@@ -56,10 +56,9 @@ plan/input and consume or validate these outputs.
   The platform task image bundles Codex; the GitHub CLI and repository-specific
   dependencies still need to be verified in the selected image. A missing tool
   produces a failure; the agent does not install system tools itself.
-- The configuration uses the hosted `internal-agents` inference route and
-  `azure-openai-gpt-5-6-sol`. The valid Responses API probe completed successfully
-  on 2026-11-19. This establishes basic wire compatibility, not successful Codex
-  tool execution, streaming, or a complete writer run.
+- The configuration uses local Helix in workspace `mmogallapall` and
+  `azure-openai-gpt-5-6-sol`. The local Inference Hub route has passed both
+  Responses API checks and complete writer trials.
 - The job's platform identity must be allowed to call that inference route.
   Managed jobs supply model authentication through Helix; no model key belongs
   in these files. A local platform needs its own model access configuration.
@@ -68,8 +67,9 @@ plan/input and consume or validate these outputs.
   Draft mode needs Contents and Pull requests write permissions for the target
   repo, plus any organization authorization required for that token.
 - The sample job injects `mmogallapall/gh-writer-token` as `GH_TOKEN`. The secret
-  exists in the hosted workspace; its GitHub permissions still need verification
-  in a live job. The sample remains in patch mode until explicitly changed.
+  must exist in the target workspace. The local token was verified in the
+  patch and draft PR trials below. The sample remains in patch mode until
+  explicitly changed.
 - Run this configuration only in an isolated execute-job container without host
   home-directory mounts. Codex uses `danger-full-access` inside that container so
   it can write Git metadata, run repository tools, and access GitHub without
@@ -79,12 +79,12 @@ plan/input and consume or validate these outputs.
 
 ## Register and submit
 
-These commands target the hosted workspace used for the original agent trials.
-Registration and an execute job are separate operations; no persistent agent
-deployment is needed.
+These commands target local Helix. Registration and an execute job are separate
+operations; no persistent agent deployment is needed. Build the shared local
+image and launcher below first.
 
 ```bash
-NHX_BASE_URL=https://nemo-helix.aire.nvidia.com \
+NHX_BASE_URL=http://localhost:8080 \
   nemo agents register --workspace mmogallapall \
     --name pr-compose-writer \
     --agent-config plugins/nemo-agents/examples/pr-pipeline/writer/agent.yaml
@@ -102,17 +102,18 @@ from pathlib import Path
 directory = Path("plugins/nemo-agents/examples/pr-pipeline/writer")
 spec = json.loads((directory / "run.example.json").read_text())
 spec["input"] = json.dumps(json.loads((directory / "input.example.json").read_text()))
+spec["image"] = "pr-compose:local"
 Path("/tmp/pr-writer-run.json").write_text(json.dumps(spec, indent=2) + "\n")
 PY
 
-NHX_BASE_URL=https://nemo-helix.aire.nvidia.com \
-  nemo agents execute --workspace mmogallapall \
+NHX_BASE_URL=http://localhost:8080 \
+  nemo agents execute --workspace mmogallapall --profile gpu \
     --spec-file /tmp/pr-writer-run.json
 ```
 
 The timeout bounds the requested run duration; older task runtimes may take
 longer to cancel an in-flight call. The tested hosted default image lacked the
-writer tools. Before submitting this hosted example, set its `image` field to
+writer tools. For hosted execution, change the model route in `agent.yaml` and select
 a compatible published writer image; `pr-compose-writer:local` is available
 only to the local Docker daemon.
 
@@ -163,9 +164,6 @@ import yaml
 
 root = Path("plugins/nemo-agents/examples/pr-pipeline/writer")
 config = yaml.safe_load((root / "agent.yaml").read_text())
-config["models"]["default"]["base_url"] = (
-    "http://localhost:8080/apis/inference-gateway/v2/workspaces/mmogallapall/openai/-/v1"
-)
 spec = json.loads((root / "run.example.json").read_text())
 spec["input"] = json.dumps(json.loads((root / "input.example.json").read_text()))
 spec["agent"] = {"config_format": "nemo-agents-spec-v1", "config": config}

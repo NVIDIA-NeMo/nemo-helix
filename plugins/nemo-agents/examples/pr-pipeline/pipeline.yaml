@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+version: 1
+name: pr-compose
+description: Plan a Linear ticket, implement the plan, and review a newly created draft PR.
+inputs:
+  ticket:
+    description: Linear issue identifier or URL.
+  repo:
+    description: Target GitHub owner/name.
+  base_branch:
+    default: main
+  mode:
+    default: patch
+    description: Use draft_pr to explicitly authorize publishing a new draft PR and running review.
+  branch:
+    default: ""
+    description: New branch name, required for draft_pr mode.
+  commit_author:
+    type: object
+    default: {}
+    description: Name and email, required for draft_pr mode.
+  constraints:
+    type: array
+    default: []
+steps:
+  - name: plan
+    agent: pr-compose-planner
+    input:
+      ticket: "{{ inputs.ticket }}"
+      constraints: "{{ inputs.constraints }}"
+    response_artifact: plan.json
+    response_format: json
+    expect:
+      path: response.status
+      equals: ready
+
+  - name: write
+    agent: pr-compose-writer
+    input:
+      repo: "{{ inputs.repo }}"
+      base_branch: "{{ inputs.base_branch }}"
+      mode: "{{ inputs.mode }}"
+      branch: "{{ inputs.branch }}"
+      commit_author: "{{ inputs.commit_author }}"
+      constraints: "{{ inputs.constraints }}"
+      plan: "{{ steps.plan.response }}"
+    response_artifact: result.json
+    response_format: json
+    expect:
+      path: response.status
+      in: [patch_ready, pr_created, no_changes]
+
+  - name: review
+    agent: pr-compose-reviewer
+    when:
+      path: steps.write.response.status
+      equals: pr_created
+    input:
+      repo: "{{ steps.write.response.repo }}"
+      pr_number: "{{ steps.write.response.pr_number }}"
+      head_sha: "{{ steps.write.response.head_sha }}"
+      github_token_env: GH_TOKEN
+    response_artifact: workspace/review-result.json
+    response_format: json
+    expect:
+      path: response.status
+      equals: completed

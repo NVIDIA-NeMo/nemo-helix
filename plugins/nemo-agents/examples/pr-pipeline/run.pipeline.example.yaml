@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+pipeline: pr-compose
+image: pr-compose-pipeline:local
+inputs:
+  ticket: REPLACE-WITH-LINEAR-TICKET
+  repo: mmogallapalli/nemo-helix-hackathon
+  base_branch: main
+  mode: patch
+step_defaults:
+  image: pr-compose:local
+  profile: gpu
+  timeout_seconds: 600
+  wait_timeout_seconds: 1800
+step_overrides:
+  plan:
+    timeout_seconds: 300
+    environment:
+      environment_spec:
+        provider: local
+        secrets:
+          LINEAR_API_KEY: mmogallapall/linear-planner-token
+  write:
+    environment:
+      environment_spec:
+        provider: local
+        secrets:
+          GH_TOKEN: mmogallapall/gh-writer-token
+  review:
+    timeout_seconds: 900
+    environment:
+      environment_spec:
+        provider: local
+        secrets:
+          GH_TOKEN: mmogallapall/gh-reviewer-token

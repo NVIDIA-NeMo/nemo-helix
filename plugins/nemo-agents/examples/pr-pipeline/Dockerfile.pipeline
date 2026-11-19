@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Build context: a directory containing only the Helix wheel built from this branch.
+# Agent steps use pr-compose:local; this image carries the updated orchestrator.
+ARG JOB_IMAGE=pr-compose:local
+FROM ${JOB_IMAGE}
+USER root
+COPY nemo_helix-*.whl /tmp/helix-wheel/
+RUN uv pip install --python /workspace/.venv/bin/python --no-deps --reinstall /tmp/helix-wheel/*.whl \
+    && rm -rf /tmp/helix-wheel \
+    && python -c "from nemo_agents_plugin.jobs.pipeline import PipelineJobConfig; assert 'pipeline' in PipelineJobConfig.model_fields; import nemo_agents_plugin.tasks.pipeline.__main__"
+ENTRYPOINT ["python", "-m", "nemo_agents_plugin.tasks.pipeline"]
+CMD []

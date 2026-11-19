@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Mapping
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 from nemo_helix_plugin.agents import pipeline_template as tpl
@@ -148,7 +149,16 @@ class PipelineStepConfig(BaseModel):
 
     name: str = Field(description="Step name, unique within the pipeline.")
     agent: str = Field(description="The registered Agent to run: 'name' or 'workspace/name'.")
-    input: str | None = Field(default=None, description="Template for the agent's input.")
+    input: str | dict[str, Any] | None = Field(
+        default=None, description="Text template or JSON object of templates for the agent's input."
+    )
+    response_artifact: str | None = Field(
+        default=None, description="Optional relative file in output_workdir to use instead of the final text response."
+    )
+    expect: StepCondition | None = Field(
+        default=None,
+        description="Required output condition, evaluated against response, e.g. response.status equals ready.",
+    )
     context: dict[str, Any] = Field(default_factory=dict, description="Per-run data for the agent; may hold templates.")
     response_format: ResponseFormat = Field(
         default=ResponseFormat.TEXT, description="'json' lets later steps read fields of the response."
@@ -241,7 +251,8 @@ def collect_static_issues(pipeline: PipelineInline) -> list[PipelineIssue]:
                     )
                 )
         else:
-            issues.extend(_template_issues(pipeline, index, template, f"{where}.input"))
+            for location, value in tpl.tree_strings(template, f"{where}.input"):
+                issues.extend(_template_issues(pipeline, index, value, location))
         for location, value in tpl.tree_strings(step.context, f"{where}.context"):
             issues.extend(_template_issues(pipeline, index, value, location))
         if step.when is not None:
@@ -284,6 +295,33 @@ def _shape_issues(pipeline: PipelineInline) -> list[PipelineIssue]:
             issues.append(
                 PipelineIssue(location=f"{where}.retries", message=f"retries is between 0 and {PIPELINE_MAX_RETRIES}.")
             )
+        if step.response_artifact is not None:
+            path = step.response_artifact
+            if (
+                not path
+                or PurePosixPath(path).is_absolute()
+                or ".." in path.split("/")
+                or "\\" in path
+                or "\x00" in path
+                or PurePosixPath(path).as_posix() != path
+                or path == "."
+            ):
+                issues.append(
+                    PipelineIssue(
+                        location=f"{where}.response_artifact",
+                        message="Use a normalized relative file path inside output_workdir.",
+                    )
+                )
+        if step.expect is not None:
+            issues.extend(_unknown_keys(step.expect, f"{where}.expect"))
+            try:
+                path = tpl.parse_path(step.expect.path)
+                if path[0] != "response":
+                    raise ValueError("Output checks must start with response.")
+                if len(path) > 1 and step.response_format is not ResponseFormat.JSON:
+                    raise ValueError("Set response_format: json to check response fields.")
+            except ValueError as exc:
+                issues.append(PipelineIssue(location=f"{where}.expect.path", message=str(exc)))
         if step.when is not None:
             if any(op in (step.when.model_extra or {}) for op in _CONDITION_OPERATORS):
                 issues.append(
@@ -396,7 +434,7 @@ def _matches_type(value: Any, input_type: InputType) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def step_input_template(pipeline: PipelineInline, index: int) -> str | None:
+def step_input_template(pipeline: PipelineInline, index: int) -> str | dict[str, Any] | None:
     """The input template step *index* uses: its own, or the default. None when there is no default.
 
     Defaults: the first step gets the pipeline's single text input; later steps get the previous response.
@@ -468,7 +506,10 @@ def render_step(pipeline: PipelineInline, index: int, context: Mapping[str, Any]
     template = step_input_template(pipeline, index)
     if template is None:
         raise ValueError(f"Step {pipeline.steps[index].name!r} has no input.")
-    return tpl.render(template, context), tpl.render_tree(pipeline.steps[index].context, context)
+    prompt = (
+        tpl.render(template, context) if isinstance(template, str) else json.dumps(tpl.render_tree(template, context))
+    )
+    return prompt, tpl.render_tree(pipeline.steps[index].context, context)
 
 
 def should_run(step: PipelineStepConfig, context: Mapping[str, Any]) -> bool:

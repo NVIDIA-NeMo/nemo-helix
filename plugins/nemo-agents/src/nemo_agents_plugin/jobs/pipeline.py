@@ -1,23 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""PipelineJob — run a fixed sequence of agent jobs, feeding each step's output to the next.
-
-Registered under ``nemo.jobs`` as ``agents.pipeline``, serving ``/jobs/pipeline``.
-
-This is a **stub**. It runs three hardcoded steps, each a real ``agents.execute`` job:
-
-1. ``plan``: a PR planner agent turns the task description into a plan.
-2. ``write``: a PR writer agent implements the planner's plan.
-3. ``review``: a PR reviewer agent reviews the writer's output.
-
-The pipeline job itself is a single-step orchestrator. Its step submits each execute job in
-turn, waits for it to finish, and passes the previous step's text response to the next step.
-It stops at the first step that does not complete.
-
-TODO(pipeline owners): the step list, prompts and data flow below are placeholders. Replace
-``PIPELINE_STEPS`` and ``_STEP_PROMPTS`` with the real definition when it lands.
-"""
+"""Run configured agent pipelines as sequential execute jobs, with a legacy task-only fallback."""
 
 from __future__ import annotations
 
@@ -27,12 +11,24 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
+from filesets import parse_fileset_ref
+from nemo_agents_plugin.entities import AgentEnvironmentInline, AgentPipelineConfig
 from nemo_agents_plugin.jobs.execute import FABRIC_RUN_RESULT_NAME, ExecuteAgentJob
 from nemo_agents_plugin.sdk import _ExecuteJobsResource
+from nemo_helix_plugin.agents import pipeline_template as tpl
 from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.pipelines import (
+    PipelineInline,
+    parse_step_response,
+    render_step,
+    resolve_run_inputs,
+    should_run,
+)
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -42,7 +38,8 @@ from nemo_helix_plugin.jobs.api_factory import (
     HelixJobStep,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from pydantic import BaseModel, Field, field_validator
+from nemo_helix_plugin.refs import parse_entity_ref
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +53,7 @@ DEFAULT_REVIEWER_AGENT = "pr-reviewer"
 
 #: Job statuses (see ``nemo_helix_plugin.jobs.watch``) that end a step job's life.
 _SUCCESS_STATUSES = frozenset({"completed"})
-_FAILURE_STATUSES = frozenset({"cancelled", "error", "failed", "paused"})
+_FAILURE_STATUSES = frozenset({"cancelled", "error", "failed", "paused", "timed_out", "timeout"})
 _POLL_INTERVAL_SECONDS = 5.0
 _STEP_TIMEOUT_SECONDS = 2 * 60 * 60
 
@@ -87,23 +84,64 @@ _STEP_PROMPTS: dict[str, str] = {
 }
 
 
-class PipelineJobConfig(BaseModel):
-    """Input for ``agents.pipeline``: the task description (the agents per role are hardcoded for now)."""
+class PipelineStepRunOptions(BaseModel):
+    """Execution settings supplied per run, separately from the reusable pipeline definition."""
 
-    model_config = {"json_schema_mode_override": "validation"}
-
-    task: str = Field(description="Programming task description. It is the planner's input.")
-    environment: str | None = Field(
-        default=None,
-        description='AgentEnvironment ("workspace/name" ref) every step runs under. Omit for none.',
+    model_config = {"extra": "forbid"}
+    image: str = ""
+    environment: str | AgentEnvironmentInline | None = None
+    profile: str | None = None
+    timeout_seconds: float = Field(default=600, gt=0)
+    wait_timeout_seconds: float = Field(
+        default=1800, gt=0, description="Wait budget including scheduling and artifact upload."
     )
 
-    @field_validator("task")
-    @classmethod
-    def _non_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be blank")
-        return value
+
+class PipelineJobConfig(BaseModel):
+    """A stored or inline pipeline, run inputs, and independently configurable child jobs."""
+
+    model_config = {"json_schema_mode_override": "validation", "extra": "forbid"}
+    pipeline: str | PipelineInline | None = Field(
+        default=None, description="Stored pipeline name/workspace ref, or inline definition."
+    )
+    inputs: dict[str, Any] | str = Field(default_factory=dict)
+    image: str = Field(default="", description="Image for the pipeline orchestrator, containing this runner.")
+    step_defaults: PipelineStepRunOptions = Field(default_factory=PipelineStepRunOptions)
+    step_overrides: dict[str, PipelineStepRunOptions] = Field(default_factory=dict)
+    task: str | None = Field(
+        default=None, description="Legacy task-only PR pipeline; mutually exclusive with pipeline."
+    )
+    environment: str | None = Field(default=None, description="Legacy shared AgentEnvironment reference.")
+
+    @model_validator(mode="after")
+    def _validate_mode(self) -> PipelineJobConfig:
+        if self.pipeline is None:
+            if self.task is None or not self.task.strip():
+                raise ValueError("Set pipeline, or a nonblank legacy task.")
+            if self.inputs or self.step_overrides or self.step_defaults.model_fields_set:
+                raise ValueError("Run inputs and step settings require pipeline.")
+        else:
+            if self.task is not None or self.environment is not None:
+                raise ValueError(
+                    "pipeline cannot be combined with legacy task/environment; use step_defaults.environment."
+                )
+            if isinstance(self.pipeline, str) and not self.pipeline.strip():
+                raise ValueError("pipeline must not be blank")
+            if isinstance(self.pipeline, PipelineInline):
+                self.validate_pipeline(self.pipeline)
+        return self
+
+    def validate_pipeline(self, pipeline: PipelineInline) -> None:
+        resolve_run_inputs(pipeline, self.inputs)
+        unknown = set(self.step_overrides) - {step.name for step in pipeline.steps}
+        if unknown:
+            raise ValueError(f"Unknown step overrides: {', '.join(sorted(unknown))}")
+
+    def options_for(self, name: str) -> PipelineStepRunOptions:
+        values = self.step_defaults.model_dump()
+        if name in self.step_overrides:
+            values.update(self.step_overrides[name].model_dump(exclude_unset=True))
+        return PipelineStepRunOptions.model_validate(values)
 
 
 class PipelineStepFailedError(RuntimeError):
@@ -126,7 +164,7 @@ def _response_text(run_result: Mapping[str, Any]) -> str:
 
 class PipelineJob(NemoJob):
     name: ClassVar[str] = "pipeline"
-    description: ClassVar[str] = "Run a PR planner, writer and reviewer agent in sequence as one platform job."
+    description: ClassVar[str] = "Run a configured sequence of independent agent jobs with output handoffs."
     container: ClassVar[str] = "cpu-tasks"
     # No separate input/spec split: the submitted input is already the stored spec.
     spec_schema: ClassVar[type[BaseModel] | None] = PipelineJobConfig
@@ -144,14 +182,34 @@ class PipelineJob(NemoJob):
         options: dict | None = None,
     ) -> HelixJobSpec:
         """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.pipeline`` in a CPU container."""
-        del workspace, entity_client, job_name, async_sdk, options
+        del job_name, async_sdk, options
         if not isinstance(spec, PipelineJobConfig):
             raise HelixJobCompilationError(f"PipelineJob.compile received unexpected spec type: {type(spec).__name__}")
+        # Snapshot stored definitions at submission, while the submitting identity can read them.
+        # Qualify agent refs against the pipeline's workspace, not the caller's workspace.
+        compiled = spec.model_dump(mode="json", exclude_unset=True)
+        if spec.pipeline is not None:
+            pipeline_workspace = workspace
+            if isinstance(spec.pipeline, str):
+                ref = parse_entity_ref(spec.pipeline, default_workspace=workspace)
+                entity = await cast(NemoEntitiesClient, entity_client).get(
+                    AgentPipelineConfig, name=ref.name, workspace=ref.workspace
+                )
+                definition = {key: getattr(entity, key) for key in PipelineInline.model_fields}
+                pipeline = PipelineInline.model_validate(definition).model_copy(deep=True)
+                pipeline_workspace = ref.workspace
+            else:
+                pipeline = spec.pipeline.model_copy(deep=True)
+            spec.validate_pipeline(pipeline)
+            for step in pipeline.steps:
+                ref = parse_entity_ref(step.agent, default_workspace=pipeline_workspace)
+                step.agent = f"{ref.workspace}/{ref.name}"
+            compiled["pipeline"] = pipeline.model_dump(mode="json", exclude_unset=True)
         executor = CPUExecutionProviderSpec(
             profile=profile or "default",
             provider="cpu",
             container=ContainerSpec(
-                image=ExecuteAgentJob._execution_image(""),
+                image=ExecuteAgentJob._execution_image(spec.image),
                 entrypoint=["python", "-m"],
                 command=["nemo_agents_plugin.tasks.pipeline"],
             ),
@@ -161,7 +219,7 @@ class PipelineJob(NemoJob):
                 HelixJobStep(
                     name="pipeline",
                     executor=executor,
-                    config=spec.model_dump(mode="json"),
+                    config=compiled,
                 )
             ],
         )
@@ -181,13 +239,17 @@ class PipelineJob(NemoJob):
             raise ValueError("PipelineJob requires a platform client to submit its agent jobs.")
         cfg = PipelineJobConfig.model_validate(config)
         execute_jobs = _ExecuteJobsResource(AgentsClient.from_client(sdk))
+        if cfg.pipeline is not None:
+            return self._run_configured(
+                cfg, ctx=ctx, sdk=sdk, execute_jobs=execute_jobs, poll_interval=poll_interval, sleep=sleep
+            )
 
         steps: list[dict[str, Any]] = []
         previous = ""
         failure: str | None = None
         for step in PIPELINE_STEPS:
             agent = step.agent
-            prompt = build_step_input(step.role, task=cfg.task, previous=previous)
+            prompt = build_step_input(step.role, task=cast(str, cfg.task), previous=previous)
             record: dict[str, Any] = {"role": step.role, "agent": agent, "job": None, "status": "pending"}
             steps.append(record)
             try:
@@ -204,6 +266,7 @@ class PipelineJob(NemoJob):
                 failure = f"Step '{step.role}' failed: {exc}"
                 logger.error(failure)
                 break
+            record.pop("_output", None)
             record["response"] = previous
 
         status = "failed" if failure else "completed"
@@ -232,9 +295,13 @@ class PipelineJob(NemoJob):
         poll_interval: float,
         step_timeout: float,
         sleep: Callable[[float], None],
+        profile: str | None = None,
+        response_artifact: str | None = None,
+        files_client: FilesClient | None = None,
     ) -> str:
         """Submit one execute job, wait for it, and return its response text."""
-        created = execute_jobs.create(spec=spec, workspace=workspace)
+        kwargs = {"profile": profile} if profile is not None else {}
+        created = execute_jobs.create(spec=spec, workspace=workspace, **kwargs)
         job_name = created.get("name")
         if not isinstance(job_name, str):
             raise PipelineStepFailedError("the Jobs service did not return a job name.")
@@ -251,6 +318,11 @@ class PipelineJob(NemoJob):
             if status in _FAILURE_STATUSES:
                 raise PipelineStepFailedError(f"execute job {job_name} ended with status '{status}'.")
             if time.monotonic() >= deadline:
+                record["status"] = "timed_out"
+                try:
+                    execute_jobs.cancel(job_name, workspace=workspace)
+                except Exception:
+                    logger.exception("Could not cancel timed-out child job %s.", job_name)
                 raise PipelineStepFailedError(f"execute job {job_name} did not finish within {step_timeout:g}s.")
             sleep(poll_interval)
 
@@ -259,10 +331,150 @@ class PipelineJob(NemoJob):
             run_result = json.loads(raw)
         except ValueError as exc:
             raise PipelineStepFailedError(f"execute job {job_name} saved an unreadable run result.") from exc
-        response = _response_text(run_result) if isinstance(run_result, Mapping) else ""
+        if not isinstance(run_result, Mapping):
+            raise PipelineStepFailedError(f"execute job {job_name} saved a non-object run result.")
+        if run_result.get("status") in {"failed", "error", "cancelled"}:
+            raise PipelineStepFailedError(f"execute job {job_name} returned a failed Fabric result.")
+        record["_output"] = dict(run_result)
+        if response_artifact is not None:
+            if files_client is None:
+                raise ValueError("Artifact responses require a Files client.")
+            return PipelineJob._artifact_response(execute_jobs, files_client, job_name, workspace, response_artifact)
+        response = _response_text(run_result)
         if not response:
             raise PipelineStepFailedError(f"execute job {job_name} completed without a text response.")
         return response
+
+    def _run_configured(
+        self,
+        cfg: PipelineJobConfig,
+        *,
+        ctx: JobContext,
+        sdk: NemoClient,
+        execute_jobs: _ExecuteJobsResource,
+        poll_interval: float,
+        sleep: Callable[[float], None],
+    ) -> dict:
+        if not isinstance(cfg.pipeline, PipelineInline):
+            raise ValueError("Stored pipeline references must be resolved by compile before task execution.")
+        pipeline = cfg.pipeline
+        context = resolve_run_inputs(pipeline, cfg.inputs)
+        context["steps"] = {}
+        records: list[dict[str, Any]] = []
+        files_client = FilesClient.from_client(sdk)
+        failure = None
+        try:
+            for index, step in enumerate(pipeline.steps):
+                record: dict[str, Any] = {
+                    "role": step.name,
+                    "agent": step.agent,
+                    "job": None,
+                    "status": "pending",
+                    "attempts": [],
+                }
+                records.append(record)
+                if not should_run(step, context):
+                    record["status"] = "skipped"
+                    continue
+                prompt, agent_context = render_step(pipeline, index, context)
+                options = cfg.options_for(step.name)
+                spec = options.model_dump(mode="json", exclude={"profile", "wait_timeout_seconds"}, exclude_none=True)
+                spec.update(agent=step.agent, input=prompt, context=agent_context)
+                for attempt in range(step.retries + 1):
+                    current: dict[str, Any] = {"role": step.name, "job": None, "status": "pending"}
+                    record["attempts"].append(current)
+                    try:
+                        text = self._run_step(
+                            execute_jobs,
+                            current,
+                            workspace=ctx.workspace,
+                            spec=spec,
+                            poll_interval=poll_interval,
+                            step_timeout=options.wait_timeout_seconds,
+                            sleep=sleep,
+                            profile=options.profile,
+                            response_artifact=step.response_artifact,
+                            files_client=files_client,
+                        )
+                    except PipelineStepFailedError as exc:
+                        current["error"] = str(exc)
+                        # Retry only known terminal errors. Do not duplicate publication after
+                        # an ambiguous submission, a timeout, or a malformed successful output.
+                        if attempt < step.retries and current["status"] in {"error", "failed"}:
+                            continue
+                        raise
+                    finally:
+                        record["job"] = current["job"]
+                        record["status"] = current["status"]
+                    response = parse_step_response(step, text)
+                    output = current.pop("_output", {})
+                    record["response"] = response
+                    if step.expect is not None and not step.expect.matches(
+                        tpl.resolve(tpl.parse_path(step.expect.path), {"response": response})
+                    ):
+                        raise PipelineStepFailedError(f"output check {step.expect.path!r} did not match")
+                    value = {"response": response, "output": output}
+                    context["steps"][step.name] = value
+                    context["previous"] = value
+                    record["status"] = "completed"
+                    break
+        except BaseException as exc:
+            if (
+                records
+                and records[-1]["job"]
+                and records[-1]["status"] not in _SUCCESS_STATUSES | _FAILURE_STATUSES | {"timed_out"}
+            ):
+                try:
+                    execute_jobs.cancel(records[-1]["job"], workspace=ctx.workspace)
+                except Exception:
+                    logger.exception("Could not cancel interrupted pipeline child.")
+            name = records[-1]["role"] if records else "setup"
+            failure = f"Step '{name}' failed: {exc}"
+            if records:
+                records[-1]["status"] = "failed"
+                records[-1]["error"] = str(exc)
+            logger.error(failure)
+            if not isinstance(exc, Exception):
+                raise
+        finally:
+            # Persist a useful partial result even on task cancellation; never persist the
+            # raw Fabric result twice (it remains in the child job's named results).
+            for record in records:
+                for attempt in record["attempts"]:
+                    attempt.pop("_output", None)
+            payload = {"status": "failed" if failure else "completed", "steps": records}
+            if failure:
+                payload["error"] = failure
+            self._save_result(ctx, payload)
+        if failure:
+            raise PipelineStepFailedError(failure)
+        return payload
+
+    @staticmethod
+    def _artifact_response(
+        execute_jobs: _ExecuteJobsResource,
+        files_client: FilesClient,
+        job: str,
+        workspace: str,
+        path: str,
+    ) -> str:
+        # Download the selected file, not the potentially large repository workdir archive.
+        results = execute_jobs.list_results(job, workspace=workspace)
+        result = next((item for item in results.get("data", []) if item.get("name") == "output_workdir"), None)
+        if result is None or result.get("artifact_storage_type") != "fileset":
+            raise PipelineStepFailedError(f"execute job {job} has no fileset output_workdir")
+        ws, fileset, prefix = parse_fileset_ref(result["artifact_url"], workspace_fallback=workspace)
+        response = files_client.download_file(workspace=ws, name=fileset, path=f"{prefix.rstrip('/')}/{path}")
+        content = bytearray()
+        with response.stream(chunk_size=65536) as chunks:
+            for chunk in chunks:
+                content.extend(chunk)
+                if len(content) > 4 * 1024 * 1024:
+                    raise PipelineStepFailedError(f"Response artifact {path!r} exceeds 4 MiB")
+        try:
+            return content.decode("utf-8")
+        except UnicodeError as exc:
+            raise PipelineStepFailedError(f"Response artifact {path!r} is not UTF-8 text") from exc
 
     @staticmethod
     def _save_result(ctx: JobContext, payload: dict[str, Any]) -> None:

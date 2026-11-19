@@ -700,13 +700,17 @@ class _ExecuteJobsResource:
         spec: Mapping[str, object],
         name: str | None = None,
         description: str | None = None,
+        profile: str | None = None,
         workspace: str | None = None,
     ) -> JsonMap:
         """Submit an execute-agent job. *spec* is an ``ExecuteAgentJobConfig``."""
+        body = _execute_job_body(spec, name, description)
+        if profile is not None:
+            body.profile = profile
         response = self._client.create_agent_job(
             workspace=workspace,
             collection="execute",
-            body=_execute_job_body(spec, name, description),
+            body=body,
         )
         return _json_map_from_response(response)
 
@@ -714,6 +718,10 @@ class _ExecuteJobsResource:
         """Get one execute-agent job by name."""
         response = self._client.get_agent_job(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
+
+    def cancel(self, name: str, workspace: str | None = None) -> None:
+        """Cancel a child job whose pipeline wait deadline has expired."""
+        self._client.cancel_agent_job(workspace=workspace, collection="execute", name=name)
 
     def list(self, workspace: str | None = None, *, agents: Sequence[str] | None = None) -> JsonMap:
         """List execute-agent jobs in *workspace*, optionally only runs of *agents*.
