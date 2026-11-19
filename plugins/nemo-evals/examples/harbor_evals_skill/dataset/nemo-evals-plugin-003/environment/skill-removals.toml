@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Relative to the installed Python package directory. Both skill packages are
+# present in the pinned release. Docs and examples are optional packaging paths.
+required_python_paths = [
+    "nemo_evals/skills/evaluator-plugin",
+    "nemo_helix_ext/skills/nemo-evals",
+]
+optional_python_paths = [
+    "nemo_evals/docs",
+    "nemo_helix_ext/cli/docs/evals",
+    "nemo_helix_ext/cli/docs/run-inference/virtual-models.mdx",
+    "nhx_evals_sdk/examples",
+]
+optional_image_paths = [
+    "/app/plugins/nemo-evals/src/nemo_evals/docs",
+    "/app/plugins/nemo-evals/src/nemo_evals/skills/evaluator-plugin",
+    "/app/packages/nhx_evals_sdk/examples",
+    "/app/docs/evals",
+    "/app/docs/run-inference/virtual-models.mdx",
+    "/app/skills",
+    "/app/.agents",
+    "/workspace/.agents",
+    "/root/.agents",
+    "/home/nvs/.agents",
+    "/usr/share/nemo-helix/skills/nemo-evals-plugin",
+    "/usr/share/nemo-helix/skills/evaluator-plugin",
+    "/usr/share/nemo-helix/skills/nemo-evals",
+]

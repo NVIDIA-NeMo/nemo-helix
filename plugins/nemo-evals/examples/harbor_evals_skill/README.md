@@ -7,13 +7,14 @@
 | --- | --- | --- |
 | `nemo-evals-plugin-001` | Offline dataset evaluation | `nemo-evals-plugin` |
 | `nemo-evals-plugin-002` | Live Taskset evaluation with a deterministic loopback agent | `supercool-agent-eval` |
+| `nemo-evals-plugin-003` | Create a π-digit Harbor benchmark and write a closed-book runner | `nemo-evals-plugin`, `nemo-evals` |
 
-Publish either task directory as a single-task Taskset. For the Taskset agent-evaluation
-example, see [Supercool run aliases](#supercool-run-aliases).
+Publish each workload as a single-task Taskset. See [Supercool run aliases](#supercool-run-aliases)
+for task 002 and [π-digit benchmark](#π-digit-benchmark) for task 003.
 
-Run one pinned Taskset twice with the same Codex model and sandbox images. The baseline has no
-injected skills. The treatment receives a published NeMo Evals skill revision through
-`spec.target.skills`. The task asks Codex to submit a two-row offline exact-match evaluation
+For the offline workload, run one pinned Taskset twice with the same Codex model and sandbox
+images. The baseline has no injected skills. The treatment receives a published NeMo Evals
+skill revision through `spec.target.skills`. The task asks Codex to submit a two-row offline exact-match evaluation
 to NeMo Helix and retrieve its results. A separate Harbor verifier checks the live job evidence.
 The scorer replays saved trials with Harbor reward, skill activation, token efficiency,
 command outcomes, and expected behavior. It scores package readiness once per skill archive.
@@ -48,8 +49,8 @@ to `github.com` and `release-assets.githubusercontent.com` to fetch Codex. To us
 mirror, change the Dockerfile's `CODEX_RELEASE_URL` default and retain the checksums.
 
 ```bash
-TASKSET_REF=$("${nhx[@]}" evals tasksets create --harbor-dir "$example/dataset/nemo-evals-plugin-001" \
-    --workspace "$WORKSPACE" --json | jq -er '.taskset_ref')
+TASKSET_REF=$("${nhx[@]}" evals tasksets create --harbor-dir "$example/dataset" \
+    --tasks nemo-evals-plugin-001 --workspace "$WORKSPACE" --json | jq -er '.taskset_ref')
 export TASKSET_REF
 "${nhx[@]}" evals tasksets build-images "$TASKSET_REF" --wait
 "${nhx[@]}" evals runs submit --taskset "$TASKSET_REF" --workspace "$WORKSPACE" \
@@ -230,3 +231,95 @@ The replay adds the observed activation, token efficiency, and the
 `verified_skill_use` view. The view requires both a passing verifier reward and
 a confirmed read of the pinned skill. On auth-disabled dev deployments, the pair
 demonstrates injection and use while archive read isolation remains unverified.
+
+## π-digit benchmark
+
+Task 003 asks Codex to publish a deterministic, single-task Harbor benchmark to the
+loopback Helix instance and write a `pi_eval.py` runner for Kubernetes. The shared verifier
+checks the saved benchmark and uses an external judge to assess its instruction and runner.
+Use a Kubernetes deployment with Builder and OpenSandbox. Its sandbox profile must allow
+the judge API origin and the Codex gateway. Configure the host CLI with `CONTEXT` or
+`NHX_BASE_URL` and set the judge origin as seen **from the sandbox**.
+
+Run from the checkout root with a fresh evidence directory.
+
+```bash
+export WORKSPACE=default SANDBOX_PROFILE=harbor-standard
+export MODEL_REF="$WORKSPACE/azure-openai-gpt-6-luna"
+export PI_JUDGE_PLATFORM_URL=http://nemo-helix-api.helix-dev.svc.cluster.local:8080
+export PI_JUDGE_MODEL_REF="$WORKSPACE/nvidia-nemotron-3-5-super-vl-120b-a12b"
+export RUN_DIR="$PWD/temp/harbor-pi-demo"
+example=plugins/nemo-evals/examples/harbor_evals_skill
+uv run --frozen python "$example/run_pi_demo.py"
+```
+
+On authenticated deployments, set `INFERENCE_KEY_SECRET` to the outer gateway's
+inference secret ref. If the judge requires authentication, supply `PI_JUDGE_API_KEY`
+through the worker environment. The launcher writes the judge origin and model ref
+into the verifier settings in a temporary copy of task 003 before publication.
+
+The launcher builds one versioned Taskset and requires all four Oracle rewards to equal
+`1` before submitting Codex. The baseline has no skills and the treatment has both
+published revisions. `$RUN_DIR/comparison.json` records the rewards, image digest, and
+Codex skill discovery and observed reads. Each arm retains its request, run ID, run
+results, and task Job bundle, including verifier stdout. A scored `0` is a valid result
+for either Codex arm. Use the same checkout, settings, and `RUN_DIR` to resume an interrupted run.
+
+### Smoke-test the generated benchmark on Kubernetes
+
+Publish the Oracle's verified `pi-digit` archive to the host deployment and run it with
+the [reviewed reference runner](dataset/nemo-evals-plugin-003/solution/pi_eval.py). Set
+`PI_EVAL_MODEL_REF` to an existing closed-book model route. Check the archive digest
+before extracting it and against the published task revision.
+
+```bash
+nested_args=(--sandbox-profile "$SANDBOX_PROFILE")
+if [[ -n ${CONTEXT:-} ]]; then
+    nested_args+=(--context "$CONTEXT")
+fi
+if [[ -n ${INFERENCE_KEY_SECRET:-} ]]; then
+    nested_args+=(--inference-key-secret "$INFERENCE_KEY_SECRET")
+fi
+
+PI_TASKSET_REF=$(uv run --frozen python - "$RUN_DIR" "$WORKSPACE" "${CONTEXT:-}" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from nemo_evals.api.schemas import HarborTaskDefinition
+from nemo_evals.harbor.archive import extract_task
+from nemo_evals.sdk.resources import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+directory, workspace, context = sys.argv[1:]
+root = Path(directory)
+oracle = json.loads((root / "comparison.json").read_text())["arms"]["oracle"]
+expected = json.loads((root / oracle["submission"]).read_text())["archive_sha256"]
+archive = root / oracle["archive"]
+with archive.open("rb") as stream:
+    if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+        raise SystemExit("Oracle archive SHA-256 does not match the submission")
+
+nemo = ["nemo", *(["--context", context] if context else [])]
+with tempfile.TemporaryDirectory(prefix="pi-digit-source-") as scratch:
+    task, _ = extract_task(archive, Path(scratch))
+    publication = json.loads(subprocess.check_output([
+        *nemo, "evals", "tasksets", "create", "--harbor-dir", str(task),
+        "--workspace", workspace, "--json",
+    ]))
+(task_ref,) = publication["tasks"]
+scope, name_digest = task_ref.split("/", 1)
+name, digest = name_digest.split("#", 1)
+with NemoClient.from_config(context=context or None) as client:
+    spec = Evaluator.from_client(client).tasks.retrieve(name, workspace=scope, revision=digest).spec
+if not isinstance(spec, HarborTaskDefinition) or spec.native_task_id != "pi-digit" or spec.source.files_hash != expected:
+    raise SystemExit("Published task archive SHA-256 differs from the Oracle archive")
+print(publication["taskset_ref"])
+PY
+)
+uv run --frozen python "$example/dataset/nemo-evals-plugin-003/solution/pi_eval.py" \
+    --taskset "$PI_TASKSET_REF" --model-ref "$PI_EVAL_MODEL_REF" "${nested_args[@]}"
+```

@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+artifacts = [
+    { source = "/var/lib/helix-task/evidence/startup.log", destination = "startup.log" },
+]
+
+[agent]
+user = 10001
+timeout_sec = 900
+
+[environment]
+workdir = "/workspace"
+network_mode = "no-network"
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+
+[environment.env]
+NEMO_BASE_URL = "http://127.0.0.1:8080"
+NHX_BASE_URL = "http://127.0.0.1:8080"
+NEMO_TELEMETRY_ENABLED = "false"
+
+[environment.healthcheck]
+command = "/opt/helix-task/start-helix"
+timeout_sec = 300
+retries = 1
+
+[verifier]
+environment_mode = "shared"
+user = 0
+timeout_sec = 180
+
+[verifier.env]
+PI_JUDGE_PLATFORM_URL = "${PI_JUDGE_PLATFORM_URL:-}"
+PI_JUDGE_MODEL_REF = "${PI_JUDGE_MODEL_REF:-}"
+PI_JUDGE_API_KEY = "${PI_JUDGE_API_KEY:-}"
