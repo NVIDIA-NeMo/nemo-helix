@@ -122,17 +122,17 @@ def recommendation(
     if config is not None and config["tool_error_rate"] < baseline:
         recommended = "config-fix"
         parts.append(
-            f"Apply the config fix now: it cuts the tool error rate from {_percent(baseline)} to "
+            f"Apply the prompt fix now: it cuts the tool error rate from {_percent(baseline)} to "
             f"{_percent(config['tool_error_rate'])}."
         )
     elif config is not None:
         parts.append(
-            f"The config fix did not lower the tool error rate ({_percent(baseline)} -> "
+            f"The prompt fix did not lower the tool error rate ({_percent(baseline)} -> "
             f"{_percent(config['tool_error_rate'])}); don't apply it as is."
         )
     if schema is not None:
         best_so_far = min(baseline, config["tool_error_rate"]) if config is not None else baseline
-        together = "together with the config fix " if has_config_fix else ""
+        together = "together with the prompt fix " if has_config_fix else ""
         if schema["tool_error_rate"] < best_so_far:
             recommended = "schema-fix"
             parts.append(

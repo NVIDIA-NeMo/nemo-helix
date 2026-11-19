@@ -15,9 +15,9 @@ tests two fixes before suggesting them:
 2. **Diagnose.** Lints the published tool schemas (open objects, long optional tails, required keys declared late,
    untyped items, enums in prose, `const`, discriminators without variants, and schemas too loose to catch the
    tool's own rejections), then asks `analyzer_model` for a system-prompt fix and a tool-schema patch.
-3. **Verify.** Re-runs the prompts with the prompt fix (`config-fix`), then also with the schema patch
-   (`schema-fix`). Without a dataset, the prompts are the user messages that started the traced sessions (the first
-   `user` message of each session's earliest LLM span), deduplicated and capped at `max_replay_prompts`. The patch
+3. **Verify.** Re-runs the prompts with the prompt fix (variant `config-fix`, "Prompt fix"), then also with the
+   schema patch on top of it (variant `schema-fix`, "Schema fix"). Without a dataset, the prompts are the user
+   messages that started the traced sessions (the first `user` message of each session's earliest LLM span), deduplicated and capped at `max_replay_prompts`. The patch
    is served by a schema-overlay MCP proxy that advertises the new schema and forwards every call to the unchanged
    tool, so the tool still validates.
 4. **Report.** Writes the files in [CONTRACT.md](CONTRACT.md) to the job's results.

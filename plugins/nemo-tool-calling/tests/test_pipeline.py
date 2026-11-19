@@ -305,7 +305,7 @@ def test_pipeline_writes_every_contract_file(
     assert result["dataset"] == {"source": "dataset", "prompts": 2, "runs_per_prompt": 2}
     assert "75%" in result["recommendation"] and "0%" in result["recommendation"]
     assert result["recommended_variant"] == "schema-fix"
-    assert "Recommended variant: **Config + schema fix** (`schema-fix`)." in (results / "report.md").read_text()
+    assert "Recommended variant: **Schema fix** (`schema-fix`)." in (results / "report.md").read_text()
     assert {path.relative_to(results).as_posix() for path in results.rglob("*") if path.is_file()} == {
         "tool-calling-result.json",
         "report.md",
@@ -433,7 +433,7 @@ def test_traced_baseline_is_scored_without_rerunning_it(
         "runs_per_prompt": 3,
     }
     baseline = result["variants"][0]
-    assert baseline["description"] == "The agent as registered, scored from 3 traced session(s) in Intake."
+    assert baseline["description"] == "The agent as registered, scored from its existing traces."
     assert baseline["metrics"]["runs"] == 3
     assert baseline["metrics"]["rejected_calls"] == 2
     assert set(baseline["per_prompt"]) == {"product-reviews", "session-x"}
@@ -497,7 +497,7 @@ def test_one_failed_analyzer_call_is_named_next_to_the_verified_fix(
     assert result["findings"][0]["id"] == "analysis-error-schema-fix"
     assert result["findings"][0]["title"] == "Analyzer failed, so no schema patch was proposed"
     assert result["recommendation"] == (
-        "Apply the config fix now: it cuts the tool error rate from 75% to 50%. No schema patch was proposed: "
+        "Apply the prompt fix now: it cuts the tool error rate from 75% to 50%. No schema patch was proposed: "
         "analyzer model `default/fake-analyzer` is unavailable (HTTP 404, no VirtualModel). Register the model in "
         "the inference gateway or set `analyzer_model`, then re-run."
     )
@@ -538,26 +538,26 @@ def test_verification_left_out_by_the_spec_is_explained(
         (
             {"baseline": 3, "config-fix": 1, "schema-fix": 2},
             "config-fix",
-            "Apply the config fix now: it cuts the tool error rate from 75% to 50%. "
+            "Apply the prompt fix now: it cuts the tool error rate from 75% to 50%. "
             "The schema patch did not help further (67%).",
         ),
         (
             {"baseline": 1, "config-fix": 2, "schema-fix": 0},
             "schema-fix",
-            "The config fix did not lower the tool error rate (50% -> 67%); don't apply it as is. "
-            "Send the schema patch to the tool's owner: together with the config fix it brings the tool error rate "
+            "The prompt fix did not lower the tool error rate (50% -> 67%); don't apply it as is. "
+            "Send the schema patch to the tool's owner: together with the prompt fix it brings the tool error rate "
             "to 0%.",
         ),
         (
             {"baseline": 1, "config-fix": 3, "schema-fix": 2},
             None,
-            "The config fix did not lower the tool error rate (50% -> 75%); don't apply it as is. "
+            "The prompt fix did not lower the tool error rate (50% -> 75%); don't apply it as is. "
             "The schema patch did not help further (67%).",
         ),
         (
             {"baseline": 1, "config-fix": 1, "schema-fix": 1},
             None,
-            "The config fix did not lower the tool error rate (50% -> 50%); don't apply it as is. "
+            "The prompt fix did not lower the tool error rate (50% -> 50%); don't apply it as is. "
             "The schema patch did not help further (50%).",
         ),
     ],
@@ -597,3 +597,55 @@ def test_no_recommended_variant_when_nothing_was_verified(
 
     assert result["recommended_variant"] is None
     assert "Recommended variant: none." in (tmp_path / "results" / "report.md").read_text()
+
+
+def test_variant_labels_and_descriptions_explain_each_variant(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner({"baseline": 3, "config-fix": 1, "schema-fix": 0}, runs_per_prompt=1),
+        analyzer=FakeAnalyzer(_analysis(post_fix_tool)),
+        results_dir=tmp_path / "results",
+    )
+
+    assert [(variant["id"], variant["label"], variant["description"]) for variant in result["variants"]] == [
+        ("baseline", "Current agent", "The agent as registered, scored by re-running the prompt set."),
+        (
+            "config-fix",
+            "Prompt fix",
+            "The agent with a suggested prompt change. Only the agent's own config changes, not its tools, so the "
+            "platform can apply it for you.",
+        ),
+        (
+            "schema-fix",
+            "Schema fix",
+            "The prompt fix plus a rewritten tool schema (the description of the tool's inputs the model sees), "
+            "tested through a proxy that shows the model the new schema while the real tool still checks every call. "
+            "Only the tool's owner can apply it for real.",
+        ),
+    ]
+    assert "config fix" not in json.dumps(result).lower()
+    assert "prompt + schema fix" not in json.dumps(result).lower()
+    report = (tmp_path / "results" / "report.md").read_text().lower()
+    assert "config fix" not in report
+    assert "prompt + schema fix" not in report
+
+
+def test_schema_fix_without_a_prompt_fix_explains_it_has_no_prompt_change(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    analysis = _analysis(post_fix_tool)
+    analysis.config_fix = None
+
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner({"baseline": 3, "schema-fix": 0}, runs_per_prompt=1),
+        analyzer=FakeAnalyzer(analysis),
+        results_dir=tmp_path / "results",
+    )
+
+    schema_fix = result["variants"][-1]
+    assert (schema_fix["id"], schema_fix["label"]) == ("schema-fix", "Schema fix")
+    assert schema_fix["description"].startswith("The agent with a rewritten tool schema")
+    assert result["recommendation"] == "Send the schema patch to the tool's owner: it brings the tool error rate to 0%."

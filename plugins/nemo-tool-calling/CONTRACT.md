@@ -10,7 +10,7 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
 | --- | --- |
 | `tool-calling-result.json` | Machine-readable summary, shape below. |
 | `report.md` | Human-readable summary of the same content. |
-| `candidate-agent.yaml` | The agent config with the suggested config fix applied. |
+| `candidate-agent.yaml` | The agent config with the suggested prompt fix applied. |
 | `candidate-agent.diff` | Unified diff of `candidate-agent.yaml` against the original config. |
 | `schema-patch/<server>/<tool>.json` | Suggested tool definition (`name`, `description`, `inputSchema`) per tool. |
 | `schema-patch.diff` | Unified diff of the suggested schemas against the published ones (pretty-printed JSON). |
@@ -33,7 +33,7 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
     {
       "id": "baseline",                  // "baseline" | "config-fix" | "schema-fix"
       "label": "Current agent",
-      "description": "The agent as registered.",
+      "description": "The agent as registered, scored from its existing traces.",  // dataset source: "The agent as registered, scored by re-running the prompt set."
       "metrics": {
         "runs": 15,
         "runs_with_errors": 1,           // runs that ended in a harness/transport error (recursion limit, timeout)
@@ -95,13 +95,21 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
   ],
   "recommended_variant": "schema-fix",   // the variant the recommendation tells the user to adopt; null when none is
                                          // recommended (no fix verified, or no fix beat the baseline)
-  "recommendation": "Apply the config fix now and send the schema patch to the tool's owner: together they cut the tool error rate from 80% to 6%."
+  "recommendation": "Apply the prompt fix now: it cuts the tool error rate from 80% to 40%. Send the schema patch to the tool's owner: together with the prompt fix it brings the tool error rate to 6%."
 }
 ```
 
+Variant labels and descriptions (Studio shows the description as the column tooltip):
+
+| `id` | `label` | `description` |
+| --- | --- | --- |
+| `baseline` | Current agent | The agent as registered, scored from its existing traces. With a dataset: The agent as registered, scored by re-running the prompt set. |
+| `config-fix` | Prompt fix | The agent with a suggested prompt change. Only the agent's own config changes, not its tools, so the platform can apply it for you. |
+| `schema-fix` | Schema fix | The prompt fix plus a rewritten tool schema (the description of the tool's inputs the model sees), tested through a proxy that shows the model the new schema while the real tool still checks every call. Only the tool's owner can apply it for real. Without a prompt fix it starts "The agent with a rewritten tool schema …". |
+
 Rules:
 
-- Variants are cumulative: `config-fix` is baseline + the config suggestion; `schema-fix` is `config-fix` + the schema
+- Variants are cumulative: `config-fix` (label "Prompt fix") is baseline + the prompt suggestion; `schema-fix` is `config-fix` + the schema
   suggestion served through the schema-overlay proxy. A variant that wasn't run is omitted.
 - Rates are floats in `[0, 1]`, rounded to 3 places.
 - A call counts as rejected when it carries any call-level signal:

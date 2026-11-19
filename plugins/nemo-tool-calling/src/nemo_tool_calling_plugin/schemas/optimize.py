@@ -79,7 +79,7 @@ class ToolCallingOptimizeSpec(BaseModel):
     analyzer_model: str = Field(
         default=DEFAULT_ANALYZER_MODEL,
         min_length=1,
-        description="Inference Gateway model that diagnoses failures and proposes the config fix and schema patch.",
+        description="Inference Gateway model that diagnoses failures and proposes the prompt fix and schema patch.",
     )
     verify: list[Literal["config-fix", "schema-fix"]] = Field(
         default=["config-fix", "schema-fix"],

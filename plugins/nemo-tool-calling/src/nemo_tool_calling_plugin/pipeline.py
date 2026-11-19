@@ -41,6 +41,19 @@ logger = logging.getLogger(__name__)
 VariantId = Literal["baseline", "config-fix", "schema-fix"]
 VERIFY_VARIANTS: tuple[VariantId, ...] = ("config-fix", "schema-fix")
 RESULT_VERSION = 1
+BASELINE_FROM_TRACES = "The agent as registered, scored from its existing traces."
+BASELINE_FROM_DATASET = "The agent as registered, scored by re-running the prompt set."
+PROMPT_FIX = (
+    "The agent with a suggested prompt change. Only the agent's own config changes, not its tools, so the platform "
+    "can apply it for you."
+)
+_SCHEMA_FIX_TAIL = (
+    "a rewritten tool schema (the description of the tool's inputs the model sees), tested through a proxy that "
+    "shows the model the new schema while the real tool still checks every call. Only the tool's owner can apply it "
+    "for real."
+)
+PROMPT_AND_SCHEMA_FIX = f"The prompt fix plus {_SCHEMA_FIX_TAIL}"
+SCHEMA_FIX_ONLY = f"The agent with {_SCHEMA_FIX_TAIL}"
 
 
 @dataclass(frozen=True)
@@ -250,10 +263,10 @@ def run_pipeline(
     if inputs.traced_baseline is None:
         logger.info("Baseline: %d prompt(s) x %d run(s)", len(inputs.prompts), inputs.runs_per_prompt)
         baseline = runner.run("baseline", base, inputs.prompts)
-        description = "The agent as registered."
+        description = BASELINE_FROM_DATASET
     else:
         baseline = inputs.traced_baseline
-        description = f"The agent as registered, scored from {len(baseline)} traced session(s) in Intake."
+        description = BASELINE_FROM_TRACES
     published = _advertised_schemas(inputs.tools)
     budget = inputs.call_budget
     variants = [_variant("baseline", "Current agent", description, baseline, schemas=published, call_budget=budget)]
@@ -304,10 +317,9 @@ def run_pipeline(
     candidate = with_system_prompt(base, analysis.config_fix.system_prompt) if analysis.config_fix else base
     ran: set[str] = {"baseline"}
     if analysis.config_fix is not None and "config-fix" in verify:
-        logger.info("Verifying the config fix")
+        logger.info("Verifying the prompt fix")
         runs = runner.run("config-fix", candidate, inputs.prompts)
-        description = "The agent with the suggested prompt edit."
-        variants.append(_variant("config-fix", "Config fix", description, runs, schemas=published, call_budget=budget))
+        variants.append(_variant("config-fix", "Prompt fix", PROMPT_FIX, runs, schemas=published, call_budget=budget))
         ran.add("config-fix")
     if schema_fix is not None and "schema-fix" in verify:
         overlaid, overlay_findings = with_schema_overlay(candidate, schema_fix, inputs.overlay_dir)
@@ -317,14 +329,10 @@ def run_pipeline(
         else:
             logger.info("Verifying the schema patch through the schema-overlay proxy")
             runs = runner.run("schema-fix", overlaid, inputs.prompts)
-            description = (
-                "The config fix plus the patched tool schema, served through a schema-overlay proxy."
-                if analysis.config_fix is not None
-                else "The agent with the patched tool schema, served through a schema-overlay proxy."
-            )
+            description = PROMPT_AND_SCHEMA_FIX if analysis.config_fix is not None else SCHEMA_FIX_ONLY
             patched = _advertised_schemas(inputs.tools, schema_fix)
             variants.append(
-                _variant("schema-fix", "Config + schema fix", description, runs, schemas=patched, call_budget=budget)
+                _variant("schema-fix", "Schema fix", description, runs, schemas=patched, call_budget=budget)
             )
             ran.add("schema-fix")
 
