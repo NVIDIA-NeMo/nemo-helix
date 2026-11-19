@@ -16,6 +16,7 @@ from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRan
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     NHX_PRINCIPAL_ENVVAR,
+    WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationConflictError,
     reference_delegation_name,
 )
@@ -3233,8 +3234,19 @@ def test_kubernetes_job_skips_workload_delegation_when_job_labels_are_missing(
     register_delegation.assert_not_called()
 
 
-def test_kubernetes_job_workload_delegation_conflict_is_not_recreated(
-    kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
+@pytest.mark.parametrize(
+    "conflict,expected_calls",
+    [
+        (WorkloadDelegationAlreadyActiveError("exists"), 1),
+        (WorkloadDelegationConflictError("registration raced"), 2),
+    ],
+)
+def test_kubernetes_job_workload_delegation_conflict_handling(
+    kubernetes_job,
+    test_step_pending_with_auth_context,
+    workload_exchange_auth_config,
+    conflict: WorkloadDelegationConflictError,
+    expected_calls: int,
 ):
     test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     pod = _kubernetes_pod("pod-uid-123")
@@ -3247,7 +3259,7 @@ def test_kubernetes_job_workload_delegation_conflict_is_not_recreated(
         patch.object(
             kubernetes_job._workload_delegations,
             "_register_workload_delegation",
-            side_effect=WorkloadDelegationConflictError("exists"),
+            side_effect=conflict,
         ) as register_delegation,
         patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
@@ -3257,7 +3269,7 @@ def test_kubernetes_job_workload_delegation_conflict_is_not_recreated(
 
     assert first_update.status == HelixJobStatus.ACTIVE
     assert second_update.status == HelixJobStatus.ACTIVE
-    register_delegation.assert_called_once()
+    assert register_delegation.call_count == expected_calls
 
 
 def test_kubernetes_job_registration_failure_does_not_block_status_and_retries(

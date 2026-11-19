@@ -41,6 +41,7 @@ from nhx.core.jobs.config import JobsStorageConfig
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.delegation_cleanup import JobDelegationCleanup
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
 from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
@@ -86,6 +87,8 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._system_entities = system_entity_client or SyncEntityClient(
             EntitiesClient.from_client(nemo_client)
         ).as_service("jobs", internal=True)
+
+        self._delegation_cleanup = JobDelegationCleanup(self._system_entities)
 
         self._step_reconciliation_total = meter.create_counter(
             name="nhx.jobs.reconciler.step.reconciliation.total",
@@ -239,6 +242,7 @@ class JobReconciler(HeartbeatMixin, Controller):
 
         with tracer.start_as_current_span("jobs_reconciler/enforce_storage_retention"):
             self._recover_unstarted_reruns()
+            self._delegation_cleanup.sweep(on_progress=self.emit_heartbeat)
             self._cleanup_pending_jobs()
             self._enforce_storage_retention()
 
@@ -370,6 +374,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                     # Claim abandoned setup before cleanup; stale publication loses its version.
                     job.status = HelixJobStatus.DELETION_PENDING
                     job = self._system_entities.update(job)
+                self._delegation_cleanup.cleanup_job(job, on_progress=self.emit_heartbeat)
                 if not self._settle_pending_storage(job):
                     continue
                 job = self._settle_pending_artifacts(job)

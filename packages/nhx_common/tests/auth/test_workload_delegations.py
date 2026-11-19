@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nhx.common.auth import AuthContext, Principal
@@ -14,8 +14,11 @@ from nhx.common.auth.workload_delegations import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
     OPAQUE_DOCKER_PROOF_PREFIX,
     InvalidWorkloadProofTokenError,
+    SyncWorkloadDelegationStore,
+    WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationConflictError,
     WorkloadDelegationEntity,
+    WorkloadDelegationError,
     WorkloadDelegationScope,
     WorkloadDelegationStore,
     WorkloadDelegationValidationError,
@@ -302,6 +305,7 @@ async def test_get_returns_none_when_missing() -> None:
     "entity",
     [
         _entity(workload_audience=""),
+        _entity(revoked_at=datetime.now(timezone.utc)),
         _entity(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)),
         _entity(bound_reference_name="authentication.kubernetes.io/pod-uid"),
         _entity(bound_reference_value="pod-uid-123"),
@@ -342,71 +346,57 @@ async def test_reference_bound_entity_registers_with_reference_pair() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_uses_fetched_db_version() -> None:
+async def test_renew_preserves_grant_binding() -> None:
     entity_client = _entity_client()
-    fetched = _entity(workload_audience="old-audience")
+    fetched = _entity(opaque_subject_token_hash="proof", docker_container_id="container-a")
+    fetched._id = "grant"
     fetched._db_version = 7
-    replacement = _entity(workload_audience="new-audience")
-    entity_client.get.return_value = fetched
+    entity_client.get_by_id.return_value = fetched
     entity_client.update.side_effect = lambda entity: entity
-
-    updated = await WorkloadDelegationStore(entity_client).update(replacement)
-
-    entity_client.get.assert_awaited_once_with(WorkloadDelegationEntity, replacement.name, workspace=SYSTEM_WORKSPACE)
-    entity_client.update.assert_awaited_once()
-    update_arg = entity_client.update.call_args.args[0]
-    assert update_arg.db_version == 7
-    assert update_arg.workload_audience == "new-audience"
-    assert updated.db_version == 7
-
-
-@pytest.mark.asyncio
-async def test_update_rejects_stale_expected_db_version() -> None:
-    entity_client = _entity_client()
-    fetched = _entity(workload_audience="old-audience")
-    fetched._db_version = 7
-    replacement = _entity(workload_audience="new-audience")
-    entity_client.get.return_value = fetched
-
-    with pytest.raises(WorkloadDelegationConflictError):
-        await WorkloadDelegationStore(entity_client).update(replacement, expected_db_version=6)
-
-    entity_client.update.assert_not_called()
+    expiry = _expires_at() + timedelta(hours=1)
+    renewed = await WorkloadDelegationStore(entity_client).renew("grant", expected_db_version=7, expires_at=expiry)
+    assert renewed.id == fetched.id and renewed.db_version == 7
+    assert renewed.expires_at == expiry
+    assert renewed.auth_context == fetched.auth_context
+    assert renewed.job_id == fetched.job_id
+    assert renewed.docker_container_id == "container-a"
+    assert renewed.opaque_subject_token_hash == "proof"
+    entity_client.get.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_update_rejects_reactivating_revoked_row() -> None:
-    entity_client = _entity_client()
-    revoked_at = datetime.now(timezone.utc)
-    fetched = _entity(revoked_at=revoked_at)
-    fetched._db_version = 8
-    stale_refresh = _entity(revoked_at=None)
-    stale_refresh._db_version = 7
-    entity_client.get.return_value = fetched
-
-    with pytest.raises(WorkloadDelegationConflictError, match="cannot be reactivated"):
-        await WorkloadDelegationStore(entity_client).update(stale_refresh)
-
-    entity_client.update.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_revoke_uses_fetched_db_version() -> None:
+async def test_renew_rejects_stale_version() -> None:
     entity_client = _entity_client()
     fetched = _entity()
+    fetched._db_version = 7
+    entity_client.get_by_id.return_value = fetched
+    with pytest.raises(WorkloadDelegationConflictError):
+        await WorkloadDelegationStore(entity_client).renew("grant", expected_db_version=6, expires_at=_expires_at())
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_renew_rejects_existing_revoked_record() -> None:
+    entity_client = _entity_client()
+    fetched = _entity(revoked_at=datetime.now(timezone.utc))
+    fetched._db_version = 8
+    entity_client.get_by_id.return_value = fetched
+    with pytest.raises(WorkloadDelegationConflictError, match="revoked"):
+        await WorkloadDelegationStore(entity_client).renew("grant", expected_db_version=8, expires_at=_expires_at())
+    assert not fetched.is_active()
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revoke_deletes_fetched_id_and_version() -> None:
+    entity_client = _entity_client()
+    fetched = _entity()
+    fetched._id = "grant"
     fetched._db_version = 9
     entity_client.get.return_value = fetched
-    entity_client.update.side_effect = lambda entity: entity
-    now = datetime.now(timezone.utc)
-
-    revoked = await WorkloadDelegationStore(entity_client).revoke(fetched.name, now=now)
-
-    assert revoked is not None
-    entity_client.get.assert_awaited_once_with(WorkloadDelegationEntity, fetched.name, workspace=SYSTEM_WORKSPACE)
-    entity_client.update.assert_awaited_once()
-    update_arg = entity_client.update.call_args.args[0]
-    assert update_arg.db_version == 9
-    assert update_arg.revoked_at == now
+    await WorkloadDelegationStore(entity_client).revoke(fetched.name)
+    entity_client.delete_by_id.assert_awaited_once_with(WorkloadDelegationEntity, "grant", expected_db_version=9)
+    entity_client.update.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -427,63 +417,94 @@ async def test_register_conflict_on_active_row_raises_domain_conflict() -> None:
     entity_client.add.side_effect = EntityConflictError("already exists")
     entity_client.get.return_value = existing
 
-    with pytest.raises(WorkloadDelegationConflictError):
+    with pytest.raises(WorkloadDelegationAlreadyActiveError):
         await WorkloadDelegationStore(entity_client).register(_entity())
 
     entity_client.update.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_register_conflict_replaces_expired_row_with_fetched_db_version() -> None:
+@pytest.mark.parametrize("inactive", ["expired", "revoked"])
+async def test_register_deletes_inactive_grant_and_logs_replacement(
+    inactive: str, caplog: pytest.LogCaptureFixture
+) -> None:
     entity_client = _entity_client()
-    expired = _entity(expires_at=datetime.now(timezone.utc) - timedelta(hours=1))
-    expired._db_version = 12
-    replacement = _entity()
-    entity_client.add.side_effect = EntityConflictError("already exists")
-    entity_client.get.return_value = expired
-    entity_client.update.side_effect = lambda entity: entity
-
-    saved = await WorkloadDelegationStore(entity_client).register(replacement)
-
-    entity_client.update.assert_awaited_once()
-    update_arg = entity_client.update.call_args.args[0]
-    assert update_arg.db_version == 12
-    assert update_arg.expires_at == replacement.expires_at
-    assert saved.db_version == 12
-
-
-@pytest.mark.asyncio
-async def test_register_conflict_replaces_revoked_row_with_fetched_db_version() -> None:
-    entity_client = _entity_client()
-    revoked = _entity(revoked_at=datetime.now(timezone.utc))
-    revoked._db_version = 13
-    replacement = _entity()
-    entity_client.add.side_effect = EntityConflictError("already exists")
-    entity_client.get.return_value = revoked
-    entity_client.update.side_effect = lambda entity: entity
-
-    saved = await WorkloadDelegationStore(entity_client).register(replacement)
-
-    entity_client.update.assert_awaited_once()
-    update_arg = entity_client.update.call_args.args[0]
-    assert update_arg.db_version == 13
-    assert update_arg.revoked_at is None
-    assert saved.db_version == 13
-
-
-@pytest.mark.asyncio
-async def test_register_conflict_rejects_stale_expected_db_version_for_replacement() -> None:
-    entity_client = _entity_client()
-    expired = _entity(expires_at=datetime.now(timezone.utc) - timedelta(hours=1))
-    expired._db_version = 12
-    replacement = _entity()
-    entity_client.add.side_effect = EntityConflictError("already exists")
-    entity_client.get.return_value = expired
-
-    with pytest.raises(WorkloadDelegationConflictError):
-        await WorkloadDelegationStore(entity_client).register(replacement, expected_db_version=11)
-
+    old = _entity(opaque_subject_token_hash="old-proof")
+    old._id = "old-grant"
+    old._db_version = 12
+    if inactive == "expired":
+        old.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    else:
+        old.revoked_at = datetime.now(timezone.utc)
+    replacement = _entity(opaque_subject_token_hash="new-proof")
+    saved_replacement = replacement.model_copy()
+    saved_replacement._id = "new-grant"
+    entity_client.add.side_effect = [EntityConflictError("already exists"), saved_replacement]
+    entity_client.get.return_value = old
+    with caplog.at_level("INFO", logger="nemo_helix_plugin.auth.workload_delegations"):
+        saved = await WorkloadDelegationStore(entity_client).register(replacement)
+    entity_client.delete_by_id.assert_awaited_once_with(WorkloadDelegationEntity, old.id, expected_db_version=12)
     entity_client.update.assert_not_called()
+    assert saved.id != old.id
+    assert saved.name == old.name
+    deleted, registered = caplog.records
+    assert deleted.__dict__["delegation_id"] == old.id
+    assert registered.__dict__["delegation_id"] == saved.id
+    assert registered.__dict__["previous_delegation_id"] == old.id
+    assert registered.__dict__["reason"] == inactive
+    assert "old-proof" not in str([record.__dict__ for record in caplog.records])
+    assert "new-proof" not in str([record.__dict__ for record in caplog.records])
+
+
+@pytest.mark.parametrize("race_at", ["deletion", "creation"])
+@pytest.mark.asyncio
+async def test_registration_race_fails_closed(race_at: str) -> None:
+    entity_client = _entity_client()
+    old = _entity(revoked_at=datetime.now(timezone.utc))
+    old._id = "old"
+    entity_client.get.return_value = old
+    entity_client.add.side_effect = EntityConflictError("unique name")
+    if race_at == "deletion":
+        entity_client.delete_by_id.side_effect = EntityConflictError("stale version")
+    with pytest.raises(WorkloadDelegationConflictError, match="changed|raced"):
+        await WorkloadDelegationStore(entity_client).register(_entity())
+    assert entity_client.add.await_count == (1 if race_at == "deletion" else 2)
+
+
+def test_sync_registration_deletes_inactive_grant() -> None:
+    entity_client = MagicMock()
+    old = _entity(revoked_at=datetime.now(timezone.utc))
+    old._id = "old"
+    old._db_version = 3
+    new = _entity()
+    saved = new.model_copy()
+    saved._id = "new"
+    entity_client.get.return_value = old
+    entity_client.add.side_effect = [EntityConflictError("unique name"), saved]
+    assert SyncWorkloadDelegationStore(entity_client).register(new).id == "new"
+    entity_client.delete_by_id.assert_called_once_with(WorkloadDelegationEntity, "old", expected_db_version=3)
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_deleted_grant_cannot_renew_by_reused_name() -> None:
+    entity_client = _entity_client()
+    entity_client.get_by_id.side_effect = EntityNotFoundError("old grant deleted")
+    with pytest.raises(WorkloadDelegationConflictError, match="no longer exists"):
+        await WorkloadDelegationStore(entity_client).renew("old", expected_db_version=1, expires_at=_expires_at())
+    entity_client.get.assert_not_called()
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lookup_by_id_returns_revoked_grant_without_following_name() -> None:
+    entity_client = _entity_client()
+    old = _entity(revoked_at=datetime.now(timezone.utc))
+    old._id = "old"
+    entity_client.get_by_id.return_value = old
+    assert await WorkloadDelegationStore(entity_client).get_by_id("old") is old
+    entity_client.get.assert_not_called()
+    entity_client.get_by_id.assert_awaited_once_with(WorkloadDelegationEntity, "old")
 
 
 def test_docker_workload_delegation_name_is_deterministic() -> None:
@@ -610,18 +631,341 @@ def test_workload_delegation_scope_rejects_empty_instance_or_claim() -> None:
 
 
 @pytest.mark.asyncio
-async def test_revoke_by_workload_updates_each_matching_delegation_with_one_timestamp() -> None:
+async def test_revoke_by_workload_deletes_exact_selected_ids() -> None:
     entity_client = _entity_client()
     first = _generic_docker_entity(workload_generation="container-a")
+    first._id = "docker-grant"
     second = _generic_reference_entity()
-    now = datetime(2026, 8, 31, 10, 0, tzinfo=timezone.utc)
+    second._id = "pod-grant"
     entity_client.list.return_value = _list_response([first, second])
-    entity_client.update.side_effect = lambda entity: entity
+    await WorkloadDelegationStore(entity_client).revoke_by_workload(_generic_scope())
+    assert [call.args[1] for call in entity_client.delete_by_id.await_args_list] == [first.id, second.id]
+    entity_client.update.assert_not_called()
 
-    revoked = await WorkloadDelegationStore(entity_client).revoke_by_workload(
-        _generic_scope(),
-        now=now,
+
+@pytest.mark.asyncio
+async def test_native_pod_renewal_cannot_add_a_docker_proof() -> None:
+    entity_client = _entity_client()
+    pod = _reference_entity()
+    entity_client.get_by_id.return_value = pod
+    with pytest.raises(WorkloadDelegationValidationError, match="opaque Docker"):
+        await WorkloadDelegationStore(entity_client).renew(
+            "grant", expected_db_version=pod.db_version, expires_at=_expires_at(), opaque_subject_token_hash="forged"
+        )
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revoke_by_id_never_resolves_current_lookup_name() -> None:
+    entity_client = _entity_client()
+    old = _entity()
+    old._id = "old-grant"
+    entity_client.get_by_id.return_value = old
+    await WorkloadDelegationStore(entity_client).revoke_by_id(old.id)
+    entity_client.delete_by_id.assert_awaited_once_with(
+        WorkloadDelegationEntity, old.id, expected_db_version=old.db_version
     )
+    entity_client.get.assert_not_called()
+    entity_client.update.assert_not_called()
 
-    assert revoked == [first, second]
-    assert [call.args[0].revoked_at for call in entity_client.update.await_args_list] == [now, now]
+
+def test_sync_revoke_by_id_never_resolves_current_lookup_name() -> None:
+    entity_client = MagicMock()
+    old = _entity()
+    old._id = "old-grant"
+    entity_client.get_by_id.return_value = old
+    SyncWorkloadDelegationStore(entity_client).revoke_by_id(old.id)
+    entity_client.delete_by_id.assert_called_once_with(
+        WorkloadDelegationEntity, old.id, expected_db_version=old.db_version
+    )
+    entity_client.get.assert_not_called()
+    entity_client.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revoke_missing_is_idempotent_and_cleans_existing_revoked_record() -> None:
+    entity_client = _entity_client()
+    entity_client.get_by_id.side_effect = EntityNotFoundError("missing")
+    store = WorkloadDelegationStore(entity_client)
+    assert await store.revoke_by_id("missing") is None
+    entity_client.get_by_id.side_effect = None
+    revoked = _entity(revoked_at=datetime.now(timezone.utc))
+    revoked._id = "old"
+    entity_client.get_by_id.return_value = revoked
+    await store.revoke_by_id("old")
+    entity_client.delete_by_id.assert_awaited_once_with(
+        WorkloadDelegationEntity, "old", expected_db_version=revoked.db_version
+    )
+    entity_client.update.assert_not_called()
+    entity_client.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bind_docker_container_is_write_once_and_renewal_preserves_it() -> None:
+    entity_client = _entity_client()
+    entity = _entity(opaque_subject_token_hash="proof")
+    entity._id = "grant"
+    entity_client.get_by_id.return_value = entity
+    entity_client.update.side_effect = lambda value: value
+    store = WorkloadDelegationStore(entity_client)
+    bound = await store.bind_docker_container("grant", "container-a")
+    assert bound.docker_container_id == "container-a"
+    assert entity.docker_container_id is None
+    entity_client.get_by_id.return_value = bound
+    entity_client.update.reset_mock()
+    assert await store.bind_docker_container("grant", "container-a") is bound
+    with pytest.raises(WorkloadDelegationConflictError, match="different container"):
+        await store.bind_docker_container("grant", "container-b")
+    renewed = await store.renew("grant", expected_db_version=bound.db_version, expires_at=_expires_at())
+    assert renewed.docker_container_id == "container-a"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored_id", [None, "container-a"])
+async def test_copied_label_cannot_revoke_another_container_grant(stored_id: str | None) -> None:
+    entity_client = _entity_client()
+    grant = _entity(docker_container_id=stored_id, opaque_subject_token_hash="proof")
+    grant._id = "grant"
+    entity_client.get_by_id.return_value = grant
+    with pytest.raises(WorkloadDelegationConflictError, match="does not match"):
+        await WorkloadDelegationStore(entity_client).revoke_for_docker_container("grant", "container-b")
+    entity_client.delete_by_id.assert_not_awaited()
+
+
+def test_sync_binding_and_verified_revocation() -> None:
+    entity_client = MagicMock()
+    entity = _entity(opaque_subject_token_hash="proof")
+    entity._id = "grant"
+    entity_client.get_by_id.return_value = entity
+    entity_client.update.side_effect = lambda value: value
+    store = SyncWorkloadDelegationStore(entity_client)
+    bound = store.bind_docker_container("grant", "container-a")
+    entity_client.get_by_id.return_value = bound
+    assert store.bind_docker_container("grant", "container-a") is bound
+    with pytest.raises(WorkloadDelegationConflictError):
+        store.bind_docker_container("grant", "container-b")
+    with pytest.raises(WorkloadDelegationConflictError):
+        store.revoke_for_docker_container("grant", "container-b")
+    store.revoke_for_docker_container("grant", "container-a")
+    entity_client.delete_by_id.assert_called_once_with(
+        WorkloadDelegationEntity, "grant", expected_db_version=bound.db_version
+    )
+    entity_client.get_by_id.side_effect = EntityNotFoundError("deleted")
+    with pytest.raises(EntityNotFoundError):
+        store.bind_docker_container("grant", "container-a")
+
+
+def test_sync_renewal_rotates_only_the_existing_docker_proof_and_expiry() -> None:
+    entity_client = MagicMock()
+    current = _entity(opaque_subject_token_hash="old-proof", docker_container_id="container-a")
+    current._id = "grant"
+    entity_client.get_by_id.return_value = current
+    entity_client.update.side_effect = lambda entity: entity
+    expiry = _expires_at()
+    renewed = SyncWorkloadDelegationStore(entity_client).renew(
+        "grant",
+        expected_db_version=current.db_version,
+        expires_at=expiry,
+        opaque_subject_token_hash="new-proof",
+    )
+    assert renewed.id == current.id
+    assert renewed.docker_container_id == current.docker_container_id
+    assert renewed.auth_context == current.auth_context
+    assert renewed.opaque_subject_token_hash == "new-proof" and renewed.expires_at == expiry
+    entity_client.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_revocation_retries_exact_id_after_renewal() -> None:
+    client = _entity_client()
+    original = _entity(docker_container_id="container-a")
+    original._id = "old-grant"
+    original._db_version = 7
+    renewed = original.model_copy()
+    renewed._db_version = 8
+    client.get_by_id.side_effect = [original, renewed]
+    client.delete_by_id.side_effect = [EntityConflictError("renewed"), None]
+
+    await WorkloadDelegationStore(client).revoke_by_id(original.id)
+
+    assert [entry.kwargs["expected_db_version"] for entry in client.delete_by_id.await_args_list] == [7, 8]
+    assert [entry.args[1] for entry in client.delete_by_id.await_args_list] == [original.id, original.id]
+    client.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_revocation_stops_after_three_conflicts() -> None:
+    client = _entity_client()
+    original = _entity()
+    original._id = "grant"
+    client.get_by_id.return_value = original
+    client.delete_by_id.side_effect = EntityConflictError("renewed")
+    with pytest.raises(WorkloadDelegationConflictError):
+        await WorkloadDelegationStore(client).revoke_by_id(original.id)
+    assert client.delete_by_id.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_async_docker_revocation_checks_binding_after_conflict() -> None:
+    client = _entity_client()
+    original = _entity(docker_container_id="container-a")
+    original._id = "grant"
+    changed = original.model_copy(update={"docker_container_id": "container-b"})
+    client.get_by_id.side_effect = [original, changed]
+    client.delete_by_id.side_effect = EntityConflictError("changed")
+    with pytest.raises(WorkloadDelegationConflictError, match="binding changed"):
+        await WorkloadDelegationStore(client).revoke_for_docker_container(original.id, "container-a")
+    assert client.delete_by_id.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_batch_revocation_attempts_siblings_after_failure() -> None:
+    client = _entity_client()
+    first = _generic_docker_entity()
+    first._id = "first"
+    second = _generic_reference_entity()
+    second._id = "second"
+    client.list.return_value = _list_response([first, second])
+    client.delete_by_id.side_effect = [RuntimeError("entity service unavailable"), None]
+
+    with pytest.raises(WorkloadDelegationError, match="Some workload delegations") as failure:
+        await WorkloadDelegationStore(client).revoke_by_workload(_generic_scope())
+
+    assert [entry.args[1] for entry in client.delete_by_id.await_args_list] == [first.id, second.id]
+    assert isinstance(failure.value.__cause__, ExceptionGroup)
+
+
+@pytest.mark.asyncio
+async def test_async_revocation_does_not_follow_replacement_after_conflict() -> None:
+    client = _entity_client()
+    original = _entity()
+    original._id = "old-grant"
+    client.get_by_id.side_effect = [original, EntityNotFoundError("old grant deleted")]
+    client.delete_by_id.side_effect = EntityConflictError("changed")
+    await WorkloadDelegationStore(client).revoke_by_id(original.id)
+    assert client.delete_by_id.call_count == 1
+    client.get.assert_not_called()
+
+
+def test_sync_revocation_retries_exact_id_after_renewal() -> None:
+    client = MagicMock()
+    original = _entity(docker_container_id="container-a")
+    original._id = "old-grant"
+    original._db_version = 7
+    renewed = original.model_copy()
+    renewed._db_version = 8
+    client.get_by_id.side_effect = [original, renewed]
+    client.delete_by_id.side_effect = [EntityConflictError("renewed"), None]
+
+    SyncWorkloadDelegationStore(client).revoke_by_id(original.id)
+
+    assert [entry.kwargs["expected_db_version"] for entry in client.delete_by_id.call_args_list] == [7, 8]
+    assert [entry.args[1] for entry in client.delete_by_id.call_args_list] == [original.id, original.id]
+    client.get.assert_not_called()
+
+
+def test_sync_revocation_stops_after_three_conflicts() -> None:
+    client = MagicMock()
+    original = _entity()
+    original._id = "grant"
+    client.get_by_id.return_value = original
+    client.delete_by_id.side_effect = EntityConflictError("renewed")
+    with pytest.raises(WorkloadDelegationConflictError):
+        SyncWorkloadDelegationStore(client).revoke_by_id(original.id)
+    assert client.delete_by_id.call_count == 3
+
+
+def test_sync_docker_revocation_checks_binding_after_conflict() -> None:
+    client = MagicMock()
+    original = _entity(docker_container_id="container-a")
+    original._id = "grant"
+    changed = original.model_copy(update={"docker_container_id": "container-b"})
+    client.get_by_id.side_effect = [original, changed]
+    client.delete_by_id.side_effect = EntityConflictError("changed")
+    with pytest.raises(WorkloadDelegationConflictError, match="binding changed"):
+        SyncWorkloadDelegationStore(client).revoke_for_docker_container(original.id, "container-a")
+    assert client.delete_by_id.call_count == 1
+
+
+def test_sync_batch_revocation_attempts_siblings_after_failure() -> None:
+    client = MagicMock()
+    first = _generic_docker_entity()
+    first._id = "first"
+    second = _generic_reference_entity()
+    second._id = "second"
+    client.list.return_value = _list_response([first, second])
+    client.delete_by_id.side_effect = [RuntimeError("entity service unavailable"), None]
+
+    with pytest.raises(WorkloadDelegationError, match="Some workload delegations") as failure:
+        SyncWorkloadDelegationStore(client).revoke_by_workload(_generic_scope())
+
+    assert [entry.args[1] for entry in client.delete_by_id.call_args_list] == [first.id, second.id]
+    assert isinstance(failure.value.__cause__, ExceptionGroup)
+
+
+def test_sync_revocation_does_not_follow_replacement_after_conflict() -> None:
+    client = MagicMock()
+    original = _entity()
+    original._id = "old-grant"
+    client.get_by_id.side_effect = [original, EntityNotFoundError("old grant deleted")]
+    client.delete_by_id.side_effect = EntityConflictError("changed")
+    SyncWorkloadDelegationStore(client).revoke_by_id(original.id)
+    assert client.delete_by_id.call_count == 1
+    client.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_empty_docker_reference_fields_normalize_on_registration() -> None:
+    client = _entity_client()
+    grant = _entity(opaque_subject_token_hash="proof", bound_reference_name="", bound_reference_value="")
+    grant._id = "grant"
+    client.add.side_effect = lambda value: value
+
+    registered = await WorkloadDelegationStore(client).register(grant, require_opaque_subject_token_hash=True)
+
+    assert registered.bound_reference_name is None
+    assert registered.bound_reference_value is None
+    assert client.add.await_args.args[0].bound_reference_name is None
+
+
+@pytest.mark.asyncio
+async def test_existing_empty_docker_references_allow_binding_and_proof_rotation() -> None:
+    client = _entity_client()
+    grant = _entity(opaque_subject_token_hash="proof")
+    grant._id = "grant"
+    legacy = grant.model_copy(update={"bound_reference_name": "", "bound_reference_value": ""})
+    client.get_by_id.return_value = legacy
+    client.update.side_effect = lambda value: value
+    store = WorkloadDelegationStore(client)
+
+    bound = await store.bind_docker_container(grant.id, "container")
+    assert bound.docker_container_id == "container"
+    renewed = await store.renew(
+        grant.id, expected_db_version=legacy.db_version, expires_at=_expires_at(), opaque_subject_token_hash="rotated"
+    )
+    assert renewed.opaque_subject_token_hash == "rotated"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reference_name,reference_value", [("reference", "value"), ("", "value")])
+async def test_docker_binding_and_rotation_reject_actual_references(reference_name, reference_value) -> None:
+    client = _entity_client()
+    grant = _entity(
+        opaque_subject_token_hash="proof",
+        bound_reference_name=reference_name,
+        bound_reference_value=reference_value,
+    )
+    grant._id = "grant"
+    client.get_by_id.return_value = grant
+    store = WorkloadDelegationStore(client)
+
+    with pytest.raises(WorkloadDelegationConflictError, match="active Docker"):
+        await store.bind_docker_container(grant.id, "container")
+    with pytest.raises(WorkloadDelegationValidationError, match="opaque Docker"):
+        await store.renew(
+            grant.id,
+            expected_db_version=grant.db_version,
+            expires_at=_expires_at(),
+            opaque_subject_token_hash="rotated",
+        )
+    client.update.assert_not_awaited()
