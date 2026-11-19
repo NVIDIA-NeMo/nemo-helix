@@ -3,6 +3,10 @@
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { customizationGetAutomodelJobStatus } from '@nemo/sdk/generated/customizer/automodel-jobs';
+import {
+  DISTILLATION_MOCK,
+  mockTrainingProgress,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/distillationMock';
 import { useQuery } from '@tanstack/react-query';
 
 export interface TrainingProgress {
@@ -23,10 +27,14 @@ export const useTrainingProgress = (
 ): TrainingProgress | undefined => {
   const { data } = useQuery({
     queryKey: ['distillation-training-progress', workspace, job],
-    queryFn: () => customizationGetAutomodelJobStatus(workspace, job ?? ''),
+    queryFn: () =>
+      DISTILLATION_MOCK
+        ? Promise.resolve(undefined)
+        : customizationGetAutomodelJobStatus(workspace, job ?? ''),
     enabled: enabled && !!job,
     refetchInterval: nodeRunning ? JOB_POLLING_INTERVAL_MS : false,
   });
+  if (DISTILLATION_MOCK) return enabled ? mockTrainingProgress(job) : undefined;
   const details = data?.status_details;
   if (!details) return undefined;
 

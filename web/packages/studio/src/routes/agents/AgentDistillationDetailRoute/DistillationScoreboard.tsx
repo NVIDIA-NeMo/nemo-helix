@@ -1,7 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Flex, Stack, Table, Text } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Flex,
+  RadioGroupInput,
+  RadioGroupItem,
+  Stack,
+  Table,
+  Text,
+} from '@nvidia/foundations-react-core';
 import {
   costDelta,
   type Delta,
@@ -9,14 +17,21 @@ import {
   scoreDelta,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/distillationDeltas';
 import {
-  ARM_COLOR_CLASSES,
+  armColorClass,
+  BASE_ARM,
   type MockArmResult,
+  ORIGINAL_ARM,
 } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import cn from 'classnames';
 import type { FC, ReactNode } from 'react';
 
 export interface DistillationScoreboardProps {
   arms: MockArmResult[];
+  /** The candidate Promote would use. */
+  selectedArm?: string;
+  bestArm?: string;
+  /** Candidate rows get a radio; the table must sit inside a `RadioGroupRoot`. */
+  selectable?: boolean;
 }
 
 const TONE_CLASSES: Record<Delta['tone'], string> = {
@@ -27,74 +42,113 @@ const TONE_CLASSES: Record<Delta['tone'], string> = {
 
 const usd = (value: number | null): string => (value === null ? '—' : `$${value.toFixed(2)}`);
 
-/** All models side by side, one row per metric, each value with its change against the baseline. */
-export const DistillationScoreboard: FC<DistillationScoreboardProps> = ({ arms }) => {
-  const baseline = arms[0];
+const isCandidate = (arm: MockArmResult): boolean => arm.id !== ORIGINAL_ARM && arm.id !== BASE_ARM;
 
-  const cell = (value: ReactNode, delta?: Delta): ReactNode => (
+/**
+ * The models as rows: the baseline and the untrained student for reference, then each candidate. A candidate's score is shown against the baseline and the untrained model.
+ */
+export const DistillationScoreboard: FC<DistillationScoreboardProps> = ({
+  arms,
+  selectedArm,
+  bestArm,
+  selectable,
+}) => {
+  const reference = arms[0];
+  const untrained = arms.find((arm) => arm.id === BASE_ARM);
+  const referenceName = reference.id === ORIGINAL_ARM ? 'baseline' : 'untrained';
+
+  const cell = (value: ReactNode, ...deltas: (Delta | undefined)[]): ReactNode => (
     <Stack gap="density-xs">
       <Text kind="body/semibold/md">{value}</Text>
-      {delta && (
-        <Text kind="body/regular/xs" className={TONE_CLASSES[delta.tone]}>
-          {delta.text}
-        </Text>
+      {deltas.map(
+        (delta) =>
+          delta && (
+            <Text key={delta.text} kind="body/regular/xs" className={TONE_CLASSES[delta.tone]}>
+              {delta.text}
+            </Text>
+          )
       )}
     </Stack>
   );
 
-  const rows: { label: string; values: (arm: MockArmResult) => ReactNode }[] = [
-    {
-      label: 'Model',
-      values: (arm) => <Text kind="mono/sm">{arm.model}</Text>,
-    },
-    {
-      label: 'Score',
-      values: (arm) => cell(arm.score.toFixed(2), arm.id === baseline.id ? undefined : scoreDelta(arm, baseline)),
-    },
-    {
-      label: 'Est. cost per 1,000 tasks',
-      values: (arm) =>
-        cell(usd(arm.estimatedCostPer1kTasks), arm.id === baseline.id ? undefined : costDelta(arm, baseline)),
-    },
-    {
-      label: 'Median latency',
-      values: (arm) =>
-        cell(`${arm.medianLatencySec.toFixed(1)} s`, arm.id === baseline.id ? undefined : latencyDelta(arm, baseline)),
-    },
-    {
-      label: 'Tokens per task (in / out)',
-      values: (arm) =>
-        cell(`${arm.inputTokensPerTask.toLocaleString()} / ${arm.outputTokensPerTask.toLocaleString()}`),
-    },
-    {
-      label: 'Evaluation',
-      values: (arm) => <Text kind="mono/sm">{arm.evalJobName}</Text>,
-    },
-  ];
+  const row = (arm: MockArmResult) => {
+    const comparedToReference = arm.id !== reference.id;
+    const candidate = isCandidate(arm);
+    return {
+      cells: [
+        {
+          children:
+            selectable && candidate ? (
+              <RadioGroupItem aria-label={`Promote ${arm.title}`}>
+                <RadioGroupInput value={arm.id} aria-label={`Promote ${arm.title}`} />
+              </RadioGroupItem>
+            ) : null,
+        },
+        {
+          children: (
+            <Stack
+              gap="density-xs"
+              data-testid={`distillation-arm-${arm.id}`}
+              className={cn('rounded-md', selectedArm === arm.id && 'bg-interaction-selected')}
+            >
+              <Flex align="center" gap="density-sm">
+                <span aria-hidden className={cn('size-3 shrink-0 rounded-full', armColorClass(arm))} />
+                <Text kind="body/semibold/sm">{arm.title}</Text>
+                {candidate && bestArm === arm.id && (
+                  <Badge kind="solid" color="green">
+                    Best score
+                  </Badge>
+                )}
+              </Flex>
+              <Text kind="mono/sm" className="text-secondary">
+                {arm.model}
+              </Text>
+            </Stack>
+          ),
+        },
+        {
+          children: cell(
+            arm.score.toFixed(2),
+            comparedToReference ? scoreDelta(arm, reference, referenceName) : undefined,
+            candidate && untrained && untrained !== reference ? scoreDelta(arm, untrained, 'untrained') : undefined
+          ),
+        },
+        {
+          children: cell(
+            usd(arm.estimatedCostPer1kTasks),
+            comparedToReference ? costDelta(arm, reference, referenceName) : undefined
+          ),
+        },
+        {
+          children: cell(
+            `${arm.medianLatencySec.toFixed(1)} s`,
+            comparedToReference ? latencyDelta(arm, reference, referenceName) : undefined
+          ),
+        },
+        {
+          children: cell(
+            `${arm.inputTokensPerTask.toLocaleString()} / ${arm.outputTokensPerTask.toLocaleString()}`
+          ),
+        },
+      ],
+    };
+  };
 
   return (
-    <Stack gap="density-md" className="w-full">
+    <Stack className="w-full">
       <Table
         data-testid="distillation-scoreboard"
         className="w-full bg-transparent"
         align="left"
         columns={[
-          { children: 'Evaluation' },
-          ...arms.map((arm) => ({
-            children: (
-              <Flex align="center" gap="density-sm">
-                <span aria-hidden className={cn('size-3 shrink-0 rounded-full', ARM_COLOR_CLASSES[arm.id])} />
-                <Text kind="body/semibold/sm">{arm.title}</Text>
-              </Flex>
-            ),
-          })),
+          { children: '' },
+          { children: 'Model' },
+          { children: 'Score' },
+          { children: 'Est. cost / 1k tasks' },
+          { children: 'Median latency' },
+          { children: 'Tokens / task (in / out)' },
         ]}
-        rows={rows.map((row) => ({
-          cells: [
-            { children: <Text kind="body/regular/sm" className="text-secondary">{row.label}</Text> },
-            ...arms.map((arm) => ({ children: row.values(arm) })),
-          ],
-        }))}
+        rows={arms.map(row)}
       />
     </Stack>
   );
