@@ -14,7 +14,10 @@ import {
 } from '@nvidia/foundations-react-core';
 import { DetailPanel } from '@studio/components/DetailPanel';
 import styles from '@studio/routes/evaluation/SkillComparisonRoute/comparison.module.css';
-import { metricLabel } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
+import {
+  ARM_LABELS,
+  metricLabel,
+} from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
   ARM_NAMES,
   comparisonMetrics,
@@ -28,7 +31,6 @@ import { getAgentEvaluationDetailRoute } from '@studio/routes/utils';
 import { useState } from 'react';
 import { Link } from 'react-router';
 
-const labels: Record<ArmName, string> = { baseline: 'Baseline', 'with-skill': 'With Skill' };
 const format = (value: number | null | undefined) =>
   value == null
     ? 'Unmeasured'
@@ -47,8 +49,8 @@ function ScoreBar({ arm, observation }: { arm: ArmName; observation: MetricObser
     arm === 'with-skill' && range && range.min >= 0 && range.max <= 1 ? range : undefined;
   const score = format(value);
   const description = whisker
-    ? `${labels[arm]}: ${score}, observed range ${format(whisker.min)} to ${format(whisker.max)}`
-    : `${labels[arm]}: ${score}`;
+    ? `${ARM_LABELS[arm]}: ${score}, observed range ${format(whisker.min)} to ${format(whisker.max)}`
+    : `${ARM_LABELS[arm]}: ${score}`;
   return (
     <svg className={styles.scoreTrack} height="18" role="img" aria-label={description}>
       <title>{description}</title>
@@ -134,20 +136,20 @@ export function MetricComparison({
                       fill="var(--color-chart-data-categorical-1)"
                     />
                   </svg>
-                  <Text>With skill</Text>
+                  <Text>{ARM_LABELS['with-skill']}</Text>
                 </Flex>
                 <Flex gap="2" align="center">
                   <svg width="24" height="4" aria-hidden>
                     <rect width="24" height="4" fill="var(--text-color-secondary)" />
                   </svg>
-                  <Text>Baseline</Text>
+                  <Text>{ARM_LABELS.baseline}</Text>
                 </Flex>
                 {hasRanges && (
                   <Flex gap="2" align="center">
                     <svg width="24" height="12" viewBox="0 0 24 12" fill="none" aria-hidden>
                       <path d="M2 2v8m0-4h20m0-4v8" stroke="currentColor" strokeWidth="1.5" />
                     </svg>
-                    <Text>With-skill min–max</Text>
+                    <Text>Variant range (min–max)</Text>
                   </Flex>
                 )}
               </Flex>
@@ -193,7 +195,7 @@ export function MetricComparison({
       <Stack gap="density-md">
         <Text kind="title/sm">Every Metric</Text>
         <Text kind="body/regular/sm" className="text-secondary">
-          Difference is with skill minus baseline, shown only for complete measured results with
+          Difference is variant minus control, shown only for complete measured results with
           matching inputs. A positive difference means a higher value; its desirability depends on
           the metric.
         </Text>
@@ -208,7 +210,7 @@ export function MetricComparison({
               className="min-w-[42rem]"
               layout="auto"
               hoverableRows
-              columns={['Metric', 'Baseline', 'With Skill', 'Difference']}
+              columns={['Metric', ARM_LABELS.baseline, ARM_LABELS['with-skill'], 'Difference']}
               rows={metrics.map((metric) => ({
                 id: metric.name,
                 onRowSelect: () => onInspect(metric.name),
@@ -250,15 +252,15 @@ export function TokenComparison({ report }: { report: ComparisonReport }) {
     <DetailPanel title="Token Usage">
       <Stack gap="density-md">
         <Text kind="body/regular/sm" className="text-secondary">
-          Cached input is part of prompt tokens and is counted once. Older reports may retain only
-          uncached prompt plus completion tokens.
+          Usage is measured in tokens. The efficiency score ranges from 0 to 1 and increases as
+          uncached prompt plus completion tokens decrease.
         </Text>
         <div className="overflow-x-auto">
           <Table
             aria-label="Token usage"
             className="min-w-[36rem]"
             layout="auto"
-            columns={['Tokens', 'Baseline', 'With Skill', 'Difference']}
+            columns={['Tokens', ARM_LABELS.baseline, ARM_LABELS['with-skill'], 'Difference']}
             rows={rows.map(({ name, key }) => ({
               id: key,
               cells: [
@@ -366,7 +368,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                     </Stack>
                   ),
                 },
-                labels[row.arm],
+                ARM_LABELS[row.arm],
                 ...metrics.map((metric) => {
                   const score = row.scores.find((entry) =>
                     entry.outputs.some((output) => `${entry.metric_type}.${output.name}` === metric)
@@ -400,7 +402,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                         type="button"
                         className={`${styles.heatCell} ${heat}`}
                         onClick={() => setSelection({ row, metric })}
-                        aria-label={`${row.task}, ${labels[row.arm]}, ${metric}: ${display === '—' ? 'Unmeasured' : display}`}
+                        aria-label={`${row.task}, ${ARM_LABELS[row.arm]}, ${metric}: ${display === '—' ? 'Unmeasured' : display}`}
                       >
                         {display}
                       </button>
@@ -424,7 +426,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
           <Stack gap="density-lg" className="max-h-[65vh] overflow-auto">
             <KeyValueGrid
               items={[
-                { key: 'arm', label: 'Arm', value: labels[selection.row.arm] },
+                { key: 'arm', label: 'Arm', value: ARM_LABELS[selection.row.arm] },
                 { key: 'task', label: 'Task', value: selection.row.task },
                 { key: 'trial', label: 'Trial', value: selection.row.trial },
                 { key: 'metric', label: 'Metric', value: selection.metric },
@@ -456,7 +458,7 @@ export function ArmEvidence({
   workspace: string;
 }) {
   return (
-    <DetailPanel title={labels[name]}>
+    <DetailPanel title={ARM_LABELS[name]}>
       <Stack gap="density-lg">
         <KeyValueGrid
           items={[
@@ -512,7 +514,7 @@ export function MetricEvidence({ report, metric }: { report: ComparisonReport; m
         records remain in each arm’s scoring bundle.
       </Text>
       {ARM_NAMES.map((name) => (
-        <DetailPanel title={labels[name]} key={name}>
+        <DetailPanel title={ARM_LABELS[name]} key={name}>
           <pre className="text-sm whitespace-pre-wrap break-all">
             {JSON.stringify(
               {

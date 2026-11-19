@@ -161,7 +161,7 @@ export function comparisonWarnings(report: ComparisonReport): string[] {
   }
   if (baseline.discovery !== false || treatment.discovery !== true) {
     warnings.push(
-      'Skill discovery has not been confirmed as absent in the baseline and present in the treatment.'
+      'Skill discovery has not been confirmed as absent in the control and present in the variant.'
     );
   }
   return warnings;

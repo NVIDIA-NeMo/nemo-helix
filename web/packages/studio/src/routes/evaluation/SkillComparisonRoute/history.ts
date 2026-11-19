@@ -144,9 +144,7 @@ export async function loadSavedComparison(
     loadArm(workspace, treatment, scoring.data),
   ]);
   if (before.skills.length || after.skills.length !== 1)
-    throw new Error(
-      'Choose a baseline without skills and a treatment with exactly one pinned skill.'
-    );
+    throw new Error('Choose a control without skills and a variant with exactly one pinned skill.');
   return parseReport(
     JSON.stringify({
       context: 'Saved Helix executions',

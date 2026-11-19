@@ -26,6 +26,7 @@ import {
   TokenComparison,
   TrialHeatmap,
 } from '@studio/routes/evaluation/SkillComparisonRoute/ComparisonResults';
+import { ARM_LABELS } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
   ARM_NAMES,
   comparisonWarnings,
@@ -98,7 +99,7 @@ export const SkillComparisonRoute = () => {
                 )}
               </Flex>
             }
-            slotDescription="Compare baseline and with-skill evaluations, then inspect the measurements and evidence behind each score."
+            slotDescription="Compare control and variant runs and inspect the evidence behind each score."
             slotActions={
               <Flex gap="density-sm">
                 <SavedRuns
@@ -173,9 +174,7 @@ export const SkillComparisonRoute = () => {
               <Flex gap="density-xl" align="center" className="flex-wrap border-y border-base py-3">
                 {ARM_NAMES.map((name) => (
                   <Flex key={name} gap="density-md" align="center">
-                    <Text className="text-secondary">
-                      {name === 'baseline' ? 'Baseline' : 'With Skill'}
-                    </Text>
+                    <Text className="text-secondary">{ARM_LABELS[name]}</Text>
                     <Text kind="title/sm" className="tabular-nums">
                       {report.arms[name].reward.toFixed(2)}
                     </Text>

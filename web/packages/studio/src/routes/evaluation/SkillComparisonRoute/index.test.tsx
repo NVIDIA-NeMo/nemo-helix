@@ -69,7 +69,7 @@ describe('SkillComparisonRoute', () => {
     await importReport(report);
     const chart = screen.getByRole('region', { name: 'Scores by metric' });
     expect(
-      within(chart).getByRole('img', { name: 'With Skill: 0.6, observed range 0.3 to 0.9' })
+      within(chart).getByRole('img', { name: 'Variant: 0.6, observed range 0.3 to 0.9' })
     ).toBeInTheDocument();
     expect(within(chart).getAllByRole('img', { name: /observed range/ })).toHaveLength(1);
   });
@@ -92,8 +92,8 @@ describe('SkillComparisonRoute', () => {
     renderComparison();
     await userEvent.click(screen.getByRole('button', { name: 'Load Saved Runs' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compare Saved Executions' });
-    await userEvent.click(await within(dialog).findByRole('button', { name: 'With Skill' }));
-    expect(await within(dialog).findByText('Baseline: run-baseline (linked)')).toBeInTheDocument();
+    await userEvent.click(await within(dialog).findByRole('button', { name: 'Variant' }));
+    expect(await within(dialog).findByText('Control: run-baseline (linked)')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Load Comparison' })).toBeEnabled();
     expect(evalsGetTasksetRun).toHaveBeenCalledWith(DEFAULT_WORKSPACE, baseline.run_id);
   });
@@ -108,7 +108,7 @@ describe('SkillComparisonRoute', () => {
     const heatmap = screen.getByRole('table', { name: 'Scores by task and trial' });
     await userEvent.click(
       within(heatmap).getByRole('button', {
-        name: 'exact-match-task, Baseline, llm-judge.assertion_1: 0',
+        name: 'exact-match-task, Control, llm-judge.assertion_1: 0',
       })
     );
     expect(await screen.findByRole('dialog', { name: 'Trial Evidence' })).toHaveTextContent(

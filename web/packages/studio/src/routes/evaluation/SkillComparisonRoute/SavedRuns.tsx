@@ -8,6 +8,7 @@ import {
 import type { TasksetRunStatus } from '@nemo/sdk/generated/evals/schema';
 import { Button, Flex, Modal, Stack, Table, Text } from '@nvidia/foundations-react-core';
 import { loadSavedComparison } from '@studio/routes/evaluation/SkillComparisonRoute/history';
+import { ARM_LABELS } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import type { ComparisonReport } from '@studio/routes/evaluation/SkillComparisonRoute/report';
 import { useState } from 'react';
 
@@ -66,13 +67,13 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
         linked.run_id === run.run_id
       ) {
         setBaselineNotice(
-          'The linked baseline has no compatible retained results. Choose a baseline below.'
+          'The linked control has no compatible retained results. Choose a control below.'
         );
         return;
       }
       setBaseline(linked);
     } catch {
-      setBaselineNotice('The linked baseline could not be loaded. Choose a baseline below.');
+      setBaselineNotice('The linked control could not be loaded. Choose a control below.');
     } finally {
       setLoading(false);
     }
@@ -106,16 +107,18 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
       >
         <Stack gap="density-lg">
           <Text className="text-secondary">
-            Choose a with-skill execution. A linked baseline is selected automatically. Otherwise,
-            choose a baseline from the same taskset. This list shows completed runs from the latest
+            Choose a variant. If it has a linked control, Studio selects it for you. Otherwise,
+            choose a control from the same taskset. The list shows completed runs from the latest
             100 executions.
           </Text>
           <Flex gap="density-xl" className="flex-wrap">
             <Text>
-              Baseline: {baseline?.run_id ?? 'Choose below'}
+              {ARM_LABELS.baseline}: {baseline?.run_id ?? 'Choose below'}
               {baseline && baseline.run_id === treatment?.baseline_run_id && ' (linked)'}
             </Text>
-            <Text>With skill: {treatment?.run_id ?? 'Choose below'}</Text>
+            <Text>
+              {ARM_LABELS['with-skill']}: {treatment?.run_id ?? 'Choose below'}
+            </Text>
           </Flex>
           {error && (
             <Text role="alert" className="text-error">
@@ -148,7 +151,7 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
                             setBaselineNotice(undefined);
                           }}
                         >
-                          Baseline
+                          {ARM_LABELS.baseline}
                         </Button>
                         <Button
                           size="small"
@@ -156,7 +159,7 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
                           disabled={loading}
                           onClick={() => void chooseTreatment(run)}
                         >
-                          With Skill
+                          {ARM_LABELS['with-skill']}
                         </Button>
                       </Flex>
                     ),
