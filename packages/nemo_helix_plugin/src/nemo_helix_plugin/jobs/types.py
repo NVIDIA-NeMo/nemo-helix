@@ -31,6 +31,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
+from nemo_helix_plugin.jobs.transfers import TaskTransferProgress, TransferAction
 from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 from nemo_helix_plugin.schema import Value
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
@@ -373,6 +374,8 @@ class HelixJobTaskResponse(BaseModel):
     name: str | None = None
     workspace: str
     project: str | None = None
+    transfer: TaskTransferProgress | None = None
+    transfer_action: TransferAction = "wait"
     status: HelixJobStatus = HelixJobStatus.PENDING
     status_details: dict[str, Any] = Field(default_factory=dict, description="Details about the task status")
     error_details: dict[str, Any] | None = None
@@ -471,6 +474,7 @@ class UpdateHelixJobRequest(BaseModel):
 class HelixJobTaskUpdate(BaseModel):
     """Request model for updating a platform job task."""
 
+    transfer: TaskTransferProgress | None = None
     status: HelixJobStatus = HelixJobStatus.PENDING
     status_details: dict[str, Any] | None = None
     error_details: dict[str, Any] | None = None

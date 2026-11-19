@@ -88,14 +88,22 @@ Editing the Job takes effect in a new Attempt through the existing start/rerun
 operation. Terminal Attempts stay terminal. Sequential jobs retain their current
 behavior when `workflow` is omitted.
 
+A current workflow can wait without creating any Steps. If a rerun Attempt is
+saved but never becomes current, the controller marks it `ERROR` after the
+existing creation timeout. This recovery preserves the current Attempt and
+shared storage, and allows Job deletion to proceed.
+
 A continuous Attempt stays active when its nodes are clean, failed or cancelled.
 Unchanged failed or cancelled inputs wait for an input commit or manual
 invalidation; backend retries are unchanged. Cancelling a node cancels its
 dependent branch while independent runnable branches finish the pass. A
 run-to-completion Attempt then ends `CANCELLED`; a continuous Attempt stays open
 and can retry cancelled nodes in a later pass. Cancelling the whole workflow
-ends its Attempt `CANCELLED` in either mode. Internal retirement of an obsolete
-queued execution for replacement does not cancel the logical node.
+ends its Attempt `CANCELLED` in either mode. Once workflow cancellation has been
+accepted, pause returns `409 Conflict` and cancellation continues. Step errors
+reported during cancellation retain their diagnostics while the Attempt still
+finishes `CANCELLED`. Internal cleanup of unstarted executions does not turn a
+workflow failure into a user cancellation.
 
 To invalidate selected nodes, PATCH the existing
 `/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details`
@@ -110,24 +118,116 @@ route with this body:
 }
 ```
 
+`trigger` lists events with OR semantics. A new commit from any listed Fileset
+or a new successful execution of any listed Step requests a run. `depends_on`
+lists readiness conditions with AND semantics: every Fileset must have a commit
+and every referenced Step must have a successful execution. Earlier successful
+executions remain sufficient for typed readiness conditions.
+
+```yaml
+name: evaluate
+depends_on:
+  - step_success: prepare
+  - fileset_commit: <configuration-fileset-id>
+trigger:
+  - fileset_commit: <input-fileset-id>
+  - step_success: refresh
+# executor: ...
+```
+
+Here, either an input commit or a successful `refresh` requests `evaluate`.
+It waits for a successful `prepare` and a committed configuration Fileset.
+Configuration commits alone do not request another run.
+
+An existing Fileset commit counts as an initial trigger. A Step trigger waits for
+its first successful execution. Without event inputs or triggers, a node runs
+once when ready. Later passes preserve consumed commits and success execution
+IDs, so old events do not fire again. Multiple events before execution coalesce.
+Events remain pending while prerequisites are unavailable. Each node runs at most
+once per pass; later events wait for the next pass. Step successes produced in a
+pass can trigger downstream nodes that have not run in that pass.
+
+Existing `inputs` remain Fileset change inputs. Existing string dependencies
+such as `depends_on: [prepare]` retain their dependency/reuse behavior. Both
+trigger and dependency Step references participate in cycle validation on
+create/update. Fileset references are checked for access before persistence.
+
 Use another request ID for another invalidation. Repeating the current signal
 for a node does not request extra work. Invalidations can remain pending while
 paused and cannot bypass failed dependencies. Input changes and invalidations
-received during execution coalesce into a later pass after the current pass
-drains. The same logical node never has overlapping executions.
+received during a pass coalesce into a later pass after the current pass drains.
+Each pass resets the nodes' per-pass completion, scheduling and blocker state,
+then captures every node's input revisions and run decision. Successful input
+baselines and execution history remain available, so clean nodes can be reused.
+New events do not replace queued executions or change downstream decisions in
+that pass.
+The same logical node never has overlapping executions. These recorded revisions
+track changes; they do not freeze the contents of a Fileset.
 
-Pause drains dispatched work and holds unscheduled nodes. Resume continues the
-same Attempt. Existing storage-retention TTLs and expiry actions apply; a
+Pause is Attempt-level: it stops further admission, drains already-admitted work
+and holds the remaining nodes. An admitted execution can still be waiting for
+backend capacity; it remains part of the drain. The Attempt reaches `PAUSED`
+when admitted work finishes. Resume continues the same pass of the same Attempt. Existing storage-retention TTLs and expiry actions apply; a
 workflow pause uses the time the Attempt reached paused, even when no individual
 Step is paused. A failed node does not expire shared storage while a continuous
 Attempt remains active.
 
+### Explore a DAG in the terminal
+
+Run `nemo jobs watch JOB_NAME` in an interactive terminal to open the DAG
+watcher for a workflow job. Use `--tui` to require it, `--no-tui` for ordinary
+line output, and `--no-emoji` for plain state symbols. Redirected output and
+sequential jobs retain the line-oriented watcher.
+
+Status shows the number of steps running in parallel and three panes: upstream
+inputs, the focused node, and downstream outputs. Inputs and outputs are
+connected DAG nodes, including Step readiness and Step-trigger links. Fileset
+conditions and trigger events appear separately in focused-node details.
+`Admitted` means an execution has been accepted and may still be waiting for
+capacity; it does not count as a running step. Use Left/Right to choose a pane, Up/Down or PageUp/PageDown
+to browse its nodes, and Enter to focus the selected neighbor. Backspace retraces
+your path. Lists scroll to keep the selected node visible; narrow terminals show
+one pane at a time. Press `/` to search any node, including disconnected branches,
+or `o` to open the drawn DAG overview. In that overview, arrow keys select
+nodes, `h`/`j`/`k`/`l` pan the canvas, PageUp/PageDown scroll vertically, Home
+centers the selected node, and Enter returns to its Status view. The layout
+stays fixed during state changes. Selected edges are highlighted; `╳` marks a
+crossing without a connection.
+
+Neighbors sort by their most recent observed state change. Their order stays
+fixed while you browse that pane; press `a` to reorder without changing the
+selection. Routine input-check timestamps do not count as activity. Transition
+times describe observations during this watch session; polling can miss
+intermediate states. Freshness, pending reruns and execution outcomes appear
+separately from scheduling state. Each node card keeps its current phase visible
+alongside the last observed change. State colors reinforce the text and emoji;
+the selected node is highlighted in every pane.
+
+Tab or `1`/`2` switches between Status and Logs. Logs default to the focused
+node's active or latest execution. Press `e` to select another execution known
+to this session, `a` to toggle all collected executions, and `f` to follow the
+latest lines. Up/Down and PageUp/PageDown scroll logs; Left/Right pans long
+lines. Explicit execution
+selection stays fixed when a newer execution starts. The session retains up to
+5,000 log records and truncates messages longer than 4,096 characters; the Logs
+view reports discarded records. Existing attempt, step, task, history and page
+limit options still constrain collection.
+
+The watcher pins the selected Attempt, keeps updating status independently of
+log retrieval, and leaves the final result open for inspection. Press `q` to
+close it. Closing a live watch detaches without cancelling the Job and returns
+exit status 130; closing a completed watch returns its success/failure status.
+The display reports when the last workflow update was received. Status and log
+consumers reuse SDK polling/retry behavior independently, so interactive watch
+performs an additional status polling sequence alongside log collection.
+
 The status API and `jobs watch` expose each logical node's freshness
-(`unknown`, `dirty`, or `clean`), scheduling state, blockers, requested revision,
+(`unknown`, `dirty`, or `clean`), scheduling state (including `admitted` before
+backend launch), blockers, requested revision,
 execution IDs, latest outcome and input-observation timestamps/errors. The
 controller alone writes `workflow_state`; ordinary progress details are separate.
-Each node keeps its active execution ID, captured run revision and input commit
-values there; Step records contain ordinary execution status, Tasks and logs.
+Each node keeps its active execution ID, current-pass revision/input snapshot,
+execution snapshot and latest input observations there; Step records contain ordinary execution status, Tasks and logs.
 Status reads do not poll inputs or schedule work. Use `attempt_id` on status
 reads or `--attempt-id` on watch to select an Attempt. The sync and async typed
 clients accept `get_job_status(..., attempt_id=...)`. Execution history remains
@@ -227,6 +327,78 @@ If the scheduler cannot read the current load, it queues the steps for that pass
 A per-workspace override is not available yet. Every workspace uses `max_active_jobs_per_workspace`. A limit per job group is also not available yet.
 
 </Note>
+
+## Pulling inputs and publishing Task output
+
+Set `filesets` on a platform Step to copy Fileset contents into each Task before
+its script runs and upload directories after the Step's workload finishes:
+
+```yaml
+platform_spec:
+  steps:
+    - name: transform
+      executor:
+        provider: cpu
+        container:
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - mkdir -p /work/output /work/diagnostics; cp /work/input/data.txt /work/output/result.txt
+      filesets:
+        pull:
+          - fileset_id: fileset-input-id
+            directory: /work/input
+        push:
+          - fileset_id: fileset-output-id
+            directory: /work/output
+            path: results
+            when: success
+          - fileset_id: fileset-diagnostics-id
+            directory: /work/diagnostics
+            when: always
+```
+
+Use immutable IDs for existing Filesets in the Job's workspace. Choose directories
+that are writable and accessible in the selected execution profile. `path` is a
+relative prefix inside the Fileset and defaults to its root. The example produces
+`results/result.txt`; it does not add the local directory name or a Task ID.
+
+Each parallel Task uploads its own configured directories. Tasks may use private
+scratch or separate RWO volumes; publishing their output does not require one
+filesystem shared across nodes. Explicit shared workload mounts still follow
+their storage driver's access and scheduling rules. The local subprocess profile
+needs `launcher_tool_path` pointing to an executable host `jobs-launcher`.
+
+| `when` | Publication condition |
+| --- | --- |
+| `always` (default) | Successful or failed aggregate Step workload |
+| `success` | Successful aggregate Step workload |
+| `failure` | Failed aggregate Step workload |
+
+The controller waits for required pulls before starting the workload. Pull failure
+fails the Step. After its workload processes stop, the Step supplies the same
+aggregate outcome to its uploaders. Required uploads finish before the controller
+explicitly commits each destination and finalizes the Step. A successful script
+with failed publication makes the Step fail; diagnostic publication cannot turn
+a failed script into success. Cancellation stops normal publication, and pause
+does not count as workload completion.
+
+Transfers preserve relative filenames and overwrite matching files. The Step/Task
+author owns filename collisions and coordination between concurrent writers. The
+platform adds no prefixes, conflict checks or cross-writer locks, and it does not
+delete destination-only files. Directory entries run in declaration order within
+a Task; Tasks can upload concurrently. Symlinks and paths escaping a selected
+directory are rejected. A missing local upload directory fails that publication;
+an existing empty directory succeeds.
+
+Transient transfer/commit failures receive up to three attempts. A surviving Task
+retries from its existing directories. Node loss can destroy Task-local output,
+so another Task cannot recover it without retained storage. An uncertain commit
+response may cause a repeated commit and another downstream notification. Commits
+are change markers, not snapshots or transactions across concurrent writers.
+The current phase and commit results appear in Step status details under
+`fileset_transfers`.
 
 ## Execution Profiles
 

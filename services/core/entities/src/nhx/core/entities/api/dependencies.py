@@ -37,7 +37,12 @@ def dep_entity_repository_with_session(
         can_read=True,
         can_write=auth_client.principal.id == "service:jobs" and not auth_client.principal.is_delegated,
     )
-    return dep_entity_repository(session_maker, EntityFieldPolicies((policy, workflow_policy)))
+    transfer_policy = ProtectedEntityField("transfer_state").bind(
+        policy_enabled=auth_client.auth_enabled and request.path_params.get("entity_type") == "platform_job_step",
+        can_read=True,
+        can_write=auth_client.principal.id == "service:jobs" and not auth_client.principal.is_delegated,
+    )
+    return dep_entity_repository(session_maker, EntityFieldPolicies((policy, workflow_policy, transfer_policy)))
 
 
 def dep_workspace_repository_with_session(

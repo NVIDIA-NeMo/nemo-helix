@@ -253,3 +253,26 @@ async def test_workflow_policy_does_not_reserve_plugin_entity_fields(policy_stor
         assert created.status_code == 201 and created.json()["data"]["workflow_state"] == "mine"
         changed = await caller.put(path + "/plugin-workflow", json={"data": {"workflow_state": "updated"}})
         assert changed.status_code == 200 and changed.json()["data"]["workflow_state"] == "updated"
+
+
+async def test_step_transfer_state_is_only_writable_by_direct_jobs_service(
+    policy_store: SQLAlchemyEntityRepository,
+) -> None:
+    path = "/apis/entities/v2/workspaces/policy-one/entities/platform_job_step"
+    original = {"phase": "publishing", "outcome": "success"}
+    async with (
+        _client(Principal(id="service:jobs"), auth_enabled=True) as service,
+        _client(Principal(id="user@example.com", email="user@example.com"), auth_enabled=True) as user,
+        _client(Principal(id="service:jobs", on_behalf_of="user@example.com"), auth_enabled=True) as delegated,
+    ):
+        created = await service.post(path, json={"name": "step", "data": {"transfer_state": original}})
+        assert created.status_code == 201, created.text
+        for client in (user, delegated):
+            changed = await client.put(
+                path + "/step", json={"data": {"transfer_state": {"phase": "done"}, "status_details": {"progress": 1}}}
+            )
+            assert changed.status_code == 200, changed.text
+            assert changed.json()["data"]["transfer_state"] == original
+        finished = await service.put(path + "/step", json={"data": {"transfer_state": {"phase": "done"}}})
+        assert finished.status_code == 200, finished.text
+        assert finished.json()["data"]["transfer_state"]["phase"] == "done"

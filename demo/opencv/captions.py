@@ -57,8 +57,9 @@ def describe_images(images: Path, edges: Path, montage: Path, captions: Path):
         if not paths:
             raise ValueError(f"No images found in {directory}")
         for path in paths:
+            print(f"[describe-images] Requesting caption: {source}/{path.name}", flush=True)
             records.append({"source": source, "image": path.name, "model": MODEL, "caption": describe(path, key)})
     captions.mkdir(parents=True, exist_ok=True)
     (captions / "descriptions.json").write_text(json.dumps(records, indent=2) + "\n")
     for record in records:
-        print(f"{record['source']}/{record['image']}: {record['caption']}")
+        print(f"{record['source']}/{record['image']}: {record['caption']}", flush=True)

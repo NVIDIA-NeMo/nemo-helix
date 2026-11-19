@@ -137,6 +137,8 @@ def job_operation_errors(operation: str, name: str, workspace: str) -> Iterator[
     """
     try:
         yield
+    except EntityValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except (JobOperationConflictError, JobHasNoAttemptError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (StateTransitionConflictError, EntityConflictError) as exc:
@@ -806,10 +808,10 @@ async def update_job_attempt_status_details(
     ),
 ) -> None:
     """Update progress or submit a typed workflow runtime request."""
-    if "workflow_reconcile" in request and auth_client.auth_enabled:
+    if {"workflow_reconcile", "workflow_admission"}.intersection(request) and auth_client.auth_enabled:
         principal = auth_client.principal
         if principal.id != "service:jobs" or principal.is_delegated:
-            raise HTTPException(403, "Only the Jobs controller can reconcile workflows")
+            raise HTTPException(403, "Only the Jobs controller can schedule workflows")
     with scoped_app_ctx(JobContext(id=job)), job_operation_errors("update the status details of", job, workspace):
         try:
             result = await dispatcher.update_attempt_status_details(

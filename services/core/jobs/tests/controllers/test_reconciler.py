@@ -1122,7 +1122,11 @@ def test_missing_receipt_never_adopts_editable_fileset_ownership(backend_registr
     controller._files.delete_fileset_by_id.assert_not_called()
 
 
-def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo_client):
+@pytest.mark.parametrize(
+    "owner_status",
+    [HelixJobStatus.CREATION_PENDING, HelixJobStatus.ERROR, HelixJobStatus.CANCELLED, HelixJobStatus.PAUSED],
+)
+def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo_client, owner_status: HelixJobStatus):
     from nhx.core.jobs.app.test_helpers import TestConstants
     from nhx.core.jobs.entities import HelixJob
 
@@ -1132,7 +1136,7 @@ def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo
         workspace="default",
         source="test",
         fileset="outputs",
-        status=HelixJobStatus.CREATION_PENDING,
+        status=owner_status,
         platform_spec=TestConstants.PLATFORM_SPEC,
     )
     records = [
@@ -1154,6 +1158,7 @@ def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo
     assert [call.kwargs["page"] for call in entities.list.call_args_list] == [1, 2]
     assert all(call.kwargs["sort"] == "created_at" for call in entities.list.call_args_list)
     assert controller._reclaim_page == 1
+    entities.delete_by_id.assert_not_called()
 
 
 @pytest.mark.parametrize("published", [False, True])
@@ -1331,29 +1336,56 @@ def test_rerun_recovery_excludes_initial_attempts_before_pagination(backend_regi
         assert all(store.get_by_id(HelixJobAttempt, attempt.id).status == HelixJobStatus.CREATED for attempt in initial)
 
 
+@pytest.mark.parametrize("workflow", [False, True])
 def test_unstarted_workflow_attempt_is_not_recovered_as_a_sequential_failure(
-    backend_registry,
+    backend_registry: BackendRegistry,
     mock_nemo_client,
-):
+    workflow: bool,
+) -> None:
+    from nemo_helix_plugin.jobs.client import JobsClient
     from nemo_helix_plugin.jobs.workflows import WorkflowSpec
+    from nhx.common.entities import ListResponse, PaginationInfo
     from nhx.core.jobs.app.test_helpers import TestConstants
-    from nhx.core.jobs.entities import HelixJobAttempt
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep
 
     reconciler, entities = _reconciler(backend_registry, mock_nemo_client)
-    attempt = HelixJobAttempt(
-        name="attempt-1",
-        job="job-id",
-        workspace="default",
-        seq=1,
-        created_at=datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc),
-        platform_spec=HelixJobSpec(
+    spec = (
+        HelixJobSpec(
             workflow=WorkflowSpec(),
-            steps=[
-                HelixJobStepSpec(name="work", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
-            ],
-        ),
+            steps=[HelixJobStepSpec(name="work", depends_on=[], executor=TestConstants.TEST_EXECUTOR)],
+        )
+        if workflow
+        else TestConstants.PLATFORM_SPEC
     )
-    entities.list.return_value = SimpleNamespace(data=[attempt])
+    job = HelixJob(name="recover-current", workspace="default", source="test", fileset="borrowed", platform_spec=spec)
+    job._id = "job-current"
+    attempt = HelixJobAttempt(name="attempt-1", job=job.id, workspace="default", seq=1, platform_spec=spec)
+    attempt._id = "attempt-current"
+    attempt._created_at = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
+    job.current_attempt_id = attempt.id
+    entities.list.side_effect = [
+        ListResponse[HelixJobAttempt](
+            data=[attempt],
+            pagination=PaginationInfo(page=1, page_size=100, current_page_size=1, total_pages=1, total_results=1),
+        ),
+        ListResponse[HelixJobStep](
+            data=[], pagination=PaginationInfo(page=1, page_size=1, current_page_size=0, total_pages=0, total_results=0)
+        ),
+    ]
+    entities.get_by_id.return_value = job
+
+    def create_step(step: HelixJobStep) -> HelixJobStep:
+        step._id = "step-recovered"
+        return step
+
+    entities.create.side_effect = create_step
+    jobs = MagicMock(spec=JobsClient)
+    reconciler._jobs = jobs
     reconciler._recover_unstarted_reruns()
-    entities.create.assert_not_called()
-    entities.update.assert_not_called()
+    if workflow:
+        entities.create.assert_not_called()
+        entities.update.assert_not_called()
+    else:
+        entities.update.assert_called_once_with(job)
+        entities.create.assert_called_once()
+        jobs.update_attempt_step_status.assert_called_once()

@@ -14,6 +14,7 @@ def test_sequential_wire_shape_omits_workflow_fields() -> None:
     wire = spec.model_dump(mode="json")
     assert "workflow" not in wire
     assert "inputs" not in wire["steps"][0]
+    assert "trigger" not in wire["steps"][0]
     assert "depends_on" not in wire["steps"][0]
 
 
@@ -21,6 +22,8 @@ def test_sequential_wire_shape_omits_workflow_fields() -> None:
     "extra",
     [
         {"depends_on": None},
+        {"depends_on": [], "trigger": None},
+        {"depends_on": [], "trigger": []},
         {"inputs": None, "depends_on": []},
     ],
 )
@@ -56,3 +59,77 @@ def test_deep_workflow_does_not_depend_on_python_recursion_limit() -> None:
     dependencies = {f"node-{i}": [f"node-{i - 1}"] if i else [] for i in range(2000)}
     validate_workflow_dependencies(dependencies)
     assert workflow_order(dependencies) == list(dependencies)
+
+
+@pytest.mark.parametrize("field", ["trigger", "depends_on"])
+@pytest.mark.parametrize(
+    "condition",
+    [
+        {},
+        {"step_success": ""},
+        {"fileset_commit": ""},
+        {"step_success": "work", "fileset_commit": "x"},
+        {"unknown": "x"},
+    ],
+)
+def test_event_conditions_are_closed(field: str, condition: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        HelixJobSpec.model_validate(
+            {
+                "workflow": {"mode": "continuous"},
+                "steps": [
+                    {
+                        "name": "work",
+                        "executor": {"provider": "cpu", "container": {"image": "test"}},
+                        "depends_on": [],
+                        field: [condition],
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("field", ["trigger", "depends_on"])
+def test_event_step_edges_validate_unknown_references_and_cycles(field: str) -> None:
+    executor = {"provider": "cpu", "container": {"image": "test"}}
+    for other in ("missing", "other"):
+        steps = [{"name": "work", "executor": executor, "depends_on": [], field: [{"step_success": other}]}]
+        if other == "other":
+            steps.append({"name": "other", "executor": executor, "depends_on": ["work"]})
+        with pytest.raises(ValidationError, match="Unknown dependency|Workflow cycle"):
+            HelixJobSpec.model_validate({"workflow": {"mode": "continuous"}, "steps": steps})
+
+
+@pytest.mark.parametrize("trigger", [[], None, [{"fileset_commit": "x"}]])
+def test_trigger_requires_workflow_opt_in(trigger: list[dict[str, str]] | None) -> None:
+    with pytest.raises(ValidationError):
+        HelixJobSpec.model_validate(
+            {
+                "steps": [
+                    {
+                        "name": "work",
+                        "executor": {"provider": "cpu", "container": {"image": "test"}},
+                        "trigger": trigger,
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize("field", ["trigger", "depends_on"])
+@pytest.mark.parametrize("condition", [{"step_success": "source"}, {"fileset_commit": "source"}])
+def test_duplicate_event_conditions_fail(field: str, condition: dict[str, str]) -> None:
+    with pytest.raises(ValidationError, match="Duplicate"):
+        HelixJobSpec.model_validate(
+            {
+                "workflow": {"mode": "continuous"},
+                "steps": [
+                    {
+                        "name": "work",
+                        "executor": {"provider": "cpu", "container": {"image": "test"}},
+                        "depends_on": [],
+                        field: [condition, condition],
+                    }
+                ],
+            }
+        )

@@ -21,7 +21,15 @@ from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTI
 from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
-from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowSpec, validate_workflow_dependencies
+from nemo_helix_plugin.jobs.transfers import StepFilesets
+from nemo_helix_plugin.jobs.workflows import (
+    WorkflowCondition,
+    WorkflowFilesetCommit,
+    WorkflowInput,
+    WorkflowSpec,
+    WorkflowStepSuccess,
+    validate_workflow_dependencies,
+)
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -143,10 +151,23 @@ class HelixJobStepSpec(JobSpecModel):
     environment: Optional[list[HelixJobEnvironmentVariable]] = Field(
         default=None, description="Environment variables for the step"
     )
-    depends_on: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+    depends_on: list[str | WorkflowCondition] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="All readiness conditions must hold. Strings retain legacy dependency/reuse behavior.",
+    )
     inputs: list[WorkflowInput] | None = Field(default=None, exclude_if=lambda value: value is None)
+    trigger: list[WorkflowCondition] | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+        description="Any new Fileset commit or successful Step execution requests a run; readiness still applies.",
+    )
     executor: Provider = Field(description="The executor for the step")
     config: dict = Field(default_factory=dict, description="Configuration for the step")
+    filesets: StepFilesets = Field(
+        default_factory=StepFilesets, description="Task-local Fileset pulls and conditional uploads"
+    )
     gateway_providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
     gateway_read_filesets: list[str] = Field(
         default_factory=list,
@@ -165,6 +186,32 @@ class HelixJobStepSpec(JobSpecModel):
         if value == {}:
             return []
         return value
+
+    @property
+    def dependency_steps(self) -> list[str]:
+        return [
+            item if isinstance(item, str) else item.step_success
+            for item in self.depends_on or []
+            if isinstance(item, (str, WorkflowStepSuccess))
+        ]
+
+    @property
+    def dependency_filesets(self) -> list[str]:
+        return [item.fileset_commit for item in self.depends_on or [] if isinstance(item, WorkflowFilesetCommit)]
+
+    @property
+    def trigger_steps(self) -> list[str]:
+        return [item.step_success for item in self.trigger or [] if isinstance(item, WorkflowStepSuccess)]
+
+    @property
+    def trigger_filesets(self) -> list[str]:
+        return [item.fileset_id for item in self.inputs or []] + [
+            item.fileset_commit for item in self.trigger or [] if isinstance(item, WorkflowFilesetCommit)
+        ]
+
+    @property
+    def workflow_parents(self) -> list[str]:
+        return list(dict.fromkeys(self.dependency_steps + self.trigger_steps))
 
     @property
     def requires_persistent_storage(self) -> bool:
@@ -200,7 +247,7 @@ class HelixJobSpec(JobSpecModel):
         if len(step_names) != len(set(step_names)):
             raise ValueError("Each step must have a unique name.")
         for step in self.steps:
-            supplied = step.model_fields_set & {"depends_on", "inputs"}
+            supplied = step.model_fields_set & {"depends_on", "inputs", "trigger"}
             if self.workflow is None and supplied:
                 raise ValueError(f"Step {step.name}: {', '.join(sorted(supplied))} requires workflow configuration")
             if self.workflow is not None:
@@ -208,11 +255,19 @@ class HelixJobSpec(JobSpecModel):
                     raise ValueError(f"Workflow step {step.name} requires explicit depends_on")
                 if "inputs" in step.model_fields_set and step.inputs is None:
                     raise ValueError(f"Workflow step {step.name}: inputs cannot be null")
-                ids = [item.fileset_id for item in step.inputs or []]
+                if "trigger" in step.model_fields_set and step.trigger is None:
+                    raise ValueError(f"Workflow step {step.name}: trigger cannot be null")
+                ids = step.trigger_filesets
                 if len(ids) != len(set(ids)):
                     raise ValueError(f"Duplicate input Fileset for step {step.name}")
+                if len(step.dependency_steps) != len(set(step.dependency_steps)) or len(
+                    step.dependency_filesets
+                ) != len(set(step.dependency_filesets)):
+                    raise ValueError(f"Duplicate dependencies for workflow step {step.name}")
+                if len(step.trigger_steps) != len(set(step.trigger_steps)):
+                    raise ValueError(f"Duplicate triggers for workflow step {step.name}")
         if self.workflow is not None:
-            validate_workflow_dependencies({step.name: step.depends_on or [] for step in self.steps})
+            validate_workflow_dependencies({step.name: step.workflow_parents for step in self.steps})
         return self
 
 

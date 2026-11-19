@@ -16,6 +16,7 @@ from nemo_helix_plugin.jobs.workflows import (
     WorkflowNodeView,
     WorkflowSignals,
     WorkflowState,
+    WorkflowStepSuccess,
     WorkflowView,
     workflow_order,
 )
@@ -33,27 +34,47 @@ def _execution_key(attempt_id: str, name: str, revision: str) -> str:
 
 def _workflow_blockers(attempt: HelixJobAttempt, state: WorkflowState) -> dict[str, list[str]]:
     """Walk from roots so only satisfied nodes can release their children."""
-    dependencies = {step.name: step.depends_on or [] for step in attempt.platform_spec.steps}
+    specs = {step.name: step for step in attempt.platform_spec.steps}
+    dependencies = {step.name: step.workflow_parents for step in attempt.platform_spec.steps}
     satisfied: set[str] = set()
     blocked: dict[str, list[str]] = {}
     for name in workflow_order(dependencies):
         node = state.nodes[name]
-        blocked[name] = [parent for parent in dependencies[name] if parent not in satisfied]
+        spec = specs[name]
+        filesets = node.pass_dependencies if state.pass_open else node.observed_dependencies
+        blocked[name] = []
+        for condition in spec.depends_on or []:
+            if isinstance(condition, str):
+                if condition not in satisfied:
+                    blocked[name].append(condition)
+            elif isinstance(condition, WorkflowStepSuccess):
+                if state.nodes[condition.step_success].successful_step_id is None:
+                    blocked[name].append(condition.step_success)
+            elif condition.fileset_commit not in filesets:
+                blocked[name].append("fileset:" + condition.fileset_commit)
         if blocked[name] or node.active_run_revision is not None:
             continue
         if state.pass_open and node.decision_pass == state.pass_number:
             # A success in this pass remains usable while newer inputs wait for the next pass.
             successful = node.last_outcome == "completed"
         else:
-            successful = node.freshness == "clean"
+            successful = (
+                node.successful_revision == node.pass_run_revision and node.successful_inputs == node.pass_inputs
+                if state.pass_open
+                else node.freshness == "clean"
+            )
         if successful:
             satisfied.add(name)
     return blocked
 
 
 def _has_eligible_pending(attempt: HelixJobAttempt, state: WorkflowState) -> bool:
+    specs = {step.name: step for step in attempt.platform_spec.steps}
     return any(
-        not blocked and node.last_poll_error is None and node.requested_run_revision != node.last_attempted_revision
+        not blocked
+        and node.inputs_available
+        and (specs[name].trigger is None or bool(node.observed_inputs) or node.last_invalidation is not None)
+        and node.requested_run_revision != node.last_attempted_revision
         for name, blocked in _workflow_blockers(attempt, state).items()
         for node in [state.nodes[name]]
     )
@@ -86,6 +107,7 @@ def workflow_view(attempt: HelixJobAttempt) -> WorkflowView | None:
             WorkflowNodeView(
                 name=step.name,
                 depends_on=step.depends_on or [],
+                trigger=step.trigger or [],
                 freshness=node.freshness,
                 scheduling_state=node.scheduling_state,
                 reason=node.reason,
@@ -110,10 +132,16 @@ def workflow_step_held(attempt: HelixJobAttempt, step: HelixJobStep) -> bool:
     if attempt.platform_spec.workflow is None:
         return False
     state = attempt.workflow_state
-    if state is None or state.control != "running" or attempt.status != HelixJobStatus.ACTIVE:
+    if state is None:
         return True
     name = step.config[STEP_SPEC_NAME_CONFIG_KEY]
-    return state.nodes[name].active_step_id != step.id
+    node = state.nodes[name]
+    running = state.control == "running" and attempt.status == HelixJobStatus.ACTIVE
+    draining = node.scheduling_state == "admitted" and (
+        (state.control in ("running", "pausing") and attempt.status == HelixJobStatus.PAUSING)
+        or (state.control == "failing" and attempt.status == HelixJobStatus.ACTIVE)
+    )
+    return node.active_step_id != step.id or not (running or draining)
 
 
 async def reconcile_workflow(
@@ -177,7 +205,9 @@ async def reconcile_workflow(
             node.successful_inputs = node.active_inputs
             node.successful_revision = node.active_run_revision
             node.successful_step_id = step.id
-        elif config.mode == "run_to_completion" and step.status == HelixJobStatus.ERROR:
+        elif (
+            config.mode == "run_to_completion" and step.status == HelixJobStatus.ERROR and state.control != "cancelling"
+        ):
             state.control = "failing"
         node.active_run_revision = None
         node.active_inputs = None
@@ -187,6 +217,9 @@ async def reconcile_workflow(
         for name, step in active.items():
             node = state.nodes[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
+                if state.control in ("pausing", "failing") and node.scheduling_state == "admitted":
+                    running = True
+                    continue
                 node.scheduling_state = "held"
                 if state.control != "pausing":
                     step.status = HelixJobStatus.CANCELLED
@@ -225,6 +258,7 @@ async def reconcile_workflow(
 
     signals = WorkflowSignals.model_validate(attempt.status_details.get(WORKFLOW_REQUESTS, {})).root
     observations: dict[str, FilesetOutput] = {}
+    observation_errors: dict[str, str] = {}
     for spec in attempt.platform_spec.steps:
         node = state.nodes[spec.name]
         signal = signals.get(spec.name)
@@ -232,35 +266,99 @@ async def reconcile_workflow(
             node.last_invalidation = signal
             node.requested_run_revision = str(uuid4())
         node.last_poll_attempt_at = now
-        vector: dict[str, str] = {}
-        try:
-            for reference in spec.inputs or []:
-                if reference.fileset_id not in observations:
-                    observations[reference.fileset_id] = (
-                        await files.get_fileset_by_id(workspace=job.workspace, fileset_id=reference.fileset_id)
-                    ).data()
-                token = observations[reference.fileset_id].commit_revision
-                if token is None:
-                    raise ValueError(f"Input {reference.fileset_id} has no commit_revision")
-                vector[reference.fileset_id] = token
-        except (NemoClientError, ValueError) as error:
-            node.last_poll_error = str(error)
+        for fileset_id in dict.fromkeys(spec.trigger_filesets + spec.dependency_filesets):
+            if fileset_id in observations or fileset_id in observation_errors:
+                continue
+            try:
+                observed = (await files.get_fileset_by_id(workspace=job.workspace, fileset_id=fileset_id)).data()
+                if observed.commit_revision is None:
+                    raise ValueError(f"Input {fileset_id} has no commit_revision")
+                observations[fileset_id] = observed
+            except (NemoClientError, ValueError) as error:
+                observation_errors[fileset_id] = str(error)
+        errors = [
+            observation_errors[identifier]
+            for identifier in spec.trigger_filesets + spec.dependency_filesets
+            if identifier in observation_errors
+        ]
+        node.last_poll_error = "; ".join(errors) or None
+        node.observed_dependencies = {}
+        for identifier in spec.dependency_filesets:
+            if identifier in observations:
+                token = observations[identifier].commit_revision
+                assert token is not None
+                node.observed_dependencies[identifier] = token
+        vector = dict(node.observed_inputs or {}) if spec.trigger is not None else {}
+        trigger_errors = any(identifier in observation_errors for identifier in spec.trigger_filesets)
+        if trigger_errors and spec.trigger is None:
+            node.inputs_available = False
             node.reason = "input_unavailable"
             continue
+        for identifier in spec.trigger_filesets:
+            if identifier in observations:
+                token = observations[identifier].commit_revision
+                assert token is not None
+                vector[identifier] = token
+        for parent in spec.trigger_steps:
+            execution_id = state.nodes[parent].successful_step_id
+            if execution_id is not None:
+                vector["step:" + parent] = execution_id
         if node.observed_inputs is not None and node.observed_inputs != vector:
             node.requested_run_revision = str(uuid4())
         node.observed_inputs = vector
+        node.inputs_available = spec.trigger is None or bool(vector) or node.last_invalidation is not None
         node.last_inputs_checked_at = now
-        node.last_poll_error = None
         if node.reason == "input_unavailable":
             node.reason = None
 
-    if not state.pass_open:
+    new_pass = not state.pass_open
+    if new_pass:
         if not _has_eligible_pending(attempt, state):
             attempt.workflow_state = state
             return await store.update(attempt)
         state.pass_number += 1
         state.pass_open = True
+        for node in state.nodes.values():
+            node.decision_pass = 0
+            node.scheduling_state = "waiting_dependencies"
+            node.reason = None
+            node.blocked_by = []
+
+    for node in state.nodes.values():
+        if not new_pass and node.pass_run_revision is not None:
+            continue
+        node.pass_invalidation = node.last_invalidation
+        node.pass_dependencies = dict(node.observed_dependencies)
+        # Existing executions retain their captured inputs when upgrading stored state.
+        if not new_pass and node.active_run_revision is not None:
+            node.pass_run_revision = node.active_run_revision
+            node.pass_inputs = node.active_inputs
+        elif not new_pass and node.decision_pass == state.pass_number and node.last_outcome == "completed":
+            node.pass_run_revision = node.successful_revision
+            node.pass_inputs = node.successful_inputs
+        else:
+            node.pass_run_revision = node.requested_run_revision
+            node.pass_inputs = (
+                dict(node.observed_inputs) if node.observed_inputs is not None and node.inputs_available else None
+            )
+
+    for spec in attempt.platform_spec.steps:
+        node = state.nodes[spec.name]
+        if node.active_run_revision is not None or node.decision_pass == state.pass_number:
+            continue
+        # Successes produced by this pass can trigger nodes not yet visited in the pass.
+        vector = dict(node.pass_inputs or {})
+        for parent in spec.trigger_steps:
+            execution_id = state.nodes[parent].successful_step_id
+            if execution_id is not None:
+                vector["step:" + parent] = execution_id
+        if vector != (node.pass_inputs or {}):
+            node.pass_inputs = vector
+            node.pass_run_revision = (
+                node.requested_run_revision
+                if vector == node.observed_inputs and node.pass_invalidation == node.last_invalidation
+                else str(uuid4())
+            )
 
     attempt.workflow_state = state
     attempt = await store.update(attempt)
@@ -276,12 +374,17 @@ async def reconcile_workflow(
         node = state.nodes[name]
         cancelled_parents = [
             parent
-            for parent in spec.depends_on or []
+            for parent in spec.dependency_steps
             if (
                 state.nodes[parent].decision_pass == state.pass_number
                 and state.nodes[parent].last_outcome == "cancelled"
             )
             or (parent in active and active[parent].status == HelixJobStatus.CANCELLING)
+        ]
+        cancelled_parents = [
+            parent
+            for parent in cancelled_parents
+            if parent in (spec.depends_on or []) or state.nodes[parent].successful_step_id is None
         ]
         if cancelled_parents:
             node.blocked_by = cancelled_parents
@@ -307,52 +410,58 @@ async def reconcile_workflow(
         if name in active:
             step = active[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
-                if node.active_run_revision != node.requested_run_revision:
-                    step.status = HelixJobStatus.CANCELLED
-                    step.status_details = {**step.status_details, WORKFLOW_INTERNAL_CANCELLATION: True}
-                    await store.update(step)
-                    node.active_step_id = None
-                    node.active_run_revision = None
-                    node.active_inputs = None
-                else:
+                if node.scheduling_state != "admitted":
                     node.scheduling_state = "waiting_capacity"
-                    node.reason = "awaiting_dispatch"
-                    continue
+                node.reason = "awaiting_dispatch"
             else:
                 node.scheduling_state = "running"
                 node.reason = None
-                continue
+            continue
         if node.decision_pass == state.pass_number:
             continue
-        parents = [state.nodes[parent] for parent in spec.depends_on or []]
+        parents = [state.nodes[parent] for parent in spec.dependency_steps]
         node.blocked_by = blocked
         if node.blocked_by:
             node.scheduling_state = "waiting_dependencies"
             node.reason = "dependencies"
             if all(parent.decision_pass == state.pass_number for parent in parents):
                 node.decision_pass = state.pass_number
+                if config.mode == "run_to_completion" and any(item.startswith("fileset:") for item in blocked):
+                    state.control = "failing"
             continue
-        if node.last_poll_error:
+        if spec.trigger is not None and not node.pass_inputs and node.pass_invalidation is None:
+            node.scheduling_state = "idle"
+            node.reason = "awaiting_trigger"
+            if all(state.nodes[parent].decision_pass == state.pass_number for parent in spec.trigger_steps):
+                node.decision_pass = state.pass_number
+            continue
+        if node.pass_inputs is None:
             node.scheduling_state = "idle"
             node.reason = "input_unavailable"
             node.decision_pass = state.pass_number
             if config.mode == "run_to_completion":
                 state.control = "failing"
             continue
-        if node.freshness == "clean":
+        if node.last_attempted_revision == node.pass_run_revision and any(
+            state.nodes[parent].decision_pass != state.pass_number for parent in spec.trigger_steps
+        ):
+            node.scheduling_state = "idle"
+            node.reason = "awaiting_trigger"
+            continue
+        if node.successful_revision == node.pass_run_revision and node.successful_inputs == node.pass_inputs:
             node.decision_pass = state.pass_number
             node.last_outcome = "completed"
             node.scheduling_state = "idle"
             node.reason = "unchanged_inputs"
             continue
-        if node.last_attempted_revision == node.requested_run_revision:
+        if node.last_attempted_revision == node.pass_run_revision:
             node.decision_pass = state.pass_number
             node.scheduling_state = "idle"
             node.reason = "awaiting_invalidation"
             continue
-        node.active_run_revision = node.requested_run_revision
-        assert node.observed_inputs is not None
-        node.active_inputs = dict(node.observed_inputs)
+        assert node.pass_run_revision is not None
+        node.active_run_revision = node.pass_run_revision
+        node.active_inputs = dict(node.pass_inputs)
         # Save the execution snapshot before creating its Step so recovery can adopt it.
         attempt = await store.update(attempt)
         assert attempt.workflow_state is not None

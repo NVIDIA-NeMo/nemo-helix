@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 WorkflowMode = Literal["run_to_completion", "continuous"]
 WorkflowControl = Literal["running", "pausing", "paused", "cancelling", "failing"]
-WorkflowScheduling = Literal["ready", "waiting_dependencies", "waiting_capacity", "held", "running", "idle"]
+WorkflowScheduling = Literal["ready", "waiting_dependencies", "waiting_capacity", "admitted", "held", "running", "idle"]
 
 
 class WorkflowSpec(BaseModel):
@@ -28,6 +28,21 @@ class WorkflowInput(BaseModel):
     fileset_id: str = Field(min_length=1)
 
 
+class WorkflowFilesetCommit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fileset_commit: str = Field(min_length=1)
+
+
+class WorkflowStepSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_success: str = Field(min_length=1)
+
+
+WorkflowCondition = WorkflowFilesetCommit | WorkflowStepSuccess
+
+
 class WorkflowInvalidation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +56,12 @@ class WorkflowInvalidation(BaseModel):
         return self
 
 
+class WorkflowAdmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(min_length=1)
+
+
 class WorkflowSignals(RootModel[dict[str, str]]):
     pass
 
@@ -51,6 +72,12 @@ class WorkflowNodeState(BaseModel):
     successful_inputs: dict[str, str] | None = None
     successful_revision: str | None = None
     last_attempted_revision: str | None = None
+    pass_run_revision: str | None = None
+    pass_inputs: dict[str, str] | None = None
+    pass_invalidation: str | None = None
+    observed_dependencies: dict[str, str] = Field(default_factory=dict)
+    pass_dependencies: dict[str, str] = Field(default_factory=dict)
+    inputs_available: bool = True
     active_step_id: str | None = None
     active_run_revision: str | None = None
     active_inputs: dict[str, str] | None = None
@@ -68,7 +95,7 @@ class WorkflowNodeState(BaseModel):
 
     @property
     def freshness(self) -> Literal["clean", "dirty", "unknown"]:
-        if self.observed_inputs is None or self.last_poll_error:
+        if self.observed_inputs is None or not self.inputs_available:
             return "unknown"
         if self.successful_revision == self.requested_run_revision and self.successful_inputs == self.observed_inputs:
             return "clean"
@@ -86,7 +113,8 @@ class WorkflowState(BaseModel):
 
 class WorkflowNodeView(BaseModel):
     name: str
-    depends_on: list[str]
+    depends_on: list[str | WorkflowCondition]
+    trigger: list[WorkflowCondition] = Field(default_factory=list)
     freshness: Literal["clean", "dirty", "unknown"]
     scheduling_state: WorkflowScheduling
     reason: str | None

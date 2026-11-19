@@ -11,6 +11,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
+from nemo_helix_plugin.jobs.transfers import StepTransferState, TaskTransferProgress, TransferAction
 from nemo_helix_plugin.jobs.types import JobControl
 from nemo_helix_plugin.jobs.workflows import WorkflowState
 from nhx.common.auth import AuthContext
@@ -155,6 +156,7 @@ class HelixJobStep(EntityBase):
     __entity_type__: ClassVar[str] = "platform_job_step"
 
     attempt_id: str = Field(..., description="Parent attempt ID")
+    transfer_state: StepTransferState | None = None
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the step")
     status: HelixJobStatus = Field(default=HelixJobStatus.CREATED, description="Step status")
     status_details: Dict[str, Any] = Field(default_factory=dict, description="Status details")
@@ -176,6 +178,9 @@ class HelixJobTask(EntityBase):
     __entity_type__: ClassVar[str] = "platform_job_task"
 
     step_id: str = Field(..., description="Parent step ID")
+    retired_transfer_runtimes: list[str] = Field(default_factory=list)
+    transfer: TaskTransferProgress | None = None
+    transfer_action: TransferAction = "wait"
     status: HelixJobStatus = Field(default=HelixJobStatus.PENDING, description="Task status")
     status_details: Dict[str, Any] = Field(default_factory=dict, description="Details about the task status")
     error_details: Optional[Dict[str, Any]] = Field(default=None, description="Details about task errors")
@@ -234,8 +239,9 @@ class HelixJobStorageReclaim(EntityBase):
     """Job storage waiting for the jobs controller to reclaim it, from a deleted job or one stopped too long.
 
     Job storage is keyed by the job name, and deleting the job removes the entities the
-    storage sweep reads. This record outlives the job, so the controller can still reach
-    the backends that hold the storage, and it holds the name until the storage is gone.
+    storage sweep reads. Empty targets record completed cleanup while the Job exists,
+    preventing retention from starting that cleanup again. The record outlives the Job
+    until cleanup finishes, retaining its name and the backends that hold its storage.
     It lives in the system workspace, so deleting the job's workspace does not drop it.
     """
 

@@ -90,8 +90,21 @@ ExecutionProfileConfigT = TypeVar("ExecutionProfileConfigT")
 
 JOB_LOGS_ENDPOINT_ENVVAR = _execution_profiles.JOB_LOGS_ENDPOINT_ENVVAR
 
+TRANSFER_CONFIG_ENV = "NEMO_JOB_FILESET_TRANSFERS"
+TRANSFER_LEADER_ENV = "NEMO_JOB_TRANSFER_LEADER"
+
+
+def get_job_transfer_envvars(step: HelixJobStepWithContext) -> dict[str, str]:
+    spec = step.step_spec
+    if spec is None or not spec.filesets.enabled:
+        return {}
+    return {TRANSFER_CONFIG_ENV: spec.filesets.model_dump_json()}
+
+
 RESERVED_MANAGED_JOB_AUTH_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset(
     {
+        TRANSFER_CONFIG_ENV,
+        TRANSFER_LEADER_ENV,
         JOB_LOGS_ENDPOINT_ENVVAR,
         "NHX_ACCESS_TOKEN",
         "NHX_ACCESS_TOKEN_FILE",

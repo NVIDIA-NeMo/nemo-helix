@@ -114,6 +114,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobBackend,
     JobUpdate,
     get_job_runtime_shared_envvars,
+    get_job_transfer_envvars,
     get_logs_endpoint_from_fileset,
     is_workload_identity_token_exchange_enabled,
     resolve_gpu_job_shm_size,
@@ -943,6 +944,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         # Thread through shared platform envvars to the job
         # Note: address_override defaults to None, which triggers automatic loopback detection
         env.update(get_job_runtime_shared_envvars(platform_config))
+        env.update(get_job_transfer_envvars(step))
 
         log_config = LogConfig(
             type=LogConfig.types.JSON,
@@ -1528,10 +1530,15 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     "duration_seconds": time.monotonic() - launcher_lookup_started_at,
                 },
             )
+            if step.step_spec is not None and step.step_spec.filesets.enabled and jobs_launcher_stream is None:
+                raise JobStorageError("Fileset transfers require the jobs-launcher binary")
             if jobs_launcher_stream is not None:
                 # Modify the container entrypoint and command to use the jobs-launcher
                 original_entrypoint = container_args.get("entrypoint", [])
-                container_args["entrypoint"] = ["/jobs-launcher", "run", "--"] + original_entrypoint
+                container_args["entrypoint"] = ["/jobs-launcher", "run"]
+                if step.step_spec is not None and step.step_spec.filesets.enabled:
+                    container_args["entrypoint"].append("--require-fileset-transfers")
+                container_args["entrypoint"] += ["--"] + original_entrypoint
                 logger.debug("Jobs launcher found, will be included in container")
             else:
                 logger.warning(
