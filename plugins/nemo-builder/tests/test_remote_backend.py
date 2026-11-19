@@ -284,6 +284,11 @@ class TestDestination:
         backend = RemoteBackend(_config(max_specs_per_set=2), PROFILES)
         placed = _plan(_spec(name="a"), _spec(name="b")).with_destinations(backend.destination)
         assert [image.caller_ref for image in placed.images] == [None, None]
+        # Both in the service's one repository, each under its own row's name.
+        assert [(image.placed.repository, image.placed.system_tag) for image in placed.images] == [
+            ("team/images", "demo-1.a"),
+            ("team/images", "demo-1.b"),
+        ]
 
 
 class TestTheJob:
@@ -599,9 +604,12 @@ class TestTheRecord:
         external = ExternalImage(image_id="img-1", build_id="build-1")
         first = await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
 
-        # The same completion again, as a retried call makes it, returns the row.
-        again = await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
-        assert again.external == first.external == external
+        # The same completion again, as a retried call makes it, returns the row: a handle read anew from the
+        # request, equal to the row's and not the same object.
+        retried = ExternalImage.model_validate(external.model_dump(mode="json"))
+        assert retried is not first.external
+        again = await complete(client, workspace="default", name="demo-1", digest=digest, external=retried)
+        assert again.external == external
         # Anything else is not swallowed, whichever of the three differs: the row keeps the first, and the
         # caller is told.
         for other in (

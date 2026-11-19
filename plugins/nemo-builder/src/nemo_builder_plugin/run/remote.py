@@ -361,10 +361,10 @@ def _link_out(context: Path) -> str | None:
     for directory, directories, files in os.walk(context):
         here = Path(directory).resolve()
         on = ways.setdefault(here, [])
-        for name in (*directories, *files):
+        for name, listed_as_directory in (*((name, True) for name in directories), *((name, False) for name in files)):
             path = Path(directory, name)
             if not path.is_symlink():
-                if name in directories:
+                if listed_as_directory:
                     on.append((here / name, None))
                 continue
             try:
@@ -874,6 +874,8 @@ def run_remote_build(
             context = context.joinpath(*inside.parts)
             if not context.is_dir():
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory in its source")
+            if not _within(context, fetched[key]):
+                raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
         # Under its own name, so that a link which comes back to it by name still does. Links as they are,
         # never followed: staging checks where each one leads.
         return Path(shutil.copytree(context, directory / (context.name or "context"), symlinks=True))
@@ -956,6 +958,21 @@ def run_remote_build(
     return 1 if failures else 0
 
 
+def _within(context: Path, source: Path) -> bool:
+    """Whether ``context``, with every link in its path followed, is ``source`` or a directory inside it.
+
+    A context path is checked as it is written, relative and with no ``..``, when a build is submitted. Where
+    it leads once links are followed rests on how the source was unpacked. This is the driver's own check of
+    that: the step holds the build service's credential, and hands the service what it takes for a context.
+    """
+    try:
+        real, root = context.resolve(), source.resolve()
+    except (OSError, RuntimeError):
+        # A loop of links, on a Python that raises for one: it leads to no directory.
+        return False
+    return real == root or root in real.parents
+
+
 def _remove(directory: str | Path) -> None:
     """Remove ``directory`` and what is in it, as far as that can be done. It never raises.
 
@@ -1031,7 +1048,11 @@ def _redact_value(value: Any, redact: Callable[[str], str], depth: int = 0) -> A
     it is a plain container, and otherwise replaced by what it prints as, redacted.
     """
     if isinstance(value, str):
-        return redact(value)
+        redacted = redact(value)
+        # As `str` compares, not as the value's own type may: a string of another type, a member of an
+        # enumeration say, is kept as it is unless the credential was in it.
+        if type(value) is str or str.__ne__(redacted, value):
+            return redacted
     if value is None or isinstance(value, bool | int | float):
         return value
     if depth < _MAX_FIELD_DEPTH:
@@ -1188,8 +1209,14 @@ def fetch_context(files_client: FilesClient, image: RemoteBuildImage, *, workspa
     """Download ``image``'s build context from Files into ``root``, acting for the submitter, and return its
     directory."""
     layout = WorkLayout(PurePosixPath(root))
-    fetch_source(files_client, layout, image.source, workspace=workspace)
-    return Path(layout.context(image.source))
+    source = image.source
+    fetch_source(files_client, layout, source, workspace=workspace)
+    context = Path(layout.context(source))
+    if source.context_path and not _within(
+        context, Path(layout.context(source.model_copy(update={"context_path": None})))
+    ):
+        raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
+    return context
 
 
 def step_main(
@@ -1225,7 +1252,13 @@ def step_main(
         if config.credential_in_environment:
             credential: str | None = take_credential(os.environ)
         elif read_credential is not None:
-            credential = read_credential().strip()
+            try:
+                credential = read_credential().strip()
+            except Exception as exc:
+                # Not what it says, unless the file system says it: a reader that quotes what it read would
+                # put the credential, which nothing can take out yet, on every row.
+                why = str(exc) if isinstance(exc, OSError) else type(exc).__name__
+                raise RuntimeError(f"the build service's credential could not be read: {why}") from None
             if not credential:
                 raise RuntimeError("the build service's credential is empty: the step's Jobs profile did not mount it")
         else:

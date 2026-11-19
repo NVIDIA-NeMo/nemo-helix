@@ -80,8 +80,10 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
 class Refused(Exception):
     """A submit the builder refuses with a 409 that says which kind it is.
 
-    ``detail`` is a sentence, as a 409's always is. ``code`` is for a caller that must tell a refusal, which the
-    same request meets every time, from a revision another request holds, which the next revision gets past.
+    ``detail`` is a sentence, as a 409's always is. ``code`` is for a caller that must tell which it met.
+    ``backend_rejected`` and ``missing_secrets`` refuse the request itself, under any revision.
+    ``backend_changed``, like the 409 with no code for a revision another request holds, is one the next
+    revision gets past.
     """
 
     def __init__(self, code: str, detail: str) -> None:
@@ -385,7 +387,8 @@ def _build_router() -> APIRouter:
     ) -> ContainerImage:
         """Make an image `ready` at the digest the step that built it published.
 
-        Completing an image already `ready` at that digest returns it; 409 if it settled otherwise.
+        Completing an image already `ready` at that digest, with the same `external`, returns it; 409 if it
+        settled otherwise, or if the request doesn't fit the image's backend.
         """
         row = await _get_row(entity_client, workspace, name)
         refusal = caller_refusal(row, caller)

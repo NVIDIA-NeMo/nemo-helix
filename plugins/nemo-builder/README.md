@@ -615,7 +615,9 @@ What differs for a caller:
 - A build context with a link that leads out of it fails the image. In an archive, a link may point
   anywhere in the archive, which can be more than the context; a service that follows links would
   be sent a file from beside the context. So does one with a link that leads back to a directory it
-  is in, which such a service would follow without end.
+  is in, which such a service would follow without end. And so does a `context_path` that leads
+  out of its source once the links in it are followed: the step checks that for itself, since it
+  holds the service's credential.
 - What a set downloads, it downloads once: an archive whole, and a fileset whole if any image builds
   from all of it. Images built from one download see the same files, however long the set takes.
 - Every workspace's images land in the service's one repository, and no tag is pushed. Pin
@@ -687,8 +689,9 @@ registry or repository, the profile, a step image, a profile whose limit is belo
 build timeouts plus two minutes, or a `default_platform` the service doesn't build.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision the other backend
-built is refused: with `code` `backend_changed` when the new backend can build the request (submit
-the next revision), or with `backend_rejected` when it can't build it under any revision. Evals goes on using the
+built is refused: with `code` `backend_changed` when the new backend can take the request (submit
+the next revision), and otherwise as any request it can't take is, under any revision
+(`backend_rejected` or `missing_secrets`, for example). Evals goes on using the
 task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.
 On `remote`, a task that names a prebuilt image keeps the build it has but can't be built again, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
@@ -794,8 +797,9 @@ Operator settings live under `builder:` in the platform config, which with the c
 `platformConfig.builder`, or in `NEMO_BUILDER_*` environment variables. Callers can't set any of them.
 They are checked at the first submit, not when the platform starts: an invalid setting, or an unknown
 key under `remote` or `sandbox`, refuses every submit with `409` `backend_rejected`. The answer
-names the setting, or `builder` for a check that spans settings; the API log has the check's own
-sentence.
+names the setting, or `builder` for a check made on the section as a whole (one that spans settings,
+or the scheme of `registry`); a section that can't be read at all is answered without a name. The
+API log has the check's own sentence.
 
 ```yaml
 builder:

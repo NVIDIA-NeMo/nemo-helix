@@ -16,8 +16,10 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
+from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypeVar
 
 import httpx
 import pytest
@@ -55,7 +57,13 @@ from nemo_builder_plugin.run.remote import (
     take_credential,
 )
 from nemo_builder_plugin.settle import _FAILURE_LINE, _marked_lines
-from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildImage, RemoteBuildStepConfig
+from nemo_builder_plugin.steps import (
+    REMOTE_CREDENTIAL_ENV,
+    ContextSource,
+    RemoteBuildImage,
+    RemoteBuildStepConfig,
+    WorkLayout,
+)
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
 
 DESTINATION = "registry.example.com/team/images"
@@ -70,6 +78,8 @@ VERIFYING = RemoteBuildStatus("verifying", "step 4 of 5")
 DONE = RemoteBuildStatus(
     "done", image=RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", attributes={"builder": "v1"})
 )
+
+_T = TypeVar("_T")
 
 
 def _row(
@@ -155,7 +165,7 @@ class FakeService:
         self.cancelled: list[str] = []
 
     @staticmethod
-    def _next[T](script: list[T]) -> T:
+    def _next(script: list[_T]) -> _T:
         return script.pop(0) if len(script) > 1 else script[0]
 
     def start(self, build: RemoteBuild) -> str:
@@ -1228,7 +1238,7 @@ class TestTheContext:
             stage_context(context, named)
         assert (context / "Dockerfile").read_text() == "FROM busybox\n"
         assert not (context / "Dockerfile").is_symlink()
-        assert ("root Dockerfile is replaced by services/feed/Dockerfile" in caplog.text) is said
+        assert (f"root Dockerfile is replaced by {named}" in caplog.text) is said
 
     def test_the_driver_hands_the_service_the_named_dockerfile(self, context: Path, tmp_path: Path) -> None:
         seen: list[str] = []
@@ -1656,6 +1666,67 @@ class TestTheImagesOfOneSet:
         assert len(service.started) == 1
         assert f"{FAILURE_MARKER} b: context path {outside!r} is not a directory inside its source" in caplog.text
 
+    @pytest.mark.parametrize(
+        ("context_path", "refused"),
+        [("up", True), ("up/below", True), ("current", False), (None, False)],
+        ids=["a-link-out", "below-a-link-out", "a-link-that-stays-inside", "the-whole-source"],
+    )
+    def test_a_fetched_context_is_inside_what_was_fetched_once_its_links_are_followed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context_path: str | None, refused: bool
+    ) -> None:
+        """One image's own download. Where a context path leads rests on how the source was unpacked, and the
+        step, which holds the service's credential, checks it for itself."""
+        outside = tmp_path / "mounted"
+        (outside / "below").mkdir(parents=True)
+
+        def fetch_source(files_client: object, layout: WorkLayout, source: ContextSource, *, workspace: str) -> None:
+            unpacked = Path(layout.context(source.model_copy(update={"context_path": None})))
+            (unpacked / "v2").mkdir(parents=True)
+            (unpacked / "current").symlink_to("v2")
+            (unpacked / "up").symlink_to(outside)
+
+        monkeypatch.setattr(driver, "fetch_source", fetch_source)
+        source = {"fileset": "default/fs-a", "archive": "task.tar.gz", "context_path": context_path}
+        image = RemoteBuildImage.model_validate(
+            {"image": "a", "source": source, "dockerfile": "Dockerfile", "platform": "linux/amd64"}
+        )
+        root = tmp_path / "fetched"
+        if refused:
+            with pytest.raises(
+                ImageFailed, match=f"context path '{context_path}' is not a directory inside its source"
+            ):
+                driver.fetch_context(object(), image, workspace="default", root=root)  # ty: ignore[invalid-argument-type]
+        else:
+            fetched = driver.fetch_context(object(), image, workspace="default", root=root)  # ty: ignore[invalid-argument-type]
+            assert fetched.resolve().is_relative_to(root.resolve())
+            assert fetched.name == (context_path or fetched.name)
+
+    def test_a_directory_reached_by_a_link_out_of_a_shared_download_is_refused(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The path itself is relative and climbs nowhere. A link in the download, where unpacking let one
+        through, leads it out: to a directory of the step's own, which holds the service's credential."""
+        outside = tmp_path / "mounted"
+        outside.mkdir()
+        (outside / "Dockerfile").write_text("FROM mounted\n")
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            (directory / "v2").mkdir()
+            (directory / "v2" / "Dockerfile").write_text("FROM v2\n")
+            (directory / "current").symlink_to("v2")
+            (directory / "up").symlink_to(outside)
+            return directory
+
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        config = self._set(archive | {"context_path": "current"}, archive | {"context_path": "up"})
+        builder, service = FakeBuilder(), FakeService([DONE])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        # A link that stays inside the download is a way to a context like any other.
+        assert [image for image, _, _ in builder.completed] == ["a"]
+        assert len(service.started) == 1
+        assert f"{FAILURE_MARKER} b: context path 'up' is not a directory inside its source" in caplog.text
+
     def test_a_download_only_one_image_names_is_fetched_where_it_is_built_and_removed_with_it(
         self, tmp_path: Path
     ) -> None:
@@ -1955,6 +2026,29 @@ class TestTheStepProgram:
         monkeypatch.setattr(driver, "sys", SimpleNamespace(stdout=stream))
         assert step_main(lambda config, credential: FakeService([DONE])) == 0
         assert getattr(stream, "line_buffering", False) is wrapped
+
+    @pytest.mark.parametrize(
+        ("raised", "said"),
+        [
+            (ValueError("unexpected text in the key file: t0p-s3cret-value"), "ValueError"),
+            (FileNotFoundError(2, "No such file or directory", "/var/run/build/token"), "/var/run/build/token"),
+        ],
+        ids=["a-reader-that-quotes-what-it-read", "a-file-that-is-not-there"],
+    )
+    def test_a_credential_that_cant_be_read_is_not_reported_in_the_readers_words(
+        self, step: dict[str, list], tmp_path: Path, caplog: pytest.LogCaptureFixture, raised: Exception, said: str
+    ) -> None:
+        """Nothing can take the credential out of a reason yet: the driver was never given it."""
+        (tmp_path / "job_step_config.json").write_text(json.dumps(_config().model_dump(mode="json")))
+
+        def read_credential() -> str:
+            raise raised
+
+        with caplog.at_level(logging.ERROR):
+            assert step_main(lambda config, credential: FakeService([DONE]), read_credential=read_credential) == 1
+        assert "t0p-s3cret-value" not in caplog.text
+        (line,) = _marked_lines(caplog.text)
+        assert "the build service's credential could not be read: " in line and said in line
 
     def test_a_step_with_no_credential_of_its_own_leaves_it_to_the_client(
         self, step: dict[str, list], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2322,6 +2416,14 @@ class TestTheStepProgram:
         redact = driver._redactor("token-value")
         untouched = {"Accept": ["application/json"], "tries": 3}
         assert driver._redact_value(untouched, redact) is untouched
+
+        class Stage(str, Enum):
+            BUILDING = "building"
+            LEAKING = "token-value"
+
+        # A string of another type too: `%(stage)s` prints a member's name, which its plain text would not.
+        assert driver._redact_value(Stage.BUILDING, redact) is Stage.BUILDING
+        assert driver._redact_value(Stage.LEAKING, redact) == "[credential]"
 
         class Request:
             def __repr__(self) -> str:

@@ -214,7 +214,12 @@ class RemoteBuildStepConfig(BaseModel):
 
     images: list[RemoteBuildImage] = Field(min_length=1)
     registry: str = Field(description="The registry host the service publishes to.")
-    repository: str = Field(description="The one repository it publishes to. Every row was written with it.")
+    repository: str = Field(
+        description=(
+            "The one repository it publishes to, as the deployment has it now. A row is normally written with "
+            "the same; the driver checks each image against its row, not this."
+        )
+    )
     build_timeout_seconds: int = Field(ge=1, description="How long to wait for one image before cancelling it.")
     credential_in_environment: bool = Field(
         default=False, description=f"Whether the service's credential is in `{REMOTE_CREDENTIAL_ENV}`."
@@ -223,5 +228,5 @@ class RemoteBuildStepConfig(BaseModel):
     @property
     def destination(self) -> str:
         """``<registry>/<repository>``: where the deployment's build service publishes. The driver checks each
-        image against its own row, which a submit wrote with the same."""
+        image against its own row, which a submit normally wrote with the same."""
         return f"{self.registry}/{self.repository}"
