@@ -109,6 +109,17 @@ def test_single_endpoint_plugin_needs_no_name() -> None:
     assert select_endpoint(_plugin(CHRISTMAS), None, None).path.endswith("/is-it-christmas")
 
 
+def test_endpoint_named_like_the_plugin_is_the_default_when_there_are_several() -> None:
+    plugin = _plugin({**CHRISTMAS, "endpoints": [*CHRISTMAS["endpoints"], _endpoint("GET", "panic", "read")]})
+
+    assert select_endpoint(plugin, None, None).path.endswith("/is-it-christmas")
+    assert select_endpoint(plugin, "panic", None).path.endswith("/panic")
+    assert [r.example for r in endpoint_rows([plugin])] == [
+        "nemo plugins call is-it-christmas",
+        "nemo plugins call is-it-christmas panic",
+    ]
+
+
 def test_name_selects_and_get_is_preferred_when_ambiguous() -> None:
     plugin = _plugin(PHOENIX)
     assert select_endpoint(plugin, "spans", None).method == "GET"

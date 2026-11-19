@@ -45,16 +45,23 @@ class EndpointRow:
     example: str
 
 
-def _example(plugin: str, name: str, method: str, siblings: Sequence[EndpointMapping]) -> str:
-    """A command the user can paste. Adds ``-X`` only where the name alone is ambiguous."""
-    same_name = [e for e in siblings if endpoint_name(e.path) == name]
-    needs_method = len(same_name) > 1 and not (method == "GET" and sum(e.method == "GET" for e in same_name) == 1)
-    parts = ["nemo plugins call", plugin]
-    if len(siblings) > 1 or needs_method:
+def _selects(plugin: ExternalPlugin, name: str | None, method: str | None, endpoint: EndpointMapping) -> bool:
+    """Whether ``plugins call`` with these arguments would pick exactly ``endpoint``."""
+    try:
+        return select_endpoint(plugin, name, method) is endpoint
+    except click.UsageError:
+        return False
+
+
+def _example(plugin: ExternalPlugin, endpoint: EndpointMapping) -> str:
+    """A command the user can paste: only as many arguments as needed to pick this endpoint."""
+    parts = ["nemo plugins call", plugin.name]
+    if not _selects(plugin, None, None, endpoint):
+        name = endpoint_name(endpoint.path)
         parts.append(name)
-    if needs_method:
-        parts.append(f"-X {method}")
-    if method not in _BODYLESS_METHODS:
+        if not _selects(plugin, name, None, endpoint):
+            parts.append(f"-X {endpoint.method}")
+    if endpoint.method not in _BODYLESS_METHODS:
         parts.append("--data '{...}'")
     return " ".join(parts)
 
@@ -74,7 +81,7 @@ def endpoint_rows(plugins: Iterable[ExternalPlugin]) -> list[EndpointRow]:
                     method=endpoint.method,
                     access=endpoint.access,
                     path=gateway_path(plugin.name, endpoint.path),
-                    example=_example(plugin.name, name, endpoint.method, plugin.endpoints),
+                    example=_example(plugin, endpoint),
                 )
             )
     return rows
@@ -103,6 +110,11 @@ def select_endpoint(plugin: ExternalPlugin, name: str | None, method: str | None
                 f"{f' named {name!r}' if name else ''}. Available: {_describe(plugin.endpoints)}."
             )
     if len(candidates) > 1:
+        if name is None and method is None:
+            # `nemo plugins call my-plugin` means its main endpoint, the one named like the plugin.
+            main = [e for e in candidates if endpoint_name(e.path) == plugin.name]
+            if len(main) == 1:
+                return main[0]
         gets = [e for e in candidates if e.method == "GET"]
         if method is None and len(gets) == 1:
             return gets[0]
