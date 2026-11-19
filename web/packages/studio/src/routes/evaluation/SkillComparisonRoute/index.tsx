@@ -92,11 +92,14 @@ export const SkillComparisonRoute = () => {
               <Flex gap="density-md" align="center" className="flex-wrap">
                 Skill Comparisons{' '}
                 {report?.synthetic_demo && <Badge color="yellow">Synthetic Demo</Badge>}
-                {report && (!report.synthetic_demo || incomplete) && (
-                  <Badge color={incomplete ? 'yellow' : 'gray'}>
-                    {incomplete ? 'Needs Review' : 'Imported Report'}
+                {report && !report.synthetic_demo && (
+                  <Badge color="gray">
+                    {imported.filename === 'Saved executions'
+                      ? 'Saved Comparison'
+                      : 'Imported Report'}
                   </Badge>
                 )}
+                {incomplete && <Badge color="yellow">Needs Review</Badge>}
               </Flex>
             }
             slotDescription="Compare control and variant runs and inspect the evidence behind each score."

@@ -21,6 +21,7 @@ import type {
   AgentEvalResult,
   AgentEvaluateJobsSortField,
   ResultFilter,
+  TrialMeasurements,
 } from '@nemo/sdk/generated/evals/schema';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
@@ -138,6 +139,7 @@ export interface AgentEvalTrialRow {
   status: string;
   output?: { output_text?: string | null } | null;
   evidence?: unknown;
+  measurements?: TrialMeasurements | null;
   metadata?: Record<string, unknown>;
 }
 

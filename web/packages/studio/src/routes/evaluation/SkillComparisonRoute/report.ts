@@ -64,8 +64,9 @@ const armSchema = z
     job_name: text,
     reward: z.union([z.literal(0), z.literal(1)]),
     agent_image_ref: image,
-    verifier_image_ref: image,
+    verifier_image_ref: image.nullable(),
     bundle: text,
+    skill_refs: z.array(pin).optional(),
     discovery: z.boolean().optional(),
     activation: z.boolean().nullish(),
     measurements: measurementsSchema.optional(),
@@ -75,6 +76,7 @@ const armSchema = z
     replay: z
       .object({
         bundle: text,
+        source: z.literal('run').optional(),
         summary: z
           .object({
             trial_count: count,
@@ -93,7 +95,7 @@ const armSchema = z
 const reportSchema = z
   .object({
     taskset_ref: pin,
-    skill_ref: pin,
+    skill_ref: pin.optional(),
     workspace: text,
     context: text,
     synthetic_demo: z.boolean().optional(),
@@ -104,7 +106,11 @@ const reportSchema = z
     arms: z.object({ baseline: armSchema, 'with-skill': armSchema }),
     error: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .refine((report) => !!report.skill_ref || !!report.arms['with-skill'].skill_refs?.length, {
+    path: ['skill_ref'],
+    message: 'A pinned variant skill is required.',
+  });
 
 export type MetricResult = z.infer<typeof metricResultSchema>;
 export type ComparisonReport = z.infer<typeof reportSchema>;
@@ -154,9 +160,11 @@ export function comparisonWarnings(report: ComparisonReport): string[] {
       'The arms used different images. Metric differences are not a controlled skill comparison.'
     );
   }
+  const skills = [...(baseline.skill_refs ?? []), ...(treatment.skill_refs ?? [])];
+  if (report.skill_ref) skills.push(report.skill_ref);
   if (
     !report.taskset_ref.startsWith(`${report.workspace}/`) ||
-    !report.skill_ref.startsWith(`${report.workspace}/`)
+    skills.some((skill) => !skill.startsWith(`${report.workspace}/`))
   ) {
     warnings.push('The pinned resources do not belong to the reported workspace.');
   }

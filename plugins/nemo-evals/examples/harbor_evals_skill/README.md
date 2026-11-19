@@ -159,9 +159,10 @@ and other diagnostics when the report includes them.
 
 **Load Saved Runs** can open a completed variant and select its linked control.
 Older runs can be paired manually using the same pinned taskset. The loader
-supports one task and one trial per arm and uses the most recent completed
-scoring replay for each trial. **Evidence** lists the source jobs and revision
-pins. Use the exported report to include the verified skill discovery evidence.
+supports one task and one trial per arm. It uses scoring replays when both
+runs have one and uses saved run results otherwise. **Evidence** lists the
+source jobs and pinned skills. Use the exported report to include verified
+skill discovery evidence.
 
 Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
 The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.
