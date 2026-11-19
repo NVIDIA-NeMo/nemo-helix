@@ -1,0 +1,213 @@
+VLM collate: give the Qwen3.5-style ``default_collate_fn`` the platform's tools and fold ``thinking`` messages.
+
+A checkpoint with a vision tower (Qwen3.5 is one, even when the data is all text) trains through the VLM
+recipe, whose ``default_collate_fn`` renders ``example["conversation"]`` with the processor's chat template.
+For the NeMo Platform's agent SFT rows that rendered the wrong text:
+
+- ``example["tools"]`` was never passed to the template, so the prompt had no tool definitions. The tools
+  of a Qwen3.5 agent row are roughly half of its tokens.
+- A ``{"role": "assistant", "thinking": "..."}`` message was not recognised. It rendered as an empty assistant
+  turn (``<think>\n\n</think>``) that the VLM label builder also trains on, and its reasoning never reached the
+  model.
+
+Now ``default_collate_fn`` merges ``thinking`` messages into ``reasoning_content`` on the assistant message
+after them (``_merge_thinking_messages`` from the chat-dataset patch, so both paths treat rows the same) and
+passes the batch's tools to ``apply_chat_template``. ``_drop_overlong_samples`` estimates lengths with the
+same tools. Examples in one batch must carry the same tools, because the template takes one list per batch;
+otherwise the collate raises rather than render a prompt the agent never saw. Rows with neither key reach the
+template exactly as before. The dataset's own conversation is not changed.
+
+Tool results need no ``tool_call_id`` here: the VLM path renders them by position, not by id.
+
+Applies after automodel-chat-dataset-thinking-and-tool-call-ids.patch (it imports ``_merge_thinking_messages``
+from it). Drop this patch once the pinned Automodel commit includes the change.
+
+diff --git a/nemo_automodel/components/datasets/vlm/collate_fns.py b/nemo_automodel/components/datasets/vlm/collate_fns.py
+index 3f58d7c9e..a6d03d6aa 100644
+--- a/nemo_automodel/components/datasets/vlm/collate_fns.py
++++ b/nemo_automodel/components/datasets/vlm/collate_fns.py
+@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
+ import torch
+ from PIL import Image as PILImage
+ 
++from nemo_automodel.components.datasets.llm.chat_dataset import _merge_thinking_messages
+ from nemo_automodel.components.datasets.packing import (
+     DEFAULT_PACKED_SEQUENCE_CONTRACT,
+     PackedSequenceContract,
+@@ -1213,7 +1214,38 @@ def _estimate_media_tokens(conversation, processor):
+     return extra
+ 
+ 
+-def _drop_overlong_samples(conversations, processor, max_length):
++def _merge_conversation_thinking(conversation):
++    """Fold ``thinking`` messages of a conversation into ``reasoning_content``.
++
++    The NeMo Platform keeps an assistant turn's reasoning in a message of its own,
++    ``{"role": "assistant", "thinking": "..."}``. Chat templates read ``reasoning_content`` on the
++    reply instead, so the unmerged message renders as an empty assistant turn that is also trained on,
++    and its reasoning never reaches the model. Conversations without a ``thinking`` message are returned
++    as they are. The caller's conversation is never changed.
++    """
++    if not any(isinstance(turn, dict) and "thinking" in turn for turn in conversation):
++        return conversation
++    return _merge_thinking_messages(list(conversation))
++
++
++def _batch_tools(examples):
++    """Return the tool definitions the examples of a batch share, or ``None`` when they carry none.
++
++    ``processor.apply_chat_template`` takes one ``tools`` list for the whole batch, so examples whose tool
++    definitions differ cannot be rendered together. Rendering them with the wrong tools would train on a
++    prompt the agent never saw, so this raises instead; use a micro batch size of 1 for such data.
++    """
++    tool_sets = [example.get("tools") or None for example in examples]
++    first = tool_sets[0] if tool_sets else None
++    if any(tools != first for tools in tool_sets[1:]):
++        raise ValueError(
++            "Examples in one batch carry different `tools`; chat templates render one tool list per batch. "
++            "Use a micro batch size of 1 for data whose tool definitions differ between examples."
++        )
++    return first
++
++
++def _drop_overlong_samples(conversations, processor, max_length, tools=None):
+     """Drop conversations whose estimated token count exceeds *max_length*.
+ 
+     Returns ``(filtered_conversations, kept_indices)`` where *kept_indices*
+@@ -1230,7 +1262,8 @@ def _drop_overlong_samples(conversations, processor, max_length):
+ 
+     for i, conv in enumerate(conversations):
+         try:
+-            text = processor.apply_chat_template([conv], tokenize=False)
++            template_kwargs = {"tools": tools} if tools else {}
++            text = processor.apply_chat_template([conv], tokenize=False, **template_kwargs)
+             if isinstance(text, list):
+                 text = text[0]
+             base_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+@@ -1284,11 +1317,16 @@ def default_collate_fn(
+         whose tensor elements preserve their processor-defined shapes; image lists
+         commonly contain tensors of shape [channels, height, width].
+     """
+-    conversations = _ensure_rgb([example["conversation"] for example in examples])
++    # Tool definitions (``example["tools"]``) go to the chat template, and ``thinking`` messages become the
++    # ``reasoning_content`` of the reply after them; without both, tool-calling rows train on a prompt with no
++    # tools and on an empty assistant turn.
++    tools = _batch_tools(examples)
++    template_kwargs = {"tools": tools} if tools else {}
++    conversations = _ensure_rgb([_merge_conversation_thinking(example["conversation"]) for example in examples])
+ 
+     # Optionally drop overlong samples before processing
+     if max_length is not None and drop_overlong:
+-        conversations, kept = _drop_overlong_samples(conversations, processor, max_length)
++        conversations, kept = _drop_overlong_samples(conversations, processor, max_length, tools=tools)
+         examples = [examples[i] for i in kept]
+ 
+     # transformers>=5 expects processing kwargs (padding/truncation/max_length) to be
+@@ -1308,6 +1346,7 @@ def default_collate_fn(
+         return_dict=True,
+         return_tensors="pt",
+         processor_kwargs=processing_kwargs,
++        **template_kwargs,
+     )
+ 
+     if _post_tokenize_hook is not None:
+diff --git a/tests/unit_tests/datasets/vlm/test_collate_fns.py b/tests/unit_tests/datasets/vlm/test_collate_fns.py
+index 0c384b486..93afc007d 100644
+--- a/tests/unit_tests/datasets/vlm/test_collate_fns.py
++++ b/tests/unit_tests/datasets/vlm/test_collate_fns.py
+@@ -764,6 +764,95 @@ def test_default_collate_fn_without_max_length(collate_mod, fake_qwen_utils, mon
+     assert proc_kwargs.get("padding") is True
+ 
+ 
++@pytest.fixture()
++def agent_collate(collate_mod, fake_qwen_utils, monkeypatch):
++    """default_collate_fn with label building stubbed: these tests check what reaches the template."""
++    monkeypatch.setattr(collate_mod, "HAVE_QWEN_VL_UTILS", True, raising=True)
++    monkeypatch.setattr(
++        collate_mod, "build_labels_from_template", lambda input_ids, conversations, processor: torch.zeros_like(input_ids)
++    )
++    return collate_mod
++
++
++class _RecordingProcessor:
++    """Records what ``default_collate_fn`` hands to ``apply_chat_template``."""
++
++    tokenizer = DummyTokenizer()
++
++    def __init__(self):
++        self.conversations = None
++        self.kwargs = None
++
++    def apply_chat_template(self, conv_list, **kwargs):
++        self.conversations = conv_list
++        self.kwargs = kwargs
++        batch_size = len(conv_list)
++        return {"input_ids": torch.arange(1, 5).unsqueeze(0).repeat(batch_size, 1)}
++
++
++_TOOLS = [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]
++_AGENT_CONVERSATION = [
++    {"role": "user", "content": [{"type": "text", "text": "fix it"}]},
++    {"role": "assistant", "thinking": "look at the files first"},
++    {
++        "role": "assistant",
++        "content": [{"type": "text", "text": "Looking."}],
++        "tool_calls": [{"type": "function", "function": {"name": "bash", "arguments": {"command": "ls"}}}],
++    },
++    {"role": "tool", "content": [{"type": "text", "text": "a.py"}]},
++    {"role": "assistant", "thinking": "done"},
++    {"role": "assistant", "content": [{"type": "text", "text": "All set."}]},
++]
++
++
++def test_default_collate_fn_merges_thinking_and_passes_tools(agent_collate):
++    """Thinking messages become reasoning_content on the reply; the example's tools reach the template."""
++    processor = _RecordingProcessor()
++    example = {"conversation": _AGENT_CONVERSATION, "tools": _TOOLS}
++
++    agent_collate.default_collate_fn([example], processor)
++
++    assert processor.kwargs["tools"] == _TOOLS
++    (conversation,) = processor.conversations
++    assert [turn["role"] for turn in conversation] == ["user", "assistant", "tool", "assistant"]
++    assert conversation[1]["reasoning_content"] == "look at the files first"
++    assert conversation[3]["reasoning_content"] == "done"
++    assert all("thinking" not in turn for turn in conversation)
++    # The dataset's own conversation is left alone, so the next epoch merges it again.
++    assert _AGENT_CONVERSATION[1] == {"role": "assistant", "thinking": "look at the files first"}
++
++
++def test_default_collate_fn_without_tools_or_thinking_is_unchanged(agent_collate):
++    """Rows with neither key reach the template as before, with no tools argument."""
++    processor = _RecordingProcessor()
++
++    agent_collate.default_collate_fn([{"conversation": CONVERSATION}], processor)
++
++    assert "tools" not in processor.kwargs
++    assert processor.conversations == [CONVERSATION]
++
++
++def test_default_collate_fn_rejects_a_batch_with_different_tools(agent_collate):
++    other_tools = [{"type": "function", "function": {"name": "other", "parameters": {"type": "object"}}}]
++    examples = [
++        {"conversation": CONVERSATION, "tools": _TOOLS},
++        {"conversation": CONVERSATION, "tools": other_tools},
++    ]
++
++    with pytest.raises(ValueError, match="different `tools`"):
++        agent_collate.default_collate_fn(examples, _RecordingProcessor())
++
++
++def test_default_collate_fn_batch_sharing_tools_passes_them_once(agent_collate):
++    processor = _RecordingProcessor()
++    examples = [{"conversation": CONVERSATION, "tools": _TOOLS}, {"conversation": CONVERSATION, "tools": list(_TOOLS)}]
++
++    agent_collate.default_collate_fn(examples, processor)
++
++    assert processor.kwargs["tools"] == _TOOLS
++    assert len(processor.conversations) == 2
++
++
+ def test_kimi_vl_collate_fn_registered(collate_mod):
+     """Test that kimi_vl_collate_fn is registered in COLLATE_FNS."""
+     assert "KimiVLProcessor" in collate_mod.COLLATE_FNS
