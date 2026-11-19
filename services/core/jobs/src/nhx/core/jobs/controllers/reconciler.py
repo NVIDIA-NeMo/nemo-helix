@@ -495,10 +495,10 @@ class JobReconciler(HeartbeatMixin, Controller):
                 self.emit_heartbeat()
 
     def _reclaim_queued_storage(self) -> None:
-        """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
+        """Reclaim storage and retain completion receipts until their Jobs are gone.
 
-        Runs every tick: a deleted job's record holds its name, and some backends remove storage
-        in the background, so a record stays until a later tick finds the removal done.
+        Pending targets are retried each tick. Once storage is gone, the empty record
+        prevents retention from restarting cleanup. Remove it after the Job is deleted.
         """
         try:
             reclaims = list(
@@ -523,8 +523,8 @@ class JobReconciler(HeartbeatMixin, Controller):
                     owner = self._system_entities.get_by_id(HelixJob, reclaim.job_id)
                 except EntityNotFoundError:
                     owner = None
-                if owner is not None and owner.status in HelixJobStatus.lifecycle_pending():
-                    continue
+                if owner is not None:
+                    continue  # Empty targets are the durable receipt that prevents re-enqueue.
                 current = self._system_entities.get_by_id(HelixJobStorageReclaim, reclaim.id)
                 self._system_entities.delete_by_id(
                     HelixJobStorageReclaim, current.id, expected_db_version=current.db_version

@@ -3,7 +3,7 @@
 
 """Workflow behavior through real in-process Jobs, Files and Entity APIs."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -2424,3 +2424,157 @@ def test_parallel_workflow_nodes_wait_for_uploads_and_commit_before_releasing_jo
         != initial_revisions["right"]
     ) == publication_succeeds
     assert harness.node_state(job, "right").last_outcome == ("completed" if publication_succeeds else "error")
+
+
+def _mock_storage_cleanup_for_job(
+    job: HelixJobResponse,
+    registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    reclaim: Callable[[str, str], bool],
+) -> None:
+    backend = registry.get_backend(provider="cpu", profile="default")
+    original = backend.reclaim_persistent_storage
+
+    def cleanup(workspace: str, name: str) -> bool:
+        if workspace == job.workspace and name == job.name:
+            return reclaim(workspace, name)
+        return original(workspace, name)
+
+    monkeypatch.setattr(backend, "reclaim_persistent_storage", cleanup)
+
+
+def _workflow_pending_storage_cleanup(
+    h: WorkflowHarness,
+    registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[HelixJobResponse, SyncEntityClient, JobReconciler]:
+    from nhx.core.jobs.config import config
+
+    monkeypatch.setattr(config.storage, "failed_storage_ttl_seconds", 0)
+    job = h.create({"work": []}, mode="run_to_completion", storage=True)
+    h.tick(job)
+    h.finish(job, "work", HelixJobStatus.ERROR)
+    store = SyncEntityClient(EntitiesClient.from_client(h.context.client)).as_service("jobs", internal=True)
+    controller = JobReconciler(registry, h.context.client, system_entity_client=store)
+    return job, store, controller
+
+
+def test_workflow_storage_cleanup_keeps_completed_receipt_until_job_deletion(
+    workflow_harness: WorkflowHarness,
+    backend_registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    h = workflow_harness
+    job, store, controller = _workflow_pending_storage_cleanup(h, backend_registry, monkeypatch)
+    assert h.tick(job).status_details["storage_reclaimed_at"]
+    reclaim = Mock(return_value=True)
+    _mock_storage_cleanup_for_job(job, backend_registry, monkeypatch, reclaim)
+    controller._reclaim_queued_storage()
+    receipts = store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+    assert len(receipts) == 1 and receipts[0].targets == []
+    receipt_id = receipts[0].id
+    for _ in range(3):
+        h.tick(job)
+        controller = JobReconciler(backend_registry, h.context.client, system_entity_client=store)
+        controller._reclaim_queued_storage()
+        saved = store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+        assert len(saved) == 1 and saved[0].id == receipt_id and saved[0].targets == []
+    reclaim.assert_called_once()
+    store.delete_by_id(HelixJob, job.id)
+    controller._reclaim_queued_storage()
+    assert not store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+    reclaim.assert_called_once()
+
+
+def test_workflow_storage_cleanup_retries_interrupted_enqueue(
+    workflow_harness: WorkflowHarness,
+    backend_registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from nhx.common.entities.client import EntityClient
+
+    h = workflow_harness
+    job, store, controller = _workflow_pending_storage_cleanup(h, backend_registry, monkeypatch)
+    original_create = EntityClient.create
+
+    async def create[EntityT: EntityBase](self: EntityClient, entity: EntityT) -> EntityT:
+        if isinstance(entity, HelixJobStorageReclaim) and entity.job_id == job.id:
+            raise RuntimeError("interrupted before storage queue creation")
+        return await original_create(self, entity)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(EntityClient, "create", create)
+        with pytest.raises(RuntimeError, match="interrupted before storage queue creation"):
+            h.tick(job)
+    assert job.attempt_id is not None
+    assert store.get_by_id(HelixJobAttempt, job.attempt_id).status_details["storage_reclaimed_at"]
+    assert not store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+    h.tick(job)
+    assert len(store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data) == 1
+    reclaim = Mock(return_value=True)
+    _mock_storage_cleanup_for_job(job, backend_registry, monkeypatch, reclaim)
+    controller._reclaim_queued_storage()
+    h.tick(job)
+    controller._reclaim_queued_storage()
+    reclaim.assert_called_once()
+
+
+def test_workflow_storage_cleanup_survives_lost_completion_response(
+    workflow_harness: WorkflowHarness,
+    backend_registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    h = workflow_harness
+    job, store, controller = _workflow_pending_storage_cleanup(h, backend_registry, monkeypatch)
+    h.tick(job)
+    original_update = store.update
+    interrupted = False
+
+    def update[EntityT: EntityBase](entity: EntityT, *, original_name: str | None = None) -> EntityT:
+        nonlocal interrupted
+        saved = original_update(entity, original_name=original_name)
+        if isinstance(entity, HelixJobStorageReclaim) and entity.job_id == job.id and entity.targets == []:
+            interrupted = True
+            raise RuntimeError("lost completed cleanup response")
+        return saved
+
+    reclaim = Mock(return_value=True)
+    _mock_storage_cleanup_for_job(job, backend_registry, monkeypatch, reclaim)
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "update", update)
+        controller._reclaim_queued_storage()
+    assert interrupted
+    h.tick(job)
+    restarted = JobReconciler(backend_registry, h.context.client, system_entity_client=store)
+    restarted._reclaim_queued_storage()
+    receipts = store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+    assert len(receipts) == 1 and receipts[0].targets == []
+    reclaim.assert_called_once()
+
+
+def test_workflow_storage_cleanup_preserves_pending_backend_work(
+    workflow_harness: WorkflowHarness,
+    backend_registry: BackendRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    h = workflow_harness
+    job, store, controller = _workflow_pending_storage_cleanup(h, backend_registry, monkeypatch)
+    h.tick(job)
+    reclaim = Mock(side_effect=[False, True, AssertionError("completed cleanup restarted")])
+    _mock_storage_cleanup_for_job(job, backend_registry, monkeypatch, reclaim)
+    controller._reclaim_queued_storage()
+    pending = store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": job.id}).data
+    assert len(pending) == 1 and pending[0].targets
+    h.tick(job)
+    controller._reclaim_queued_storage()
+    h.tick(job)
+    controller._reclaim_queued_storage()
+    assert reclaim.call_count == 2
