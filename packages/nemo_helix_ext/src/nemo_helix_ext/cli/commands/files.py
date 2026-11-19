@@ -388,10 +388,14 @@ def create_filesets(
         [bold red]Required fields:[/] name
 
         [green]Examples:[/]
-        nemo files filesets create <name> --input-file config.json
-        nemo files filesets create <name> --input-data '{"name": "value"}'
-        echo '{"json": "data"}' | nemo files filesets create <name> --input-file -
-        nemo files filesets create <name> --<option> "value"
+        [dim]# Create a dataset fileset with a description[/]
+        nemo files filesets create my-fileset --purpose dataset --description "Training data"
+        [dim]# Pass the same fields as JSON[/]
+        nemo files filesets create my-fileset --input-data '{"purpose": "dataset", "description": "Training data"}'
+        [dim]# Read the fields from stdin[/]
+        echo '{"purpose": "dataset"}' | nemo files filesets create my-fileset --input-file -
+        [dim]# Next, upload data into the new fileset[/]
+        nemo files upload ./data.csv my-fileset
     """
     input_payload = _read_input_payload(input_file, input_data)
 
