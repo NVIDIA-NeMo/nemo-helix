@@ -3,7 +3,6 @@
 
 """Describe each input and generated image using NVIDIA's hosted Nemotron 3.5 Super VL model."""
 
-import argparse
 import base64
 import json
 import os
@@ -50,28 +49,16 @@ def describe(path: Path, key: str) -> str:
     return caption.strip()
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--images", type=Path, required=True)
-    parser.add_argument("--edges", type=Path, required=True)
-    parser.add_argument("--montage", type=Path, required=True)
-    parser.add_argument("--captions", type=Path, required=True)
-    args = parser.parse_args()
-    key = os.environ.get("NVIDIA_API_KEY")
-    if not key:
-        parser.error("Set NVIDIA_API_KEY for the hosted vision model.")
+def describe_images(images: Path, edges: Path, montage: Path, captions: Path):
+    key = os.environ["NVIDIA_API_KEY"]
     records = []
-    for source, directory in (("images", args.images), ("edges", args.edges), ("montage", args.montage)):
+    for source, directory in (("images", images), ("edges", edges), ("montage", montage)):
         paths = sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"})
         if not paths:
-            parser.error(f"No images found in {directory}")
+            raise ValueError(f"No images found in {directory}")
         for path in paths:
             records.append({"source": source, "image": path.name, "model": MODEL, "caption": describe(path, key)})
-    args.captions.mkdir(parents=True, exist_ok=True)
-    (args.captions / "descriptions.json").write_text(json.dumps(records, indent=2) + "\n")
+    captions.mkdir(parents=True, exist_ok=True)
+    (captions / "descriptions.json").write_text(json.dumps(records, indent=2) + "\n")
     for record in records:
         print(f"{record['source']}/{record['image']}: {record['caption']}")
-
-
-if __name__ == "__main__":
-    main()

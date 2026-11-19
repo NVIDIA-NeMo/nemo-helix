@@ -1529,6 +1529,7 @@ nemo files filesets [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new fileset.
 * `delete`: Delete Fileset.
 * `list`: List Filesets endpoint with filtering and pagination.
+* `commit`: Assign a new commit revision to a FileSet and return the...
 * `refresh`: Re-resolve a fileset's tracked revision against its source.
 * `get`: Get Fileset by Workspace and Name.
 * `update`: Update Fileset Metadata.
@@ -1661,6 +1662,32 @@ Filter filesets by name, description, purpose, storage_type, created_at, and upd
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
 * `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 * `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+##### nemo files filesets commit
+
+Assign a new commit revision to a FileSet and return the updated FileSet.
+
+**Usage:**
+
+```shell
+nemo files filesets commit [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo files filesets refresh
 
