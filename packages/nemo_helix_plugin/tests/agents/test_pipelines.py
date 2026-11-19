@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -375,3 +376,28 @@ def test_parse_step_response() -> None:
     assert parse_step_response(text_step, '{"a": 1}') == '{"a": 1}'
     with pytest.raises(ValueError, match="not valid JSON"):
         parse_step_response(json_step, "not json")
+
+
+@pytest.mark.parametrize("path", ["/absolute", "../escape", "a/../escape", "a\\b", "a//b", "."])
+def test_response_artifact_rejects_unsafe_or_ambiguous_paths(path):
+    with pytest.raises(ValueError, match="relative file path"):
+        PipelineConfig.model_validate(_cfg({"name": "a", "agent": "x", "response_artifact": path}))
+
+
+def test_object_input_preserves_json_values_and_quotes():
+    pipeline = PipelineConfig.model_validate(
+        _cfg({"name": "a", "agent": "x", "input": {"ticket": "{{ inputs.input }}", "number": 7, "nested": [True]}})
+    )
+    prompt, _ = render_step(pipeline, 0, resolve_run_inputs(pipeline, {"input": 'quoted "value" {{ literal }}'}))
+    assert json.loads(prompt) == {"ticket": 'quoted "value" {{ literal }}', "number": 7, "nested": [True]}
+
+
+def test_object_input_validates_nested_references():
+    with pytest.raises(ValueError, match="Unknown input"):
+        PipelineConfig.model_validate(_cfg({"name": "a", "agent": "x", "input": {"nested": ["{{ inputs.missing }}"]}}))
+
+
+def test_expect_requires_json_and_response_path():
+    for condition in ({"path": "inputs.input", "equals": "x"}, {"path": "response.status", "equals": "ready"}):
+        with pytest.raises(ValueError):
+            PipelineConfig.model_validate(_cfg({"name": "a", "agent": "x", "expect": condition}))

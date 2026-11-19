@@ -108,8 +108,8 @@ contract exists, jobs retain their non-streaming invocation.
 A pipeline config (`pipeline.yaml`) runs registered agents one after another.
 Each step names an agent and the data it gets; the agent's own settings stay
 in its `agent.yaml`, and run settings (image, environment, timeout) are given
-when the pipeline runs. The `agents.pipeline` job does not read these configs
-yet. Full example: [examples/pipeline-configs/pr-pipeline.yaml](examples/pipeline-configs/pr-pipeline.yaml).
+when the pipeline runs. The `agents.pipeline` job resolves the stored definition
+at submission and runs each step as a separate execute-agent job. Full example: [examples/pipeline-configs/pr-pipeline.yaml](examples/pipeline-configs/pr-pipeline.yaml).
 
 ```yaml
 version: 1
@@ -136,6 +136,16 @@ steps:
 - A step without `input` gets the pipeline's single text input (first step) or
   `{{ previous.response }}`.
 - A step with `when` may be skipped, so later steps cannot reference it.
+- Object-valued `input` is rendered recursively, then serialized as JSON for the
+  agent. Whole placeholders preserve objects, arrays, and numbers.
+- `response_artifact` selects a UTF-8 file relative to the child job's
+  `output_workdir` (up to 4 MiB). Without it, the agent's final text is used.
+  `response_format: json` parses either source before the next handoff.
+- `expect` checks the parsed output, for example
+  `{path: response.status, equals: ready}`. A mismatch stops the pipeline.
+- `retries` applies only to child jobs with a known terminal error/failed status.
+  Timeouts, ambiguous submissions, malformed outputs, and failed `expect` checks
+  stop without retrying. Avoid retries for agents that publish external changes.
 - `context` is stored in plain text; do not put secrets in it.
 
 ```bash
@@ -145,6 +155,38 @@ nemo agents pipeline-configs create -f pipeline.yaml
 nemo agents pipeline-configs update email-triage -f pipeline.yaml   # replaces the stored config
 nemo agents pipeline-configs list | get <name> | delete <name>
 ```
+
+Run a stored config with inputs and separate execution settings:
+
+```yaml
+# run.yaml
+pipeline: email-triage
+inputs:
+  email: "Please check this message."
+step_defaults:
+  timeout_seconds: 300
+  wait_timeout_seconds: 1800
+step_overrides:
+  reply:
+    timeout_seconds: 600
+```
+
+```bash
+nemo agents pipeline --workspace my-workspace --spec-file run.yaml
+```
+
+`pipeline` accepts a stored name, `workspace/name`, or an inline definition.
+`image` selects the orchestrator image; `step_defaults` and `step_overrides`
+select each child's image, profile, environment, run timeout, and wait budget
+(including scheduling and artifact upload). Omitted override fields inherit the
+defaults. The server and orchestrator image must include this runner version.
+Timeouts and task interruption attempt to cancel the active child. The
+`pipeline_result` job artifact records child IDs, responses, skips, and failures,
+including partial progress if a step fails. Legacy `--task` runs retain the
+original fixed `pr-planner` → `pr-writer` → `pr-reviewer` text flow.
+
+See [the PR pipeline](examples/pr-pipeline/README.md#run-the-pipeline-locally)
+for a complete Deep Agents → Codex → Pi example with file-based handoffs.
 
 ### Prerequisites
 

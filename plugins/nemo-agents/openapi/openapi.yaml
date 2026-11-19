@@ -6847,6 +6847,38 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PipelineInline:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Pipeline format version (1).
+        description:
+          type: string
+          title: Description
+          description: What the pipeline does.
+          default: ''
+        inputs:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineInputParam'
+          type: object
+          title: Inputs
+          description: Named inputs a run supplies, referenced as {{ inputs.<name>
+            }}.
+        steps:
+          items:
+            $ref: '#/components/schemas/PipelineStepConfig'
+          type: array
+          title: Steps
+          description: Steps to run, in order.
+      additionalProperties: true
+      type: object
+      required:
+      - version
+      - steps
+      title: PipelineInline
+      description: 'A pipeline config without entity identity: the body of ``pipeline.yaml``
+        minus ``name``.'
     PipelineInputParam:
       properties:
         type:
@@ -7020,21 +7052,45 @@ components:
       title: PipelineJobAttemptsPage
     PipelineJobConfig:
       properties:
-        task:
+        pipeline:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to PipelineInline.
+          - $ref: '#/components/schemas/PipelineInline'
+          title: Pipeline
+          description: Stored pipeline name/workspace ref, or inline definition.
+        inputs:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: string
+          title: Inputs
+        image:
           type: string
+          title: Image
+          description: Image for the pipeline orchestrator, containing this runner.
+          default: ''
+        step_defaults:
+          $ref: '#/components/schemas/PipelineStepRunOptions'
+        step_overrides:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineStepRunOptions'
+          type: object
+          title: Step Overrides
+        task:
           title: Task
-          description: Programming task description. It is the planner's input.
+          description: Legacy task-only PR pipeline; mutually exclusive with pipeline.
+          type: string
         environment:
           title: Environment
-          description: AgentEnvironment ("workspace/name" ref) every step runs under.
-            Omit for none.
+          description: Legacy shared AgentEnvironment reference.
           type: string
+      additionalProperties: false
       type: object
-      required:
-      - task
       title: PipelineJobConfig
-      description: 'Input for ``agents.pipeline``: the task description (the agents
-        per role are hardcoded for now).'
+      description: A stored or inline pipeline, run inputs, and independently configurable
+        child jobs.
     PipelineJobRequest:
       properties:
         name:
@@ -7165,9 +7221,25 @@ components:
           title: Agent
           description: 'The registered Agent to run: ''name'' or ''workspace/name''.'
         input:
+          anyOf:
+          - type: string
+          - additionalProperties: true
+            type: object
           title: Input
-          description: Template for the agent's input.
+          description: Text template or JSON object of templates for the agent's input.
+        response_artifact:
+          title: Response Artifact
+          description: Optional relative file in output_workdir to use instead of
+            the final text response.
           type: string
+        expect:
+          title: Expect
+          description: Required output condition, evaluated against response, e.g.
+            response.status equals ready.
+          oneOf:
+          - $ref: '#/components/schemas/ConditionEquals'
+          - $ref: '#/components/schemas/ConditionNotEquals'
+          - $ref: '#/components/schemas/ConditionIn'
         context:
           additionalProperties: true
           type: object
@@ -7197,6 +7269,38 @@ components:
       - agent
       title: PipelineStepConfig
       description: One agent run in a pipeline.
+    PipelineStepRunOptions:
+      properties:
+        image:
+          type: string
+          title: Image
+          default: ''
+        environment:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to AgentEnvironmentInline.
+          - $ref: '#/components/schemas/AgentEnvironmentInline'
+          title: Environment
+        profile:
+          title: Profile
+          type: string
+        timeout_seconds:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Timeout Seconds
+          default: 600
+        wait_timeout_seconds:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Wait Timeout Seconds
+          description: Wait budget including scheduling and artifact upload.
+          default: 1800
+      additionalProperties: false
+      type: object
+      title: PipelineStepRunOptions
+      description: Execution settings supplied per run, separately from the reusable
+        pipeline definition.
     PipelineValidationResult:
       properties:
         valid:

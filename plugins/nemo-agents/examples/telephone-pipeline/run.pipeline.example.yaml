@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+pipeline: telephone-game
+image: pr-compose-pipeline:local
+inputs:
+  sentence: The sleepy baker carried seven purple pancakes to the train station.
+step_defaults:
+  image: pr-compose:local
+  profile: gpu
+  timeout_seconds: 180
+  wait_timeout_seconds: 600

@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+version: 1
+name: telephone-game
+description: Pass a sentence through five telephone players using plain-text handoffs.
+inputs:
+  sentence:
+    description: The sentence whispered to the first player.
+steps:
+  - name: player1
+    agent: telephone
+    input: "{{ inputs.sentence }}"
+  - name: player2
+    agent: telephone
+    input: "{{ previous.response }}"
+  - name: player3
+    agent: telephone
+    input: "{{ previous.response }}"
+  - name: player4
+    agent: telephone
+    input: "{{ previous.response }}"
+  - name: player5
+    agent: telephone
+    input: "{{ previous.response }}"

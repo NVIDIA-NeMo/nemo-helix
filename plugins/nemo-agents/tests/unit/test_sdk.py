@@ -804,3 +804,26 @@ def test_execute_job_list_rejects_malformed_agent_ref(ref: str) -> None:
 
     with pytest.raises(ValueError, match="invalid entity reference"):
         AgentsResource(_client(handler)).jobs.execute.list(agents=[ref])
+
+
+def test_execute_job_profile_is_a_submission_field():
+    captured = {}
+
+    def handler(req):
+        captured.update(_read_json(req))
+        return httpx.Response(201, json={"name": "child"})
+
+    AgentsResource(_client(handler)).jobs.execute.create(spec={"agent": "writer"}, profile="gpu")
+    assert captured["profile"] == "gpu"
+    assert "profile" not in captured["spec"]
+
+
+def test_execute_job_cancel_uses_job_route():
+    captured = []
+
+    def handler(req):
+        captured.append((req.method, req.url.path))
+        return httpx.Response(200, json={"name": "child", "status": "cancelled"})
+
+    AgentsResource(_client(handler)).jobs.execute.cancel("child")
+    assert captured == [("POST", "/apis/agents/v2/workspaces/team-a/jobs/execute/child/cancel")]
