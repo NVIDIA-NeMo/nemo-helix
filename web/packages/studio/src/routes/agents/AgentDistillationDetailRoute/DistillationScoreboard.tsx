@@ -25,7 +25,7 @@ const TONE_CLASSES: Record<Delta['tone'], string> = {
   error: 'text-feedback-danger',
 };
 
-const usd = (value: number): string => `$${value.toFixed(2)}`;
+const usd = (value: number | null): string => (value === null ? '—' : `$${value.toFixed(2)}`);
 
 /** All models side by side, one row per metric, each value with its change against the baseline. */
 export const DistillationScoreboard: FC<DistillationScoreboardProps> = ({ arms }) => {

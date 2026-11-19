@@ -21,6 +21,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
   useCancelDistillation,
+  useDistillationArmMetrics,
   useDistillationWorkflow,
   usePromoteDistillation,
   useRetryDistillationNode,
@@ -56,6 +57,7 @@ export const AgentDistillationDetailRoute: FC = () => {
   const cancel = useCancelDistillation(workspace, distillationName);
   const retry = useRetryDistillationNode(workspace, distillationName);
   const promote = usePromoteDistillation(workspace);
+  const armMetrics = useDistillationArmMetrics(workspace, workflow);
   const [chosenTab, setChosenTab] = useState<DistillationTab | undefined>();
   const wasRunning = useRef(false);
   const status = workflow?.status;
@@ -189,7 +191,7 @@ export const AgentDistillationDetailRoute: FC = () => {
           </Stack>
         </TabsContent>
         <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="results">
-          <DistillationResultsTab status={workflow.status} arms={toArms(workflow)} />
+          <DistillationResultsTab status={workflow.status} arms={toArms(workflow, armMetrics.data)} />
         </TabsContent>
       </DetailPageLayout>
     </AccessibleTitle>

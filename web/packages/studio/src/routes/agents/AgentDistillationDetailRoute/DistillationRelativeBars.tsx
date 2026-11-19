@@ -25,7 +25,8 @@ export interface DistillationRelativeBarsProps {
   arms: MockArmResult[];
 }
 
-const percentOf = (value: number, reference: number): number => Math.round((value / reference) * 100);
+const percentOf = (value: number | null, reference: number | null): number | undefined =>
+  value === null || reference === null ? undefined : Math.round((value / reference) * 100);
 
 /** Score, cost and latency of each model as a percentage of the original agent. */
 export const DistillationRelativeBars: FC<DistillationRelativeBarsProps> = ({ arms }) => {
