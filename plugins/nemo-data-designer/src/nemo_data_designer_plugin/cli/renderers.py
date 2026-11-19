@@ -205,6 +205,8 @@ class PreviewRenderer(CLIRenderer):
         sample_records_dir.mkdir(parents=True, exist_ok=True)
 
         df.to_parquet(results_dir / "dataset.parquet")
+        # A CSV copy opens in a spreadsheet without extra tooling.
+        df.to_csv(results_dir / "dataset.csv", index=False)
 
         analysis = self._analysis
         if analysis is not None and hasattr(analysis, "to_report"):
@@ -225,6 +227,7 @@ class PreviewRenderer(CLIRenderer):
         )
 
         console.print(f"  [bold]Results path:[/bold] {results_dir}")
+        console.print(f"  [bold]CSV path:[/bold] {results_dir / 'dataset.csv'}")
         console.print(f"  [bold]Browser path:[/bold] {sample_records_dir / PAGER_FILENAME}")
 
     @staticmethod
