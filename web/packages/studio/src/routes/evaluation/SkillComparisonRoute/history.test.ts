@@ -231,6 +231,28 @@ describe('loadSavedComparison', () => {
     expect(customFetch).not.toHaveBeenCalled();
   });
 
+  it('loads a trial with no reward and preserves its execution failure', async () => {
+    vi.mocked(evalsListAgentEvaluateJobs).mockResolvedValue({ data: [] });
+    vi.mocked(evalsGetTasksetRunTask).mockImplementation(async (_workspace, id) => ({
+      task: 'task-0',
+      task_index: 0,
+      phase: 'succeeded',
+      trials: [
+        {
+          trial: id,
+          phase: 'errored',
+          error_type: 'RewardFileNotFoundError',
+          error: 'No reward file found.',
+        },
+      ],
+    }));
+    const result = await loadSavedComparison('default', control, variant);
+    expect(result.arms['with-skill']).toMatchObject({
+      reward: null,
+      evidence_error: 'No reward file found.',
+    });
+  });
+
   it('keeps matching scoring replays when both runs retain one', async () => {
     vi.mocked(evalsListAgentEvaluateJobs).mockResolvedValue({
       data: [replay('control'), replay('variant')],

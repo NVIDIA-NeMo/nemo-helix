@@ -47,11 +47,6 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
     setError(undefined);
     const linkedId = run.baseline_run_id;
     if (!linkedId) {
-      setBaseline((current) =>
-        current?.taskset_ref === run.taskset_ref && current.run_id !== run.run_id
-          ? current
-          : undefined
-      );
       return;
     }
     setBaseline(undefined);
@@ -78,6 +73,13 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
       setLoading(false);
     }
   };
+  const selectionIssue = (() => {
+    if (!baseline || !treatment) return 'Choose a Control and a Variant to load a comparison.';
+    if (baseline.run_id === treatment.run_id) return 'Choose two different runs.';
+    if (baseline.taskset_ref !== treatment.taskset_ref)
+      return 'These runs use different taskset revisions. Choose runs with the same revision.';
+    return null;
+  })();
   const load = async () => {
     if (!baseline || !treatment) return;
     setLoading(true);
@@ -137,7 +139,18 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
                   run.run_id,
                   new Date(run.accepted_at).toLocaleString(),
                   {
-                    children: <span title={run.taskset_ref}>{run.taskset_ref.split('#')[0]}</span>,
+                    children: (
+                      <Stack gap="1">
+                        <Text>{run.taskset_ref.split('#')[0]}</Text>
+                        <Text
+                          kind="body/regular/sm"
+                          className="text-secondary"
+                          title={run.taskset_ref}
+                        >
+                          Revision {run.taskset_ref.split('#')[1]?.slice(0, 12)}
+                        </Text>
+                      </Stack>
+                    ),
                   },
                   {
                     children: (
@@ -171,18 +184,10 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
           {!loading && !runs.length && (
             <Text>No completed executions with retained results were found.</Text>
           )}
+          {!loading && selectionIssue && <Text role="status">{selectionIssue}</Text>}
           <Flex justify="end">
-            <Button
-              disabled={
-                loading ||
-                !baseline ||
-                !treatment ||
-                baseline.run_id === treatment.run_id ||
-                baseline.taskset_ref !== treatment.taskset_ref
-              }
-              onClick={() => void load()}
-            >
-              Load Comparison
+            <Button disabled={loading || !!selectionIssue} onClick={() => void load()}>
+              {loading ? 'Loading Comparison…' : 'Load Comparison'}
             </Button>
           </Flex>
         </Stack>

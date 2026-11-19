@@ -179,7 +179,7 @@ export const SkillComparisonRoute = () => {
                   <Flex key={name} gap="density-md" align="center">
                     <Text className="text-secondary">{ARM_LABELS[name]}</Text>
                     <Text kind="title/sm" className="tabular-nums">
-                      {report.arms[name].reward.toFixed(2)}
+                      {report.arms[name].reward?.toFixed(2) ?? 'Unmeasured'}
                     </Text>
                     <Text kind="body/regular/sm" className="text-secondary">
                       {report.synthetic_demo ? 'example task reward' : 'task reward'}
