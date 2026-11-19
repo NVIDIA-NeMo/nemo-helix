@@ -85,6 +85,7 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
         id="user:alice",
         email="alice@example.test",
         groups=["workspace-editors"],
+        account_id="account-alice",
         authz_aliases=["legacy-alice"],
     )
 
@@ -96,6 +97,7 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     assert resolved.principal.on_behalf_of == "user:alice"
     assert resolved.principal.on_behalf_of_email == "alice@example.test"
     assert resolved.principal.on_behalf_of_groups == ["workspace-editors"]
+    assert resolved.principal.on_behalf_of_account_id == "account-alice"
     assert resolved.principal.on_behalf_of_authz_aliases == ["user:alice", "alice@example.test", "legacy-alice"]
 
 

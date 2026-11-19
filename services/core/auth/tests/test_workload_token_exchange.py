@@ -28,6 +28,7 @@ from nhx.common.auth.workload_delegations import (
     kubernetes_pod_uid_delegation_name,
     reference_delegation_name,
 )
+from nhx.common.auth.workload_tokens import resolve_workload_access_token
 from nhx.common.config import AuthConfig, Configuration
 from nhx.common.config.base import AccessKeyConfig, OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 from nhx.common.entities import SYSTEM_WORKSPACE, EntityNotFoundError
@@ -1038,7 +1039,13 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     entity_client: _FakeEntityClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    delegation = _reference_delegation_entity()
+    creator = Principal(
+        id="creator@example.com",
+        email="creator@example.com",
+        account_id="account-creator",
+        authz_aliases=["legacy-creator"],
+    )
+    delegation = _reference_delegation_entity(auth_context=PluginAuthContext.from_principal(creator))
     entity_client.entities[delegation.name] = delegation
 
     async def decode_subject_token(
@@ -1064,6 +1071,13 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
         "sub": "system:serviceaccount:nemo-runs:job-runner",
         "groups": "system:serviceaccounts",
     }
+    resolved = asyncio.run(resolve_workload_access_token(exchange_config, response.json()["access_token"]))
+    assert resolved is not None
+    principal = resolved.principal
+    assert principal.on_behalf_of_account_id == creator.account_id
+    assert principal.on_behalf_of_authz_aliases == [creator.id, "legacy-creator"]
+    assert principal.account_id is None
+    assert principal.authz_aliases == ["system:serviceaccount:nemo-runs:job-runner"]
 
 
 def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_row(

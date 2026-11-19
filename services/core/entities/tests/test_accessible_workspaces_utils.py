@@ -147,8 +147,24 @@ async def cached_bindings_repository() -> AsyncIterator[tuple[AsyncMock, dict[st
         (Principal(id=TEST_PRINCIPAL, groups=["test-group"]), "test-group"),
         (Principal(id=TEST_PRINCIPAL), "*"),
         (Principal(id="service:agents", on_behalf_of=TEST_PRINCIPAL), TEST_PRINCIPAL),
+        (
+            Principal(
+                id="system:serviceaccount:test:jobs",
+                on_behalf_of=TEST_PRINCIPAL,
+                on_behalf_of_account_id="account-creator",
+            ),
+            "account-creator",
+        ),
+        (
+            Principal(
+                id="system:serviceaccount:test:jobs",
+                on_behalf_of=TEST_PRINCIPAL,
+                on_behalf_of_authz_aliases=["legacy-creator"],
+            ),
+            "legacy-creator",
+        ),
     ],
-    ids=["id", "email", "group", "wildcard", "on-behalf-of"],
+    ids=["id", "email", "group", "wildcard", "on-behalf-of", "delegated-account", "delegated-alias"],
 )
 async def test_workspace_access_refreshes_stale_denial(
     cached_bindings_repository, workspace_auth: AuthClient, principal: Principal, binding_principal: str

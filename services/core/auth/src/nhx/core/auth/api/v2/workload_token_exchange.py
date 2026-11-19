@@ -760,6 +760,10 @@ def _build_delegated_claims(
         claims["email"] = delegated_principal.email
     if delegated_principal.groups:
         claims["groups"] = ",".join(delegated_principal.groups)
+    if delegated_principal.account_id:
+        claims["nhx_subject_account_id"] = delegated_principal.account_id
+    if delegated_principal.authz_aliases:
+        claims["nhx_subject_aliases"] = delegated_principal.authz_aliases
 
     actor_claims: dict[str, Any] = {"sub": verified_subject.subject}
     if verified_subject.groups:
