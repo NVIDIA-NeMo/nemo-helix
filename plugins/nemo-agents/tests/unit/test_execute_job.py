@@ -3301,6 +3301,33 @@ def test_a_stored_pre_rename_kind_reads_back_as_written() -> None:
     assert step_config.request.post_run_action == PostRunActionConfig(kind="noop")
 
 
+@pytest.mark.parametrize("kind", ["noop", "agents.noop"])
+def test_run_resolves_old_and_current_noop_to_the_installed_action(ctx: JobContext, kind: str) -> None:
+    legacy = _legacy_step_spec(kind)
+    snapshot = json.loads(json.dumps(legacy))
+    with patch(
+        "nemo_agents_plugin.jobs.execute.FabricDirectories.create",
+        side_effect=RuntimeError("past-action-validation"),
+    ) as create:
+        with pytest.raises(RuntimeError, match="past-action-validation"):
+            ExecuteAgentJob().run(legacy, ctx=ctx)
+    create.assert_called_once()
+    assert legacy == snapshot
+
+
+@pytest.mark.parametrize(
+    ("kind", "config", "error"),
+    [("noop", {"unexpected": True}, "Invalid config"), ("removed.action", {}, "Unknown post-run action")],
+)
+def test_runtime_noop_compatibility_does_not_accept_invalid_or_unknown_actions(
+    ctx: JobContext, kind: str, config: dict[str, Any], error: str
+) -> None:
+    with patch("nemo_agents_plugin.jobs.execute.FabricDirectories.create") as create:
+        with pytest.raises(ValueError, match=error):
+            ExecuteAgentJob().run(_legacy_step_spec(kind, config), ctx=ctx)
+    create.assert_not_called()
+
+
 def test_translating_a_stored_record_leaves_the_record_untouched() -> None:
     legacy = _legacy_step_spec("noop")
     snapshot = json.loads(json.dumps(legacy))

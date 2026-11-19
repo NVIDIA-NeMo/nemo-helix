@@ -609,11 +609,17 @@ class ExecuteAgentJob(NemoJob):
         # image can differ, and a stored job can outlive the plugin that provided
         # its action. Resolve it, and validate its config against this image's
         # version of the action, before the agent spends any time or tokens.
+        # Older API servers snapshot the built-in no-op under its former
+        # unqualified kind. Preserve that snapshot when reading job history,
+        # but execute it using the current built-in action registration.
+        action_kind = (
+            NOOP_POST_RUN_ACTION_KIND
+            if step_config.post_run_action.kind == "noop"
+            else step_config.post_run_action.kind
+        )
         try:
-            post_run_action = resolve_post_run_action(step_config.post_run_action.kind)
-            validate_post_run_action_config(
-                step_config.post_run_action.kind, step_config.post_run_action.config, action=post_run_action
-            )
+            post_run_action = resolve_post_run_action(action_kind)
+            validate_post_run_action_config(action_kind, step_config.post_run_action.config, action=post_run_action)
         except Exception as exc:
             # Missing, conflicting, failing to import, or rejecting this config:
             # all mean the action cannot run, so all get the same actionable message.
