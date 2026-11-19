@@ -494,7 +494,7 @@ class TestSubmitting:
             ),
             (
                 "/bot:pa\\ss@reg/team",
-                f"Value error, invalid repository path: {'bot:pa\\ss@reg/team'!r}",
+                "Value error, invalid repository path: " + repr("bot:pa\\ss@reg/team"),
                 "Value error, invalid repository path: <the value>",
             ),
             # A value too short to be anything but a word of the sentence is left where it is.
