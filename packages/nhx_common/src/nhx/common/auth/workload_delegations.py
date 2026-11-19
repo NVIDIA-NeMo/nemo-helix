@@ -35,6 +35,9 @@ from nemo_helix_plugin.auth.workload_delegations import (
     SyncWorkloadDelegationStore as SyncWorkloadDelegationStore,
 )
 from nemo_helix_plugin.auth.workload_delegations import (
+    WorkloadDelegationAlreadyActiveError as WorkloadDelegationAlreadyActiveError,
+)
+from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationConflictError as WorkloadDelegationConflictError,
 )
 from nemo_helix_plugin.auth.workload_delegations import (

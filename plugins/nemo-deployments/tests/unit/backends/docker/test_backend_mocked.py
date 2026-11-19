@@ -54,6 +54,7 @@ from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationEntity,
     WorkloadDelegationLookupScope,
     WorkloadDelegationScope,
+    WorkloadDelegationValidationError,
     parse_opaque_docker_proof_token,
     verify_opaque_docker_proof_token_hash,
 )
@@ -92,11 +93,17 @@ def _workload_identity_config(*, token_expiration_seconds: int = 900) -> Deploym
 
 def _workload_store() -> MagicMock:
     store = MagicMock()
-    store.register = AsyncMock()
-    store.revoke = AsyncMock()
-    store.revoke_by_workload = AsyncMock(return_value=[])
+
+    def save(entity: WorkloadDelegationEntity, *, require_opaque_subject_token_hash: bool) -> WorkloadDelegationEntity:
+        saved = entity.model_copy()
+        saved._id = "workload-delegation-test"
+        return saved
+
+    store.register = AsyncMock(side_effect=save)
+    store.revoke_by_id = AsyncMock()
+    store.revoke_by_workload = AsyncMock(return_value=None)
     store.list_by_workload = AsyncMock(return_value=[])
-    store.update = AsyncMock()
+    store.renew = AsyncMock()
     return store
 
 
@@ -114,7 +121,9 @@ def _docker_workload_delegation(*, expires_in_seconds: int) -> WorkloadDelegatio
         ttl_seconds_active=900,
     )
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
-    return delegation.model_copy(update={"expires_at": expires_at})
+    saved = delegation.model_copy(update={"expires_at": expires_at})
+    saved._id = "grant-server"
+    return saved
 
 
 def test_init_raises_missing_dependency_when_docker_daemon_unavailable(mock_client: MagicMock) -> None:
@@ -422,9 +431,8 @@ async def test_create_one_shot_recreate_cleans_prior_workload_identity_before_re
 
     async def revoke_by_workload(
         scope: WorkloadDelegationLookupScope,
-    ) -> list[WorkloadDelegationEntity]:
+    ) -> None:
         order.append("revoke")
-        return []
 
     def list_volumes(*, filters: dict[str, list[str]]) -> list[MagicMock]:
         order.append("cleanup-volumes")
@@ -434,8 +442,11 @@ async def test_create_one_shot_recreate_cleans_prior_workload_identity_before_re
         delegation: WorkloadDelegationEntity,
         *,
         require_opaque_subject_token_hash: bool,
-    ) -> None:
+    ) -> WorkloadDelegationEntity:
         order.append("register")
+        saved = delegation.model_copy()
+        saved._id = "workload-delegation-test"
+        return saved
 
     workload_store.revoke_by_workload.side_effect = revoke_by_workload
     workload_store.register.side_effect = register_delegation
@@ -637,7 +648,7 @@ async def test_refresh_workload_identity_delegation_skips_distant_expiry(
 
     await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
 
-    workload_store.update.assert_not_awaited()
+    workload_store.renew.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -656,18 +667,19 @@ async def test_refresh_workload_identity_delegation_extends_near_expiry(
     with patch.object(docker_backend, "_write_workload_identity_subject_token", writer):
         await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
 
-    workload_store.update.assert_awaited_once()
-    updated = workload_store.update.await_args.args[0]
-    assert workload_store.update.await_args.kwargs == {"expected_db_version": delegation.db_version}
-    assert updated.expires_at > original_expires_at
-    assert updated.opaque_subject_token_hash != original_hash
+    workload_store.renew.assert_awaited_once()
+    renewed_args = workload_store.renew.await_args
+    assert renewed_args.args == (delegation.id,)
+    assert renewed_args.kwargs["expected_db_version"] == delegation.db_version
+    assert renewed_args.kwargs["expires_at"] > original_expires_at
+    assert renewed_args.kwargs["opaque_subject_token_hash"] != original_hash
     writer.assert_awaited_once()
     await_args = writer.await_args
     assert await_args is not None
     written_token = await_args.args[1]
     parsed = parse_opaque_docker_proof_token(written_token)
     assert parsed.delegation_name == delegation.name
-    assert verify_opaque_docker_proof_token_hash(parsed.secret, updated.opaque_subject_token_hash)
+    assert verify_opaque_docker_proof_token_hash(parsed.secret, renewed_args.kwargs["opaque_subject_token_hash"])
 
 
 @pytest.mark.asyncio
@@ -685,7 +697,7 @@ async def test_refresh_workload_identity_delegation_handles_naive_expiry(
     with patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()):
         await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
 
-    workload_store.update.assert_awaited_once()
+    workload_store.renew.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -695,6 +707,7 @@ async def test_refresh_workload_identity_delegation_continues_after_row_failure(
     config = _workload_identity_config()
     first = _docker_workload_delegation(expires_in_seconds=60)
     second = _docker_workload_delegation(expires_in_seconds=60).model_copy(update={"workload_generation": "worker"})
+    second._id = "grant-worker"
     workload_store = _workload_store()
     workload_store.list_by_workload.return_value = [first, second]
     docker_backend._workload_delegations = workload_store
@@ -704,8 +717,8 @@ async def test_refresh_workload_identity_delegation_continues_after_row_failure(
         await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
 
     assert writer.await_count == 2
-    workload_store.update.assert_awaited_once()
-    assert workload_store.update.await_args.args[0].workload_generation == "worker"
+    workload_store.renew.assert_awaited_once()
+    assert workload_store.renew.await_args.args == (second.id,)
 
 
 @pytest.mark.asyncio
@@ -716,14 +729,14 @@ async def test_refresh_workload_identity_delegation_skips_stale_conflict(
     delegation = _docker_workload_delegation(expires_in_seconds=60)
     workload_store = _workload_store()
     workload_store.list_by_workload.return_value = [delegation]
-    workload_store.update.side_effect = WorkloadDelegationConflictError("stale")
+    workload_store.renew.side_effect = WorkloadDelegationConflictError("stale")
     docker_backend._workload_delegations = workload_store
 
     with patch.object(docker_backend, "_write_workload_identity_subject_token", AsyncMock()):
         await docker_backend._refresh_workload_delegations_for_config(workspace="default", name="srv", config=config)
 
-    workload_store.update.assert_awaited_once()
-    assert workload_store.update.await_args.kwargs == {"expected_db_version": delegation.db_version}
+    workload_store.renew.assert_awaited_once()
+    assert workload_store.renew.await_args.kwargs["expected_db_version"] == delegation.db_version
 
 
 @pytest.mark.asyncio
@@ -2438,3 +2451,39 @@ def test_build_run_kwargs_sizes_dev_shm(
         network=None,
     )
     assert run_kwargs.get("shm_size") == expected
+
+
+@pytest.mark.asyncio
+async def test_cleanup_prepared_identity_revokes_exact_saved_grant(docker_backend: DockerDeploymentBackend) -> None:
+    store = _workload_store()
+    docker_backend._workload_delegations = store
+    with patch.object(docker_backend, "_remove_workload_identity_volume", new_callable=AsyncMock) as remove:
+        await docker_backend._cleanup_prepared_workload_identity(("old-volume", "old-grant"), reason="failed start")
+    store.revoke_by_id.assert_awaited_once_with("old-grant")
+    remove.assert_awaited_once_with("old-volume")
+
+
+@pytest.mark.asyncio
+async def test_audience_change_requires_recreation_before_proof_write(docker_backend: DockerDeploymentBackend) -> None:
+    config = _workload_identity_config()
+    delegation = _docker_workload_delegation(expires_in_seconds=60)
+    old_hash = delegation.opaque_subject_token_hash
+    old_expiry = delegation.expires_at
+    store = _workload_store()
+    docker_backend._workload_delegations = store
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.docker.backend.get_workload_delegation_audience",
+            return_value="new-audience",
+        ),
+        patch.object(docker_backend, "_write_workload_identity_subject_token", new_callable=AsyncMock) as writer,
+        pytest.raises(WorkloadDelegationValidationError, match="recreate the deployment"),
+    ):
+        await docker_backend._refresh_docker_workload_delegation(
+            workspace="default", name="srv", config=config, delegation=delegation, now=datetime.now(timezone.utc)
+        )
+    writer.assert_not_awaited()
+    store.renew.assert_not_awaited()
+    assert delegation.workload_audience == "nemo-helix"
+    assert delegation.opaque_subject_token_hash == old_hash
+    assert delegation.expires_at == old_expiry
