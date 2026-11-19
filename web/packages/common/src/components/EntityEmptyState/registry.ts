@@ -50,6 +50,12 @@ export type { EntityKey };
  * onto {@link EntityEmptyState}.
  */
 export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescriptor> = {
+  skillComparisons: {
+    heading: 'No comparison report loaded',
+    subheading:
+      'Import a Harbor skill evaluation report to compare results and inspect per-trial evidence.',
+    createAction: { label: 'Import Report' },
+  },
   guardrails: {
     heading: 'No guardrail configs yet',
     subheading:

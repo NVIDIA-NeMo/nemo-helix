@@ -434,6 +434,9 @@ export const getNewFilesetRoute = (workspace: string) => {
 export const getTasksRoute = (workspace: string) =>
   generatePath(ROUTES.workspace.tasks, { workspace });
 
+export const getSkillComparisonsRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.skillComparisons, { workspace });
+
 /** A task's page; a tab other than the first gets its own path segment. */
 export const getTaskDetailRoute = (workspace: string, taskName: string, tab?: TaskDetailTab) =>
   tab && tab !== TASK_DETAIL_TABS[0].value

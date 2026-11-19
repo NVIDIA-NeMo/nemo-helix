@@ -84,6 +84,7 @@ export const ENTITY_ICONS = {
   experiments: Beaker,
   insightExperiments: Beaker,
   evalComparison: ScmCompare,
+  skillComparisons: ScmCompare,
   // A taskset is the stored group of tasks an evaluation run scores.
   tasksets: Collection,
   // A task is one scored unit of work: an instruction plus how it is graded.

@@ -90,6 +90,7 @@ export const ROUTES = {
     evaluationBenchmarks: `/workspaces/:${P.workspace}/evaluation/benchmarks`,
     evaluationBenchmarkDetails: `/workspaces/:${P.workspace}/evaluation/benchmarks/:${P.benchmarkName}`,
     evaluationResults: `/workspaces/:${P.workspace}/evaluation/results`,
+    skillComparisons: `/workspaces/:${P.workspace}/evaluation/skill-comparisons`,
     /** Read-only taskset library (gated by VITE_FF_TASKSETS_ENABLED). */
     tasksets: `/workspaces/:${P.workspace}/evaluation/tasksets`,
     tasksetDetail: `/workspaces/:${P.workspace}/evaluation/tasksets/:${P.tasksetName}`,
