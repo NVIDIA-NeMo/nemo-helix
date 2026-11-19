@@ -76,13 +76,16 @@ class RemoteConfig(BaseModel):
 
     registry: str | None = Field(
         default=None,
-        description="Host of the registry the service publishes every image to. Unset refuses every submit.",
+        description=(
+            "Host of the registry the service publishes every image to. Unset, with `backend: remote`, every "
+            "submit is refused."
+        ),
     )
     repository: str | None = Field(
         default=None,
         description=(
             "The one repository the service publishes to, in every workspace's name: an image is told apart by "
-            "its digest. Unset refuses every submit."
+            "its digest. Unset, with `backend: remote`, every submit is refused."
         ),
     )
     profile: str = Field(
@@ -295,7 +298,8 @@ class BuilderConfig(NemoConfig):
         try:
             return sorted({normalize_registry(host) for host in value})
         except ImageIdentityError as exc:
-            raise ValueError(f"import_registries must be registry hosts: {exc}") from exc
+            # Not the host it refused: a registry given with a login in it is a credential, and this is logged.
+            raise ValueError("import_registries must be registry hosts, such as `ghcr.io`") from exc
 
     # The push step's credentials: platform secrets in the submitting workspace, which Jobs reads as the
     # submitter and gives the push step as environment variables. A workspace without them can't build.

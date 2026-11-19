@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Completion: who may make a row ``ready``, and the one write that does, at the digest its push step pushed."""
+"""Completion: who may make a row ``ready``, and the one write that does, at the digest the step that built the
+image published."""
 
 from __future__ import annotations
 
@@ -163,7 +164,8 @@ async def complete(
         if external is not None and in_cluster:
             raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
         if not in_cluster and (external is None or external.build_id is None):
-            # Only the step that had a build service build it can name that build.
+            # Without it the row would be ready with no handle, and stay so: the step's own completion, at the
+            # same digest, would be answered with the row as it stands. Naming a build doesn't show who calls.
             raise CompletionConflict(f"{name} is built by a build service; its completion must name the build")
         if settled(row, digest, external):
             return row

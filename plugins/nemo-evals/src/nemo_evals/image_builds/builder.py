@@ -108,7 +108,8 @@ _REFUSALS = frozenset({CODE_BACKEND_REJECTED, CODE_MISSING_SECRETS})
 
 def _refuses_the_request(conflict: ConflictError) -> bool:
     """Whether Builder's 409 says so itself, by its ``code``."""
-    return isinstance(conflict.body, dict) and conflict.body.get("code") in _REFUSALS
+    code = conflict.body.get("code") if isinstance(conflict.body, dict) else None
+    return isinstance(code, str) and code in _REFUSALS
 
 
 async def ensure_build(
@@ -139,7 +140,11 @@ async def ensure_build(
             if _refuses_the_request(exc):
                 # Builder refuses the request itself, and would refuse it under any revision.
                 raise
-            logger.info("Builder holds %s-%d for another request; submitting the next revision", name, revision - 1)
+            logger.info(
+                "Builder holds %s-%d for another request, or another backend built it; submitting the next revision",
+                name,
+                revision - 1,
+            )
     return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform)
 
 

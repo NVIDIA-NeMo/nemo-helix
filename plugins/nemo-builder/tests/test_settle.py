@@ -13,6 +13,7 @@ import pytest
 from nemo_builder_plugin import settle as settle_module
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.remote import STEP_NAME as REMOTE_STEP_NAME
+from nemo_builder_plugin.remote import RemoteBackend
 from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, EndedJob, ended_job, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
@@ -333,7 +334,8 @@ class TestWhyAnEndedJobDidNotBuildIt:
         job = _job(log_tail=log_tail, message="Step build failed")
         job.steps[0].name = "build"
         assert ended_job(job) == EndedJob(HelixJobStatus.ERROR, {}, "Step build failed")
-        assert settle_module._REASON_STEP == REMOTE_STEP_NAME
+        # Spelt out in settle, so that the API never loads the backend or a step's program: kept the same here.
+        assert (settle_module._REASON_STEP, settle_module._REASON_BACKEND) == (REMOTE_STEP_NAME, RemoteBackend.name)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -370,29 +372,6 @@ class TestWhyAnEndedJobDidNotBuildIt:
         reasons = ended_job(_job(log_tail=log_tail)).reasons
         assert reasons["a"] == "second"
         assert len(reasons["b"]) == 500
-
-    def test_the_reason_is_read_from_a_log_kept_as_json_lines(self) -> None:
-        """As the subprocess executor hands it back, taken from a real run: each log line is the string that ends
-        a JSON object, so it is escaped, and the tail's first line is cut wherever 2,048 characters began."""
-        entry = (
-            '{"timestamp": "2026-11-17T18:49:31.454239+00:00", "job": "builder-demo-1", "job_step": "remote-build", '
-            '"job_task": "task-0a2d95345500482f9ebf86b172dfd158", "message": "[stderr] %s"}'
-        )
-        reason = 'the build service reports it failed: no package named \\"nosuchpkg\\" \\u2026 [build b-be6e0bc02e]'
-        log_tail = "\n".join(
-            [
-                # The cut first line: its opening is gone, and what follows the marker is whole.
-                '2d95345500482f9ebf86b172dfd158", "message": "[stderr] [ERROR] run.remote: NHX_BUILD_FAILED a: first"}',
-                entry % "[INFO] 2026-11-17 13:49:31,440 nemo_builder_plugin.run.remote: build b-be6e0bc02e: failed",
-                entry % f"[ERROR] 2026-11-17 13:49:31,446 nemo_builder_plugin.run.remote: NHX_BUILD_FAILED b: {reason}",
-                entry % "[INFO] 2026-11-17 13:49:31,446 nemo_builder_plugin.run.remote: 2 image(s), 2 failure(s)",
-                "",
-            ]
-        )
-        assert ended_job(_job(log_tail=log_tail, message="Job exited with code 1")).reasons == {
-            "a": "first",
-            "b": 'the build service reports it failed: no package named "nosuchpkg" … [build b-be6e0bc02e]',
-        }
 
     @pytest.mark.parametrize("inside", ["\x0c", "\u2028", "\x85", "\x1e"], ids=repr)
     def test_a_line_ends_at_a_newline_and_nowhere_else(self, inside: str) -> None:

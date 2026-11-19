@@ -92,9 +92,12 @@ FAILURE_MARKER = "NHX_BUILD_FAILED"
 MAX_REASON_CHARS = 400
 #: What of that end is left for a set's failure lines when they are logged again, last.
 TAIL_CHARS = 1800
-#: What surrounds a reason on its line: the logger's prefix, and what an executor wraps a log line in (the
-#: subprocess executor keeps each as a JSON object of its own).
-LINE_OVERHEAD = 280
+#: What surrounds a reason on its line: the logger's prefix (level, time and logger name, about 65 characters),
+#: the marker, and a little to spare. The executors that run the step keep its log lines as they are printed.
+LINE_OVERHEAD = 100
+#: The least room for a reason that makes a failure line worth logging again: a line cut to less says nothing,
+#: and settling reads the last line for an image.
+MIN_REASON_ROOM = 40
 #: The largest power of two a backoff counts up to; past it the wait is :data:`MAX_BACKOFF_SECONDS` anyway.
 _MAX_BACKOFF_EXPONENT = 6
 #: Why an image the job was told to stop building wasn't built.
@@ -188,7 +191,7 @@ class RemoteBuildService(Protocol):
 
         Safe to repeat: the driver asks again, a few times, when this raises :class:`RetryableError` or
         :class:`OverBudgetError`. It returns normally for a build that has already ended or been cancelled: any
-        error is taken to mean the build may still be running, and the image's row then says so.
+        error is taken to mean the build may still be running, and the image's failure line then says so.
         """
         ...
 
@@ -274,23 +277,31 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     stay inside what was unpacked, which may be more than this context: a service's packager that follows links
     would send a file from beside the context with it.
     """
+    if not context.is_dir():
+        raise ImageFailed("its build context is not a directory in what was fetched: its context path matches none")
     root = context.resolve()
     named = context / dockerfile
     source = named.resolve()
-    if not context.is_dir() or root not in source.parents or not source.is_file():
+    if root not in source.parents or not source.is_file():
         raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
     if (link := _link_out(context)) is not None:
         raise ImageFailed(f"the build context has a link that leads out of it: {link!r}")
     target = context / ROOT_DOCKERFILE
+    # Whether the spec names the root Dockerfile by its own path, however that path is spelt.
+    at_root = named.name == ROOT_DOCKERFILE and named.parent.resolve() == root
+    #: Whether the root Dockerfile is already the named file: nothing to copy, though under another name its
+    #: ignore file is another one.
+    same = False
     if not target.is_symlink():
         if target.is_dir():
             raise ImageFailed(
                 f"the build context has a directory named {ROOT_DOCKERFILE} at its root, where the build service "
                 "reads the Dockerfile"
             )
-        if target.is_file() and target.samefile(source):
+        same = target.is_file() and target.samefile(source)
+        if same and at_root:
             return context
-        if target.exists():
+        if target.exists() and not same:
             logger.warning(
                 "the context's own root %s is replaced by %s for this build",
                 ROOT_DOCKERFILE,
@@ -300,9 +311,10 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     if staged_ignore.is_dir() and not staged_ignore.is_symlink():
         raise ImageFailed(f"the build context has a directory named {staged_ignore.name} at its root")
     kept = ignore.read_bytes() if ignore.is_file() else None
-    # A link too: a service's packager may not follow one.
-    target.unlink(missing_ok=True)
-    shutil.copyfile(source, target)
+    if not same:
+        # A link too: a service's packager may not follow one.
+        target.unlink(missing_ok=True)
+        shutil.copyfile(source, target)
     staged_ignore.unlink(missing_ok=True)
     if kept is not None:
         staged_ignore.write_bytes(kept)
@@ -384,8 +396,12 @@ def _call(
             # Not one of the three: the service's client broke its contract, and a repeat would tell nothing.
             raise ImageFailed(f"{what}: unexpected {type(exc).__name__}: {exc}", maybe_called=True) from exc
         remaining = deadline - clock.monotonic()
-        if remaining <= 0 or (wait >= remaining and not at_the_deadline):
+        if remaining <= 0:
             raise ImageFailed(f"{what}: {failure}; still failing at the build timeout", maybe_called=lost) from failure
+        if wait >= remaining and not at_the_deadline:
+            raise ImageFailed(
+                f"{what}: {failure}; the build timeout leaves no time to try again", maybe_called=lost
+            ) from failure
         wait = min(wait, remaining)
         logger.warning("%s failed (%s); trying again in %.0fs", what, sanitize_for_log(str(failure)), wait)
         clock.sleep(wait)
@@ -485,15 +501,22 @@ def _wait(
         clock.sleep(min(POLL_SECONDS, remaining))
 
 
-def _handle(built: RemoteImage, build_id: str) -> ExternalImage:
+def _handle(built: RemoteImage, build_id: str, redact: Callable[[str], str]) -> ExternalImage:
     """What the row records of the service's own names for the image.
 
     The handle is taken whole or not at all. What the service merely reports about the build is cut to fit: a
-    long attribute must not cost an image that is built and published.
+    long attribute must not cost an image that is built and published. Every reader of the image reads these,
+    so the credential is taken out of them as it is out of a reason: a service may report a link that carries it.
     """
-    attributes = {str(key)[:128]: str(value)[:512] for key, value in list(built.attributes.items())[:32]}
+    attributes = {
+        redact(str(key))[:128]: redact(str(value))[:512] for key, value in list(built.attributes.items())[:32]
+    }
     try:
-        return ExternalImage(image_id=built.image_id or None, build_id=build_id or None, attributes=attributes)
+        return ExternalImage(
+            image_id=redact(built.image_id) if built.image_id else None,
+            build_id=redact(build_id) if build_id else None,
+            attributes=attributes,
+        )
     except ValidationError as exc:
         problems = "; ".join(f"{'.'.join(map(str, error['loc']))}: {error['msg']}" for error in exc.errors())
         raise ImageFailed(f"the build service's handle for the image can't be recorded ({problems})") from exc
@@ -545,6 +568,7 @@ def _build_one(
     clock: Clock,
     cancelled: Callable[[], bool],
     scratch: Path,
+    redact: Callable[[str], str],
 ) -> None:
     """Build ``image``. ``fetch`` puts its build context in ``scratch``, which is this image's alone."""
     try:
@@ -597,7 +621,8 @@ def _build_one(
         repository, _, digest = built.reference.rpartition("@")
         if repository != destination or not _DIGEST.fullmatch(digest):
             raise ImageFailed(f"the build service published {built.reference!r}, not a digest in {destination}")
-        done = _complete(builder, image.image, digest, _handle(built, build_id), clock=clock, cancelled=cancelled)
+        external = _handle(built, build_id, redact)
+        done = _complete(builder, image.image, digest, external, clock=clock, cancelled=cancelled)
         if done.status != "ready" or done.digest != digest:
             raise ImageFailed(f"the builder completed it as {done.status} at {done.digest}, not ready at {digest}")
     except ImageFailed as exc:
@@ -632,6 +657,22 @@ def _report(image: str, reason: str, ending: str = "", *, room: int = MAX_REASON
     logger.error("%s %s: %s", FAILURE_MARKER, sanitize_for_log(image), _line(reason, ending, room))
 
 
+def _in_a_url(secret: str) -> str:
+    """A pattern for ``secret`` in a URL, whichever of its characters the encoder percent-encoded."""
+    pieces: list[str] = []
+    for character in secret:
+        literal = re.escape(character)
+        if character.isascii() and (character.isalnum() or character in "-._~"):
+            pieces.append(literal)
+            continue
+        encoded = "".join(f"%{byte:02X}" for byte in character.encode())
+        choices = [literal, f"(?i:{re.escape(encoded)})"]
+        if character == " ":
+            choices.append(re.escape("+"))
+        pieces.append(f"(?:{'|'.join(choices)})")
+    return "".join(pieces)
+
+
 def _redactor(secret: str | None) -> Callable[[str], str]:
     """Takes ``secret`` out of a text, in each form a text may hold it.
 
@@ -642,22 +683,26 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
     """
     if not secret:
         return lambda text: text
-    forms = {
-        secret,
-        sanitize_for_log(secret),
-        _one_line(secret),
-        repr(secret)[1:-1],
+    shown = repr(secret)[1:-1]
+    escaped = {
+        shown,
+        # `repr` leaves an apostrophe as it is unless the text around it also holds a double quote.
+        re.sub(r"(?<!\\)'", r"\\'", shown),
         json.dumps(secret)[1:-1],
         json.dumps(secret, ensure_ascii=False)[1:-1],
         secret.encode("unicode_escape").decode("ascii"),
-        quote(secret, safe=""),
-        quote_plus(secret),
     }
+    # Quoted once more, as an error that holds another error's text is: `repr` of a tuple of messages, say.
+    twice = {repr(form)[1:-1] for form in escaped} | {json.dumps(form)[1:-1] for form in escaped}
+    forms = {secret, sanitize_for_log(secret), _one_line(secret), quote(secret, safe=""), quote_plus(secret)}
+    forms |= escaped | twice
     lines = [line.strip() for line in secret.splitlines()]
     if len(lines) > 1:
         forms.update(line for line in lines if len(line) >= _MIN_PART_CHARS)
-    # The longest first, so that one form is never left as the remains of another.
-    found = re.compile("|".join(re.escape(form) for form in sorted(forms - {""}, key=len, reverse=True)))
+    # The longest first, so that one form is never left as the remains of another. Last, the secret as any URL
+    # holds it: encoders differ in which characters they leave alone.
+    patterns = [re.escape(form) for form in sorted(forms - {""}, key=len, reverse=True)]
+    found = re.compile("|".join([*patterns, _in_a_url(secret)]))
 
     def redact(text: str) -> str:
         # What is already taken out is not read again: a short credential may be part of the mark itself.
@@ -689,23 +734,49 @@ def run_remote_build(
     failures = 0
     #: Each image this run failed, with its reason and what follows it, as they were logged.
     failed: list[tuple[str, str, str]] = []
-    #: Each source this run fetched, by what names it, and where its context is: read by `context_for`.
+    #: Each download this run made, by what names it, and where it is: read by `context_for`.
     fetched: dict[str, Path] = {}
+    #: The filesets some image of the set builds from whole: that download covers their directories too.
+    whole_filesets = {
+        image.source.fileset
+        for image in config.images
+        if image.source.archive is None and image.source.context_path is None
+    }
 
     def context_for(image: RemoteBuildImage, directory: Path) -> Path:
         """``image``'s build context, in ``directory``.
 
-        The images of one set are built one after another, and a source may change in between. So a source is
-        fetched once, and each image that names it gets a copy of that fetch: every image of a revision is
-        built from the same files. A set of one image has nothing to share, and is spared the copy.
+        The images of one set are built one after another, and a source may change in between. So what a set
+        downloads it downloads once, as the in-cluster build's fetch step does: an archive whole, whichever
+        directory of it each image builds from, and a fileset whole if any image builds from all of it. Each
+        image gets its own copy of its directory, so every image built from one download sees the same files. A
+        set of one image has nothing to share, and is spared the copy.
         """
         if len(config.images) == 1:
             return fetch(image, directory)
-        source = image.source.model_dump_json()
-        if source not in fetched:
-            fetched[source] = fetch(image, Path(tempfile.mkdtemp(dir=scratch, prefix="source-")))
-        # Links as they are, never followed: staging checks where each one leads.
-        return Path(shutil.copytree(fetched[source], directory / "context", symlinks=True))
+        source = image.source
+        whole = source.archive is not None or source.fileset in whole_filesets
+        download = source.model_copy(update={"context_path": None}) if whole else source
+        key = download.model_dump_json()
+        if key not in fetched:
+            into = Path(tempfile.mkdtemp(dir=scratch, prefix="source-"))
+            try:
+                fetched[key] = fetch(image.model_copy(update={"source": download}), into)
+            except BaseException:
+                # Not kept: the next image that names it tries again, in a directory of its own.
+                shutil.rmtree(into, ignore_errors=True)
+                raise
+        context = fetched[key]
+        if whole and source.context_path:
+            inside = PurePosixPath(source.context_path)
+            if inside.is_absolute() or ".." in inside.parts:
+                raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
+            context = context.joinpath(*inside.parts)
+            if not context.is_dir():
+                raise ImageFailed(f"context path {source.context_path!r} is not a directory in its source")
+        # Under its own name, so that a link which comes back to it by name still does. Links as they are,
+        # never followed: staging checks where each one leads.
+        return Path(shutil.copytree(context, directory / (context.name or "context"), symlinks=True))
 
     def report(image: str, reason: str, ending: str = "") -> None:
         reason, ending = redact(_one_line(redact(reason))), redact(_one_line(redact(ending)))
@@ -723,12 +794,19 @@ def run_remote_build(
             report(image.image, f"cannot read its row: {exc}")
             failures += 1
             continue
+        except Exception as exc:
+            # Such as a token that couldn't be renewed. One image must not cost the rest of the set.
+            report(image.image, f"cannot read its row: unexpected {type(exc).__name__}: {exc}")
+            failures += 1
+            continue
         if row.status not in ("queued", "pending"):
             logger.info("%s is already %s; nothing to build", sanitize_for_log(image.image), row.status)
             failures += row.status != "ready"
             continue
-        try:
-            with tempfile.TemporaryDirectory(dir=scratch, prefix="image-") as directory:
+        # The failure is reported inside, before the image's context is removed: a large one takes a while to
+        # delete, and a step that was told to stop has seconds left.
+        with tempfile.TemporaryDirectory(dir=scratch, prefix="image-") as directory:
+            try:
                 _build_one(
                     image,
                     row=row,
@@ -740,30 +818,38 @@ def run_remote_build(
                     clock=clock,
                     cancelled=cancelled,
                     scratch=Path(directory),
+                    redact=redact,
                 )
-        except ImageFailed as exc:
-            report(image.image, str(exc), exc.ending)
-            failures += 1
-        except Exception as exc:
-            # Any error, anticipated or not: one image must not cost the rest of the set. Where it was raised, but
-            # not its message as a traceback prints it: that may hold a line break a submitter chose.
-            logger.error(
-                "building %s failed unexpectedly, at:\n%s",
-                sanitize_for_log(image.image),
-                "".join(traceback.format_tb(exc.__traceback__)),
-            )
-            report(image.image, f"unexpected {type(exc).__name__}: {exc}")
-            failures += 1
+            except ImageFailed as exc:
+                report(image.image, str(exc), exc.ending)
+                failures += 1
+            except Exception as exc:
+                # Any error, anticipated or not: one image must not cost the rest of the set. Where it was raised,
+                # but not its message as a traceback prints it: that may hold a line break a submitter chose.
+                logger.error(
+                    "building %s failed unexpectedly, at:\n%s",
+                    sanitize_for_log(image.image),
+                    "".join(traceback.format_tb(exc.__traceback__)),
+                )
+                report(image.image, f"unexpected {type(exc).__name__}: {exc}")
+                failures += 1
     logger.info("%d image(s), %d failure(s)", len(config.images), failures)
     if failed and len(config.images) > 1:
         # Jobs keeps only the end of a failed step's log, and whatever a later image logged came after an earlier
-        # image's line. So each line again, last, its reason cut to share what is kept. A build's ID or key is
-        # never cut, so past about four failures in one set the first of these lines fall outside it.
-        share = TAIL_CHARS // len(failed)
+        # image's line. So each line again, last, its reason cut to share what is kept. A line with too little
+        # room left for its reason is not logged again: settling reads the last line for an image, and the first
+        # one, though it may have fallen outside what is kept, says more than one cut to nothing.
         for image, reason, ending in failed:
-            room = max(share - len(image) - LINE_OVERHEAD, len(ending) + 1)
-            _report(image, reason, ending, room=min(MAX_REASON_CHARS, room))
+            room = _room(len(failed), image)
+            if room - len(ending) >= MIN_REASON_ROOM:
+                _report(image, reason, ending, room=room)
     return 1 if failures else 0
+
+
+def _room(lines: int, image: str) -> int:
+    """How long a reason and what follows it may be on ``image``'s failure line, for ``lines`` such lines to
+    fit in what Jobs keeps of a failed step's log."""
+    return min(MAX_REASON_CHARS, TAIL_CHARS // lines - len(image) - LINE_OVERHEAD)
 
 
 def take_credential(environ: MutableMapping[str, str]) -> str:
@@ -788,8 +874,9 @@ def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> l
     # It prints `exc_text` as it finds it, so the redacted text is put there first.
     if record.exc_info and not record.exc_text:
         record.exc_text = logging.Formatter().formatException(record.exc_info)
-    if record.exc_text:
-        record.exc_text = redact(record.exc_text)
+    if record.exc_text and (redacted := redact(record.exc_text)) != record.exc_text:
+        # The exception itself still holds what was taken out of its text, and some handlers print it themselves.
+        record.exc_text, record.exc_info = redacted, None
     if record.stack_info:
         record.stack_info = redact(record.stack_info)
     return record
@@ -805,21 +892,21 @@ def _redact_value(value: Any, redact: Callable[[str], str], depth: int = 0) -> A
         return redact(value)
     if value is None or isinstance(value, bool | int | float):
         return value
-    try:
-        shown = repr(value)
-    except Exception:
-        return "<a value that can't be shown>"
-    if redact(shown) == shown:
-        return value
     if depth < _MAX_FIELD_DEPTH:
+        # Each string in it on its own, not the container as it prints: a string is quoted differently there.
+        rebuilt: Any = None
         if type(value) is dict:
-            return {
+            rebuilt = {
                 _redact_value(key, redact, depth + 1): _redact_value(item, redact, depth + 1)
                 for key, item in value.items()
             }
-        if type(value) in (list, tuple, set, frozenset):
-            return type(value)(_redact_value(item, redact, depth + 1) for item in value)
-    return redact(shown)
+        elif type(value) in (list, tuple, set, frozenset):
+            rebuilt = type(value)(_redact_value(item, redact, depth + 1) for item in value)
+        if rebuilt is not None:
+            return value if rebuilt == value else rebuilt
+    shown = repr(value)
+    redacted = redact(shown)
+    return value if redacted == shown else redacted
 
 
 class _RedactedFields(dict[str, Any]):
@@ -832,28 +919,84 @@ class _RedactedFields(dict[str, Any]):
 
     def __init__(self, fields: Mapping[str, Any], redact: Callable[[str], str]) -> None:
         super().__init__(fields)
-        self._redact = redact
+        self.redact = redact
 
     def __setitem__(self, key: str, value: Any) -> None:
-        super().__setitem__(key, _redact_value(value, self._redact))
+        try:
+            value = _redact_value(value, self.redact)
+        except Exception:
+            # Never into the code that logged. What can't be checked is withheld, not kept as it is.
+            value = WITHHELD
+        super().__setitem__(key, value)
 
 
-def redact_log(secret: str) -> None:
-    """From here on, every record this process logs has ``secret`` taken out of it.
+#: What stands in for a logged value, or a whole record, that could not be checked for a secret.
+WITHHELD = "<withheld: it could not be checked for the build service's credential>"
+
+
+class Redaction:
+    """Takes every secret it has been given out of a text."""
+
+    def __init__(self) -> None:
+        self._redactors: list[Callable[[str], str]] = []
+
+    def add(self, secret: str) -> None:
+        if secret:
+            self._redactors.append(_redactor(secret))
+
+    def __call__(self, text: str) -> str:
+        for redact in self._redactors:
+            text = redact(text)
+        return text
+
+
+class _RedactingFactory:
+    """A log record factory that makes records as ``make`` does, then takes the secrets out of them."""
+
+    def __init__(self, make: Callable[..., logging.LogRecord]) -> None:
+        self._make = make
+        self.redaction = Redaction()
+
+    def __call__(self, *args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = self._make(*args, **kwargs)
+        try:
+            _redact_record(record, self.redaction)
+        except Exception:
+            # Never into the code that logged. A record that can't be checked is withheld, not printed as it is.
+            record.msg, record.args = WITHHELD, None
+            record.exc_info = record.exc_text = record.stack_info = None
+        fields = record.__dict__
+        # A factory under this one may be redacting already, for secrets of its own: both, then.
+        under = fields.redact if isinstance(fields, _RedactedFields) else None
+        record.__dict__ = _RedactedFields(
+            fields, self.redaction if under is None else lambda text: self.redaction(under(text))
+        )
+        return record
+
+
+def log_redaction() -> Redaction:
+    """What takes secrets out of everything this process logs, installed on first use.
 
     Where records are made, not on the handlers there are now: a service's client may log through a logger that
     doesn't pass its records up, or add a handler of its own later. That covers a record's message, its
-    exception and stack, and the ``extra`` fields of the call that logged it.
+    exception and stack, and the ``extra`` fields of the call that logged it. It is also a function, which takes
+    the same secrets out of any text.
     """
-    redact = _redactor(secret)
-    make = logging.getLogRecordFactory()
+    factory = logging.getLogRecordFactory()
+    if not isinstance(factory, _RedactingFactory):
+        factory = _RedactingFactory(factory)
+        logging.setLogRecordFactory(factory)
+    return factory.redaction
 
-    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
-        record = _redact_record(make(*args, **kwargs), redact)
-        record.__dict__ = _RedactedFields(record.__dict__, redact)
-        return record
 
-    logging.setLogRecordFactory(factory)
+def redact_log(secret: str) -> None:
+    """From here on, every record this process logs has ``secret`` taken out of it too, and so has every reason.
+
+    The driver calls it with the credential it is given. A service's client calls it with whatever else must
+    stay out of the log: a part of that credential it uses alone, or a token it trades the credential for. Only
+    a secret as it was given here is recognised, whole, or line by line for one of several lines.
+    """
+    log_redaction().add(secret)
 
 
 def stop_requested() -> Callable[[], bool]:
@@ -896,21 +1039,23 @@ def step_main(
 
     The credential is the one in the environment, when the deployment keeps it in a platform secret. Otherwise it
     is what ``read_credential`` returns, for a step program whose Jobs profile mounts it as a file. Either way the
-    driver keeps it out of the log and out of every reason. With neither, ``make_service`` gets None and finds
-    the credential itself, and keeping it out of its own errors is then the service's.
+    driver keeps it out of the log and out of every reason, as it was given: whole, or line by line. A part of
+    it that a client uses alone, or a token a client trades it for, the driver doesn't know: the client gives
+    those to :func:`redact_log`. With neither, ``make_service`` gets None and finds the credential itself, and
+    does the same with it.
     """
     # The level first, in brackets: the Jobs launcher reads it from there, and records any other line as an error.
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s: %(message)s")
     config = RemoteBuildStepConfig.model_validate(read_step_config())
-    redact = _redactor(None)
+    # Every secret given to `redact_log`, the client's own included, whenever it is given.
+    redact = log_redaction()
     try:
         if config.credential_in_environment:
             credential: str | None = take_credential(os.environ)
         else:
             credential = (read_credential() if read_credential is not None else "").strip() or None
         if credential is not None:
-            redact = _redactor(credential)
-            redact_log(credential)
+            redact.add(credential)
         attempt = JobAttempt.from_environment(os.environ)
         # As `service:builder`, acting for the submitter through the job's delegation.
         client = get_task_nemo_client("builder")
@@ -927,9 +1072,10 @@ def step_main(
     except Exception as exc:
         # Before there is anything to drive. Said for each image on the line settling reads, and through the log,
         # which keeps the credential out, not as the interpreter would print it.
+        reason = redact(_one_line(redact(f"the step could not start: {type(exc).__name__}: {exc}")))
         for image in config.images:
-            reason = f"the step could not start: {type(exc).__name__}: {exc}"
-            _report(image.image, redact(_one_line(redact(reason))))
+            # Cut to share what Jobs keeps of the log, so that every image's line is in it.
+            _report(image.image, reason, room=max(_room(len(config.images), image.image), MIN_REASON_ROOM))
         return 1
     try:
         return run_remote_build(

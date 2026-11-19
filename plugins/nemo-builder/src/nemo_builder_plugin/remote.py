@@ -49,7 +49,8 @@ def _token_exchange() -> bool:
     try:
         return is_workload_identity_token_exchange_enabled()
     except WorkloadIdentityConfigError:
-        # The auth config can't be read here. Jobs, which can, refuses the job if the secret can't be fetched.
+        # The auth config can't be read here, so exchange is taken for off. If it is on, the step starts with no
+        # credential, and says so on each image's line.
         return False
 
 

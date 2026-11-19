@@ -76,8 +76,8 @@ _MAX_EXTERNAL_VALUE = 512
 class ExternalImage(BaseModel):
     """What a remote build service calls the image it built, written when the row becomes ``ready``.
 
-    Opaque to the builder: it stores these and reads none of them. They are for a consumer that uses the same
-    service.
+    The builder stores these for a consumer that uses the same service. Of them it reads only ``build_id``,
+    which a completion must carry, and whether a second completion carries the same.
     """
 
     image_id: str | None = Field(

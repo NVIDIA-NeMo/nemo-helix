@@ -476,10 +476,53 @@ class TestSubmitting:
         assert "remote.registry must be a host" in caplog.text
         assert "t0ken" not in caplog.text
 
-    def test_a_validator_that_quotes_what_it_refused_has_it_taken_out_of_the_log(self) -> None:
-        """Whatever a validator's sentence says, the value it was given is not logged with it."""
-        error: Any = {"loc": ("registry",), "msg": "Value error, bad host 'bot:t0ken@reg'", "input": "bot:t0ken@reg"}
-        assert service._without_input(error) == "Value error, bad host <the value>"
+    @pytest.mark.parametrize(
+        ("refused", "message", "logged"),
+        [
+            ("bot:t0ken@reg", "Value error, bad host 'bot:t0ken@reg'", "Value error, bad host <the value>"),
+            (
+                ["ghcr.io", "bot:t0ken@reg"],
+                "Value error, not a host: bot:t0ken@reg",
+                "Value error, not a host: <the value>",
+            ),
+            (
+                {"registry": "/bot:t0ken@reg/"},
+                "Value error, bad path bot:t0ken@reg",
+                "Value error, bad path <the value>",
+            ),
+            # A value too short to be anything but a word of the sentence is left where it is.
+            ("to", "Value error, set it to a host", "Value error, set it to a host"),
+        ],
+        ids=["a-string", "in-a-list", "trimmed-in-a-mapping", "too-short-to-take-out"],
+    )
+    def test_a_validator_that_quotes_what_it_refused_has_it_taken_out_of_the_log(
+        self, refused: object, message: str, logged: str
+    ) -> None:
+        """The builder's own validators don't repeat a value. This is for one that does all the same."""
+        error: Any = {"type": "value_error", "loc": ("registry",), "msg": message, "input": refused}
+        assert service._without_input(error) == logged
+
+    def test_pydantics_own_sentence_is_logged_as_it_is(self) -> None:
+        """It doesn't quote the value, and a value's digits may be in it by chance."""
+        error: Any = {
+            "type": "greater_than_equal",
+            "loc": ("remote", "build_timeout_seconds"),
+            "msg": "Input should be greater than or equal to 60",
+            "input": "6000",
+        }
+        assert service._without_input(error) == "Input should be greater than or equal to 60"
+
+    def test_a_registry_to_copy_from_that_is_refused_is_not_logged(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate({"import_registries": ["ghcr.io", "bot:t0ken@registry.example.com/x"]})
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert (response.status_code, response.json()["code"]) == (409, "backend_rejected")
+        assert "import_registries must be registry hosts" in caplog.text
+        assert "t0ken" not in caplog.text and "t0ken" not in response.text
 
     def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Such a check has no one setting to name. An answer of `(: invalid value)` would name nothing."""

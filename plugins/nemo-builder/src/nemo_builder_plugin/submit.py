@@ -23,6 +23,7 @@ from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,19 @@ async def submit_build_set(
         raise
     except ValueError as exc:
         raise InvalidBuildRequest(str(exc)) from exc
+    try:
+        # Made here, with the rest of what can refuse the request, though they are written further down. A
+        # workspace whose name a row's job reference can't hold gets this far only when no repository path
+        # needed its name first.
+        rows = _rows_for(plan, digest, backend.name)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(map(str, error['loc']))}: {error['msg']}"
+            for error in exc.errors(include_input=False, include_url=False)
+        )
+        raise InvalidBuildRequest(
+            f"an image's row can't record this request in workspace {workspace!r} ({problems})"
+        ) from exc
     # Jobs checks these too, but only once the rows exist, and its refusal looks like a taken job name.
     missing = [
         f"{secret_workspace}/{name}"
@@ -207,7 +221,7 @@ async def submit_build_set(
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
-    for row in _rows_for(plan, digest, backend.name):
+    for row in rows:
         try:
             created.append(await entity_client.create(row))
             images.append(created[-1])

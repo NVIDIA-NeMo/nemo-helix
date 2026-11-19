@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -96,18 +96,44 @@ def _refused(_request: Request, refused: Exception) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": refused.detail, "code": refused.code})
 
 
+#: The shortest value taken out of a logged validation message.
+_MIN_REFUSED_CHARS = 4
+
+
 def _setting(location: tuple[int | str, ...]) -> str:
     """The setting a validation error is about. A check on the section as a whole has no location: `builder`."""
     return ".".join(map(str, location)) or "builder"
 
 
+def _refused_values(refused: object, depth: int = 0) -> Iterator[str]:
+    """Each string in what a setting was given, and in a list or mapping of them, as a message might repeat it."""
+    if isinstance(refused, str):
+        # As a validator would most likely have written it, quoted, then bare. One trimmed of what a validator
+        # trims first, too. Not a short one: it would be found in words that have nothing to do with it.
+        for form in (repr(refused), refused, refused.strip(), refused.strip("/")):
+            if len(form) >= _MIN_REFUSED_CHARS:
+                yield form
+    elif depth < 4 and isinstance(refused, list | tuple | set | frozenset):
+        for item in refused:
+            yield from _refused_values(item, depth + 1)
+    elif depth < 4 and isinstance(refused, dict):
+        for key, item in refused.items():
+            yield from _refused_values(key, depth + 1)
+            yield from _refused_values(item, depth + 1)
+
+
 def _without_input(error: ErrorDetails) -> str:
-    """A validation error's message, with the value it refused taken out if the message repeats it."""
-    message, refused = error["msg"], error.get("input")
-    # As a validator would most likely have written it, quoted, then bare.
-    for form in (repr(refused), str(refused)) if isinstance(refused, str | int | float) else ():
-        if form:
-            message = message.replace(form, "<the value>")
+    """A validation error's message, for the log, without the value it refused.
+
+    Only a validator of the builder's own writes a sentence that could repeat what it was given, and those are
+    written not to. This is for one that does all the same: a setting may hold a credential.
+    """
+    message = error["msg"]
+    if error["type"] not in ("value_error", "assertion_error"):
+        # Pydantic's own sentence, which doesn't quote the value. Left as it is.
+        return message
+    for form in sorted(set(_refused_values(error.get("input"))), key=len, reverse=True):
+        message = message.replace(form, "<the value>")
     return message
 
 

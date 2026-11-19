@@ -61,8 +61,8 @@ DIGEST = "sha256:" + "d" * 64
 ATTEMPT = JobAttempt(workspace="default", job_uid="job-uid-1", attempt_id="attempt-1")
 
 QUEUED = RemoteBuildStatus("queued")
-BUILDING = RemoteBuildStatus("building", "submitting")
-VERIFYING = RemoteBuildStatus("verifying", "checking the image")
+BUILDING = RemoteBuildStatus("building", "step 2 of 5")
+VERIFYING = RemoteBuildStatus("verifying", "step 4 of 5")
 DONE = RemoteBuildStatus(
     "done", image=RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", attributes={"builder": "v1"})
 )
@@ -309,14 +309,30 @@ class TestABuildThatSucceeds:
         assert _run(FakeService([done]), builder, context, tmp_path) == 0
         assert builder.completed == [("demo-1", DIGEST, ExternalImage(build_id="build-1"))]
 
+    def test_the_credential_is_taken_out_of_what_the_service_reports_for_the_row(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """Every reader of the image reads these. A service may report a link to its console, with a key in it."""
+        attributes = {"console": "https://build.example.com/b/42?key=token-value"}
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", attributes=attributes)
+        builder = FakeBuilder()
+        service = FakeService([RemoteBuildStatus("done", image=image)])
+        assert _run(service, builder, context, tmp_path, redact=driver._redactor("token-value")) == 0
+        ((_, _, external),) = builder.completed
+        assert external == ExternalImage(
+            image_id="img-1",
+            build_id="build-1",
+            attributes={"console": "https://build.example.com/b/42?key=[credential]"},
+        )
+
     def test_each_stage_is_logged_once(self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
             _run(FakeService([QUEUED, BUILDING, BUILDING, VERIFYING, DONE]), FakeBuilder(), context, tmp_path)
         stages = [record.getMessage() for record in caplog.records if record.getMessage().startswith("build build-1")]
         assert stages == [
             "build build-1: queued",
-            "build build-1: building (submitting)",
-            "build build-1: verifying (checking the image)",
+            "build build-1: building (step 2 of 5)",
+            "build build-1: verifying (step 4 of 5)",
             "build build-1: done",
         ]
 
@@ -380,7 +396,7 @@ class TestRetrying:
         ("start", "timeout", "reason"),
         [
             ([RetryableError("connection reset"), PermanentError("400: bad request")], 600, "400: bad request"),
-            ([RetryableError("connection reset")], 120, "connection reset; still failing at the build timeout"),
+            ([RetryableError("connection reset")], 120, "connection reset; the build timeout leaves no time to try"),
             ([RetryableError("connection reset"), KeyError("state")], 600, "unexpected KeyError"),
         ],
         ids=["then-refused", "until-the-timeout", "then-a-bug"],
@@ -454,7 +470,8 @@ class TestRetrying:
             assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=300), clock=clock) == 1
         assert clock.now < 300
         assert max(clock.sleeps) == MAX_BACKOFF_SECONDS
-        assert "queue full; still failing at the build timeout" in caplog.text
+        # Given up before the timeout: a build started with no time left would only be cancelled.
+        assert "queue full; the build timeout leaves no time to try again" in caplog.text
         # The service answered every time, and never that it had started anything.
         assert "a build may be running" not in caplog.text
 
@@ -519,7 +536,7 @@ class TestRetrying:
         clock = FakeClock()
         service = FakeService([DONE], start=[OverBudgetError("busy")])
         assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=60), clock=clock) == 1
-        # 2, 4, 8 and 16 seconds waited: the next wait, 32, would pass the minute, so no fifth try is made.
+        # Five tries, at 0, 2, 6, 14 and 30 seconds. The next wait, 32, would pass the minute: there is no sixth.
         assert (len(service.started), clock.now) == (5, 30.0)
 
     @pytest.mark.parametrize("failure", [RemoteBuildError("no subclass"), KeyError("state")], ids=["base", "a-bug"])
@@ -570,7 +587,7 @@ class TestABuildThatFails:
         assert service.cancelled == ["build-1"]
         assert builder.completed == []
         assert clock.now == 35
-        assert "timed out after 35s, while building (submitting) [build build-1]" in caplog.text
+        assert "timed out after 35s, while building (step 2 of 5) [build build-1]" in caplog.text
 
     def test_a_job_told_to_stop_cancels_its_build(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -682,7 +699,7 @@ class TestABuildThatFails:
         assert service.cancelled == ["build-1"] * 3
         assert clock.pauses == [CANCEL_PAUSE_SECONDS] * 2
         # The third try was taken, so the row says nothing of a build left running.
-        assert "timed out after 35s, while building (submitting) [build build-1]" in caplog.text
+        assert "timed out after 35s, while building (step 2 of 5) [build build-1]" in caplog.text
 
     def test_a_cancel_that_never_arrives_is_given_up_and_said_on_the_row(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -700,7 +717,7 @@ class TestABuildThatFails:
     @pytest.mark.parametrize(
         ("statuses", "timeout", "reason"),
         [
-            ([BUILDING], 35, "timed out after 35s, while building (submitting)"),
+            ([BUILDING], 35, "timed out after 35s, while building (step 2 of 5)"),
             ([RemoteBuildStatus("succeeded")], 600, "a stage the driver doesn't know: 'succeeded'"),  # ty: ignore[invalid-argument-type]
             ([KeyError("state")], 600, "reading the build: unexpected KeyError: 'state'"),
         ],
@@ -963,9 +980,7 @@ class TestABuildThatFails:
 
 class TestSeveralImages:
     def test_one_images_failure_does_not_cost_the_next(self, context: Path, tmp_path: Path) -> None:
-        service = FakeService(
-            [RemoteBuildStatus("failed", "scan found a critical vulnerability"), DONE], start=["build-1", "build-2"]
-        )
+        service = FakeService([RemoteBuildStatus("failed", "its last step failed"), DONE], start=["build-1", "build-2"])
         builder = FakeBuilder()
         assert _run(service, builder, context, tmp_path, config=_config("demo-1.a", "demo-1.b")) == 1
         assert [(image, external.build_id if external else None) for image, _, external in builder.completed] == [
@@ -988,10 +1003,37 @@ class TestSeveralImages:
         last = messages[messages.index("3 image(s), 3 failure(s)") + 1 :]
         assert [line.split(": ")[0] for line in last] == [f"{FAILURE_MARKER} {name}" for name in "abc"]
         assert [line.rpartition(" [")[2] for line in last] == ["build build-1]", "build build-2]", "build build-3]"]
-        # All three fit in the 1,800 characters Jobs is taken to keep, with the 280 a logger and an executor put
-        # around each line: 1,797 as the reasons are cut, and 2,040 if they were left at their own 400.
-        assert (LINE_OVERHEAD, TAIL_CHARS) == (280, 1800)
-        assert sum(len(line) - len(f"{FAILURE_MARKER} a: ") + 280 for line in last) <= 1800
+        # All three fit in the 1,800 characters Jobs is taken to keep, with the 100 a logger puts around each
+        # line, each reason cut to its 400.
+        assert (LINE_OVERHEAD, TAIL_CHARS) == (100, 1800)
+        assert sum(len(line) - len(f"{FAILURE_MARKER} a: ") + LINE_OVERHEAD for line in last) <= TAIL_CHARS
+
+    def test_a_line_with_no_room_left_for_its_reason_is_not_logged_again(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Settling reads the last line for an image. With many failures, a line logged again would be cut to
+        nothing, and would replace the one that says why."""
+        names = [f"image-{n:02}" for n in range(16)]
+        service = FakeService([DONE], start=[PermanentError("401: the token was refused")])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(*names)) == 1
+        lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith(FAILURE_MARKER)]
+        # Once each, whole. 1,800 characters shared by sixteen lines leave a reason less than forty.
+        assert lines == [f"{FAILURE_MARKER} {name}: starting the build: 401: the token was refused" for name in names]
+        assert driver._room(16, "image-00") < driver.MIN_REASON_ROOM <= driver._room(8, "image-00")
+
+    def test_an_unexpected_error_reading_a_row_does_not_cost_the_next_image_either(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Such as a token the client could not renew, which is no client error. It would otherwise end the
+        step as a traceback, with no line for this image and the rest never tried."""
+        builder = FakeBuilder(unreadable={"a": RuntimeError("token exchange answered 503")})
+        with caplog.at_level(logging.ERROR):
+            assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 1
+        assert [image for image, _, _ in builder.completed] == ["b"]
+        assert (
+            f"{FAILURE_MARKER} a: cannot read its row: unexpected RuntimeError: token exchange answered 503"
+        ) in caplog.text
 
     def test_a_build_is_still_named_when_many_lines_share_the_end_of_the_log(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -1108,12 +1150,21 @@ class TestTheContext:
         with caplog.at_level(logging.ERROR):
             assert _run(service, FakeBuilder(), fetched, tmp_path) == 1
         assert service.started == []
-        assert "dockerfile 'Dockerfile' is not a file inside the build context" in caplog.text
+        said = {
+            "the-dockerfile": "dockerfile 'Dockerfile' is not a file inside the build context",
+            "the-context": "its build context is not a directory in what was fetched",
+        }
+        assert said[missing] in caplog.text
 
     def test_a_directory_where_the_dockerfile_goes_is_refused(self, context: Path) -> None:
         (context / "Dockerfile").unlink()
         (context / "Dockerfile").mkdir()
         with pytest.raises(ImageFailed, match="a directory named Dockerfile at its root"):
+            stage_context(context, "services/feed/Dockerfile")
+
+    def test_a_directory_where_the_ignore_file_goes_is_refused(self, context: Path) -> None:
+        (context / "Dockerfile.dockerignore").mkdir()
+        with pytest.raises(ImageFailed, match="a directory named Dockerfile.dockerignore at its root"):
             stage_context(context, "services/feed/Dockerfile")
 
     def test_a_dockerfiles_own_ignore_file_goes_to_the_root_with_it(self, context: Path) -> None:
@@ -1153,6 +1204,33 @@ class TestTheContext:
         assert (staged / "Dockerfile").read_text() == "FROM alpine\n"
         assert (staged / "Dockerfile.dockerignore").read_text() == "secrets\n"
 
+    @pytest.mark.parametrize("linked", ["by-a-link", "by-a-hard-link"])
+    def test_the_root_dockerfile_under_another_name_brings_that_names_ignore_file(
+        self, linked: str, context: Path
+    ) -> None:
+        """`Dockerfile.slim` is the root `Dockerfile` itself, so there is nothing to copy. Built by that name,
+        though, it is that name's ignore file a builder reads."""
+        if linked == "by-a-link":
+            (context / "Dockerfile.slim").symlink_to("Dockerfile")
+        else:
+            os.link(context / "Dockerfile", context / "Dockerfile.slim")
+        (context / "Dockerfile.slim.dockerignore").write_text("private.env\n")
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+
+        staged = stage_context(context, "Dockerfile.slim")
+
+        assert (staged / "Dockerfile").read_text() == "FROM scratch\n"
+        assert not (staged / "Dockerfile").is_symlink()
+        assert (staged / "Dockerfile.dockerignore").read_text() == "private.env\n"
+
+    def test_the_root_dockerfile_under_another_name_does_not_gain_the_root_names_ignore_file(
+        self, context: Path
+    ) -> None:
+        (context / "Dockerfile.slim").symlink_to("Dockerfile")
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+        staged = stage_context(context, "Dockerfile.slim")
+        assert not (staged / "Dockerfile.dockerignore").exists()
+
     @pytest.mark.parametrize("kind", ["a-file", "a-directory", "by-an-absolute-path"])
     def test_a_context_with_a_link_that_leads_out_of_it_is_refused(
         self, kind: str, context: Path, tmp_path: Path
@@ -1191,13 +1269,42 @@ class TestTheImagesOfOneSet:
 
         def fetch(image: RemoteBuildImage, directory: Path) -> Path:
             fetch.calls.append(image.source.fileset)  # ty: ignore[unresolved-attribute]
+            fetch.directories.append((image.source.archive, image.source.context_path))  # ty: ignore[unresolved-attribute]
             for name, content in files.items():
                 (directory / name).parent.mkdir(parents=True, exist_ok=True)
                 (directory / name).write_text(content)
             return directory
 
         fetch.calls = []  # ty: ignore[unresolved-attribute]
+        fetch.directories = []  # ty: ignore[unresolved-attribute]
         return fetch
+
+    @staticmethod
+    def _set(*sources: dict[str, str]) -> RemoteBuildStepConfig:
+        """A set with one image, named a, b, c..., for each source."""
+        return RemoteBuildStepConfig.model_validate(
+            {
+                "images": [
+                    {"image": name, "source": source, "dockerfile": "Dockerfile", "platform": "linux/amd64"}
+                    for name, source in zip("abcdef", sources, strict=False)
+                ],
+                "registry": "registry.example.com",
+                "repository": "team/images",
+                "build_timeout_seconds": 600,
+            }
+        )
+
+    @staticmethod
+    def _reading(read: str) -> tuple[type[FakeService], list[str]]:
+        """A service that notes ``read``, a file of each context it is handed."""
+        seen: list[str] = []
+
+        class Reading(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                seen.append((build.context / read).read_text())
+                return super().start(build)
+
+        return Reading, seen
 
     def test_every_image_is_built_from_the_source_as_it_was_first_fetched(self, tmp_path: Path) -> None:
         files = {"Dockerfile": "FROM scratch\n", "version": "first"}
@@ -1249,6 +1356,109 @@ class TestTheImagesOfOneSet:
             == 0
         )
         assert built == ["FROM one\n", "FROM root\n", "FROM two\n"]
+
+    def test_an_archive_is_downloaded_once_whichever_of_its_directories_each_image_builds(self, tmp_path: Path) -> None:
+        """Unpacked whole, as the in-cluster build's fetch step does. Fetched again for its second directory, a
+        revision's images could come from two uploads of the archive."""
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        files = {"environment/Dockerfile": "FROM env\n", "tests/Dockerfile": "FROM tests\n"}
+        fetch = self._sources(tmp_path, files)
+        service, built = self._reading("Dockerfile")
+        config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": "tests"})
+
+        assert _run(service([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
+
+        assert built == ["FROM env\n", "FROM tests\n"]
+        # One download, of the archive and not of a directory of it.
+        assert fetch.directories == [("task.tar.gz", None)]  # ty: ignore[unresolved-attribute]
+
+    def test_a_filesets_whole_download_serves_the_images_that_build_a_directory_of_it(self, tmp_path: Path) -> None:
+        files = {"Dockerfile": "FROM root\n", "feed/Dockerfile": "FROM feed\n"}
+        fetch = self._sources(tmp_path, files)
+        service, built = self._reading("Dockerfile")
+        config = self._set({"fileset": "default/fs-a", "context_path": "feed"}, {"fileset": "default/fs-a"})
+
+        assert _run(service([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
+
+        assert built == ["FROM feed\n", "FROM root\n"]
+        assert fetch.directories == [(None, None)]  # ty: ignore[unresolved-attribute]
+
+    def test_a_copy_keeps_its_directorys_name_so_a_link_back_to_it_by_name_still_leads_inside(
+        self, tmp_path: Path
+    ) -> None:
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            for name in ("environment", "tests"):
+                (directory / name).mkdir()
+                (directory / name / "Dockerfile").write_text(f"FROM {name}\n")
+            (directory / "environment" / "again").symlink_to("../environment/Dockerfile")
+            return directory
+
+        service, built = self._reading("again")
+        config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": "tests"})
+        builder = FakeBuilder()
+        assert _run(service([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        # The first image's link came back to its own directory. The second has no such file to read.
+        assert (built, [image for image, _, _ in builder.completed]) == (["FROM environment\n"], ["a"])
+
+    def test_a_download_that_fails_leaves_nothing_behind_and_is_tried_again_for_the_next_image(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        calls: list[str] = []
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            calls.append(image.image)
+            (directory / "half").write_text("part of a download")
+            if len(calls) == 1:
+                raise OSError("disk full")
+            (directory / "Dockerfile").write_text("FROM scratch\n")
+            return directory
+
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(FakeService([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 1
+        assert f"{FAILURE_MARKER} a: cannot fetch its build context: disk full" in caplog.text
+        assert (calls, [image for image, _, _ in builder.completed]) == (["a", "b"], ["b"])
+        # The failed download's directory is gone: only the one that worked is kept, for the rest of the set.
+        assert len(list((tmp_path / "scratch").glob("source-*"))) == 1
+
+    def test_each_source_of_a_set_is_its_own_download(self, tmp_path: Path) -> None:
+        fetch = self._sources(tmp_path, {"Dockerfile": "FROM scratch\n"})
+        config = self._set({"fileset": "default/fs-a"}, {"fileset": "default/fs-b"}, {"fileset": "default/fs-a"})
+        assert _run(FakeService([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        assert fetch.calls == ["default/fs-a", "default/fs-b"]  # ty: ignore[unresolved-attribute]
+
+    def test_a_copy_keeps_a_link_as_a_link_so_one_that_leads_out_is_still_refused(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Copied with its links followed, the file from beside the context would be in every image's copy, as
+        an ordinary file that nothing could tell from the context's own."""
+        (tmp_path / "beside").mkdir()
+        (tmp_path / "beside" / "answer.txt").write_text("not this build's\n")
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            (directory / "Dockerfile").write_text("FROM scratch\n")
+            (directory / "fixture").symlink_to(tmp_path / "beside" / "answer.txt")
+            return directory
+
+        service = FakeService([DONE])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 1
+        assert service.started == []
+        assert caplog.text.count("the build context has a link that leads out of it: 'fixture'") >= 2
+
+    def test_a_directory_of_a_download_that_isnt_there_is_said_to_be_missing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        fetch = self._sources(tmp_path, {"environment/Dockerfile": "FROM env\n"})
+        config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": "no-such"})
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(FakeService([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        assert [image for image, _, _ in builder.completed] == ["a"]
+        assert f"{FAILURE_MARKER} b: context path 'no-such' is not a directory in its source" in caplog.text
 
     def test_a_set_of_one_image_is_built_where_it_was_fetched(self, context: Path, tmp_path: Path) -> None:
         """Nothing to share, so no second copy of what may be a large context."""
@@ -1560,6 +1770,96 @@ class TestTheStepProgram:
         redact = driver._redactor("dXNlcjpw\nYXNz" if "YXNzd29yZA" not in quoted else "dXNlcjpw\nYXNzd29yZA==")
         assert "YXNz" not in redact(quoted)
         assert "[credential]" in redact(quoted)
+
+    @pytest.mark.parametrize(
+        ("secret", "text"),
+        [
+            ("QUJD+REVG/R0hJ==", "GET /builds?key=QUJD%2BREVG/R0hJ%3D%3D failed"),
+            ("QUJD+REVG/R0hJ==", "GET /builds?key=QUJD%2bREVG%2fR0hJ== failed"),
+            ("two words", "GET /builds?key=two+words failed"),
+            ("pa'ss-w0rd-123", repr(("401", 'reply: {"error": "bad password pa\'ss-w0rd-123"}'))),
+            ("C:\\keys\\build", repr(repr("refused C:\\keys\\build"))),
+            ('say "hi" twice', json.dumps({"error": json.dumps('refused say "hi" twice')})),
+        ],
+        ids=["url-slash-left", "url-lowercase-hex", "url-plus", "apostrophe-in-a-repr", "escaped-twice", "json-twice"],
+    )
+    def test_a_credential_is_taken_out_however_what_holds_it_wrote_it(self, secret: str, text: str) -> None:
+        redacted = driver._redactor(secret)(text)
+        assert "[credential]" in redacted
+        for part in ("REVG", "words", "w0rd", "keys", "hi"):
+            assert part not in redacted or part not in secret
+
+    def test_a_secret_a_client_adds_is_taken_out_with_the_credential(self, signals: None) -> None:
+        """A client that trades the credential for a token gives the token to `redact_log`. Both stay out of
+        the message, the fields and a reason, whichever was given first."""
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        handler = Own()
+        handler.setFormatter(logging.Formatter("%(message)s %(headers)s"))
+        client_log = logging.getLogger("some.build.client.tokens")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        redact = driver.log_redaction()
+        driver.redact_log("the-credential")
+        driver.redact_log("the-access-token")
+        try:
+            client_log.error(
+                "the-credential was traded for the-access-token",
+                extra={"headers": ["the-credential", "the-access-token"]},
+            )
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == ["[credential] was traded for [credential] ['[credential]', '[credential]']"]
+        # The same function the driver cuts a reason with: it knows the token too, though it was given later.
+        assert redact("401: the-access-token expired") == "401: [credential] expired"
+
+    def test_an_exception_whose_text_was_redacted_is_not_left_on_the_record(self) -> None:
+        """Some handlers print the exception themselves, from the record, and not the text a formatter kept."""
+        try:
+            raise ValueError("refused: Bearer token-value")
+        except ValueError:
+            leaking = logging.LogRecord("x", logging.ERROR, __file__, 1, "the call failed", None, sys.exc_info())
+        try:
+            raise ValueError("refused")
+        except ValueError:
+            harmless = logging.LogRecord("x", logging.ERROR, __file__, 1, "the call failed", None, sys.exc_info())
+        redact = driver._redactor("token-value")
+        driver._redact_record(leaking, redact)
+        driver._redact_record(harmless, redact)
+        assert leaking.exc_info is None and "Bearer [credential]" in (leaking.exc_text or "")
+        assert harmless.exc_info is not None
+
+    def test_a_record_that_cant_be_checked_is_withheld_not_printed(self, signals: None) -> None:
+        """Logging never raises into the code that logs, and what could not be checked is not let through."""
+
+        class Unprintable:
+            def __repr__(self) -> str:
+                raise RuntimeError("no repr")
+
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        handler = Own()
+        handler.setFormatter(logging.Formatter("%(message)s | %(request)s"))
+        client_log = logging.getLogger("some.build.client.broken")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        driver.redact_log("token-value")
+        try:
+            client_log.warning("try %d of %d", Unprintable(), extra={"request": "ok"})
+            client_log.warning("sent", extra={"request": Unprintable()})
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == [f"{driver.WITHHELD} | ok", f"sent | {driver.WITHHELD}"]
 
     def test_taking_a_credential_out_twice_changes_nothing_more(self) -> None:
         """A reason is redacted before and after it is made one line, and a short credential may be part of the

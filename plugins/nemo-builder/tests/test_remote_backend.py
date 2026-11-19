@@ -27,6 +27,7 @@ from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildStepConf
 from nemo_builder_plugin.submit import (
     BackendChanged,
     BuildConflict,
+    InvalidBuildRequest,
     MissingSecrets,
     SubmitResult,
     referenced_secrets,
@@ -234,10 +235,10 @@ class TestDestination:
         ]
         assert {(p.registry, p.repository) for p in placed} == {("registry.example.com", "team/images")}
 
-    def test_a_workspace_whose_name_no_tag_could_hold_still_builds(self) -> None:
-        """No tag is pushed, so nothing needs the workspace's name to fit in one."""
+    def test_a_workspace_whose_name_no_repository_could_hold_is_placed_all_the_same(self) -> None:
+        """Nothing is published under the workspace's name, so it needn't fit in a repository path or a tag."""
         backend = RemoteBackend(_config(), PROFILES)
-        placed = backend.destination(_plan(workspace="alice@example.com").images[0])
+        placed = backend.destination(_plan(workspace="Team_A").images[0])
         assert (placed.repository, placed.system_tag) == ("team/images", "demo-1")
 
     def test_a_spec_with_no_output_passes_the_generic_placement(self) -> None:
@@ -372,6 +373,7 @@ async def _submit(
     backend: Backend,
     *,
     unreadable: frozenset[str] = frozenset(),
+    workspace: str = "default",
 ) -> SubmitResult:
     async def secret_readable(workspace: str, name: str) -> bool:
         return f"{workspace}/{name}" not in unreadable
@@ -382,7 +384,7 @@ async def _submit(
     return await submit_build_set(
         BuildSet(name="demo", revision=1, build_specs=[_spec()]),
         backend=backend,
-        workspace="default",
+        workspace=workspace,
         entity_client=entity_client,
         create_job=jobs.create_job,
         get_job_fields=jobs.get_job_fields,
@@ -394,6 +396,23 @@ async def _submit(
 
 class TestSubmitting:
     """The generic submit path, unchanged, with the remote backend behind it."""
+
+    async def test_a_workspace_whose_name_no_repository_could_hold_builds(self) -> None:
+        client = FakeEntityClient()
+        submitted = await _submit(
+            client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES), workspace="Team_A"
+        )
+        assert submitted.images[0].provenance.job == "Team_A/builder-demo-1"
+
+    async def test_a_workspace_whose_name_a_row_cant_record_is_refused_before_anything_is_written(self) -> None:
+        """The in-cluster backend refuses such a name sooner, as a repository path. Here nothing is published
+        under it, so the row's reference to its job is the first thing that can't hold it."""
+        client = FakeEntityClient()
+        with pytest.raises(InvalidBuildRequest, match=r"in workspace 'alice@example.com' \(job: "):
+            await _submit(
+                client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES), workspace="alice@example.com"
+            )
+        assert client.events == []
 
     async def test_the_row_is_written_at_the_services_repository_then_the_job_is_created(self) -> None:
         client = FakeEntityClient()

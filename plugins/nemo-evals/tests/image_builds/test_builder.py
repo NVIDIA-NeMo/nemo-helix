@@ -235,6 +235,18 @@ async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_t
     assert builder.submitted == [1]
 
 
+@pytest.mark.parametrize(
+    "code", [["backend_rejected"], {"is": "missing_secrets"}, 409], ids=["list", "mapping", "number"]
+)
+async def test_a_code_that_is_no_code_is_not_taken_for_a_refusal(code: object) -> None:
+    """Whatever a proxy or a later Builder puts there: it is read, not looked up."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+    builder.code = code  # ty: ignore[invalid-assignment]
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    # A revision another request holds, as a 409 with no code is: the next one is submitted.
+    assert (builder.submitted, submitted.images[0].name) == ([1, 2], "harbor-env-0123456789ab-2")
+
+
 def test_archive_source_splits_a_fileset_reference() -> None:
     assert archive_source("default/harbor-tasks#sort/abc/task_archive", "sort/tests") == _SOURCE
 

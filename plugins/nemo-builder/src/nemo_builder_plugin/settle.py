@@ -25,7 +25,6 @@ passed.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping
@@ -102,10 +101,9 @@ def _message(details: object) -> str | None:
 def _marked_lines(log_tail: str) -> Iterator[str]:
     """Each marked line in ``log_tail``, from the marker on, as the step wrote it.
 
-    Each executor keeps a step's log its own way. Kubernetes and Docker hand back the text. The subprocess
-    executor keeps JSON lines, with a log line as the string that ends each object: read from there, the line is
-    still escaped and ends with the object's ``"}``. The tail is cut by length, so its first line may be the end
-    of one; what follows the marker is whole all the same.
+    The executors a remote-build step runs on, Kubernetes and Docker, hand back the end of its log as text. The
+    tail is cut by length, so its first line may be the end of one; what follows the marker is whole all the
+    same.
 
     A line ends at a newline and nowhere else. ``str.splitlines`` also breaks on a form feed and six more
     characters, which a reason may hold, and what followed one would read as a line of its own.
@@ -115,15 +113,7 @@ def _marked_lines(log_tail: str) -> Iterator[str]:
         start = line.find(_MARKER)
         if start < 0:
             continue
-        text = line[start:]
-        if text.endswith('"}'):
-            try:
-                decoded = json.loads(f'"{text[:-2]}"')
-            except ValueError:
-                decoded = None
-            if isinstance(decoded, str):
-                text = decoded
-        yield text
+        yield line[start:]
 
 
 def ended_job(job: HelixJobStatusResponse) -> EndedJob:

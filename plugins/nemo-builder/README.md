@@ -12,7 +12,9 @@ the cluster build its images: see
 
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
-listed below.
+listed below. That is the in-cluster build. Building through a service outside the cluster has run
+only in this plugin's tests, against a stand-in for a build service: this repository holds no
+service's client or step image, and that path has not been run on a cluster.
 
 ## Quickstart (minikube)
 
@@ -419,7 +421,7 @@ service on its own permissions, so the service checks its user may read images h
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, one whose config couldn't be read, or one the `remote` backend built. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). |
-| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and reads none of them. |
+| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these, and reads only `build_id`: a completion must carry one, and a second completion must carry the same handle. |
 
 Names come from the request:
 
@@ -613,18 +615,21 @@ What differs for a caller:
 - A build context with a link that leads out of it fails the image. In an archive, a link may point
   anywhere in the archive, which can be more than the context; a service that follows links would
   be sent a file from beside the context.
-- Each source of a set is fetched once, so every image of a revision is built from the same files.
+- What a set downloads, it downloads once: an archive whole, and a fileset whole if any image builds
+  from all of it. Images built from one download see the same files, however long the set takes.
 - Every workspace's images land in the service's one repository, and no tag is pushed. Pin
   `image_ref`.
 - The builder doesn't sign, and holds no key. Whether an image is signed, and by whom, is the
   service's.
 - `runtime_config` is null: the step never reads the image's config.
-- There is no build log. A failed row's `status_detail` ends with the step's one-line reason, which
-  names the service's build once one was started. If that build couldn't be cancelled, the reason
-  says it may still be running.
+- There is no build log. When the step ends as a failed step, the row's `status_detail` ends with
+  the step's one-line reason, which names the service's build once one was started, and says so if
+  that build couldn't be cancelled and may still be running. When the job is cancelled, Jobs keeps
+  no log for the step: the row says only that its job ended, and the reason is only in the step's
+  own log.
 - A `ready` row doesn't show whose image it names: see [Security](#security).
-- A build that starts while the service is unreachable is tried again for ten minutes, and one
-  already running is waited on until its timeout. A longer outage fails each queued build as it
+- A build that starts while the service is unreachable is tried again for up to ten minutes, less
+  if its timeout is sooner, and one already running is waited on until its timeout. A longer outage fails each queued build as it
   reaches a slot.
 
 What an operator sets up:
@@ -641,7 +646,9 @@ What an operator sets up:
   submit is refused on one. It is written in full: a profile added under `jobs.executors`
   inherits nothing from `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
   security context, as the chart does for the in-cluster build profiles. Its `max_active_jobs` caps
-  the builds in flight, so set it to what the service lets the deployment queue. Its
+  the builds in flight, so set it to what the service lets the deployment queue. On Docker, Jobs
+  gives a step its `credential_secret` only where the Jobs controller has its launcher
+  (`launcher_tool_path`); without it the step starts with no credential. Its
   `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when
   the build was submitted, so it must cover the longest a build waits for a slot as well as the
   build. The limit a submit checks it against is a floor: it leaves out fetching each context and
@@ -654,7 +661,8 @@ What an operator sets up:
 - The credential, which is in reach of more than the step either way, so give the service one that
   can do no more than build into the one repository, and that can be replaced.
   Prefer `credential_secret`, which names a platform secret: every user who may build must be able
-  to read it, and no one else can. Write it as `<workspace>/<name>`: a bare name is read from each
+  to read it. It is then kept as any platform secret is, which is not from everything inside the
+  cluster (see [Security](#security)). Write it as `<workspace>/<name>`: a bare name is read from each
   submitter's own workspace.
   The other way is for the profile to mount it, as a Kubernetes Secret volume
   (`storage.additional_volumes`). Jobs gives whatever a profile carries to every step that names
@@ -662,11 +670,14 @@ What an operator sets up:
   workspace, can run their own image on `cpu/<profile>` and read the mounted credential, whether or
   not they can read platform secrets (see [Security](#security)). A platform that uses workload
   token exchange has only this way, because Jobs can't fetch a step's secrets there, and a submit
-  is refused until the profile mounts it. Never put the credential in the profile's `env`: Jobs
+  is refused there while `credential_secret` is set. The builder can't check that the profile does
+  mount the credential: a step without one fails each image, and says so on its line. Never put the credential in the profile's `env`: Jobs
   returns a profile's settings, `env` included, to every user who lists the profiles.
   A step program that reads a mounted credential passes `step_main` the function that reads it
   (`read_credential`), so the driver keeps it out of the log and out of every reason, as it does one
-  from the environment.
+  from the environment. The driver knows the credential only as it was given, whole or line by line.
+  A client that uses a part of it alone, or trades it for a token, gives that to `redact_log`, which
+  keeps it out too.
 
 A deployment that can't run the step refuses every submit with `409` and says what is missing: the
 registry or repository, the profile, a step image, a profile whose limit is below one full set's
@@ -719,7 +730,11 @@ the workspace's key signed the image; see [Security](#security) for what can.
 on, the caller must also act for the image's submitter: a user's own token is refused. That doesn't
 show the caller is the image's push step (see [Security](#security)). Completing an image already
 `ready` at that digest returns it, so a retry is safe. The builder doesn't read the registry: it
-records the digest the push step names.
+records the digest the push step names. It answers `409` if the image settled otherwise: it failed,
+or is `ready` at another digest. For an image the `remote` backend built, it also answers `409` if
+the completion doesn't name the service's build (`external.build_id`), or names another handle than
+the image is `ready` with; and for an image built in this cluster, if the completion carries an
+`external` at all.
 
 | Status | When |
 |---|---|
@@ -879,9 +894,14 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 
 ## Limitations
 
-Unless a bullet says otherwise, these describe the default `execution` backend. Those about
-submitting, completing, platform auth and fetching a context hold for `backend: remote` too. What
-differs with it is in
+Unless a bullet says otherwise, these describe the default `execution` backend. With
+`backend: remote`, the bullets about build pods, the sandbox, the work volume, the push step and
+signing don't apply, and three others read differently. The step's profile may be on Docker as
+well as Kubernetes. A context that can't be fetched fails only the images that name it. And where
+the platform uses workload token exchange, the step fetches no platform secret, since its profile
+mounts the credential, so the reason given under Security for the push step doesn't hold for it:
+that combination is meant to work, and has not been run. The bullets about who may submit, read
+and complete an image hold for both backends. What else differs is in
 [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster).
 
 ### Deployment
@@ -916,8 +936,8 @@ differs with it is in
   submit the next `revision`: the same one again would build images already failed.
 - **With `backend: remote`, a step that is killed can leave its build running.** The step cancels
   the service's build when it gives the build up, or when Jobs tells it to stop. A step that is
-  killed outright, out of memory or with its node, cancels nothing: the row is failed once its job
-  has ended, and the build goes on until the service ends it. The step logs the build's ID when
+  killed outright (out of memory, with its node, or on Docker when Jobs' own time limit ends it)
+  cancels nothing: the row is failed once its job has ended, and the build goes on until the service ends it. The step logs the build's ID when
   the build starts, and nothing else records it. It gives the service's client the build's timeout
   (`RemoteBuild.timeout_seconds`), for a service that can end a build by itself.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one

@@ -222,5 +222,6 @@ class RemoteBuildStepConfig(BaseModel):
 
     @property
     def destination(self) -> str:
-        """``<registry>/<repository>``: where every image this step completes must be."""
+        """``<registry>/<repository>``: where the deployment's build service publishes. The driver checks each
+        image against its own row, which a submit wrote with the same."""
         return f"{self.registry}/{self.repository}"
