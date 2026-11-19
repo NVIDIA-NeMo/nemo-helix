@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Link } from 'react-router';
+import { pluginPath } from './paths';
 import { useIsItChristmas } from './queries';
 import type { PluginHost } from './types';
 
@@ -32,6 +34,9 @@ export function IsItChristmasPage({ host }: { host: PluginHost }) {
         <Text kind="body/regular/xs" color="secondary">
           Answered by a Rust server on the other side of the Helix gateway.
         </Text>
+        <Link to={`${pluginPath(host.workspaceId)}/panic`} className="text-subtle underline">
+          Trigger a Rust panic →
+        </Link>
       </Stack>
     </Flex>
   );

@@ -20,12 +20,14 @@ export function localDate(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-/** Calls the Rust backend through the Helix gateway: Studio -> /apis/plugins/<name>/... -> :6010. */
+/** A plugin route through the Helix gateway: Studio -> /apis/plugins/<name>/... -> the Rust server. */
+const pluginUrl = (host: ApiHost, route: string): string =>
+  `${host.apiBaseUrl.replace(/\/$/, '')}/apis/plugins/${PLUGIN_NAME}/v2/workspaces/` +
+  `${encodeURIComponent(host.workspaceId)}/${route}`;
+
 export async function getAnswer(host: ApiHost, date: string, signal?: AbortSignal): Promise<Answer> {
   const token = host.auth.getAccessToken();
-  const url =
-    `${host.apiBaseUrl.replace(/\/$/, '')}/apis/plugins/${PLUGIN_NAME}/v2/workspaces/` +
-    `${encodeURIComponent(host.workspaceId)}/is-it-christmas?date=${encodeURIComponent(date)}`;
+  const url = pluginUrl(host, `is-it-christmas?date=${encodeURIComponent(date)}`);
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     redirect: 'error',
@@ -33,4 +35,29 @@ export async function getAnswer(host: ApiHost, date: string, signal?: AbortSigna
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (await res.json()) as Answer;
+}
+
+/** What the Rust server reports when its handler panics. */
+export interface RustPanic {
+  /** The text Rust prints to stderr, including the RUST_BACKTRACE note. */
+  detail: string;
+  kind: 'panic';
+  thread: string;
+  location: string | null;
+  message: string;
+}
+
+/**
+ * Calls the endpoint that panics on purpose. A real panic comes back as HTTP 500 with its
+ * report as JSON, so a 500 is the expected answer here and anything else is the surprise.
+ */
+export async function getPanic(host: ApiHost, signal?: AbortSignal): Promise<RustPanic> {
+  const token = host.auth.getAccessToken();
+  const res = await fetch(pluginUrl(host, 'panic'), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    redirect: 'error',
+    signal,
+  });
+  if (res.status === 500) return (await res.json()) as RustPanic;
+  throw new Error(res.ok ? 'Expected the endpoint to panic, but it answered normally' : `${res.status} ${res.statusText}`);
 }

@@ -7,7 +7,10 @@ use is_it_christmas::{router, Config};
 
 #[tokio::main]
 async fn main() {
-    let port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(6010);
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(6010);
     let public_url = env::var("PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
     let bundle_dir = env::var("BUNDLE_DIR")
         .map(PathBuf::from)
@@ -15,10 +18,18 @@ async fn main() {
 
     // Loopback only: Helix reaches this adapter from the same machine in the demo.
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind listener");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind listener");
     println!("is-it-christmas listening on http://{addr}");
     println!("register with: nemo plugins install {public_url}/plugin.json");
-    axum::serve(listener, router(Config { public_url, bundle_dir }))
-        .await
-        .expect("serve");
+    axum::serve(
+        listener,
+        router(Config {
+            public_url,
+            bundle_dir,
+        }),
+    )
+    .await
+    .expect("serve");
 }

@@ -3,6 +3,7 @@
 
 import { Navigate, Route, Routes } from 'react-router';
 import { IsItChristmasPage } from './IsItChristmasPage';
+import { PanicPage } from './PanicPage';
 import { pluginPath } from './paths';
 import type { PluginRootProps } from './types';
 
@@ -11,6 +12,7 @@ export function Root({ host }: PluginRootProps) {
   return (
     <Routes>
       <Route index element={<IsItChristmasPage host={host} />} />
+      <Route path="panic" element={<PanicPage host={host} />} />
       <Route path="*" element={<Navigate to={pluginPath(host.workspaceId)} replace />} />
     </Routes>
   );

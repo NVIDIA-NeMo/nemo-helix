@@ -25,6 +25,13 @@ The server exposes:
 - `GET /v1/workspaces/{workspace}/is-it-christmas?date=YYYY-MM-DD`: the API. `date` is
   the caller's local date; it defaults to today in UTC.
 
+- `GET /v1/workspaces/{workspace}/panic`: panics on purpose, to show what a Rust failure looks
+  like end to end. The handler does `"ho ho ho".parse::<u32>().unwrap()`, catches the panic so
+  the server keeps serving, and answers HTTP 500 with the text Rust itself prints, including
+  `ParseIntError { kind: InvalidDigit }` and the `RUST_BACKTRACE` note. Rust also prints it to its
+  own stderr. Try `nemo plugins call is-it-christmas panic`, or the "Trigger a Rust panic" link in
+  the Studio page. The CLI retries 5xx responses, so one call shows up as three panics.
+
 There is no credential: the endpoint is public on loopback. A real plugin would add a
 `credential` (a workspace secret sent as a bearer token), as the Phoenix plugin does.
 

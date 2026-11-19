@@ -7,7 +7,12 @@
 //! pins the UI bundle served at `/index.js`, and then proxies
 //! `/apis/plugins/is-it-christmas/...` requests to the endpoint below.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    cell::RefCell,
+    panic,
+    path::PathBuf,
+    sync::{Arc, Once},
+};
 
 use axum::{
     extract::{Path, Query, State},
@@ -73,7 +78,10 @@ fn bad_request(detail: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "detail": detail }))).into_response()
 }
 
-async fn is_it_christmas(Path(_workspace): Path<String>, Query(query): Query<AnswerQuery>) -> Response {
+async fn is_it_christmas(
+    Path(_workspace): Path<String>,
+    Query(query): Query<AnswerQuery>,
+) -> Response {
     let today = match query.date {
         None => Utc::now().date_naive(),
         Some(raw) => match NaiveDate::parse_from_str(&raw, "%Y-%m-%d") {
@@ -87,6 +95,70 @@ async fn is_it_christmas(Path(_workspace): Path<String>, Query(query): Query<Ans
     }
 }
 
+thread_local! {
+    /// Where the most recent panic on this thread happened, captured by the hook below.
+    static LAST_PANIC_LOCATION: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+static INSTALL_HOOK: Once = Once::new();
+
+/// Keeps Rust's normal panic output on stderr, and also remembers where the panic
+/// happened so the HTTP error can report it.
+fn install_panic_hook() {
+    INSTALL_HOOK.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if let Some(at) = info.location() {
+                let place = format!("{}:{}:{}", at.file(), at.line(), at.column());
+                LAST_PANIC_LOCATION.with(|slot| *slot.borrow_mut() = Some(place));
+            }
+            previous(info);
+        }));
+    });
+}
+
+#[derive(Debug, Serialize)]
+pub struct PanicReport {
+    /// The text Rust prints to stderr for a panic, including the RUST_BACKTRACE note.
+    pub detail: String,
+    pub kind: &'static str,
+    pub thread: String,
+    pub location: Option<String>,
+    pub message: String,
+}
+
+/// Panic on purpose, the way real Rust code does: `unwrap()` on an `Err`. The panic is
+/// caught so the server keeps serving, and reported exactly as it happened.
+pub fn trigger_panic() -> PanicReport {
+    install_panic_hook();
+    let outcome = panic::catch_unwind(|| "ho ho ho".parse::<u32>().unwrap());
+    let payload = outcome.expect_err("\"ho ho ho\" is not a number");
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+        .unwrap_or_else(|| "Box<dyn Any>".to_string());
+    let thread = std::thread::current()
+        .name()
+        .unwrap_or("<unnamed>")
+        .to_string();
+    let location = LAST_PANIC_LOCATION.with(|slot| slot.borrow_mut().take());
+    let detail = format!(
+        "thread '{thread}' panicked at {}:\n{message}\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+        location.as_deref().unwrap_or("<unknown>"),
+    );
+    PanicReport {
+        detail,
+        kind: "panic",
+        thread,
+        location,
+        message,
+    }
+}
+
+async fn panic_endpoint(Path(_workspace): Path<String>) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(trigger_panic())).into_response()
+}
+
 /// The manifest Helix registers. The bundle hash is computed from the file actually
 /// served, so the pin cannot drift from the bytes. Without a built UI it is API-only.
 fn manifest(config: &Config) -> Value {
@@ -94,12 +166,20 @@ fn manifest(config: &Config) -> Value {
     let mut plugin = json!({
         "name": PLUGIN_NAME,
         "title": "Is it Christmas?",
-        "endpoints": [{
-            "method": "GET",
-            "path": "/v2/workspaces/{workspace}/is-it-christmas",
-            "access": "read",
-            "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/is-it-christmas"),
-        }],
+        "endpoints": [
+            {
+                "method": "GET",
+                "path": "/v2/workspaces/{workspace}/is-it-christmas",
+                "access": "read",
+                "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/is-it-christmas"),
+            },
+            {
+                "method": "GET",
+                "path": "/v2/workspaces/{workspace}/panic",
+                "access": "read",
+                "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/panic"),
+            },
+        ],
     });
     let script = std::fs::read(config.bundle_dir.join("index.js"));
     let sidecar = std::fs::read(config.bundle_dir.join("plugin.manifest.json"))
@@ -127,7 +207,10 @@ async fn plugin_manifest(State(config): State<Arc<Config>>) -> Json<Value> {
 async fn bundle(State(config): State<Arc<Config>>) -> Response {
     match std::fs::read(config.bundle_dir.join("index.js")) {
         Ok(bytes) => (
-            [(header::CONTENT_TYPE, "text/javascript"), (header::CACHE_CONTROL, "no-store")],
+            [
+                (header::CONTENT_TYPE, "text/javascript"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
             bytes,
         )
             .into_response(),
@@ -140,7 +223,11 @@ pub fn router(config: Config) -> Router {
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/plugin.json", get(plugin_manifest))
         .route("/index.js", get(bundle))
-        .route("/v1/workspaces/{workspace}/is-it-christmas", get(is_it_christmas))
+        .route(
+            "/v1/workspaces/{workspace}/is-it-christmas",
+            get(is_it_christmas),
+        )
+        .route("/v1/workspaces/{workspace}/panic", get(panic_endpoint))
         .with_state(Arc::new(config))
 }
 
@@ -173,7 +260,10 @@ mod tests {
     #[test]
     fn boxing_day_counts_to_next_year() {
         let a = answer(day(2026, 12, 26)).unwrap();
-        assert_eq!((a.days_until, a.next_christmas.as_str()), (364, "2027-12-25"));
+        assert_eq!(
+            (a.days_until, a.next_christmas.as_str()),
+            (364, "2027-12-25")
+        );
     }
 
     #[test]
@@ -182,34 +272,79 @@ mod tests {
     }
 
     fn temp_bundle(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("is-it-christmas-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("is-it-christmas-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
     async fn get_json(app: Router, uri: &str) -> (StatusCode, Value) {
-        let res = app.oneshot(Request::get(uri).body(Body::empty()).unwrap()).await.unwrap();
+        let res = app
+            .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
         let status = res.status();
         let bytes = res.into_body().collect().await.unwrap().to_bytes();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     fn app(dir: PathBuf) -> Router {
-        router(Config { public_url: "http://127.0.0.1:6010/".into(), bundle_dir: dir })
+        router(Config {
+            public_url: "http://127.0.0.1:6010/".into(),
+            bundle_dir: dir,
+        })
+    }
+
+    #[test]
+    fn panic_report_is_in_rusts_own_words() {
+        let report = trigger_panic();
+        assert_eq!(
+            report.message,
+            "called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }"
+        );
+        assert!(report
+            .location
+            .as_deref()
+            .is_some_and(|l| l.starts_with("src/lib.rs:")));
+        assert!(report.detail.contains("panicked at src/lib.rs:"));
+        assert!(report.detail.contains("RUST_BACKTRACE=1"));
+    }
+
+    #[tokio::test]
+    async fn panic_endpoint_is_a_500_and_the_server_keeps_serving() {
+        let app = app(temp_bundle("panic"));
+        let (status, body) = get_json(app.clone(), "/v1/workspaces/default/panic").await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["kind"], "panic");
+        assert!(body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("ParseIntError { kind: InvalidDigit }"));
+        let (status, _) = get_json(app, "/health").await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
     async fn endpoint_uses_the_callers_date() {
-        let (status, body) =
-            get_json(app(temp_bundle("api")), "/v1/workspaces/default/is-it-christmas?date=2026-12-25").await;
+        let (status, body) = get_json(
+            app(temp_bundle("api")),
+            "/v1/workspaces/default/is-it-christmas?date=2026-12-25",
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["is_christmas"], true);
     }
 
     #[tokio::test]
     async fn endpoint_rejects_a_malformed_date() {
-        let (status, body) =
-            get_json(app(temp_bundle("bad")), "/v1/workspaces/default/is-it-christmas?date=tomorrow").await;
+        let (status, body) = get_json(
+            app(temp_bundle("bad")),
+            "/v1/workspaces/default/is-it-christmas?date=tomorrow",
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["detail"], "date must be YYYY-MM-DD");
     }
@@ -224,18 +359,36 @@ mod tests {
             "http://127.0.0.1:6010/v1/workspaces/{workspace}/is-it-christmas"
         );
         assert!(plugin.get("bundle").is_none() && plugin.get("navigation").is_none());
+        assert_eq!(plugin["endpoints"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            plugin["endpoints"][1]["path"],
+            "/v2/workspaces/{workspace}/panic"
+        );
     }
 
     #[tokio::test]
     async fn manifest_pins_the_bytes_it_serves() {
         let dir = temp_bundle("ui");
         std::fs::write(dir.join("index.js"), b"export const Root = () => null;").unwrap();
-        std::fs::write(dir.join("plugin.manifest.json"), br#"{"contractVersion":"1.0.0"}"#).unwrap();
+        std::fs::write(
+            dir.join("plugin.manifest.json"),
+            br#"{"contractVersion":"1.0.0"}"#,
+        )
+        .unwrap();
         let (_, body) = get_json(app(dir.clone()), "/plugin.json").await;
         let expected = format!("{:x}", Sha256::digest(b"export const Root = () => null;"));
         assert_eq!(body["plugin"]["bundle"]["sha256"], expected.as_str());
-        assert_eq!(body["plugin"]["bundle"]["url"], "http://127.0.0.1:6010/index.js");
-        assert_eq!(body["plugin"]["bundle"]["sidecar"]["contractVersion"], "1.0.0");
-        assert_eq!(body["plugin"]["navigation"][0]["path"], "/workspaces/{workspace}/plugin/is-it-christmas");
+        assert_eq!(
+            body["plugin"]["bundle"]["url"],
+            "http://127.0.0.1:6010/index.js"
+        );
+        assert_eq!(
+            body["plugin"]["bundle"]["sidecar"]["contractVersion"],
+            "1.0.0"
+        );
+        assert_eq!(
+            body["plugin"]["navigation"][0]["path"],
+            "/workspaces/{workspace}/plugin/is-it-christmas"
+        );
     }
 }
