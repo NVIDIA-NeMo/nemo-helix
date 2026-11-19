@@ -70,15 +70,55 @@ class TokenCounter(Protocol):
     def count(self, messages: list[Row], tools: list[Row] | None) -> int: ...
 
 
+def fold_thinking(messages: list[Row]) -> list[Row]:
+    """The messages as the trainer renders them: ``thinking`` folded into ``reasoning_content``.
+
+    SFT rows keep an assistant turn's reasoning in a message of its own, ``{"role": "assistant",
+    "thinking": ...}``, ahead of the reply. Chat templates read ``reasoning_content`` on the reply, and
+    Automodel's ``ChatDataset`` (patched by ``docker/automodel/patches/automodel-chat-dataset-thinking-and-
+    tool-call-ids.patch``) folds the one into the other before rendering. A template given the raw rows ignores ``thinking`` and
+    renders an empty assistant turn, so a length measured on them leaves the reasoning out. This follows the
+    patch: the reasoning joins the next assistant message unless that one has reasoning of its own, and
+    otherwise stays a turn of its own.
+    """
+    folded: list[Row] = []
+    pending: str | None = None
+    for message in messages:
+        if pending is not None:
+            if message["role"] == "assistant" and "thinking" not in message and "reasoning_content" not in message:
+                message = {**message, "reasoning_content": pending}
+            else:
+                folded.append({"role": "assistant", "content": "", "reasoning_content": pending})
+            pending = None
+        if "thinking" not in message:
+            folded.append(message)
+            continue
+        rest = {key: value for key, value in message.items() if key != "thinking"}
+        thinking = message["thinking"] or ""
+        if "reasoning_content" in rest:
+            folded.append(rest)
+        elif rest.get("content") or rest.get("tool_calls"):
+            folded.append({**rest, "reasoning_content": thinking})
+        else:
+            pending = thinking
+    if pending is not None:
+        folded.append({"role": "assistant", "content": "", "reasoning_content": pending})
+    return folded
+
+
 class ChatTemplateCounter:
-    """Counts tokens by rendering the tokenizer's chat template, as training does."""
+    """Counts tokens by rendering the tokenizer's chat template, as training does.
+
+    Training renders ``thinking`` as the reply's ``reasoning_content``, so that is how rows are counted
+    (see `fold_thinking`).
+    """
 
     def __init__(self, tokenizer: Any) -> None:
         self._tokenizer = tokenizer
 
     def count(self, messages: list[Row], tools: list[Row] | None) -> int:
         text = self._tokenizer.apply_chat_template(
-            messages, tools=tools or None, tokenize=False, add_generation_prompt=False
+            fold_thinking(messages), tools=tools or None, tokenize=False, add_generation_prompt=False
         )
         return len(self._tokenizer(text, add_special_tokens=False)["input_ids"])
 
