@@ -1,0 +1,484 @@
+{
+  "name": "continuous-demo",
+  "description": "Continuous five-layer DAG: prepare, ten workers, five reducers, two validators, summarize.",
+  "source": "continuous-workflow-demo",
+  "spec": {},
+  "platform_spec": {
+    "workflow": {
+      "mode": "continuous"
+    },
+    "steps": [
+      {
+        "name": "prepare",
+        "depends_on": [],
+        "trigger": [
+          {
+            "fileset_commit": "REPLACE_WITH_INPUT_FILESET_ID"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [prepare] Input commit received; preparing 10 simulated partitions\"\npart=1\nwhile [ \"$part\" -le 10 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [prepare] Prepared partition $part/10\"\n  sleep 1\n  part=$((part + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [prepare] Preparation complete; releasing all 10 workers\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-01",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-01] Starting simulated partition 01; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-01] Processing simulated batch $batch/6\"\n  sleep 4\n  echo \"[$(date -u +%H:%M:%S)] [worker-01] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-01] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-02",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-02] Starting simulated partition 02; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-02] Processing simulated batch $batch/6\"\n  sleep 5\n  echo \"[$(date -u +%H:%M:%S)] [worker-02] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-02] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-03",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-03] Starting simulated partition 03; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-03] Processing simulated batch $batch/6\"\n  sleep 3\n  echo \"[$(date -u +%H:%M:%S)] [worker-03] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-03] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-04",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-04] Starting simulated partition 04; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-04] Processing simulated batch $batch/6\"\n  sleep 4\n  echo \"[$(date -u +%H:%M:%S)] [worker-04] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-04] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-05",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-05] Starting simulated partition 05; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-05] Processing simulated batch $batch/6\"\n  sleep 5\n  echo \"[$(date -u +%H:%M:%S)] [worker-05] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-05] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-06",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-06] Starting simulated partition 06; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-06] Processing simulated batch $batch/6\"\n  sleep 3\n  echo \"[$(date -u +%H:%M:%S)] [worker-06] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-06] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-07",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-07] Starting simulated partition 07; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-07] Processing simulated batch $batch/6\"\n  sleep 4\n  echo \"[$(date -u +%H:%M:%S)] [worker-07] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-07] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-08",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-08] Starting simulated partition 08; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-08] Processing simulated batch $batch/6\"\n  sleep 5\n  echo \"[$(date -u +%H:%M:%S)] [worker-08] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-08] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-09",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-09] Starting simulated partition 09; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-09] Processing simulated batch $batch/6\"\n  sleep 3\n  echo \"[$(date -u +%H:%M:%S)] [worker-09] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-09] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "worker-10",
+        "depends_on": [
+          "prepare"
+        ],
+        "trigger": [
+          {
+            "step_success": "prepare"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [worker-10] Starting simulated partition 10; execution=${NEMO_JOB_STEP:-unknown}\"\nbatch=1\nwhile [ \"$batch\" -le 6 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [worker-10] Processing simulated batch $batch/6\"\n  sleep 4\n  echo \"[$(date -u +%H:%M:%S)] [worker-10] Progress: $((batch * 100 / 6))%; simulated records=$((batch * 100))\"\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [worker-10] SUCCESS; 600 simulated records processed\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "reduce-01",
+        "depends_on": [
+          "worker-01",
+          "worker-02"
+        ],
+        "trigger": [
+          {
+            "step_success": "worker-01"
+          },
+          {
+            "step_success": "worker-02"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [reduce-01] Starting after: worker-01, worker-02\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [reduce-01] Combining partitions: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [reduce-01] SUCCESS; Combining partitions complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "reduce-02",
+        "depends_on": [
+          "worker-03",
+          "worker-04"
+        ],
+        "trigger": [
+          {
+            "step_success": "worker-03"
+          },
+          {
+            "step_success": "worker-04"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [reduce-02] Starting after: worker-03, worker-04\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [reduce-02] Combining partitions: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [reduce-02] SUCCESS; Combining partitions complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "reduce-03",
+        "depends_on": [
+          "worker-05",
+          "worker-06"
+        ],
+        "trigger": [
+          {
+            "step_success": "worker-05"
+          },
+          {
+            "step_success": "worker-06"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [reduce-03] Starting after: worker-05, worker-06\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [reduce-03] Combining partitions: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [reduce-03] SUCCESS; Combining partitions complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "reduce-04",
+        "depends_on": [
+          "worker-07",
+          "worker-08"
+        ],
+        "trigger": [
+          {
+            "step_success": "worker-07"
+          },
+          {
+            "step_success": "worker-08"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [reduce-04] Starting after: worker-07, worker-08\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [reduce-04] Combining partitions: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [reduce-04] SUCCESS; Combining partitions complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "reduce-05",
+        "depends_on": [
+          "worker-09",
+          "worker-10"
+        ],
+        "trigger": [
+          {
+            "step_success": "worker-09"
+          },
+          {
+            "step_success": "worker-10"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [reduce-05] Starting after: worker-09, worker-10\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [reduce-05] Combining partitions: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [reduce-05] SUCCESS; Combining partitions complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "validate-01",
+        "depends_on": [
+          "reduce-01",
+          "reduce-02",
+          "reduce-03"
+        ],
+        "trigger": [
+          {
+            "step_success": "reduce-01"
+          },
+          {
+            "step_success": "reduce-02"
+          },
+          {
+            "step_success": "reduce-03"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [validate-01] Starting after: reduce-01, reduce-02, reduce-03\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [validate-01] Checking first result group: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [validate-01] SUCCESS; Checking first result group complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "validate-02",
+        "depends_on": [
+          "reduce-04",
+          "reduce-05"
+        ],
+        "trigger": [
+          {
+            "step_success": "reduce-04"
+          },
+          {
+            "step_success": "reduce-05"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [validate-02] Starting after: reduce-04, reduce-05\"\nbatch=1\nwhile [ \"$batch\" -le 4 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [validate-02] Checking second result group: batch $batch/4 (simulated)\"\n  sleep 3\n  batch=$((batch + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [validate-02] SUCCESS; Checking second result group complete\""
+            ]
+          }
+        }
+      },
+      {
+        "name": "summarize",
+        "depends_on": [
+          "validate-01",
+          "validate-02"
+        ],
+        "trigger": [
+          {
+            "step_success": "validate-01"
+          },
+          {
+            "step_success": "validate-02"
+          }
+        ],
+        "executor": {
+          "provider": "cpu",
+          "profile": "gpu",
+          "container": {
+            "image": "docker.io/my-registry/nhx-api:local",
+            "command": [
+              "sh",
+              "-c",
+              "set -eu\necho \"[$(date -u +%H:%M:%S)] [summarize] Both validation groups finished; combining simulated results\"\npart=1\nwhile [ \"$part\" -le 10 ]; do\n  echo \"[$(date -u +%H:%M:%S)] [summarize] Collected worker $part/10\"\n  sleep 1\n  part=$((part + 1))\ndone\necho \"[$(date -u +%H:%M:%S)] [summarize] PASS COMPLETE; waiting for the next Fileset commit\""
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
