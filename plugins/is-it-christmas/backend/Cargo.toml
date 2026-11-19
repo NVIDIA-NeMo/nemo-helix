@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "is-it-christmas"
+version = "0.1.0"
+edition = "2021"
+description = "Example NeMo Helix community plugin whose backend is written in Rust"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

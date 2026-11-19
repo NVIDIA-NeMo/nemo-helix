@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "types": ["vitest/globals"],
+    "paths": {
+      "@nemo/common": ["../../../web/packages/common/src/plugin.ts"],
+      "@nemo/common/*": ["../../../web/packages/common/*"],
+      "@nemo/sdk/*": ["../../../web/packages/sdk/*"]
+    }
+  },
+  "include": ["src"]
+}
