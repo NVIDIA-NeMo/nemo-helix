@@ -181,8 +181,6 @@ describe('AgentEvaluationWizard parallel requests', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
