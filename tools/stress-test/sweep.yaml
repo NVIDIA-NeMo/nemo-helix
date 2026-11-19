@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+run_key: stress
+payload_bytes: 1024
+image: "nvcr.io/0921617854601259/nemo-helix-dev/nhx-tasks:70cc13d4055922c48de00f383a2dbabfc622ad88"
+pods:
+  exit:
+    cpu_request: 100m
+    memory_request: 256Mi
+    cpu_limit: 500m
+    memory_limit: 512Mi
+  idle:
+    cpu_request: 100m
+    memory_request: 256Mi
+    cpu_limit: 500m
+    memory_limit: 512Mi
+  barrier:
+    cpu_request: 100m
+    memory_request: 256Mi
+    cpu_limit: 500m
+    memory_limit: 512Mi
+  hammer:
+    cpu_request: 500m
+    memory_request: 512Mi
+    cpu_limit: "1"
+    memory_limit: 1Gi
+steps:
+  - {id: exit-01, kind: exit, count: 1}
+  - {id: exit-10, kind: exit, count: 10}
+  - {id: exit-25, kind: exit, count: 25}
+  - {id: exit-50, kind: exit, count: 50}
+  - {id: exit-100, kind: exit, count: 100}
+  - {id: exit-500, kind: exit, count: 500}
+  - {id: barrier-10, kind: barrier, count: 10, timeout_seconds: 180, workspaces: 1}
+  - {id: barrier-10-w2, kind: barrier, count: 10, timeout_seconds: 180, workspaces: 2}
+  - {id: barrier-100, kind: barrier, count: 100, timeout_seconds: 600, workspaces: 1}
+  - {id: barrier-100-w2, kind: barrier, count: 100, timeout_seconds: 600, workspaces: 2}
+  - {id: files-01, kind: hammer, count: 1, duration_seconds: 60, service: files, rate_per_second: 5}
+  - {id: files-10, kind: hammer, count: 10, duration_seconds: 60, service: files, rate_per_second: 5}
+  - {id: files-25, kind: hammer, count: 25, duration_seconds: 60, service: files, rate_per_second: 5}
+  - {id: secrets-01, kind: hammer, count: 1, duration_seconds: 60, service: secrets, rate_per_second: 5}
+  - {id: secrets-10, kind: hammer, count: 10, duration_seconds: 60, service: secrets, rate_per_second: 5}
+  - {id: secrets-25, kind: hammer, count: 25, duration_seconds: 60, service: secrets, rate_per_second: 5}
+  - {id: secrets-100, kind: hammer, count: 100, duration_seconds: 60, service: secrets, rate_per_second: 5}
+  - {id: secrets-300, kind: hammer, count: 300, duration_seconds: 60, service: secrets, rate_per_second: 5}
+  - {id: auth-01, kind: hammer, count: 1, duration_seconds: 60, service: auth, rate_per_second: 5}
+  - {id: auth-10, kind: hammer, count: 10, duration_seconds: 60, service: auth, rate_per_second: 5}
+  - {id: auth-25, kind: hammer, count: 25, duration_seconds: 60, service: auth, rate_per_second: 5}
