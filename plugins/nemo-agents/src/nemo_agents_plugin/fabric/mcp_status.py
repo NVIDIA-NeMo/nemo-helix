@@ -21,6 +21,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal, TextIO
 
 import anyio
@@ -110,10 +111,10 @@ def _is_exposed(tool: str, spec: McpServerConfig, config: AgentConfig) -> bool:
 
 @asynccontextmanager
 async def _open_streams(
-    transport: str, target: str, spec: McpServerConfig, env: dict[str, str], errlog: TextIO
+    transport: str, target: str, spec: McpServerConfig, env: dict[str, str], errlog: TextIO, cwd: Path | None
 ) -> AsyncGenerator[tuple[Any, Any]]:
     if transport == "stdio":
-        params = StdioServerParameters(command=target, args=spec.args, env=env or None)
+        params = StdioServerParameters(command=target, args=spec.args, env=env or None, cwd=cwd)
         async with stdio_client(params, errlog=errlog) as streams:
             yield streams
         return
@@ -144,9 +145,10 @@ async def probe_mcp_server(
     spec: McpServerConfig,
     config: AgentConfig,
     *,
+    cwd: Path | None = None,
     timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
 ) -> McpServerStatus:
-    """Connect to one declared server and list its tools."""
+    """Connect to one declared server and list its tools, launching stdio servers from ``cwd`` as the runtime does."""
     transport = _normalize_transport(spec.transport)
     raw_target = spec.url.strip()
     target = os.path.expandvars(raw_target)
@@ -196,7 +198,7 @@ async def probe_mcp_server(
     with tempfile.TemporaryFile(mode="w+", errors="replace") as errlog:
         try:
             with anyio.fail_after(timeout_seconds):
-                async with _open_streams(transport, target, spec, env, errlog) as (read, write):
+                async with _open_streams(transport, target, spec, env, errlog, cwd) as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
                         tools = await _list_all_tools(session)
@@ -231,7 +233,7 @@ class McpStatusCache:
         self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._cached: dict[str, tuple[float, McpServerStatus]] = {}
 
-    async def get_server(self, config: AgentConfig, name: str) -> McpServerStatus | None:
+    async def get_server(self, config: AgentConfig, name: str, *, cwd: Path | None = None) -> McpServerStatus | None:
         """Status of one declared server, or ``None`` when the config does not declare it."""
         spec = _declared_servers(config).get(name)
         if spec is None:
@@ -240,11 +242,11 @@ class McpStatusCache:
             cached = self._cached.get(name)
             if cached is not None and time.monotonic() - cached[0] < self._ttl_seconds:
                 return cached[1]
-            status = await probe_mcp_server(name, spec, config)
+            status = await probe_mcp_server(name, spec, config, cwd=cwd)
             self._cached[name] = (time.monotonic(), status)
             return status
 
-    async def get(self, config: AgentConfig) -> McpStatusResponse:
+    async def get(self, config: AgentConfig, *, cwd: Path | None = None) -> McpStatusResponse:
         """Status of every declared server, probed concurrently."""
-        statuses = await asyncio.gather(*(self.get_server(config, name) for name in _declared_servers(config)))
+        statuses = await asyncio.gather(*(self.get_server(config, name, cwd=cwd) for name in _declared_servers(config)))
         return McpStatusResponse(servers=[s for s in statuses if s is not None], checked_at=datetime.now(UTC))

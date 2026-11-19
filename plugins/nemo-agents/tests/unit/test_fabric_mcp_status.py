@@ -104,6 +104,19 @@ async def test_crashing_stdio_server_reports_stderr() -> None:
     assert status.stderr == "boom"
 
 
+async def test_stdio_probe_resolves_relative_args_from_cwd(tmp_path: Path) -> None:
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "server.py").write_text(_SERVER_SCRIPT, encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    spec = McpServerConfig.model_validate(_stdio("../mcps/server.py"))
+
+    status = await probe_mcp_server("calc", spec, _config({}), cwd=workspace, timeout_seconds=10)
+
+    assert status.state == "running"
+    assert [tool.name for tool in status.tools] == ["add", "wipe"]
+
+
 async def test_unsupported_transport() -> None:
     spec = McpServerConfig(transport="websocket", url="ws://localhost:1")
 
@@ -224,7 +237,7 @@ async def test_list_all_tools_rejects_repeated_cursor() -> None:
 def _counting_probe(monkeypatch: pytest.MonkeyPatch, delay: float = 0) -> list[str]:
     calls: list[str] = []
 
-    async def probe(name: str, spec: McpServerConfig, config: AgentConfig) -> McpServerStatus:
+    async def probe(name: str, spec: McpServerConfig, config: AgentConfig, *, cwd: Path | None) -> McpServerStatus:
         calls.append(name)
         await asyncio.sleep(delay)
         return McpServerStatus(name=name, transport="stdio", target=spec.url, state="running")
@@ -287,6 +300,34 @@ def test_mcp_server_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert single.status_code == 200
     assert single.json() == body["servers"][0]
     assert missing.status_code == 404
+
+
+def test_mcp_server_endpoint_launches_stdio_from_agent_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def validate(config: AgentConfig, *, base_dir: Path) -> object:
+        return object()
+
+    monkeypatch.setattr(server, "_validate_agent_config", validate)
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "server.py").write_text(_SERVER_SCRIPT, encoding="utf-8")
+    config_path = tmp_path / "agent.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                **_BASE_CONFIG,
+                "environment": {"workspace": "./workspace"},
+                "mcp": {"servers": {"calc": _stdio("../mcps/server.py")}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(create_fabric_serving_app(config_path)) as client:
+        status = client.get("/v1/mcp/servers/calc").json()
+
+    assert status["state"] == "running", status
+    assert [tool["name"] for tool in status["tools"]] == ["add", "wipe"]
 
 
 # Studio's hand-written types are checked against the same fixture in web/packages/studio/src/api/agents/mcpStatusContract.test.ts.

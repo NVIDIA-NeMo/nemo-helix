@@ -87,10 +87,10 @@ def release_runtime_base_dir(base_dir: RuntimeBaseDir, *, workspace_baseline: Pa
     logger.info("Removed staged agent root %s.", base_dir.path)
 
 
-def ensure_local_workspace_dir(agent_config: AgentConfig, base_dir: Path) -> None:
-    """Create the configured local workspace relative to the agent base directory."""
+def ensure_local_workspace_dir(agent_config: AgentConfig, base_dir: Path) -> Path | None:
+    """Create the configured local workspace relative to the agent base directory and return it."""
     if agent_config.environment.provider != "local":
-        return
+        return None
 
     configured_workspace = Path(agent_config.environment.workspace)
     if configured_workspace.is_absolute():
@@ -102,6 +102,7 @@ def ensure_local_workspace_dir(agent_config: AgentConfig, base_dir: Path) -> Non
         raise ValueError("Local workspace path must remain within the agent base directory.")
 
     workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
 
 
 def prepare_deepagents_workspace_baseline(agent_config: AgentConfig, base_dir: Path) -> Path | None:
