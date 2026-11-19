@@ -18,7 +18,7 @@ _LABEL_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 @dataclass(frozen=True)
 class StudioLinkDestination:
-    """Known Studio destination that Claude Code can link to."""
+    """Known Studio destination that the assistant can link to."""
 
     label: str
     path_template: str

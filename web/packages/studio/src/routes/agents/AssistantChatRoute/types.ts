@@ -91,16 +91,6 @@ export interface AssistantHistorySession {
   chat_artifacts: AssistantChatArtifacts;
 }
 
-export interface AssistantSkill {
-  name: string;
-  claude_name: string;
-  description: string;
-  source: string;
-  source_path?: string | null;
-  install_path: string;
-  installed: boolean;
-}
-
 export interface AssistantUserHistoryItem {
   kind: 'user';
   text: string;

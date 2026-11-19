@@ -253,6 +253,13 @@ describe('Routes', () => {
       expect(findIfRouteExists(routes, ROUTES.workspace.dashboard)).toBe(false);
     });
 
+    it('does not add a full-page assistant chat route when assistant studio is in preview', async () => {
+      // The assistant is Felix, the top-bar pop-out; there is no full-page assistant route.
+      vi.stubEnv('VITE_FF_ASSISTANT_STUDIO_ENABLED', 'preview');
+      const { routes } = await import('@studio/routes/index');
+      expect(findIfRouteExists(routes, ROUTES.workspace.assistantChat)).toBe(false);
+    });
+
     it('should include virtual model routes if only agent optimizations are enabled', async () => {
       vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
       vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
