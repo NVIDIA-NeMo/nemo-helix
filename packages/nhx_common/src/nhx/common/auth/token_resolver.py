@@ -50,6 +50,10 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
                 authz_aliases=[alias for alias in aliases if isinstance(alias, str)],
             )
         return _direct_principal_from_claims(claims)
+    subject_aliases = _identity_aliases(claims.subject, claims.email)
+    aliases = claims.raw_claims.get("nhx_subject_aliases")
+    if isinstance(aliases, list) and all(isinstance(alias, str) for alias in aliases):
+        subject_aliases = list(dict.fromkeys([*subject_aliases, *aliases]))
     return Principal(
         id=claims.actor.subject,
         groups=claims.actor.groups,
@@ -57,7 +61,7 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
         on_behalf_of=claims.subject,
         on_behalf_of_email=claims.email,
         on_behalf_of_groups=claims.groups,
-        on_behalf_of_authz_aliases=_identity_aliases(claims.subject, claims.email),
+        on_behalf_of_authz_aliases=subject_aliases,
     )
 
 

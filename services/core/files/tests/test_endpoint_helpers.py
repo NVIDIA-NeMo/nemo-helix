@@ -19,6 +19,7 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import SecretRef
 from nhx.common.auth import AuthClient, Principal
 from nhx.common.auth.headers import TRUSTED_IDENTITY_HEADERS
+from nhx.common.auth.workload_tokens import resolve_workload_access_token
 from nhx.common.config import AuthConfig
 from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
@@ -262,7 +263,12 @@ async def test_storage_secret_lookup_uses_signed_creator_delegation(
             ),
         ),
     )
-    creator = Principal(id="creator@example.com", email="creator@example.com", groups=["workspace-editors"])
+    creator = Principal(
+        id="creator@example.com",
+        email="creator@example.com",
+        groups=["workspace-editors"],
+        authz_aliases=["legacy-creator"],
+    )
     principal = (
         Principal(
             id="service:models",
@@ -270,13 +276,14 @@ async def test_storage_secret_lookup_uses_signed_creator_delegation(
             on_behalf_of=creator.id,
             on_behalf_of_email=creator.email,
             on_behalf_of_groups=creator.groups,
+            on_behalf_of_authz_aliases=creator.authz_aliases,
         )
         if delegated
         else creator
     )
     requests: list[httpx.Request] = []
 
-    def access_secret(request: httpx.Request) -> httpx.Response:
+    async def access_secret(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.url.path == "/apis/secrets/v2/workspaces/shared/secrets/hf-token/access"
         # The receiving middleware rejects even empty trusted identity headers.
@@ -294,11 +301,18 @@ async def test_storage_secret_lookup_uses_signed_creator_delegation(
         assert claims["groups"] == "workspace-editors"
         assert claims["act"] == {"sub": "service:files"}
         assert claims["scope"] == "platform:read platform:write"
+        resolved = await resolve_workload_access_token(auth_config, token)
+        assert resolved is not None
+        subject_aliases = resolved.principal.on_behalf_of_authz_aliases
+        assert set(creator.authz_aliases).issubset(subject_aliases)
+        # Only the legacy alias has a grant to this secret, not the subject or email.
+        secret_grants = {"legacy-creator": {"shared/hf-token"}}
+        permitted = any("shared/hf-token" in secret_grants.get(alias, set()) for alias in subject_aliases)
         assert request.headers["traceparent"] == "preserved-trace"
         for header, value in MARK_INTERNAL_REQUEST_HEADERS.items():
             assert request.headers[header] == value
         return httpx.Response(
-            status,
+            status if permitted else 403,
             json={"name": "hf-token", "workspace": "shared", "value": "hf-token"}
             if status == 200
             else {"detail": "denied"},
