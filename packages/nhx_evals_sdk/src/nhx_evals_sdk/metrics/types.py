@@ -15,6 +15,7 @@ from nhx_evals_sdk.agent_eval.metrics import (
 from nhx_evals_sdk.metrics.bleu import BLEUMetric
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.f1 import F1Metric
+from nhx_evals_sdk.metrics.harbor_skill_metrics import HarborSkillMetrics
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.number_check import NumberCheckMetric
 from nhx_evals_sdk.metrics.ragas.metrics import (
@@ -88,6 +89,7 @@ MetricVariants: TypeAlias = (
     | ExactMatchMetric
     | F1Metric
     | LLMJudgeMetric
+    | HarborSkillMetrics
     | NumberCheckMetric
     | RemoteMetric
     | NemoAgentToolkitRemoteMetric

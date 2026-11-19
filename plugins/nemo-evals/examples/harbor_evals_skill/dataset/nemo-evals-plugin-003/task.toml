@@ -7,7 +7,7 @@ artifacts = [
 
 [agent]
 user = 10001
-timeout_sec = 900
+timeout_sec = 1200
 
 [environment]
 workdir = "/workspace"

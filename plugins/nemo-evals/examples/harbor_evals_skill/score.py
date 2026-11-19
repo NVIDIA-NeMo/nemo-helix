@@ -12,10 +12,11 @@ import re
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Annotated, Any
 
+import supercool_metrics as supercool
 from codex_evidence import CodexEvidence, observe_codex, rollout_events
 from nemo_evals.api.schemas import HarborTaskDefinition, Revision, TaskRef, TasksetInput, TasksetRef
 from nemo_evals.harbor.archive_io import download_verified
@@ -55,12 +56,12 @@ from nhx_evals_sdk.metrics.skills import (
 )
 from nhx_evals_sdk.values import ModelRef
 from nhx_evals_sdk.values.evidence import EVIDENCE_LOGS
-from nhx_evals_sdk.values.skill_evidence import SkillToolCall, SkillToolTrace
+from nhx_evals_sdk.values.skill_evidence import SkillContentBundle, SkillToolCall, SkillToolTrace
 from nhx_evals_sdk.values.skills import SkillSnapshot
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SKILL_NAME = "nemo-evals-plugin"
-AGENT_EVAL_SKILL_NAME = "supercool-agent-eval"
+AGENT_EVAL_SKILL_NAME = supercool.SKILL_NAME
 TASK_BY_SKILL = {SKILL_NAME: "nemo-evals-plugin-001", AGENT_EVAL_SKILL_NAME: "nemo-evals-plugin-002"}
 DATASET = Path(__file__).resolve().parent / "dataset"
 _ARMS = ("baseline", "with-skill")
@@ -154,7 +155,9 @@ def _json_object(path: Path) -> dict[str, Any]:
     return data
 
 
-def _skill_package(client: NemoClient, skill_ref: PinnedSkillRef) -> tuple[SkillSnapshot, dict[str, str]]:
+def _skill_package(
+    client: NemoClient, skill_ref: PinnedSkillRef
+) -> tuple[SkillSnapshot, dict[str, str], SkillContentBundle]:
     workspace, name, digest = _split_pin(skill_ref.root)
     skill = AgentsClient.from_client(client).get_skill_revision(workspace=workspace, name=name, revision=digest).data()
     if skill.content_hash != digest or skill.archive.skill_name != name:
@@ -174,18 +177,27 @@ def _skill_package(client: NemoClient, skill_ref: PinnedSkillRef) -> tuple[Skill
         extracted = extract_skill_archive(archive_path, root, expected_files_hash=archive.files_hash)
         if extracted.name != archive.skill_name:
             raise ValueError("The digest-verified archive has an unexpected package directory")
-        inventory = {
-            path.relative_to(extracted).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(extracted.rglob("*"))
-            if path.is_file()
-        }
+        inventory, text = {}, {}
+        for path in sorted(extracted.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(extracted).as_posix()
+            data = path.read_bytes()
+            inventory[relative] = hashlib.sha256(data).hexdigest()
+            try:
+                text[relative] = data.decode("utf-8")
+            except UnicodeDecodeError:
+                # Package metrics report missing text if a file in their scope cannot be decoded.
+                continue
         snapshot = SkillSnapshot(
             directory_name=archive.skill_name,
             digest=archive.files_hash,
-            document=(extracted / "SKILL.md").read_text(encoding="utf-8"),
+            document=text.get("SKILL.md"),
             files=list(inventory),
         )
-    return snapshot, inventory
+        if snapshot.document is None:
+            raise ValueError("The verified skill package must contain a UTF-8 SKILL.md")
+    return snapshot, inventory, SkillContentBundle(artifact_digest=snapshot.digest, files=text)
 
 
 async def _package_metrics(snapshot: SkillSnapshot) -> dict[str, Any]:
@@ -207,6 +219,16 @@ async def _package_metrics(snapshot: SkillSnapshot) -> dict[str, Any]:
     }
 
 
+def _agent_log_dir(bundle: Path, trial: AgentEvalTrial) -> Path:
+    descriptor = trial.evidence.descriptors.get(EVIDENCE_LOGS) if trial.evidence is not None else None
+    if not descriptor or not descriptor.ref:
+        raise ValueError("The saved trial has no Harbor agent log directory")
+    agent_dir = Path(descriptor.ref).resolve()
+    if agent_dir.name != "agent" or not agent_dir.is_relative_to(bundle.resolve()) or not agent_dir.is_dir():
+        raise ValueError("The saved trial has an agent log directory outside the downloaded bundle")
+    return agent_dir
+
+
 def _evidence(
     bundle: Path,
     trial: AgentEvalTrial,
@@ -214,13 +236,9 @@ def _evidence(
     expected_inventory: dict[str, dict[str, str]],
     *,
     expect_setup_egress: bool,
+    events: Iterable[dict[str, Any]] | None = None,
 ) -> CodexEvidence:
-    descriptor = trial.evidence.descriptors.get(EVIDENCE_LOGS) if trial.evidence is not None else None
-    if not descriptor or not descriptor.ref:
-        raise ValueError("The saved trial has no Harbor agent log directory")
-    agent_dir = Path(descriptor.ref).resolve()
-    if agent_dir.name != "agent" or not agent_dir.is_relative_to(bundle.resolve()) or not agent_dir.is_dir():
-        raise ValueError("The saved trial has an agent log directory outside the downloaded bundle")
+    agent_dir = _agent_log_dir(bundle, trial)
     log = (agent_dir.parent / "trial.log").read_text(encoding="utf-8")
     if "Codex is already available at the requested version" not in log:
         raise ValueError("Harbor did not record the built-in Codex install being skipped")
@@ -232,7 +250,9 @@ def _evidence(
     inventory = _json_object(agent_dir.parent / "artifacts" / "skill-inventory.json")
     if inventory.get("staged") != expected_inventory or inventory.get("registered") != expected_inventory:
         raise ValueError("The staged and registered skill inventories do not match the expected archive files")
-    observed = observe_codex(rollout_events(agent_dir), snapshot.directory_name, snapshot.document or "")
+    observed = observe_codex(
+        rollout_events(agent_dir) if events is None else events, snapshot.directory_name, snapshot.document or ""
+    )
     if observed.skill_listed != bool(expected_inventory):
         raise ValueError("The launch skill catalog does not match the arm's expected discovery")
     return observed
@@ -450,10 +470,19 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, exp
     try:
         with NemoClient.from_config(context=comparison.context) as context_client:
             client = context_client.with_workspace(comparison.workspace)
-            snapshot, inventory = _skill_package(client, comparison.skill_ref)
+            snapshot, inventory, contents = _skill_package(client, comparison.skill_ref)
             report["skill_files_hash"] = snapshot.digest
             report["package_metrics"] = asyncio.run(_package_metrics(snapshot))
+            metric_evidence = supercool.MetricEvidence()
+            if skill_name == AGENT_EVAL_SKILL_NAME:
+                evidence_file = run_dir / "metric-evidence.json"
+                if evidence_file.exists():
+                    metric_evidence = supercool.MetricEvidence.model_validate_json(evidence_file.read_bytes())
+                report["package_metrics"].update(
+                    asyncio.run(supercool.score_package(snapshot, contents, metric_evidence))
+                )
             trials = {}
+            supercool_trials = {}
             for name in _ARMS:
                 arm = comparison.arms[name]
                 try:
@@ -462,7 +491,13 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, exp
                     if len(saved) != 1:
                         raise ValueError("Expected one saved Harbor trial")
                     expected = {skill_name: inventory} if name == "with-skill" else {}
-                    evidence = _evidence(bundle, saved[0], snapshot, expected, expect_setup_egress=expect_setup_egress)
+                    events = None
+                    if skill_name == AGENT_EVAL_SKILL_NAME:
+                        agent_dir = _agent_log_dir(bundle, saved[0])
+                        events = list(rollout_events(agent_dir))
+                    evidence = _evidence(
+                        bundle, saved[0], snapshot, expected, expect_setup_egress=expect_setup_egress, events=events
+                    )
                     trials[name] = replay_trial(
                         saved[0],
                         arm.reward,
@@ -474,6 +509,16 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, exp
                     report["arms"][name]["discovery"] = evidence.skill_listed
                     report["arms"][name]["activation"] = evidence.activated
                     report["arms"][name]["measurements"] = evidence.measurements.model_dump(mode="json")
+                    if events is not None:
+                        job = supercool.read_inner_job(
+                            agent_dir.parent / "artifacts" / "job-snapshot.json", trials[name]
+                        )
+                        trace = supercool.trial_trace(
+                            events, trials[name].id, snapshot.document or "", activated=evidence.activated, job=job
+                        )
+                        supercool_trials[name] = supercool.TrialEvidence(
+                            trials[name], trace, evidence.skill_listed, job
+                        )
                 except _ERRORS as exc:
                     report["arms"][name]["evidence_error"] = str(exc)
                     success = False
@@ -506,6 +551,14 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, exp
                 except _ERRORS as exc:
                     arm_report["replay_error"] = str(exc)
                     success = False
+            if supercool_trials:
+                instruction = (DATASET / TASK_BY_SKILL[skill_name] / "instruction.md").read_text(encoding="utf-8")
+                documentation, skill_scores = asyncio.run(
+                    supercool.score_diagnostics(client, snapshot, supercool_trials, instruction, metric_evidence, judge)
+                )
+                report["documentation_rubric"] = documentation
+                for name, scores in skill_scores.items():
+                    report["arms"][name]["skill_metrics"] = scores
     except _ERRORS as exc:
         report["error"] = str(exc)
         success = False
@@ -520,7 +573,8 @@ def main() -> int:
     run_dir = parser.parse_args().run_dir.resolve()
     try:
         comparison = Comparison.model_validate_json((run_dir / "comparison.json").read_text(encoding="utf-8"))
-        judge = ModelRef(os.environ.get("JUDGE_MODEL_REF", "")) if comparison.skill_name == SKILL_NAME else None
+        judge_ref = os.environ.get("JUDGE_MODEL_REF", "")
+        judge = ModelRef(judge_ref) if judge_ref or comparison.skill_name == SKILL_NAME else None
         expect_egress = os.environ.get("EXPECT_SETUP_EGRESS", "1")
         if expect_egress not in {"0", "1"}:
             raise ValueError("Set EXPECT_SETUP_EGRESS to 0 for profiles without setup egress, or 1 to check closure")

@@ -188,7 +188,8 @@ reads the alias and the evaluation result directly from Helix.
 
 Use the connection and Codex model settings above, with a fresh run directory.
 For auth-disabled deployments, leave `INFERENCE_KEY_SECRET` unset. The replay
-uses deterministic scoring and works without `JUDGE_MODEL_REF`.
+can score the deterministic checks on its own. Set `JUDGE_MODEL_REF` to add
+the documentation, answer accuracy, task success, and expected-behavior rubrics.
 
 ```bash
 export RUN_DIR="$PWD/temp/harbor-supercool-agent-eval-run"
@@ -229,8 +230,27 @@ from the naming convention.
 
 The replay adds the observed activation, token efficiency, and the
 `verified_skill_use` view. The view requires both a passing verifier reward and
-a confirmed read of the pinned skill. On auth-disabled dev deployments, the pair
-demonstrates injection and use while archive read isolation remains unverified.
+a confirmed read of the pinned skill.
+
+`score.py` also evaluates the extended SDK skill metrics locally from the
+downloaded bundles. The same summary includes:
+
+| Field | Metrics and evidence |
+| --- | --- |
+| `package_metrics` | Structure, references, context efficiency, static correctness, description quality, reliability readiness, script quality, and package Unicode checks on the verified archive. |
+| `arms.*.skill_metrics` | Skill routing, workflow checks, recovery, productivity, tool selection, arguments and execution outcomes, component coordination and usage, and trial safety. The root Codex trace is partial. Observed counts can be available while coverage-dependent rates remain unmeasured. |
+| `documentation_rubric` and the per-arm judge views | Documentation quality, answer accuracy, task success, and expected behavior with `JUDGE_MODEL_REF` configured. The per-arm judge receives the separate verifier's job name, alias, and exact-match mean. |
+
+To score external scan and test evidence, add `metric-evidence.json` to
+`RUN_DIR`. All its fields are optional. Use `skill_scans` for the
+`security`, `sensitive_data`, `code_risk`, `license`, `dependencies`, and
+`package_configuration` reports, and `skill_test_report` for the isolated
+bundled-test report. These reports must identify the verified skill archive
+digest. Use `trial_safety` for safety reports keyed by saved trial ID. Missing
+reports remain unmeasured. Overactivation requires an unrelated trial with the
+skill installed, and script invocation requires an executable bundled script.
+
+On auth-disabled dev deployments, archive read isolation remains unverified.
 
 ## π-digit benchmark
 
@@ -263,7 +283,21 @@ The launcher builds one versioned Taskset and requires all four Oracle rewards t
 published revisions. `$RUN_DIR/comparison.json` records the rewards, image digest, and
 Codex skill discovery and observed reads. Each arm retains its request, run ID, run
 results, and task Job bundle, including verifier stdout. A scored `0` is a valid result
-for either Codex arm. Use the same checkout, settings, and `RUN_DIR` to resume an interrupted run.
+for either Codex arm. Codex has 20 minutes for the authoring phase. Use the same
+checkout, settings, and `RUN_DIR` to resume an interrupted run.
+
+The comparison's `sdk_metrics` includes scores per arm and per pinned skill, judge
+views, and a catalog of the SDK metric types. Partial trace scores include observed
+counts. Metrics that need evidence this task lacks are marked unmeasured or
+inapplicable. To supply external evidence, add `metric-evidence.json` in `RUN_DIR`
+with `packages` keyed by archive digest and `trial_safety` keyed by saved trial ID.
+Each package can contain `skill_scans` and `skill_test_report`.
+
+Refresh scores against the same Helix deployment and saved evidence.
+
+```bash
+uv run --frozen python "$example/run_pi_demo.py" --score-existing "$RUN_DIR"
+```
 
 ### Smoke-test the generated benchmark on Kubernetes
 

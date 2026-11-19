@@ -21,19 +21,21 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from codex_evidence import CODEX_VERSION, observe_codex, rollout_events
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.skill_archive import EXCLUDED_TOP_LEVEL_DIRS
 from nhx_evals_sdk.agent_eval.persistence import read_trials
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus
 from nhx_evals_sdk.values.evidence import EVIDENCE_LOGS
+from nhx_evals_sdk.values.models import ModelRef
+from pi_metrics import REWARDS, TASK, MetricReports, publish_taskset
 
 EXAMPLE = Path(__file__).resolve().parent
 REPO = EXAMPLE.parents[3]
-TASK = "nemo-evals-plugin-003"
 SKILLS = {
     "nemo-evals-plugin": REPO / "plugins/nemo-evals/src/nemo_evals/skills/evaluator-plugin",
     "nemo-evals": REPO / ".agents/skills/nemo-evals",
 }
-REWARDS = ("reward", "task_instruction", "taskset_persisted", "script_correct")
 RUN_PATTERN = r"run-[0-9a-f]{16}"
 
 
@@ -220,17 +222,45 @@ def run_demo(run_dir: Path, settings: dict[str, str]) -> None:
     else:
         save_json(settings_file, settings)
 
+    skill_file = run_dir / "skills.json"
+    if not skill_file.exists():
+        refs = []
+        for name, source in SKILLS.items():
+            skill = json.loads(
+                cli(
+                    "agents",
+                    "skills",
+                    "publish",
+                    name,
+                    "--from-dir",
+                    str(source.resolve(strict=True)),
+                    "--output-format",
+                    "json",
+                    capture=True,
+                )
+            )
+            digest = skill["content_hash"]
+            require(bool(re.fullmatch(r"[0-9a-f]{64}", digest)), f"{name}: expected a pinned revision")
+            refs.append(f"{workspace}/{name}#{digest}")
+        save_json(skill_file, {"skill_refs": refs})
+    refs = read_json(skill_file)["skill_refs"]
+
     taskset_file = run_dir / "taskset.json"
     if not taskset_file.exists():
         with tempfile.TemporaryDirectory(prefix="harbor-pi-source-") as scratch:
             dataset = materialize_dataset(Path(scratch), settings)
-            publication = json.loads(
-                cli(
-                    "evals", "tasksets", "create", "--harbor-dir", str(dataset), "--tasks", TASK, "--json", capture=True
+            evidence = run_dir / "metric-evidence.json"
+            reports = MetricReports.model_validate(read_json(evidence)) if evidence.is_file() else MetricReports()
+            with NemoClient.from_config(context=settings["context"] or None) as client:
+                publication = publish_taskset(
+                    client, dataset, workspace, refs, ModelRef(settings["PI_JUDGE_MODEL_REF"]), reports
                 )
-            )
         save_json(taskset_file, publication)
     publication = read_json(taskset_file)
+    require(
+        publication.get("scoring") == "harbor" and publication.get("skill_refs") == refs,
+        "Use a fresh RUN_DIR to publish a Taskset with these pinned skills and native Harbor scoring.",
+    )
     taskset = publication["taskset_ref"]
     require(
         bool(re.fullmatch(rf"{re.escape(workspace)}/[^/#]+#[0-9a-f]{{64}}", taskset))
@@ -305,40 +335,28 @@ def run_demo(run_dir: Path, settings: dict[str, str]) -> None:
             f"{arm}: expected a pinned image, agent_preinstalled=false, and no separate verifier image",
         )
         rewards = check_rewards(results, arm)
+        metrics_file = bundle / "scores.jsonl"
+        metrics = [json.loads(line) for line in metrics_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        scored = {record["metric_type"] for record in metrics if record["status"] == "completed"}
+        require(
+            {"harbor_skill_metrics", "llm-judge", "token_efficiency", "evidence_presence"} <= scored,
+            f"{arm}: expected all native SDK metric records in {metrics_file}",
+        )
+        aggregates = results["tasks"][0]["result"]["scores"]["scores"]
         return {
             "run_id": run_id,
             "job": job,
             "agent_image_ref": image,
             "reward": rewards,
+            "sdk_metrics": {
+                entry["name"]: entry for entry in aggregates if not entry["name"].startswith("harbor_reward.")
+            },
+            "sdk_scores": str(metrics_file.relative_to(run_dir)),
             "bundle": str(bundle.relative_to(run_dir)),
             **verify_evidence(bundle, run_dir, arm, rewards),
         }
 
     oracle = collect("oracle", submit("oracle", []))
-    skill_file = run_dir / "skills.json"
-    if not skill_file.exists():
-        refs = []
-        for name, source in SKILLS.items():
-            skill = json.loads(
-                cli(
-                    "agents",
-                    "skills",
-                    "publish",
-                    name,
-                    "--from-dir",
-                    str(source.resolve(strict=True)),
-                    "--taskset",
-                    taskset,
-                    "--output-format",
-                    "json",
-                    capture=True,
-                )
-            )
-            digest = skill["content_hash"]
-            require(bool(re.fullmatch(r"[0-9a-f]{64}", digest)), f"{name}: expected a pinned revision")
-            refs.append(f"{workspace}/{name}#{digest}")
-        save_json(skill_file, {"skill_refs": refs})
-    refs = read_json(skill_file)["skill_refs"]
     baseline_id = submit("baseline", [])
     treatment_id = submit("with-skills", refs)
     arms = {"oracle": oracle}
@@ -352,7 +370,7 @@ def run_demo(run_dir: Path, settings: dict[str, str]) -> None:
     require(len({arm["agent_image_ref"] for arm in arms.values()}) == 1, "Runs used different effective image digests.")
     comparison = run_dir / "comparison.json"
     save_json(comparison, {"taskset_ref": taskset, "skill_refs": refs, "arms": arms})
-    print(f"Comparison saved to {comparison}", flush=True)
+    print(f"Comparison and native Harbor metrics saved to {comparison}", flush=True)
 
 
 def main() -> None:
@@ -360,7 +378,6 @@ def main() -> None:
     parser.parse_args()
     os.umask(0o077)
     try:
-        settings = inputs()
         if directory := os.getenv("RUN_DIR"):
             run_dir = Path(directory).resolve()
             run_dir.mkdir(parents=True, exist_ok=True)
@@ -371,8 +388,8 @@ def main() -> None:
         print(f"Comparison directory: {run_dir}", flush=True)
         with (run_dir / ".launcher.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            run_demo(run_dir, settings)
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as exc:
+            run_demo(run_dir, inputs())
+    except (OSError, ValueError, KeyError, NemoClientError, subprocess.CalledProcessError, tarfile.TarError) as exc:
         sys.exit(str(exc))
 
 

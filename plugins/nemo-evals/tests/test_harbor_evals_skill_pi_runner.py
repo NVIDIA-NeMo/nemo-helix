@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from nemo_evals.api.schemas import HarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.sdk.task_preparation import describe_harbor_task
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
@@ -151,6 +152,15 @@ def test_release_result_with_a_completed_job_status(pi_eval):
     del task["state"]
     task["status"] = "completed"
     assert pi_eval.measured_reward(response, run_id=RUN_ID, taskset_ref=TASKSET) == 1
+
+
+def test_authoring_task_packages_with_20_minute_agent_timeout():
+    (task,) = discover_harbor_tasks(SOLUTION.parent)
+    spec = describe_harbor_task(task, workspace="default").spec
+
+    assert isinstance(spec, HarborTaskDefinition)
+    assert spec.config["agent"]["timeout_sec"] == 1200
+    assert spec.config["verifier"]["environment_mode"] == "shared"
 
 
 @pytest.mark.parametrize(
