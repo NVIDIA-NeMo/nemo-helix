@@ -91,6 +91,8 @@ import {
   evaluationConfigError,
   evaluationFilesetName,
   findEvalConfigFile,
+  recordRunJob,
+  runMetadata,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import {
   EXPERIMENT_SETTINGS_DEFAULTS,
@@ -966,6 +968,17 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               buildAgentEvalRequestBody(spec, selections) as AgentEvaluateJobRequest
             );
         if (!created?.name) throw new Error('Submission did not return a job name');
+        await recordRunJob(
+          workspace,
+          evaluationId,
+          created.name,
+          runMetadata(
+            filesetName,
+            datasetSnapshot
+              ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
+              : undefined
+          )
+        );
         return { name: created.name };
       } catch (err) {
         throw await discardSeeded(workspace, seeded, err);

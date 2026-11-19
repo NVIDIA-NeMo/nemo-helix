@@ -48,6 +48,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   createRunEvaluation: vi.fn(),
+  recordRunJob: vi.fn(),
   evaluationConfigError: vi.fn(),
   findEvalConfigFile: vi.fn(),
 }));

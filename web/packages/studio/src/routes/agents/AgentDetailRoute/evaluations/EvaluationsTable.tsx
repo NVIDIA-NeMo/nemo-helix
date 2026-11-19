@@ -22,8 +22,9 @@ import {
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
+import { AddToGroupModal } from '@studio/components/dataViews/ExperimentDataView/AddToGroupModal';
+import { defaultExperimentName } from '@studio/components/evaluation/defaultExperiment';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
-import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import {
   type EvaluatorScore,
   evaluatorScores,
@@ -57,6 +58,15 @@ const timestampMs = (value?: string): number => {
 
 const createdAtMs = (row: AgentEvalTableRow): number =>
   timestampMs(row.job?.created_at ?? row.evaluation?.created_at);
+
+/** Ids of the agent's default experiment among the run's memberships — where an unlinked run sits. */
+const defaultExperimentIds = (evaluation: AgentEvaluationRow, agent?: string): string[] => {
+  const name = defaultExperimentName(agent ?? evaluation.agent_names?.[0] ?? '');
+  return evaluation.experiments.filter((e) => e.name === name).map((e) => e.id);
+};
+
+const isUnlinked = (evaluation: AgentEvaluationRow, agent?: string): boolean =>
+  defaultExperimentIds(evaluation, agent).length === evaluation.experiments.length;
 
 const preferredJob = (a: EvalJobRow, b: EvalJobRow): EvalJobRow => {
   if (isTerminalJob(a) !== isTerminalJob(b)) return isTerminalJob(a) ? b : a;
@@ -134,8 +144,8 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
-  // The evaluation a "New evaluation from this configuration" click is re-running, or null when
-  // the form is closed.
+  // The evaluation a "Link to experiment" click is linking, or null when the modal is closed.
+  const [linkRow, setLinkRow] = useState<AgentEvaluationRow | null>(null);
   const rows = useMemo(() => mergeRows(evaluations, jobs), [evaluations, jobs]);
   // StudioDataView is `dataMode="manual"`, so it renders exactly the rows it is handed and leaves
   // paging to the caller. Both source lists are already in memory, so slice here rather than
@@ -195,6 +205,9 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           size: 200,
           cell: ({ row }) => {
             const { evaluation } = row.original;
+            if (evaluation && isUnlinked(evaluation, agentName)) {
+              return <Text className="text-secondary">Not linked</Text>;
+            }
             const name = evaluation ? primaryExperimentName(evaluation) : undefined;
             return <Text title={name}>{name ?? '—'}</Text>;
           },
@@ -339,18 +352,24 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         rowActionsColumn({
           cell: ({ row: { original: row } }) => {
             const { evaluation, job } = row;
-            const rerunAgent = agentName ?? evaluation?.agent_names?.[0];
+            const rerunAgent = agentName ?? evaluation?.agent_names?.[0] ?? job?.agentName;
             const actions = [
-              // Only offered for a row that carries a reusable eval config; without one the form
-              // would open on an evaluation it has to reject.
-              ...(evaluation && evaluationFilesetName(evaluation) && rerunAgent
+              ...(job && rerunAgent
                 ? [
                     {
-                      label: 'New evaluation from this configuration',
+                      label: 'Re-run',
                       onSelect: () =>
-                        navigate(
-                          getAgentRunEvaluationRoute(workspace, rerunAgent, evaluation.name)
-                        ),
+                        navigate(getAgentRunEvaluationRoute(workspace, rerunAgent, job.name)),
+                    },
+                  ]
+                : []),
+              ...(evaluation
+                ? [
+                    {
+                      label: isUnlinked(evaluation, agentName)
+                        ? 'Link to experiment'
+                        : 'Add to experiment',
+                      onSelect: () => setLinkRow(evaluation),
                     },
                   ]
                 : []),
@@ -409,6 +428,15 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             ),
           },
         }}
+      />
+
+      <AddToGroupModal
+        open={!!linkRow}
+        onClose={() => setLinkRow(null)}
+        workspace={workspace}
+        evaluations={linkRow ? [linkRow] : []}
+        detachExperimentIds={linkRow ? defaultExperimentIds(linkRow, agentName) : []}
+        title="Link to experiment"
       />
 
       {deleteRows.length > 0 && (

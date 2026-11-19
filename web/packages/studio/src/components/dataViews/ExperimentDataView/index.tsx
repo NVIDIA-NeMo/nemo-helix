@@ -50,7 +50,7 @@ import {
 } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { useSortErrorRecovery } from '@studio/components/dataViews/ExperimentDataView/useSortErrorRecovery';
 import { deriveEvaluatorNames } from '@studio/components/dataViews/ExperimentDataView/util';
-import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
+import { evaluationJobName } from '@studio/components/evaluation/experimentEvalConfig';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentRunEvaluationRoute, getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
@@ -188,13 +188,14 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
     clearSelection: () => void;
   } | null>(null);
 
-  // "New evaluation from this configuration". Re-running is reachable from here as well as from
-  // the agent page, because this leaderboard is where you notice a run worth varying.
+  // Re-running is reachable from here as well as from the agent page, because this leaderboard is
+  // where you notice a run worth repeating.
   const navigate = useNavigate();
   const rerun = useCallback(
     (evaluation: EvaluationRow) => {
       const agent = evaluation.agent_names?.[0];
-      if (agent) navigate(getAgentRunEvaluationRoute(workspace, agent, evaluation.name));
+      const job = evaluationJobName(evaluation);
+      if (agent && job) navigate(getAgentRunEvaluationRoute(workspace, agent, job));
     },
     [navigate, workspace]
   );
@@ -576,12 +577,11 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
         cell: ({ row }) => (
           <QuickActionsMenuRoot
             actions={[
-              // Needs a reusable eval config and the agent that produced it: the form's picker is
-              // agent-scoped, so an untagged row opens on a step with nothing to choose.
-              ...(evaluationFilesetName(row.original) && row.original.agent_names?.[0]
+              // Needs the job that produced the run, whose spec is copied, and its agent.
+              ...(evaluationJobName(row.original) && row.original.agent_names?.[0]
                 ? [
                     {
-                      label: 'New evaluation from this configuration',
+                      label: 'Re-run',
                       onSelect: () => rerun(row.original),
                     },
                   ]
