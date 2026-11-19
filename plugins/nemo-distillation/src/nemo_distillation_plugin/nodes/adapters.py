@@ -38,6 +38,8 @@ class PlatformPort(Protocol):
         node_key: str,
         trajectory_filesets: list[str],
         pass_filter: dict[str, Any],
+        student_model: str | None,
+        max_tokens: dict[str, Any] | None,
     ) -> None: ...
 
     async def submit_customization(self, *, workspace: str, name: str, spec: dict[str, Any]) -> None: ...
@@ -138,6 +140,8 @@ class ConvertAdapter(_Adapter):
             node_key=node_key,
             trajectory_filesets=list(filesets),
             pass_filter=dict(inputs.get("pass_filter") or {}),
+            student_model=inputs.get("student_model"),
+            max_tokens=inputs.get("max_tokens"),
         )
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:

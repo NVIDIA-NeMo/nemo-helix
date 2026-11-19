@@ -91,6 +91,8 @@ class Platform:
         node_key: str,
         trajectory_filesets: list[str],
         pass_filter: dict[str, Any],
+        student_model: str | None,
+        max_tokens: dict[str, Any] | None,
     ) -> None:
         spec = AtifConvertSpec(
             workspace=workspace,
@@ -98,6 +100,8 @@ class Platform:
             node_key=node_key,
             trajectory_filesets=trajectory_filesets,
             pass_filter=pass_filter,
+            student_model=student_model,
+            max_tokens=max_tokens,
         )
         platform_spec = await AtifConvertJob.compile(
             workspace=workspace,

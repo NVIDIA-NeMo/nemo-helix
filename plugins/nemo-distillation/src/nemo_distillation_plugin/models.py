@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
+from nemo_customizer.token_budget import MaxTokens
 from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -267,6 +268,14 @@ class DistillInputs(BaseModel):
     evals: list[EvalInput] = Field(min_length=1)
     eval_results: list[str] = Field(default_factory=list)
     pass_filter: dict[str, Any] = Field(default_factory=dict)
+    max_tokens: MaxTokens | None = Field(
+        default=None,
+        description=(
+            "Length limit for training rows, measured with the student's tokenizer, and what to do with rows "
+            "over it: drop-chain, drop-longest or truncate-earlier-turns. Unset leaves it to the trainer, "
+            "which drops over-long rows without a report."
+        ),
+    )
     candidates: list[CandidateSpec] = Field(default_factory=list)
     deployment: DeploymentInput = Field(default_factory=DeploymentInput)
     prices: dict[str, Any] = Field(default_factory=dict)
