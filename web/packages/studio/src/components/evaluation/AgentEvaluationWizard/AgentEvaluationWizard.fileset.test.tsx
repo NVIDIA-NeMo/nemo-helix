@@ -6,6 +6,7 @@ import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-j
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
+  getExperiment,
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
@@ -17,7 +18,12 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
-import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
+import { DEFAULT_EXPERIMENT_AGENT_KEY } from '@studio/components/evaluation/defaultExperiment';
+import {
+  createRunEvaluation,
+  EVAL_CONFIG_FILESET_KEY,
+  recordRunJob,
+} from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -36,6 +42,7 @@ vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOrigi
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
   createExperiment: vi.fn(),
+  getExperiment: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
@@ -193,10 +200,9 @@ const mockListApis = (datasetPaths = ['output/part-0.parquet']) => {
 
 type User = ReturnType<typeof userEvent.setup>;
 
-const openConfigurationStep = async (user: User) => {
-  await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: 'Next' }));
+/** The wizard opens on Configuration; this only waits for it. */
+const openConfigurationStep = async () => {
+  await screen.findByLabelText('Dataset file ref');
 };
 
 const pickDataset = async (user: User, ref = DATASET_REF) => {
@@ -232,7 +238,7 @@ const leaveConfiguration = async (user: User) => {
 };
 
 const nameAndRun = async (user: User) => {
-  await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+  await user.type(await screen.findByLabelText(/Evaluation Name/), 'run-1');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
@@ -264,10 +270,10 @@ beforeEach(() => {
       : parquetFile(PARQUET.twoRows)
   );
   vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
-  vi.mocked(createExperiment).mockResolvedValue({
-    id: 'grp_new',
-    name: 'model-update-tests',
-  } as never);
+  vi.mocked(getExperiment).mockRejectedValue(
+    Object.assign(new Error('Not Found'), { response: { status: 404 } })
+  );
+  vi.mocked(createExperiment).mockResolvedValue({ id: 'grp_default' } as never);
   vi.mocked(createRunEvaluation).mockResolvedValue('eval_new' as never);
 });
 
@@ -277,7 +283,6 @@ afterEach(() => {
 
 /** A dataset and an uploaded config, then on to the Run step. */
 const configureAndContinue = async (user: User) => {
-  await openConfigurationStep(user);
   await pickDataset(user);
   await chooseConfigKind(user, 'Upload');
   await uploadConfig(user);
@@ -285,11 +290,39 @@ const configureAndContinue = async (user: User) => {
 };
 
 const runWhenReady = async (user: User) => {
-  await nameAndRun(user);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
   await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
 };
 
 describe('AgentEvaluationWizard run target', () => {
+  it("runs with only a dataset and config, landing in the agent's default experiment", async () => {
+    vi.mocked(createRunEvaluation).mockImplementation(async (_ws, { name }) => name);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await runWhenReady(user);
+
+    expect(createExperiment).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({
+        name: 'my-agent-runs',
+        metadata: { [DEFAULT_EXPERIMENT_AGENT_KEY]: AGENT },
+      }),
+      undefined
+    );
+    const [, { name, experimentIds, filesetName, metadata }] =
+      vi.mocked(createRunEvaluation).mock.calls[0];
+    expect(experimentIds).toEqual(['grp_default']);
+    expect(name).toMatch(/^my-agent-[a-z0-9]{8}$/);
+    expect(filesetName).toBe(`${name}-data`);
+    expect(metadata).toMatchObject({ [EVAL_CONFIG_FILESET_KEY]: `${name}-data` });
+    const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(request.spec).toMatchObject({ publication: { intake: { evaluation_id: name } } });
+    expect(recordRunJob).toHaveBeenCalledWith(DEFAULT_WORKSPACE, name, 'job-1', metadata);
+  });
+
   it('submits the chosen parallelism', async () => {
     const user = userEvent.setup();
     renderWizard();
@@ -310,7 +343,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -337,7 +370,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -355,7 +388,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user, 'other-ws/generated#output/part-0.parquet');
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -373,7 +406,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(
       await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
@@ -393,7 +426,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     expect(
       await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
@@ -410,7 +443,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await user.click(await screen.findByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText('Select an input file.')).toBeVisible();
@@ -422,7 +455,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('Reading the selected file...')).toBeVisible();
@@ -434,7 +467,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('Unable to find base file.')).toBeVisible();
@@ -445,7 +478,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('File contains no data')).toBeVisible();
@@ -479,7 +512,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt', 'expected']);
     await checkFields(user, 'Judge Prompt', ['prompt', 'expected']);
@@ -519,7 +552,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
     await checkFields(user, 'Judge Prompt', ['expected']);
@@ -556,7 +589,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await findPromptFields('Agent Prompt');
     for (const box of promptFields('Agent Prompt').getAllByRole('checkbox')) {
@@ -584,7 +617,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt']);
     await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
@@ -599,7 +632,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
     expect(await readPrompt(user, 'Agent Prompt')).toBe(
@@ -614,7 +647,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt']);
     await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
@@ -642,7 +675,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await findPromptFields('Judge Prompt');
     const response = promptFields('Judge Prompt').getByRole('checkbox', {
@@ -656,7 +689,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(await screen.findByRole('button', { name: 'Edit Judge Prompt' }));
     const prompt = screen.getByLabelText('Judge Prompt');
@@ -681,7 +714,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(await screen.findByRole('button', { name: 'Edit Agent Prompt' }));
     const prompt = screen.getByLabelText('Agent Prompt');
@@ -698,7 +731,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await clickNextWhenReady(user);
 
@@ -723,7 +756,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -743,7 +776,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user, configReading('item.missing'));
@@ -758,7 +791,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Choose from Fileset');
     await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
@@ -776,7 +809,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await leaveConfiguration(user);
@@ -790,7 +823,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'configs/strict.json');
 
@@ -801,7 +834,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await chooseConfigKind(user, 'Upload');

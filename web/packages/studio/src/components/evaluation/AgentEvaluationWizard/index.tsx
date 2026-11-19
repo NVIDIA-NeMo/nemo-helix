@@ -5,18 +5,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { getEntityNameError } from '@nemo/common/src/utils/entityName';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
-import { deleteEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
-import {
-  createExperiment,
-  deleteExperiment,
-  useListExperiments,
-} from '@nemo/sdk/generated/platform/experiments';
+import { deleteEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -38,10 +32,10 @@ import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   buildAgentEvaluationSpec,
   configFitIssues,
-  NO_FIT_ISSUES,
-  promptFitIssues,
   defaultAgentPrompt,
   defaultJudgePrompt,
+  NO_FIT_ISSUES,
+  promptFitIssues,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
 import {
   DATASET_FILE_TYPES,
@@ -55,10 +49,16 @@ import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluati
 import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
 import { parquetBatchGroups } from '@studio/components/evaluation/AgentEvaluationWizard/parquetBatchGroups';
 import { PromptTemplateSection } from '@studio/components/evaluation/AgentEvaluationWizard/PromptTemplateSection';
+import {
+  resolveRunTarget,
+  RUN_TARGET_DEFAULTS,
+  runTargetSchemaShape,
+  useRunNameCheck,
+} from '@studio/components/evaluation/AgentEvaluationWizard/runTarget';
+import { RunTargetFields } from '@studio/components/evaluation/AgentEvaluationWizard/RunTargetFields';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
 import { DatasetPanel } from '@studio/components/evaluation/EvalWizard/DatasetPanel';
 import {
-  entityNameField,
   submitErrorMessage,
   unsalvageableNameError,
 } from '@studio/components/evaluation/EvalWizard/entityNameField';
@@ -71,41 +71,27 @@ import {
   recordRunJob,
   runMetadata,
 } from '@studio/components/evaluation/experimentEvalConfig';
-import {
-  EXPERIMENT_SETTINGS_DEFAULTS,
-  experimentSettingsPayload,
-  experimentSettingsSchemaShape,
-} from '@studio/components/evaluation/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
 import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
 import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import {
   bareName,
   buildDatasetEvalRequestBody,
+  dataFilesetName,
   DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
-  dataFilesetName,
   injectJudgeModel,
   parseUploadedDatasetConfig,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
-import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityNameCheck';
-import { LINK_DOCS_STUDIO_EXPERIMENTS } from '@studio/constants/links';
+import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useMemo, useRef, useState } from 'react';
-import {
-  FormProvider,
-  type SubmitErrorHandler,
-  type SubmitHandler,
-  useForm,
-  useWatch,
-} from 'react-hook-form';
+import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
-import { useDebounce } from 'use-debounce';
 import { z } from 'zod';
 
 const CONFIG_KIND_FORM = 'form';
@@ -122,30 +108,25 @@ const CONFIG_KIND_ITEMS = [
   { value: CONFIG_KIND_UPLOAD, children: 'Upload' },
 ];
 
-const STEPS = ['Create experiment', 'Configuration', 'Run Evaluation'];
+/** The dataset and eval config are the heavy part, so they get a step of their own; where the
+ *  results publish is a short, optional second step. */
+const STEPS = ['Configuration', 'Run'];
 
 const MAX_PARALLELISM = 16;
 
 const EMPTY_PROMPT_MESSAGE = 'Select at least one field, or write a prompt.';
 
-/** Why the step's primary action is disabled. A reason already shown under its field is not
- *  repeated beside the action. */
-type StepBlocker = { kind: 'field' } | { kind: 'hint'; hint: string };
+/** Why the primary action is disabled. A reason already shown under its field is not repeated
+ *  beside the action. */
+type Blocker = { kind: 'field' } | { kind: 'hint'; hint: string };
 
-const SHOWN_ON_FIELD: StepBlocker = { kind: 'field' };
+const SHOWN_ON_FIELD: Blocker = { kind: 'field' };
 
-const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
+const blockedWith = (hint: string): Blocker => ({ kind: 'hint', hint });
 
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
   judgeModel: z.string(),
-  /** Name of the experiment created on the "new experiment" path. The fileset holding this run's
-   *  eval config and dataset is derived from it. */
-  newName: entityNameField(),
-  /** Name of the Intake Evaluation this run publishes under. Asked for on both paths: the run's
-   *  name is how it is told apart from its siblings on the leaderboard, so it is the natural
-   *  place to record what changed ("…-temp-1" vs "…-temp-point5"). */
-  evaluationRecordName: entityNameField(),
   /** Whether the eval config is built here, picked from a fileset, or uploaded. */
   configKind: z.enum(CONFIG_KINDS),
   /** The prompt sent to the agent; ``null`` while it is still the generated one. */
@@ -168,10 +149,12 @@ const submitEvaluationBaseSchema = z.object({
     .int('Use a whole number')
     .min(1, 'At least 1')
     .max(MAX_PARALLELISM, `At most ${MAX_PARALLELISM}`),
-  ...experimentSettingsSchemaShape,
+  ...runTargetSchemaShape,
 });
 
 type SubmitEvaluationFormData = z.infer<typeof submitEvaluationBaseSchema>;
+
+const CONFIGURATION_FIELDS = ['dataset', 'promptTemplate', 'body', 'judgeModel'] as const;
 
 const isUnusablePrompt = (prompt: string | null) => prompt !== null && hasMalformedBraces(prompt);
 
@@ -197,9 +180,9 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         issue(['body', 'scores'], 'Add at least one score for the judge to extract.');
       }
     }
-    const experimentNameError = unsalvageableNameError(data.newName, 'Experiment name');
-    if (experimentNameError) issue(['newName'], experimentNameError);
-
+    // Blank is fine (a name is generated); anything typed must survive sanitizing, and the
+    // fileset derived from it is longer, so it can overflow where the name alone would not.
+    if (!data.evaluationRecordName) return;
     const nameError =
       unsalvageableNameError(data.evaluationRecordName, 'Evaluation name') ??
       getEntityNameError(dataFilesetName(data.evaluationRecordName), 'Derived fileset name');
@@ -207,10 +190,8 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
   });
 
 const makeDefaultValues = (agent: string): SubmitEvaluationFormData => ({
-  agent: agent ?? '',
+  agent,
   judgeModel: '',
-  newName: '',
-  evaluationRecordName: '',
   configKind: CONFIG_KIND_FORM,
   promptTemplate: null,
   promptColumns: [],
@@ -220,19 +201,15 @@ const makeDefaultValues = (agent: string): SubmitEvaluationFormData => ({
   configFileset: '',
   configFile: '',
   parallelism: DEFAULT_PARALLELISM,
-  ...EXPERIMENT_SETTINGS_DEFAULTS,
+  ...RUN_TARGET_DEFAULTS,
 });
-
-/** A file the user picked, plus why it was rejected when it was. */
-interface FilePick {
-  file: File;
-  error?: string;
-}
 
 /** The picked eval config, with its parsed spec once it validates. ``format`` follows the
  *  uploaded extension, not the detected syntax: a file named .yaml is stored as YAML even if
  *  its contents happen to be valid JSON, which is the mapping an author expects. */
-interface ConfigPick extends FilePick {
+interface ConfigPick {
+  file: File;
+  error?: string;
   spec?: DatasetEvalSpec;
   format?: EvalConfigFormat;
 }
@@ -280,15 +257,11 @@ interface AgentEvaluationWizardProps {
  *  the returned error names what to remove by hand. */
 const discardSeeded = async (
   workspace: string,
-  seeded: { filesetName?: string; evaluationName?: string; experimentName?: string },
+  seeded: { filesetName?: string; evaluationName?: string },
   cause: unknown
 ): Promise<unknown> => {
   const leftovers: string[] = [];
-  if (seeded.experimentName) {
-    await deleteExperiment(workspace, seeded.experimentName).catch(() =>
-      leftovers.push(`experiment "${seeded.experimentName}"`)
-    );
-  } else if (seeded.evaluationName) {
+  if (seeded.evaluationName) {
     await deleteEvaluation(workspace, seeded.evaluationName).catch(() =>
       leftovers.push(`evaluation "${seeded.evaluationName}"`)
     );
@@ -358,10 +331,7 @@ const seedRunFileset = async (
   return spec;
 };
 
-export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
-  workspace,
-  agent: agentProp,
-}) => {
+export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({ workspace, agent }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -380,11 +350,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
-    defaultValues: makeDefaultValues(agentProp),
+    defaultValues: makeDefaultValues(agent),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
-  const { control, setValue, handleSubmit, clearErrors, trigger, formState, setError } = methods;
+  const { control, setValue, handleSubmit, clearErrors, trigger, setError, formState } = methods;
   const { errors } = formState;
 
   const configKind = useWatch({ control, name: 'configKind' });
@@ -422,8 +392,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const datasetError =
     datasetInspection.data?.error ?? datasetFile.error?.message ?? preview.error ?? undefined;
 
-  // Parquet shards beside the picked file, read together through one glob when the user keeps
-  // the box ticked.
+  // Parquet shards beside the picked file, read together through one glob when the box is ticked.
   const filesetFiles = useFilesListFilesetFiles(
     datasetLocation?.workspace ?? '',
     datasetLocation?.name ?? '',
@@ -467,7 +436,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   });
   const isLoadingFilesetConfig = configFilesetFile.isFetching || filesetConfigRead.isFetching;
   const activeConfigPick = isConfigFromFileset ? (filesetConfigRead.data ?? null) : configPick;
-
   const pickedSpec = activeConfigPick?.error ? undefined : activeConfigPick?.spec;
 
   // Checked against the row the preview read, so nothing is reported before the columns are known.
@@ -489,23 +457,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     ? promptFitIssues(judgePrompt ?? generatedJudgePrompt, columns, true)
     : NO_FIT_ISSUES;
 
-  const rawExperimentName = useWatch({ control, name: 'newName' });
-  const rawRecordName = useWatch({ control, name: 'evaluationRecordName' });
-  const experimentPreview = toValidEntityName(rawExperimentName, '');
-  const recordPreview = toValidEntityName(rawRecordName, '');
-
-  const [debouncedExperimentName] = useDebounce(experimentPreview, DEFAULT_DEBOUNCE_MS);
-  const [debouncedRecordName] = useDebounce(recordPreview, DEFAULT_DEBOUNCE_MS);
-  const experimentConflictQuery = useListExperiments(
-    workspace,
-    { page_size: 1, filter: { name: debouncedExperimentName } },
-    { query: { enabled: !!debouncedExperimentName } }
-  );
-  const recordConflictQuery = useListEvaluations(
-    workspace,
-    { page_size: 1, filter: { name: debouncedRecordName } },
-    { query: { enabled: !!debouncedRecordName } }
-  );
+  const { status: recordNameStatus } = useRunNameCheck(workspace, control);
 
   const configError =
     activeConfigPick?.error ??
@@ -513,29 +465,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     (submitAttempted && !activeConfigPick && !isLoadingFilesetConfig
       ? 'Select an eval configuration'
       : undefined);
-
-  const experimentNameStatus = nameCheckStatus(
-    experimentPreview,
-    debouncedExperimentName,
-    experimentConflictQuery
-  );
-  const recordNameStatus = nameCheckStatus(recordPreview, debouncedRecordName, recordConflictQuery);
-
-  const experimentNameSlots = nameFieldSlots({
-    entity: 'experiment',
-    preview: experimentPreview,
-    status: experimentNameStatus,
-    schemaError: errors.newName?.message,
-    describe: 'Groups multiple evaluation runs together for comparison.',
-  });
-
-  const recordNameSlots = nameFieldSlots({
-    entity: 'evaluation',
-    preview: recordPreview,
-    status: recordNameStatus,
-    schemaError: errors.evaluationRecordName?.message,
-    describe: 'Names this run within the experiment. Results publish under it.',
-  });
 
   // Mirrors injectJudgeModel's own guard, so the picker is shown exactly when a metric would
   // have a model written into it — not just for the llm-judge type. Every match is collected,
@@ -591,10 +520,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   // Clears first: validation is async, and leaving the previous pick in place would keep the
   // submit gate open against a file the user has already replaced. It also drops its result if
-  // the pick is no longer current — a slow read of a replaced file would otherwise land after a
-  // faster one and submit a file the card no longer shows.
-  // A fresh config also means a fresh judge: the preselect effect above bails once judgeModel
-  // is set, so leaving it would keep the previous file's judge.
+  // the pick is no longer current. A fresh config also means a fresh judge.
   const handleConfigPicked = async (item?: { file: File }) => {
     setValue('judgeModel', '');
     clearConfigPick();
@@ -650,24 +576,17 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         () => undefined
       );
       if (snapshot === null) throw new Error(`The dataset ${inputs.datasetRef} no longer exists.`);
-      const name = formData.evaluationRecordName;
+      const { experimentIds, name } = await resolveRunTarget(workspace, formData.agent, formData);
       const filesetName = dataFilesetName(name);
       const spec = await seedRunFileset(workspace, filesetName, formData.judgeModel, inputs);
       const metadata = runMetadata(
         filesetName,
         snapshot ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(snapshot) } : undefined
       );
-      const seeded: { filesetName: string; evaluationName?: string; experimentName?: string } = {
-        filesetName,
-      };
+      const seeded: { filesetName: string; evaluationName?: string } = { filesetName };
       try {
-        const experiment = await createExperiment(workspace, {
-          name: formData.newName,
-          ...experimentSettingsPayload(formData),
-        });
-        seeded.experimentName = experiment.name;
         await createRunEvaluation(workspace, {
-          experimentIds: [experiment.id],
+          experimentIds,
           name,
           filesetName,
           datasetName: datasetLabel(inputs.datasetRef, workspace),
@@ -713,77 +632,44 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     },
   });
 
-  // What the current step still needs before Next means anything. Kept separate from the zod
-  // schema: the schema judges the whole submission, and a step must only answer for its own
-  // fields — otherwise step one would refuse to advance over a field two steps away.
-  const stepBlocker = (): StepBlocker | undefined => {
-    if (step === 0) {
-      if (!experimentPreview) {
-        return blockedWith('Name the experiment to continue.');
-      }
-      if (experimentNameStatus === 'checking' || experimentNameStatus === 'conflict') {
-        return SHOWN_ON_FIELD;
-      }
-      return errors.newName ? SHOWN_ON_FIELD : undefined;
-    }
-    if (step === 1) {
+  const onLastStep = step === STEPS.length - 1;
+
+  // Everything the current step waits on, so the button is disabled instead of swallowing the
+  // click. Schema errors stay out: those only show once the step is submitted.
+  const blocker = ((): Blocker | undefined => {
+    if (!onLastStep) {
       if (isReadingDataset || isLoadingFilesetConfig) {
         return blockedWith('Reading the selected file...');
       }
-      if (datasetError) {
-        return blockedWith(datasetError);
-      }
-      if (configIssues.errors.length > 0) {
-        return SHOWN_ON_FIELD;
-      }
-      if (isLlmJudge && isJudgeModelsLoading) {
-        return blockedWith('Loading judge models...');
-      }
-      if (promptIssues.errors.length > 0 || judgePromptIssues.errors.length > 0) {
-        return SHOWN_ON_FIELD;
-      }
-    }
-    // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
-    // click. Schema errors stay out: those only show once a submit is tried.
-    if (step === 2) {
-      // invalidModelRefs is empty while the list is in flight, so submitting inside that window
+      if (datasetError) return blockedWith(datasetError);
+      // invalidModelRefs is empty while the list is in flight, so advancing inside that window
       // would skip the judge-model check entirely.
-      if (isLlmJudge && isJudgeModelsLoading) {
-        return blockedWith('Loading judge models...');
-      }
-      if (recordNameStatus === 'checking' || recordNameStatus === 'conflict') {
+      if (isLlmJudge && isJudgeModelsLoading) return blockedWith('Loading judge models...');
+      if (
+        configIssues.errors.length > 0 ||
+        promptIssues.errors.length > 0 ||
+        judgePromptIssues.errors.length > 0
+      ) {
         return SHOWN_ON_FIELD;
       }
-      // The experiment's name field is a step back, so its conflict is spelled out here.
-      if (experimentNameStatus === 'conflict') {
-        return blockedWith(`An experiment named ${experimentPreview} already exists.`);
-      }
+      return undefined;
+    }
+    if (recordNameStatus === 'checking' || recordNameStatus === 'conflict') {
+      return SHOWN_ON_FIELD;
     }
     return undefined;
-  };
-  const blocker = stepBlocker();
+  })();
 
   const isAgentPromptMissing = () => {
-    if (!isFormConfig || agentPrompt.trim()) {
-      return false;
-    }
+    if (!isFormConfig || agentPrompt.trim()) return false;
     setError('promptTemplate', { type: 'custom', message: EMPTY_PROMPT_MESSAGE });
     return true;
   };
 
   const goNext = async () => {
-    if (blocker) {
-      return;
-    }
-    if (step === 1) {
-      setSubmitAttempted(true);
-      const valid = await trigger(
-        isFormConfig ? ['dataset', 'promptTemplate', 'body'] : ['dataset', 'judgeModel']
-      );
-      if (!valid || (!isFormConfig && !pickedSpec) || isAgentPromptMissing()) {
-        return;
-      }
-    }
+    setSubmitAttempted(true);
+    const valid = await trigger([...CONFIGURATION_FIELDS]);
+    if (!valid || (!isFormConfig && !pickedSpec) || isAgentPromptMissing()) return;
     setStep(step + 1);
   };
 
@@ -795,63 +681,32 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const onSubmit: SubmitHandler<SubmitEvaluationFormData> = async (formData) => {
     // EvalWizard already drops clicks and Enter while blocked; this keeps a submit from ever
     // skipping a gate.
-    if (blocker) {
-      return;
-    }
-    if (
-      isAgentPromptMissing() ||
-      (!isFormConfig && !pickedSpec) ||
-      configIssues.errors.length > 0 ||
-      promptIssues.errors.length > 0 ||
-      judgePromptIssues.errors.length > 0
-    ) {
-      setStep(1);
+    if (blocker) return;
+    const inputs = buildInputs(formData);
+    if (!inputs) {
+      setStep(0);
       return;
     }
     try {
-      const inputs = buildInputs(formData);
-      if (!inputs) return;
       await submitEvaluation({ formData, inputs });
     } catch {
       // Error rendered via errorText prop.
     }
   };
 
-  const onInvalid: SubmitErrorHandler<SubmitEvaluationFormData> = (invalid) => {
-    const failed = (fields: string[]) => fields.some((field) => field in invalid);
-    if (failed(['dataset', 'promptTemplate', 'body', 'judgeModel'])) {
-      setStep(1);
-    }
-  };
-
-  const onLastStep = step === STEPS.length - 1;
-
-  // Enter on an intermediate step means "next", not "submit the half-filled form".
+  // Enter on the first step means "next", not "submit the half-filled form".
   const handleContinue = () => {
+    if (blocker) return;
     if (!onLastStep) {
       void goNext();
       return;
     }
-    setSubmitAttempted(true);
-    void handleSubmit(onSubmit, onInvalid)();
+    void handleSubmit(onSubmit, (invalid) => {
+      if (CONFIGURATION_FIELDS.some((field) => field in invalid)) setStep(0);
+    })();
   };
 
   const errorMessage = submitErrorMessage(submitError);
-
-  const parallelismField = (
-    <ControlledTextInput
-      useControllerProps={{ control, name: 'parallelism' }}
-      name="parallelism"
-      label={<Text kind="label/bold/xl">Parallel Requests</Text>}
-      aria-label="Parallel Requests"
-      type="number"
-      formFieldProps={{
-        slotInfo:
-          'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
-        slotError: errors.parallelism?.message,
-      }}
-    />
-  );
 
   return (
     <EvalWizard
@@ -877,7 +732,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           </Button>
         ) : null
       }
-      cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
+      cancelTo={getAgentEvaluationsTabRoute(workspace, agent)}
       continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
       continueLoading={isPending}
       canContinue={!blocker}
@@ -888,46 +743,21 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         <Stack gap="density-xl">
           {step === 0 && (
             <>
-              <Text kind="label/bold/xl">Experiment</Text>
-              <Text className="text-secondary" kind="body/regular/md">
-                Learn more in the{' '}
+              <Text kind="body/regular/md">
+                Pick a dataset and an eval config to score your agent with. Runs are evaluated by
+                the NeMo Helix Evals built-in runner.{' '}
                 <Anchor
                   kind="inline"
                   textKind="body/regular/md"
-                  href={LINK_DOCS_STUDIO_EXPERIMENTS}
+                  href={LINK_EVAL_DOCS}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  experiments documentation
+                  Learn more
                 </Anchor>
                 .
               </Text>
-              <ControlledTextInput
-                useControllerProps={{ control, name: 'newName' }}
-                placeholder="e.g. model-update-tests"
-                formFieldProps={{
-                  slotLabel: 'Name',
-                  ...experimentNameSlots,
-                }}
-              />
-              {/* The same settings the Experiments page offers, so starting from here is not a
-                  lesser way to create an experiment. */}
-              <ExperimentSettingsFields
-                control={control}
-                names={{
-                  description: 'description',
-                  defaultSort: 'defaultSort',
-                  isFavorite: 'isFavorite',
-                  showEvaluationsOverTime: 'showEvaluationsOverTime',
-                }}
-                disabled={isPending}
-                collapseAdvanced
-              />
-            </>
-          )}
 
-          {step === 1 && (
-            <>
               <DatasetPanel
                 slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
                 slotHelp="Read from its fileset, not copied, so later changes to this file also change re-runs."
@@ -1058,11 +888,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   <Text kind="label/bold/lg">Metrics</Text>
                   <Text className="text-secondary" kind="body/regular/md">
                     Scored as the eval config defines them, against agent{' '}
-                    <code>{bareName(agentProp)}</code>. Any target in the config is replaced by this
+                    <code>{bareName(agent)}</code>. Any target in the config is replaced by this
                     agent.
                   </Text>
                   <Stack gap="density-sm">
-                    {pickedSpec?.metrics.map((metric, index) => {
+                    {pickedSpec.metrics.map((metric, index) => {
                       const model = metric.payload.metric.model;
                       const judge =
                         typeof model === 'string'
@@ -1104,17 +934,21 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             </>
           )}
 
-          {step === 2 && (
+          {step === 1 && (
             <>
+              <Text kind="label/bold/xl">Results</Text>
+              <RunTargetFields workspace={workspace} agent={agent} disabled={isPending} />
               <ControlledTextInput
-                useControllerProps={{ control, name: 'evaluationRecordName' }}
-                placeholder="e.g. initial-baseline"
+                useControllerProps={{ control, name: 'parallelism' }}
+                name="parallelism"
+                label="Parallel Requests"
+                type="number"
                 formFieldProps={{
-                  slotLabel: 'Evaluation Name',
-                  ...recordNameSlots,
+                  slotInfo:
+                    'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
+                  slotError: errors.parallelism?.message,
                 }}
               />
-              {parallelismField}
             </>
           )}
         </Stack>

@@ -14,7 +14,7 @@ import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { renderRoute, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -98,31 +98,7 @@ const mockLists = () => {
   );
 };
 
-const renderWizard = () =>
-  renderRoute(undefined, {
-    history: `/workspaces/${DEFAULT_WORKSPACE}`,
-    routes: [
-      {
-        path: '/workspaces/:workspace',
-        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
-      },
-      { path: ROUTES.workspace.agentDetail, element: <LocationDisplay /> },
-    ],
-  });
-
 describe('AgentEvaluationWizard', () => {
-  it('will not advance past the experiment step without a name', async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    await screen.findByLabelText('Name');
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
-
-    await user.type(screen.getByLabelText('Name'), 'model-update-tests');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-  });
-
   it("cancels to the agent's evaluations when opened by a direct link", async () => {
     mockLists();
     const user = userEvent.setup();
