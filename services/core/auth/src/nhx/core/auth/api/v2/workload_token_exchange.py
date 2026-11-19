@@ -764,6 +764,9 @@ def _build_delegated_claims(
         claims["nhx_subject_account_id"] = delegated_principal.account_id
     if delegated_principal.authz_aliases:
         claims["nhx_subject_aliases"] = delegated_principal.authz_aliases
+    if delegation.job_id and verified_subject.bound_reference is not None:
+        claims["nhx_workload_job"] = delegation.job_id
+        claims["nhx_workload_workspace"] = delegation.workload_workspace
 
     actor_claims: dict[str, Any] = {"sub": verified_subject.subject}
     if verified_subject.groups:

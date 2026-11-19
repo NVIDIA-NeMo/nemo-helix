@@ -432,6 +432,9 @@ authz:
       description: "Runtime permissions for job workload containers"
       permissions:
       - jobs.logs.create
+    TaskImageBuildRunner:
+      description: "Scoped entity access for Kubernetes task-image-build workers"
+      permissions: []
     ServiceSystem:
       description: >-
         Internal Helix service principal (principal IDs matching service:*). Used when no
@@ -953,6 +956,7 @@ authz:
     # workspace-scoped read permission as the regular fileset API.
     /apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}:
       get: &hf-fileset-read
+        x-not-in-openapi: true
         direct:
           actor_perms:
           - filesets.read

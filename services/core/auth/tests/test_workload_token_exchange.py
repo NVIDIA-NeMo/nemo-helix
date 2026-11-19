@@ -1110,6 +1110,8 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     assert entity_client.get_calls == [delegation.name]
     assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
+    assert claims["nhx_workload_job"] == delegation.job_id
+    assert claims["nhx_workload_workspace"] == delegation.workload_workspace
     assert claims["act"] == {
         "sub": "system:serviceaccount:nemo-runs:job-runner",
         "groups": "system:serviceaccounts",

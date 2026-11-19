@@ -547,6 +547,28 @@ async def _update_entity_target(
 ) -> Entity:
     """Apply the existing update policy to an immutable target."""
     workspace, entity_type, name = target.workspace, target.entity_type, target.name
+    resolved = auth_client.resolved_bearer_token
+    if (
+        entity_type == "task_image_build"
+        and auth_client.auth_enabled
+        and resolved is not None
+        and resolved.token_kind == "workload_access_token"
+        and auth_client.principal.id.startswith("system:serviceaccount:")
+    ):
+        # The worker can report its own build's progress, but cannot change
+        # which task, revision or job the build record belongs to.
+        claims = resolved.claims.raw_claims
+        job = claims.get("nhx_workload_job")
+        if (
+            not isinstance(job, str)
+            or job != target.data.get("job")
+            or claims.get("nhx_workload_workspace") != workspace
+        ):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Workload does not own this task image build")
+        progress = {key: value for key, value in entity_data.data.items() if key in {"status", "images", "error"}}
+        entity_data = entity_data.model_copy(
+            update={"data": {**target.data, **progress}, "new_name": None, "project": target.project}
+        )
     await _invalidate_target_bindings(target)
 
     # Validate project exists if specified

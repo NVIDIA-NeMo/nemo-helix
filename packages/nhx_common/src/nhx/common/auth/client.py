@@ -220,6 +220,12 @@ class AuthClient(BaseModel):
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
         if scopes:
             auth_input["scopes"] = scopes
+        resolved = self.resolved_bearer_token
+        if resolved is not None and resolved.token_kind == "workload_access_token":
+            for claim in ("nhx_workload_job", "nhx_workload_workspace"):
+                value = resolved.claims.raw_claims.get(claim)
+                if isinstance(value, str):
+                    auth_input[claim] = value
         self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=True)
 
         # This fact belongs to the verified credential, never a caller-supplied snapshot.
