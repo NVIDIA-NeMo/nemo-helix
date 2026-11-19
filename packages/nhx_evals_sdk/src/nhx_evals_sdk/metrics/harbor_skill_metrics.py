@@ -315,11 +315,17 @@ class HarborSkillMetrics(MetricBase):
         if not staged or (atif and atif.ref and Path(atif.ref).resolve().is_relative_to(agent)):
             await score(metric_input, (SkillUsedMetric(),), "")
         if taskset and candidate.output_text:
+            reference = metric_input.row.data["reference"] | {"verified_taskset_ref": taskset}
+            taskset_input = metric_input.model_copy(
+                update={"row": DatasetRow(data=metric_input.row.data | {"reference": reference})}
+            )
             await score(
-                metric_input,
+                taskset_input,
                 (
                     StringCheckMetric(
-                        operation="contains", left_template="{{ sample.output_text }}", right_template=taskset
+                        operation="contains",
+                        left_template="{{ sample.output_text }}",
+                        right_template="{{ item.reference.verified_taskset_ref }}",
                     ),
                 ),
                 "",

@@ -80,7 +80,7 @@ async def test_inline_metric_round_trip_scores_real_skill_read_and_preserves_unk
         "\n".join(json.dumps({"type": kind, "payload": payload}) for kind, payload in capture) + "\n"
     )
     candidate = CandidateOutput(
-        evidence=CandidateEvidence(descriptors=standard_evidence_descriptors(logs_dir=agent)),
+        evidence=CandidateEvidence(descriptors=standard_evidence_descriptors(logs_dir=agent, final_state_dir=verifier)),
     )
     row = DatasetRow(
         data={

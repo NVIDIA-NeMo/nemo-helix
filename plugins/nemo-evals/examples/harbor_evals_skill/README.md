@@ -286,18 +286,18 @@ results, and task Job bundle, including verifier stdout. A scored `0` is a valid
 for either Codex arm. Codex has 20 minutes for the authoring phase. Use the same
 checkout, settings, and `RUN_DIR` to resume an interrupted run.
 
-The comparison's `sdk_metrics` includes scores per arm and per pinned skill, judge
-views, and a catalog of the SDK metric types. Partial trace scores include observed
-counts. Metrics that need evidence this task lacks are marked unmeasured or
-inapplicable. To supply external evidence, add `metric-evidence.json` in `RUN_DIR`
-with `packages` keyed by archive digest and `trial_safety` keyed by saved trial ID.
-Each package can contain `skill_scans` and `skill_test_report`.
+The publisher attaches SDK metrics and views to the stored Harbor task revision.
+Use API and dispatcher images built from a checkout that supports the inline
+`harbor_skill_metrics` metric. Harbor scores the verifier rewards, token efficiency,
+package and trial evidence, and judge rubrics in each run. Inspect the aggregate
+scores with `nemo evals runs results <run-id> --json` and the evidence coverage
+and diagnostics in the run's `scores.jsonl`. The launcher includes the native
+aggregates in `comparison.json`. [Custom metrics and views](https://docs.nvidia.com/nemo-helix/v0.10/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
 
-Refresh scores against the same Helix deployment and saved evidence.
-
-```bash
-uv run --frozen python "$example/run_pi_demo.py" --score-existing "$RUN_DIR"
-```
+To supply scanner or isolated test evidence at publication, add `metric-evidence.json`
+to a fresh `RUN_DIR`. Use `packages` keyed by verified skill archive digest, with
+`skill_scans` and `skill_test_report` for each package. Missing reports stay
+unmeasured, and partial trace metrics report observed counts.
 
 ### Smoke-test the generated benchmark on Kubernetes
 

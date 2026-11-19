@@ -13,12 +13,13 @@ from itertools import dropwhile, groupby
 from pathlib import Path
 from typing import Any, Literal
 
-from codex_evidence import AGENT_HOME, _command_succeeded, _function_output_text, _json_object, _proves_tool_read
+from codex_evidence import AGENT_HOME, _command_succeeded, _json_object, _proves_tool_read
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
-from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nhx_evals_sdk.agent_eval.runtimes.harbor.codex_evidence import command_events as _commands
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, SemanticView
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentOutput
 from nhx_evals_sdk.inference import InferenceFn, make_inference_request, new_inference_client
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
@@ -49,6 +50,7 @@ from nhx_evals_sdk.metrics.skill_traces import (
     ToolSelectionMetric,
     WorkflowComplianceMetric,
 )
+from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.values.models import Model, ModelRef
 from nhx_evals_sdk.values.skill_evidence import (
     SkillContentBundle,
@@ -67,7 +69,6 @@ SUFFIX = "-supercool-7cf95d1e203ab864"
 EXPECTED_ALIAS = f"agent-smoke{SUFFIX}"
 _SHELL_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 _JSON_RECORD = re.compile(r"(?m)^[ \t]*(\{)")
-_SESSION = re.compile(r"(?m)^Process running with session ID ([0-9]+)$")
 _SKILL_PATH = str(AGENT_HOME / ".agents" / "skills" / SKILL_NAME / "SKILL.md")
 
 
@@ -129,51 +130,6 @@ def verified_inner_job(path: Path, details: Mapping[str, Any]) -> InnerJob | Non
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid evidence for the verified inner agent-evaluation job") from exc
     return InnerJob(job_id, name, alias, float(means[0]))
-
-
-@dataclass
-class _Command:
-    call: dict[str, Any]
-    started: int
-    finished: int | None = None
-    output: str | None = None
-
-
-def _commands(events: Iterable[dict[str, Any]]) -> list[_Command]:
-    """Pair root function calls with results, including passive command-session polls."""
-    commands: list[_Command] = []
-    pending: dict[str, tuple[dict[str, Any], _Command | None]] = {}
-    sessions: dict[str, _Command] = {}
-    for index, event in enumerate(events):
-        payload = event.get("payload")
-        if event.get("type") != "response_item" or not isinstance(payload, dict):
-            continue
-        call_id = payload.get("call_id")
-        if not isinstance(call_id, str) or not call_id:
-            continue
-        kind = payload.get("type")
-        if kind == "function_call":
-            command = None
-            if payload.get("name") != "write_stdin":
-                command = _Command(payload, index)
-                commands.append(command)
-            pending[call_id] = (payload, command)
-        elif kind == "function_call_output" and call_id in pending:
-            call, command = pending.pop(call_id)
-            result = _function_output_text(payload.get("output"))
-            if call.get("name") == "write_stdin":
-                args = _json_object(call.get("arguments"))
-                if args.get("chars", ""):
-                    sessions.pop(str(args.get("session_id")), None)
-                    continue
-                command = sessions.pop(str(args.get("session_id")), None)
-            if command is None or result is None:
-                continue
-            command.finished, command.output = index, result
-            header = result.partition("\nOutput:\n")[0].partition("\nFinal output:\n")[0]
-            if call.get("name") in {"exec_command", "write_stdin"} and (session := _SESSION.search(header)):
-                sessions[session[1]] = command
-    return commands
 
 
 def _submits_agent_eval(command: str) -> bool:
@@ -275,7 +231,7 @@ async def score_package(
         candidate=CandidateOutput(),
     )
     return {
-        metric.type.value: (await metric.compute_scores(inputs)).model_dump(mode="json")
+        metric_type_name(metric): (await metric.compute_scores(inputs)).model_dump(mode="json")
         for metric in additional_package_metrics()
     }
 

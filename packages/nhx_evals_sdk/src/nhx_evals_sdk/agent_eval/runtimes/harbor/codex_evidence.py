@@ -19,6 +19,7 @@ CODEX_VERSION = "0.162.1"
 PUBLISH = "Taskset:publish"
 READBACK = "Taskset:readback"
 AGENT_HOME = PurePosixPath("/home/harbor-agent")
+_SESSION = re.compile(r"(?m)^Process running with session ID ([0-9]+)$")
 _CATALOG_KEYS = ("skills", "host_skills", "cloud_skills")
 _CATALOG_ALIAS = re.compile(r"^- `([rec]\d+)` = `([^`]+)`$", re.MULTILINE)
 _CATALOG_ENTRY = re.compile(r"^- ([^:]+):.*\((file|executor package|cloud package|custom resource): (.+)\)$")
@@ -292,6 +293,51 @@ def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: s
     return CodexEvidence(listed, activated, _measurements(usage), tuple(command_outcomes.values()))
 
 
+@dataclass
+class CommandEvent:
+    call: dict[str, Any]
+    started: int
+    finished: int | None = None
+    output: str | None = None
+
+
+def command_events(events: Iterable[dict[str, Any]]) -> list[CommandEvent]:
+    """Pair root function calls with results, including passive command-session polls."""
+    commands: list[CommandEvent] = []
+    pending: dict[str, tuple[dict[str, Any], CommandEvent | None]] = {}
+    sessions: dict[str, CommandEvent] = {}
+    for index, event in enumerate(events):
+        payload = event.get("payload")
+        if event.get("type") != "response_item" or not isinstance(payload, dict):
+            continue
+        call_id = payload.get("call_id")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        kind = payload.get("type")
+        if kind == "function_call":
+            command = None
+            if payload.get("name") != "write_stdin":
+                command = CommandEvent(payload, index)
+                commands.append(command)
+            pending[call_id] = (payload, command)
+        elif kind == "function_call_output" and call_id in pending:
+            call, command = pending.pop(call_id)
+            result = _function_output_text(payload.get("output"))
+            if call.get("name") == "write_stdin":
+                args = _json_object(call.get("arguments"))
+                if args.get("chars", ""):
+                    sessions.pop(str(args.get("session_id")), None)
+                    continue
+                command = sessions.pop(str(args.get("session_id")), None)
+            if command is None or result is None:
+                continue
+            command.finished, command.output = index, result
+            header = result.partition("\nOutput:\n")[0].partition("\nFinal output:\n")[0]
+            if call.get("name") in {"exec_command", "write_stdin"} and (session := _SESSION.search(header)):
+                sessions[session[1]] = command
+    return commands
+
+
 def _skill_location(name: str) -> str:
     return str(AGENT_HOME / ".agents" / "skills" / name / "SKILL.md")
 
@@ -324,31 +370,18 @@ def tool_trace(
     events: list[dict[str, Any]], trial_id: str, staged: dict[str, str], taskset: str, task: str
 ) -> SkillToolTrace:
     """Correlate observed root tool calls, keeping unobserved exits and components unknown."""
-    calls: dict[str, tuple[int, dict[str, Any]]] = {}
-    outputs: dict[str, str | None] = {}
+    normalized: dict[str, SkillToolCall] = {}
     step, timestamp = -1, None
-    for event in events:
-        payload = event.get("payload")
-        if event.get("type") != "response_item" or not isinstance(payload, dict):
+    for command_event in command_events(events):
+        call, output = command_event.call, command_event.output
+        name, call_id = call.get("name"), call["call_id"]
+        if name not in {"exec_command", "skills.read"} and (call.get("namespace"), name) != ("skills", "read"):
             continue
-        call_id = payload.get("call_id")
-        if not isinstance(call_id, str) or not call_id:
+        if call_id in normalized:
             continue
-        if payload.get("type") == "function_call":
-            name = payload.get("name")
-            if name in ("exec_command", "skills.read") or (payload.get("namespace"), name) == ("skills", "read"):
-                if call_id in calls:
-                    continue
-                current = event.get("timestamp") or call_id
-                if current != timestamp:
-                    timestamp, step = current, step + 1
-                calls[call_id] = (step, payload)
-        elif payload.get("type") == "function_call_output":
-            outputs[call_id] = _function_output_text(payload.get("output")) if call_id not in outputs else None
-
-    normalized = []
-    for call_id, (step, call) in calls.items():
-        output = outputs.get(call_id)
+        current = events[command_event.started].get("timestamp") or call_id
+        if current != timestamp:
+            timestamp, step = current, step + 1
         succeeded = _command_succeeded(output)
         component, arguments = None, None
         tool = "exec_command" if call["name"] == "exec_command" else "skills.read"
@@ -359,11 +392,10 @@ def tool_trace(
         if component is None and tool == "exec_command" and succeeded is True and output:
             command = _json_object(call.get("arguments")).get("cmd")
             if isinstance(command, str):
-                component, arguments = _confirmed_component(command, output.partition("\nOutput:\n")[2], taskset, task)
-        normalized.append(
-            SkillToolCall(
-                id=call_id, step=step, tool=tool, component=component, arguments=arguments, succeeded=succeeded
-            )
+                stdout = output.partition("\nOutput:\n")[2] or output.partition("\nFinal output:\n")[2]
+                component, arguments = _confirmed_component(command, stdout, taskset, task)
+        normalized[call_id] = SkillToolCall(
+            id=call_id, step=step, tool=tool, component=component, arguments=arguments, succeeded=succeeded
         )
     # These root events omit opaque subprocess work, retry links and productivity annotations.
-    return SkillToolTrace(trial_id=trial_id, complete=False, calls=normalized)
+    return SkillToolTrace(trial_id=trial_id, complete=False, calls=list(normalized.values()))

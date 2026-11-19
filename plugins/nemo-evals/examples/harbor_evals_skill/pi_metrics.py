@@ -3,20 +3,12 @@
 
 """Publish the Pi benchmark with native Harbor SDK metrics and views."""
 
-import hashlib
-import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
-from nemo_evals.api.schemas import Revision, TaskRef, TasksetInput
-from nemo_evals.harbor.archive_io import download_verified
+from nemo_evals.api.schemas import TaskRef, TasksetInput
 from nemo_evals.sdk.resources import Evaluator
-from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.agents.skills import PinnedSkillRef
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.schema import Page
-from nemo_helix_plugin.skill_archive import DEFAULT_LIMITS, extract_skill_archive
 from nhx_evals_sdk.agent_eval.metrics import EvidencePresenceMetric
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 from nhx_evals_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
@@ -25,9 +17,10 @@ from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.skill_judges import skill_documentation_rubric_metric, skill_outcome_metric
 from nhx_evals_sdk.metrics.skills import TokenEfficiencyMetric
 from nhx_evals_sdk.values.models import ModelRef
-from nhx_evals_sdk.values.skill_evidence import SkillContentBundle, SkillScanReport, SkillTestReport
-from nhx_evals_sdk.values.skills import SkillSnapshot
+from nhx_evals_sdk.values.scores import JSONScoreParser
+from nhx_evals_sdk.values.skill_evidence import SkillScanReport, SkillTestReport
 from pydantic import BaseModel, ConfigDict, Field
+from skill_artifacts import pin_revision, read_skill_package
 
 TASK = "nemo-evals-plugin-003"
 REWARDS = ("reward", "task_instruction", "taskset_persisted", "script_correct")
@@ -46,52 +39,6 @@ class MetricReports(BaseModel):
     packages: dict[str, PackageReports] = Field(default_factory=dict)
 
 
-def _read_package(
-    agents: AgentsClient, files: FilesClient, ref: PinnedSkillRef, reports: MetricReports
-) -> HarborSkillPackage:
-    path, digest = ref.root.split("#")
-    workspace, name = path.split("/")
-    revision = agents.get_skill_revision(workspace=workspace, name=name, revision=digest).data()
-    if revision.content_hash != digest or revision.archive.skill_name != name:
-        raise ValueError(f"Agents returned a different skill revision for {ref.root}")
-    archive = revision.archive
-    with tempfile.TemporaryDirectory(prefix="helix-pi-skill-") as directory:
-        root = Path(directory)
-        archive_path = root / "archive.tar.gz"
-        with archive_path.open("wb") as output:
-            download_verified(
-                files,
-                archive.archive_ref,
-                output,
-                limit=DEFAULT_LIMITS.max_archive_bytes,
-                expected_digest=archive.files_hash,
-            )
-        extracted = extract_skill_archive(archive_path, root, expected_files_hash=archive.files_hash)
-        if extracted.name != name:
-            raise ValueError(f"Unexpected directory in verified skill archive for {ref.root}")
-        inventory, contents = {}, {}
-        for file in sorted(extracted.rglob("*")):
-            if file.is_file():
-                relative = file.relative_to(extracted).as_posix()
-                data = file.read_bytes()
-                inventory[relative] = hashlib.sha256(data).hexdigest()
-                try:
-                    contents[relative] = data.decode("utf-8")
-                except UnicodeDecodeError:
-                    continue
-    snapshot = SkillSnapshot(
-        directory_name=name, digest=archive.files_hash, files=list(inventory), document=contents["SKILL.md"]
-    )
-    report = reports.packages.get(snapshot.digest, PackageReports())
-    return HarborSkillPackage(
-        snapshot=snapshot,
-        contents=SkillContentBundle(artifact_digest=snapshot.digest, files=contents),
-        inventory=inventory,
-        scans=report.skill_scans,
-        isolated_tests=report.skill_test_report,
-    )
-
-
 def _judge(model: ModelRef, packages: list[HarborSkillPackage]) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
     outcome, views = skill_outcome_metric(
         model,
@@ -104,7 +51,9 @@ def _judge(model: ModelRef, packages: list[HarborSkillPackage]) -> tuple[LLMJudg
     scores = list(outcome.scores)
     for package in packages:
         name = package.snapshot.directory_name
-        scores.extend(score.model_copy(update={"name": f"{name}.{score.name}"}) for score in documentation.scores)
+        for score in documentation.scores:
+            key = f"{name}.{score.name}"
+            scores.append(score.model_copy(update={"name": key, "parser": JSONScoreParser(json_path=key)}))
         for view_name, view in doc_views.items():
             views[f"{name}.{view_name}"] = view.model_copy(
                 update={
@@ -138,18 +87,6 @@ def _judge(model: ModelRef, packages: list[HarborSkillPackage]) -> tuple[LLMJudg
     ), views
 
 
-def _revision_pin(read: Callable[..., Page[Revision]], workspace: str, name: str, ordinal: int) -> str:
-    page = 1
-    while True:
-        result = read(name, workspace=workspace, page=page)
-        for revision in result.data:
-            if revision.revision == ordinal:
-                return f"{workspace}/{name}#{revision.content_hash}"
-        if result.pagination is None or page >= result.pagination.total_pages:
-            raise ValueError(f"No published digest for {workspace}/{name} revision {ordinal}")
-        page += 1
-
-
 def publish_taskset(
     client: NemoClient,
     dataset: Path,
@@ -158,8 +95,19 @@ def publish_taskset(
     judge_model: ModelRef,
     reports: MetricReports,
 ) -> dict:
-    agents, files = AgentsClient.from_client(client), FilesClient.from_client(client)
-    packages = [_read_package(agents, files, PinnedSkillRef(ref), reports) for ref in refs]
+    packages = []
+    for ref in refs:
+        snapshot, inventory, contents = read_skill_package(client, PinnedSkillRef(ref))
+        report = reports.packages.get(snapshot.digest, PackageReports())
+        packages.append(
+            HarborSkillPackage(
+                snapshot=snapshot,
+                inventory=inventory,
+                contents=contents,
+                scans=report.skill_scans,
+                isolated_tests=report.skill_test_report,
+            )
+        )
     if set(reports.packages) - {package.snapshot.digest for package in packages}:
         raise ValueError("A supplied package report does not belong to a selected skill revision")
     (source,) = discover_harbor_tasks(dataset)
@@ -179,10 +127,10 @@ def publish_taskset(
 
     evaluator = Evaluator.from_client(client)
     stored = evaluator.tasks.replace(TASK, task=source, workspace=workspace)
-    member = _revision_pin(evaluator.tasks.list_revisions, workspace, stored.name, stored.revision)
+    member = pin_revision(evaluator.tasks.list_revisions, workspace, stored.name, stored.revision)
     taskset = evaluator.tasksets.replace(TASK, taskset=TasksetInput(tasks=[TaskRef(member)]), workspace=workspace)
     return {
-        "taskset_ref": _revision_pin(evaluator.tasksets.list_revisions, workspace, taskset.name, taskset.revision),
+        "taskset_ref": pin_revision(evaluator.tasksets.list_revisions, workspace, taskset.name, taskset.revision),
         "tasks": [member],
         "total": 1,
         "scoring": "harbor",
