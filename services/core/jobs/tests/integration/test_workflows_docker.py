@@ -704,3 +704,76 @@ def test_launcher_child_uses_captured_config_after_job_definition_edit(docker_wo
     logs = h.logs(job)
     assert "original-child" in {row.message for row in logs}
     assert {"logical_name": "child"} in [json.loads(row.message) for row in logs if row.message.startswith("{")]
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_docker_node_cancel_prunes_branch_and_continuous_inputs_retry(
+    docker_workflow: DockerWorkflowHarness, mode: WorkflowMode
+) -> None:
+    from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest
+
+    h = docker_workflow
+    source = h.files.create_fileset(
+        workspace="default", body=CreateFilesetRequest(name=h.prefix + "-cancel-input")
+    ).data()
+    job = h.create(
+        {"stop": [], "blocked": ["stop"], "leaf": ["blocked"], "independent": [], "tail": ["independent"]},
+        mode=mode,
+        inputs={"stop": [source.id]},
+        commands={"stop": GATED_WORK, "independent": GATED_WORK},
+    )
+    running = h.wait_for(
+        job, lambda state: len(state.steps) == 2 and all(step.status == HelixJobStatus.ACTIVE for step in state.steps)
+    )
+    assert job.attempt_id is not None and running.workflow is not None
+    stop_id = next(node.active_execution_id for node in running.workflow.nodes if node.name == "stop")
+    independent_id = next(node.active_execution_id for node in running.workflow.nodes if node.name == "independent")
+    assert stop_id is not None and independent_id is not None
+    h.jobs.update_attempt_step_status(
+        workspace="default",
+        job=job.id,
+        attempt=job.attempt_id,
+        name=stop_id,
+        body=HelixJobStatusUpdateRequest(status=HelixJobStatus.CANCELLING),
+    )
+    pruned = h.wait_for(
+        job,
+        lambda state: (
+            state.workflow is not None
+            and all(
+                node.last_outcome == "cancelled"
+                for node in state.workflow.nodes
+                if node.name in ("stop", "blocked", "leaf")
+            )
+        ),
+    )
+    assert pruned.status == HelixJobStatus.ACTIVE and len(pruned.steps) == 2
+    assert next(step for step in pruned.steps if step.id == independent_id).status == HelixJobStatus.ACTIVE
+    if mode == "continuous":
+        h.files.commit_fileset(workspace="default", name=source.name)
+        assert len(h.tick(job).steps) == 2
+    h.release(job, independent_id)
+    drained = h.wait_for(
+        job,
+        lambda state: (
+            len(state.steps) == 3
+            and all(step.status.is_terminal() for step in state.steps)
+            and (mode == "continuous" or state.status.is_terminal())
+        ),
+    )
+    assert drained.workflow is not None and drained.workflow.pass_number == 1
+    if mode == "run_to_completion":
+        assert drained.status == HelixJobStatus.CANCELLED
+        assert h.tick(job).status == HelixJobStatus.CANCELLED
+    else:
+        assert drained.status == HelixJobStatus.ACTIVE
+        retry = h.wait_for(job, lambda state: len(state.steps) == 4 and state.steps[-1].status == HelixJobStatus.ACTIVE)
+        assert retry.workflow is not None and retry.workflow.pass_number == 2
+        retry_id = next(node.active_execution_id for node in retry.workflow.nodes if node.name == "stop")
+        assert retry_id is not None and retry_id != stop_id
+        h.release(job, retry_id)
+        recovered = h.settled(job)
+        assert len(recovered.steps) == 6
+        assert recovered.workflow is not None and not recovered.workflow.degraded
+        assert all(node.freshness == "clean" for node in recovered.workflow.nodes)
+    assert all(container.status != "running" for container in h.containers(job))

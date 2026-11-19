@@ -24,6 +24,7 @@ from nhx.core.jobs.entities import STEP_SPEC_NAME_CONFIG_KEY, HelixJob, HelixJob
 
 WORKFLOW_REQUESTS = "_workflow_requests"
 WORKFLOW_CONTROL = "_workflow_control"
+WORKFLOW_INTERNAL_CANCELLATION = "_workflow_internal_cancellation"
 
 
 def _execution_key(attempt_id: str, name: str, revision: str) -> str:
@@ -34,9 +35,18 @@ def _has_eligible_pending(attempt: HelixJobAttempt, state: WorkflowState) -> boo
     return any(
         node.last_poll_error is None
         and node.requested_run_revision != node.last_attempted_revision
-        and all(state.nodes[parent].freshness == "clean" for parent in spec.depends_on or [])
+        and all(
+            state.nodes[parent].freshness == "clean" and state.nodes[parent].last_outcome != "cancelled"
+            for parent in spec.depends_on or []
+        )
         for spec in attempt.platform_spec.steps
         for node in [state.nodes[spec.name]]
+    )
+
+
+def _pass_cancelled(state: WorkflowState) -> bool:
+    return any(
+        node.decision_pass == state.pass_number and node.last_outcome == "cancelled" for node in state.nodes.values()
     )
 
 
@@ -54,7 +64,9 @@ def workflow_view(attempt: HelixJobAttempt) -> WorkflowView | None:
         and not state.pass_open
         and state.control == "running"
         and not _has_eligible_pending(attempt, state),
-        degraded=any(node.last_poll_error or node.last_outcome == "error" for node in state.nodes.values()),
+        degraded=any(
+            node.last_poll_error or node.last_outcome in ("error", "cancelled") for node in state.nodes.values()
+        ),
         nodes=[
             WorkflowNodeView(
                 name=step.name,
@@ -132,16 +144,20 @@ async def reconcile_workflow(
             continue
         node.active_step_id = None
         node.latest_step_id = step.id
-        node.last_outcome = (
-            "completed"
-            if step.status == HelixJobStatus.COMPLETED
-            else "error"
-            if step.status == HelixJobStatus.ERROR
-            else "cancelled"
+        internal_cancellation = (
+            step.status == HelixJobStatus.CANCELLED and step.status_details.get(WORKFLOW_INTERNAL_CANCELLATION) is True
         )
+        if not internal_cancellation:
+            node.last_outcome = (
+                "completed"
+                if step.status == HelixJobStatus.COMPLETED
+                else "error"
+                if step.status == HelixJobStatus.ERROR
+                else "cancelled"
+            )
+            node.decision_pass = state.pass_number
         node.scheduling_state = "idle"
         node.reason = None
-        node.decision_pass = state.pass_number
         if step.status == HelixJobStatus.COMPLETED:
             node.successful_inputs = node.active_inputs
             node.successful_revision = node.active_run_revision
@@ -159,6 +175,7 @@ async def reconcile_workflow(
                 node.scheduling_state = "held"
                 if state.control != "pausing":
                     step.status = HelixJobStatus.CANCELLED
+                    step.status_details = {**step.status_details, WORKFLOW_INTERNAL_CANCELLATION: True}
                     await store.update(step)
                     node.active_step_id = None
                     node.active_run_revision = None
@@ -174,7 +191,11 @@ async def reconcile_workflow(
                 state.paused_at = now
                 attempt.status = HelixJobStatus.PAUSED
             else:
-                attempt.status = HelixJobStatus.CANCELLED if state.control == "cancelling" else HelixJobStatus.ERROR
+                attempt.status = (
+                    HelixJobStatus.CANCELLED
+                    if state.control == "cancelling" or _pass_cancelled(state)
+                    else HelixJobStatus.ERROR
+                )
                 state.stopped_at = now
         else:
             attempt.status = (
@@ -238,11 +259,42 @@ async def reconcile_workflow(
             break
         spec = specs[name]
         node = state.nodes[name]
+        cancelled_parents = [
+            parent
+            for parent in spec.depends_on or []
+            if (
+                state.nodes[parent].decision_pass == state.pass_number
+                and state.nodes[parent].last_outcome == "cancelled"
+            )
+            or (parent in active and active[parent].status == HelixJobStatus.CANCELLING)
+        ]
+        if cancelled_parents:
+            node.blocked_by = cancelled_parents
+            node.reason = "cancelled_dependency"
+            if name in active:
+                step = active[name]
+                if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
+                    step.status = HelixJobStatus.CANCELLED
+                    await store.update(step)
+                    node.active_step_id = None
+                    node.active_run_revision = None
+                    node.active_inputs = None
+                else:
+                    if step.status != HelixJobStatus.CANCELLING:
+                        step.status = HelixJobStatus.CANCELLING
+                        await store.update(step)
+                    node.scheduling_state = "running"
+                    continue
+            node.last_outcome = "cancelled"
+            node.decision_pass = state.pass_number
+            node.scheduling_state = "idle"
+            continue
         if name in active:
             step = active[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
                 if node.active_run_revision != node.requested_run_revision:
                     step.status = HelixJobStatus.CANCELLED
+                    step.status_details = {**step.status_details, WORKFLOW_INTERNAL_CANCELLATION: True}
                     await store.update(step)
                     node.active_step_id = None
                     node.active_run_revision = None
@@ -320,11 +372,12 @@ async def reconcile_workflow(
     if all(node.decision_pass == state.pass_number for node in state.nodes.values()):
         state.pass_open = False
         if config.mode == "run_to_completion":
-            attempt.status = (
-                HelixJobStatus.ERROR
-                if state.control == "failing" or any(node.last_outcome == "error" for node in state.nodes.values())
-                else HelixJobStatus.COMPLETED
-            )
+            if _pass_cancelled(state):
+                attempt.status = HelixJobStatus.CANCELLED
+            elif state.control == "failing" or any(node.last_outcome == "error" for node in state.nodes.values()):
+                attempt.status = HelixJobStatus.ERROR
+            else:
+                attempt.status = HelixJobStatus.COMPLETED
             state.stopped_at = now
     if not attempt.status.is_terminal():
         attempt.status = HelixJobStatus.ACTIVE
