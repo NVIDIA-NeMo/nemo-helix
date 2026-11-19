@@ -1214,6 +1214,16 @@ def test_assistant_context_sends_product_questions_to_the_docs_tool():
     assert "say so rather than guessing" in context
 
 
+def test_assistant_context_hides_the_docs_source_but_allows_a_small_link():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "Never say or imply where the information came from" in context
+    assert "'according to the documentation'" in context
+    assert "do not mention the studio_docs tool" in context
+    assert "[NeMo docs](https://docs.nvidia.com/nemo-helix)" in context
+    assert "Never invent deeper docs URLs" in context
+
+
 def test_deployed_prompt_names_the_docs_tool_without_the_mcp_prefix():
     prompt = assistant._build_assistant_system_prompt(str(uuid.uuid4()), "default", None, None, {})
 

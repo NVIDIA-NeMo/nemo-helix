@@ -29,6 +29,12 @@ export interface MessageRenderProps {
   toolCallPartComponent?: ToolCallMessagePartComponent;
 }
 
+/**
+ * How the user's own messages look. `bubble` is the original raised chat bubble with larger text;
+ * `tinted` uses the assistant's text size and formatting on a light brand-tinted background.
+ */
+export type UserMessageVariant = 'bubble' | 'tinted';
+
 export interface AssistantChatThreadProps {
   animateAssistantMessageCompletion?: boolean;
   disabled?: boolean;
@@ -47,6 +53,8 @@ export interface AssistantChatThreadProps {
   };
   /** Hides the composer's "clear chat" button, for surfaces that already offer a "new chat". */
   hideResetButton?: boolean;
+  /** Look of the user's messages and the edit box. Defaults to `bubble`. */
+  userMessageVariant?: UserMessageVariant;
   contentClassName?: string;
   composerContainerClassName?: string;
   hideAssistantMessageActions?: boolean;

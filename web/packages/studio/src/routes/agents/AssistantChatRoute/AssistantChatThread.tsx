@@ -171,6 +171,7 @@ export const AssistantChatThread: FC<AssistantChatThreadProps> = ({
         }
         viewportClassName={CHAT_VIEWPORT_SCROLLBAR_CLASS}
         hideAssistantMessageActions
+        userMessageVariant="tinted"
         toolCallPartComponent={isCompact ? CompactAssistantToolCallPart : AssistantToolCallPart}
         attributes={{
           ThreadViewport: {

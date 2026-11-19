@@ -3,17 +3,21 @@
 
 import { ComposerPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
+import type { UserMessageVariant } from '@nemo/common/src/components/AssistantChat/types';
+import { USER_MESSAGE_SURFACE_CLASS } from '@nemo/common/src/components/AssistantChat/UserMessage';
 import { ImportImage, Close } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
 
 export const UserEditComposer = ({
   enableImageAttachments = true,
+  variant = 'bubble',
 }: {
   enableImageAttachments?: boolean;
+  variant?: UserMessageVariant;
 }) => (
   <MessagePrimitive.Root
     data-testid="assistant-chat-edit-composer"
-    className="ml-density-5xl min-w-0 self-stretch rounded-xl rounded-br-none bg-surface-raised px-density-xl py-density-lg"
+    className={`ml-density-5xl min-w-0 self-stretch ${USER_MESSAGE_SURFACE_CLASS[variant]}`}
   >
     <ComposerPrimitive.Root className="flex w-full flex-col gap-density-sm">
       {enableImageAttachments && <ComposerAttachmentsRow />}

@@ -47,6 +47,7 @@ export const AssistantChatThread = ({
   enableImageAttachments,
   minInputRows,
   hideResetButton,
+  userMessageVariant,
   animateAssistantMessageCompletion,
 }: AssistantChatThreadProps) => {
   const { className: threadViewportClassName, ...threadViewportAttributes } =
@@ -74,13 +75,19 @@ export const AssistantChatThread = ({
       <UserMessage
         messageContentProps={messageContentProps}
         toolCallPartComponent={toolCallPartComponent}
+        variant={userMessageVariant}
       />
     ),
-    [messageContentProps, toolCallPartComponent]
+    [messageContentProps, toolCallPartComponent, userMessageVariant]
   );
   const UserEditComposerWithAttachments = useCallback(
-    () => <UserEditComposer enableImageAttachments={enableImageAttachments} />,
-    [enableImageAttachments]
+    () => (
+      <UserEditComposer
+        enableImageAttachments={enableImageAttachments}
+        variant={userMessageVariant}
+      />
+    ),
+    [enableImageAttachments, userMessageVariant]
   );
   const messageComponents = useMemo(
     () => ({

@@ -15,6 +15,9 @@ SELECT_DATASET_FILE_TOOL_NAME = "select_dataset_file"
 SELECT_MODEL_TOOL_NAME = "select_model"
 JOB_PROGRESS_TOOL_NAME = "job_progress"
 STUDIO_DOCS_TOOL_NAME = "studio_docs"
+# The published docs site. Page URLs follow the site's navigation tree rather than file paths, so the
+# assistant links only to the site root instead of guessing a page URL.
+STUDIO_DOCS_SITE_URL = "https://docs.nvidia.com/nemo-helix"
 
 APPROVAL_TOOL: dict[str, Any] = {
     "name": APPROVAL_TOOL_NAME,
@@ -225,6 +228,13 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
             "the nemo CLI, or how agents are built and deployed from memory. First call "
             "mcp__nemo_studio__studio_docs (no path to list pages, then a page path to read one) and answer "
             "from what the docs say. If the docs do not cover it, say so rather than guessing."
+        ),
+        (
+            "Answer from the docs in your own words, as something you simply know. Never say or imply where the "
+            "information came from: no 'from the docs', 'according to the documentation', 'the docs say', no page "
+            "titles such as 'About NeMo Studio', and do not mention the studio_docs tool or that you looked "
+            "something up. When your answer relied on the docs, you may end it with one small, unobtrusive "
+            f"Markdown link such as [NeMo docs]({STUDIO_DOCS_SITE_URL}). Never invent deeper docs URLs."
         ),
         (
             "NeMo Studio and the NeMo Helix API are already installed, set up, and running for this "

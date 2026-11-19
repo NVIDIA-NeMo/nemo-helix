@@ -152,6 +152,7 @@ const StaticAssistantChatThread = ({
   isRunning = false,
   messages: initialMessages = defaultStaticMessages,
   toolCallPartComponent,
+  userMessageVariant,
 }: {
   emptyState?: ComponentProps<typeof AssistantChatThread>['emptyState'];
   hideAssistantMessageActions?: boolean;
@@ -159,6 +160,7 @@ const StaticAssistantChatThread = ({
   isRunning?: boolean;
   messages?: readonly ThreadMessageLike[];
   toolCallPartComponent?: ToolCallMessagePartComponent;
+  userMessageVariant?: ComponentProps<typeof AssistantChatThread>['userMessageVariant'];
 }) => {
   const [messages, setMessages] = useState<readonly ThreadMessageLike[]>(initialMessages);
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
@@ -184,6 +186,7 @@ const StaticAssistantChatThread = ({
         placeholder="Task prompt"
         onReset={() => undefined}
         toolCallPartComponent={toolCallPartComponent}
+        userMessageVariant={userMessageVariant}
       />
     </AssistantRuntimeProvider>
   );
@@ -439,6 +442,42 @@ describe('AssistantChat', () => {
       within(assistantMessage).queryByTestId('assistant-chat-running-indicator')
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Edit message/i })).toBeInTheDocument();
+  });
+
+  describe('user message variant', () => {
+    const userMessage: ThreadMessageLike = {
+      role: 'user',
+      content: [{ type: 'text', text: 'Hi' }],
+    };
+    const getUserMessageSurface = () => {
+      const message = screen
+        .getAllByTestId('assistant-chat-message')
+        .find((candidate) => candidate.getAttribute('data-testspeaker') === 'user');
+      return message && within(message).getByTestId('assistant-chat-user-message-surface');
+    };
+
+    it('keeps the original raised bubble with larger text by default', () => {
+      renderAssistantChat(<StaticAssistantChatThread messages={[userMessage]} />);
+
+      const surface = getUserMessageSurface();
+
+      expect(surface).toHaveAttribute('data-variant', 'bubble');
+      expect(surface).toHaveClass('bg-surface-raised', 'rounded-br-none');
+      expect(surface?.className).toContain('text-body-regular-lg');
+    });
+
+    it('renders a brand-tinted message with the assistant text size when tinted', () => {
+      renderAssistantChat(
+        <StaticAssistantChatThread messages={[userMessage]} userMessageVariant="tinted" />
+      );
+
+      const surface = getUserMessageSurface();
+
+      expect(surface).toHaveAttribute('data-variant', 'tinted');
+      expect(surface).toHaveClass('bg-brand/10', 'rounded-xl');
+      expect(surface).not.toHaveClass('bg-surface-raised');
+      expect(surface?.className).not.toContain('text-body-regular-lg');
+    });
   });
 
   it('renders tool-only assistant messages without the assistant response surface', () => {
