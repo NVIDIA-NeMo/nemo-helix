@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 WorkflowMode = Literal["run_to_completion", "continuous"]
 WorkflowControl = Literal["running", "pausing", "paused", "cancelling", "failing"]
-WorkflowScheduling = Literal["ready", "waiting_dependencies", "waiting_capacity", "held", "running", "idle"]
+WorkflowScheduling = Literal["ready", "waiting_dependencies", "waiting_capacity", "admitted", "held", "running", "idle"]
 
 
 class WorkflowSpec(BaseModel):
@@ -41,6 +41,12 @@ class WorkflowInvalidation(BaseModel):
         return self
 
 
+class WorkflowAdmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(min_length=1)
+
+
 class WorkflowSignals(RootModel[dict[str, str]]):
     pass
 
@@ -51,6 +57,8 @@ class WorkflowNodeState(BaseModel):
     successful_inputs: dict[str, str] | None = None
     successful_revision: str | None = None
     last_attempted_revision: str | None = None
+    pass_run_revision: str | None = None
+    pass_inputs: dict[str, str] | None = None
     active_step_id: str | None = None
     active_run_revision: str | None = None
     active_inputs: dict[str, str] | None = None

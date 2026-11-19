@@ -45,7 +45,11 @@ def _workflow_blockers(attempt: HelixJobAttempt, state: WorkflowState) -> dict[s
             # A success in this pass remains usable while newer inputs wait for the next pass.
             successful = node.last_outcome == "completed"
         else:
-            successful = node.freshness == "clean"
+            successful = (
+                node.successful_revision == node.pass_run_revision and node.successful_inputs == node.pass_inputs
+                if state.pass_open
+                else node.freshness == "clean"
+            )
         if successful:
             satisfied.add(name)
     return blocked
@@ -110,10 +114,16 @@ def workflow_step_held(attempt: HelixJobAttempt, step: HelixJobStep) -> bool:
     if attempt.platform_spec.workflow is None:
         return False
     state = attempt.workflow_state
-    if state is None or state.control != "running" or attempt.status != HelixJobStatus.ACTIVE:
+    if state is None:
         return True
     name = step.config[STEP_SPEC_NAME_CONFIG_KEY]
-    return state.nodes[name].active_step_id != step.id
+    node = state.nodes[name]
+    running = state.control == "running" and attempt.status == HelixJobStatus.ACTIVE
+    draining = node.scheduling_state == "admitted" and (
+        (state.control in ("running", "pausing") and attempt.status == HelixJobStatus.PAUSING)
+        or (state.control == "failing" and attempt.status == HelixJobStatus.ACTIVE)
+    )
+    return node.active_step_id != step.id or not (running or draining)
 
 
 async def reconcile_workflow(
@@ -189,6 +199,9 @@ async def reconcile_workflow(
         for name, step in active.items():
             node = state.nodes[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
+                if state.control in ("pausing", "failing") and node.scheduling_state == "admitted":
+                    running = True
+                    continue
                 node.scheduling_state = "held"
                 if state.control != "pausing":
                     step.status = HelixJobStatus.CANCELLED
@@ -257,12 +270,34 @@ async def reconcile_workflow(
         if node.reason == "input_unavailable":
             node.reason = None
 
-    if not state.pass_open:
+    new_pass = not state.pass_open
+    if new_pass:
         if not _has_eligible_pending(attempt, state):
             attempt.workflow_state = state
             return await store.update(attempt)
         state.pass_number += 1
         state.pass_open = True
+        for node in state.nodes.values():
+            node.decision_pass = 0
+            node.scheduling_state = "waiting_dependencies"
+            node.reason = None
+            node.blocked_by = []
+
+    for node in state.nodes.values():
+        if not new_pass and node.pass_run_revision is not None:
+            continue
+        # Existing executions retain their captured inputs when upgrading stored state.
+        if not new_pass and node.active_run_revision is not None:
+            node.pass_run_revision = node.active_run_revision
+            node.pass_inputs = node.active_inputs
+        elif not new_pass and node.decision_pass == state.pass_number and node.last_outcome == "completed":
+            node.pass_run_revision = node.successful_revision
+            node.pass_inputs = node.successful_inputs
+        else:
+            node.pass_run_revision = node.requested_run_revision
+            node.pass_inputs = (
+                dict(node.observed_inputs) if node.observed_inputs is not None and not node.last_poll_error else None
+            )
 
     attempt.workflow_state = state
     attempt = await store.update(attempt)
@@ -309,21 +344,13 @@ async def reconcile_workflow(
         if name in active:
             step = active[name]
             if step.status in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED):
-                if node.active_run_revision != node.requested_run_revision:
-                    step.status = HelixJobStatus.CANCELLED
-                    step.status_details = {**step.status_details, WORKFLOW_INTERNAL_CANCELLATION: True}
-                    await store.update(step)
-                    node.active_step_id = None
-                    node.active_run_revision = None
-                    node.active_inputs = None
-                else:
+                if node.scheduling_state != "admitted":
                     node.scheduling_state = "waiting_capacity"
-                    node.reason = "awaiting_dispatch"
-                    continue
+                node.reason = "awaiting_dispatch"
             else:
                 node.scheduling_state = "running"
                 node.reason = None
-                continue
+            continue
         if node.decision_pass == state.pass_number:
             continue
         parents = [state.nodes[parent] for parent in spec.depends_on or []]
@@ -334,27 +361,27 @@ async def reconcile_workflow(
             if all(parent.decision_pass == state.pass_number for parent in parents):
                 node.decision_pass = state.pass_number
             continue
-        if node.last_poll_error:
+        if node.pass_inputs is None:
             node.scheduling_state = "idle"
             node.reason = "input_unavailable"
             node.decision_pass = state.pass_number
             if config.mode == "run_to_completion":
                 state.control = "failing"
             continue
-        if node.freshness == "clean":
+        if node.successful_revision == node.pass_run_revision and node.successful_inputs == node.pass_inputs:
             node.decision_pass = state.pass_number
             node.last_outcome = "completed"
             node.scheduling_state = "idle"
             node.reason = "unchanged_inputs"
             continue
-        if node.last_attempted_revision == node.requested_run_revision:
+        if node.last_attempted_revision == node.pass_run_revision:
             node.decision_pass = state.pass_number
             node.scheduling_state = "idle"
             node.reason = "awaiting_invalidation"
             continue
-        node.active_run_revision = node.requested_run_revision
-        assert node.observed_inputs is not None
-        node.active_inputs = dict(node.observed_inputs)
+        assert node.pass_run_revision is not None
+        node.active_run_revision = node.pass_run_revision
+        node.active_inputs = dict(node.pass_inputs)
         # Save the execution snapshot before creating its Step so recovery can adopt it.
         attempt = await store.update(attempt)
         assert attempt.workflow_state is not None

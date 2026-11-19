@@ -2095,6 +2095,7 @@ components:
           - ready
           - waiting_dependencies
           - waiting_capacity
+          - admitted
           - held
           - running
           - idle

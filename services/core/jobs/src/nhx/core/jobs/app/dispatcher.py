@@ -15,7 +15,7 @@ from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
-from nemo_helix_plugin.jobs.workflows import WorkflowInvalidation, WorkflowSignals
+from nemo_helix_plugin.jobs.workflows import WorkflowAdmission, WorkflowInvalidation, WorkflowSignals
 from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -1551,6 +1551,11 @@ class JobDispatcher:
         if resolved is None:
             return None
         job, attempt = resolved
+        if "workflow_admission" in status_details:
+            if len(status_details) != 1:
+                raise JobOperationConflictError("Admission cannot be mixed with progress details")
+            request = WorkflowAdmission.model_validate(status_details["workflow_admission"])
+            return await self._admit_workflow_step(job, attempt, request.step_id)
         if "workflow_reconcile" in status_details:
             if status_details != {"workflow_reconcile": True}:
                 raise JobOperationConflictError("Invalid workflow reconciliation request")
@@ -1595,6 +1600,42 @@ class JobDispatcher:
                 return None
 
         operations_counter.add(1, attributes={"operation": "update_attempt_status_details"})
+        return create_platform_job_response(job, attempt)
+
+    async def _admit_workflow_step(self, job: HelixJob, attempt: HelixJobAttempt, step_id: str) -> HelixJobResponse:
+        store = self.store.as_service("jobs", internal=True)
+        job = await store.get_by_id(HelixJob, job.id)
+        attempt = await store.get_by_id(HelixJobAttempt, attempt.id)
+        try:
+            step = await store.get_by_id(HelixJobStep, step_id)
+        except EntityNotFoundError as exc:
+            raise JobOperationConflictError("Workflow execution is no longer available") from exc
+        state = attempt.workflow_state
+        if (
+            attempt.platform_spec.workflow is None
+            or state is None
+            or job.current_attempt_id != attempt.id
+            or step.attempt_id != attempt.id
+            or step.workspace != job.workspace
+            or step.status not in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED)
+        ):
+            raise JobOperationConflictError("Workflow execution is not eligible for admission")
+        name = get_step_spec_name(step.config, step.name) or step.name
+        node = state.nodes.get(name)
+        if node is None or node.active_step_id != step.id:
+            raise JobOperationConflictError("Workflow execution is no longer selected by the controller")
+        admitted = node.scheduling_state == "admitted"
+        if not (
+            (attempt.status == HelixJobStatus.ACTIVE and state.control == "running")
+            or (attempt.status == HelixJobStatus.ACTIVE and state.control == "failing" and admitted)
+            or (attempt.status == HelixJobStatus.PAUSING and state.control in ("running", "pausing") and admitted)
+        ):
+            raise JobOperationConflictError("Workflow attempt is not admitting new executions")
+        if not admitted:
+            node.scheduling_state = "admitted"
+            node.reason = "awaiting_dispatch"
+            # Pause and admission update this same versioned entity; a losing write cannot launch work.
+            attempt = await store.update(attempt)
         return create_platform_job_response(job, attempt)
 
     async def _retain_workflow_storage(
@@ -1689,6 +1730,7 @@ class JobDispatcher:
             WORKFLOW_REQUESTS,
             WORKFLOW_CONTROL,
             "workflow_reconcile",
+            "workflow_admission",
             "workflow_invalidation",
         }:
             raise JobOperationConflictError("Workflow scheduling fields are reserved")

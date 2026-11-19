@@ -415,6 +415,22 @@ class JobScheduler(HeartbeatMixin, Controller):
             raise
         if job.status in HelixJobStatus.lifecycle_pending():
             raise SchedulingDeferred("Job creation or deletion is pending")
+        if step.step_spec is not None and step.step_spec.depends_on is not None:
+            try:
+                self._jobs.update_attempt_status_details(
+                    step.job,
+                    step.attempt_id,
+                    workspace=step.workspace,
+                    body={"workflow_admission": {"step_id": step.id}},
+                )
+            except NemoHTTPError as exc:
+                if exc.status_code == 409 or is_retryable(self._nemo_client.retry or RetryPolicy(), exc.http_response):
+                    raise SchedulingDeferred("Workflow execution admission is deferred") from exc
+                raise
+            except NemoTransportError as exc:
+                if is_retryable(self._nemo_client.retry or RetryPolicy(), exc.error):
+                    raise SchedulingDeferred("Workflow execution admission is temporarily unavailable") from exc
+                raise
         provider, profile = extract_provider_profile(step)
         backend = self._backend_registry.get_backend(profile=profile, provider=provider)
         self._step_scheduled_total.add(1, attributes={"provider": provider, "profile": profile})

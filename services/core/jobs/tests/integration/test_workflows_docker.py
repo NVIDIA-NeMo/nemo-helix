@@ -868,3 +868,102 @@ def test_docker_failure_during_workflow_cancellation(
     assert "failed-before-cancel" in {row.message for row in h.logs(job)}
     assert all(c.status != "running" for c in h.containers(job))
     assert h.tick(job).status == HelixJobStatus.CANCELLED
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_docker_attempt_pause_orders_admission_and_survives_restart(
+    docker_workflow: DockerWorkflowHarness, mode: WorkflowMode
+) -> None:
+    from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
+
+    h = docker_workflow
+    job = h.create({"root": [], "child": ["root"]}, mode=mode, commands={"root": GATED_WORK})
+    h.reconciler.step()
+    first = h.status(job)
+    assert len(first.steps) == 1 and job.attempt_id is not None
+    step = next(step for step in h.scheduler.get_steps_for_scheduling() if step.job_id == job.id)
+    h.jobs.pause_job(workspace="default", name=job.id)
+    h.reconciler.step()
+    assert h.status(job).status == HelixJobStatus.PAUSED
+    with pytest.raises(SchedulingDeferred):
+        h.scheduler.schedule_step(step)
+    assert h.containers(job) == []
+    h.jobs.resume_job(workspace="default", name=job.id)
+    h.reconciler.step()
+    h.jobs.update_attempt_status_details(
+        job.id,
+        job.attempt_id,
+        workspace="default",
+        body={"workflow_admission": {"step_id": first.steps[0].id}},
+    )
+    h.jobs.pause_job(workspace="default", name=job.id)
+    h.reconciler.step()
+    assert h.status(job).status == HelixJobStatus.PAUSING
+    h.restart_controller()
+    running = h.wait_for(job, lambda state: any(step.status == HelixJobStatus.ACTIVE for step in state.steps))
+    assert running.status == HelixJobStatus.PAUSING and len(running.steps) == 1
+    h.release(job, first.steps[0].id)
+    paused = h.wait_for(job, lambda state: state.status == HelixJobStatus.PAUSED)
+    assert len(paused.steps) == 1 and paused.workflow is not None and paused.workflow.pass_number == 1
+    h.jobs.resume_job(workspace="default", name=job.id)
+    ended = h.wait_for(
+        job,
+        lambda state: state.status.is_terminal() or (state.workflow is not None and state.workflow.waiting_for_changes),
+    )
+    assert len(ended.steps) == 2
+    assert ended.status == (HelixJobStatus.ACTIVE if mode == "continuous" else HelixJobStatus.COMPLETED)
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_docker_pass_freezes_queued_and_downstream_inputs(
+    docker_workflow: DockerWorkflowHarness, mode: WorkflowMode
+) -> None:
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nhx.common.entities.client import SyncEntityClient
+    from nhx.core.jobs.entities import HelixJobAttempt
+
+    h = docker_workflow
+    source = h.files.create_fileset(workspace="default", body=CreateFilesetRequest(name=h.prefix + "-source")).data()
+    child_input = h.files.create_fileset(
+        workspace="default", body=CreateFilesetRequest(name=h.prefix + "-child")
+    ).data()
+    job = h.create(
+        {"root": [], "child": ["root"]},
+        mode=mode,
+        inputs={"root": [source.id], "child": [child_input.id]},
+        commands={"root": GATED_WORK},
+    )
+    h.reconciler.step()
+    initial = h.status(job)
+    assert len(initial.steps) == 1 and job.attempt_id is not None
+    original_id = initial.steps[0].id
+    h.files.commit_fileset(workspace="default", name=source.name)
+    h.files.commit_fileset(workspace="default", name=child_input.name)
+    h.reconciler.step()
+    queued = h.status(job)
+    assert len(queued.steps) == 1 and queued.steps[0].id == original_id
+    h.wait_for(job, lambda state: state.steps[0].status == HelixJobStatus.ACTIVE)
+    h.release(job, original_id)
+    drained = h.wait_for(
+        job,
+        lambda state: (
+            len(state.steps) == 2
+            and state.workflow is not None
+            and all(node.last_outcome == "completed" for node in state.workflow.nodes)
+        ),
+    )
+    assert drained.workflow is not None and drained.workflow.pass_number == 1
+    store = SyncEntityClient(EntitiesClient.from_client(h.client))
+    attempt = store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt.workflow_state is not None
+    assert attempt.workflow_state.nodes["child"].successful_inputs == {child_input.id: child_input.commit_revision}
+    if mode == "run_to_completion":
+        assert h.wait_for(job, lambda state: state.status.is_terminal()).status == HelixJobStatus.COMPLETED
+        assert len(h.tick(job).steps) == 2
+    else:
+        retry = h.wait_for(job, lambda state: len(state.steps) == 3 and state.steps[-1].status == HelixJobStatus.ACTIVE)
+        assert retry.workflow is not None and retry.workflow.pass_number == 2
+        h.release(job, retry.steps[-1].id)
+        ended = h.settled(job)
+        assert len(ended.steps) == 4
+        assert ended.workflow is not None and all(node.freshness == "clean" for node in ended.workflow.nodes)

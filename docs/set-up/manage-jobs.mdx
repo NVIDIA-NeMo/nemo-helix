@@ -97,8 +97,8 @@ and can retry cancelled nodes in a later pass. Cancelling the whole workflow
 ends its Attempt `CANCELLED` in either mode. Once workflow cancellation has been
 accepted, pause returns `409 Conflict` and cancellation continues. Step errors
 reported during cancellation retain their diagnostics while the Attempt still
-finishes `CANCELLED`. Internal retirement of an obsolete queued execution for
-replacement does not cancel the logical node.
+finishes `CANCELLED`. Internal cleanup of unstarted executions does not turn a
+workflow failure into a user cancellation.
 
 To invalidate selected nodes, PATCH the existing
 `/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details`
@@ -116,21 +116,30 @@ route with this body:
 Use another request ID for another invalidation. Repeating the current signal
 for a node does not request extra work. Invalidations can remain pending while
 paused and cannot bypass failed dependencies. Input changes and invalidations
-received during execution coalesce into a later pass after the current pass
-drains. The same logical node never has overlapping executions.
+received during a pass coalesce into a later pass after the current pass drains.
+Each pass resets the nodes' per-pass completion, scheduling and blocker state,
+then captures every node's input revisions and run decision. Successful input
+baselines and execution history remain available, so clean nodes can be reused.
+New events do not replace queued executions or change downstream decisions in
+that pass.
+The same logical node never has overlapping executions. These recorded revisions
+track changes; they do not freeze the contents of a Fileset.
 
-Pause drains dispatched work and holds unscheduled nodes. Resume continues the
-same Attempt. Existing storage-retention TTLs and expiry actions apply; a
+Pause is Attempt-level: it stops further admission, drains already-admitted work
+and holds the remaining nodes. An admitted execution can still be waiting for
+backend capacity; it remains part of the drain. The Attempt reaches `PAUSED`
+when admitted work finishes. Resume continues the same pass of the same Attempt. Existing storage-retention TTLs and expiry actions apply; a
 workflow pause uses the time the Attempt reached paused, even when no individual
 Step is paused. A failed node does not expire shared storage while a continuous
 Attempt remains active.
 
 The status API and `jobs watch` expose each logical node's freshness
-(`unknown`, `dirty`, or `clean`), scheduling state, blockers, requested revision,
+(`unknown`, `dirty`, or `clean`), scheduling state (including `admitted` before
+backend launch), blockers, requested revision,
 execution IDs, latest outcome and input-observation timestamps/errors. The
 controller alone writes `workflow_state`; ordinary progress details are separate.
-Each node keeps its active execution ID, captured run revision and input commit
-values there; Step records contain ordinary execution status, Tasks and logs.
+Each node keeps its active execution ID, current-pass revision/input snapshot,
+execution snapshot and latest input observations there; Step records contain ordinary execution status, Tasks and logs.
 Status reads do not poll inputs or schedule work. Use `attempt_id` on status
 reads or `--attempt-id` on watch to select an Attempt. The sync and async typed
 clients accept `get_job_status(..., attempt_id=...)`. Execution history remains

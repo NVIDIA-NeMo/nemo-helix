@@ -308,8 +308,10 @@ def test_pause_holds_queued_work_and_manual_request_until_resume(workflow_harnes
     harness.jobs.resume_job(workspace="default", name=job.id)
     resumed = harness.tick(job)
     assert resumed.status == HelixJobStatus.ACTIVE
-    assert len(resumed.steps) == 2
-    assert resumed.steps[0].status == HelixJobStatus.CANCELLED
+    assert len(resumed.steps) == 1 and resumed.steps[0].id == first.steps[0].id
+    harness.finish(job, "work")
+    harness.tick(job)
+    assert len(harness.tick(job).steps) == 2
 
 
 def test_draining_pause_waits_for_active_step_and_does_not_unlock_child(workflow_harness: WorkflowHarness) -> None:
@@ -766,26 +768,27 @@ def test_restart_recovers_execution_snapshot_from_workflow_state(
     elif trigger == "manual":
         harness.invalidate(job, ["work"])
     recovered = harness.tick(job)
-    expected = 2 if before.steps and trigger != "unchanged" else 1
-    assert len(recovered.steps) == expected
+    assert len(recovered.steps) == 1
     assert recovered.workflow is not None
     active = harness.node_state(job, "work")
-    assert active.active_step_id == recovered.steps[-1].id
-    if trigger == "unchanged":
-        assert active.active_run_revision == snapshot.active_run_revision
-        assert active.active_inputs == snapshot.active_inputs
-        if before.steps:
-            assert active.active_step_id == before.steps[0].id
-    else:
-        assert active.active_run_revision != snapshot.active_run_revision
-        if before.steps:
-            assert recovered.steps[0].status == HelixJobStatus.CANCELLED
+    assert active.active_step_id == recovered.steps[0].id
+    assert active.active_run_revision == snapshot.active_run_revision
+    assert active.active_inputs == snapshot.active_inputs
+    if before.steps:
+        assert active.active_step_id == before.steps[0].id
     harness.finish(job, "work")
     completed = harness.tick(job)
+    assert completed.workflow is not None
+    if trigger != "unchanged":
+        assert completed.workflow.nodes[0].freshness == "dirty"
+        harness.tick(job)
+        next_run = harness.node_state(job, "work")
+        assert next_run.active_run_revision == next_run.requested_run_revision != snapshot.active_run_revision
+        harness.finish(job, "work")
+        completed = harness.tick(job)
     assert completed.workflow is not None and completed.workflow.nodes[0].freshness == "clean"
     finished = harness.node_state(job, "work")
-    assert finished.successful_revision == active.active_run_revision
-    assert finished.successful_inputs == active.active_inputs
+    assert finished.successful_revision == finished.requested_run_revision
     assert finished.active_step_id is None and finished.active_run_revision is None and finished.active_inputs is None
 
 
@@ -1046,51 +1049,57 @@ def test_explicit_cancel_with_new_inputs_still_cancels_node(workflow_harness: Wo
 
 @pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
 @pytest.mark.parametrize("after_update", [False, True])
-def test_restart_after_internal_retirement_keeps_replacement_pending(
+def test_restart_preserves_admission_and_current_pass(
     workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch, mode: str, after_update: bool
 ) -> None:
     from nhx.common.entities.client import EntityBase, EntityClient
-    from nhx.core.jobs.entities import HelixJobStep
 
     h = workflow_harness
     source = h.fileset()
     job = h.create({"work": [], "child": ["work"]}, {"work": [source.id]}, mode=mode)
     first = h.tick(job)
-    old_id = first.steps[0].id
-    h.files.commit_fileset(workspace="default", name=source.name)
+    assert job.attempt_id is not None
     original = EntityClient.update
 
     async def update[EntityT: EntityBase](
         self: EntityClient, entity: EntityT, *, original_name: str | None = None
     ) -> EntityT:
-        if isinstance(entity, HelixJobStep) and entity.id == old_id and entity.status == HelixJobStatus.CANCELLED:
-            if after_update:
-                await original(self, entity, original_name=original_name)
-            raise RuntimeError("interrupted internal retirement")
+        if isinstance(entity, HelixJobAttempt) and entity.id == job.attempt_id:
+            assert entity.workflow_state is not None
+            if entity.workflow_state.nodes["work"].scheduling_state == "admitted":
+                if after_update:
+                    await original(self, entity, original_name=original_name)
+                raise RuntimeError("interrupted admission")
         return await original(self, entity, original_name=original_name)
 
+    body: dict[str, object] = {"workflow_admission": {"step_id": first.steps[0].id}}
     with monkeypatch.context() as patch:
         patch.setattr(EntityClient, "update", update)
-        with pytest.raises(RuntimeError, match="interrupted internal retirement"):
-            h.tick(job)
+        with pytest.raises(RuntimeError, match="interrupted admission"):
+            h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
+    h.files.commit_fileset(workspace="default", name=source.name)
     recovered = h.tick(job)
-    assert recovered.status == HelixJobStatus.ACTIVE and len(recovered.steps) == 2
-    assert recovered.steps[0].status == HelixJobStatus.CANCELLED
-    assert h.node_state(job, "work").active_step_id == recovered.steps[1].id
-    assert job.attempt_id is not None
-    h.jobs.update_attempt_step_status(
-        workspace="default",
-        job=job.id,
-        attempt=job.attempt_id,
-        name=old_id,
-        body=HelixJobStatusUpdateRequest(status=HelixJobStatus.CANCELLED),
-    )
-    assert h.tick(job).status == HelixJobStatus.ACTIVE
+    assert len(recovered.steps) == 1 and recovered.steps[0].id == first.steps[0].id
+    assert h.node_state(job, "work").active_inputs == {source.id: source.commit_revision}
+    h.jobs.pause_job(workspace="default", name=job.id)
+    paused = h.tick(job)
+    assert paused.status == (HelixJobStatus.PAUSING if after_update else HelixJobStatus.PAUSED)
+    if not after_update:
+        h.jobs.resume_job(workspace="default", name=job.id)
+        h.tick(job)
+    h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
     h.finish(job, "work")
-    assert len(h.tick(job).steps) == 3
+    h.tick(job)
+    if after_update:
+        assert h.status(job).status == HelixJobStatus.PAUSED
+        h.jobs.resume_job(workspace="default", name=job.id)
+        h.tick(job)
     h.finish(job, "child")
     ended = h.tick(job)
     assert ended.status == (HelixJobStatus.ACTIVE if mode == "continuous" else HelixJobStatus.COMPLETED)
+    assert len(ended.steps) == 2
+    if mode == "continuous":
+        assert len(h.tick(job).steps) == 3
 
 
 def test_restart_after_failure_retires_queued_work_without_turning_into_cancel(
@@ -1344,3 +1353,365 @@ def test_step_failure_cannot_override_workflow_cancellation(
     assert h.tick(job).status == HelixJobStatus.CANCELLED
     preserved = store.get_by_id(HelixJobStep, failure_id)
     assert preserved.status == HelixJobStatus.ERROR and preserved.error_details == diagnostics
+
+
+@pytest.mark.parametrize(
+    "mode,trigger", [("continuous", "commit"), ("continuous", "manual"), ("run_to_completion", "commit")]
+)
+def test_pass_keeps_downstream_inputs_fixed(workflow_harness: WorkflowHarness, mode: str, trigger: str) -> None:
+    h = workflow_harness
+    source, downstream = h.fileset(), h.fileset()
+    job = h.create({"root": [], "child": ["root"]}, {"root": [source.id], "child": [downstream.id]}, mode=mode)
+    initial = h.tick(job)
+    root = h.node_state(job, "root")
+    child_revision = h.node_state(job, "child").requested_run_revision
+    assert job.attempt_id is not None
+    h.jobs.update_attempt_step_status(
+        workspace="default",
+        job=job.id,
+        attempt=job.attempt_id,
+        name=initial.steps[0].id,
+        body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+    )
+    if trigger == "commit":
+        h.files.commit_fileset(workspace="default", name=source.name)
+        h.files.commit_fileset(workspace="default", name=downstream.name)
+    else:
+        h.invalidate(job, ["root", "child"])
+    h.tick(job)
+    h.finish(job, "root")
+    released = h.tick(job)
+    child = h.node_state(job, "child")
+    assert len(released.steps) == 2
+    assert child.active_run_revision == child_revision
+    assert child.active_inputs == {downstream.id: downstream.commit_revision}
+    assert h.node_state(job, "root").successful_revision == root.active_run_revision
+    h.finish(job, "child")
+    drained = h.tick(job)
+    assert drained.workflow is not None and drained.workflow.pass_number == 1
+    assert all(node.has_pending_run for node in drained.workflow.nodes)
+    if mode == "run_to_completion":
+        assert drained.status == HelixJobStatus.COMPLETED
+        assert len(h.tick(job).steps) == 2
+    else:
+        again = h.tick(job)
+        assert again.workflow is not None and again.workflow.pass_number == 2 and len(again.steps) == 3
+        h.finish(job, "root")
+        h.tick(job)
+        latest = h.node_state(job, "child")
+        assert latest.active_run_revision == latest.requested_run_revision != child_revision
+        assert latest.active_inputs == latest.observed_inputs
+        h.finish(job, "child")
+        clean = h.tick(job)
+        assert clean.workflow is not None and clean.workflow.waiting_for_changes
+
+
+@pytest.mark.parametrize("trigger", ["commit", "manual"])
+def test_queued_execution_is_fixed_for_its_pass(workflow_harness: WorkflowHarness, trigger: str) -> None:
+    h = workflow_harness
+    source = h.fileset()
+    job = h.create({"work": []}, {"work": [source.id]})
+    first = h.tick(job)
+    before = h.node_state(job, "work")
+    if trigger == "commit":
+        h.files.commit_fileset(workspace="default", name=source.name)
+    else:
+        h.invalidate(job, ["work"])
+    pending = h.tick(job)
+    current = h.node_state(job, "work")
+    assert len(pending.steps) == 1 and pending.steps[0].id == first.steps[0].id
+    assert current.active_run_revision == before.active_run_revision
+    assert current.active_inputs == before.active_inputs
+    assert current.requested_run_revision != current.active_run_revision
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_admitted_work_drains_before_attempt_pauses(workflow_harness: WorkflowHarness, mode: str) -> None:
+    h = workflow_harness
+    job = h.create({"root": [], "child": ["root"]}, mode=mode)
+    first = h.tick(job)
+    assert job.attempt_id is not None
+    body: dict[str, object] = {"workflow_admission": {"step_id": first.steps[0].id}}
+    h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
+    assert h.node_state(job, "root").scheduling_state == "admitted"
+    h.jobs.pause_job(workspace="default", name=job.id)
+    draining = h.tick(job)
+    assert draining.status == HelixJobStatus.PAUSING
+    h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
+    h.finish(job, "root")
+    paused = h.tick(job)
+    assert paused.status == HelixJobStatus.PAUSED and len(paused.steps) == 1
+    h.jobs.resume_job(workspace="default", name=job.id)
+    resumed = h.tick(job)
+    assert resumed.workflow is not None and resumed.workflow.pass_number == 1
+    assert len(resumed.steps) == 2
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_pause_rejects_unadmitted_work(workflow_harness: WorkflowHarness, mode: str) -> None:
+    h = workflow_harness
+    job = h.create({"work": []}, mode=mode)
+    first = h.tick(job)
+    h.jobs.pause_job(workspace="default", name=job.id)
+    assert h.tick(job).status == HelixJobStatus.PAUSED
+    response = h.context.test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/attempts/{job.attempt_id}/status-details",
+        json={"workflow_admission": {"step_id": first.steps[0].id}},
+    )
+    assert response.status_code == 409
+    assert h.status(job).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_stale_scheduler_cannot_dispatch_after_attempt_pause(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    from unittest.mock import Mock
+
+    from nemo_helix_plugin.jobs.execution_profiles import E2EJobExecutionProfile
+    from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
+    from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+    from nhx.core.jobs.controllers.scheduler import JobScheduler
+
+    h = workflow_harness
+    job = h.create({"work": []}, mode=mode)
+    h.tick(job)
+    profile = E2EJobExecutionProfile(provider="cpu", profile="default")
+    registry = BackendRegistry.from_config(nemo_client=h.context.client, profiles=[profile])
+    scheduler = JobScheduler(registry, h.context.client)
+    step = next(step for step in scheduler.get_steps_for_scheduling() if step.job_id == job.id)
+    backend = registry.get_backend(provider="cpu", profile="default")
+    launch = Mock()
+    monkeypatch.setattr(backend, "schedule", launch)
+    h.jobs.pause_job(workspace="default", name=job.id)
+    assert h.tick(job).status == HelixJobStatus.PAUSED
+    with pytest.raises(SchedulingDeferred):
+        scheduler.schedule_step(step)
+    launch.assert_not_called()
+
+
+@pytest.mark.parametrize("winner", ["pause", "admission"])
+def test_pause_and_admission_share_attempt_version(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch, winner: str
+) -> None:
+    from nhx.common.entities.client import EntityBase, EntityClient
+    from nhx.core.jobs.app.workflow import WORKFLOW_CONTROL
+
+    h = workflow_harness
+    job = h.create({"work": []})
+    first = h.tick(job)
+    assert job.attempt_id is not None
+    original = EntityClient.update
+    intervened = False
+
+    async def update[EntityT: EntityBase](
+        self: EntityClient, entity: EntityT, *, original_name: str | None = None
+    ) -> EntityT:
+        nonlocal intervened
+        if isinstance(entity, HelixJobAttempt) and entity.id == job.attempt_id and not intervened:
+            assert entity.workflow_state is not None
+            pause_write = entity.status == HelixJobStatus.PAUSING
+            admission_write = entity.workflow_state.nodes["work"].scheduling_state == "admitted"
+            if (winner == "pause" and admission_write) or (winner == "admission" and pause_write):
+                intervened = True
+                competing = await self.get_by_id(HelixJobAttempt, entity.id)
+                assert competing.workflow_state is not None
+                if winner == "pause":
+                    competing.status = HelixJobStatus.PAUSING
+                    competing.status_details = {**competing.status_details, WORKFLOW_CONTROL: "pause"}
+                else:
+                    competing.workflow_state.nodes["work"].scheduling_state = "admitted"
+                await original(self, competing)
+        return await original(self, entity, original_name=original_name)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(EntityClient, "update", update)
+        if winner == "pause":
+            response = h.context.test_client.patch(
+                f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/attempts/{job.attempt_id}/status-details",
+                json={"workflow_admission": {"step_id": first.steps[0].id}},
+            )
+        else:
+            response = h.context.test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/pause")
+    assert intervened and response.status_code == 409
+    if winner == "admission":
+        h.jobs.pause_job(workspace="default", name=job.id)
+        assert h.tick(job).status == HelixJobStatus.PAUSING
+        h.finish(job, "work")
+    assert h.tick(job).status == HelixJobStatus.PAUSED
+
+
+def test_backend_deferral_keeps_admitted_work_drainable(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    from nemo_helix_plugin.jobs.execution_profiles import E2EJobExecutionProfile
+    from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
+    from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+    from nhx.core.jobs.controllers.reconciler import JobReconciler
+    from nhx.core.jobs.controllers.scheduler import JobScheduler
+
+    h = workflow_harness
+    job = h.create({"work": [], "child": ["work"]})
+    first = h.tick(job)
+    registry = BackendRegistry.from_config(
+        nemo_client=h.context.client, profiles=[E2EJobExecutionProfile(provider="cpu", profile="default")]
+    )
+    scheduler = JobScheduler(registry, h.context.client)
+    step = next(step for step in scheduler.get_steps_for_scheduling() if step.job_id == job.id)
+    backend = registry.get_backend(provider="cpu", profile="default")
+    with monkeypatch.context() as patch:
+        patch.setattr(backend, "schedule", Mock(side_effect=SchedulingDeferred("backend capacity full")))
+        with pytest.raises(SchedulingDeferred):
+            scheduler.schedule_step(step)
+    assert h.node_state(job, "work").scheduling_state == "admitted"
+    h.jobs.pause_job(workspace="default", name=job.id)
+    assert h.tick(job).status == HelixJobStatus.PAUSING
+    update = scheduler.schedule_step(step)
+    assert job.attempt_id is not None
+    h.jobs.update_attempt_step_status(
+        workspace="default",
+        job=job.id,
+        attempt=job.attempt_id,
+        name=step.id,
+        body=HelixJobStatusUpdateRequest(status=update.status, status_details=update.status_details),
+    )
+    reconciler = JobReconciler(registry, h.context.client)
+    for _ in range(8):
+        paused = h.tick(job)
+        if paused.status == HelixJobStatus.PAUSED:
+            break
+        reconciler.step()
+    assert paused.status == HelixJobStatus.PAUSED
+    assert len(paused.steps) == 1 and paused.steps[0].id == first.steps[0].id
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"workflow_admission": {}},
+        {"workflow_admission": {"step_id": ""}},
+        {"workflow_admission": {"step_id": "x", "extra": True}},
+    ],
+)
+def test_workflow_admission_validates_request(
+    workflow_harness: WorkflowHarness, body: dict[str, dict[str, str | bool]]
+) -> None:
+    h = workflow_harness
+    job = h.create({"work": []})
+    h.tick(job)
+    response = h.context.test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/attempts/{job.attempt_id}/status-details", json=body
+    )
+    assert response.status_code == 422
+    assert h.node_state(job, "work").scheduling_state != "admitted"
+
+
+def test_workflow_admission_rejects_foreign_execution(workflow_harness: WorkflowHarness) -> None:
+    h = workflow_harness
+    left, right = h.create({"work": []}), h.create({"work": []})
+    h.tick(left)
+    other = h.tick(right)
+    response = h.context.test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{left.id}/attempts/{left.attempt_id}/status-details",
+        json={"workflow_admission": {"step_id": other.steps[0].id}},
+    )
+    assert response.status_code == 409
+
+
+def test_new_pass_resets_nodes_before_scheduling_and_recovers(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nhx.common.entities.client import EntityBase, EntityClient
+
+    h = workflow_harness
+    job = h.create({"root": [], "child": ["root"]})
+    h.tick(job)
+    for name in ("root", "child"):
+        h.finish(job, name)
+        h.tick(job)
+    child_success = h.node_state(job, "child").successful_step_id
+    h.invalidate(job, ["root"])
+    original = EntityClient.update
+
+    async def update[EntityT: EntityBase](
+        self: EntityClient, entity: EntityT, *, original_name: str | None = None
+    ) -> EntityT:
+        saved = await original(self, entity, original_name=original_name)
+        if isinstance(entity, HelixJobAttempt) and entity.id == job.attempt_id:
+            assert entity.workflow_state is not None
+            if entity.workflow_state.pass_number == 2:
+                raise RuntimeError("interrupted after pass reset")
+        return saved
+
+    with monkeypatch.context() as patch:
+        patch.setattr(EntityClient, "update", update)
+        with pytest.raises(RuntimeError, match="interrupted after pass reset"):
+            h.tick(job)
+    for name in ("root", "child"):
+        reset = h.node_state(job, name)
+        assert reset.decision_pass == 0
+        assert reset.scheduling_state == "waiting_dependencies"
+        assert reset.reason is None and reset.blocked_by == []
+        assert reset.active_step_id is None
+    assert h.node_state(job, "child").successful_step_id == child_success
+    h.invalidate(job, ["child"])
+    resumed = h.tick(job)
+    assert resumed.workflow is not None and resumed.workflow.pass_number == 2
+    assert len(resumed.steps) == 3
+    assert h.node_state(job, "child").scheduling_state == "waiting_dependencies"
+    h.finish(job, "root")
+    drained = h.tick(job)
+    assert len(drained.steps) == 3
+    assert h.node_state(job, "child").successful_step_id == child_success
+    assert h.node_state(job, "child").decision_pass == 2
+    third = h.tick(job)
+    assert third.workflow is not None and third.workflow.pass_number == 3
+    assert len(third.steps) == 4 and h.node_state(job, "child").active_step_id is not None
+
+
+def test_new_pass_preserves_unchanged_failure_suppression(workflow_harness: WorkflowHarness) -> None:
+    h = workflow_harness
+    job = h.create({"bad": [], "good": [], "child": ["bad"]})
+    h.tick(job)
+    h.finish(job, "bad", HelixJobStatus.ERROR)
+    h.finish(job, "good")
+    h.tick(job)
+    bad_execution = h.node_state(job, "bad").latest_step_id
+    h.invalidate(job, ["good"])
+    second = h.tick(job)
+    assert second.workflow is not None and second.workflow.pass_number == 2 and second.workflow.degraded
+    assert len(second.steps) == 3
+    bad = h.node_state(job, "bad")
+    assert bad.active_step_id is None and bad.latest_step_id == bad_execution
+    assert bad.last_outcome == "error" and bad.reason == "awaiting_invalidation"
+    assert h.node_state(job, "child").blocked_by == ["bad"]
+    h.finish(job, "good")
+    waiting = h.tick(job)
+    assert waiting.workflow is not None and waiting.workflow.waiting_for_changes
+
+
+def test_once_failure_drains_already_admitted_work(workflow_harness: WorkflowHarness) -> None:
+    from nhx.core.jobs.app.workflow import workflow_step_held
+
+    h = workflow_harness
+    job = h.create({"bad": [], "other": [], "child": ["bad", "other"]}, mode="run_to_completion")
+    h.tick(job)
+    other_id = h.node_state(job, "other").active_step_id
+    assert job.attempt_id is not None and other_id is not None
+    body: dict[str, object] = {"workflow_admission": {"step_id": other_id}}
+    h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
+    h.finish(job, "bad", HelixJobStatus.ERROR)
+    draining = h.tick(job)
+    assert draining.status == HelixJobStatus.ACTIVE
+    assert h.node_state(job, "other").scheduling_state == "admitted"
+    store = SyncEntityClient(EntitiesClient.from_client(h.context.client))
+    attempt = store.get_by_id(HelixJobAttempt, job.attempt_id)
+    step = store.get_by_id(HelixJobStep, other_id)
+    assert not workflow_step_held(attempt, step)
+    h.jobs.update_attempt_status_details(job.id, job.attempt_id, workspace="default", body=body)
+    h.finish(job, "other")
+    finished = h.tick(job)
+    assert finished.status == HelixJobStatus.ERROR
+    assert len(finished.steps) == 2
