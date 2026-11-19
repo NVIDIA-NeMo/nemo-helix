@@ -30,6 +30,7 @@ VLM_LORA_EXCLUDE_MODULES = [
     "*sound*",
     "*mlp1*",
     "*lm_head*",
+    "*mtp*",
 ]
 
 
