@@ -14,6 +14,7 @@ from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nhx_evals_sdk.agent_eval.runtimes.harbor.codex_evidence import CODEX_VERSION
 from nhx_evals_sdk.agent_eval.trials import standard_evidence_descriptors
 from nhx_evals_sdk.metrics.harbor_skill_metrics import HarborSkillMetrics, HarborSkillPackage
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.structured_output import StructuredOutputMode
 from nhx_evals_sdk.values.evidence import CandidateEvidence
@@ -117,6 +118,8 @@ async def test_native_judge_uses_harbor_verdicts_and_preserves_each_package_view
     publisher = importlib.import_module("pi_metrics")
     metric, views = publisher._judge(ModelRef("default/judge"), [package])
     assert {f"{NAME}.documentation_rubric", "expected_behavior", "task_success", "answer_accuracy"} <= views.keys()
+    metric = unbundle_metric(bundle_metric(metric, InlineMetricBundlePackager()))
+    assert isinstance(metric, LLMJudgeMetric)
     metric.model = Model(name="fixture", url="http://judge.invalid/v1")
 
     async def no_structured_output(**kwargs):
@@ -129,7 +132,9 @@ async def test_native_judge_uses_harbor_verdicts_and_preserves_each_package_view
         assert evidence["documents"] == {NAME: DOCUMENT}
         assert evidence["verifier_rewards"] == {"script_correct": 0}
         assert evidence["candidate_answer"] == "Saved the taskset."
-        verdicts = {score.name: "8" if score.name.startswith(NAME) else "met" for score in metric.scores}
+        verdicts = {
+            score.name: "8" if score.name.startswith(NAME.replace("-", "_")) else "met" for score in metric.scores
+        }
         return {"choices": [{"message": {"content": json.dumps(verdicts)}}]}
 
     metric.set_inference_fn(judge)

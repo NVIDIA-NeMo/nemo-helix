@@ -51,14 +51,15 @@ def _judge(model: ModelRef, packages: list[HarborSkillPackage]) -> tuple[LLMJudg
     scores = list(outcome.scores)
     for package in packages:
         name = package.snapshot.directory_name
+        prefix = name.replace("-", "_")
         for score in documentation.scores:
-            key = f"{name}.{score.name}"
+            key = f"{prefix}_{score.name}"
             scores.append(score.model_copy(update={"name": key, "parser": JSONScoreParser(json_path=key)}))
         for view_name, view in doc_views.items():
             views[f"{name}.{view_name}"] = view.model_copy(
                 update={
                     "signals": [
-                        signal.model_copy(update={"output": f"{name}.{signal.output}"}) for signal in view.signals
+                        signal.model_copy(update={"output": f"{prefix}_{signal.output}"}) for signal in view.signals
                     ]
                 }
             )
