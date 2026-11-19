@@ -194,8 +194,6 @@ const mockListApis = (datasetPaths = ['output/part-0.parquet']) => {
 type User = ReturnType<typeof userEvent.setup>;
 
 const openConfigurationStep = async (user: User) => {
-  await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-  await user.click(screen.getByRole('button', { name: 'Next' }));
   await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: 'Next' }));

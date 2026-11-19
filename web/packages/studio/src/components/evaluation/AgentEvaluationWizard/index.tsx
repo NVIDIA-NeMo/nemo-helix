@@ -9,9 +9,8 @@ import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { InfoCircle } from '@nemo/icons/icons';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import type { AgentEvaluateJobRequest, EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
+import type { EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
 import { deleteEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
@@ -21,7 +20,6 @@ import {
 import {
   filesCreateFileset,
   filesDeleteFileset,
-  filesDownloadFile,
   filesUploadFile,
   useFilesListFilesetFiles,
 } from '@nemo/sdk/generated/platform/files';
@@ -30,16 +28,12 @@ import {
   Banner,
   Button,
   Checkbox,
-  Flex,
   FormField,
-  RadioGroup,
   SegmentedControl,
   Stack,
   Text,
-  Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
-import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   buildAgentEvaluationSpec,
@@ -55,18 +49,13 @@ import {
 } from '@studio/components/evaluation/AgentEvaluationWizard/consts';
 import {
   DATASET_SNAPSHOT_KEY,
-  datasetDrift,
-  datasetSnapshotOf,
   takeDatasetSnapshot,
 } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
-import { EvaluationSourceSelect } from '@studio/components/evaluation/AgentEvaluationWizard/EvaluationSourceSelect';
 import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluationWizard/FilesetConfigPicker';
 import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
 import { parquetBatchGroups } from '@studio/components/evaluation/AgentEvaluationWizard/parquetBatchGroups';
 import { PromptTemplateSection } from '@studio/components/evaluation/AgentEvaluationWizard/PromptTemplateSection';
-import { useEvaluationSources } from '@studio/components/evaluation/AgentEvaluationWizard/useEvaluationSources';
 import {
-  type EvaluationMode,
   isLastStep,
   nextStep,
   previousStep,
@@ -88,9 +77,6 @@ import { useDatasetPreview } from '@studio/components/evaluation/EvalWizard/useD
 import {
   createRunEvaluation,
   evalConfigFilename,
-  evaluationConfigError,
-  evaluationFilesetName,
-  findEvalConfigFile,
   recordRunJob,
   runMetadata,
 } from '@studio/components/evaluation/experimentEvalConfig';
@@ -105,27 +91,22 @@ import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import {
   bareName,
-  buildAgentEvalRequestBody,
   buildDatasetEvalRequestBody,
   DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
-  type EvalSpec,
   filesetNameForExperiment,
   injectJudgeModel,
-  isDatasetEvalSpec,
   MODE_DEFAULT,
-  MODE_EXPERIMENT,
-  parseEvalConfig,
   parseUploadedDatasetConfig,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
 import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityNameCheck';
-import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
+import { LINK_DOCS_STUDIO_EXPERIMENTS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useMemo, useRef, useState } from 'react';
 import {
   FormProvider,
   type SubmitErrorHandler,
@@ -136,41 +117,6 @@ import {
 import { useNavigate } from 'react-router';
 import { useDebounce } from 'use-debounce';
 import { z } from 'zod';
-
-const startItems = (rerunDisabled: boolean) => [
-  {
-    value: MODE_EXPERIMENT,
-    disabled: rerunDisabled,
-    children: (
-      <Stack gap="density-xs">
-        <Flex align="center" gap="density-xs">
-          <Text kind="label/bold/md">Re-run an existing evaluation</Text>
-          {rerunDisabled && (
-            <Tooltip slotContent="No existing evaluations to re-run.">
-              <InfoCircle size="14" aria-label="Why is this option disabled?" />
-            </Tooltip>
-          )}
-        </Flex>
-        <Text className="text-secondary" kind="body/regular/sm">
-          Reuses the eval config saved on a previous run. The new run joins that run&apos;s
-          experiment, so the two sit side by side on its leaderboard.
-        </Text>
-      </Stack>
-    ),
-  },
-  {
-    value: MODE_DEFAULT,
-    children: (
-      <Stack gap="density-xs">
-        <Text kind="label/bold/md">Create a new experiment</Text>
-        <Text className="text-secondary" kind="body/regular/sm">
-          Sets up a fresh experiment to group runs under, then takes a dataset and an eval config to
-          measure them with.
-        </Text>
-      </Stack>
-    ),
-  },
-];
 
 const CONFIG_KIND_FORM = 'form';
 const CONFIG_KIND_FILESET = 'fileset';
@@ -190,9 +136,6 @@ const MAX_PARALLELISM = 16;
 
 const EMPTY_PROMPT_MESSAGE = 'Select at least one field, or write a prompt.';
 
-const NO_EVALUATIONS_MESSAGE =
-  'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
-
 /** Why the step's primary action is disabled. A reason already shown under its field is not
  *  repeated beside the action. */
 type StepBlocker = { kind: 'field' } | { kind: 'hint'; hint: string };
@@ -204,7 +147,6 @@ const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
   judgeModel: z.string(),
-  mode: z.enum([MODE_DEFAULT, MODE_EXPERIMENT]),
   /** Name of the experiment created on the "new experiment" path. The fileset holding this run's
    *  eval config and dataset is derived from it. */
   newName: entityNameField(),
@@ -212,8 +154,6 @@ const submitEvaluationBaseSchema = z.object({
    *  name is how it is told apart from its siblings on the leaderboard, so it is the natural
    *  place to record what changed ("…-temp-1" vs "…-temp-point5"). */
   evaluationRecordName: entityNameField(),
-  /** Name of the existing evaluation whose eval config is reused on the re-run path. */
-  evaluationName: z.string(),
   /** Whether the eval config is built here, picked from a fileset, or uploaded. */
   configKind: z.enum(CONFIG_KINDS),
   /** The prompt sent to the agent; ``null`` while it is still the generated one. */
@@ -252,7 +192,7 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         path: ['judgeModel'],
       });
     }
-    if (data.mode === MODE_DEFAULT) {
+    {
       // Values here are already sanitized by the field transform, so the only naming failures
       // left are "nothing salvageable" and the derived fileset name — which is longer, so a name
       // that is legal on its own can still overflow once "-data" is appended, and there is no
@@ -312,13 +252,6 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         }
       }
     }
-    if (data.mode === MODE_EXPERIMENT && !data.evaluationName) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Pick an evaluation to re-run',
-        path: ['evaluationName'],
-      });
-    }
     const recordNameError = unsalvageableNameError(data.evaluationRecordName, 'Evaluation name');
     if (recordNameError) {
       ctx.addIssue({
@@ -329,17 +262,11 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
     }
   });
 
-const makeDefaultValues = (
-  agent?: string,
-  sourceEvaluation?: string
-): SubmitEvaluationFormData => ({
+const makeDefaultValues = (agent: string): SubmitEvaluationFormData => ({
   agent: agent ?? '',
   judgeModel: '',
-  // Provisional: the preselect effect corrects this once the evaluation list resolves.
-  mode: MODE_EXPERIMENT,
   newName: '',
   evaluationRecordName: '',
-  evaluationName: sourceEvaluation ?? '',
   configKind: CONFIG_KIND_FORM,
   promptTemplate: null,
   promptColumns: [],
@@ -366,19 +293,6 @@ interface ConfigPick extends FilePick {
   format?: EvalConfigFormat;
 }
 
-const datasetLabel = (spec: EvalSpec, workspace: string): string | undefined => {
-  if (!isDatasetEvalSpec(spec) || typeof spec.dataset !== 'string') {
-    return undefined;
-  }
-  const location = parseFilesetLocation(spec.dataset, workspace);
-  if (!location) {
-    return undefined;
-  }
-  return location.workspace === workspace
-    ? location.name
-    : `${location.workspace}/${location.name}`;
-};
-
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
 
@@ -402,13 +316,20 @@ const readConfigPick = async (file: File): Promise<ConfigPick> => {
   }
 };
 
+/** How a dataset ref is labelled on the Evaluation: its fileset, workspace-qualified when it
+ *  lives elsewhere. */
+const datasetLabel = (ref: string, workspace: string): string | undefined => {
+  const location = parseFilesetLocation(ref, workspace);
+  if (!location) return undefined;
+  return location.workspace === workspace
+    ? location.name
+    : `${location.workspace}/${location.name}`;
+};
+
 interface AgentEvaluationWizardProps {
   workspace: string;
   /** The agent under evaluation. */
   agent: string;
-  /** Name of an evaluation to start from. Opens the wizard on its last step with that run already
-   *  chosen, which is how "New evaluation from this configuration" hands a row's config over. */
-  sourceEvaluation?: string;
 }
 
 interface SeededEntities {
@@ -461,69 +382,53 @@ interface EvalInputs {
   datasetRef: string;
 }
 
-/** Resolves the persisted yardstick spec for this submission. On the "new experiment" path it
- *  takes the built or picked config, bakes in the picked judge and the dataset ref, and seeds it
- *  into a new fileset; on the re-run path it reads the saved spec back verbatim (no re-bake, no
- *  judge re-pick). */
+/** Bakes the dataset and judge selection into the reusable eval config. */
 const loadPersistedSpec = async (
   workspace: string,
   formData: SubmitEvaluationFormData,
-  configFileset: string | null,
   inputs: EvalInputs | null
-): Promise<EvalSpec> => {
-  if (formData.mode === MODE_DEFAULT) {
-    if (!inputs) throw new Error('Pick a dataset and an eval config before submitting');
-    const signal = new AbortController().signal;
-    const name = filesetNameForExperiment(formData.newName);
-    const judgeModel = formData.judgeModel || null;
-    const spec: DatasetEvalSpec = {
-      ...inputs.spec,
-      dataset: inputs.datasetRef,
-      metrics: judgeModel
-        ? inputs.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
-        : inputs.spec.metrics,
-    };
-
-    try {
-      await filesCreateFileset(workspace, { name, description: 'Agent Evaluation Config' }, signal);
-    } catch (err) {
-      if (isConflictError(err)) {
-        throw new Error(
-          `A fileset named "${name}" already exists — choose a different experiment name`
-        );
-      }
-      throw err;
-    }
-    try {
-      await filesUploadFile(
-        workspace,
-        name,
-        evalConfigFilename(inputs.configFormat),
-        new Blob([serializeEvalConfig(spec, inputs.configFormat)], {
-          type: inputs.configFormat === 'yaml' ? 'application/yaml' : 'application/json',
-        }),
-        signal
-      );
-    } catch (uploadErr) {
-      throw await discardSeeded(workspace, { filesetName: name }, uploadErr);
-    }
-    return spec;
-  }
-  if (!configFileset) throw new Error('The selected evaluation has no eval config fileset');
+): Promise<DatasetEvalSpec> => {
+  if (!inputs) throw new Error('Pick a dataset and an eval config before submitting');
   const signal = new AbortController().signal;
-  // The stored config keeps whichever serialization its author uploaded, so resolve the file
-  // by listing rather than assuming an extension. parseEvalConfig reads either.
-  const configFile = await findEvalConfigFile(workspace, configFileset, signal);
-  if (!configFile) throw new Error("Failed to read the selected evaluation's eval config");
-  const blob = await filesDownloadFile(workspace, configFileset, configFile, signal);
-  if (!blob) throw new Error("Failed to read the selected evaluation's eval config");
-  return parseEvalConfig(await blob.text());
+  const name = filesetNameForExperiment(formData.newName);
+  const judgeModel = formData.judgeModel || null;
+  const spec: DatasetEvalSpec = {
+    ...inputs.spec,
+    dataset: inputs.datasetRef,
+    metrics: judgeModel
+      ? inputs.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
+      : inputs.spec.metrics,
+  };
+
+  try {
+    await filesCreateFileset(workspace, { name, description: 'Agent Evaluation Config' }, signal);
+  } catch (err) {
+    if (isConflictError(err)) {
+      throw new Error(
+        `A fileset named "${name}" already exists — choose a different experiment name`
+      );
+    }
+    throw err;
+  }
+  try {
+    await filesUploadFile(
+      workspace,
+      name,
+      evalConfigFilename(inputs.configFormat),
+      new Blob([serializeEvalConfig(spec, inputs.configFormat)], {
+        type: inputs.configFormat === 'yaml' ? 'application/yaml' : 'application/json',
+      }),
+      signal
+    );
+  } catch (uploadErr) {
+    throw await discardSeeded(workspace, { filesetName: name }, uploadErr);
+  }
+  return spec;
 };
 
 export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   workspace,
   agent: agentProp,
-  sourceEvaluation,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -531,13 +436,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   // Ref keeps the override's required-ness current for the zod schema getter at validation time.
   const judgeRequiredRef = useRef(false);
-  // Latches once the evaluation list resolves; after that the field is the user's.
-  const modeDefaultApplied = useRef(false);
   const [schema] = useState(() => makeSubmitEvaluationSchema(() => judgeRequiredRef.current));
 
-  // A handed-in source has already answered the first two steps, so the wizard opens on the last
-  // one. Back still walks all the way out, so the choice stays reviewable rather than assumed.
-  const [step, setStep] = useState<WizardStep>(sourceEvaluation ? 'evaluation' : 'start');
+  const [step, setStep] = useState<WizardStep>('experiment');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
 
@@ -547,70 +448,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
-    defaultValues: makeDefaultValues(agentProp, sourceEvaluation),
+    defaultValues: makeDefaultValues(agentProp),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
   const { control, setValue, handleSubmit, clearErrors, trigger, formState, setError } = methods;
   const { errors } = formState;
 
-  const mode = useWatch({ control, name: 'mode' }) as EvaluationMode;
-  const selectedAgent = useWatch({ control, name: 'agent' });
-  const steps = stepsFor(mode);
-
-  const evaluationName = useWatch({ control, name: 'evaluationName' });
-
-  // Every reusable evaluation for this agent, resolved to its experiment. One list feeds the
-  // picker, its section headings, and the lookup that resolves the chosen run.
-  const sources = useEvaluationSources({
-    workspace,
-    agent: selectedAgent || undefined,
-    enabled: !!selectedAgent,
-  });
-  const selectedSource = sources.byName[evaluationName];
-  const selectedEvaluation = selectedSource?.evaluation;
-  const hasNoEvaluations = mode === MODE_EXPERIMENT && sources.isEmpty;
-  // Only a settled, agent-scoped, genuinely empty list disables re-run: a disabled query reports
-  // isLoading false, which would read as empty before anything was fetched.
-  const rerunUnavailable = !!selectedAgent && !sources.isLoading && sources.isEmpty;
-
-  // Default the start mode once the list resolves; `selectedAgent` gates it because a disabled
-  // query reports isLoading false, which would read as empty before anything was fetched.
-  useEffect(() => {
-    if (!selectedAgent || sources.isLoading || modeDefaultApplied.current) return;
-    modeDefaultApplied.current = true;
-    if (sources.isEmpty) setValue('mode', MODE_DEFAULT);
-  }, [selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
-
-  // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
-  // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
-  // handed in by "New evaluation from this configuration" arrives in the form's default values,
-  // which is a choice already made rather than one guessed at.)
-
-  const { data: evaluationConfigIssue, isFetching: isValidatingEvaluation } = useQuery({
-    queryKey: ['evaluation-eval-config', workspace, evaluationName],
-    queryFn: ({ signal }) =>
-      selectedEvaluation ? evaluationConfigError(workspace, selectedEvaluation, signal) : null,
-    enabled: mode === MODE_EXPERIMENT && !!selectedEvaluation,
-  });
-
-  const sourceSnapshot = selectedEvaluation ? datasetSnapshotOf(selectedEvaluation) : null;
-  const { data: sourceDatasetDrift, isFetching: isCheckingSourceDataset } = useQuery({
-    queryKey: ['evaluation-dataset-drift', workspace, evaluationName],
-    queryFn: sourceSnapshot
-      ? ({ signal }) => datasetDrift(workspace, sourceSnapshot, signal)
-      : skipToken,
-    enabled: mode === MODE_EXPERIMENT,
-    retry: false,
-  });
-  const sourceDatasetMissing =
-    sourceDatasetDrift === 'missing' && sourceSnapshot
-      ? `The dataset this evaluation read, ${sourceSnapshot.ref}, no longer exists. Pick another evaluation.`
-      : undefined;
-
-  const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
-  const evaluationFieldError =
-    errors.evaluationName?.message ?? evaluationConfigIssue ?? sourceDatasetMissing ?? undefined;
+  const steps = stepsFor(MODE_DEFAULT).slice(1);
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
@@ -721,37 +566,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const [debouncedExperimentName] = useDebounce(experimentPreview, DEFAULT_DEBOUNCE_MS);
   const [debouncedRecordName] = useDebounce(recordPreview, DEFAULT_DEBOUNCE_MS);
-  const isCreateMode = mode === MODE_DEFAULT;
-
-  // Prefill the run's name with the source's own; seeded once per source, never over a typed name.
-  const suggestedRecordName = useRef('');
-  const seededForSource = useRef<string | null>(null);
-  useEffect(() => {
-    if (mode !== MODE_EXPERIMENT || !evaluationName) return;
-    if (seededForSource.current === evaluationName) return;
-    seededForSource.current = evaluationName;
-    if (rawRecordName && rawRecordName !== suggestedRecordName.current) return;
-    suggestedRecordName.current = evaluationName;
-    setValue('evaluationRecordName', evaluationName, { shouldValidate: false });
-  }, [mode, evaluationName, rawRecordName, setValue]);
-
-  // Leaving the re-run path retires the derived name. It is borrowed from whichever run was
-  // selected there, and carrying it onto a brand-new experiment's first evaluation would name that
-  // run after an unrelated one. Only the suggestion is dropped — a name the user typed is theirs,
-  // on either path — and clearing the seed marker lets a switch back suggest again.
-  useEffect(() => {
-    if (mode !== MODE_DEFAULT) return;
-    if (!rawRecordName || rawRecordName !== suggestedRecordName.current) return;
-    suggestedRecordName.current = '';
-    seededForSource.current = null;
-    modeDefaultApplied.current = false;
-    setValue('evaluationRecordName', '');
-  }, [mode, rawRecordName, setValue]);
-
   const experimentConflictQuery = useListExperiments(
     workspace,
     { page_size: 1, filter: { name: debouncedExperimentName } },
-    { query: { enabled: isCreateMode && !!debouncedExperimentName } }
+    { query: { enabled: !!debouncedExperimentName } }
   );
   const recordConflictQuery = useListEvaluations(
     workspace,
@@ -786,9 +604,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     preview: recordPreview,
     status: recordNameStatus,
     schemaError: errors.evaluationRecordName?.message,
-    describe: isCreateMode
-      ? 'Names this run within the experiment. Results publish under it.'
-      : 'Names this run alongside the one it re-runs — say what changed, e.g. a new temperature.',
+    describe: 'Names this run within the experiment. Results publish under it.',
   });
 
   // Mirrors injectJudgeModel's own guard, so the picker is shown exactly when a metric would
@@ -799,7 +615,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       (metric) => metric.metric_type === 'llm-judge' || 'model' in metric.payload.metric
     ) ?? [];
 
-  const isLlmJudge = mode === MODE_DEFAULT && !isFormConfig && judgeMetrics.length > 0;
+  const isLlmJudge = !isFormConfig && judgeMetrics.length > 0;
 
   // A different query from the one behind the dropdown (lazy, paginated for search); this is the
   // only complete workspace list, so it decides what counts as valid.
@@ -891,52 +707,32 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             }
           : pickedSpec && { spec: pickedSpec, configFormat: activeConfigPick?.format ?? 'json' };
       const inputs = configInputs && datasetRef ? { ...configInputs, datasetRef } : null;
-      const spec = await loadPersistedSpec(workspace, formData, evaluationFileset, inputs);
+      const spec = await loadPersistedSpec(workspace, formData, inputs);
 
-      const isNew = formData.mode === MODE_DEFAULT;
-      const filesetName = isNew
-        ? filesetNameForExperiment(formData.newName)
-        : (evaluationFileset ?? '');
-
-      const seeded: SeededEntities = isNew ? { filesetName } : {};
+      const filesetName = filesetNameForExperiment(formData.newName);
+      const seeded: SeededEntities = { filesetName };
 
       try {
-        const specDataset =
-          isDatasetEvalSpec(spec) && typeof spec.dataset === 'string' ? spec.dataset : null;
+        const specDataset = typeof spec.dataset === 'string' ? spec.dataset : null;
         const datasetSnapshot = specDataset
           ? await takeDatasetSnapshot(workspace, specDataset).catch(() => undefined)
           : undefined;
         if (datasetSnapshot === null) {
           throw new Error(`The dataset ${specDataset} no longer exists.`);
         }
-        // The "new experiment" path creates the ExperimentGroup this run lands in, carrying every
-        // setting the Experiments page would have offered; the re-run path reuses the picked
-        // evaluation's group(s) and records the lineage.
-        let experimentIds: string[];
-        let nameStem: string;
-        let parentEvaluationId: string | undefined;
-        if (isNew) {
-          const experiment = await createExperiment(workspace, {
-            name: formData.newName,
-            ...experimentSettingsPayload(formData),
-          });
-          seeded.experimentName = experiment.name;
-          experimentIds = [experiment.id];
-          nameStem = experiment.name;
-        } else {
-          if (!selectedEvaluation) throw new Error('No evaluation to re-run');
-          experimentIds = selectedEvaluation.experiment_ids;
-          nameStem = selectedSource?.experimentName ?? selectedEvaluation.name;
-          parentEvaluationId = selectedEvaluation.id;
-        }
+        const experiment = await createExperiment(workspace, {
+          name: formData.newName,
+          ...experimentSettingsPayload(formData),
+        });
+        seeded.experimentName = experiment.name;
+        const nameStem = experiment.name;
 
         const evaluationId = await createRunEvaluation(workspace, {
-          experimentIds,
+          experimentIds: [experiment.id],
           name: formData.evaluationRecordName,
           nameStem,
           filesetName,
-          datasetName: datasetLabel(spec, workspace),
-          parentEvaluationId,
+          datasetName: specDataset ? datasetLabel(specDataset, workspace) : undefined,
           metadata: datasetSnapshot
             ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
             : undefined,
@@ -958,15 +754,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           evaluationId,
           parallelism: formData.parallelism,
         };
-        const created = isDatasetEvalSpec(spec)
-          ? await evalsCreateEvaluateJob(
-              workspace,
-              buildDatasetEvalRequestBody(spec, selections, null) as EvaluateJobRequest
-            )
-          : await submitAgentEvalJob(
-              workspace,
-              buildAgentEvalRequestBody(spec, selections) as AgentEvaluateJobRequest
-            );
+        const created = await evalsCreateEvaluateJob(
+          workspace,
+          buildDatasetEvalRequestBody(spec, selections, null) as EvaluateJobRequest
+        );
         if (!created?.name) throw new Error('Submission did not return a job name');
         await recordRunJob(
           workspace,
@@ -997,9 +788,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // schema: the schema judges the whole submission, and a step must only answer for its own
   // fields — otherwise step one would refuse to advance over a field two steps away.
   const stepBlocker = (): StepBlocker | undefined => {
-    if (step === 'start') {
-      return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
-    }
     if (step === 'experiment') {
       if (!experimentPreview) {
         return blockedWith('Name the experiment to continue.');
@@ -1029,38 +817,16 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
     // click. Schema errors stay out: those only show once a submit is tried.
     if (step === 'evaluation') {
-      if (mode === MODE_EXPERIMENT) {
-        if (hasNoEvaluations) {
-          return SHOWN_ON_FIELD;
-        }
-        // Nothing can be picked, and a handed-in source cannot be resolved or checked, until the
-        // list arrives.
-        if (sources.isLoading) {
-          return blockedWith('Loading evaluations...');
-        }
-        if (evaluationName && !selectedEvaluation) {
-          return blockedWith(`Evaluation ${evaluationName} no longer exists. Pick another.`);
-        }
-        if (isValidatingEvaluation) {
-          return blockedWith('Checking the saved eval config...');
-        }
-        if (isCheckingSourceDataset) {
-          return blockedWith('Checking the dataset...');
-        }
-        if (evaluationConfigIssue || sourceDatasetMissing) {
-          return SHOWN_ON_FIELD;
-        }
-      }
       // invalidModelRefs is empty while the list is in flight, so submitting inside that window
       // would skip the judge-model check entirely.
-      if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) {
+      if (isLlmJudge && isJudgeModelsLoading) {
         return blockedWith('Loading judge models...');
       }
       if (recordNameStatus === 'checking' || recordNameStatus === 'conflict') {
         return SHOWN_ON_FIELD;
       }
       // The experiment's name field is a step back, so its conflict is spelled out here.
-      if (isCreateMode && experimentNameStatus === 'conflict') {
+      if (experimentNameStatus === 'conflict') {
         return blockedWith(`An experiment named ${experimentPreview} already exists.`);
       }
     }
@@ -1069,7 +835,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const blocker = stepBlocker();
 
   const isAgentPromptMissing = () => {
-    if (mode !== MODE_DEFAULT || !isFormConfig || agentPrompt.trim()) {
+    if (!isFormConfig || agentPrompt.trim()) {
       return false;
     }
     setError('promptTemplate', { type: 'custom', message: EMPTY_PROMPT_MESSAGE });
@@ -1107,11 +873,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     }
     if (
       isAgentPromptMissing() ||
-      (mode === MODE_DEFAULT &&
-        ((!isFormConfig && !pickedSpec) ||
-          configIssues.errors.length > 0 ||
-          promptIssues.errors.length > 0 ||
-          judgePromptIssues.errors.length > 0))
+      (!isFormConfig && !pickedSpec) ||
+      configIssues.errors.length > 0 ||
+      promptIssues.errors.length > 0 ||
+      judgePromptIssues.errors.length > 0
     ) {
       setStep('configuration');
       return;
@@ -1195,39 +960,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     >
       <FormProvider {...methods}>
         <Stack gap="density-xl">
-          {step === 'start' && (
-            <>
-              <Text kind="body/regular/md">
-                Run evaluation via NeMo Helix Evals built-in runner. Evaluator also supports Harbor
-                and Gym as runners.{' '}
-                <Anchor
-                  kind="inline"
-                  textKind="body/regular/md"
-                  href={LINK_EVAL_DOCS}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Learn more
-                </Anchor>
-                .
-              </Text>
-
-              <FormField slotLabel="How do you want to start?">
-                <RadioGroup
-                  kind="tile"
-                  orientation="vertical"
-                  name="mode"
-                  value={mode}
-                  onValueChange={(value) => {
-                    setValue('mode', value as EvaluationMode, { shouldValidate: false });
-                    clearErrors(['evaluationName', 'newName']);
-                  }}
-                  items={startItems(rerunUnavailable)}
-                />
-              </FormField>
-            </>
-          )}
-
           {step === 'experiment' && (
             <>
               <Text kind="label/bold/xl">Experiment</Text>
@@ -1400,8 +1132,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   <Text kind="label/bold/lg">Metrics</Text>
                   <Text className="text-secondary" kind="body/regular/md">
                     Scored as the eval config defines them, against agent{' '}
-                    <code>{bareName(selectedAgent)}</code>. Any target in the config is replaced by
-                    this agent.
+                    <code>{bareName(agentProp)}</code>. Any target in the config is replaced by this
+                    agent.
                   </Text>
                   <Stack gap="density-sm">
                     {pickedSpec?.metrics.map((metric, index) => {
@@ -1450,44 +1182,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
           {step === 'evaluation' && (
             <>
-              {mode === MODE_EXPERIMENT && <Text kind="label/bold/xl">Configuration</Text>}
-              {/* Which run to base this one on, and what to call the result, are one decision:
-                  the name is derived from the pick, so the two belong on the same screen. */}
-              {mode === MODE_EXPERIMENT &&
-                (hasNoEvaluations ? (
-                  <Text className="text-secondary" kind="body/regular/md">
-                    {NO_EVALUATIONS_MESSAGE}
-                  </Text>
-                ) : (
-                  <EvaluationSourceSelect<SubmitEvaluationFormData>
-                    name="evaluationName"
-                    options={sources.options}
-                    groupLabels={sources.groupLabels}
-                    byName={sources.byName}
-                    isLoading={sources.isLoading}
-                    selectedName={evaluationName}
-                    slotError={evaluationFieldError}
-                    disabled={isPending}
-                  />
-                ))}
-              {mode === MODE_EXPERIMENT && sourceDatasetDrift === 'changed' ? (
-                <Banner kind="inline" status="warning">
-                  The dataset has changed since {evaluationName} ran, so its scores may not compare
-                  with this run&apos;s.
-                </Banner>
-              ) : null}
-
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}
-                placeholder={
-                  isCreateMode ? 'e.g. initial-baseline' : 'e.g. nemotron-super-3-temp-1'
-                }
+                placeholder="e.g. initial-baseline"
                 formFieldProps={{
-                  slotLabel: isCreateMode ? 'Evaluation Name' : 'New Evaluation Name',
+                  slotLabel: 'Evaluation Name',
                   ...recordNameSlots,
                 }}
               />
-              {mode === MODE_EXPERIMENT && parallelismField}
             </>
           )}
         </Stack>

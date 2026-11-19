@@ -19,7 +19,6 @@ export const AgentEvaluationNewRoute: FC = () => {
   const { [ROUTE_PARAMS.agentName]: agentName = '' } = useParams<{ agentName: string }>();
   const [searchParams] = useSearchParams();
   const sourceJob = searchParams.get('job') ?? undefined;
-  const sourceEvaluation = searchParams.get('source') ?? undefined;
   const { data: agent, isPending } = useAgentsGetAgent(workspace, agentName, {
     query: { enabled: !!agentName },
   });
@@ -46,11 +45,6 @@ export const AgentEvaluationNewRoute: FC = () => {
       sourceJob={sourceJob}
     />
   ) : (
-    <AgentEvaluationWizard
-      key={`${agentName}/${sourceEvaluation ?? ''}`}
-      workspace={workspace}
-      agent={agentName}
-      sourceEvaluation={sourceEvaluation}
-    />
+    <AgentEvaluationWizard key={agentName} workspace={workspace} agent={agentName} />
   );
 };
