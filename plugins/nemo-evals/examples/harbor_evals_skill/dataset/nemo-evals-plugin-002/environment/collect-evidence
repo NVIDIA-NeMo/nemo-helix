@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+set -eu
+cd /opt/helix-task
+umask 022
+exec /usr/bin/env -i \
+    HOME=/var/lib/helix-task/root \
+    XDG_CONFIG_HOME=/var/lib/helix-task/root/.config \
+    NHX_CONFIG_FILE_PATH=/opt/helix-task/helix-config.yaml \
+    PATH=/app/.venv/bin:/usr/bin:/bin \
+    /app/.venv/bin/python -I /opt/helix-task/collect_evidence.py

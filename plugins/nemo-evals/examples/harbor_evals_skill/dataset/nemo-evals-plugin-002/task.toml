@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+artifacts = [
+    { source = "/var/lib/helix-task/evidence/job-snapshot.json", destination = "job-snapshot.json" },
+    { source = "/var/lib/helix-task/evidence/skill-inventory.json", destination = "skill-inventory.json" },
+    { source = "/var/lib/helix-task/evidence/startup.log", destination = "startup.log" },
+]
+
+[agent]
+user = 10001
+timeout_sec = 600
+
+[environment]
+workdir = "/workspace"
+network_mode = "no-network"
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+
+[environment.env]
+NEMO_BASE_URL = "http://127.0.0.1:8080"
+NHX_BASE_URL = "http://127.0.0.1:8080"
+NEMO_TELEMETRY_ENABLED = "false"
+
+[environment.healthcheck]
+command = "/opt/helix-task/start-helix"
+timeout_sec = 300
+retries = 1
+
+[verifier]
+environment_mode = "separate"
+timeout_sec = 180
+
+[[verifier.collect]]
+service = "main"
+user = 0
+command = "/opt/helix-task/collect-evidence"
+timeout_sec = 30
+
+[verifier.environment]
+network_mode = "no-network"
+workdir = "/tests"
+cpus = 1
+memory_mb = 512
+storage_mb = 1024

@@ -34,6 +34,7 @@ from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from nhx_evals_sdk.agent_eval.reward_keys import HARBOR_PRIMARY_REWARD_KEY
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
 from nhx_evals_sdk.enums import MetricType
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
@@ -59,16 +60,17 @@ from nhx_evals_sdk.values.skills import SkillSnapshot
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SKILL_NAME = "nemo-evals-plugin"
-SCORING_NAME = "nemo-evals-plugin-001-scoring"
+AGENT_EVAL_SKILL_NAME = "supercool-agent-eval"
+TASK_BY_SKILL = {SKILL_NAME: "nemo-evals-plugin-001", AGENT_EVAL_SKILL_NAME: "nemo-evals-plugin-002"}
 DATASET = Path(__file__).resolve().parent / "dataset"
 _ARMS = ("baseline", "with-skill")
-_REPLAY_METRICS = {
+_AGENT_EVAL_REPLAY_METRICS = {
     MetricType.HARBOR_REWARD,
     MetricType.SKILL_ACTIVATION,
     MetricType.TOKEN_EFFICIENCY,
-    MetricType.TOOL_EXECUTION_OUTCOME,
-    MetricType.LLM_JUDGE,
 }
+_REPLAY_METRICS = _AGENT_EVAL_REPLAY_METRICS | {MetricType.TOOL_EXECUTION_OUTCOME, MetricType.LLM_JUDGE}
+_AGENT_EVAL_REWARDS = ("inner_eval_passed", "suffix_applied")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE = Annotated[str, Field(pattern=r"^[^@\s]+@sha256:[0-9a-f]{64}$")]
 _ERRORS = (NemoClientError, OSError, RuntimeError, ValueError, tarfile.TarError)
@@ -94,11 +96,15 @@ class Comparison(BaseModel):
     context: str = Field(min_length=1)
     arms: dict[str, Arm]
 
+    @property
+    def skill_name(self) -> str:
+        return _split_pin(self.skill_ref.root)[1]
+
     @model_validator(mode="after")
     def validate_pair(self) -> "Comparison":
         taskset_workspace, _, _ = _split_pin(self.taskset_ref.root)
         skill_workspace, skill_name, _ = _split_pin(self.skill_ref.root)
-        if taskset_workspace != self.workspace or skill_workspace != self.workspace or skill_name != SKILL_NAME:
+        if taskset_workspace != self.workspace or skill_workspace != self.workspace or skill_name not in TASK_BY_SKILL:
             raise ValueError(
                 "Comparison refs must identify the pinned Taskset and Evals skill in the selected workspace"
             )
@@ -151,7 +157,7 @@ def _json_object(path: Path) -> dict[str, Any]:
 def _skill_package(client: NemoClient, skill_ref: PinnedSkillRef) -> tuple[SkillSnapshot, dict[str, str]]:
     workspace, name, digest = _split_pin(skill_ref.root)
     skill = AgentsClient.from_client(client).get_skill_revision(workspace=workspace, name=name, revision=digest).data()
-    if skill.content_hash != digest or skill.archive.skill_name != SKILL_NAME:
+    if skill.content_hash != digest or skill.archive.skill_name != name:
         raise ValueError("Agents returned a different skill revision or package name")
     archive = skill.archive
     with tempfile.TemporaryDirectory(prefix="helix-skill-") as directory:
@@ -238,6 +244,8 @@ def replay_trial(
     measurements: TrialMeasurements,
     activation: bool | None,
     command_outcomes: tuple[bool | None, ...] = (),
+    *,
+    skill_name: str = SKILL_NAME,
 ) -> AgentEvalTrial:
     if trial.error is not None or trial.status != AgentEvalTrialStatus.COMPLETED:
         raise ValueError("The saved Harbor trial did not complete successfully")
@@ -254,9 +262,15 @@ def replay_trial(
         or details[reward_key] != reward
     ):
         raise ValueError("The saved Harbor reward does not match the comparison")
+    if skill_name == AGENT_EVAL_SKILL_NAME:
+        components = [details.get(name) for name in _AGENT_EVAL_REWARDS]
+        if any(type(value) not in (int, float) or value not in (0, 1) for value in components) or reward != int(
+            all(components)
+        ):
+            raise ValueError("The saved agent-eval reward components do not match its Harbor reward")
     metadata = {HARBOR_PRIMARY_REWARD_KEY: reward_key, "reward": reward, "reward_details": details}
     if activation is not None:
-        metadata["skill_activation"] = {SKILL_NAME: activation}
+        metadata["skill_activation"] = {skill_name: activation}
     if command_outcomes:
         # The root rollout covers only selected calls. Its event order does not establish tool step boundaries.
         trace = SkillToolTrace(
@@ -293,7 +307,12 @@ def _revision_pin(list_revisions: Callable[..., Page[Revision]], workspace: str,
 
 
 def _scoring_taskset(
-    evaluator: Evaluator, live_ref: TasksetRef, judge_ref: ModelRef, trials: list[AgentEvalTrial]
+    evaluator: Evaluator,
+    live_ref: TasksetRef,
+    judge_ref: ModelRef | None,
+    trials: list[AgentEvalTrial],
+    *,
+    skill_name: str,
 ) -> TasksetRef:
     workspace, name, digest = _split_pin(live_ref.root)
     live = evaluator.tasksets.retrieve(name, workspace=workspace, revision=digest)
@@ -301,45 +320,56 @@ def _scoring_taskset(
         raise ValueError("The live Taskset must pin the example's one Harbor task")
     task_workspace, task_name, task_digest = _split_pin(live.tasks[0].root)
     member = evaluator.tasks.retrieve(task_name, workspace=task_workspace, revision=task_digest)
-    sources = discover_harbor_tasks(DATASET)
-    if len(sources) != 1 or not isinstance(member.spec, HarborTaskDefinition):
+    task_id = TASK_BY_SKILL[skill_name]
+    if not isinstance(member.spec, HarborTaskDefinition) or member.spec.native_task_id != task_id:
         raise ValueError("Expected the example's one live Harbor task")
-    source = sources[0]
+    (source,) = discover_harbor_tasks(DATASET / task_id)
     if source.id != member.spec.native_task_id or any(trial.task_id != source.id for trial in trials):
         raise ValueError(
             "The local task, live Taskset member, and both saved trials must share the native Harbor task ID"
         )
-    judge, views = expected_behavior_metric(
-        judge_ref,
-        [
-            "The final answer states that the offline evaluation job completed successfully.",
-            "The final answer gives the name of the evaluation job.",
-            "The final answer identifies the exact-match metric and reports its mean of 0.5.",
-        ],
-    )
-    source.metrics.extend(
-        [
-            SkillActivationMetric(skill_name=SKILL_NAME, should_activate=True),
-            TokenEfficiencyMetric(),
-            ToolExecutionOutcomeMetric(tool_pattern="exec_command"),
-            judge,
-        ]
-    )
-    source.views.update(views)
+    source.metrics.extend([SkillActivationMetric(skill_name=skill_name, should_activate=True), TokenEfficiencyMetric()])
+    if skill_name == AGENT_EVAL_SKILL_NAME:
+        source.views["verified_skill_use"] = SemanticView(
+            reducer=SemanticReducer.ALL,
+            signals=[
+                ViewSignal(metric="harbor_reward", output="reward"),
+                ViewSignal(metric="skill_activation", output="activated"),
+            ],
+        )
+    else:
+        if judge_ref is None:
+            raise ValueError("Set JUDGE_MODEL_REF for the offline Evals example")
+        judge, views = expected_behavior_metric(
+            judge_ref,
+            [
+                "The final answer states that the offline evaluation job completed successfully.",
+                "The final answer gives the name of the evaluation job.",
+                "The final answer identifies the exact-match metric and reports its mean of 0.5.",
+            ],
+        )
+        source.metrics.extend([ToolExecutionOutcomeMetric(tool_pattern="exec_command"), judge])
+        source.views.update(views)
     prepared = evaluator.tasks.prepare(source, workspace=workspace)
     if (
         not isinstance(prepared.spec, HarborTaskDefinition)
         or prepared.spec.source.files_hash != member.spec.source.files_hash
     ):
         raise ValueError("The scoring task must use the same archive bytes as the pinned live Taskset member")
-    task = evaluator.tasks.replace(SCORING_NAME, task=prepared, workspace=workspace)
+    scoring_name = f"{task_id}-scoring"
+    task = evaluator.tasks.replace(scoring_name, task=prepared, workspace=workspace)
     pin = _revision_pin(evaluator.tasks.list_revisions, workspace, task.name, task.revision)
-    scoring = evaluator.tasksets.replace(SCORING_NAME, taskset=TasksetInput(tasks=[TaskRef(pin)]), workspace=workspace)
+    scoring = evaluator.tasksets.replace(scoring_name, taskset=TasksetInput(tasks=[TaskRef(pin)]), workspace=workspace)
     return TasksetRef(_revision_pin(evaluator.tasksets.list_revisions, workspace, scoring.name, scoring.revision))
 
 
 def _replay_results(
-    evals_client: EvaluatorClient, job_name: str, trial: AgentEvalTrial, archive_dest: Path
+    evals_client: EvaluatorClient,
+    job_name: str,
+    trial: AgentEvalTrial,
+    archive_dest: Path,
+    *,
+    skill_name: str = SKILL_NAME,
 ) -> tuple[dict[str, Any], list[str]]:
     with tempfile.TemporaryDirectory(dir=archive_dest.parent, prefix=".skill-replay-") as directory:
         root = Path(directory)
@@ -357,16 +387,20 @@ def _replay_results(
             AgentEvalTaskScore.model_validate_json(line)
             for line in (bundle / "scores.jsonl").read_text(encoding="utf-8").splitlines()
         ]
-    reward = [score for score in summary.scores.scores if score.name == "harbor_reward.reward"]
+    rewards = {"reward": trial.metadata["reward"]}
+    metrics = _REPLAY_METRICS
+    if skill_name == AGENT_EVAL_SKILL_NAME:
+        rewards.update({key: trial.metadata["reward_details"][key] for key in _AGENT_EVAL_REWARDS})
+        metrics = _AGENT_EVAL_REPLAY_METRICS
+    for key, value in rewards.items():
+        aggregates = [score for score in summary.scores.scores if score.name == f"harbor_reward.{key}"]
+        if len(aggregates) != 1 or aggregates[0].mean != value or aggregates[0].count != 1 or aggregates[0].nan_count:
+            raise ValueError(f"The replay did not preserve the saved Harbor reward {key}")
     if (
         summary.trial_count != 1
         or summary.error_count
-        or len(reward) != 1
-        or reward[0].mean != trial.metadata["reward"]
-        or reward[0].count != 1
-        or reward[0].nan_count
-        or len(scores) != len(_REPLAY_METRICS)
-        or {score.metric_type for score in scores} != _REPLAY_METRICS
+        or len(scores) != len(metrics)
+        or {score.metric_type for score in scores} != metrics
         or any(score.trial_id != trial.id or score.task_id != trial.task_id for score in scores)
     ):
         raise ValueError("The replay results do not match the one saved Harbor trial and reward")
@@ -407,9 +441,11 @@ def _write_summary(run_dir: Path, report: dict[str, Any]) -> None:
             path.unlink(missing_ok=True)
 
 
-def _score(run_dir: Path, comparison: Comparison, judge: ModelRef, *, expect_setup_egress: bool) -> bool:
+def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, expect_setup_egress: bool) -> bool:
     report = comparison.model_dump(mode="json")
-    report["judge_model_ref"] = judge.root
+    if judge is not None:
+        report["judge_model_ref"] = judge.root
+    skill_name = comparison.skill_name
     success = True
     try:
         with NemoClient.from_config(context=comparison.context) as context_client:
@@ -425,10 +461,15 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef, *, expect_set
                     saved = read_trials(bundle)
                     if len(saved) != 1:
                         raise ValueError("Expected one saved Harbor trial")
-                    expected = {SKILL_NAME: inventory} if name == "with-skill" else {}
+                    expected = {skill_name: inventory} if name == "with-skill" else {}
                     evidence = _evidence(bundle, saved[0], snapshot, expected, expect_setup_egress=expect_setup_egress)
                     trials[name] = replay_trial(
-                        saved[0], arm.reward, evidence.measurements, evidence.activated, evidence.command_outcomes
+                        saved[0],
+                        arm.reward,
+                        evidence.measurements,
+                        evidence.activated,
+                        evidence.command_outcomes if skill_name == SKILL_NAME else (),
+                        skill_name=skill_name,
                     )
                     report["arms"][name]["discovery"] = evidence.skill_listed
                     report["arms"][name]["activation"] = evidence.activated
@@ -439,7 +480,9 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef, *, expect_set
                 return False
 
             evaluator = Evaluator.from_client(client)
-            scoring = _scoring_taskset(evaluator, comparison.taskset_ref, judge, list(trials.values()))
+            scoring = _scoring_taskset(
+                evaluator, comparison.taskset_ref, judge, list(trials.values()), skill_name=skill_name
+            )
             report["scoring_taskset_ref"] = scoring.root
             evals_client = EvaluatorClient.from_client(client)
             for name in _ARMS:
@@ -451,7 +494,11 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef, *, expect_set
                     job.wait_until_done()
                     arm_report["scoring_job"]["id"] = job.job.id
                     arm_report["replay"], failed_metrics = _replay_results(
-                        evals_client, job.name, trials[name], run_dir / f"{name}-scoring-results.tar.gz"
+                        evals_client,
+                        job.name,
+                        trials[name],
+                        run_dir / f"{name}-scoring-results.tar.gz",
+                        skill_name=skill_name,
                     )
                     if failed_metrics:
                         raise ValueError(f"Replay metrics failed: {', '.join(failed_metrics)}")
@@ -472,7 +519,7 @@ def main() -> int:
     run_dir = parser.parse_args().run_dir.resolve()
     try:
         comparison = Comparison.model_validate_json((run_dir / "comparison.json").read_text(encoding="utf-8"))
-        judge = ModelRef(os.environ.get("JUDGE_MODEL_REF", ""))
+        judge = ModelRef(os.environ.get("JUDGE_MODEL_REF", "")) if comparison.skill_name == SKILL_NAME else None
         expect_egress = os.environ.get("EXPECT_SETUP_EGRESS", "1")
         if expect_egress not in {"0", "1"}:
             raise ValueError("Set EXPECT_SETUP_EGRESS to 0 for profiles without setup egress, or 1 to check closure")

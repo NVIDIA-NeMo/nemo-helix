@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+remove_skill_dirs = [
+    "/app/.venv/lib/python3.13/site-packages/nemo_evals/skills/evaluator-plugin",
+    "/app/.venv/lib/python3.13/site-packages/nemo_helix_ext/skills/nemo-evals",
+]

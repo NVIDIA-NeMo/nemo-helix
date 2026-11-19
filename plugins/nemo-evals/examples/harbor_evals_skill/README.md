@@ -1,7 +1,15 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Evaluate the NeMo Evals skill with Harbor
+# Evaluate skill injection with Harbor
+
+| Harbor task | Workload | Published skill |
+| --- | --- | --- |
+| `nemo-evals-plugin-001` | Offline dataset evaluation | `nemo-evals-plugin` |
+| `nemo-evals-plugin-002` | Live Taskset evaluation with a deterministic loopback agent | `supercool-agent-eval` |
+
+Publish either task directory as a single-task Taskset. For the Taskset agent-evaluation
+example, see [Supercool run aliases](#supercool-run-aliases).
 
 Run one pinned Taskset twice with the same Codex model and sandbox images. The baseline has no
 injected skills. The treatment receives a published NeMo Evals skill revision through
@@ -40,7 +48,7 @@ to `github.com` and `release-assets.githubusercontent.com` to fetch Codex. To us
 mirror, change the Dockerfile's `CODEX_RELEASE_URL` default and retain the checksums.
 
 ```bash
-TASKSET_REF=$("${nhx[@]}" evals tasksets create --harbor-dir "$example/dataset" \
+TASKSET_REF=$("${nhx[@]}" evals tasksets create --harbor-dir "$example/dataset/nemo-evals-plugin-001" \
     --workspace "$WORKSPACE" --json | jq -er '.taskset_ref')
 export TASKSET_REF
 "${nhx[@]}" evals tasksets build-images "$TASKSET_REF" --wait
@@ -153,3 +161,57 @@ fixture with the Evals SDK installed:
 ```bash
 uv run --no-sync python plugins/nemo-evals/examples/harbor_evals_skill/score_evidence_example.py
 ```
+
+## Supercool run aliases
+
+The `002` task gives Codex a spec for `nemo evals agent-evaluate` against a pinned
+one-task Taskset in the sandbox's Helix service. The deterministic loopback agent
+returns the expected answer in both arms. The [Supercool skill](skills/supercool-agent-eval/SKILL.md)
+supplies the required suffix for the job's `labels.run_alias`. The separate verifier
+reads the alias and the evaluation result directly from Helix.
+
+Use the connection and Codex model settings above, with a fresh run directory.
+For auth-disabled deployments, leave `INFERENCE_KEY_SECRET` unset. The replay
+uses deterministic scoring and works without `JUDGE_MODEL_REF`.
+
+```bash
+export RUN_DIR="$PWD/temp/harbor-supercool-agent-eval-run"
+mkdir -p "$RUN_DIR"
+TASKSET_REF=$("${nhx[@]}" evals tasksets create \
+    --harbor-dir "$example/dataset/nemo-evals-plugin-002" --workspace "$WORKSPACE" --json \
+    | jq -er '.taskset_ref')
+export TASKSET_REF
+"${nhx[@]}" evals tasksets build-images "$TASKSET_REF" --wait
+"${nhx[@]}" evals runs submit --taskset "$TASKSET_REF" --workspace "$WORKSPACE" \
+    --agent oracle --sandbox-profile "$SANDBOX_PROFILE"
+```
+
+Check the Oracle as above. Require one completed trial, Harbor reward `1`,
+and inner exact-match mean `1.0` in the collected job snapshot. Then publish the
+skill and run the pair.
+
+```bash
+skill=$("${nhx[@]}" agents skills publish supercool-agent-eval \
+    --from-dir "$example/skills/supercool-agent-eval" --taskset "$TASKSET_REF" \
+    --workspace "$WORKSPACE" --output-format json)
+skill_digest=$(jq -er '.content_hash' <<< "$skill")
+export SKILL_REF="$WORKSPACE/supercool-agent-eval#$skill_digest"
+uv run --frozen bash plugins/nemo-evals/examples/harbor_skill_injection/run_codex_demo.sh
+uv run --frozen python "$example/score.py" "$RUN_DIR"
+```
+
+The live and replayed Harbor rewards distinguish the successful inner evaluation
+from the naming convention.
+
+| Score | Baseline | With skill |
+| --- | ---: | ---: |
+| `harbor_reward.inner_eval_passed` | 1 | 1 |
+| `harbor_reward.suffix_applied` | 0 | 1 |
+| `harbor_reward.reward` | 0 | 1 |
+| `skill_activation.activated` | Unmeasured | 1 |
+| `view.verified_skill_use` | Unmeasured | 1 |
+
+The replay adds the observed activation, token efficiency, and the
+`verified_skill_use` view. The view requires both a passing verifier reward and
+a confirmed read of the pinned skill. On auth-disabled dev deployments, the pair
+demonstrates injection and use while archive read isolation remains unverified.

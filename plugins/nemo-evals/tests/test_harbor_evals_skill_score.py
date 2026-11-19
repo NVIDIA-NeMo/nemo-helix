@@ -304,6 +304,28 @@ def test_replay_payload_preserves_zero_reward_and_omits_inaccessible_evidence(mo
         scoring.replay_trial(trial, 1, TrialMeasurements(), True)
 
 
+def test_taskset_agent_eval_replay_preserves_reward_components(monkeypatch: pytest.MonkeyPatch) -> None:
+    scoring = _load_example(monkeypatch, "score")
+    skill = "supercool-agent-eval"
+    details = {"reward": 1.0, "inner_eval_passed": 1.0, "suffix_applied": 1.0}
+    trial = AgentEvalTrial(
+        id="trial-id",
+        task_id="nemo-evals-plugin-002",
+        status="completed",
+        output=AgentOutput(output_text="Submitted the job."),
+        metadata={"harbor_primary_reward_key": "reward", "reward": 1.0, "reward_details": details},
+    )
+    replay = scoring.replay_trial(trial, 1.0, TrialMeasurements(), True, skill_name=skill)
+    assert replay.metadata["skill_activation"] == {skill: True}
+    assert replay.metadata["reward_details"] == details
+
+    inconsistent = trial.model_copy(
+        update={"metadata": {**trial.metadata, "reward_details": {**details, "suffix_applied": 0}}}
+    )
+    with pytest.raises(ValueError, match="reward components"):
+        scoring.replay_trial(inconsistent, 1.0, TrialMeasurements(), True, skill_name=skill)
+
+
 @pytest.mark.parametrize(
     ("answer", "inference_error", "view_mean", "reported_errors"),
     [
