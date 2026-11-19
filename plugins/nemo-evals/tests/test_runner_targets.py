@@ -140,8 +140,9 @@ def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_p
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():
+    # ``skills``: local directories are refused; an empty list carries as a no-skill run.
     assert set(HarborRuntimeConfig.model_fields) == (
-        set(HARBOR_AGENT_VALUES) | set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir"}
+        set(HARBOR_AGENT_VALUES) | set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir", "skills"}
     )
 
 

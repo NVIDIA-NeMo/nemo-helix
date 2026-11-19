@@ -114,6 +114,12 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
     for field, default in required_defaults.items():
         if getattr(config, field) != default:
             raise UnsubmittableRunnerError(f"Harbor {field} must retain its default for job submission.")
+    if config.skills:
+        # Local directories mean nothing on a worker. An empty list carries: it is a no-skill run.
+        raise UnsubmittableRunnerError(
+            "Harbor skills are local directories, which cannot travel with job submission. Publish each one "
+            "with `nemo agents skills create` and name it in the target's `skills`."
+        )
     source: HarborBuiltinAgentSource | HarborImportedAgentSource
     if config.agent_import_path is not None:
         source = HarborImportedAgentSource(import_path=config.agent_import_path, model_name=config.agent_model_name)
@@ -140,6 +146,7 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
             n_concurrent_trials=config.n_concurrent_trials
             if "n_concurrent_trials" in config.model_fields_set
             else None,
+            skills=None if config.skills is None else [],
             **{name: getattr(config, name) for name in carried_fields},
         )
         target.model_dump(mode="json")

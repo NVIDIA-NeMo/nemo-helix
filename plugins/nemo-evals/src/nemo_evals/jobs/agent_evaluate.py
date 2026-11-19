@@ -110,6 +110,8 @@ from nemo_evals.jobs.run_outcome import (
     report_status_details,
 )
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
+from nemo_evals.jobs.skill_resolution import resolve_skills
+from nemo_evals.jobs.skill_staging import SKILLS_STORAGE_DIR, stage_resolved_skills
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
 from nemo_evals.source_authorization import SourceReadAuthorizer
@@ -120,6 +122,7 @@ from nemo_evals.task_refs import (
     validate_execution_support,
     validate_scoring,
 )
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -325,8 +328,21 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
             validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
+            resolved_skills = None
+            if isinstance(target, HarborRunnerTarget) and target.skills is not None:
+                resolved_skills = await resolve_skills(
+                    target.skills,
+                    workspace=workspace,
+                    agents=client_from_platform(
+                        require_platform_client(async_sdk, "resolving skills"), AsyncAgentsClient
+                    ),
+                    authorize=authorize,
+                )
             spec = AgentEvalSpec(
-                tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
+                tasks=resolved_tasks,
+                target=target,
+                resolved_skills=resolved_skills,
+                **submit_spec.model_dump(exclude={"tasks", "target"}),
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
             if fileset_source is None or fileset_source.snapshot is None:
@@ -561,6 +577,7 @@ class _AgentEvalJobBase(NemoJob):
         fabric_gateway_origin: str | None = None,
         trial_issuer: TrialCredentialIssuer | None = None,
         trial_progress: Callable[[HarborRuntimeConfig], HarborJobScope | None] | None = None,
+        skills: list[Path] | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -569,6 +586,8 @@ class _AgentEvalJobBase(NemoJob):
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
         sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
         model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run.
+        ``skills`` are the staged skill directories a Harbor runner injects (see :func:`stage_resolved_skills`):
+        None leaves skills unmanaged, and a list, even an empty one, is exactly the skills every trial sees.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -613,6 +632,7 @@ class _AgentEvalJobBase(NemoJob):
                 reward_key=target.reward_key,
                 agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
                 agent_timeout_multiplier=target.agent_timeout_multiplier,
+                skills=skills,
             )
             if target.n_concurrent_trials is not None:
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
@@ -700,6 +720,10 @@ class _AgentEvalJobBase(NemoJob):
         )
         run_id = self._run_id() or f"agent-eval-{datetime.now(UTC):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
         trial_issuer = _trial_credential_issuer(spec, ctx, platform_client, async_client, run_id)
+        # Outside the bundle tree, which is deleted below once the target is resolved.
+        skill_dirs = stage_resolved_skills(
+            spec.resolved_skills, ctx.storage.persistent / SKILLS_STORAGE_DIR, async_client
+        )
         with proxy as fabric_gateway_origin:
             target, prompt_template, params = self._resolve_target(
                 spec.target,
@@ -708,6 +732,7 @@ class _AgentEvalJobBase(NemoJob):
                 fabric_gateway_origin=fabric_gateway_origin,
                 trial_issuer=trial_issuer,
                 trial_progress=lambda harbor_config: self._trial_progress_scope(harbor_config, ctx, async_client),
+                skills=skill_dirs,
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():

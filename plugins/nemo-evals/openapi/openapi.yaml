@@ -4002,6 +4002,15 @@ components:
           title: Tasks
           description: Resolved task snapshots in execution order. Only archive materialization
             remains on the worker.
+        resolved_skills:
+          title: Resolved Skills
+          description: 'The skills this run gives its agent, each pinned and resolved
+            to its archive at submit. None: the run does not manage skills. A list,
+            even an empty one: exactly these skills. Set by submission, never by the
+            submitter.'
+          items:
+            $ref: '#/components/schemas/ResolvedSkill'
+          type: array
       additionalProperties: false
       type: object
       required:
@@ -6250,6 +6259,18 @@ components:
           description: Harbor agent-phase timeout multiplier, applied to every trial.
           type: number
           exclusiveMinimum: 0.0
+        skills:
+          title: Skills
+          description: 'Stored skills (Agents service) every trial''s agent gets:
+            `workspace/name` or `name`, optionally pinned with `#<tag-or-digest>`;
+            unqualified names resolve in the run''s workspace and an absent fragment
+            means `latest`. Submission pins each one to its revision. Unset leaves
+            skills to the task and agent. A list, even an empty one, is exactly the
+            skills the run sees: skill names must be unique, and neither `agent_kwargs.skills_dir`
+            nor a task''s `environment.skills_dir` may add others.'
+          items:
+            $ref: '#/components/schemas/SkillRef'
+          type: array
       additionalProperties: false
       type: object
       title: HarborRunnerTarget
@@ -7773,6 +7794,11 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
+    PinnedSkillRef:
+      type: string
+      pattern: ^[\w\-.]+(/[\w\-.]+)?#[0-9a-f]{64}$
+      title: PinnedSkillRef
+      description: A skill reference pinned to a revision's full content digest.
     PublicationOutcome:
       properties:
         status:
@@ -8019,6 +8045,29 @@ components:
       - provenance
       title: ResolvedHarborTaskDefinition
       description: Job snapshot with expanded metrics and the original stored revision.
+    ResolvedSkill:
+      properties:
+        ref:
+          allOf:
+          - $ref: '#/components/schemas/PinnedSkillRef'
+          description: The skill revision, pinned by content digest.
+        archive:
+          allOf:
+          - $ref: '#/components/schemas/SkillArchiveDescriptor'
+          description: The archive to fetch and verify.
+      additionalProperties: false
+      type: object
+      required:
+      - ref
+      - archive
+      title: ResolvedSkill
+      description: 'A skill as frozen into an evaluation spec at submit time.
+
+
+        Everything the worker needs, and nothing it would have to look up again: the
+        pinned ref for
+
+        provenance, and the exact archive to fetch and verify.'
     ResolvedTask:
       properties:
         id:
@@ -8897,6 +8946,56 @@ components:
       title: SemanticView
       description: Task-scoped reporting view that maps a task's own metric outputs
         into a named score.
+    SkillArchiveDescriptor:
+      properties:
+        archive_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Archive Ref
+          description: Fileset reference to the archive object (workspace/fileset#path).
+        files_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Files Hash
+          description: Lowercase hex SHA-256 of the archive bytes.
+        skill_name:
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](-?[a-z0-9])+$
+          title: Skill Name
+          description: The skill's frontmatter name; the directory it is staged under.
+      additionalProperties: false
+      type: object
+      required:
+      - archive_ref
+      - files_hash
+      - skill_name
+      title: SkillArchiveDescriptor
+      description: 'Where a revision''s archive lives and what its bytes must hash
+        to.
+
+
+        ``files_hash`` is the SHA-256 of the deterministic archive bytes (see
+
+        :mod:`nemo_helix_plugin.skill_archive`). Every consumer re-hashes what it
+        downloads and refuses a
+
+        mismatch. ``archive_ref`` always points into the service-owned skills fileset,
+        never at a
+
+        location a caller chose.'
+    SkillRef:
+      type: string
+      pattern: ^[\w\-.]+(/[\w\-.]+)?(#[\w\-.]+)?$
+      title: SkillRef
+      description: 'Reference to a stored skill: ``workspace/name``, ``name``, or
+        either with ``#<tag-or-digest>``.
+
+
+        An absent fragment means ``latest``. Anything persisted as part of a frozen
+        spec must be pinned
+
+        (see :class:`PinnedSkillRef`).'
     StringFilter:
       additionalProperties: false
       properties:

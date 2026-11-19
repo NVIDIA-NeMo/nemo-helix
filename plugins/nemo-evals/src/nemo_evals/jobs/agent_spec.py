@@ -30,6 +30,7 @@ from nemo_evals.filesets import FilesetRef, is_fileset_glob_pattern
 from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
+from nemo_helix_plugin.agents.skills import ResolvedSkill, SkillRef
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
 from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import ID_PREFIX_PATTERN, check_id_prefix
@@ -399,6 +400,17 @@ class HarborRunnerTarget(_EvalTarget):
     agent_timeout_multiplier: float | None = Field(
         default=None, gt=0, description="Harbor agent-phase timeout multiplier, applied to every trial."
     )
+    # Left out of the serialized target when None, so targets that manage no skills keep their bytes
+    # (and so stored plan and request digests) from before this field existed.
+    skills: list[SkillRef] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Stored skills (Agents service) every trial's agent gets: `workspace/name` or `name`, "
+        "optionally pinned with `#<tag-or-digest>`; unqualified names resolve in the run's workspace and an "
+        "absent fragment means `latest`. Submission pins each one to its revision. Unset leaves skills to the "
+        "task and agent. A list, even an empty one, is exactly the skills the run sees: skill names must be "
+        "unique, and neither `agent_kwargs.skills_dir` nor a task's `environment.skills_dir` may add others.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -432,6 +444,12 @@ class HarborRunnerTarget(_EvalTarget):
     @model_validator(mode="after")
     def _env_vars_are_harbor_safe(self) -> Self:
         validate_harbor_env(self.env_vars, self.env_secrets)
+        return self
+
+    @model_validator(mode="after")
+    def _managed_skills_exclude_agent_skills_dir(self) -> Self:
+        if self.skills is not None and "skills_dir" in self.agent_kwargs:
+            raise ValueError("`agent_kwargs.skills_dir` cannot be combined with `skills`")
         return self
 
     @model_validator(mode="after")
@@ -1111,6 +1129,29 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
         description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
     )
+    # Left out of the serialized spec when None, so a spec that manages no skills keeps the bytes
+    # (and so the stored plan's digest) it had before this field existed.
+    resolved_skills: list[ResolvedSkill] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="The skills this run gives its agent, each pinned and resolved to its archive at submit. "
+        "None: the run does not manage skills. A list, even an empty one: exactly these skills. "
+        "Set by submission, never by the submitter.",
+    )
+
+    @model_validator(mode="after")
+    def _skills_are_resolved(self) -> Self:
+        requested = self.target.skills if isinstance(self.target, HarborRunnerTarget) else None
+        if requested is None:
+            if self.resolved_skills is not None:
+                raise ValueError("`resolved_skills` needs a Harbor target that names `skills`")
+            return self
+        if self.resolved_skills is None or len(self.resolved_skills) != len(requested):
+            raise ValueError("AgentEvalSpec Harbor target names skills that were not resolved before run")
+        names = [skill.archive.skill_name for skill in self.resolved_skills]
+        if len(set(names)) != len(names):
+            raise ValueError(f"resolved skills must have unique names, got {names}")
+        return self
 
     @model_validator(mode="after")
     def _reject_unresolved_registered_agent(self) -> Self:
