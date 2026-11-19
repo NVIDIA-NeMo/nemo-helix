@@ -15,6 +15,7 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      serviceAccountName: {{ .Release.Name }}
       {{- with .Values.imagePullSecret }}
       imagePullSecrets:
         - name: {{ . }}
@@ -28,6 +29,10 @@ spec:
           env:
             - name: NHX_BASE_URL
               value: {{ .Values.helixBaseUrl | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             {{- range $key, $value := .Values.config }}
             - name: NEMO_HELIX_OPERATOR_{{ $key | upper }}
               value: {{ $value | quote }}

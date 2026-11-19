@@ -10,8 +10,10 @@ from nemo_builder_plugin.client import AsyncBuilderClient
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
 from nemo_helix_operator.config import HelixOperatorConfig
+from nemo_helix_operator.deploy import deploy_router
 from nemo_helix_operator.schemas import CreateBuildRequest, HelixBuild, SourceInfo
 from nemo_helix_operator.source import DOCKERFILE_PATH
+from nemo_helix_operator.testrun import e2e_router
 from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
@@ -51,7 +53,11 @@ class HelixOperatorService(NemoService):
     dependencies: ClassVar[list[str]] = []
 
     def get_routers(self) -> list[RouterSpec]:
-        return [RouterSpec(_build_router(), tag="Helix Operator", prefix="/v2/workspaces/{workspace}")]
+        return [
+            RouterSpec(_build_router(), tag="Helix Operator", prefix="/v2/workspaces/{workspace}"),
+            RouterSpec(deploy_router(), tag="Helix Operator", prefix="/v2/workspaces/{workspace}"),
+            RouterSpec(e2e_router(), tag="Helix Operator", prefix="/v2/workspaces/{workspace}"),
+        ]
 
 
 def _build_router() -> APIRouter:

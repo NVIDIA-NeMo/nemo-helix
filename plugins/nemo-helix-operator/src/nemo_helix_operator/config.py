@@ -35,6 +35,14 @@ class HelixOperatorConfig(NemoConfig):
             "if that also serves `/apis/helix-operator`."
         ),
     )
+    release_name: str = Field(
+        default="nemo-helix", description="The Helix Helm release deploy upgrades, in the operator pod's namespace."
+    )
+    chart_path: str = Field(default="k8s/helm", description="Where the Helix chart is in the uploaded checkout.")
+    deploy_timeout: str = Field(default="10m", description="`helm upgrade --timeout` for a deploy.")
+    api_url: str = Field(
+        default="http://nemo-helix-api:8080", description="The Helix API Service that test runs call, in-cluster."
+    )
     base_image: str = Field(
         default="ghcr.io/nvidia-nemo/nemo-helix/nhx-api:70332d17b8562e2b1070da40d733210b19e43b70",
         description=(

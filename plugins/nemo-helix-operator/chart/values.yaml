@@ -10,3 +10,10 @@ helixBaseUrl: http://nemo-helix-api:8080
 imagePullSecret: ""
 # HelixOperatorConfig fields, as NEMO_HELIX_OPERATOR_<FIELD> env vars, e.g. {OUTPUT_REPOSITORY: nhx-api}.
 config: {}
+deploy:
+  # Grants the pod what `helm upgrade` of the Helix release in this namespace needs: admin of this namespace and the
+  # builds namespace. Anyone who can call the deploy API gets that access, so enable it only with platform auth on
+  # or in a throwaway namespace.
+  enabled: false
+  # The Helix release's builder namespace. Empty means `<release namespace>-builds`, the Helix chart's default.
+  buildsNamespace: ""
