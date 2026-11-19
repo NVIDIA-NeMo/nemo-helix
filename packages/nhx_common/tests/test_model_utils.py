@@ -9,7 +9,7 @@ def test_is_embedding_model_returns_false_for_none() -> None:
 
 
 def test_is_embedding_model_detects_embed_substring_case_insensitive() -> None:
-    assert is_embedding_model("NVIDIA/Llama-Nemotron-Embed-1B-v2") is True
+    assert is_embedding_model("NVIDIA/Llama-Nemotron-Embd-1B-v2") is True
 
 
 def test_is_embedding_model_returns_false_for_non_embedding_name() -> None:
