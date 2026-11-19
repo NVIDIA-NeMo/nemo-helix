@@ -13,6 +13,7 @@ import pytest
 from _pytest.reports import TestReport
 from nemo_helix_plugin.client.auth import StaticToken, TokenProvider, TokenProviderAuth
 from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, NemoClient
+from nemo_helix_plugin.client.tls import httpx_tls_config_from_env
 from nemo_helix_plugin.client.types import RetryPolicy
 
 from e2e.services_pool import E2EServicesPool, RunningServices, admin_headers
@@ -173,6 +174,7 @@ def services_pool_client(_services: str, _services_instance: RunningServices) ->
         headers=headers,
         auth=TokenProviderAuth(auth) if auth is not None else None,
         timeout=DEFAULT_TIMEOUT,
+        **httpx_tls_config_from_env(),  # NHX_CLIENT_SSL_CERT_FILE: a cluster gateway with its own CA
     )
     client = NemoClient(
         base_url=_services,
@@ -212,6 +214,7 @@ def client_as_principal(client: NemoClient, headers: Mapping[str, str]) -> NemoC
             headers=dict(headers),
             auth=TokenProviderAuth(auth) if auth is not None else None,
             timeout=DEFAULT_TIMEOUT,
+            **httpx_tls_config_from_env(),
         ),
         owns_http_client=True,
     )

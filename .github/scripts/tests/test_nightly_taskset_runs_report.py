@@ -49,19 +49,28 @@ JUNIT_DISPATCH = '<testcase><failure message="AssertionError: [dispatch] run run
 class FakeGitHub:
     """Records each call; the issue search returns ``open`` and creating an issue returns number 7."""
 
-    def __init__(self, open_issue: int | None = None, older_open: tuple[int, ...] = ()) -> None:
+    def __init__(
+        self, open_issue: int | None = None, older_open: tuple[int, ...] = (), jobs: tuple[dict[str, str], ...] = ()
+    ) -> None:
         self.open_issue = open_issue
         self.older_open = older_open
+        self.jobs = jobs  # this run's jobs, as the Actions API lists them
         self.calls: list[tuple[str, str, Mapping[str, Any] | None]] = []
 
     def __call__(self, method: str, path: str, body: Mapping[str, Any] | None = None) -> Any:
         self.calls.append((method, path, body))
+        if method == "GET" and "/actions/runs/" in path:
+            return {"jobs": list(self.jobs)}
         if method == "GET":
             numbers = ([self.open_issue] if self.open_issue is not None else []) + list(self.older_open)
             return [{"number": number} for number in numbers]
         if path == f"repos/{REPO}/issues":
             return {"number": 7}
         return None
+
+    def written(self, n: int) -> Mapping[str, Any] | None:
+        """The body of the ``n``-th call that isn't a read."""
+        return [body for method, _, body in self.calls if method != "GET"][n]
 
     def writes(self) -> list[tuple[str, str]]:
         return [(method, path) for method, path, _ in self.calls if method != "GET"]
@@ -88,6 +97,37 @@ def test_failure_stage_names_the_failed_job_before_the_test_else_the_tests_own_s
     assert report_module.failure_stage(RED_TEST, "") == "setup"
     assert report_module.failure_stage(RED_TEST, JUNIT_DISPATCH) == "dispatch"
     assert report_module.failure_stage(RED_TEST, '<failure message="boom"/>') == "test"
+
+
+FOUND = {"result": "success", "outputs": {"found": "true"}}
+NOT_FOUND = {"result": "success", "outputs": {"found": "false"}}
+REUSED_GREEN = {
+    "find-images": FOUND,
+    "build-images": {"result": "skipped"},
+    "kind-taskset-runs-e2e": {"result": "success"},
+}
+
+
+def test_a_build_skipped_for_images_in_ghcr_is_green_not_a_build_failure() -> None:
+    github = FakeGitHub(open_issue=3)
+
+    assert report_module.report(github, make_run(REUSED_GREEN), [], "") == {"action": "closed"}
+    reused_red = {**REUSED_GREEN, "kind-taskset-runs-e2e": {"result": "failure"}}
+    assert report_module.failure_stage(reused_red, JUNIT_DISPATCH) == "dispatch"
+
+
+def test_a_skipped_build_without_images_in_ghcr_is_a_build_failure() -> None:
+    needs = {**REUSED_GREEN, "find-images": NOT_FOUND, "kind-taskset-runs-e2e": {"result": "skipped"}}
+
+    assert not report_module.is_green(needs)
+    assert report_module.failure_stage(needs, "") == "build-images"
+
+
+def test_a_failed_image_lookup_is_its_own_stage() -> None:
+    needs = {"find-images": {"result": "failure"}, "build-images": {"result": "skipped"}}
+
+    assert not report_module.is_green(needs)
+    assert report_module.failure_stage(needs, "") == "find-images"
 
 
 def test_slow_steps_flags_steps_over_half_their_cap() -> None:
@@ -133,10 +173,10 @@ def test_a_red_scheduled_run_opens_the_issue_with_the_stage_and_dispatches_one_c
         ("POST", f"repos/{REPO}/issues/7/labels"),
         ("POST", f"repos/{REPO}/actions/workflows/nightly-taskset-runs-e2e.yaml/dispatches"),
     ]
-    _, _, opened = github.calls[1]
+    opened = github.written(0)
     assert opened is not None
     assert "Stage: `[dispatch]`" in opened["body"] and "Taskset runs: run-1" in opened["body"]
-    assert github.calls[2][2] == {"labels": ["stage:dispatch"]}
+    assert github.written(1) == {"labels": ["stage:dispatch"]}
     assert github.last_body() == {"ref": "main", "inputs": {"classify_for": "100", "source_sha": SHA}}
 
 
@@ -185,9 +225,103 @@ def test_main_reads_the_artifacts_and_fails_a_red_report(tmp_path: Path) -> None
     }
 
     assert report_module.main(env, github) == 1
-    _, _, opened = github.calls[1]
+    opened = github.written(0)
     assert opened is not None
     assert "Stage: `[dispatch]`" in opened["body"] and "Taskset runs: run-1" in opened["body"]
+
+
+JUNIT_IMAGE_BUILD = '<testcase><failure message="AssertionError: [image-build] task-image-build-x-1: HTTP 403"/>'
+JUNIT_GREEN = '<testsuite failures="0" skipped="0"><testcase name="ok"/></testsuite>'
+
+
+def test_failed_rows_names_each_red_row_and_its_stage() -> None:
+    rows = {
+        "auth-on-exchange-true-1": JUNIT_IMAGE_BUILD,
+        "auth-on-exchange-false-1": JUNIT_GREEN,
+        "auth-off-exchange-false-1": JUNIT_DISPATCH,
+        "auth-off-exchange-false-2": None,  # failed before pytest wrote a report
+        "auth-on-exchange-false-2": '<testcase><error message="boom"/></testcase>',
+    }
+
+    assert report_module.failed_rows(rows) == [
+        "auth-off-exchange-false-1: [dispatch]",
+        "auth-off-exchange-false-2: [setup]",
+        "auth-on-exchange-false-2: [test]",
+        "auth-on-exchange-true-1: [image-build]",
+    ]
+
+
+def test_a_red_run_lists_every_failed_row_so_one_red_row_cant_hide_another(tmp_path: Path) -> None:
+    for row, junit in [
+        ("auth-on-exchange-true-1", JUNIT_IMAGE_BUILD),
+        ("auth-off-exchange-false-1", JUNIT_DISPATCH),
+        ("auth-on-exchange-false-1", JUNIT_GREEN),
+    ]:
+        nested = tmp_path / f"kind-taskset-runs-e2e-{row}-kubernetes-artifacts"
+        nested.mkdir()
+        (nested / "junit.xml").write_text(junit)
+    github = FakeGitHub()
+    env = {
+        "GITHUB_REPOSITORY": REPO,
+        "GITHUB_RUN_ID": "100",
+        "SOURCE_SHA": SHA,
+        "NEEDS_JSON": json.dumps(RED_TEST),
+        "ARTIFACTS": str(tmp_path),
+    }
+
+    assert report_module.main(env, github) == 1
+    opened = github.written(0)
+    assert opened is not None
+    assert (
+        "Failed rows: `auth-off-exchange-false-1: [dispatch]`; `auth-on-exchange-true-1: [image-build]`"
+        in opened["body"]
+    )
+    assert "auth-on-exchange-false-1" not in opened["body"]
+
+
+def test_failed_rows_names_a_row_that_only_skipped() -> None:
+    """The workflow fails a row whose JUnit skipped a test; the report must name it."""
+    skipped = '<testsuite failures="0" errors="0" skipped="1"><testcase name="ok"/></testsuite>'
+
+    assert report_module.failed_rows(
+        {"auth-on-exchange-true-1": skipped, "auth-off-exchange-false-1": JUNIT_GREEN}
+    ) == ["auth-on-exchange-true-1: [skipped]"]
+
+
+def test_a_failed_row_that_uploaded_no_artifact_is_listed_from_the_runs_jobs() -> None:
+    jobs = (
+        {"name": "Kind taskset runs e2e (auth-on, exchange-true, 1)", "conclusion": "failure"},
+        {"name": "Kind taskset runs e2e (auth-off, exchange-false, 1)", "conclusion": "success"},
+        {"name": "Build images", "conclusion": "failure"},
+    )
+    github = FakeGitHub(jobs=jobs)
+
+    report_module.report(github, make_run(RED_TEST), [], "", {"auth-off-exchange-false-1": JUNIT_GREEN})
+
+    opened = github.written(0)
+    assert opened is not None
+    assert "Failed rows: `auth-on-exchange-true-1: [setup]`" in opened["body"]
+
+
+def test_a_failed_job_with_passing_junit_is_listed() -> None:
+    """A job can fail after pytest passed, such as in finalization; its green JUnit must not hide the failure."""
+    jobs = ({"name": "Kind taskset runs e2e (auth-on, exchange-true, 1)", "conclusion": "failure"},)
+    github = FakeGitHub(jobs=jobs)
+
+    report_module.report(github, make_run(RED_TEST), [], JUNIT_GREEN, {"auth-on-exchange-true-1": JUNIT_GREEN})
+
+    opened = github.written(0)
+    assert opened is not None
+    assert "Failed rows: `auth-on-exchange-true-1: [job]`" in opened["body"]
+
+
+def test_a_green_run_lists_no_failed_rows() -> None:
+    github = FakeGitHub(open_issue=3)
+
+    report_module.report(github, make_run(GREEN), [], JUNIT_GREEN, {"auth-on-exchange-true-1": JUNIT_GREEN})
+
+    closed = github.written(0)
+    assert closed is not None and "Green again" in closed["body"] and "Failed rows" not in closed["body"]
 
 
 def test_main_without_artifacts_reports_the_setup_stage() -> None:
@@ -195,7 +329,7 @@ def test_main_without_artifacts_reports_the_setup_stage() -> None:
     env = {"GITHUB_REPOSITORY": REPO, "GITHUB_RUN_ID": "100", "SOURCE_SHA": SHA, "NEEDS_JSON": json.dumps(RED_TEST)}
 
     assert report_module.main(env, github) == 1
-    assert github.calls[2][2] == {"labels": ["stage:setup"]}
+    assert github.written(1) == {"labels": ["stage:setup"]}
 
 
 def test_gh_api_failure_names_the_api_error() -> None:
