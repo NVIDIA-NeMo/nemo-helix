@@ -36,7 +36,11 @@ def test_session_delete_authorization_precedes_storage(monkeypatch: pytest.Monke
     )
     entity_client = SimpleNamespace(
         get=AsyncMock(return_value=entity),
-        get_by_id=AsyncMock(return_value=SimpleNamespace(is_deleted=False, baseline_evaluation_name=None)),
+        get_by_id=AsyncMock(
+            side_effect=lambda kind, entity_id: (
+                entity if kind is Evaluation else SimpleNamespace(is_deleted=False, baseline_evaluation_name=None)
+            )
+        ),
         list=AsyncMock(return_value=SimpleNamespace(data=[])),
         update=AsyncMock(return_value=entity),
     )
@@ -96,7 +100,7 @@ def test_session_delete_authorization_precedes_storage(monkeypatch: pytest.Monke
                 if resource == "sessions":
                     service.delete_session.assert_awaited_once_with(workspace=workspace, session_id="target")
                 else:
-                    assert entity_client.update.await_count == (2 if resource == "evaluations" else 1)
+                    assert entity_client.update.await_count == (3 if resource == "evaluations" else 1)
                     if resource == "evaluations":
                         service.delete_evaluation_sessions.assert_awaited_once_with(
                             workspace=workspace, evaluation_name="target"

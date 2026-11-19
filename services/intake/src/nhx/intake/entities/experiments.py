@@ -244,6 +244,11 @@ class Experiment(EntityBase):
         description="System-managed destination name, persisted before telemetry cleanup so deletion can be retried.",
     )
 
+    deletion_owner: str | None = Field(
+        default=None,
+        description="System-managed non-expiring cleanup claim; acquired with an entity version check.",
+    )
+
     pinned_at: datetime | None = Field(
         default=None,
         description=(

@@ -204,8 +204,14 @@ class IntakeSpansService:
         return session
 
     async def delete_session(self, *, workspace: str, session_id: str) -> None:
-        await self.get_session(workspace=workspace, session_id=session_id)
-        evaluation_names = await self._sessions.get_evaluation_names(workspace=workspace, session_id=session_id)
+        session = await self._sessions.get_session(workspace=workspace, session_id=session_id)
+        if session is None and not await self._sessions.has_live_trace_index(
+            workspace=workspace, session_id=session_id
+        ):
+            raise SessionNotFoundError(workspace, session_id)
+        evaluation_names = await self._sessions.get_evaluation_names(
+            workspace=workspace, session_id=session_id, include_deleted=session is None
+        )
         for name in evaluation_names:
             if self._entity_client is None:
                 raise SessionInEvaluationError(workspace, session_id)
@@ -227,7 +233,8 @@ class IntakeSpansService:
         """Delete eligible sessions after an evaluation is soft-deleted.
 
         Keyset pagination advances past protected shared sessions as well as deleted
-        ones. Retrying after a storage failure discovers only remaining current spans.
+        ones. Retained span references also discover sessions whose source deletion
+        committed before an index write failed.
         """
         after = None
         while session_ids := await self._sessions.list_evaluation_session_ids(

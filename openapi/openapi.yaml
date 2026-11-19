@@ -6642,6 +6642,8 @@ paths:
         '409':
           description: Session has a protected evaluation or conflicting trace-index
             ownership
+        '503':
+          description: Telemetry storage unavailable; retry deletion to finish cleanup
         '422':
           description: Validation Error
           content:

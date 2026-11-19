@@ -4,6 +4,8 @@
 """Read and delete APIs for ClickHouse-backed Intake sessions."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.repository.clickhouse.executor import ClickHouseQueryError
 from nhx.intake.repository.session import TraceIndexCollisionError
 from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access
 from nhx.intake.spans.api.sessions_schemas import Session
@@ -36,6 +38,7 @@ async def get_session(workspace: str, id: str, service: SpansServiceDep) -> Sess
         403: {"description": "Insufficient permission or write scope"},
         404: {"description": "Session not found"},
         409: {"description": "Session has a protected evaluation or conflicting trace-index ownership"},
+        503: {"description": "Telemetry storage unavailable; retry deletion to finish cleanup"},
     },
 )
 async def delete_session(workspace: str, id: str, service: SpansServiceDep) -> None:
@@ -51,3 +54,7 @@ async def delete_session(workspace: str, id: str, service: SpansServiceDep) -> N
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except SessionNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {workspace}/{id} not found")
+    except ClickHouseQueryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CLICKHOUSE_UNAVAILABLE_MESSAGE
+        ) from exc

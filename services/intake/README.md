@@ -285,8 +285,13 @@ Before any write, the repository checks the exact root-span trace-index keys aga
 current spans and raw index history, including retained tombstones. Conflicting
 session/source owners cause `409` for the entire request. Repeated versions of the
 same owner and sessions without roots pass the check; lookup failures prevent deletion.
-Root-span tombstones update the trace index through its materialized view. Evaluator
-results and annotations are preserved under their independent retention policies.
+Root-span tombstones update the trace index through its materialized view. Deletion
+also writes trace-index tombstones explicitly, including historical roots that have
+since become children. If spans were deleted but index cleanup failed, retrying DELETE
+repairs the remaining live index rows and returns `204`. A session returns `404` only
+when neither live spans nor live index rows remain. Storage errors return `503`.
+Evaluation cleanup also discovers retained span references so these repairs are retried.
+Evaluator results and annotations are preserved under their independent retention policies.
 This is logical deletion; physical disk-space reclamation follows ClickHouse retention.
 
 The collision and evaluation checks precede the insert and are not a transaction with
@@ -323,6 +328,19 @@ name until member cleanup succeeds, allowing its DELETE to be retried too. Trace
 ownership conflicts return `409`. Cleanup and reference updates are separate operations
 across storage systems and retain the documented concurrent-ingestion limitation. Large
 retained telemetry sets may make the synchronous reference updates take longer.
+
+Cleanup acquires a persisted `deletion_owner` claim with an entity-version check,
+then holds it through telemetry relinking and the final rename. Competing cleanup
+requests return `409`. Requests with stale snapshots reload by immutable entity ID;
+completed cleanup does not relink telemetry belonging to a replacement evaluation.
+Known storage/collision failures release the claim while keeping the original name
+reserved for retry. Claims never expire automatically: a paused worker could otherwise
+resume after another request released the original name. Cancellation, worker termination,
+or an unexpected failure can therefore leave cleanup blocked. Operator recovery requires
+stopping the old worker and confirming its outstanding ClickHouse operations have finished
+or been cancelled, then fetching the evaluation by immutable ID and clearing only
+`deletion_owner` with a version-checked entity update. Preserve `name`, `is_deleted`, and
+`deletion_name`, and retry the original DELETE. Do not clear an active worker's claim.
 
 ## Trace identity and historical collisions
 

@@ -80,6 +80,7 @@ async def test_delete_session_returns_404_when_missing() -> None:
 async def test_delete_session_service_checks_existence_and_evaluation(exists: bool, has_evaluation: bool) -> None:
     repository = SimpleNamespace(
         get_session=AsyncMock(return_value=object() if exists else None),
+        has_live_trace_index=AsyncMock(return_value=False),
         get_evaluation_names=AsyncMock(return_value=["evaluation-a"] if has_evaluation else []),
         delete_session=AsyncMock(),
     )
@@ -99,7 +100,9 @@ async def test_delete_session_service_checks_existence_and_evaluation(exists: bo
             await service.delete_session(workspace="workspace-a", session_id="session-a")
         repository.delete_session.assert_not_awaited()
     if exists:
-        repository.get_evaluation_names.assert_awaited_once_with(workspace="workspace-a", session_id="session-a")
+        repository.get_evaluation_names.assert_awaited_once_with(
+            workspace="workspace-a", session_id="session-a", include_deleted=False
+        )
     else:
         repository.get_evaluation_names.assert_not_awaited()
 
