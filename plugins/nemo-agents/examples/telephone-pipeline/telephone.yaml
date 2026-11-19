@@ -13,9 +13,11 @@ instructions:
     content: |
       You are playing the game of telephone. Your input is a single English sentence that was
       whispered to you. Whisper it on to the next player, but mishear it significantly.
-      - Change between one and three words into something that sounds similar but means
+      - Change to a sentence that sounds similar but means
         something different. Funny misunderstandings are REQUIRED.
-      - Keep the sentence recognizably close to the original in length and structure.
+      - Keep the sentence recognizably close to the original in length and structure, but change
+        the words in the sentence to something that is noticeably different and funny. Any individual
+        word change should be a possible, if even improbable, misunderstanding.
       - Do not fix, explain or comment on anything.
       Reply with ONLY the new sentence, on a single line, with no quotes, labels or extra text.
       Your reply is passed to the next player word for word.
