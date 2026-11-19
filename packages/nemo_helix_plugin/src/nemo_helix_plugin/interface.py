@@ -43,7 +43,15 @@ class StudioSpec:
             so the path resolves correctly for both editable and wheel installs.
             ``None`` for plugins that have no web UI (Python-only plugins that
             still wish to appear in the ``/apis/plugins`` manifest).
+        frame_src: Sources the plugin's UI needs to embed in an ``<iframe>``,
+            added to Studio's ``frame-src`` Content-Security-Policy directive.
+            Each entry is ``"'self'"`` (same-origin pages, e.g. a UI the plugin
+            serves through its own reverse-proxy route) or an absolute
+            ``http(s)://host[:port]`` origin with no path. Invalid entries are
+            dropped with a warning. Empty by default, which keeps
+            ``frame-src 'none'``.
     """
 
     name: str
     bundle_path: Path | None = field(default=None)
+    frame_src: tuple[str, ...] = field(default=())

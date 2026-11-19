@@ -718,10 +718,27 @@ class TestBuildCSPHeader:
                 return part[len(name) + 1 :]
         raise AssertionError(f"directive {name!r} not found in {csp!r}")
 
-    def _csp_for(self, replacements: dict[str, str]) -> str:
+    def _csp_for(self, replacements: dict[str, str], manifests: list[PluginManifestResponse] | None = None) -> str:
         service = StudioService()
-        with patch.object(service, "_get_config", return_value=SimpleNamespace(env_replacements=replacements)):
+        with (
+            patch.object(service, "_get_config", return_value=SimpleNamespace(env_replacements=replacements)),
+            patch("nhx.studio.service.discover_plugins", return_value=manifests or []),
+        ):
             return service._build_csp_header()
+
+    def test_plugin_frame_src_opens_frame_src(self):
+        manifests = [
+            PluginManifestResponse(name="observability", frame_src=("'self'",)),
+            PluginManifestResponse(name="other", frame_src=("https://ui.example.com",)),
+            PluginManifestResponse(name="headless"),
+        ]
+        csp = self._csp_for({"STUDIO_UI_VITE_AUTH_AUTHORITY": "https://issuer.example.com"}, manifests)
+        assert self._directive(csp, "frame-src") == "'self' https://issuer.example.com https://ui.example.com"
+        assert self._directive(csp, "frame-ancestors") == "'none'"
+
+    def test_plugins_without_frame_src_keep_frame_src_none(self):
+        csp = self._csp_for({}, [PluginManifestResponse(name="headless")])
+        assert self._directive(csp, "frame-src") == "'none'"
 
     def test_empty_replacements_is_same_origin(self):
         csp = self._csp_for({})

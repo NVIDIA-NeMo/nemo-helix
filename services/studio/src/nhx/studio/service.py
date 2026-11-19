@@ -292,6 +292,7 @@ class StudioService(Service[StudioConfig]):
             ),
             frame_src_urls=(issuer,),  # oidc-client-ts silent-renew iframe
             script_src_urls=(platform_base_url,),  # dynamic import() of plugin bundles
+            plugin_frame_src=[source for manifest in discover_plugins() for source in manifest.frame_src],
         )
 
     def _mount_static_files(self, app: FastAPI) -> None:

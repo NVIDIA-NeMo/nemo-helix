@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -224,6 +225,64 @@ class TestDiscoverPlugins:
 
         assert result[0].bundle_url == "/plugin-ui/my-plugin/index.js"
         assert result[0].bundle_dir == bundle_file.parent.resolve()
+
+    def _discover_with_frame_src(self, tmp_path: Path, frame_src: Any) -> PluginManifestResponse:
+        bundle_file = tmp_path / "index.js"
+        bundle_file.write_text("// bundle")
+        spec = StudioSpec(name="example", bundle_path=bundle_file, frame_src=frame_src)
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("example")):
+            with patch("nhx.studio.plugins.discover_entry_points", return_value=_eps("example")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"example": Mock(return_value=spec)}):
+                    return discover_plugins()[0]
+
+    def test_frame_src_defaults_to_empty(self, tmp_path: Path):
+        assert self._discover_with_frame_src(tmp_path, ()).frame_src == ()
+
+    def test_frame_src_keeps_self_and_bare_origins_normalized_and_deduped(self, tmp_path: Path):
+        manifest = self._discover_with_frame_src(
+            tmp_path, ("'self'", "https://ui.example.com", "http://localhost:5000/", "https://ui.example.com")
+        )
+        assert manifest.frame_src == ("'self'", "https://ui.example.com", "http://localhost:5000")
+
+    @pytest.mark.parametrize(
+        "bad_entry",
+        [
+            "*",
+            "https://*.example.com",
+            "https://ui.example.com/path",
+            "https://ui.example.com?x=1",
+            "https://user:pw@ui.example.com",
+            "javascript:alert(1)",
+            "data:",
+            "ftp://ui.example.com",
+            "https://ui.example.com; script-src *",
+            "https://ui.example.com https://evil.example.com",
+            "'unsafe-inline'",
+            "self",
+            42,
+        ],
+    )
+    def test_frame_src_drops_invalid_entries(self, tmp_path: Path, bad_entry: object, caplog):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            manifest = self._discover_with_frame_src(tmp_path, ("'self'", bad_entry))
+        assert manifest.frame_src == ("'self'",)
+        assert "frame_src entry" in caplog.text
+
+    def test_frame_src_not_a_sequence_is_ignored(self, tmp_path: Path, caplog):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            manifest = self._discover_with_frame_src(tmp_path, "'self'")
+        assert manifest.frame_src == ()
+
+    def test_frame_src_ignored_without_valid_bundle(self):
+        spec = StudioSpec(name="headless", frame_src=("'self'",))
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("headless")):
+            with patch("nhx.studio.plugins.discover_studio", return_value={"headless": Mock(return_value=spec)}):
+                assert discover_plugins()[0].frame_src == ()
+
+    def test_frame_src_not_exposed_by_endpoint(self):
+        app = FastAPI()
+        app.include_router(build_plugins_router([PluginManifestResponse(name="x", frame_src=("'self'",))]))
+        assert TestClient(app).get("/apis/plugins").json() == [{"name": "x", "bundleUrl": None}]
 
     @pytest.mark.parametrize(
         "invalid_name",

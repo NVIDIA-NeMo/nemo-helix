@@ -53,6 +53,7 @@ def build_csp(
     connect_src_urls: Iterable[str] = (),
     frame_src_urls: Iterable[str] = (),
     script_src_urls: Iterable[str] = (),
+    plugin_frame_src: Iterable[str] = (),
 ) -> str:
     """Content-Security-Policy for the Studio UI, built from configured endpoints.
 
@@ -68,11 +69,17 @@ def build_csp(
     cross-origin platform base URL in connect-src (API/plugin-manifest fetches)
     and script-src (dynamic import() of plugin bundles). Empty or relative URLs
     contribute nothing; with no arguments the policy is fully same-origin.
+
+    *plugin_frame_src* holds sources Studio plugins declared via
+    ``StudioSpec.frame_src``, already validated by plugin discovery to be
+    ``'self'`` or bare origins. Any frame source at all switches frame-src from
+    ``'none'`` to ``'self'`` plus the listed origins.
     """
     connect_src = " ".join(["'self'", *_origins(connect_src_urls)])
     script_src = " ".join(["'self'", *_origins(script_src_urls)])
-    frame_origins = _origins(frame_src_urls)
-    frame_src = " ".join(["'self'", *frame_origins]) if frame_origins else "'none'"
+    frame_sources = [*_origins(frame_src_urls), *plugin_frame_src]
+    frame_origins = [source for source in dict.fromkeys(frame_sources) if source != "'self'"]
+    frame_src = " ".join(["'self'", *frame_origins]) if frame_sources else "'none'"
     return (
         "default-src 'self'; "
         f"script-src {script_src}; "
