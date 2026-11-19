@@ -82,7 +82,7 @@ in its JSON-string `input` before running from the repository root:
 NHX_BASE_URL=https://nemo-helix.aire.nvidia.com \
   .venv/bin/nemo agents execute \
   --workspace mmogallapall \
-  --spec-file agents/pr-compose-planner/run.example.json
+  --spec-file plugins/nemo-agents/examples/pr-pipeline/planner/run.example.json
 ```
 
 For a completed ticket, explicitly request a retrospective plan in the input's

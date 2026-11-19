@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Local demo image derived from the existing ARM64 PR-review image.
+# This adds writer tools; it does not install the current Helix source checkout.
+ARG REVIEW_IMAGE=pr-compose-reviewer:local
+FROM ${REVIEW_IMAGE}
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Matches the installed nemo-fabric-adapters-codex 0.6.1 harness dependency.
+RUN uv pip install --python /workspace/.venv/bin/python "openai-codex==0.154.0"
+
+# Temporary, image-local compatibility fix for Codex adapter 0.6.1.
+# Forward only the GitHub variable name; the job injects its value at runtime.
+# Fail if the adapter changes rather than silently producing an unpatched image.
+RUN python - <<'PYCODE'
+from importlib.metadata import version
+from pathlib import Path
+import nemo_fabric_adapters.codex.adapter as adapter
+
+assert version("nemo-fabric-adapters-codex") == "0.6.1", "Recheck the Codex env patch for this adapter version"
+path = Path(adapter.__file__)
+source = path.read_text()
+marker = "INHERITED_ENV_NAMES = {\n"
+assert source.count(marker) == 1, "Codex environment allowlist changed"
+assert "GH_TOKEN" not in adapter.INHERITED_ENV_NAMES, "Upstream already forwards GH_TOKEN; remove this patch"
+path.write_text(source.replace(marker, marker + '    "GH_TOKEN",\n', 1))
+PYCODE
+
+# Codex can update its private home after returning an answer. Do not upload
+# that runtime cache as a result: temporary Git files may disappear mid-upload.
+RUN python - <<'PYCODE'
+from pathlib import Path
+import nemo_agents_plugin.jobs.execute as execute
+
+path = Path(execute.__file__)
+source = path.read_text()
+old = "ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)"
+new = 'ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts, ignore_patterns=[".fabric/codex/custom-provider-home/"])'
+assert source.count(old) == 1, "Recheck the result-upload patch for this Helix version"
+path.write_text(source.replace(old, new, 1))
+PYCODE
+
+RUN git --version && gh --version \
+    && python -c "import nemo_agents_plugin.tasks.execute.__main__; import nemo_fabric_adapters.codex.adapter; import codex_cli_bin, subprocess; subprocess.run([str(codex_cli_bin.bundled_codex_path()), '--version'], check=True)"
+
+# Execute jobs provide their config and credentials at runtime.
+ENTRYPOINT ["python", "-m", "nemo_agents_plugin.tasks.execute"]
+CMD []
