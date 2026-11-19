@@ -953,6 +953,7 @@ authz:
     # workspace-scoped read permission as the regular fileset API.
     /apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}:
       get: &hf-fileset-read
+        x-not-in-openapi: true
         direct:
           actor_perms:
           - filesets.read
