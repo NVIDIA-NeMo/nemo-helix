@@ -85,6 +85,7 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
         id="user:alice",
         email="alice@example.test",
         groups=["workspace-editors"],
+        authz_aliases=["legacy-alice"],
     )
 
     token = await issue_service_workload_access_token_async(config, service_name="jobs", on_behalf_of=creator)
@@ -95,6 +96,7 @@ async def test_delegated_service_workload_access_token_preserves_obo_principal(t
     assert resolved.principal.on_behalf_of == "user:alice"
     assert resolved.principal.on_behalf_of_email == "alice@example.test"
     assert resolved.principal.on_behalf_of_groups == ["workspace-editors"]
+    assert resolved.principal.on_behalf_of_authz_aliases == ["user:alice", "alice@example.test", "legacy-alice"]
 
 
 @pytest.mark.asyncio
