@@ -159,7 +159,10 @@ class Platform:
                     lora_enabled=bool(inputs.get("lora_enabled")),
                     tool_call_config=ToolCallConfig.model_validate(tool_call) if tool_call else None,
                 ),
-                executor_config=ContainerExecutorConfig(gpu=int(inputs["gpu"])),
+                executor_config=ContainerExecutorConfig(
+                    gpu=int(inputs["gpu"]),
+                    additional_args=[str(arg) for arg in inputs.get("additional_args") or []],
+                ),
             ),
             exist_ok=True,
         )

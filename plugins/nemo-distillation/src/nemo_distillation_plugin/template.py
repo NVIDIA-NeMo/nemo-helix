@@ -60,6 +60,7 @@ def render_graph(inputs: DistillInputs) -> dict[str, GraphNode]:
         "engine": inputs.deployment.engine,
         "gpu": inputs.deployment.gpu,
         "tool_call_config": inputs.deployment.tool_call_config,
+        "additional_args": list(inputs.deployment.additional_args),
     }
     teacher = inputs.teacher
     arms = ["base", *[candidate.name for candidate in chosen]]
@@ -75,6 +76,7 @@ def render_graph(inputs: DistillInputs) -> dict[str, GraphNode]:
                 "engine": teacher.engine,
                 "gpu": teacher.gpu,
                 "tool_call_config": teacher.tool_call_config,
+                "additional_args": list(teacher.additional_args),
                 "role": "teacher",
                 "lora_enabled": False,
                 "model": teacher.model,

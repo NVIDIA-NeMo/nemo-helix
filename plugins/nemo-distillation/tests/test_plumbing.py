@@ -19,7 +19,7 @@ from nemo_distillation_plugin.models import Workflow
 from nemo_distillation_plugin.nodes.adapters import build_adapters
 from nemo_distillation_plugin.runtime import Missing
 from nemo_distillation_plugin.template import assemble
-from samples import DATASET_REF, EVAL_CONFIGS, TASKS_REF, inputs
+from samples import DATASET_REF, EVAL_CONFIGS, TASKS_REF, TOOL_ARGS, inputs
 
 
 class FakePlatform:
@@ -277,6 +277,9 @@ async def test_the_stub_flows_through_train_deploy_and_eval() -> None:
     assert original_eval["max_concurrent_tasks"] == 1
     assert set(harness.platform.config_reads) == {TASKS_REF, DATASET_REF}
     assert "classify-0" not in workflow.model_dump_json()
+    assert harness.platform.created and all(
+        deploy_inputs["additional_args"] == TOOL_ARGS for _, deploy_inputs in harness.platform.created
+    )
     assert harness.platform.dataset_evals[dataset_job]["deployment"] == teacher_agent
     assert harness.platform.trajectory_filesets == [
         workflow.nodes["eval_original[tasks]"].outputs["fileset"],

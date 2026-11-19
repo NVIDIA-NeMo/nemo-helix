@@ -52,6 +52,11 @@ class DeploymentInput(BaseModel):
     engine: Literal["vllm", "nim"] = "vllm"
     gpu: int = Field(default=1, gt=0)
     tool_call_config: dict[str, Any] | None = None
+    additional_args: list[str] = Field(
+        default_factory=list,
+        description="Raw serve args appended to the engine. vLLM tool calling needs "
+        "['--enable-auto-tool-choice', '--tool-call-parser', '<parser>'].",
+    )
 
     @model_validator(mode="after")
     def _tool_calls_need_nim(self) -> DeploymentInput:
@@ -112,6 +117,11 @@ class TeacherInput(BaseModel):
     engine: Literal["vllm", "nim"] = "vllm"
     gpu: int = Field(default=1, gt=0)
     tool_call_config: dict[str, Any] | None = None
+    additional_args: list[str] = Field(
+        default_factory=list,
+        description="Raw serve args appended to the engine. vLLM tool calling needs "
+        "['--enable-auto-tool-choice', '--tool-call-parser', '<parser>'].",
+    )
 
     @model_validator(mode="after")
     def _tool_calls_need_nim(self) -> TeacherInput:
