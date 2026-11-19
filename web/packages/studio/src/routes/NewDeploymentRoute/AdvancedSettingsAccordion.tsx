@@ -10,6 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
+import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { MappingFields } from '@nemo/common/src/components/form/MappingFields';
 import { Accordion, Stack, Text } from '@nvidia/foundations-react-core';
@@ -57,6 +58,17 @@ export const AdvancedSettingsAccordion: FC<AdvancedSettingsAccordionProps> = ({
                       'w-full min-w-0 [&>:last-child]:flex [&>:last-child]:min-w-0 [&>:last-child]:flex-1 [&>:last-child]:justify-end',
                   },
                 },
+              }}
+            />
+            <ControlledTextArea
+              useControllerProps={{ control, name: 'additionalArgs' }}
+              label="Additional Arguments"
+              placeholder={'--tokenizer-mode glm5_next\n--tensor-parallel-size 1\n--enable-expert-parallel'}
+              rows={5}
+              formFieldProps={{
+                slotInfo:
+                  'Appended to the engine command, separated by spaces or new lines. A flag set here replaces the platform default for that flag, for example --tensor-parallel-size.',
+                slotError: errors.additionalArgs?.message,
               }}
             />
             <MappingFields

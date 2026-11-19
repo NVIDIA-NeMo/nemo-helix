@@ -47,6 +47,7 @@ import {
   huggingFaceSourceFilesetName,
 } from '@studio/routes/DeploymentsListRoute/huggingFaceDeploymentArtifacts';
 import {
+  additionalArgsFormToApi,
   additionalEnvsFormToApi,
   configNameFromWizardBaseName,
   deploymentNameFromWizardBaseName,
@@ -94,10 +95,12 @@ function imageOverrides(
 function executorConfigFromValues(values: WizardFormValues): ContainerExecutorConfig {
   const diskSize = values.diskSize?.trim();
   const additionalEnvs = additionalEnvsFormToApi(values.additionalEnvs);
+  const additionalArgs = additionalArgsFormToApi(values.additionalArgs);
   return {
     gpu: values.gpu,
     ...(diskSize ? { disk_size: diskSize } : {}),
     ...(additionalEnvs ? { additional_envs: additionalEnvs } : {}),
+    ...(additionalArgs ? { additional_args: additionalArgs } : {}),
     ...imageOverrides(values),
   };
 }
@@ -110,6 +113,7 @@ async function createNgcDeployment(
   reportStage: ReportStage
 ) {
   const additionalEnvs = additionalEnvsFormToApi(values.additionalEnvs);
+  const additionalArgs = additionalArgsFormToApi(values.additionalArgs);
   const modelName = values.name.trim();
 
   reportStage('Creating deployment configuration…');
@@ -127,6 +131,7 @@ async function createNgcDeployment(
       image_tag: values.imageTag!.trim(),
       disk_size: values.diskSize?.trim() || '50Gi',
       ...(additionalEnvs ? { additional_envs: additionalEnvs } : {}),
+      ...(additionalArgs ? { additional_args: additionalArgs } : {}),
     },
   });
 
