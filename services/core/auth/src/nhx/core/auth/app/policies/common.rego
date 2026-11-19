@@ -487,6 +487,15 @@ path_matches_pattern(path, pattern) if {
 		segment_matches(path_parts[trailing_start + j], suffix_parts[j])
 	}
 } else if {
+	# An explicit FastAPI path converter consumes one or more trailing segments.
+	endswith(pattern, "/{path:path}")
+	prefix_parts := split(trim_suffix(pattern, "/{path:path}"), "/")
+	path_parts := split(path, "/")
+	count(path_parts) > count(prefix_parts)
+	every i in numbers.range(0, count(prefix_parts) - 1) {
+		segment_matches(path_parts[i], prefix_parts[i])
+	}
+} else if {
 	# Standard matching: same number of segments, each must match
 	path_parts := split(path, "/")
 	pattern_parts := split(pattern, "/")
