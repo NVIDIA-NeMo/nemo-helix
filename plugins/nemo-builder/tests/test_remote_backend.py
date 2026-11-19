@@ -36,7 +36,12 @@ from nemo_helix_plugin.auth.workload_identity import WorkloadIdentityConfigError
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
-from nemo_helix_plugin.jobs.execution_profiles import KubernetesJobExecutionProfile
+from nemo_helix_plugin.jobs.execution_profiles import (
+    DockerJobExecutionProfile,
+    KubernetesJobExecutionProfile,
+    OpenShellJobExecutionProfile,
+    SubprocessJobExecutionProfile,
+)
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -169,6 +174,18 @@ class TestADeploymentThatCannotBuild:
     def test_no_profile_for_the_step(self) -> None:
         with pytest.raises(BackendRejectedError, match="no execution profile cpu/build-remote"):
             RemoteBackend(_config(), [_profile("build-fetch")]).check(_plan())
+
+    @pytest.mark.parametrize("kind", [OpenShellJobExecutionProfile, SubprocessJobExecutionProfile])
+    def test_a_profile_on_a_backend_that_cant_run_the_step(self, kind: type[ExecutionProfile]) -> None:
+        """One that runs no container, gives a step no job ID, or can't put a secret in its environment. The
+        step would fail every time, after the rows were written."""
+        profile = kind.model_validate({"provider": "cpu", "profile": "build-remote", "config": {}})
+        with pytest.raises(BackendRejectedError, match=f"runs on {profile.backend}, which can't run the remote-build"):
+            RemoteBackend(_config(), [profile]).check(_plan())
+
+    def test_a_docker_profile_can_run_the_step(self) -> None:
+        profile = DockerJobExecutionProfile.model_validate({"provider": "cpu", "profile": "build-remote", "config": {}})
+        RemoteBackend(_config(), [profile]).check(_plan())
 
     def test_no_image_that_holds_the_step(self) -> None:
         with pytest.raises(BackendRejectedError, match="no image that holds the remote-build step"):
@@ -480,6 +497,33 @@ class TestTheRecord:
                 external=ExternalImage(image_id="img-1"),
             )
         assert client.rows["demo-1"].status == "pending"
+
+    async def test_a_remote_row_is_not_completed_without_the_services_name_for_the_build(self) -> None:
+        """Ready with no handle, the row would stay that way: the step's own completion, at the same digest,
+        would be answered with the row as it stands."""
+        client = FakeEntityClient()
+        await _submit(client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES))
+        digest = "sha256:" + "c" * 64
+        for external in (None, ExternalImage(image_id="img-1")):
+            with pytest.raises(CompletionConflict, match="its completion must name the build"):
+                await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
+        assert client.rows["demo-1"].status == "pending"
+
+    async def test_completing_again_must_name_the_same_build(self) -> None:
+        client = FakeEntityClient()
+        await _submit(client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES))
+        digest = "sha256:" + "c" * 64
+        external = ExternalImage(image_id="img-1", build_id="build-1")
+        first = await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
+
+        # The same completion again, as a retried call makes it, returns the row.
+        again = await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
+        assert again.external == first.external == external
+        # Another build's handle is not swallowed: the row keeps the first, and the caller is told.
+        other = ExternalImage(image_id="img-2", build_id="build-2")
+        with pytest.raises(CompletionConflict, match="another build's image"):
+            await complete(client, workspace="default", name="demo-1", digest=digest, external=other)
+        assert client.rows["demo-1"].external == external
 
     async def test_completing_writes_the_handle_with_the_digest(self) -> None:
         client = FakeEntityClient()

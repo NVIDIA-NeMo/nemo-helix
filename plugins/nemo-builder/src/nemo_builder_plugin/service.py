@@ -64,6 +64,7 @@ from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 logger = logging.getLogger(__name__)
 
@@ -89,17 +90,28 @@ def _setting(location: tuple[int | str, ...]) -> str:
     return ".".join(map(str, location)) or "builder"
 
 
+def _without_input(error: ErrorDetails) -> str:
+    """A validation error's message, with the value it refused taken out if the message repeats it."""
+    message, refused = error["msg"], error.get("input")
+    # As a validator would most likely have written it, quoted, then bare.
+    for form in (repr(refused), str(refused)) if isinstance(refused, str | int | float) else ():
+        if form:
+            message = message.replace(form, "<the value>")
+    return message
+
+
 def _load_config() -> BuilderConfig:
     try:
         return BuilderConfig.get()
     except ValidationError as exc:
         # Named, not a bare 500: an operator who misspelt a key finds it in the answer. The answer says which
-        # settings and what kind of problem. A validator's own sentence may quote the value it refused, which a
-        # submitter has no business reading, so that goes to the log only.
-        errors = exc.errors(include_input=False, include_url=False)
+        # settings and what kind of problem. A validator's own sentence goes to the log only, and without the
+        # value it refused, should it quote that: a setting may hold a credential, such as a registry given
+        # with a login.
+        errors = exc.errors(include_url=False)
         logger.error(
             "the builder's configuration is invalid: %s",
-            sanitize_for_log("; ".join(f"{_setting(error['loc'])}: {error['msg']}" for error in errors)),
+            sanitize_for_log("; ".join(f"{_setting(error['loc'])}: {_without_input(error)}" for error in errors)),
         )
         problems = "; ".join(
             f"{_setting(error['loc'])}: "

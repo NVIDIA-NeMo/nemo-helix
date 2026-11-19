@@ -226,7 +226,7 @@ class TestReadingAJobAsTheBuilder:
         job = SimpleNamespace(
             status=HelixJobStatus.ERROR,
             error_details={"message": "Step remote-build failed"},
-            steps=[SimpleNamespace(error_details=None, tasks=[task])],
+            steps=[SimpleNamespace(name="remote-build", error_details=None, tasks=[task])],
         )
         response = MagicMock()
         response.data.return_value = job

@@ -106,6 +106,11 @@ def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
 _REFUSALS = frozenset({CODE_BACKEND_REJECTED, CODE_MISSING_SECRETS})
 
 
+def _refuses_the_request(conflict: ConflictError) -> bool:
+    """Whether Builder's 409 says so itself, by its ``code``."""
+    return isinstance(conflict.body, dict) and conflict.body.get("code") in _REFUSALS
+
+
 async def ensure_build(
     builder: ImageBuilder,
     *,
@@ -131,7 +136,7 @@ async def ensure_build(
                 name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
             )
         except ConflictError as exc:
-            if isinstance(exc.body, dict) and exc.body.get("code") in _REFUSALS:
+            if _refuses_the_request(exc):
                 # Builder refuses the request itself, and would refuse it under any revision.
                 raise
             logger.info("Builder holds %s-%d for another request; submitting the next revision", name, revision - 1)
@@ -168,8 +173,9 @@ async def adopt_or_build(
             submitted = await builder.submit(
                 name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
             )
-        except ConflictError:
-            if await builder.get_image(f"{name}-{revision}") is None:
+        except ConflictError as exc:
+            # What Builder says first: a row another request wrote meanwhile must not hide a refusal of this one.
+            if _refuses_the_request(exc) or await builder.get_image(f"{name}-{revision}") is None:
                 # Nothing holds the revision, so no other request won it: Builder refused this request, and
                 # would again. A request that loses the race always finds the winner's row.
                 raise

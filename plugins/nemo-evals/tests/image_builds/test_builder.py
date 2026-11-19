@@ -219,6 +219,22 @@ async def test_adopt_or_build_raises_what_builder_refuses_outright() -> None:
     assert builder.submitted == [1]
 
 
+@pytest.mark.parametrize("code", ["missing_secrets", "backend_rejected"])
+async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_the_row_meanwhile(code: str) -> None:
+    """What Builder says is read first. A row that appears after the refusal is another request's, and says
+    nothing about whether this one can be built."""
+    builder = _Builder([], conflicting=frozenset({1}), code=code)
+
+    async def race(name: str) -> ContainerImage | None:
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "ready") if revision == 1 and builder.submitted else None
+
+    builder.get_image = race  # ty: ignore[invalid-assignment]
+    with pytest.raises(ConflictError):
+        await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    assert builder.submitted == [1]
+
+
 def test_archive_source_splits_a_fileset_reference() -> None:
     assert archive_source("default/harbor-tasks#sort/abc/task_archive", "sort/tests") == _SOURCE
 

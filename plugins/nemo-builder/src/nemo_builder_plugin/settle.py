@@ -34,6 +34,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.schema import JOB_NAME_PREFIX
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -63,6 +64,12 @@ _MARKER = "NHX_BUILD_FAILED "
 _FAILURE_LINE = re.compile(r"NHX_BUILD_FAILED (\S+): (.+)")
 #: The longest reason a row records.
 _MAX_REASON_CHARS = 500
+#: The one step whose log a reason is read from, and the backend whose rows take it: ``remote.py``'s ``STEP_NAME``
+#: and backend name, spelt here as the marker is. A remote-build step's driver writes each marked line itself,
+#: with nothing a submitter chose on a line of its own. An in-cluster build's log carries whatever a Dockerfile
+#: prints, a line that looks like the marker included, so it is never read for one.
+_REASON_STEP = "remote-build"
+_REASON_BACKEND = "remote"
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +132,8 @@ def ended_job(job: HelixJobStatusResponse) -> EndedJob:
     message = _message(job.error_details)
     for step in job.steps:
         message = message or _message(step.error_details)
+        if step.name != _REASON_STEP:
+            continue
         for task in step.tasks:
             # Jobs keeps the last lines of a failed task's log here. The last line for an image is its reason.
             for line in _marked_lines(task.error_stack or ""):
@@ -208,8 +217,19 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | EndedJob | None, 
     if ended.status not in _ENDED:
         return None
     detail = f"not built: its build job ended ({ended.status.value}) without publishing it"
-    why = ended.reasons.get(image.name) or ended.message
+    if not _own_job(image):
+        # The job was read as the builder, which may read any. What it said is copied only onto a row of its own
+        # build: a row written some other way can name any job, in any workspace.
+        return detail
+    line = ended.reasons.get(image.name) if image.provenance.backend == _REASON_BACKEND else None
+    why = line or ended.message
     return f"{detail}: {why}" if why else detail
+
+
+def _own_job(image: ContainerImage) -> bool:
+    """Whether the job ``image`` names is the one a submit creates for it: in its workspace, named for its set."""
+    provenance = image.provenance
+    return provenance.job == f"{image.workspace}/{JOB_NAME_PREFIX}{provenance.build_set}-{provenance.revision}"
 
 
 async def _fail(rows: _Rows, image: ContainerImage, detail: str) -> ContainerImage:

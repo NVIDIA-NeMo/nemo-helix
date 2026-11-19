@@ -79,6 +79,10 @@ CANCEL_PAUSE_SECONDS = 2.0
 CANCEL_SECONDS = 20.0
 #: What takes a credential's place in a text.
 REDACTED = "[credential]"
+#: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this.
+_IGNORE_SUFFIX = ".dockerignore"
+#: How deep into a logged value the driver looks for a credential before it treats what is left as text.
+_MAX_FIELD_DEPTH = 6
 #: The shortest part of a credential that is taken out on its own: one line of a credential of several.
 _MIN_PART_CHARS = 8
 
@@ -135,6 +139,9 @@ class RemoteBuild:
     platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
     labels: Mapping[str, str] = field(default_factory=dict)
+    #: How long the driver waits for the build before it cancels it. A service that can end a build by itself
+    #: should be told: a step that is killed outright, out of memory or with its node, cancels nothing.
+    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +177,7 @@ class RemoteBuildService(Protocol):
 
         Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
         call must send the service the same request, so an implementation that uploads the context keeps the first
-        upload for that key and reuses it.
+        upload for that key and reuses it. The ID is not empty: it is what the image's row names the build by.
         """
         ...
 
@@ -256,14 +263,24 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     links, which were only checked to stay inside the context where they were unpacked.
 
     Docker resolves ``COPY`` against the context, not the Dockerfile's directory, so moving the file changes what a
-    build reads in two cases. A context with a root ``Dockerfile`` of its own loses it to the one the spec names.
-    And an ignore file named for a Dockerfile (``<its path>.dockerignore``) is not moved with it, so a builder that
-    reads one reads the root ``Dockerfile.dockerignore`` instead, if the context has one.
+    build reads in one case: a context with a root ``Dockerfile`` of its own loses it to the one the spec names.
+
+    What the build leaves out must not change with the move. A builder reads the ignore file named for a
+    Dockerfile (``<its path>.dockerignore``) in preference to the context's own ``.dockerignore``, so that file
+    goes to the root with its Dockerfile, and one that was the replaced root Dockerfile's doesn't stay to stand in
+    for it.
+
+    A context with a link that leads out of it is refused. Its links were checked, where it was unpacked, to
+    stay inside what was unpacked, which may be more than this context: a service's packager that follows links
+    would send a file from beside the context with it.
     """
     root = context.resolve()
-    source = (context / dockerfile).resolve()
+    named = context / dockerfile
+    source = named.resolve()
     if not context.is_dir() or root not in source.parents or not source.is_file():
         raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
+    if (link := _link_out(context)) is not None:
+        raise ImageFailed(f"the build context has a link that leads out of it: {link!r}")
     target = context / ROOT_DOCKERFILE
     if not target.is_symlink():
         if target.is_dir():
@@ -279,10 +296,35 @@ def stage_context(context: Path, dockerfile: str) -> Path:
                 ROOT_DOCKERFILE,
                 sanitize_for_log(dockerfile),
             )
+    ignore, staged_ignore = named.with_name(named.name + _IGNORE_SUFFIX), context / (ROOT_DOCKERFILE + _IGNORE_SUFFIX)
+    if staged_ignore.is_dir() and not staged_ignore.is_symlink():
+        raise ImageFailed(f"the build context has a directory named {staged_ignore.name} at its root")
+    kept = ignore.read_bytes() if ignore.is_file() else None
     # A link too: a service's packager may not follow one.
     target.unlink(missing_ok=True)
     shutil.copyfile(source, target)
+    staged_ignore.unlink(missing_ok=True)
+    if kept is not None:
+        staged_ignore.write_bytes(kept)
     return context
+
+
+def _link_out(context: Path) -> str | None:
+    """The first link under ``context`` that leads out of it, as its path in the context. None if none does."""
+    root = context.resolve()
+    for directory, directories, files in os.walk(context):
+        for name in (*directories, *files):
+            path = Path(directory, name)
+            if not path.is_symlink():
+                continue
+            try:
+                end = path.resolve()
+            except (OSError, RuntimeError):
+                # A loop of links, on a Python that raises for one: it reaches no file, in the context or out.
+                continue
+            if end != root and root not in end.parents:
+                return path.relative_to(context).as_posix()
+    return None
 
 
 def _backoff(tries: int) -> float:
@@ -298,11 +340,17 @@ def _call(
     deadline: float,
     cancelled: Callable[[], bool],
     patience: float | None = START_PATIENCE_SECONDS,
+    at_the_deadline: bool = False,
 ) -> _T:
     """``call``, repeated as its failure says, until the build's deadline or the job is told to stop.
 
     A used-up budget is waited out for as long as the deadline allows. A failure with no stated reason is repeated
     for ``patience`` seconds on end; with None, until the deadline too.
+
+    With ``at_the_deadline``, a wait that would pass the deadline is cut to end on it, and the call is made once
+    more there: right for a read of a build that is running, which costs nothing and may find it done. Without,
+    the call is given up as soon as its next try would come too late: right for a start, which would only be
+    cancelled.
     """
     failures = waits = 0
     # Once a try has failed for no stated reason, the call may have happened: whoever gives it up is told so.
@@ -335,8 +383,10 @@ def _call(
         except Exception as exc:
             # Not one of the three: the service's client broke its contract, and a repeat would tell nothing.
             raise ImageFailed(f"{what}: unexpected {type(exc).__name__}: {exc}", maybe_called=True) from exc
-        if clock.monotonic() + wait >= deadline:
+        remaining = deadline - clock.monotonic()
+        if remaining <= 0 or (wait >= remaining and not at_the_deadline):
             raise ImageFailed(f"{what}: {failure}; still failing at the build timeout", maybe_called=lost) from failure
+        wait = min(wait, remaining)
         logger.warning("%s failed (%s); trying again in %.0fs", what, sanitize_for_log(str(failure)), wait)
         clock.sleep(wait)
 
@@ -409,6 +459,7 @@ def _wait(
                 deadline=deadline,
                 cancelled=cancelled,
                 patience=None,
+                at_the_deadline=True,
             )
         except ImageFailed as exc:
             exc.uncancelled = not _cancel(service, build_id, clock=clock)
@@ -495,6 +546,7 @@ def _build_one(
     cancelled: Callable[[], bool],
     scratch: Path,
 ) -> None:
+    """Build ``image``. ``fetch`` puts its build context in ``scratch``, which is this image's alone."""
     try:
         context = stage_context(fetch(image, scratch), image.dockerfile)
     except ImageFailed:
@@ -506,6 +558,7 @@ def _build_one(
         context=context,
         platform=image.platform,
         labels={"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid},
+        timeout_seconds=config.build_timeout_seconds,
     )
     # The row was written with the service's repository at submit. An image anywhere else isn't the row's.
     destination = f"{row.registry}/{row.repository}"
@@ -516,6 +569,9 @@ def _build_one(
         build_id = _call(
             "starting the build", lambda: service.start(build), clock=clock, deadline=deadline, cancelled=cancelled
         )
+        if not isinstance(build_id, str) or not build_id.strip():
+            # The row names its build by this, and the builder completes no remote row without it.
+            raise ImageFailed("the build service's client started a build without naming it", maybe_called=True)
     except ImageFailed as exc:
         if exc.maybe_called:
             # A build may be running whose ID never arrived, so this step can't cancel it. Its key finds it.
@@ -625,13 +681,31 @@ def run_remote_build(
     """Build each image the step was given. 0 if every one is ``ready``, 1 otherwise.
 
     One image's failure doesn't cost the others. ``fetch`` downloads an image's build context into the directory it
-    is given, which is removed once the image is done, and returns the context's directory; the driver may change
-    what is in it. ``redact`` takes whatever must not be reported out of a reason, before the reason is cut.
+    is given and returns the context's directory; the driver may change what is in it. Everything it writes is
+    under ``scratch``, which the caller removes. ``redact`` takes whatever must not be reported out of a reason,
+    before the reason is cut.
     """
     clock = clock or Clock()
     failures = 0
     #: Each image this run failed, with its reason and what follows it, as they were logged.
     failed: list[tuple[str, str, str]] = []
+    #: Each source this run fetched, by what names it, and where its context is: read by `context_for`.
+    fetched: dict[str, Path] = {}
+
+    def context_for(image: RemoteBuildImage, directory: Path) -> Path:
+        """``image``'s build context, in ``directory``.
+
+        The images of one set are built one after another, and a source may change in between. So a source is
+        fetched once, and each image that names it gets a copy of that fetch: every image of a revision is
+        built from the same files. A set of one image has nothing to share, and is spared the copy.
+        """
+        if len(config.images) == 1:
+            return fetch(image, directory)
+        source = image.source.model_dump_json()
+        if source not in fetched:
+            fetched[source] = fetch(image, Path(tempfile.mkdtemp(dir=scratch, prefix="source-")))
+        # Links as they are, never followed: staging checks where each one leads.
+        return Path(shutil.copytree(fetched[source], directory / "context", symlinks=True))
 
     def report(image: str, reason: str, ending: str = "") -> None:
         reason, ending = redact(_one_line(redact(reason))), redact(_one_line(redact(ending)))
@@ -661,7 +735,7 @@ def run_remote_build(
                     config=config,
                     service=service,
                     builder=builder,
-                    fetch=fetch,
+                    fetch=context_for,
                     attempt=attempt,
                     clock=clock,
                     cancelled=cancelled,
@@ -721,17 +795,63 @@ def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> l
     return record
 
 
+def _redact_value(value: Any, redact: Callable[[str], str], depth: int = 0) -> Any:
+    """``value`` as a log call attached it, with the credential out of it.
+
+    A value that doesn't hold the credential is returned as it is, whatever it is. One that does is rebuilt if
+    it is a plain container, and otherwise replaced by what it prints as, redacted.
+    """
+    if isinstance(value, str):
+        return redact(value)
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    try:
+        shown = repr(value)
+    except Exception:
+        return "<a value that can't be shown>"
+    if redact(shown) == shown:
+        return value
+    if depth < _MAX_FIELD_DEPTH:
+        if type(value) is dict:
+            return {
+                _redact_value(key, redact, depth + 1): _redact_value(item, redact, depth + 1)
+                for key, item in value.items()
+            }
+        if type(value) in (list, tuple, set, frozenset):
+            return type(value)(_redact_value(item, redact, depth + 1) for item in value)
+    return redact(shown)
+
+
+class _RedactedFields(dict[str, Any]):
+    """A log record's fields, with the credential taken out of each one set by key.
+
+    ``Logger.makeRecord`` attaches a log call's ``extra`` fields to the record after the record factory has
+    returned it, one at a time, by key in the record's ``__dict__``. A formatter that prints such a field, a
+    request's headers say, would print the credential in it. So a record's fields are kept in one of these.
+    """
+
+    def __init__(self, fields: Mapping[str, Any], redact: Callable[[str], str]) -> None:
+        super().__init__(fields)
+        self._redact = redact
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        super().__setitem__(key, _redact_value(value, self._redact))
+
+
 def redact_log(secret: str) -> None:
     """From here on, every record this process logs has ``secret`` taken out of it.
 
     Where records are made, not on the handlers there are now: a service's client may log through a logger that
-    doesn't pass its records up, or add a handler of its own later.
+    doesn't pass its records up, or add a handler of its own later. That covers a record's message, its
+    exception and stack, and the ``extra`` fields of the call that logged it.
     """
     redact = _redactor(secret)
     make = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
-        return _redact_record(make(*args, **kwargs), redact)
+        record = _redact_record(make(*args, **kwargs), redact)
+        record.__dict__ = _RedactedFields(record.__dict__, redact)
+        return record
 
     logging.setLogRecordFactory(factory)
 

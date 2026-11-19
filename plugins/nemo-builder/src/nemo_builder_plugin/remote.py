@@ -31,6 +31,10 @@ from nemo_helix_plugin.jobs.spec import (
 )
 
 STEP_NAME = "remote-build"
+#: The Jobs backends a `cpu` profile can be on that can run the step. It is a container, it reads the job's ID
+#: from its environment, and with `credential_secret` it is given a platform secret there: the others lack one
+#: of the three.
+STEP_BACKENDS = ("docker", "kubernetes_job")
 
 #: How long past its last build timeout a step needs, to cancel the build and say why.
 CANCEL_MARGIN_SECONDS = 120
@@ -79,6 +83,11 @@ class RemoteBackend:
         profile = next((p for p in self._profiles if (p.provider, p.profile) == ("cpu", name)), None)
         if profile is None:
             raise BackendRejectedError(f"Jobs has no execution profile cpu/{name} to run the remote-build step on")
+        if profile.backend not in STEP_BACKENDS:
+            raise BackendRejectedError(
+                f"Jobs execution profile cpu/{name} runs on {profile.backend}, which can't run the remote-build "
+                f"step; it needs one of: {', '.join(STEP_BACKENDS)}"
+            )
         if remote.image is None and not profile.config.default_task_image:
             # Jobs would fall back to the platform's own tasks image, which holds no build service's client.
             raise BackendRejectedError(
@@ -105,7 +114,7 @@ class RemoteBackend:
             raise BackendRejectedError(
                 "builder.remote.credential_secret is set, but this platform uses workload token exchange, under "
                 f"which Jobs cannot fetch a step's platform secrets; mount the credential on Jobs execution profile "
-                f"cpu/{name} and unset credential_secret"
+                f"cpu/{name} and unset credential_secret (any job that names the profile can then read it)"
             )
 
     def check(self, plan: BuildPlan) -> None:

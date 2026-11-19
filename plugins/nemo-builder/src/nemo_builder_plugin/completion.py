@@ -124,12 +124,18 @@ class _Rows(Protocol):
     async def update(self, entity: ContainerImage) -> ContainerImage: ...
 
 
-def settled(row: ContainerImage, digest: str) -> bool:
-    """Whether ``row`` is already ``ready`` at ``digest``. Raises :class:`CompletionConflict` if it settled otherwise."""
+def settled(row: ContainerImage, digest: str, external: ExternalImage | None = None) -> bool:
+    """Whether ``row`` is already ``ready`` at ``digest``, with ``external`` as the build service's handle for it.
+
+    Raises :class:`CompletionConflict` if it settled otherwise.
+    """
     if row.status == "ready":
-        if row.digest == digest:
-            return True
-        raise CompletionConflict(f"{row.name} is already ready as {row.digest}, not {digest}")
+        if row.digest != digest:
+            raise CompletionConflict(f"{row.name} is already ready as {row.digest}, not {digest}")
+        if row.external != external:
+            # Returned as it is, the caller would take the row for the one it meant to write.
+            raise CompletionConflict(f"{row.name} is already ready at {digest}, as another build's image")
+        return True
     if row.status == "failed":
         raise CompletionConflict(f"{row.name} has already failed ({row.status_detail}); ready is not reachable from it")
     return False
@@ -153,13 +159,17 @@ async def complete(
     """
     for _ in range(2):
         row = await rows.get(ContainerImage, name=name, workspace=workspace)
-        if settled(row, digest):
+        in_cluster = row.provenance.backend == IN_CLUSTER_BACKEND
+        if external is not None and in_cluster:
+            raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
+        if not in_cluster and (external is None or external.build_id is None):
+            # Only the step that had a build service build it can name that build.
+            raise CompletionConflict(f"{name} is built by a build service; its completion must name the build")
+        if settled(row, digest, external):
             return row
         upstream = row.provenance.upstream
         if upstream is not None and digest != upstream.manifest_digest:
             raise CompletionConflict(f"{name} copies {upstream.manifest_digest}, not {digest}")
-        if external is not None and row.provenance.backend == IN_CLUSTER_BACKEND:
-            raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
         row.digest = digest
         row.runtime_config = runtime_config
         row.external = external

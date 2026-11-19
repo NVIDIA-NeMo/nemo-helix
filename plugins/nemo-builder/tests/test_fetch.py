@@ -17,7 +17,7 @@ from typing import Literal, cast
 import pytest
 from nemo_builder_plugin.run import fetch
 from nemo_builder_plugin.run.fetch import ArchiveRefused, clear_earlier_attempts, fetch_source
-from nemo_builder_plugin.run.remote import fetch_context, stage_context
+from nemo_builder_plugin.run.remote import ImageFailed, fetch_context, stage_context
 from nemo_builder_plugin.run.supervise import _volume_mounts
 from nemo_builder_plugin.steps import (
     ContextSource,
@@ -261,6 +261,22 @@ class TestWhatARemoteBuildHandsItsService:
         # The directory's own root Dockerfile gives way to the one the spec names.
         assert (context / "Dockerfile").read_bytes() == b"FROM elsewhere"
         assert self._files(context) == ["Dockerfile", "docker/Dockerfile", "run.sh"]
+
+    def test_a_directory_of_an_archive_that_links_to_a_file_beside_it_is_refused(self, tmp_path: Path) -> None:
+        """Unpacking checks a link against the whole archive. The context is one directory of it."""
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as tar:
+            for name, content in (("app/Dockerfile", b"FROM scratch"), ("tests/answer.txt", b"not for the image")):
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+            link = tarfile.TarInfo("app/fixture")
+            link.type, link.linkname = tarfile.SYMTYPE, "../tests/answer.txt"
+            tar.addfile(link)
+        source = ContextSource(fileset="default/fs-a", archive="task.tar", context_path="app")
+
+        with pytest.raises(ImageFailed, match="a link that leads out of it: 'fixture'"):
+            self._context({"task.tar": buffer.getvalue()}, source, "Dockerfile", tmp_path)
 
 
 class TestHostileListings:

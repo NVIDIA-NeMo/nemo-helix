@@ -10,7 +10,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import pytest
+from nemo_builder_plugin import settle as settle_module
 from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.remote import STEP_NAME as REMOTE_STEP_NAME
 from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, EndedJob, ended_job, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
@@ -25,6 +27,7 @@ def _row(
     status: Literal["queued", "pending", "ready", "failed"] = "pending",
     job: str = "ws-a/builder-demo-1",
     age: timedelta | None = timedelta(minutes=1),
+    backend: str = "execution",
 ) -> ContainerImage:
     row = ContainerImage(
         name=name,
@@ -32,7 +35,9 @@ def _row(
         status=status,
         registry="reg.example.com",
         repository="ws-a/app",
-        provenance=Provenance(build_set="demo", revision=1, job=job, request_digest="sha256:" + "a" * 64),
+        provenance=Provenance(
+            build_set="demo", revision=1, job=job, request_digest="sha256:" + "a" * 64, backend=backend
+        ),
     )
     row._created_at = None if age is None else NOW - age
     return row
@@ -287,7 +292,7 @@ def _job(
 class TestWhyAnEndedJobDidNotBuildIt:
     @pytest.mark.asyncio
     async def test_the_line_its_step_logged_for_the_image_is_the_reason(self) -> None:
-        rows = FakeRows(_row())
+        rows = FakeRows(_row(backend="remote"))
         ended = EndedJob(HelixJobStatus.ERROR, reasons={"demo-1.img0": REASON}, message="Task failed")
         [image] = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
         assert (image.status, image.status_detail) == ("failed", f"{ENDED}: {REASON}")
@@ -295,7 +300,7 @@ class TestWhyAnEndedJobDidNotBuildIt:
     @pytest.mark.asyncio
     async def test_the_jobs_own_account_is_the_reason_when_the_step_left_none(self) -> None:
         """Jobs ended the step itself, at its time limit, before the step could say anything."""
-        rows = FakeRows(_row("a"), _row("b"))
+        rows = FakeRows(_row("a", backend="remote"), _row("b", backend="remote"))
         timed_out = "Job timed out after reaching max TTL of 86400 seconds"
         ended = EndedJob(HelixJobStatus.ERROR, reasons={"a": REASON}, message=timed_out)
         a, b = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
@@ -311,6 +316,37 @@ class TestWhyAnEndedJobDidNotBuildIt:
         ended = ended_job(_job(message="Step push failed"))
         [image] = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
         assert image.status_detail == f"{ENDED}: Step push failed"
+
+    @pytest.mark.asyncio
+    async def test_a_line_in_an_in_cluster_builds_log_is_never_taken_for_a_reason(self) -> None:
+        """Its log carries what a Dockerfile prints, a line that looks like the marker included. One failed image
+        could otherwise write the reason another image of its set is failed with."""
+        rows = FakeRows(_row())
+        forged = EndedJob(
+            HelixJobStatus.ERROR, reasons={"demo-1.img0": "an invented reason"}, message="Step build failed"
+        )
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": forged}))
+        assert image.status_detail == f"{ENDED}: Step build failed"
+
+    def test_only_a_remote_build_steps_log_is_read_for_reasons(self) -> None:
+        log_tail = "[INFO] nemo_builder_plugin.run.supervise:   NHX_BUILD_FAILED demo-1: an invented reason"
+        job = _job(log_tail=log_tail, message="Step build failed")
+        job.steps[0].name = "build"
+        assert ended_job(job) == EndedJob(HelixJobStatus.ERROR, {}, "Step build failed")
+        assert settle_module._REASON_STEP == REMOTE_STEP_NAME
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "job", ["ws-b/builder-demo-1", "ws-a/builder-other-1", "ws-a/builder-demo-2", "ws-a/some-job"]
+    )
+    async def test_what_a_job_said_is_copied_only_onto_a_row_of_its_own_build(self, job: str) -> None:
+        """Jobs are read as the builder, which may read any. A row written past the builder can name any job, in
+        any workspace, and must not come to hold what that job said."""
+        rows = FakeRows(_row(job=job, backend="remote"))
+        name = job.partition("/")[2]
+        private = EndedJob(HelixJobStatus.ERROR, reasons={"demo-1.img0": "theirs"}, message="a private diagnostic")
+        [image] = await _settle(rows, FakeJobs({name: private}))
+        assert (image.status, image.status_detail) == ("failed", ENDED)
 
     @pytest.mark.asyncio
     async def test_a_job_that_said_nothing_reads_as_it_always_did(self) -> None:

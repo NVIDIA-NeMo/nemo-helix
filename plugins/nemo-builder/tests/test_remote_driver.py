@@ -287,6 +287,21 @@ class TestABuildThatSucceeds:
         assert build.platform == "linux/amd64"
         assert build.key == idempotency_key(ATTEMPT, "demo-1")
         assert build.labels == {"workspace": "default", "image": "demo-1", "job": "job-uid-1"}
+        # For a service that can end a build by itself: a step killed outright cancels nothing.
+        assert build.timeout_seconds == 600
+
+    @pytest.mark.parametrize("build_id", ["", "  ", None], ids=["empty", "blank", "none"])
+    def test_a_build_the_client_doesnt_name_fails_and_is_said_to_maybe_be_running(
+        self, build_id: str | None, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The row names its build by the ID, and no remote row is completed without one."""
+        service = FakeService([DONE], start=[build_id])  # ty: ignore[invalid-argument-type]
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, tmp_path) == 1
+        assert (service.polled, builder.completed) == ([], [])
+        assert "started a build without naming it" in caplog.text
+        assert f"[a build may be running, started with key {idempotency_key(ATTEMPT, 'demo-1')}]" in caplog.text
 
     def test_a_service_with_no_handle_of_its_own_still_completes(self, context: Path, tmp_path: Path) -> None:
         done = RemoteBuildStatus("done", image=RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id=""))
@@ -475,8 +490,37 @@ class TestRetrying:
         with caplog.at_level(logging.ERROR):
             assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=120), clock=clock) == 1
         assert service.cancelled == ["build-1"]
-        assert clock.now < 120
+        # Read one last time at the deadline itself, not given up when the next wait would have passed it.
+        assert clock.now == 120
         assert "reading the build: 503; still failing at the build timeout [build build-1]" in caplog.text
+
+    def test_a_service_that_answers_again_before_the_timeout_keeps_its_build(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """The waits double. With a minute for the build and the service silent for 40 seconds, the wait after
+        the read at 30 would end at 62: cut to end at 60, it finds the build done."""
+        clock = FakeClock()
+
+        class Offline(FakeService):
+            def status(self, build_id: str) -> RemoteBuildStatus:
+                self.polled.append(build_id)
+                if clock.now < 40:
+                    raise RetryableError("timeout")
+                return DONE
+
+        service = Offline([])
+        builder = FakeBuilder()
+        assert _run(service, builder, context, tmp_path, config=_config(timeout=60), clock=clock) == 0
+        assert (clock.sleeps, service.cancelled) == ([2.0, 4.0, 8.0, 16.0, 30.0], [])
+        assert len(builder.completed) == 1
+
+    def test_a_start_is_not_made_when_its_build_could_only_be_cancelled(self, context: Path, tmp_path: Path) -> None:
+        """A read at the deadline costs nothing. A start there would be a build to cancel."""
+        clock = FakeClock()
+        service = FakeService([DONE], start=[OverBudgetError("busy")])
+        assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=60), clock=clock) == 1
+        # 2, 4, 8 and 16 seconds waited: the next wait, 32, would pass the minute, so no fifth try is made.
+        assert (len(service.started), clock.now) == (5, 30.0)
 
     @pytest.mark.parametrize("failure", [RemoteBuildError("no subclass"), KeyError("state")], ids=["base", "a-bug"])
     def test_a_client_that_breaks_the_contract_fails_the_image_and_leaves_no_build_running(
@@ -1072,6 +1116,146 @@ class TestTheContext:
         with pytest.raises(ImageFailed, match="a directory named Dockerfile at its root"):
             stage_context(context, "services/feed/Dockerfile")
 
+    def test_a_dockerfiles_own_ignore_file_goes_to_the_root_with_it(self, context: Path) -> None:
+        """A builder reads `<Dockerfile>.dockerignore` before the context's `.dockerignore`. Left behind, a file
+        the build excluded where it was written, a `private.env` say, would be sent and could be copied in."""
+        (context / "private.env").write_text("sample only\n")
+        (context / ".dockerignore").write_text("*.md\n")
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+        (context / "services" / "feed" / "Dockerfile.dockerignore").write_text("private.env\n")
+
+        staged = stage_context(context, "services/feed/Dockerfile")
+
+        assert (staged / "Dockerfile.dockerignore").read_text() == "private.env\n"
+        # The context's own, which a builder falls back to, is as it was.
+        assert (staged / ".dockerignore").read_text() == "*.md\n"
+
+    def test_the_replaced_root_dockerfiles_ignore_file_does_not_stand_in_for_one(self, context: Path) -> None:
+        """The named Dockerfile has no ignore file of its own, so the context's `.dockerignore` is what applies
+        to it. The one beside the root Dockerfile it replaces was never written for it."""
+        (context / ".dockerignore").write_text("*.md\n")
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+
+        staged = stage_context(context, "services/feed/Dockerfile")
+
+        assert not (staged / "Dockerfile.dockerignore").exists()
+        assert (staged / ".dockerignore").read_text() == "*.md\n"
+
+    def test_a_dockerfile_already_at_the_root_keeps_its_ignore_file(self, context: Path) -> None:
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+        assert stage_context(context, "Dockerfile") == context
+        assert (context / "Dockerfile.dockerignore").read_text() == "services\n"
+
+    def test_a_root_dockerfile_under_another_name_brings_its_ignore_file(self, context: Path) -> None:
+        (context / "Dockerfile.dev").write_text("FROM alpine\n")
+        (context / "Dockerfile.dev.dockerignore").write_text("secrets\n")
+        staged = stage_context(context, "Dockerfile.dev")
+        assert (staged / "Dockerfile").read_text() == "FROM alpine\n"
+        assert (staged / "Dockerfile.dockerignore").read_text() == "secrets\n"
+
+    @pytest.mark.parametrize("kind", ["a-file", "a-directory", "by-an-absolute-path"])
+    def test_a_context_with_a_link_that_leads_out_of_it_is_refused(
+        self, kind: str, context: Path, tmp_path: Path
+    ) -> None:
+        """A packager that follows links would send what is beside the context along with it."""
+        (tmp_path / "beside").mkdir()
+        (tmp_path / "beside" / "answer.txt").write_text("not this build's\n")
+        target = {
+            "a-file": "../../beside/answer.txt",
+            "a-directory": "../../beside",
+            "by-an-absolute-path": str(tmp_path / "beside" / "answer.txt"),
+        }[kind]
+        (context / "services" / "fixture").symlink_to(target)
+        with pytest.raises(ImageFailed, match="a link that leads out of it: 'services/fixture'"):
+            stage_context(context, "Dockerfile")
+
+    def test_links_that_go_round_in_a_loop_lead_nowhere_and_are_left(self, context: Path) -> None:
+        """They reach no file, inside the context or out of it."""
+        (context / "one").symlink_to("two")
+        (context / "two").symlink_to("one")
+        assert stage_context(context, "Dockerfile") == context
+
+    def test_links_that_stay_inside_the_context_are_left_alone(self, context: Path) -> None:
+        (context / "services" / "feed" / "up").symlink_to("../../app.py")
+        (context / "all-services").symlink_to("services")
+        staged = stage_context(context, "services/feed/Dockerfile")
+        assert (staged / "all-services" / "feed" / "up").read_text() == "print('hello')\n"
+
+
+class TestTheImagesOfOneSet:
+    """A set's images are built one after another, and a source can change in between."""
+
+    @staticmethod
+    def _sources(tmp_path: Path, files: dict[str, str]) -> Callable[[RemoteBuildImage, Path], Path]:
+        """A fetch that writes ``files`` as they are when it is called, and counts its calls."""
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            fetch.calls.append(image.source.fileset)  # ty: ignore[unresolved-attribute]
+            for name, content in files.items():
+                (directory / name).parent.mkdir(parents=True, exist_ok=True)
+                (directory / name).write_text(content)
+            return directory
+
+        fetch.calls = []  # ty: ignore[unresolved-attribute]
+        return fetch
+
+    def test_every_image_is_built_from_the_source_as_it_was_first_fetched(self, tmp_path: Path) -> None:
+        files = {"Dockerfile": "FROM scratch\n", "version": "first"}
+        fetch = self._sources(tmp_path, files)
+        seen: list[str] = []
+
+        class Changing(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                seen.append((build.context / "version").read_text())
+                files["version"] = "second"
+                return super().start(build)
+
+        builder = FakeBuilder()
+        assert _run(Changing([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 0
+        assert seen == ["first", "first"]
+        assert fetch.calls == ["default/fs-a"]  # ty: ignore[unresolved-attribute]
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+
+    def test_each_image_stages_its_own_copy(self, tmp_path: Path) -> None:
+        """Staging moves a Dockerfile to the root of the context. One image's must not become the next one's."""
+        files = {"Dockerfile": "FROM root\n", "one/Dockerfile": "FROM one\n", "two/Dockerfile": "FROM two\n"}
+        config = RemoteBuildStepConfig.model_validate(
+            {
+                "images": [
+                    {
+                        "image": name,
+                        "source": {"fileset": "default/fs-a"},
+                        "dockerfile": path,
+                        "platform": "linux/amd64",
+                    }
+                    for name, path in (("a", "one/Dockerfile"), ("b", "Dockerfile"), ("c", "two/Dockerfile"))
+                ],
+                "registry": "registry.example.com",
+                "repository": "team/images",
+                "build_timeout_seconds": 600,
+            }
+        )
+        built: list[str] = []
+
+        class Reading(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                built.append((build.context / "Dockerfile").read_text())
+                return super().start(build)
+
+        assert (
+            _run(
+                Reading([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=self._sources(tmp_path, files), config=config
+            )
+            == 0
+        )
+        assert built == ["FROM one\n", "FROM root\n", "FROM two\n"]
+
+    def test_a_set_of_one_image_is_built_where_it_was_fetched(self, context: Path, tmp_path: Path) -> None:
+        """Nothing to share, so no second copy of what may be a large context."""
+        service = FakeService([DONE])
+        assert _run(service, FakeBuilder(), context, tmp_path) == 0
+        assert service.started[0].context == context
+
 
 class TestIdentity:
     def test_the_key_is_stable_in_an_attempt_and_new_in_a_rerun_another_job_or_another_image(self) -> None:
@@ -1384,6 +1568,49 @@ class TestTheStepProgram:
         once = redact("refused: cred is not known")
         assert once == "refused: [credential] is not known"
         assert redact(once) == once
+
+    def test_the_fields_a_log_call_attaches_are_redacted_too(self, signals: None) -> None:
+        """A client that logs a failed request with its headers. `extra` fields reach a record after it is made,
+        and a formatter that prints one would print the credential in it."""
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        handler = Own()
+        handler.setFormatter(logging.Formatter("%(message)s %(headers)s %(attempt)s %(sent)s"))
+        client_log = logging.getLogger("some.build.client.requests")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        driver.redact_log("token-value")
+        try:
+            headers = {"Authorization": "Bearer token-value", "Accept": ["application/json"]}
+            client_log.error("request failed", extra={"headers": headers, "attempt": 2, "sent": b"key=token-value"})
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == [
+            "request failed {'Authorization': 'Bearer [credential]', 'Accept': ['application/json']} 2 "
+            "b'key=[credential]'"
+        ]
+        # The caller's own dictionary is not changed under it.
+        assert headers["Authorization"] == "Bearer token-value"
+
+    def test_a_logged_value_without_the_credential_is_passed_on_as_it_is(self) -> None:
+        redact = driver._redactor("token-value")
+        untouched = {"Accept": ["application/json"], "tries": 3}
+        assert driver._redact_value(untouched, redact) is untouched
+
+        class Request:
+            def __repr__(self) -> str:
+                return "<Request Authorization: Bearer token-value>"
+
+        assert driver._redact_value(Request(), redact) == "<Request Authorization: Bearer [credential]>"
+        nested: list[object] = ["token-value"]
+        for _ in range(10):
+            nested = [nested]
+        assert "token-value" not in repr(driver._redact_value(nested, redact))
 
     def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(
         self, signals: None, caplog: pytest.LogCaptureFixture

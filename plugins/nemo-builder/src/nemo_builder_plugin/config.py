@@ -116,8 +116,10 @@ class RemoteConfig(BaseModel):
         description=(
             "The platform secret holding the service's credential, which the step reads from its environment. Write "
             "it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read "
-            "from each submitter's own workspace, so every workspace would need its own. Null when the step's Jobs "
-            "profile mounts the credential instead, which a platform using workload token exchange requires."
+            "from each submitter's own workspace, so every workspace would need its own. Every user who may build "
+            "must be able to read it. Null when the step's Jobs profile mounts the credential instead, which a "
+            "platform using workload token exchange requires; a mounted credential is readable by any job that "
+            "names the profile, whoever creates it."
         ),
     )
     platforms: list[str] = Field(
@@ -133,8 +135,8 @@ class RemoteConfig(BaseModel):
         description=(
             "Take a spec whose Dockerfile isn't `Dockerfile` at the context root: the step puts that file at the "
             "root of the context it hands the service, in place of any `Dockerfile` already there. A build that "
-            "copies its own root `Dockerfile` into the image then copies the named one, and an ignore file named "
-            "for the Dockerfile (`<its path>.dockerignore`) is not moved with it. False refuses such a spec."
+            "copies its own root `Dockerfile` into the image then copies the named one. The Dockerfile's own "
+            "ignore file (`<its path>.dockerignore`) goes to the root with it. False refuses such a spec."
         ),
     )
     build_timeout_seconds: int = Field(
@@ -154,7 +156,8 @@ class RemoteConfig(BaseModel):
         try:
             return validate_registry_host(value)
         except ImageIdentityError as exc:
-            raise ValueError(f"remote.registry must be a host, optionally with a port, got {value!r}") from exc
+            # Not the value: a registry given with a login in it is a credential, and this is logged.
+            raise ValueError("remote.registry must be a host, optionally with a port") from exc
 
     @field_validator("repository")
     @classmethod
@@ -253,13 +256,12 @@ class BuilderConfig(NemoConfig):
         if value is None:
             return None
         if "/" in value:
-            raise ValueError(
-                f"registry must be a host without a path, got {value!r}. Put the path in `repository_prefix`."
-            )
+            raise ValueError("registry must be a host without a path. Put the path in `repository_prefix`.")
         try:
             return validate_registry_host(value)
         except ImageIdentityError as exc:
-            raise ValueError(f"registry must be a host, optionally with a port, got {value!r}") from exc
+            # Not the value: a registry given with a login in it is a credential, and this is logged.
+            raise ValueError("registry must be a host, optionally with a port") from exc
 
     @field_validator("repository_prefix")
     @classmethod

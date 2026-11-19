@@ -593,8 +593,10 @@ From the environment, the `remote` section is one JSON value, `NEMO_BUILDER_REMO
 
 A build set becomes one job with one step, `remote-build`. The step fetches each image's context
 from Files, acting for the submitter, has the service build it, and completes the row with the digest
-the service published and the service's own handle (`external`). No sandbox runs, and the push step's
-secrets, the build namespace and the work volume aren't used.
+the service published and the service's own handle (`external`). The builder completes such a row
+only when the completion names the service's build (`external.build_id`), and answers a second
+completion that names another with `409`. No sandbox runs, and the push step's secrets, the build
+namespace and the work volume aren't used.
 
 What differs for a caller:
 
@@ -604,9 +606,14 @@ What differs for a caller:
   two of these: it builds agent layers with `mounts` and copies prebuilt task images, so this
   backend refuses those builds.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
-  place of any `Dockerfile` already there. An ignore file named for it (`<its path>.dockerignore`)
-  isn't moved with it. With `allow_dockerfile_path: false`, such a spec is refused instead, with
-  `409` `backend_rejected`.
+  place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
+  it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
+  the build leaves out what it would have left out where it was written. With
+  `allow_dockerfile_path: false`, such a spec is refused instead, with `409` `backend_rejected`.
+- A build context with a link that leads out of it fails the image. In an archive, a link may point
+  anywhere in the archive, which can be more than the context; a service that follows links would
+  be sent a file from beside the context.
+- Each source of a set is fetched once, so every image of a revision is built from the same files.
 - Every workspace's images land in the service's one repository, and no tag is pushed. Pin
   `image_ref`.
 - The builder doesn't sign, and holds no key. Whether an image is signed, and by whom, is the
@@ -630,8 +637,9 @@ What an operator sets up:
   has about 30 seconds from the stop signal to cancel its build. `cancel` must be safe to repeat,
   and must return normally for a build that has already ended: the driver asks up to three times,
   and takes any error to mean the build may still be running.
-- The Jobs profile, written in full: a profile added under `jobs.executors` inherits nothing from
-  `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
+- The Jobs profile, on Kubernetes or Docker: the other Jobs backends can't run the step, and a
+  submit is refused on one. It is written in full: a profile added under `jobs.executors`
+  inherits nothing from `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
   security context, as the chart does for the in-cluster build profiles. Its `max_active_jobs` caps
   the builds in flight, so set it to what the service lets the deployment queue. Its
   `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when
@@ -643,10 +651,19 @@ What an operator sets up:
   RoleBinding there for the Jobs controller, the ServiceAccount the profile names, with
   `sandboxClusterCapable` a Secret under the OpenSandbox key's name (Jobs gives every job pod a
   reference to it), and a namespace-qualified `platform.base_url`.
-- The credential. Either the profile mounts it, or `credential_secret` names a platform secret,
-  which every user who may build must be able to read. Write it as `<workspace>/<name>`: a bare name
-  is read from each submitter's own workspace. A platform that uses workload token exchange must
-  mount it, because Jobs can't fetch a step's secrets there, and a submit is refused until it does.
+- The credential, which is in reach of more than the step either way, so give the service one that
+  can do no more than build into the one repository, and that can be replaced.
+  Prefer `credential_secret`, which names a platform secret: every user who may build must be able
+  to read it, and no one else can. Write it as `<workspace>/<name>`: a bare name is read from each
+  submitter's own workspace.
+  The other way is for the profile to mount it, as a Kubernetes Secret volume
+  (`storage.additional_volumes`). Jobs gives whatever a profile carries to every step that names
+  the profile, and doesn't restrict who may name one: anyone who may create a job, in any
+  workspace, can run their own image on `cpu/<profile>` and read the mounted credential, whether or
+  not they can read platform secrets (see [Security](#security)). A platform that uses workload
+  token exchange has only this way, because Jobs can't fetch a step's secrets there, and a submit
+  is refused until the profile mounts it. Never put the credential in the profile's `env`: Jobs
+  returns a profile's settings, `env` included, to every user who lists the profiles.
   A step program that reads a mounted credential passes `step_main` the function that reads it
   (`read_credential`), so the driver keeps it out of the log and out of every reason, as it does one
   from the environment.
@@ -897,6 +914,12 @@ differs with it is in
   rows stay `pending` in listings for good: the chart refuses a controller selection that leaves it
   out. Within the five minutes, submitting the same request again creates its job; after them,
   submit the next `revision`: the same one again would build images already failed.
+- **With `backend: remote`, a step that is killed can leave its build running.** The step cancels
+  the service's build when it gives the build up, or when Jobs tells it to stop. A step that is
+  killed outright, out of memory or with its node, cancels nothing: the row is failed once its job
+  has ended, and the build goes on until the service ends it. The step logs the build's ID when
+  the build starts, and nothing else records it. It gives the service's client the build's timeout
+  (`RemoteBuild.timeout_seconds`), for a service that can end a build by itself.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
@@ -950,7 +973,9 @@ differs with it is in
   route, including a `ready` row's digest, which `complete` never changes. Even a real workload
   token says only whom a step acts for, not which job it belongs to.
 - **With `backend: remote`, a `ready` row doesn't show whose image it names.** `complete` records
-  the digest and the `external` its caller sends, and checks neither against the build service.
+  the digest and the `external` its caller sends, and checks neither against the build service: it
+  holds no credential for one. Nor can it tell the row's own build step from any other job step
+  acting for the same submitter (above), which can complete the row first.
   Every workspace's images share the service's one repository, so a caller that completes its own
   `pending` row can name another workspace's image, if it knows that image's digest or handle. A
   consumer must not take a row's `image_ref` or `external.image_id` as proof that the image is the
@@ -969,7 +994,10 @@ differs with it is in
   under any of the builder's profiles. Under `build-control` such a job can create any pod in the
   build namespace: it can mount the whole work volume, with every build's contexts and outputs, and
   rewrite a layout another job's push step is about to publish; read any build pod's log; and delete
-  any build pod. Closing it needs Jobs to restrict these profiles to the builder.
+  any build pod. With `backend: remote`, a raw job under the remote-build profile gets everything
+  that profile carries, so a build service's credential that the profile mounts is readable by
+  anyone who may create a job in any workspace. Closing it needs Jobs to restrict these profiles to
+  the builder.
 - **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:
   the platform, as any user or service it names, every other Service, and on a cloud cluster the
   node's metadata server. A NetworkPolicy allowing the sandbox only public addresses would close

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -469,8 +469,14 @@ class TestSubmitting:
         assert response.json()["detail"] == (
             "the builder's configuration is invalid (remote.registry: invalid value); the API log says more"
         )
-        # The operator's log has the rest.
+        # The operator's log has the rest, but not the value either: here it holds a password.
         assert "remote.registry must be a host" in caplog.text
+        assert "t0ken" not in caplog.text
+
+    def test_a_validator_that_quotes_what_it_refused_has_it_taken_out_of_the_log(self) -> None:
+        """Whatever a validator's sentence says, the value it was given is not logged with it."""
+        error: Any = {"loc": ("registry",), "msg": "Value error, bad host 'bot:t0ken@reg'", "input": "bot:t0ken@reg"}
+        assert service._without_input(error) == "Value error, bad host <the value>"
 
     def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Such a check has no one setting to name. An answer of `(: invalid value)` would name nothing."""
