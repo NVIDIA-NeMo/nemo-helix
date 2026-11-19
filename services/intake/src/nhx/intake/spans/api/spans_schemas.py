@@ -42,6 +42,7 @@ class SpanGroupSortField(StrEnum):
 class SpanGroupBy(StrEnum):
     TRACE_ID = "trace_id"
     SESSION_ID = "session_id"
+    PROJECT = "project"
 
 
 SpanMode = IntakeResponseMode
@@ -51,7 +52,9 @@ SPAN_SUMMARY_ERROR_MESSAGE_CHAR_LIMIT = 1000
 class SpanFilter(BaseModel):
     session_id: str | None = Field(default=None, description="Filter by span session id.")
     trace_id: str | None = Field(default=None, description="Filter by canonical trace id.")
-    project: str | None = Field(default=None, description="Filter by project name.")
+    project: str | None = Field(
+        default=None, description="Filter by project name; an empty name selects unassigned spans."
+    )
     evaluation_name: str | None = Field(default=None, description="Filter by Evaluation name.")
     test_case_name: str | None = Field(default=None, description="Filter by test case name.")
     evaluation_id: str | None = Field(

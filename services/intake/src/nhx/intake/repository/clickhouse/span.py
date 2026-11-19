@@ -14,7 +14,7 @@ from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickH
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.span import SpanRepository
 from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, IntakeResponseMode, IntakeSpan, SpanGroup, SpanListFilter
-from nhx.intake.spans.span_attribute_catalog import where_clause
+from nhx.intake.spans.span_attribute_catalog import spec_for_field, where_clause
 from nhx.intake.spans.storage import (
     dict_to_row,
     make_pagination,
@@ -54,6 +54,7 @@ SPAN_SORT_COLUMNS = {
 SPAN_GROUP_COLUMN_FIELDS = {
     "trace_id": "trace_id",
     "session_id": "session_id",
+    "project": f"attributes_string['{spec_for_field('project').bag_key}']",
 }
 
 # Selected by the grouped query itself, so the outer ORDER BY can name them directly.
@@ -345,7 +346,9 @@ def _group_expression(field: str) -> _GroupExpression:
         return _GroupExpression(
             select_sql=f"{column} AS {field}",
             group_sql=column,
-            required_sql=f"{column} != ''",
+            # Include the unassigned-project bucket; trace/session IDs must
+            # still be present for their respective grouping modes.
+            required_sql="1" if field == "project" else f"{column} != ''",
         )
     raise ValueError(f"Unsupported span group-by field: {field}")
 

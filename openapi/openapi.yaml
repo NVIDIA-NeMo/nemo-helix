@@ -6538,11 +6538,15 @@ paths:
         required: true
         schema:
           type: string
-          description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+          description: 'Comma-separated span fields to group by: trace_id, session_id,
+            or project. Project grouping includes an empty-name bucket for unassigned
+            spans.'
           examples:
           - trace_id
           title: By
-        description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+        description: 'Comma-separated span fields to group by: trace_id, session_id,
+          or project. Project grouping includes an empty-name bucket for unassigned
+          spans.'
       - name: sort
         in: query
         required: false
@@ -23861,7 +23865,7 @@ components:
           title: Trace Id
           type: string
         project:
-          description: Filter by project name.
+          description: Filter by project name; an empty name selects unassigned spans.
           title: Project
           type: string
         evaluation_name:
@@ -23956,6 +23960,7 @@ components:
       enum:
       - trace_id
       - session_id
+      - project
       title: SpanGroupBy
     SpanGroupSortField:
       type: string
