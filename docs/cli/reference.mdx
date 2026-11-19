@@ -1286,11 +1286,21 @@ nemo wait inference provider [OPTIONS] NAME
 
 Commands for plugin discovery.
 
+External plugins served by their own HTTP adapter can be previewed, registered,
+and removed with `preview`, `install`, `installed`, and `uninstall`.
+
 **Examples:**
 
 ```shell
-# List installed plugins.
+# List installed plugins, including registered external ones.
 nemo plugins list
+# Review an external plugin's manifest without installing it.
+nemo plugins preview http://127.0.0.1:6007/plugin.yaml
+# Register it (shows the manifest and asks for consent).
+nemo plugins install http://127.0.0.1:6007/plugin.yaml
+# List and remove registered external plugins.
+nemo plugins installed
+nemo plugins uninstall phoenix
 ```
 
 **Usage:**
@@ -1317,7 +1327,10 @@ nemo plugins [OPTIONS] [COMMAND] [ARGS]...
 
 List installed plugins.
 
-Discovers installed plugins from registered NeMo plugin entry points.
+Shows plugins discovered from registered NeMo plugin entry points
+(`source: entry-point`) and external plugins registered with the platform
+through `nemo plugins install` (`source: external`). If the platform cannot
+be reached, only the entry-point plugins are shown, with a note.
 
 **Examples:**
 
