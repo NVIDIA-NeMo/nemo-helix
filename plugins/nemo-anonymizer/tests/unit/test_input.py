@@ -89,6 +89,15 @@ def test_fileset_validation_requires_file_fragment() -> None:
         )
 
 
+def test_fileset_validation_rejects_unsupported_file_type() -> None:
+    with pytest.raises(AnonymizerInvalidConfigError, match=r"\.csv or \.parquet file, got '\.json'"):
+        validate_anonymizer_input_source(
+            AnonymizerInputSpec(source="fs#data/records.JSON"),
+            workspace="team-a",
+            allow_local_paths=False,
+        )
+
+
 @pytest.mark.asyncio
 async def test_prepare_fileset_materializes_before_building_upstream_input(
     tmp_path: Path,

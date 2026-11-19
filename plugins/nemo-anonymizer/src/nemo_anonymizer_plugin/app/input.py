@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -207,6 +207,13 @@ def _parse_fileset_input_ref(source: str, *, workspace: str) -> tuple[str, str, 
     if not file_path:
         raise AnonymizerInvalidConfigError(
             f"Fileset input source {source!r} must point to a CSV or Parquet file using a #path fragment."
+        )
+    # Reject a reference that names another file type now, rather than after the job
+    # has started and downloaded it. A path with no extension is checked once downloaded.
+    suffix = PurePosixPath(file_path).suffix.lower()
+    if suffix and suffix not in _SUPPORTED_FILE_SUFFIXES:
+        raise AnonymizerInvalidConfigError(
+            f"Fileset input source {source!r} must point to a .csv or .parquet file, got {suffix!r}."
         )
     return workspace_name, fileset_name, file_path
 
