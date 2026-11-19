@@ -113,6 +113,40 @@ route with this body:
 }
 ```
 
+`trigger` lists events with OR semantics. A new commit from any listed Fileset
+or a new successful execution of any listed Step requests a run. `depends_on`
+lists readiness conditions with AND semantics: every Fileset must have a commit
+and every referenced Step must have a successful execution. Earlier successful
+executions remain sufficient for typed readiness conditions.
+
+```yaml
+name: evaluate
+depends_on:
+  - step_success: prepare
+  - fileset_commit: <configuration-fileset-id>
+trigger:
+  - fileset_commit: <input-fileset-id>
+  - step_success: refresh
+# executor: ...
+```
+
+Here, either an input commit or a successful `refresh` requests `evaluate`.
+It waits for a successful `prepare` and a committed configuration Fileset.
+Configuration commits alone do not request another run.
+
+An existing Fileset commit counts as an initial trigger. A Step trigger waits for
+its first successful execution. Without event inputs or triggers, a node runs
+once when ready. Later passes preserve consumed commits and success execution
+IDs, so old events do not fire again. Multiple events before execution coalesce.
+Events remain pending while prerequisites are unavailable. Each node runs at most
+once per pass; later events wait for the next pass. Step successes produced in a
+pass can trigger downstream nodes that have not run in that pass.
+
+Existing `inputs` remain Fileset change inputs. Existing string dependencies
+such as `depends_on: [prepare]` retain their dependency/reuse behavior. Both
+trigger and dependency Step references participate in cycle validation on
+create/update. Fileset references are checked for access before persistence.
+
 Use another request ID for another invalidation. Repeating the current signal
 for a node does not request extra work. Invalidations can remain pending while
 paused and cannot bypass failed dependencies. Input changes and invalidations

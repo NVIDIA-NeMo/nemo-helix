@@ -16,7 +16,7 @@ from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatusUpdateRequest
-from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowNodeState, WorkflowSpec
+from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowMode, WorkflowNodeState, WorkflowSpec
 from nhx.common.entities.client import SyncEntityClient
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.app.test_helpers import TestConstants
@@ -1715,3 +1715,392 @@ def test_once_failure_drains_already_admitted_work(workflow_harness: WorkflowHar
     finished = h.tick(job)
     assert finished.status == HelixJobStatus.ERROR
     assert len(finished.steps) == 2
+
+
+def _create_event_workflow(
+    h: WorkflowHarness, steps: list[HelixJobStepSpec], mode: WorkflowMode = "continuous"
+) -> HelixJobResponse:
+    return h.jobs.create_job(
+        workspace="default",
+        body=CreateHelixJobRequest(
+            name="events-" + uuid4().hex[:12],
+            source="test",
+            spec={},
+            platform_spec=HelixJobSpec(workflow=WorkflowSpec(mode=mode), steps=steps),
+        ),
+    ).data()
+
+
+def test_event_filesets_are_or_triggers_and_dependencies_are_persistent(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit, WorkflowStepSuccess
+
+    h = workflow_harness
+    left, right = h.fileset(), h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(name="prepare", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(name="validate", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[WorkflowStepSuccess(step_success="prepare"), WorkflowStepSuccess(step_success="validate")],
+                trigger=[WorkflowFilesetCommit(fileset_commit=left.id), WorkflowFilesetCommit(fileset_commit=right.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+        ],
+    )
+    assert len(h.tick(job).steps) == 2
+    h.finish(job, "prepare")
+    assert len(h.tick(job).steps) == 2
+    h.finish(job, "validate")
+    ready = h.tick(job)
+    assert len(ready.steps) == 3
+    assert ready.workflow is not None and len(ready.workflow.nodes[2].trigger) == 2
+    h.finish(job, "work")
+    waiting = h.tick(job)
+    assert waiting.workflow is not None and waiting.workflow.waiting_for_changes
+    for fileset in (left, right):
+        h.files.commit_fileset(workspace="default", name=fileset.name)
+        before = len(h.status(job).steps)
+        assert len(h.tick(job).steps) == before + 1
+        h.finish(job, "work")
+        h.tick(job)
+        assert len(h.tick(job).steps) == before + 1
+    assert h.node_state(job, "prepare").successful_step_id == ready.steps[0].id
+
+
+def test_step_success_or_trigger_does_not_wait_for_other_source(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowStepSuccess
+
+    h = workflow_harness
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[],
+                trigger=[WorkflowStepSuccess(step_success="left"), WorkflowStepSuccess(step_success="right")],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+            HelixJobStepSpec(name="left", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(name="right", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+        ],
+    )
+    assert len(h.tick(job).steps) == 2
+    h.finish(job, "left")
+    assert len(h.tick(job).steps) == 3
+    h.finish(job, "work")
+    h.tick(job)
+    h.finish(job, "right")
+    assert len(h.tick(job).steps) == 3
+    second = h.tick(job)
+    assert second.workflow is not None and second.workflow.pass_number == 2
+    assert len(second.steps) == 4
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 4
+    h.invalidate(job, ["left"])
+    h.tick(job)
+    h.finish(job, "left")
+    assert len(h.tick(job).steps) == 6
+
+
+@pytest.mark.parametrize("outcome", [HelixJobStatus.ERROR, HelixJobStatus.CANCELLED])
+def test_only_successful_execution_triggers_dependents(
+    workflow_harness: WorkflowHarness, outcome: HelixJobStatus
+) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowStepSuccess
+
+    h = workflow_harness
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(name="source", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[],
+                trigger=[WorkflowStepSuccess(step_success="source")],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+        ],
+    )
+    h.tick(job)
+    h.finish(job, "source", outcome)
+    h.tick(job)
+    assert len(h.tick(job).steps) == 1
+    h.invalidate(job, ["source"])
+    h.tick(job)
+    h.finish(job, "source")
+    assert len(h.tick(job).steps) == 3
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 3
+
+
+def test_fileset_readiness_does_not_trigger_work(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit
+
+    h = workflow_harness
+    source, prerequisite = h.fileset(), h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[WorkflowFilesetCommit(fileset_commit=prerequisite.id)],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            )
+        ],
+    )
+    h.tick(job)
+    h.finish(job, "work")
+    h.tick(job)
+    h.files.commit_fileset(workspace="default", name=prerequisite.name)
+    assert len(h.tick(job).steps) == 1
+    h.files.commit_fileset(workspace="default", name=source.name)
+    assert len(h.tick(job).steps) == 2
+
+
+def test_one_missing_or_event_does_not_block_other_event(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit
+
+    h = workflow_harness
+    available, missing = h.fileset(), h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[],
+                trigger=[
+                    WorkflowFilesetCommit(fileset_commit=available.id),
+                    WorkflowFilesetCommit(fileset_commit=missing.id),
+                ],
+                executor=TestConstants.TEST_EXECUTOR,
+            )
+        ],
+    )
+    h.files.delete_fileset_by_id(workspace="default", fileset_id=missing.id)
+    assert len(h.tick(job).steps) == 1
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 1
+    h.files.commit_fileset(workspace="default", name=available.name)
+    assert len(h.tick(job).steps) == 2
+
+
+@pytest.mark.parametrize("change", ["input_commit", "manual"])
+def test_step_event_keeps_midpass_fileset_change_pending(workflow_harness: WorkflowHarness, change: str) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit, WorkflowStepSuccess
+
+    h = workflow_harness
+    source = h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(name="prepare", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[WorkflowStepSuccess(step_success="prepare")],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id), WorkflowStepSuccess(step_success="prepare")],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+        ],
+    )
+    h.tick(job)
+    if change == "input_commit":
+        h.files.commit_fileset(workspace="default", name=source.name)
+    else:
+        h.invalidate(job, ["work"])
+    h.finish(job, "prepare")
+    assert len(h.tick(job).steps) == 2
+    captured = h.node_state(job, "work")
+    assert captured.active_inputs is not None
+    assert captured.active_inputs[source.id] == source.commit_revision
+    assert captured.active_run_revision != captured.requested_run_revision
+    if change == "input_commit":
+        assert captured.active_inputs != captured.observed_inputs
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 3
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 3
+
+
+def test_all_fileset_dependencies_must_be_ready_without_consuming_pending_trigger(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+    from nemo_helix_plugin.client.errors import NemoHTTPError
+    from nemo_helix_plugin.client.response import NemoResponse
+    from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit
+
+    h = workflow_harness
+    source, left, right = h.fileset(), h.fileset(), h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[
+                    WorkflowFilesetCommit(fileset_commit=left.id),
+                    WorkflowFilesetCommit(fileset_commit=right.id),
+                ],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            )
+        ],
+    )
+    original = AsyncFilesClient.from_client(h.context.async_client).get_fileset_by_id
+
+    async def unavailable(
+        self: AsyncFilesClient, *, workspace: str | None = None, fileset_id: str
+    ) -> NemoResponse[FilesetOutput]:
+        if fileset_id == right.id:
+            raise NemoHTTPError(httpx.Response(503, request=httpx.Request("GET", "http://test/fileset")))
+        return await original(workspace=workspace, fileset_id=fileset_id)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncFilesClient, "get_fileset_by_id", unavailable)
+        blocked = h.tick(job)
+        assert blocked.steps == [] and blocked.workflow is not None
+        assert blocked.workflow.nodes[0].blocked_by == ["fileset:" + right.id]
+        h.invalidate(job, ["work"])
+        h.files.commit_fileset(workspace="default", name=source.name)
+        for _ in range(2):
+            still_blocked = h.tick(job)
+            assert still_blocked.steps == [] and still_blocked.workflow is not None
+            assert still_blocked.workflow.pass_number == 1
+    assert len(h.tick(job).steps) == 1
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 1
+
+
+def test_prior_success_remains_ready_during_a_later_failed_rerun(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit, WorkflowStepSuccess
+
+    h = workflow_harness
+    source = h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(name="prepare", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[WorkflowStepSuccess(step_success="prepare")],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+        ],
+    )
+    h.tick(job)
+    h.finish(job, "prepare")
+    h.tick(job)
+    h.finish(job, "work")
+    h.tick(job)
+    prior = h.node_state(job, "prepare").successful_step_id
+    h.invalidate(job, ["prepare"])
+    h.files.commit_fileset(workspace="default", name=source.name)
+    assert len(h.tick(job).steps) == 4
+    h.finish(job, "prepare", HelixJobStatus.ERROR)
+    h.tick(job)
+    assert h.node_state(job, "work").active_step_id is not None
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 4
+    assert h.node_state(job, "prepare").successful_step_id == prior
+
+
+def test_event_triggers_wait_while_attempt_is_paused(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit
+
+    h = workflow_harness
+    source = h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            )
+        ],
+    )
+    h.tick(job)
+    h.finish(job, "work")
+    h.tick(job)
+    h.jobs.pause_job(workspace="default", name=job.id)
+    assert h.tick(job).status == HelixJobStatus.PAUSED
+    h.files.commit_fileset(workspace="default", name=source.name)
+    assert len(h.tick(job).steps) == 1
+    h.jobs.resume_job(workspace="default", name=job.id)
+    assert len(h.tick(job).steps) == 2
+    h.finish(job, "work")
+    h.tick(job)
+    assert len(h.tick(job).steps) == 2
+
+
+@pytest.mark.parametrize("condition_kind", ["trigger", "depends_on"])
+def test_new_fileset_conditions_can_wait_for_the_initial_commit(
+    workflow_harness: WorkflowHarness, monkeypatch: pytest.MonkeyPatch, condition_kind: str
+) -> None:
+    from nemo_helix_plugin.client.response import NemoResponse
+    from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit
+
+    h = workflow_harness
+    source = h.fileset()
+    original = AsyncFilesClient.from_client(h.context.async_client).get_fileset_by_id
+
+    async def uncommitted(
+        self: AsyncFilesClient, *, workspace: str | None = None, fileset_id: str
+    ) -> NemoResponse[FilesetOutput]:
+        response = await original(workspace=workspace, fileset_id=fileset_id)
+        if fileset_id == source.id:
+            response.body.commit_revision = None
+        return response
+
+    step = HelixJobStepSpec(name="work", depends_on=[], executor=TestConstants.TEST_EXECUTOR)
+    if condition_kind == "trigger":
+        step.trigger = [WorkflowFilesetCommit(fileset_commit=source.id)]
+    else:
+        step.depends_on = [WorkflowFilesetCommit(fileset_commit=source.id)]
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncFilesClient, "get_fileset_by_id", uncommitted)
+        job = _create_event_workflow(h, [step])
+        assert h.tick(job).steps == []
+        assert h.tick(job).steps == []
+    assert len(h.tick(job).steps) == 1
+
+
+def test_event_workflow_once_mode_remains_terminal(workflow_harness: WorkflowHarness) -> None:
+    from nemo_helix_plugin.jobs.workflows import WorkflowFilesetCommit, WorkflowStepSuccess
+
+    h = workflow_harness
+    source = h.fileset()
+    job = _create_event_workflow(
+        h,
+        [
+            HelixJobStepSpec(name="prepare", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            HelixJobStepSpec(
+                name="work",
+                depends_on=[WorkflowStepSuccess(step_success="prepare")],
+                trigger=[WorkflowFilesetCommit(fileset_commit=source.id)],
+                executor=TestConstants.TEST_EXECUTOR,
+            ),
+        ],
+        mode="run_to_completion",
+    )
+    assert len(h.tick(job).steps) == 1
+    h.finish(job, "prepare")
+    assert len(h.tick(job).steps) == 2
+    h.finish(job, "work")
+    assert h.tick(job).status == HelixJobStatus.COMPLETED
+    h.files.commit_fileset(workspace="default", name=source.name)
+    still_terminal = h.tick(job)
+    assert still_terminal.status == HelixJobStatus.COMPLETED and len(still_terminal.steps) == 2

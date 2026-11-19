@@ -6520,6 +6520,17 @@ components:
         Provide ``api_key_secret`` referencing a secret that contains ``WANDB_API_KEY``.
 
         Optionally set ``base_url`` for self-hosted W&B servers.'
+    WorkflowFilesetCommit:
+      properties:
+        fileset_commit:
+          type: string
+          minLength: 1
+          title: Fileset Commit
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_commit
+      title: WorkflowFilesetCommit
     WorkflowNodeView:
       properties:
         name:
@@ -6527,9 +6538,19 @@ components:
           title: Name
         depends_on:
           items:
-            type: string
+            anyOf:
+            - type: string
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
           type: array
           title: Depends On
+        trigger:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
+          type: array
+          title: Trigger
         freshness:
           type: string
           enum:
@@ -6607,6 +6628,17 @@ components:
       - last_poll_attempt_at
       - last_poll_error
       title: WorkflowNodeView
+    WorkflowStepSuccess:
+      properties:
+        step_success:
+          type: string
+          minLength: 1
+          title: Step Success
+      additionalProperties: false
+      type: object
+      required:
+      - step_success
+      title: WorkflowStepSuccess
     WorkflowView:
       properties:
         mode:

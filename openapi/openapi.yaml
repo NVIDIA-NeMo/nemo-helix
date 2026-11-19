@@ -18169,14 +18169,29 @@ components:
           type: array
         depends_on:
           title: Depends On
+          description: All readiness conditions must hold. Strings retain legacy dependency/reuse
+            behavior.
           items:
-            type: string
+            anyOf:
+            - type: string
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
           type: array
         inputs:
           title: Inputs
           items:
             $ref: '#/components/schemas/WorkflowInput'
           type: array
+        trigger:
+          title: Trigger
+          description: Any new Fileset commit or successful Step execution requests
+            a run; readiness still applies.
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
+          type: array
+          minItems: 1
         executor:
           oneOf:
           - $ref: '#/components/schemas/CPUExecutionProvider'
@@ -25221,6 +25236,17 @@ components:
       - account_id
       - authz_aliases
       title: WebSessionResponse
+    WorkflowFilesetCommit:
+      properties:
+        fileset_commit:
+          type: string
+          minLength: 1
+          title: Fileset Commit
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_commit
+      title: WorkflowFilesetCommit
     WorkflowInput:
       properties:
         fileset_id:
@@ -25239,9 +25265,19 @@ components:
           title: Name
         depends_on:
           items:
-            type: string
+            anyOf:
+            - type: string
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
           type: array
           title: Depends On
+        trigger:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/WorkflowFilesetCommit'
+            - $ref: '#/components/schemas/WorkflowStepSuccess'
+          type: array
+          title: Trigger
         freshness:
           type: string
           enum:
@@ -25336,6 +25372,17 @@ components:
       additionalProperties: false
       type: object
       title: WorkflowSpec
+    WorkflowStepSuccess:
+      properties:
+        step_success:
+          type: string
+          minLength: 1
+          title: Step Success
+      additionalProperties: false
+      type: object
+      required:
+      - step_success
+      title: WorkflowStepSuccess
     WorkflowView:
       properties:
         mode:

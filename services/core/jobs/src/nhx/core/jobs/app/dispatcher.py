@@ -314,19 +314,17 @@ class JobDispatcher:
                 raise JobEnvironmentValidationError(str(exc)) from exc
         if job_spec.workflow is not None:
             for step in job_spec.steps:
-                for reference in step.inputs or []:
+                for fileset_id in dict.fromkeys(step.trigger_filesets + step.dependency_filesets):
                     try:
                         fileset = (
-                            await self.files.get_fileset_by_id(workspace=job_workspace, fileset_id=reference.fileset_id)
+                            await self.files.get_fileset_by_id(workspace=job_workspace, fileset_id=fileset_id)
                         ).data()
                     except (ClientNotFoundError, ClientPermissionDeniedError) as error:
-                        raise JobEnvironmentValidationError(
-                            f"Input Fileset {reference.fileset_id} is unavailable"
-                        ) from error
-                    if fileset.commit_revision is None:
-                        raise JobEnvironmentValidationError(
-                            f"Input Fileset {reference.fileset_id} has no commit_revision"
-                        )
+                        raise JobEnvironmentValidationError(f"Input Fileset {fileset_id} is unavailable") from error
+                    if fileset.commit_revision is None and any(
+                        item.fileset_id == fileset_id for item in step.inputs or []
+                    ):
+                        raise JobEnvironmentValidationError(f"Input Fileset {fileset_id} has no commit_revision")
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if step.gateway_providers:
