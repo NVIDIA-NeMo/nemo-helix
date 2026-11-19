@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared readers for experimental grader-only skill evidence."""
-
 from collections.abc import Mapping
 
 from nhx_evals_sdk.metrics.protocol import MetricInput

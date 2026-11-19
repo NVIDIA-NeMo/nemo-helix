@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic checks over adapter-supplied, ordered skill/tool evidence."""
-
 from collections.abc import Iterable
 from fnmatch import fnmatchcase
 from itertools import groupby
@@ -75,8 +73,6 @@ class SkillOveractivationMetric(MetricBase):
 
 
 class SkillRoutingMetric(MetricBase):
-    """Distinguish target, acceptable alternate, and wrong skill invocations."""
-
     type: Literal[MetricType.SKILL_ROUTING] = MetricType.SKILL_ROUTING
     expected_skill: str = Field(min_length=1, description="Canonical component identity, e.g. Skill:search.")
     acceptable_skills: list[str] = Field(default_factory=list)
@@ -130,8 +126,6 @@ class ExpectedScriptInvocationMetric(MetricBase):
 
 
 class WorkflowComplianceMetric(MetricBase):
-    """Check authored precedence constraints without imposing order within a parallel step."""
-
     type: Literal[MetricType.WORKFLOW_COMPLIANCE] = MetricType.WORKFLOW_COMPLIANCE
     rules: list[SkillOrderRule] = Field(min_length=1)
 
@@ -150,7 +144,7 @@ class WorkflowComplianceMetric(MetricBase):
 
 
 class ErrorRecoveryMetric(MetricBase):
-    """Attribute failures explicitly and follow correlated retry chains to known success."""
+    """Measure recovery through explicit retry links."""
 
     type: Literal[MetricType.ERROR_RECOVERY] = MetricType.ERROR_RECOVERY
 
@@ -203,8 +197,6 @@ class ErrorRecoveryMetric(MetricBase):
 
 
 class ToolProductivityMetric(MetricBase):
-    """Aggregate observed productivity labels."""
-
     type: Literal[MetricType.TOOL_PRODUCTIVITY] = MetricType.TOOL_PRODUCTIVITY
 
     def output_spec(self) -> list[MetricOutputSpec]:
@@ -226,8 +218,6 @@ class ToolProductivityMetric(MetricBase):
 
 
 class ToolSelectionMetric(MetricBase):
-    """Measure tool selection precision, recall, and F1."""
-
     type: Literal[MetricType.TOOL_SELECTION] = MetricType.TOOL_SELECTION
     expected_tools: list[str] = Field(min_length=1)
     acceptable_tools: list[str] = Field(default_factory=list)
@@ -299,8 +289,6 @@ class SkillArgumentRule(BaseModel):
 
 
 class ToolArgumentComplianceMetric(MetricBase):
-    """Validate captured tool arguments against authored schemas."""
-
     type: Literal[MetricType.TOOL_ARGUMENT_COMPLIANCE] = MetricType.TOOL_ARGUMENT_COMPLIANCE
     rules: list[SkillArgumentRule] = Field(min_length=1)
 
@@ -361,8 +349,6 @@ class ToolExecutionOutcomeMetric(MetricBase):
 
 
 class SkillHandoffRule(BaseModel):
-    """Require an earlier producer's value or artifact in a later consumer's input."""
-
     model_config = ConfigDict(extra="forbid")
     producer: str = Field(min_length=1)
     consumer: str = Field(min_length=1)
@@ -458,7 +444,7 @@ def _handoff(trace: SkillToolTrace, rule: SkillHandoffRule, instruction: object)
 
 
 class SkillConflictRule(BaseModel):
-    """Two component patterns that must not both be activated in one trial."""
+    """Forbid both patterns from appearing in one trial."""
 
     model_config = ConfigDict(extra="forbid")
     first: str = Field(min_length=1)
@@ -466,8 +452,6 @@ class SkillConflictRule(BaseModel):
 
 
 class ComponentCoordinationMetric(MetricBase):
-    """Score ordering, handoffs, and conflicts."""
-
     type: Literal[MetricType.COMPONENT_COORDINATION] = MetricType.COMPONENT_COORDINATION
     order_rules: list[SkillOrderRule] = Field(default_factory=list)
     handoffs: list[SkillHandoffRule] = Field(default_factory=list)
@@ -530,7 +514,7 @@ class ComponentCoordinationMetric(MetricBase):
 
 
 class ComponentUsageMetric(MetricBase):
-    """Coverage of declared available components; environment omissions stay visible."""
+    """Measure coverage among available components."""
 
     type: Literal[MetricType.COMPONENT_USAGE] = MetricType.COMPONENT_USAGE
     declared_components: list[str] = Field(min_length=1)

@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Experimental adapter inputs for skill artifact scans and observed tool behavior."""
-
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -14,7 +12,7 @@ FindingSeverity = Literal["critical", "high", "medium", "low", "info"]
 
 
 class SkillContentBundle(BaseModel):
-    """Original UTF-8 files associated with one skill revision."""
+    """Original UTF-8 files for one revision."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -28,7 +26,7 @@ class SkillContentBundle(BaseModel):
 
 
 class SkillFinding(BaseModel):
-    """A redacted finding supplied by a scanner or verifier."""
+    """Redacted finding metadata."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -62,8 +60,6 @@ class SkillScanReport(BaseModel):
 
 
 class SkillTestReport(BaseModel):
-    """Bundled test results produced by an isolated test runner."""
-
     model_config = ConfigDict(extra="forbid", strict=True)
 
     artifact_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -76,7 +72,7 @@ class SkillTestReport(BaseModel):
 
 
 class SkillToolCall(BaseModel):
-    """A tool invocation. Calls at the same step are unordered."""
+    """Calls at the same step are unordered."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -85,7 +81,7 @@ class SkillToolCall(BaseModel):
     tool: str = Field(min_length=1)
     component: str | None = Field(default=None, description="Canonical identity such as Skill:search or MCP:docs/read.")
     arguments: dict[str, JsonValue] | None = Field(
-        default=None, description="Null means unavailable. An empty object records a call with no arguments."
+        default=None, description="Null for unavailable arguments. Empty object for a call with no arguments."
     )
     observation: JsonValue | None = None
     succeeded: bool | None = None
@@ -98,15 +94,13 @@ class SkillToolCall(BaseModel):
 
 
 class SkillToolTrace(BaseModel):
-    """Ordered tool evidence with explicit event coverage."""
-
     model_config = ConfigDict(extra="forbid", strict=True)
 
     trial_id: str = Field(min_length=1)
-    complete: bool = Field(description="True when all relevant events were captured. Individual fields may be unknown.")
+    complete: bool = Field(description="True when all relevant calls were captured.")
     calls: list[SkillToolCall]
     initial_context: list[JsonValue] | None = Field(
-        default=None, description="All preexisting context relevant to value handoffs; null means coverage is unknown."
+        default=None, description="Preexisting context relevant to value handoffs. Null when coverage is unknown."
     )
 
     @model_validator(mode="after")

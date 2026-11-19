@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SkillEvaluator-inspired rubrics expressed with the existing Helix judge and views."""
-
 from collections.abc import Sequence
 
 from nhx_evals_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
@@ -37,7 +35,7 @@ _DOCUMENTATION = [
 def skill_documentation_rubric_metric(
     model: Model | ModelRef,
 ) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Score the snapshot document on nine criteria and report a weighted mean."""
+    """Judge the snapshot document and return a weighted 0–10 view."""
     judge = LLMJudgeMetric(
         model=model,
         scores=[
@@ -108,7 +106,6 @@ def _outcome_judge(
 
 
 def answer_accuracy_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Judge five binary answer accuracy criteria."""
     return _outcome_judge(
         model,
         [
@@ -123,7 +120,7 @@ def answer_accuracy_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dic
 
 
 def task_success_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Judge goal achievement from the final answer."""
+    """Judge goal achievement from the final answer alone."""
     return _outcome_judge(
         model,
         [
@@ -139,7 +136,7 @@ def task_success_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[s
 def skill_outcome_metric(
     model: Model | ModelRef, assertions: Sequence[str] = ()
 ) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Combine accuracy, goal success, and assertions in one judge with separate views."""
+    """Return one judge with separate accuracy, success, and assertion views."""
     judge, views = answer_accuracy_metric(model)
     goal, goal_views = task_success_metric(model)
     scores = [*judge.scores, *goal.scores]

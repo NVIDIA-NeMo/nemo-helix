@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Offline fixtures for the remaining skill metrics; all scoring is implemented in the SDK."""
-
 import asyncio
 import hashlib
 import json

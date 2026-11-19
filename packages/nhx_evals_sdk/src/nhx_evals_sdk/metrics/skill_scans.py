@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Score scanner and isolated-test evidence without executing package code."""
+"""Score supplied scanner and test reports."""
 
 from collections import Counter
 from typing import ClassVar, Literal
@@ -16,8 +16,6 @@ from pydantic import Field
 
 
 class _SkillScanMetric(MetricBase):
-    """Common finding, severity, and completeness accounting for report adapters."""
-
     scan_key: str
     failure_severities: list[FindingSeverity] = ["critical", "high"]
     report_scope: ClassVar[Literal["artifact", "trial"]] = "artifact"
@@ -52,7 +50,6 @@ class _SkillScanMetric(MetricBase):
 
 
 def _scan_scores(report: SkillScanReport, failure_severities: list[FindingSeverity], *, canary: bool) -> MetricResult:
-    # Deduplicate repeated report rows without retaining sensitive excerpts.
     findings = {
         (finding.rule, finding.category, finding.severity, finding.file, finding.line) for finding in report.findings
     }
@@ -90,49 +87,37 @@ def _scan_scores(report: SkillScanReport, failure_severities: list[FindingSeveri
 
 
 class SkillSecurityScanMetric(_SkillScanMetric):
-    """SkillSpector or equivalent artifact-security findings."""
-
     type: Literal[MetricType.SKILL_SECURITY_SCAN] = MetricType.SKILL_SECURITY_SCAN
     scan_key: str = "security"
 
 
 class SkillSensitiveDataMetric(_SkillScanMetric):
-    """PII and credential findings, preserving scanner coverage."""
-
     type: Literal[MetricType.SKILL_SENSITIVE_DATA] = MetricType.SKILL_SENSITIVE_DATA
     scan_key: str = "sensitive_data"
 
 
 class SkillCodeRiskMetric(_SkillScanMetric):
-    """Bandit, Semgrep, or equivalent source-risk findings."""
-
     type: Literal[MetricType.SKILL_CODE_RISK] = MetricType.SKILL_CODE_RISK
     scan_key: str = "code_risk"
 
 
 class SkillLicenseMetric(_SkillScanMetric):
-    """License evidence and policy findings from an artifact auditor."""
-
     type: Literal[MetricType.SKILL_LICENSE] = MetricType.SKILL_LICENSE
     scan_key: str = "license"
 
 
 class SkillDependencyComplianceMetric(_SkillScanMetric):
-    """License, dependency pinning, banned-package, and vulnerability findings."""
-
     type: Literal[MetricType.SKILL_DEPENDENCY_COMPLIANCE] = MetricType.SKILL_DEPENDENCY_COMPLIANCE
     scan_key: str = "dependencies"
 
 
 class SkillPackageConfigurationRiskMetric(_SkillScanMetric):
-    """Plugin declarations, MCP configuration, privilege, and hook findings."""
-
     type: Literal[MetricType.SKILL_PACKAGE_CONFIGURATION_RISK] = MetricType.SKILL_PACKAGE_CONFIGURATION_RISK
     scan_key: str = "package_configuration"
 
 
 class AgentSafetyMetric(_SkillScanMetric):
-    """Trial-scoped safety findings, including planted-canary leakage."""
+    """Score trial safety findings, including canary leaks."""
 
     type: Literal[MetricType.AGENT_SAFETY] = MetricType.AGENT_SAFETY
     scan_key: str = "safety"
@@ -140,8 +125,6 @@ class AgentSafetyMetric(_SkillScanMetric):
 
 
 class SkillBundledTestMetric(MetricBase):
-    """Score a report from an isolated execution of the skill's own tests."""
-
     type: Literal[MetricType.SKILL_BUNDLED_TEST] = MetricType.SKILL_BUNDLED_TEST
     minimum_coverage: float = Field(default=0.8, ge=0, le=1, allow_inf_nan=False)
 

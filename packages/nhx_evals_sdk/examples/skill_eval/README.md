@@ -110,49 +110,24 @@ emitted only by the index task and the gcd task respectively.)
   `french_params` check uses a small illustrative French wordlist (`_FRENCH_PARAMS`)
   — extend it if a run picks a French word not listed.
 
-## Preview the hackathon metrics with saved trials
+## Offline previews
 
-From the repository root, with the Evals SDK installed in the workspace:
+Run from the repository root with the Evals SDK installed. Both previews use
+synthetic trials and fixed judge replies.
 
 ```bash
 uv run --no-sync python -m packages.nhx_evals_sdk.examples.skill_eval.run_metric_preview
+uv run --no-sync python -m packages.nhx_evals_sdk.examples.skill_eval.run_additional_metric_preview
 ```
 
-The preview scores two synthetic revisions against the same task and assertions.
-It calls the SDK evaluator with saved trials and uses fixed judge replies. It
-needs no running Helix services, agent harness, or model credentials. The output
-shows a repaired reference, improved assertion coverage, lower token usage,
-and the difference between unknown and observed skill activation.
+| Evidence field | Input |
+| --- | --- |
+| `reference.skill_snapshot`, `reference.skill_contents` | Original package inventory and text with a matching digest |
+| `reference.skill_scans[scan_key]`, `reference.skill_test_report` | Reports bound to the artifact digest |
+| `trial.metadata.skill_tool_trace`, `trial.metadata.skill_scans[scan_key]` | Evidence bound to the trial ID |
+| `trial.metadata.skill_activation[skill_name]` | Observed activation or non-activation. Omit when unknown. |
+| `trial.measurements` | Prompt, completion, and cache-read token counts. Use zero for known absence of cache reads. |
 
-| Metric | Evidence | What to compare |
-| --- | --- | --- |
-| Skill structure | Original `SKILL.md` and directory name | Portable frontmatter and instruction defects |
-| Reference integrity | Original `SKILL.md` and full package file inventory | Broken or escaping local file links and images in the entry document |
-| Context efficiency | Original `SKILL.md` | Line count and estimated tokens (`ceil(characters / 4)`) against an advisory budget |
-| Skill activation | Named per-trial observation and task expectation | Intended activation or non-activation, with unknown observations unmeasured |
-| Expected behavior | Shared assertions, the task prompt, and final answer | Individual met/unmet verdicts, mean assertion score, and all-assertions-met view |
-| Token efficiency | Canonical trial measurements | Inclusive prompt tokens minus cache reads plus completion tokens, with score `half_life / (half_life + tokens)` |
-
-The two placeholder inputs are `reference.skill_snapshot` for the artifact checks
-and `trial.metadata.skill_activation` for the activation check. A snapshot
-carries the original document, canonical file paths, directory name, and a digest
-supplied by the fixture adapter. A per-skill activation value of `false` requires
-adequate observation to establish non-activation. Omit the value when the skill
-is absent or instrumentation is insufficient. The built-in `SkillUsedMetric`
-is a useful trace heuristic, but its `false` result alone is insufficient to
-populate this field. These experimental SDK inputs are populated by the preview fixtures.
-A beta integration can adapt its stored artifacts and harness observations at
-this boundary. The scoring implementations live in `nhx_evals_sdk.metrics.skills`
-and their configurations are registered for inline plugin submission.
-
-The expected-behavior factory configures the existing Helix LLM judge. Its two
-views require all assertion scores to be finite, so an invalid or missing
-verdict leaves the composite unmeasured. The preview judges final answers only.
-Use assertions that every compared revision can satisfy without requiring a
-particular skill invocation. The activation check reports that separately.
-Token scoring requires a known cache partition, using an explicit zero when
-the runner can establish that no cache reads occurred.
-
-The [additional metrics guide](ADDITIONAL_METRICS.md) maps the remaining tier 1
-and tier 3 candidates to SDK metrics, documents their evidence adapters and
-score semantics, and provides a second offline preview for review.
+Use `skill_outcome_metric` for answer accuracy, goal success, and shared
+assertions in one task. Evaluate the skill document in a separate task with
+`skill_documentation_rubric_metric`.

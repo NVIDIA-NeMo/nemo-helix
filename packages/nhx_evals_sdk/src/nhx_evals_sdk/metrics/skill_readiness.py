@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic skill documentation and source-readiness checks."""
-
 import ast
 import re
 from typing import Literal
@@ -56,7 +54,7 @@ class _ReadinessMetric(MetricBase):
 
 
 class SkillStaticCorrectnessMetric(_ReadinessMetric):
-    """Check entry structure, documented examples, and local reference validity."""
+    """Check entry structure, examples, and local references."""
 
     type: Literal[MetricType.SKILL_STATIC_CORRECTNESS] = MetricType.SKILL_STATIC_CORRECTNESS
 
@@ -81,8 +79,6 @@ class SkillStaticCorrectnessMetric(_ReadinessMetric):
 
 
 class SkillDescriptionQualityMetric(_ReadinessMetric):
-    """Measure explicit trigger context, descriptive length, and specific language."""
-
     type: Literal[MetricType.SKILL_DESCRIPTION_QUALITY] = MetricType.SKILL_DESCRIPTION_QUALITY
     minimum_characters: int = Field(default=20, gt=0, strict=True)
 
@@ -108,7 +104,7 @@ class SkillDescriptionQualityMetric(_ReadinessMetric):
 
 
 class SkillReliabilityReadinessMetric(_ReadinessMetric):
-    """Check documented operational guidance and explicitly required I/O contracts."""
+    """Check headings for operational guidance and required I/O contracts."""
 
     type: Literal[MetricType.SKILL_RELIABILITY_READINESS] = MetricType.SKILL_RELIABILITY_READINESS
     requires_inputs: bool = Field(default=False, strict=True)
@@ -231,7 +227,7 @@ def _literal_integer(node: ast.AST) -> int | None:
 
 
 class SkillUnicodeSafetyMetric(MetricBase):
-    """Count hidden Unicode controls with explicit document or package scope."""
+    """Count hidden Unicode controls in the selected scope."""
 
     type: Literal[MetricType.SKILL_UNICODE_SAFETY] = MetricType.SKILL_UNICODE_SAFETY
     scope: Literal["document", "package"] = "document"
