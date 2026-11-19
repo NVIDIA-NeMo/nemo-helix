@@ -8,7 +8,12 @@ set -euo pipefail
 : "${MODEL_REF:?Set MODEL_REF to the workspace/name of your GPT-6 Luna gateway model}"
 
 demo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$demo_dir/../../../.." && pwd)
+skill_dir="$repo_root/packages/nhx_evals_sdk/src/nhx_evals_sdk/agent_eval/example_skills/supercool-guidelines"
 nemo_cli=(nemo --context "$CONTEXT")
+
+# Publish the skill as a stored skill entity; republishing identical content cuts no new revision.
+"${nemo_cli[@]}" agents skills publish supercool-guidelines --from-dir "$skill_dir" --workspace "$WORKSPACE" >/dev/null
 
 taskset=$("${nemo_cli[@]}" evals tasksets create --workspace "$WORKSPACE" \
     --harbor-dir "$demo_dir/dataset" --json | jq -er '.taskset_ref')
@@ -16,7 +21,7 @@ taskset=$("${nemo_cli[@]}" evals tasksets create --workspace "$WORKSPACE" \
 
 submit() {
     local variant=$1 output run_id
-    output=$(jq -n --arg variant "$variant" --arg model "$MODEL_REF" \
+    output=$(jq -n --arg variant "$variant" --arg model "$MODEL_REF" --arg skill "$WORKSPACE/supercool-guidelines" \
         --arg key "${INFERENCE_KEY_SECRET:-}" --arg profile "${SANDBOX_PROFILE:-}" '
         {
             spec: {target: {
@@ -27,7 +32,7 @@ submit() {
             }},
             execution: {dispatcher_profile: "default"}
         }
-        | if $variant == "with-skill" then .spec.target.env_vars = {NHX_HARBOR_MOCK_SKILL: "1"} else . end
+        | .spec.target.skills = (if $variant == "with-skill" then [$skill] else [] end)
         | if $key != "" then .spec.target.env_secrets = {OPENAI_API_KEY: $key} else . end
         | if $profile != "" then .execution.sandbox.profile = $profile else . end
     ' | "${nemo_cli[@]}" evals runs submit --workspace "$WORKSPACE" \
