@@ -40,6 +40,9 @@ def _app(
     app = FastAPI()
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
+    # As the platform registers them on the service's app.
+    for kind, handler in BuilderService().get_exception_handlers().items():
+        app.add_exception_handler(kind, handler)
     app.dependency_overrides[get_entity_client] = lambda: entities
     app.dependency_overrides[current_caller] = lambda: caller
     # Every build job still running, unless a test says otherwise.

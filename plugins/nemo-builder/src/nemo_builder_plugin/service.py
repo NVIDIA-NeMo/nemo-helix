@@ -10,7 +10,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import ClassVar, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
@@ -62,7 +62,7 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nemo_helix_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
@@ -76,13 +76,24 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
         raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
 
 
-def _refusal(code: str, exc: Exception) -> JSONResponse:
-    """A 409 that says which kind it is.
+class Refused(Exception):
+    """A submit the builder refuses with a 409 that says which kind it is.
 
     ``detail`` is the sentence it always was. ``code`` is for a caller that must tell a refusal, which the same
     request meets every time, from a revision another request holds, which the next revision gets past.
     """
-    return JSONResponse(status_code=409, content={"detail": str(exc), "code": code})
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def _refused(_request: Request, refused: Exception) -> JSONResponse:
+    """The answer to a :class:`Refused`: what an ``HTTPException`` would answer, with ``code`` beside ``detail``."""
+    if not isinstance(refused, Refused):
+        raise refused
+    return JSONResponse(status_code=409, content={"detail": refused.detail, "code": refused.code})
 
 
 def _setting(location: tuple[int | str, ...]) -> str:
@@ -159,6 +170,9 @@ class BuilderService(NemoService):
     name: ClassVar[str] = "builder"
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "secrets"]
 
+    def get_exception_handlers(self) -> dict[type[Exception], ExceptionHandler]:
+        return {Refused: _refused}
+
     def get_routers(self) -> list[RouterSpec]:
         return [
             RouterSpec(
@@ -183,7 +197,7 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         client: AsyncNemoClient = Depends(get_nemo_client),
         caller: Caller = Depends(current_caller),
-    ) -> SubmitBuildResponse | JSONResponse:
+    ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. Jobs starts the job once
@@ -234,11 +248,11 @@ def _build_router() -> APIRouter:
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except BackendRejectedError as exc:
-            return _refusal(CODE_BACKEND_REJECTED, exc)
+            raise Refused(CODE_BACKEND_REJECTED, str(exc)) from exc
         except MissingSecrets as exc:
-            return _refusal(CODE_MISSING_SECRETS, exc)
+            raise Refused(CODE_MISSING_SECRETS, str(exc)) from exc
         except BackendChanged as exc:
-            return _refusal(CODE_BACKEND_CHANGED, exc)
+            raise Refused(CODE_BACKEND_CHANGED, str(exc)) from exc
         except BuildConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except UpstreamUnavailable as exc:
