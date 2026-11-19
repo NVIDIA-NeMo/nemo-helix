@@ -29,6 +29,8 @@ from nemo_helix_plugin.service import NemoService, RouterSpec
 from nemo_notif_plugin import store
 from nemo_notif_plugin.authz import NotifEventPerms, scope
 from nemo_notif_plugin.broker import Listener, NotifBroker, broker
+from nemo_notif_plugin.config import NotifConfig
+from nemo_notif_plugin.mailer import Mailer
 from nemo_notif_plugin.types import (
     CreateNotifEventRequest,
     MarkAllReadResponse,
@@ -57,7 +59,7 @@ class NotifService(NemoService):
     def get_routers(self) -> list[RouterSpec]:
         return [
             RouterSpec(
-                build_events_router(broker),
+                build_events_router(broker, Mailer(NotifConfig.get().email)),
                 tag="Notif Events",
                 description="Publish ephemeral notification events and stream them over SSE.",
                 prefix="/v2/workspaces/{workspace}",
@@ -90,7 +92,7 @@ async def stream_events(
         yield format_sse(event)
 
 
-def build_events_router(notif_broker: NotifBroker) -> APIRouter:
+def build_events_router(notif_broker: NotifBroker, mailer: Mailer | None = None) -> APIRouter:
     router = APIRouter()
 
     @router.post("/events", status_code=201, response_model=PublishNotifEventResponse)
@@ -105,6 +107,8 @@ def build_events_router(notif_broker: NotifBroker) -> APIRouter:
         entity = await store.create_event(entity_client, workspace, body)
         # New events are unread for everyone, so one payload serves every listener.
         event = store.to_event(entity, principal_id=None)
+        if mailer is not None:
+            mailer.submit(event)
         return PublishNotifEventResponse(event=event, delivered=notif_broker.publish(event))
 
     @router.get("/events", response_model=NotifEventList)

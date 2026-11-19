@@ -57,6 +57,22 @@ def test_pending_chunk_is_reported_once() -> None:
     assert tracker.observe(SOURCE, [Chunk("c1")]) == []
 
 
+def test_event_addresses_the_people_to_notify() -> None:
+    tracker = DraftPolicyTracker()
+    source = DraftEventSource(kind="job", workspace="team", name="train", sandbox="nhx-abc")
+
+    [anonymous] = tracker.observe(source, [Chunk("c1")])
+    [addressed] = tracker.observe(
+        DraftEventSource(
+            kind="job", workspace="team", name="train", sandbox="nhx-def", notify_emails=("creator@example.com",)
+        ),
+        [Chunk("c1")],
+    )
+
+    assert "email_to" not in anonymous["data"]
+    assert addressed["data"]["email_to"] == ["creator@example.com"]
+
+
 def test_decision_on_a_reported_chunk_is_reported() -> None:
     tracker = DraftPolicyTracker()
     tracker.observe(SOURCE, [Chunk("c1"), Chunk("c2")])

@@ -70,6 +70,7 @@ class DraftEventSource:
     sandbox: str
     step: str | None = None
     link: str | None = None
+    notify_emails: tuple[str, ...] = ()
 
 
 def _endpoints(chunk: DraftChunk) -> list[str]:
@@ -91,6 +92,8 @@ def build_event(chunk: DraftChunk, source: DraftEventSource) -> dict[str, Any]:
     else:
         title = f"Network access {chunk.status}: {target}"
         message = f"{binary} in {workload} stays blocked from {target}. {chunk.rejection_reason}".strip()
+    # The notif service emails these people, e.g. the creator of the job that is blocked.
+    email_to = {"email_to": list(source.notify_emails)} if source.notify_emails else {}
     return {
         "type": f"{EVENT_TYPE_PREFIX}.{chunk.status}",
         "title": title[:200],
@@ -112,6 +115,7 @@ def build_event(chunk: DraftChunk, source: DraftEventSource) -> dict[str, Any]:
             "validation_result": chunk.validation_result,
             "hit_count": chunk.hit_count,
             "stage": chunk.stage,
+            **email_to,
         },
     }
 

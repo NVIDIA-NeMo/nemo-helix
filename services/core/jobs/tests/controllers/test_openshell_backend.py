@@ -650,6 +650,23 @@ class TestSync:
         }
         assert events[0]["link"] == f"/workspaces/{step.workspace}/jobs/{step.job}"
 
+    def test_draft_event_addresses_the_job_creator(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        backend._client.get_draft_policy.return_value = pb.GetDraftPolicyResponse(
+            chunks=[pb.PolicyChunk(id="c1", status="pending", rule_name="allow_example_com_443")]
+        )
+        step = test_step_pending
+        step.auth_context = AuthContext(principal_id="user-1", principal_email="creator@example.com")
+
+        with patch.object(backend_module, "publish_events") as publish:
+            backend.sync(step)
+
+        _, _, events = publish.call_args.args
+        assert events[0]["data"]["email_to"] == ["creator@example.com"]
+
     def test_draft_policy_rpc_error_does_not_change_the_step(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:

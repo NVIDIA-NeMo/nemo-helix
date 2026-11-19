@@ -52,6 +52,32 @@ curl -X POST http://localhost:8080/apis/notif/v2/workspaces/default/events \
   -H 'content-type: application/json' -d '{"type":"jobs.job.failed","title":"Fine-tune failed"}'
 ```
 
+## Email
+
+Published events can also be emailed. This is off by default, and when turned on it starts as a
+dry run that logs each email instead of sending it. Configure it in the platform config:
+
+```yaml
+notif:
+  email:
+    enabled: true
+    dry_run: true                     # set to false to open SMTP connections
+    smtp_host: smtp.example.com       # unauthenticated relay; port 25, no STARTTLS by default
+    sender: nemo-notif@example.com
+    recipients: [oncall@example.com]  # receive every matching event
+    allowed_recipient_domains: [example.com]
+    severities: [warning, error]      # default
+    type_prefixes: [openshell.]       # default: every type
+    studio_base_url: https://nemo.example.com/studio
+```
+
+A publisher can address specific people with `data.email_to` (a list of addresses); only addresses
+in `allowed_recipient_domains` are used. The OpenShell draft policy events set it to the job
+creator's email when the job has one.
+
+Each matching event is one plain-text email, sent in the background after the event is stored.
+There are no per-user preferences, batching or retries: a failed send is logged and dropped.
+
 ## Authz
 
 Publishing requires `notif.events.create` (Editor). Listing, streaming and the read/unread routes

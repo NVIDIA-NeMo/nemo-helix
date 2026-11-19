@@ -653,6 +653,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
         except grpc.RpcError as exc:
             logger.debug("GetDraftPolicy failed for sandbox %s: %s", sandbox_name, _rpc_detail(exc))
             return
+        creator_email = step.auth_context.principal_email if step.auth_context else None
         source = DraftEventSource(
             kind="job",
             workspace=step.workspace,
@@ -660,6 +661,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
             sandbox=sandbox_name,
             step=step.name,
             link=f"/workspaces/{step.workspace}/jobs/{step.job}",
+            notify_emails=(creator_email,) if creator_email else (),
         )
         events = self._draft_tracker.observe(source, drafts.chunks)
         if final:
