@@ -588,3 +588,140 @@ def test_files_client_source_lists_and_reads_through_the_files_api_shapes() -> N
     assert source.read("job-fileset-eval", "a/b.json") == b"payload"
     # A ref carries its own workspace; a bare name falls back to the workflow workspace.
     assert calls == [("other", "job-fileset-eval", None), ("wf-workspace", "job-fileset-eval", "a/b.json")]
+
+
+# --- raw completions as the input ------------------------------------------------------------------
+
+
+def _completion_files(trial_id: str, text: str, *, count: int = 2) -> dict[str, dict[str, Any]]:
+    """`count` chained raw model calls for a trial, keyed by bundle-relative ref."""
+    request: list[dict[str, Any]] = [
+        {"role": "system", "content": [{"type": "text", "text": "You are an agent."}]},
+        {"role": "user", "content": [{"type": "text", "text": f"prompt {trial_id}"}]},
+    ]
+    files: dict[str, dict[str, Any]] = {}
+    for number in range(count):
+        last = number == count - 1
+        calls = (
+            None
+            if last
+            else [{"id": f"c{number}", "type": "function", "function": {"name": "bash", "arguments": "{}"}}]
+        )
+        files[f"evidence/{trial_id}/agent/completions/call-{number}.json"] = {
+            "messages": list(request),
+            "response": {
+                "choices": [
+                    {
+                        "finish_reason": "stop" if last else "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": f"{text} {number}",
+                            "reasoning_content": f"thought {number}",
+                            "tool_calls": calls,
+                        },
+                    }
+                ]
+            },
+            "kwargs": {"tools": [BASH]},
+            "timestamp": float(number),
+        }
+        if calls:
+            request += [
+                {"role": "assistant", "content": [], "tool_calls": calls},
+                {
+                    "role": "tool",
+                    "tool_call_id": f"c{number}",
+                    "name": "bash",
+                    "content": [{"type": "text", "text": "output " * 100}],
+                },
+            ]
+    return files
+
+
+def _with_completions(
+    trial: dict[str, Any], files: dict[str, dict[str, Any]], bundle: dict[str, bytes], *, write: bool = True
+) -> None:
+    for ref in files:
+        trial["evidence"]["descriptors"][f"artifact:{ref.split('/', 2)[2]}"] = {"kind": "artifact", "ref": ref}
+        if write:
+            bundle[f"{BUNDLE}/{ref}"] = json.dumps(files[ref]).encode()
+
+
+def test_raw_completions_win_over_the_atif_summary(tmp_path: Path) -> None:
+    trial = _trial("t1", "task-a")
+    files = _bundle([trial], [], {"t1": _atif("prompt t1", "ls")})
+    _with_completions(trial, _completion_files("t1", "real text"), files)
+    files[f"{BUNDLE}/trials.jsonl"] = (json.dumps(trial) + "\n").encode()
+
+    result = convert_filesets(MemorySource(files), _spec(validation_fraction=0), tmp_path)
+
+    rows = _read(result.train_path)
+    assert len(rows) == 2  # one per raw call; the ATIF would have given 2 as well but with its own text
+    assert [row["messages"][-1]["content"] for row in rows] == ["real text 0", "real text 1"]
+    assert rows[0]["messages"][-2] == {"role": "assistant", "thinking": "thought 0"}
+    assert result.output["sources"] == {"completions": 1}
+    assert result.output["skipped"] == {}
+    for row in rows:
+        SFTPChatDatasetItemSchema.model_validate(row)
+
+
+def test_a_trial_with_completions_and_no_atif_trace_converts(tmp_path: Path) -> None:
+    trial = _trial("t1", "task-a", ref=None)
+    files = _bundle([trial], [], {})
+    _with_completions(trial, _completion_files("t1", "only raw"), files)
+    files[f"{BUNDLE}/trials.jsonl"] = (json.dumps(trial) + "\n").encode()
+
+    result = convert_filesets(MemorySource(files), _spec(validation_fraction=0), tmp_path)
+
+    assert result.output["examples"] == 2
+    assert result.output["sources"] == {"completions": 1}
+    assert "no_atif_trace" not in result.output["skipped"]
+
+
+def test_unreadable_completions_fall_back_to_the_atif_trace_and_say_so(tmp_path: Path) -> None:
+    missing = _trial("missing", "task-a")
+    corrupt = _trial("corrupt", "task-b")
+    files = _bundle([missing, corrupt], [], {"missing": _atif("p", "ls"), "corrupt": _atif("p", "ls")})
+    _with_completions(missing, _completion_files("missing", "x"), files, write=False)  # listed, not stored
+    _with_completions(corrupt, _completion_files("corrupt", "x"), files)
+    files[f"{BUNDLE}/evidence/corrupt/agent/completions/call-0.json"] = b"{not json"
+    files[f"{BUNDLE}/trials.jsonl"] = "".join(json.dumps(t) + "\n" for t in (missing, corrupt)).encode()
+
+    result = convert_filesets(MemorySource(files), _spec(validation_fraction=0), tmp_path)
+
+    assert result.output["sources"] == {"atif": 2}
+    assert result.output["skipped"] == {"completions_unreadable": 2}
+    assert result.output["examples"] == 4
+
+
+def test_unreadable_completions_without_a_trace_skip_the_trial(tmp_path: Path) -> None:
+    broken = _trial("broken", "task-a", ref=None)
+    good = _trial("good", "task-b")
+    files = _bundle([broken, good], [], {"good": _atif("p", "ls")})
+    _with_completions(broken, _completion_files("broken", "x"), files, write=False)
+    files[f"{BUNDLE}/trials.jsonl"] = "".join(json.dumps(t) + "\n" for t in (broken, good)).encode()
+
+    result = convert_filesets(MemorySource(files), _spec(validation_fraction=0), tmp_path)
+
+    assert result.output["runs"] == 1
+    assert result.output["sources"] == {"atif": 1}
+    assert result.output["skipped"] == {"completions_unreadable": 1}
+
+
+def test_the_length_limit_applies_to_rows_built_from_completions(tmp_path: Path) -> None:
+    trial = _trial("t1", "task-a", ref=None)
+    files = _bundle([trial], [], {})
+    _with_completions(trial, _completion_files("t1", "y" * 300, count=6), files)
+    files[f"{BUNDLE}/trials.jsonl"] = (json.dumps(trial) + "\n").encode()
+    spec = _spec(
+        validation_fraction=0,
+        student_model="default/s",
+        max_tokens={"behavior": "drop-longest", "tokens": 2500},
+    )
+
+    result = convert_filesets(MemorySource(files), spec, tmp_path, CharCounter())
+
+    rows = _read(result.train_path)
+    assert 0 < len(rows) < 6
+    assert all(CharCounter().count(r["messages"], r.get("tools")) <= 2500 for r in rows)
+    assert result.output["skipped"]["row_over_max_tokens"] == 6 - len(rows)

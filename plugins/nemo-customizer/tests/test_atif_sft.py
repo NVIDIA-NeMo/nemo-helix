@@ -1,11 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from typing import Any
 
 import pytest
 from nemo_customizer.atif_sft import (
     PassFilter,
+    completion_refs,
+    convert_completions,
     convert_trajectory,
     held_out_tasks,
     join_bundle_path,
@@ -330,3 +333,197 @@ def test_held_out_tasks_are_stable_and_leave_training_data() -> None:
     assert held_out_tasks({"only"}, 0.5) == set()
     assert held_out_tasks(tasks, 0) == set()
     assert len(held_out_tasks({"a", "b", "c"}, 0.01)) == 1  # a positive fraction holds out at least one
+
+
+# --- raw completions -------------------------------------------------------------------------------
+
+
+def _parts(text: str) -> list[dict[str, str]]:
+    return [{"type": "text", "text": text}] if text else []
+
+
+def _call_message(call_id: str, command: str) -> dict[str, Any]:
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": "bash", "arguments": json.dumps({"command": command})},
+    }
+
+
+def completion(
+    request: list[dict[str, Any]],
+    *,
+    text: str | None = None,
+    reasoning: str | None = None,
+    calls: list[dict[str, Any]] | None = None,
+    finish: str = "tool_calls",
+    at: float = 0.0,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One raw model call: the request messages the model got and the chat completion it returned."""
+    message: dict[str, Any] = {"role": "assistant", "content": text, "tool_calls": calls}
+    if reasoning is not None:
+        message["reasoning_content"] = reasoning
+    return {
+        "messages": request,
+        "response": {"choices": [{"finish_reason": finish, "message": message}]},
+        "kwargs": {"tools": [BASH] if tools is None else tools},
+        "timestamp": at,
+    }
+
+
+def _requests() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A two-turn conversation as OpenHands sends it: history keeps tool calls but not the assistant text."""
+    first = [
+        {"role": "system", "content": _parts("You are an agent.")},
+        {"role": "user", "content": _parts("Fix the bug.")},
+    ]
+    second = [
+        *first,
+        {"role": "assistant", "content": [], "tool_calls": [_call_message("a", "ls")]},
+        {"role": "tool", "tool_call_id": "a", "name": "bash", "content": _parts("file.py")},
+    ]
+    return first, second
+
+
+def test_each_raw_call_is_a_row_with_its_reasoning_text_and_tools() -> None:
+    first, second = _requests()
+    converted = convert_completions(
+        [
+            completion(first, text="Let me look.", reasoning="List files first.", calls=[_call_message("a", "ls")]),
+            completion(second, text="Done.", reasoning="It is fixed.", calls=None, finish="stop", at=1.0),
+        ]
+    )
+
+    assert converted.skipped == []
+    assert len(converted.chains) == 1
+    one, two = converted.rows
+    assert one["messages"] == [
+        {"role": "system", "content": "You are an agent."},
+        {"role": "user", "content": "Fix the bug."},
+        {"role": "assistant", "thinking": "List files first."},
+        {
+            "role": "assistant",
+            "content": "Let me look.",
+            "tool_calls": [{"type": "function", "function": {"name": "bash", "arguments": {"command": "ls"}}}],
+        },
+    ]
+    assert one["tools"][0]["function"]["name"] == "bash"
+    # The context is the request verbatim: the history turn has no text and no thinking, as the model saw it.
+    assert two["messages"][2] == {
+        "role": "assistant",
+        "tool_calls": [{"type": "function", "function": {"name": "bash", "arguments": {"command": "ls"}}}],
+    }
+    assert two["messages"][3] == {"role": "tool", "content": "file.py"}
+    assert two["messages"][-2:] == [
+        {"role": "assistant", "thinking": "It is fixed."},
+        {"role": "assistant", "content": "Done."},
+    ]
+    for row in converted.rows:
+        SFTPChatDatasetItemSchema.model_validate(row)
+
+
+def test_calls_are_put_in_time_order() -> None:
+    first, second = _requests()
+    converted = convert_completions(
+        [
+            completion(second, text="second", at=2.0, calls=None, finish="stop"),
+            completion(first, text="first", at=1.0, calls=[_call_message("a", "ls")]),
+        ]
+    )
+    assert [row["messages"][-1]["content"] for row in converted.rows] == ["first", "second"]
+    assert len(converted.chains) == 1
+
+
+def test_a_call_that_does_not_extend_the_previous_request_starts_a_new_chain() -> None:
+    first, second = _requests()
+    unrelated = [{"role": "user", "content": _parts("A different conversation.")}]
+    converted = convert_completions(
+        [
+            completion(first, text="a", calls=[_call_message("a", "ls")], at=1.0),
+            completion(second, text="b", calls=None, finish="stop", at=2.0),
+            completion(unrelated, text="c", calls=None, finish="stop", at=3.0),
+        ]
+    )
+    assert [len(chain) for chain in converted.chains] == [2, 1]
+
+
+def test_a_response_cut_off_by_the_token_limit_is_not_a_target() -> None:
+    first, second = _requests()
+    converted = convert_completions(
+        [
+            completion(first, text="cut off", calls=[_call_message("a", "ls")], finish="length", at=1.0),
+            completion(second, text="ok", calls=None, finish="stop", at=2.0),
+        ]
+    )
+    assert [row["messages"][-1]["content"] for row in converted.rows] == ["ok"]
+    assert converted.skipped == ["truncated_completion"]
+
+
+def test_blank_reasoning_and_empty_responses_make_no_thinking_message_or_row() -> None:
+    first, second = _requests()
+    converted = convert_completions(
+        [
+            completion(first, text="hi", reasoning="  \n", calls=None, finish="stop", at=1.0),
+            completion(second, text="", reasoning=None, calls=None, finish="stop", at=2.0),
+        ]
+    )
+    assert len(converted.rows) == 1
+    assert converted.rows[0]["messages"][-1] == {"role": "assistant", "content": "hi"}
+
+
+def test_tool_arguments_that_are_not_an_object_skip_the_run() -> None:
+    first, _ = _requests()
+    bad = {"id": "a", "type": "function", "function": {"name": "bash", "arguments": "not json"}}
+    converted = convert_completions([completion(first, calls=[bad])])
+    assert converted.rows == []
+    assert converted.skipped == ["bad_tool_arguments"]
+
+
+def test_tool_calls_without_tool_definitions_are_skipped_not_invented() -> None:
+    first, _ = _requests()
+    converted = convert_completions([completion(first, calls=[_call_message("a", "ls")], tools=[])])
+    assert converted.rows == []
+    assert converted.skipped == ["no_tool_definitions"]
+
+
+def test_a_request_with_no_prompt_has_nothing_to_condition_on() -> None:
+    converted = convert_completions([completion([{"role": "assistant", "content": []}], text="hi", calls=None)])
+    assert converted.rows == []
+    assert converted.skipped == ["no_prompt"]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "not an object",
+        {"messages": "x", "response": {}},
+        {"messages": [], "response": {"choices": []}},
+        {"messages": [{"role": "user", "content": "hi"}], "response": {"choices": [{"message": "x"}]}},
+        {
+            "messages": [{"role": "oracle", "content": "hi"}],
+            "response": {"choices": [{"message": {"role": "assistant", "content": "x"}}]},
+        },
+    ],
+)
+def test_malformed_completions_raise_so_the_caller_can_fall_back(document: Any) -> None:
+    with pytest.raises(ValueError):
+        convert_completions([document])
+
+
+def test_completion_refs_come_from_the_evidence_descriptors_in_name_order() -> None:
+    def desc(ref: str) -> dict[str, Any]:
+        return {"kind": "artifact", "ref": ref}
+
+    trial = {
+        "evidence": {
+            "descriptors": {
+                "artifact:agent/completions/b.json": desc("e/agent/completions/b.json"),
+                "artifact:agent/completions/a.json": desc("e/agent/completions/a.json"),
+                "artifact:agent/trajectory.json": desc("e/agent/trajectory.json"),
+                "artifact:agent/completions/notes.txt": desc("e/agent/completions/notes.txt"),
+            }
+        }
+    }
+    assert completion_refs(trial) == ["e/agent/completions/a.json", "e/agent/completions/b.json"]
+    assert completion_refs({}) == []

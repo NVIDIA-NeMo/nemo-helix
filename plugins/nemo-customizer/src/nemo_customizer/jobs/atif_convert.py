@@ -4,12 +4,13 @@
 """ATIF convert job: evaluation trajectories to an SFT dataset.
 
 The input is the evaluation runs' output filesets (Jobs ``job-fileset-<job>``). Each holds one or more
-agent-eval result bundles, ``<dir>/trials.jsonl`` beside ``scores.jsonl``, with each trial's ATIF
-trajectory located through its ``evidence.descriptors``. The job:
+agent-eval result bundles, ``<dir>/trials.jsonl`` beside ``scores.jsonl``, with each trial's evidence
+located through its ``evidence.descriptors``: the agent's raw model calls (``agent/completions/*.json``)
+when it kept them, otherwise its ATIF trajectory. The job:
 
 1. lists trials and keeps completed ones that pass ``pass_filter``,
 2. holds out whole tasks for validation,
-3. converts every kept trajectory to one SFT row per assistant turn (see ``nemo_customizer.atif_sft``),
+3. converts every kept trial to one SFT row per assistant turn (see ``nemo_customizer.atif_sft``),
 4. uploads ``train.jsonl``, ``validation.jsonl`` and ``output.json`` under ``nodes/<node>/`` in the
    workflow fileset.
 
@@ -41,7 +42,16 @@ from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.refs import parse_entity_ref
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from nemo_customizer.atif_sft import PassFilter, convert_trajectory, held_out_tasks, join_bundle_path, trace_ref
+from nemo_customizer.atif_sft import (
+    Converted,
+    PassFilter,
+    completion_refs,
+    convert_completions,
+    convert_trajectory,
+    held_out_tasks,
+    join_bundle_path,
+    trace_ref,
+)
 from nemo_customizer.token_budget import ChatTemplateCounter, MaxTokens, TokenCounter, apply_budget
 
 logger = logging.getLogger(__name__)
@@ -205,7 +215,8 @@ class _Candidate:
     ref: str
     trial_id: str
     task_id: str
-    trace_path: str
+    trace_path: str | None
+    completion_paths: tuple[str, ...] = ()
 
 
 @dataclass
@@ -247,16 +258,55 @@ def _candidates(
                     skipped["trial_not_completed"] += 1
                 elif not flt.passes(scores.get(str(trial.get("id")), [])):
                     skipped["filtered_by_score"] += 1
-                elif (reference := trace_ref(trial)) is None:
-                    skipped["no_atif_trace"] += 1
                 else:
+                    reference = trace_ref(trial)
+                    completions = completion_refs(trial)
+                    if reference is None and not completions:
+                        skipped["no_atif_trace"] += 1
+                        continue
                     found[key] = _Candidate(
                         ref=ref,
                         trial_id=str(trial.get("id")),
                         task_id=str(trial.get("task_id")),
-                        trace_path=join_bundle_path(bundle, reference),
+                        trace_path=join_bundle_path(bundle, reference) if reference else None,
+                        completion_paths=tuple(join_bundle_path(bundle, c) for c in completions),
                     )
     return [found[key] for key in sorted(found)], len(seen)
+
+
+def _convert_candidate(
+    source: FilesetSource, candidate: _Candidate, skipped: Counter[str], sources: Counter[str]
+) -> Converted | None:
+    """One trial's rows, or ``None`` when it has no usable input.
+
+    The agent's raw model calls win when the trial has them: they keep the text, reasoning and prompts
+    the model really saw, which an ATIF summary may not. When they are missing or unreadable the ATIF
+    trace is used instead.
+    """
+    if candidate.completion_paths:
+        try:
+            calls = [json.loads(source.read(candidate.ref, path)) for path in candidate.completion_paths]
+            converted = convert_completions(calls)
+        except (NotFoundError, ValueError):  # unreadable, not JSON (UnicodeDecodeError too), or not a completion
+            skipped["completions_unreadable"] += 1
+        else:
+            sources["completions"] += 1
+            return converted
+    if candidate.trace_path is None:
+        return None
+    try:
+        trajectory = json.loads(source.read(candidate.ref, candidate.trace_path))
+    except NotFoundError:
+        skipped["trace_missing"] += 1
+        return None
+    except ValueError:  # JSONDecodeError and UnicodeDecodeError
+        skipped["trace_invalid"] += 1
+        return None
+    if not isinstance(trajectory, dict):
+        skipped["trace_invalid"] += 1
+        return None
+    sources["atif"] += 1
+    return convert_trajectory(trajectory)
 
 
 def convert_filesets(
@@ -270,6 +320,7 @@ def convert_filesets(
     """
     flt = PassFilter.model_validate(spec.pass_filter)
     skipped: Counter[str] = Counter()
+    sources: Counter[str] = Counter()  # which input each converted trial came from
     candidates, trials_seen = _candidates(source, spec.trajectory_filesets, flt, skipped)
     held_out = held_out_tasks({c.task_id for c in candidates}, spec.validation_fraction)
 
@@ -285,18 +336,9 @@ def convert_filesets(
         limit = (budget, counter)
     with train_path.open("wb") as train, validation_path.open("wb") as validation:
         for candidate in candidates:
-            try:
-                trajectory = json.loads(source.read(candidate.ref, candidate.trace_path))
-            except NotFoundError:
-                skipped["trace_missing"] += 1
+            converted = _convert_candidate(source, candidate, skipped, sources)
+            if converted is None:
                 continue
-            except ValueError:  # JSONDecodeError and UnicodeDecodeError
-                skipped["trace_invalid"] += 1
-                continue
-            if not isinstance(trajectory, dict):
-                skipped["trace_invalid"] += 1
-                continue
-            converted = convert_trajectory(trajectory)
             skipped.update(converted.skipped)
             chains = converted.chains
             if limit is not None:
@@ -344,6 +386,7 @@ def convert_filesets(
         "max_tokens": {"behavior": budget.behavior, "tokens": budget.tokens} if budget is not None else None,
         "truncated_rows": truncated_rows,
         "dropped_trials": dropped_trials,
+        "sources": dict(sorted(sources.items())),
         "skipped": {reason: count for reason, count in sorted(skipped.items()) if count},
     }
     return ConversionResult(train_path=train_path, validation_path=validation_path, output=output)
