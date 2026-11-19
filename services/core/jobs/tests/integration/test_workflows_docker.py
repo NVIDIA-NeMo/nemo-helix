@@ -83,6 +83,7 @@ class DockerWorkflowHarness:
     profile: DockerJobExecutionProfile
     registry: BackendRegistry
     requests: list[tuple[str, str, int]]
+    platform_host: str
     created: list[HelixJobResponse] = field(default_factory=list)
 
     def restart_controller(self) -> None:
@@ -305,6 +306,7 @@ def docker_workflow(
                 profile,
                 registry,
                 requests,
+                platform_host,
             )
             try:
                 yield harness
@@ -422,14 +424,14 @@ def test_docker_task_callbacks_follow_each_execution(docker_workflow: DockerWork
 report() {
     body=$(printf '{"status":"%s","status_details":{"probe":"container"}}' "$1")
     path="/apis/jobs/v2/workspaces/$NEMO_JOB_WORKSPACE/jobs/$NEMO_JOB_ID/attempts/$NEMO_JOB_ATTEMPT_ID/steps/$NEMO_JOB_STEP/tasks/$NEMO_JOB_TASK"
-    printf 'PUT %s HTTP/1.1\r\nHost: host.docker.internal\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$path" "${#body}" "$body" |
-        nc -w 10 host.docker.internal PORT > /tmp/callback-response
+    printf 'PUT %s HTTP/1.1\r\nHost: CALLBACK_HOST\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$path" "${#body}" "$body" |
+        nc -w 10 CALLBACK_HOST PORT > /tmp/callback-response
     grep -q '^HTTP/1.[01] 200 ' /tmp/callback-response || { cat /tmp/callback-response; exit 1; }
 }
 report active
 sleep 0.2
 report completed
-""".replace("PORT", str(server.port))
+""".replace("PORT", str(server.port)).replace("CALLBACK_HOST", h.platform_host)
         job = h.create({"work": []}, commands={"work": command})
         first = h.settled(job)
         assert first.workflow is not None and not first.workflow.degraded, first.model_dump_json(indent=2)
