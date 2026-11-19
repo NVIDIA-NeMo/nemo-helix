@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Exercise the API's cluster-scoped TokenReview role and binding.
+platformConfig:
+  platform:
+    base_url: https://helix.example.com
+  auth:
+    enabled: true
+    oidc:
+      workload:
+        client_id: helix-workload
+        kubernetes_token_review_enabled: true
