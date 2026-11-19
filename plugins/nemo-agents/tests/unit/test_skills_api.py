@@ -279,3 +279,24 @@ def test_list_ignores_a_workspace_override_in_the_filter(client: TestClient, ser
 
     assert service.list_skills.await_args.args == ("default",)
     assert service.list_skills.await_args.kwargs["filter_operation"] is None
+
+
+def test_public_skill_filter_round_trips_the_submitted_shape() -> None:
+    from nemo_agents_plugin.schema import SkillFilter, public_skill_filter
+
+    submitted = LogicalOperation(
+        operator=FilterOperator.AND,
+        operations=[
+            ComparisonOperation(field="description", operator=FilterOperator.LIKE, value="pdf"),
+            ComparisonOperation(field="tags", operator=FilterOperator.IN, value=["docs", "pdf"]),
+            ComparisonOperation(field="tags", operator=FilterOperator.EQ, value="x"),
+        ],
+    )
+
+    assert public_skill_filter(SkillFilter.translate_operation(submitted)) == {
+        "$and": [
+            {"description": {"$like": "pdf"}},
+            {"tags": {"$in": ["docs", "pdf"]}},
+            {"tags": {"$eq": "x"}},
+        ]
+    }

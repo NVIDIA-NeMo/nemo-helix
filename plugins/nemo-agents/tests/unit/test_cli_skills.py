@@ -262,7 +262,9 @@ def test_list_merges_tag_options_into_the_filter(invoke) -> None:
     assert request.url.path == SKILLS
     query = parse_qs(request.url.query.decode())
     assert query["sort"] == ["-name"]
-    assert json.loads(query["filter"][0]) == {"description": {"$like": "read"}, "tags": {"$in": ["pdf", "docs"]}}
+    assert json.loads(query["filter"][0]) == {
+        "$and": [{"description": {"$like": "read"}}, {"tags": {"$in": ["pdf", "docs"]}}]
+    }
     assert [row["name"] for row in json.loads(result.stdout)["data"]] == ["my-skill"]
 
 
@@ -298,3 +300,41 @@ def test_delete_requires_confirmation_and_maps_404(invoke) -> None:
 
     result, _ = invoke(["get", "absent"], lambda _: httpx.Response(404, json={"detail": "Skill not found"}))
     assert result.exit_code == 3
+
+
+def test_list_tag_composes_with_a_top_level_or_filter(invoke) -> None:
+    result, recorder = invoke(
+        ["list", "--tag", "pdf", "--filter", '{"$or": [{"name": "a-skill"}, {"name": "b-skill"}]}', "-f", "json"],
+        lambda _: httpx.Response(200, json=_page(_skill())),
+    )
+    assert result.exit_code == 0, result.output
+    query = parse_qs(recorder.requests[-1].url.query.decode())
+    assert json.loads(query["filter"][0]) == {
+        "$and": [{"$or": [{"name": "a-skill"}, {"name": "b-skill"}]}, {"tags": {"$in": ["pdf"]}}]
+    }
+
+
+def test_from_dir_skips_top_level_evals_and_refuses_oversized_files(invoke, tmp_path, monkeypatch) -> None:
+    skill = tmp_path / "my-skill"
+    (skill / "evals").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: d\n---\n")
+    (skill / "evals" / "evals.json").write_text("{}")
+    (skill / "nested" / "evals").mkdir(parents=True)
+    (skill / "nested" / "evals" / "kept.txt").write_text("kept")
+    result, recorder = invoke(
+        ["create", "my-skill", "--from-dir", str(skill), "-f", "json"], lambda _: httpx.Response(201, json=_skill())
+    )
+    assert result.exit_code == 0, result.output
+    uploaded = [r.url.path.split("/-/", 1)[1] for r in recorder.requests if r.method == "PUT" and "/-/" in r.url.path]
+    assert not any("/evals/evals.json" in path and "/nested/" not in path for path in uploaded)
+    assert any(path.endswith("nested/evals/kept.txt") for path in uploaded)
+
+    from nemo_agents_plugin import skills_cli
+    from nemo_helix_plugin.skill_archive import SkillArchiveLimits
+
+    monkeypatch.setattr(skills_cli, "DEFAULT_LIMITS", SkillArchiveLimits(max_file_bytes=3))
+    result, _ = invoke(
+        ["create", "my-skill", "--from-dir", str(skill), "-f", "json"], lambda _: httpx.Response(201, json=_skill())
+    )
+    assert result.exit_code != 0
+    assert "size limits" in result.output

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Skill entities: hackathon plan
 
 Scope: skills as a versioned platform entity. Harbor skill injection, eval metrics, provenance on
@@ -81,8 +84,8 @@ searchable metadata, that eval work (and later registered agents) can reference.
 - **Skills fileset is not reserved.** The Files service cannot reserve a fileset for a service, so
   a workspace editor can pre-create `nemo-agents-skills` or overwrite or delete its objects. Every
   read verifies the archive against its pinned hash, so tampering is detected rather than served,
-  but a tampered pin is then unusable. Today publish only refuses a pre-created fileset that is not
-  on platform storage.
+  but a tampered pin is then unusable. (Restricting it to local storage was tried and dropped: a
+  deployment whose default Files storage is S3 creates it on S3.)
 - **Executable bits are lost on publish.** The Files service does not keep file modes, so scripts
   published from a fileset are archived `0644`, and a change that only adds `+x` publishes no new
   revision. Fix: a mode-preserving source (e.g. uploading a pre-built archive).
@@ -90,6 +93,13 @@ searchable metadata, that eval work (and later registered agents) can reference.
   for a symlink mid-build could be followed (`O_NOFOLLOW` covers only the last path component), and
   hard-linked files are accepted. Publish stages into a private temp directory first, so this
   matters only for other callers of the builder.
+- **Relationship filter does not require the same workspace.** A revision created in workspace B
+  with a skill in workspace A as its parent (only possible through the raw entities API) could
+  affect A's list filters for a caller who can read both. Fix: a same-workspace option on the
+  relationship registry.
+- **Unverified: Files write grants for publishers.** A review flagged that publishing might need the
+  caller to hold Files write grants on the skills fileset. Platform policy unions a delegating
+  service's grants with the caller's, so it should not; not reproduced either way.
 - **Files listing is not paginated.** Source staging validates every entry before allocating
   anything, but the listing response itself is held in memory once.
 

@@ -13,7 +13,6 @@ from __future__ import annotations
 import builtins
 import io
 import math
-import sys
 import tarfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -161,7 +160,7 @@ class FakeStore:
                 attribute = comparison.field.removeprefix("data.")
                 rows = [r for r in rows if getattr(r, attribute) == comparison.value]
         if sort:
-            rows.sort(key=lambda r: getattr(r, sort.lstrip("-")), reverse=sort.startswith("-"))
+            rows.sort(key=lambda r: getattr(r, sort.lstrip("-").removeprefix("data.")), reverse=sort.startswith("-"))
         start = (page - 1) * page_size
         data = [_copy(r) for r in rows[start : start + page_size]]
         return ListResponse(
@@ -722,18 +721,40 @@ async def test_source_is_read_with_the_callers_client_not_the_service_client() -
     assert service_files.uploads  # the archive went to the service-owned fileset
 
 
-async def test_a_pre_created_skills_fileset_on_external_storage_is_refused(
-    harness: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    real = _fileset_json
+async def test_strict_create_fails_when_a_competing_create_published_different_content(harness: Harness) -> None:
+    await harness.store.create(SkillEntity(name=SKILL, workspace=WS))  # a competing create's head
+    harness.store.contend[1] = "different"  # ...whose revision 1 lands first, with other content
 
-    def external(workspace: str, name: str) -> dict[str, object]:
-        return {
-            **real(workspace, name),
-            "storage": {"type": "s3", "bucket": "mine", "prefix": "", "use_sdk_auth": True},
-        }
-
-    monkeypatch.setattr(sys.modules[__name__], "_fileset_json", external)
-
-    with pytest.raises(SkillStorageError, match="reserved"):
+    with pytest.raises(SkillExistsError):
         await harness.service.create_skill(WS, SKILL, _input())
+    assert [r.revision for r in harness.store.revisions()] == [1]
+
+
+async def test_strict_create_reuses_its_own_identical_revision_one(harness: Harness) -> None:
+    await harness.store.create(SkillEntity(name=SKILL, workspace=WS))
+    harness.store.contend[1] = None  # an earlier attempt of this same create wrote revision 1, then crashed
+
+    skill, created = await harness.service.publish_skill(WS, SKILL, _input())
+
+    assert (skill.revision, created) == (1, False)
+
+
+@pytest.mark.parametrize("tag", [".", "..", "t" * 256])
+async def test_tags_that_cannot_be_read_back_are_refused(harness: Harness, tag: str) -> None:
+    with pytest.raises(SkillValidationError):
+        await harness.service.create_skill(WS, SKILL, _input(tags=[tag]))
+    await harness.service.create_skill(WS, SKILL, _input())
+    with pytest.raises(SkillValidationError):
+        await harness.service.tag_revision(WS, SKILL, tag, "latest")
+
+
+async def test_revisions_are_ordered_by_ordinal_not_timestamp(harness: Harness) -> None:
+    await harness.service.create_skill(WS, SKILL, _input())
+    harness.source(body="v2\n")
+    await harness.service.publish_skill(WS, SKILL, _input())
+    rev1, rev2 = harness.store.revisions()
+    rev2._created_at, rev1._created_at = rev1._created_at, rev2._created_at  # clocks disagree with ordinals
+
+    page = await harness.service.list_revisions(WS, SKILL)
+
+    assert page is not None and [s.revision for s in page.data] == [2, 1]
