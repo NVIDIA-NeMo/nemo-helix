@@ -14,6 +14,7 @@ SELECT_EVAL_CONFIG_TOOL_NAME = "select_eval_config"
 SELECT_DATASET_FILE_TOOL_NAME = "select_dataset_file"
 SELECT_MODEL_TOOL_NAME = "select_model"
 JOB_PROGRESS_TOOL_NAME = "job_progress"
+STUDIO_DOCS_TOOL_NAME = "studio_docs"
 
 APPROVAL_TOOL: dict[str, Any] = {
     "name": APPROVAL_TOOL_NAME,
@@ -159,6 +160,32 @@ JOB_PROGRESS_TOOL: dict[str, Any] = {
     },
 }
 
+STUDIO_DOCS_TOOL: dict[str, Any] = {
+    "name": STUDIO_DOCS_TOOL_NAME,
+    "description": (
+        "Read the NeMo product documentation (Studio, agents, and the nemo CLI) that ships with this Studio. "
+        "Call it with no path to get an index of pages, then call it again with a page path to read that page. "
+        "Use it to answer questions about what Studio can do, how a Studio page or workflow works, how to use "
+        "the CLI, or how agents are built and deployed, instead of answering from memory. "
+        "Long pages are returned in parts; pass offset to continue."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Docs page path from the index, such as studio/agents. Omit to list the pages.",
+            },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Character offset to continue reading a long page. Defaults to 0.",
+            },
+        },
+        "additionalProperties": False,
+    },
+}
+
 MCP_TOOLS: list[dict[str, Any]] = [
     APPROVAL_TOOL,
     SELECT_AGENT_TOOL,
@@ -166,6 +193,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     SELECT_DATASET_FILE_TOOL,
     SELECT_MODEL_TOOL,
     JOB_PROGRESS_TOOL,
+    STUDIO_DOCS_TOOL,
 ]
 
 STUDIO_UI_TOOL_NAMES = (
@@ -174,12 +202,30 @@ STUDIO_UI_TOOL_NAMES = (
     SELECT_DATASET_FILE_TOOL_NAME,
     SELECT_MODEL_TOOL_NAME,
     JOB_PROGRESS_TOOL_NAME,
+    STUDIO_DOCS_TOOL_NAME,
     STUDIO_LINK_TOOL_NAME,
 )
 
 STUDIO_ASSISTANT_CONTEXT = "\n".join(
     [
         "You are NeMo Assistant, running inside NeMo Studio.",
+        (
+            "Your name is Felix, and you are a cat. Felix is the friendly cat mascot of NeMo Studio and the face "
+            "of NeMo Assistant. When the user asks who or what you are, or what your name is, say you are Felix, "
+            "a cat who helps in NeMo Studio. Never say you have no name or that you are not a cat."
+        ),
+        (
+            "Keep a light, playful tone with the occasional gentle bit of cat flavor (for example one 'purr-fect' "
+            "now and then). Use at most one such touch in a reply and skip it in most replies. Never use cat "
+            "flavor in error messages, technical steps, commands, code, or when the user seems frustrated: "
+            "accuracy and clarity always come first."
+        ),
+        (
+            "Do not answer questions about what Studio can do, how a Studio page or workflow works, how to use "
+            "the nemo CLI, or how agents are built and deployed from memory. First call "
+            "mcp__nemo_studio__studio_docs (no path to list pages, then a page path to read one) and answer "
+            "from what the docs say. If the docs do not cover it, say so rather than guessing."
+        ),
         (
             "NeMo Studio and the NeMo Helix API are already installed, set up, and running for this "
             "workspace. Treat the platform as healthy and available."

@@ -1067,6 +1067,7 @@ def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
         "select_dataset_file",
         "select_model",
         "job_progress",
+        "studio_docs",
         "studio_link",
     }
     studio_link_tool = next(tool for tool in tools if tool["name"] == "studio_link")
@@ -1192,8 +1193,93 @@ def test_build_assistant_system_prompt_uses_assistant_identity():
         {},
     )
 
-    assert "Your identity in this interface is NeMo Assistant." in prompt
+    assert "Your identity in this interface is NeMo Assistant, known as Felix, a cat." in prompt
     assert "Claude" not in prompt
+
+
+def test_assistant_context_gives_felix_his_name_and_species():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "Your name is Felix, and you are a cat." in context
+    assert "Never say you have no name or that you are not a cat." in context
+    # The playful tone is bounded: never in errors or technical content.
+    assert "Never use cat flavor in error messages, technical steps, commands, code" in context
+
+
+def test_assistant_context_sends_product_questions_to_the_docs_tool():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "mcp__nemo_studio__studio_docs" in context
+    assert "from memory" in context
+    assert "say so rather than guessing" in context
+
+
+def test_deployed_prompt_names_the_docs_tool_without_the_mcp_prefix():
+    prompt = assistant._build_assistant_system_prompt(str(uuid.uuid4()), "default", None, None, {})
+
+    assert "Your name is Felix, and you are a cat." in prompt
+    assert "call studio_docs (no path to list pages" in prompt
+    assert "mcp__nemo_studio__studio_docs" not in prompt
+    assert "studio_docs, and ask_user_question call, pass studio_session_id=" in prompt
+
+
+def test_mcp_studio_docs_lists_pages_when_called_without_a_path(service_client: TestClient):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "studio_docs", "arguments": {}}},
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert "isError" not in result
+    assert "- studio/index:" in result["content"][0]["text"]
+
+
+def test_mcp_studio_docs_reads_a_page_by_path(service_client: TestClient):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "studio_docs", "arguments": {"path": "studio/index"}},
+        },
+    )
+
+    result = response.json()["result"]
+    assert "isError" not in result
+    assert "NeMo Studio" in result["content"][0]["text"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"path": "studio/does-not-exist"},
+        {"path": "../../etc/passwd"},
+        {"path": "studio/index", "offset": -1},
+        {"path": "studio/index", "offset": "0"},
+        {"path": "studio/index", "offset": True},
+    ],
+)
+def test_mcp_studio_docs_reports_bad_requests_as_tool_errors(service_client: TestClient, arguments: dict[str, Any]):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "studio_docs", "arguments": arguments},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "error" not in body
+    assert body["result"]["isError"] is True
+
+
+def test_studio_docs_is_allowed_without_an_approval_prompt():
+    assert "mcp__nemo_studio__studio_docs" in assistant.allowed_mcp_tools()
 
 
 def test_history_summary_reads_model_generated_session_title(tmp_path: Path):
@@ -2103,10 +2189,9 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "Enabled Studio link destinations for this Studio instance" in captured["studio_system_prompt"]
     assert "Only call studio_link with one of the enabled destinations above" in captured["studio_system_prompt"]
     assert "Do not invent Studio route paths manually" in captured["studio_system_prompt"]
-    assert "/workspaces/{workspace}/evaluation/..." in captured["studio_system_prompt"]
-    assert "never nest evaluation links under /dashboard/evaluations/" in captured["studio_system_prompt"]
     assert "destination='evaluation_results'" in captured["studio_system_prompt"]
-    assert "/workspaces/{workspace}/evaluation/results" in captured["studio_system_prompt"]
+    # Route paths live in the studio_link destination table, not hardcoded in the prompt.
+    assert "/dashboard/evaluations/" not in captured["studio_system_prompt"]
     assert "use destination='model_chat'" in captured["studio_system_prompt"]
     assert "Direct Studio link requests are mandatory tool-use requests" in captured["studio_system_prompt"]
     assert "Never answer a Studio link request by saying you cannot generate URLs" in captured["studio_system_prompt"]
@@ -2580,6 +2665,7 @@ def test_public_mcp_route_is_mounted_before_static_fallback():
         "select_dataset_file",
         "select_model",
         "job_progress",
+        "studio_docs",
         "studio_link",
     ]
     assert get_response.status_code == 405

@@ -28,7 +28,7 @@ from nemo_helix_plugin.authz import CallerKind, path_rule
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError, EntityStoreError
 from nhx.common.entities.constants import NAME_PATTERN
 from nhx.common.service.dependencies import get_entity_client
-from nhx.studio import studio_links
+from nhx.studio import studio_docs, studio_links
 from nhx.studio.assistant_artifacts import (
     ChatArtifactsResponse,
     InputSelectionTool,
@@ -52,6 +52,7 @@ from nhx.studio.assistant_mcp_tools import (
     SELECT_EVAL_CONFIG_TOOL_NAME,
     SELECT_MODEL_TOOL_NAME,
     STUDIO_ASSISTANT_CONTEXT,
+    STUDIO_DOCS_TOOL_NAME,
     STUDIO_LINK_TOOL_NAME,
     allowed_mcp_tools,
     permission_prompt_tool,
@@ -426,7 +427,6 @@ def _build_studio_system_prompt(
         "The MCP server URL is an internal callback for tools, not the Studio UI base URL.",
         "Do not invent Studio route paths manually when studio_link can provide the link.",
         "If studio_link is unavailable and you must construct a Studio UI link manually, use only a known enabled Studio route and prefer a relative Markdown link that starts with /workspaces/ or /models/.",
-        "Evaluation pages use /workspaces/{workspace}/evaluation/... with singular evaluation; never nest evaluation links under /dashboard/evaluations/.",
         "Interactive Studio choice behavior:",
         "Studio ships dedicated visual picker tools. When a picker fits, you MUST use it instead of plain text.",
         "Whenever you need the user to name, pick, confirm, or disambiguate an agent (including choosing among deployed agents), you MUST call mcp__nemo_studio__select_agent to render the agent dropdown. Never ask for an agent in plain text.",
@@ -485,7 +485,7 @@ def _build_studio_system_prompt(
         "For generated filesets, custom models, deployments, evaluations, guardrails, secrets, Data Designer, Safe Synthesizer, settings, members, or intake work, choose the matching studio_link destination.",
         "For created datasets or filesets use destination='fileset' with the fileset name when available; otherwise use destination='filesets'.",
         "For started evaluations use destination='evaluation_result' with the result or job name when available; otherwise use destination='evaluation_results' or destination='evaluation_metrics'.",
-        "For the evaluation results list specifically, use destination='evaluation_results'; it resolves to /workspaces/{workspace}/evaluation/results.",
+        "For the evaluation results list specifically, use destination='evaluation_results'.",
         "For Data Designer jobs use destination='data_designer_job' with the job name when available; otherwise use destination='data_designer'.",
         "For Safe Synthesizer jobs use destination='safe_synthesizer_job' or destination='safe_synthesizer_report' with the job name when available; otherwise use destination='safe_synthesizer'.",
         "For Base Models or available base models use destination='base_models'.",
@@ -532,6 +532,7 @@ def _build_assistant_system_prompt(
         SELECT_DATASET_FILE_TOOL_NAME,
         SELECT_MODEL_TOOL_NAME,
         JOB_PROGRESS_TOOL_NAME,
+        STUDIO_DOCS_TOOL_NAME,
         STUDIO_LINK_TOOL_NAME,
     )
     for tool_name in tool_names:
@@ -546,12 +547,12 @@ def _build_assistant_system_prompt(
         [
             context,
             prompt,
-            "Your identity in this interface is NeMo Assistant.",
+            "Your identity in this interface is NeMo Assistant, known as Felix, a cat.",
             "Do not describe yourself as a different assistant or provider.",
             "Deployed NeMo Assistant callback behavior:",
             (
                 f"For every select_agent, select_model, select_dataset_file, select_eval_config, "
-                f"job_progress, studio_link, and ask_user_question call, pass studio_session_id='{session_id}'."
+                f"job_progress, studio_link, studio_docs, and ask_user_question call, pass studio_session_id='{session_id}'."
             ),
             "Do not reveal the Studio session id to the user.",
             (
@@ -1123,6 +1124,22 @@ def _mcp_tool_result_payload(request_id: Any, result: dict[str, Any]) -> dict[st
             "content": [{"type": "text", "text": json.dumps(result)}],
         },
     }
+
+
+def _studio_docs_tool_result(args: dict[str, Any]) -> dict[str, Any]:
+    """Build the MCP result for studio_docs: the page index, one page, or a tool-level error."""
+    path = _trimmed_string(args.get("path"))
+    offset = args.get("offset", 0)
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        return {"content": [{"type": "text", "text": "offset must be a non-negative integer."}], "isError": True}
+
+    if path is None:
+        return {"content": [{"type": "text", "text": studio_docs.format_index()}]}
+    try:
+        text = studio_docs.read_page(path, offset)
+    except LookupError as exc:
+        return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+    return {"content": [{"type": "text", "text": text}]}
 
 
 async def _stream_mcp_tool_result(
@@ -2127,6 +2144,15 @@ async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDe
                     "result": {
                         "content": [{"type": "text", "text": json.dumps(result)}],
                     },
+                }
+            )
+
+        if name == STUDIO_DOCS_TOOL_NAME:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": _studio_docs_tool_result(args),
                 }
             )
 
