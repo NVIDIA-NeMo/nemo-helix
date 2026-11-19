@@ -29,6 +29,20 @@ describe('skill comparison reports', () => {
     });
   });
 
+  it('accepts confirmed discovery in both arms for a skill version comparison', () => {
+    const report = makeSkillComparisonReport();
+    delete report.skill_ref;
+    report.arms.baseline.skill_refs = [`default/skill#${'a'.repeat(64)}`];
+    report.arms['with-skill'].skill_refs = [`default/skill#${'b'.repeat(64)}`];
+    report.arms.baseline.discovery = true;
+    report.arms['with-skill'].discovery = true;
+    const parsed = parseReport(JSON.stringify(report));
+    expect(comparisonWarnings(parsed)).toEqual([]);
+    expect(
+      comparisonMetrics(parsed).find((metric) => metric.name === 'llm-judge.assertion_1')?.delta
+    ).toBe(1);
+  });
+
   it('does not infer negative activation from an absent observation', () => {
     const report = makeSkillComparisonReport();
     delete report.arms['with-skill'].activation;
