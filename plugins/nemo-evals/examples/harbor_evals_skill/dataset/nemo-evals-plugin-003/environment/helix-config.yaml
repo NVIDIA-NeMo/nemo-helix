@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+platform:
+  runtime: none
+  base_url: http://127.0.0.1:8080
+auth:
+  enabled: false
+  policy_decision_point_provider: embedded
+jobs:
+  schedule_interval_seconds: 1
+  reconcile_interval_seconds: 1
+  executors:
+    - provider: subprocess
+      profile: default
+      backend: subprocess
+      config:
+        working_directory: /var/lib/helix-task/service/jobs
+        cleanup_completed_jobs_immediately: false
+files:
+  default_storage_config:
+    type: local
+    path: /var/lib/helix-task/service/files

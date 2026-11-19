@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[agent]
+user = 10001
+timeout_sec = 300
+
+[environment]
+workdir = "/workspace"
+network_mode = "no-network"
+cpus = 1
+memory_mb = 2048
+storage_mb = 2048
+
+[verifier]
+timeout_sec = 30
