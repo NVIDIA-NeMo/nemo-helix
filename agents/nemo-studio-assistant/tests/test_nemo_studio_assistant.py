@@ -177,7 +177,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
@@ -226,7 +226,7 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
         "files",
@@ -282,14 +282,20 @@ def test_platform_translation_virtualizes_packaged_skill_root() -> None:
     assert translated.skills.paths == ["/skills"]
 
 
-def test_guardrails_skill_is_generic_sdk_workflow_and_copies_match() -> None:
-    source = AGENT_ROOT / "src/nemo_studio_assistant/skills/guardrails/SKILL.md"
-    packaged = AGENT_ROOT / "skills/guardrails/SKILL.md"
-    registered = ETHOS_ROOT / "skills/guardrails/SKILL.md"
-    skill_text = source.read_text(encoding="utf-8")
+def test_registration_skills_mirror_packaged_skills() -> None:
+    packaged_root = AGENT_ROOT / "skills"
+    registered_root = ETHOS_ROOT / "skills"
+    packaged = {path.relative_to(packaged_root): path for path in packaged_root.rglob("*") if path.is_file()}
+    registered = {path.relative_to(registered_root): path for path in registered_root.rglob("*") if path.is_file()}
 
-    assert packaged.read_text(encoding="utf-8") == skill_text
-    assert registered.read_text(encoding="utf-8") == skill_text
+    assert sorted(registered) == sorted(packaged)
+    for relative_path, packaged_path in packaged.items():
+        assert registered[relative_path].read_bytes() == packaged_path.read_bytes(), relative_path
+
+
+def test_guardrails_skill_is_generic_sdk_workflow() -> None:
+    skill_text = (AGENT_ROOT / "skills/guardrails/SKILL.md").read_text(encoding="utf-8")
+
     assert "guardrail.configs" in skill_text
     assert "| List/read backend models | `models` | `list` / `retrieve` |" in skill_text
     assert "inference.virtual_models" in skill_text
@@ -315,6 +321,7 @@ def test_mcp_server_exposes_expected_tools() -> None:
         "job_progress",
         "studio_link",
         "ask_user_question",
+        "search_docs",
     }
     deploy_tool = next(tool for tool in tools if tool.name == "deploy_guardrail")
     blocked_schema = deploy_tool.parameters["properties"]["blocked_message"]
@@ -918,9 +925,9 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
 ) -> None:
     approval_requested = False
 
-    def approve(*_args: object, **_kwargs: object) -> dict[str, str]:
+    def approve(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
         nonlocal approval_requested
-        approval_requested = True
+        approval_requested = approval_requested or tool_name == "approval_prompt"
         return {"behavior": "allow"}
 
     platform = _FakeHelix()
@@ -1144,7 +1151,8 @@ def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch)
     approvals: list[tuple[str, str, dict[str, object], dict[str, object]]] = []
 
     def approve(session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
-        approvals.append((session, tool_name, arguments, kwargs))
+        if tool_name != "assistant_activity":
+            approvals.append((session, tool_name, arguments, kwargs))
         return {"behavior": "allow"}
 
     platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
@@ -1470,3 +1478,90 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
 
     assert json.loads(response) == {"workspace": "default"}
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
+
+
+def test_ask_user_question_wraps_string_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    callback_input: dict[str, object] = {}
+
+    def callback(_session_id: str, _tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        callback_input.update(arguments)
+        return {"behavior": "allow", "updatedInput": {}}
+
+    monkeypatch.setattr(register, "_call_studio_tool", callback)
+
+    register.ask_user_question(
+        "90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        [{"question": "Continue?", "options": ["Yes", {"label": "No", "description": "Stop here"}]}],
+    )
+
+    assert callback_input["input"] == {
+        "questions": [
+            {"question": "Continue?", "options": [{"label": "Yes"}, {"label": "No", "description": "Stop here"}]}
+        ]
+    }
+
+
+def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) -> None:
+    session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+    calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
+        calls.append((tool_name, arguments, kwargs))
+        return {"status": "recorded"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api("workspaces", "list", studio_session_id=session_id, workspace="default")
+
+    assert calls == [
+        (
+            "assistant_activity",
+            {"tool_name": "nemo_api", "summary": "list workspaces", "resource": "workspaces", "action": "list"},
+            {"workspace": "default", "timeout": register.STUDIO_ACTIVITY_TIMEOUT_SECONDS},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resource", "action"),
+    [("workspaces", "create"), ("workspaces", "explode"), ("not-a-resource", "list")],
+)
+def test_nemo_api_reports_no_activity_for_denied_or_invalid_calls(
+    monkeypatch: pytest.MonkeyPatch, resource: str, action: str
+) -> None:
+    activity: list[dict[str, object]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, str]:
+        if tool_name == "assistant_activity":
+            activity.append(arguments)
+        return {"behavior": "deny", "message": "declined"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api(resource, action, studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a", workspace="default")
+
+    assert activity == []
+
+
+def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise RuntimeError("Studio is down")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    response = json.loads(register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a"))
+
+    assert response["status"] in {"ok", "no_results", "unavailable"}
+
+
+def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise AssertionError("no callback expected without a Studio session")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    register.search_docs("guardrail")

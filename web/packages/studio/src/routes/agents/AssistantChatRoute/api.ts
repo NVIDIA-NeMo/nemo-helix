@@ -24,7 +24,6 @@ import type {
   AssistantPermissionRequest,
   AssistantSessionHistory,
   AssistantSessionHistoryItem,
-  AssistantSkill,
   AssistantStreamHandlers,
 } from '@studio/routes/agents/AssistantChatRoute/types';
 
@@ -55,13 +54,11 @@ const getStudioBaseUrl = (): string | undefined => {
 
 const getStudioPathname = (): string | undefined => {
   if (typeof window === 'undefined') return undefined;
-  return window.location.pathname;
+  return `${window.location.pathname}${window.location.search}`;
 };
 
 export const getAssistantHistorySessionsQueryKey = (workspace: string) =>
   ['assistant', 'history', 'sessions', workspace] as const;
-
-export const ASSISTANT_SKILLS_QUERY_KEY = ['assistant', 'skills'] as const;
 
 export const getAssistantSessionHistoryQueryKey = (sessionId: string) =>
   ['assistant', 'history', 'session', sessionId] as const;
@@ -208,24 +205,6 @@ const parseHistorySession = (value: unknown): AssistantHistorySession | undefine
   };
 };
 
-const parseAssistantSkill = (value: unknown): AssistantSkill | undefined => {
-  if (!isRecord(value)) return undefined;
-  const name = getString(value.name);
-  const claudeName = getString(value.claude_name);
-  const installPath = getString(value.install_path);
-  if (!name || !claudeName || !installPath) return undefined;
-
-  return {
-    name,
-    claude_name: claudeName,
-    description: getString(value.description),
-    source: getString(value.source) || '-',
-    source_path: getString(value.source_path) || undefined,
-    install_path: installPath,
-    installed: value.installed === true,
-  };
-};
-
 const parseAssistantPart = (value: unknown): AssistantResponseHistoryPart | undefined => {
   if (!isRecord(value)) return undefined;
 
@@ -287,23 +266,6 @@ export const listAssistantHistorySessions = async (
   return body
     .map(parseHistorySession)
     .filter((session): session is AssistantHistorySession => session !== undefined);
-};
-
-export const listAssistantSkills = async (): Promise<AssistantSkill[]> => {
-  const response = await assistantFetch(assistantApiUrl('/skills'));
-
-  if (!response.ok) {
-    throw new Error(
-      await getResponseErrorMessage(response, 'Failed to load NeMo Assistant skills')
-    );
-  }
-
-  const body = (await response.json()) as unknown;
-  if (!Array.isArray(body)) return [];
-
-  return body
-    .map(parseAssistantSkill)
-    .filter((skill): skill is AssistantSkill => skill !== undefined);
 };
 
 export const getAssistantSessionHistory = async (

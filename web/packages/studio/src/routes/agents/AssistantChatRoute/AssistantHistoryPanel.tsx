@@ -6,7 +6,6 @@ import { Button, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { AssistantArtifactsPane } from '@studio/routes/agents/AssistantChatRoute/historyPanel/AssistantArtifactsPane';
 import { FloatingPanel } from '@studio/routes/agents/AssistantChatRoute/historyPanel/FloatingPanel';
 import { HistoryPanelContents } from '@studio/routes/agents/AssistantChatRoute/historyPanel/HistoryPanelContents';
-import { SkillsPanelContents } from '@studio/routes/agents/AssistantChatRoute/historyPanel/SkillsPanelContents';
 import type { AssistantHistoryPanelProps } from '@studio/routes/agents/AssistantChatRoute/historyPanel/types';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import {
@@ -15,7 +14,7 @@ import {
 } from '@studio/util/localStorage';
 import type { FC } from 'react';
 
-type OpenFloatingPanel = 'history' | 'skills';
+type OpenFloatingPanel = 'history';
 
 export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
   hideArtifacts,
@@ -82,13 +81,6 @@ export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
         onOpenChange={(open) => handleFloatingPanelOpenChange('history', open)}
       >
         <HistoryPanelContents {...props} />
-      </FloatingPanel>
-      <FloatingPanel
-        open={openFloatingPanel === 'skills'}
-        title="Skills"
-        onOpenChange={(open) => handleFloatingPanelOpenChange('skills', open)}
-      >
-        <SkillsPanelContents />
       </FloatingPanel>
     </aside>
   );
