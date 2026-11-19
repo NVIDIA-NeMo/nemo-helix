@@ -40,31 +40,166 @@ instructions:
       Check again after collecting results. If it changed, emit status failed with an error
       explaining the stale input; do not report a successful review of a different revision.
       - A GitHub token is in the env var named by `github_token_env` (default GH_TOKEN).
-      - NHX_BASE_URL (env) is where the Helix API lives for this container, but on an auth-ENABLED
-        platform it points at the API service DIRECTLY with no bearer token, so calling it for a
-        platform API returns 401. Do NOT call it directly -- resolve the authenticated base in
-        STEP 0 (API_BASE) and use that for every platform API call.
+      - NHX_BASE_URL (env) is the runtime-provided Helix API base. Newer runtimes point it
+        at the authenticated proxy; older images may point it at the API service directly.
+        Resolve API_BASE in STEP 0 and use it for every platform API call.
       - NEMO_JOB_WORKSPACE (env) is this job's workspace -- use it for all API paths; never
         hardcode a workspace name.
       - NEMO_JOB_ID (env) is THIS job's own id -- used for self-configuration below.
 
       ## STEP 0 -- resolve the authenticated platform API base (do this FIRST)
-      On an auth-ENABLED platform, NHX_BASE_URL points at the API service directly and NO bearer
-      token is injected, so calling it directly returns 401. The job authenticates to the platform
-      only through a per-job loopback auth proxy (dynamic port) that forwards as this job's identity.
-      A bundled resolver script finds the right base deterministically (prefers a published
-      NHX_PLATFORM_PROXY_URL, else discovers the loopback proxy by matching {"status":"ok"} on
-      /healthz + the nhx-auth-proxy openapi title + a real authed probe, else falls back to
-      NHX_BASE_URL). Decode and run it, and use its output as API_BASE for ALL platform API calls:
+      Authenticated jobs use a per-job loopback proxy that forwards as the job's identity.
+      Keep the resolver below for compatibility with older images that do not expose that
+      proxy through NHX_BASE_URL. It uses an explicit NHX_PLATFORM_PROXY_URL override if
+      supplied, otherwise probes loopback listeners, then falls back to NHX_BASE_URL.
+      Write and run this readable helper exactly as shown (the heredoc terminator must be
+      unindented in the shell command). It is embedded here so no extra image file is needed.
 
-        printf %s 'IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwojIFNQRFgtRmlsZUNvcHlyaWdodFRleHQ6IENvcHlyaWdodCAoYykgMjAyNS0yMDI2IE5WSURJQSBDT1JQT1JBVElPTiAmIEFGRklMSUFURVMuIEFsbCByaWdodHMgcmVzZXJ2ZWQuCiMgU1BEWC1MaWNlbnNlLUlkZW50aWZpZXI6IEFwYWNoZS0yLjAKIiIiUmVzb2x2ZSB0aGUgYXV0aGVudGljYXRlZCBIZWxpeCBwbGF0Zm9ybSBBUEkgYmFzZSBVUkwgZnJvbSBpbnNpZGUgYW4gYWdlbnRzLmV4ZWN1dGUgam9iLgoKT24gYW4gYXV0aC1lbmFibGVkIHBsYXRmb3JtIGEgam9iJ3MgTkhYX0JBU0VfVVJMIHBvaW50cyBhdCB0aGUgQVBJIHNlcnZpY2UgZGlyZWN0bHkgd2l0aCBubwpiZWFyZXIgdG9rZW4sIHNvIHBsYXRmb3JtIEFQSSBjYWxscyAoYWdlbnRzLmV4ZWN1dGUsIGpvYiBwb2xsLCByZXN1bHRzLCBvd24tcmVjb3JkIHJlYWQpIDQwMS4KVGhlIGpvYiBhdXRoZW50aWNhdGVzIG9ubHkgdGhyb3VnaCBhIHBlci1qb2IgbG9vcGJhY2sgYXV0aCBwcm94eSB0aGF0IGZvcndhcmRzIGFzIHRoZSBqb2IncyBvd24KaWRlbnRpdHkgYW5kIGJpbmRzIGFuIEVQSEVNRVJBTCAxMjcuMC4wLjEgcG9ydC4gVGhpcyBzY3JpcHQgZmluZHMgdGhlIHJpZ2h0IGJhc2UgdG8gdXNlLCBjaGVhcGx5CmFuZCBkZXRlcm1pbmlzdGljYWxseSwgc28gdGhlIGFnZW50IGRvZXMgbm90IGhhdmUgdG8gcG9ydC1zY2FuIGJ5IGhhbmQgZWFjaCBydW4uCgpSZXNvbHV0aW9uIHByZWNlZGVuY2UgKHByaW50cyB0aGUgZmlyc3QgdGhhdCB3b3JrcyB0byBzdGRvdXQsIHRoZW4gZXhpdHMgMCk6CiAgMS4gJE5IWF9QTEFURk9STV9QUk9YWV9VUkwgICAgICAgICAtLSB0aGUgc2FuY3Rpb25lZCBwdWJsaXNoZWQgcHJveHkgb3JpZ2luIChmdXR1cmUgcGxhdGZvcm1zKS4KICAyLiBhIGRpc2NvdmVyZWQgbG9vcGJhY2sgYXV0aCBwcm94eSAtLSBzY2FuIDEyNy4wLjAuMSBsaXN0ZW5lcnMgZnJvbSAvcHJvYy9uZXQvdGNweyw2fTsgdGhlIGF1dGgKICAgICBwcm94eSBhbnN3ZXJzIEdFVCAvaGVhbHRoeiB3aXRoIEVYQUNUTFkgeyJzdGF0dXMiOiJvayJ9IEFORCBzZXJ2ZXMgL29wZW5hcGkuanNvbiB0aXRsZWQKICAgICAibmh4LWF1dGgtcHJveHkiLiBWZXJpZmllZCBieSBhIHJlYWwgYXV0aGVkIHByb2JlOiBHRVQgL2FwaXMvYWdlbnRzL3YyL3dvcmtzcGFjZXMvPHdzPi9hZ2VudHMKICAgICByZXR1cm5zIDwgNDAwIHRocm91Z2ggaXQgKHZzIDQwMSBkaXJlY3QpLgogIDMuICROSFhfQkFTRV9VUkwgICAgICAgICAgICAgICAgICAgLS0gYXV0aC1kaXNhYmxlZCBwbGF0Zm9ybXMgKGRpcmVjdCwgdW5hdXRoZW50aWNhdGVkKSB3b3JrIGFzLWlzLgoKVXNhZ2U6IHB5dGhvbjMgcmVzb2x2ZV9wbGF0Zm9ybV9hcGkucHkgICAgICAgICAgICAjIHByaW50cyB0aGUgQVBJIGJhc2UgVVJMCiAgICAgICBBUElfQkFTRT0iJChweXRob24zIHJlc29sdmVfcGxhdGZvcm1fYXBpLnB5KSIKRXhpdCAwICsgVVJMIG9uIHN1Y2Nlc3M7IGV4aXQgMSArIHN0ZGVyciBub3RlIGlmIG5vdGhpbmcgcmVzb2x2ZXMgKGNhbGxlciBzaG91bGQgZmFsbCBiYWNrKS4KIiIiCmZyb20gX19mdXR1cmVfXyBpbXBvcnQgYW5ub3RhdGlvbnMKCmltcG9ydCBqc29uCmltcG9ydCBvcwppbXBvcnQgc3lzCmltcG9ydCB1cmxsaWIuZXJyb3IKaW1wb3J0IHVybGxpYi5yZXF1ZXN0CgpfSEVBTFRIWl9PSyA9IHsic3RhdHVzIjogIm9rIn0KX1BST1hZX1RJVExFID0gIm5oeC1hdXRoLXByb3h5IgpfVElNRU9VVCA9IDIuMAoKCmRlZiBfbG9nKCphOiBvYmplY3QpIC0+IE5vbmU6CiAgICBwcmludCgqYSwgZmlsZT1zeXMuc3RkZXJyKQoKCmRlZiBfZ2V0KHVybDogc3RyLCB0aW1lb3V0OiBmbG9hdCA9IF9USU1FT1VUKSAtPiB0dXBsZVtpbnQsIGJ5dGVzXToKICAgIHJlcSA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QodXJsLCBtZXRob2Q9IkdFVCIpCiAgICB0cnk6CiAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD10aW1lb3V0KSBhcyByZXNwOgogICAgICAgICAgICByZXR1cm4gcmVzcC5zdGF0dXMsIHJlc3AucmVhZCgpCiAgICBleGNlcHQgdXJsbGliLmVycm9yLkhUVFBFcnJvciBhcyBleGM6CiAgICAgICAgcmV0dXJuIGV4Yy5jb2RlLCBleGMucmVhZCgpIGlmIGV4Yy5mcCBlbHNlIGIiIgogICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICByZXR1cm4gMCwgYiIiCgoKZGVmIF9sb29wYmFja19wb3J0cygpIC0+IGxpc3RbaW50XToKICAgICIiIlBhcnNlIGxpc3RlbmluZyAxMjcuMC4wLjEgcG9ydHMgZnJvbSAvcHJvYy9uZXQvdGNwIGFuZCAvcHJvYy9uZXQvdGNwNi4iIiIKICAgIHBvcnRzOiBzZXRbaW50XSA9IHNldCgpCiAgICBmb3IgcGF0aCBpbiAoIi9wcm9jL25ldC90Y3AiLCAiL3Byb2MvbmV0L3RjcDYiKToKICAgICAgICB0cnk6CiAgICAgICAgICAgIGxpbmVzID0gb3BlbihwYXRoKS5yZWFkKCkuc3BsaXRsaW5lcygpWzE6XQogICAgICAgIGV4Y2VwdCBPU0Vycm9yOgogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGZvciBsaW5lIGluIGxpbmVzOgogICAgICAgICAgICBwYXJ0cyA9IGxpbmUuc3BsaXQoKQogICAgICAgICAgICBpZiBsZW4ocGFydHMpIDwgNDoKICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIGxvY2FsLCBzdGF0ZSA9IHBhcnRzWzFdLCBwYXJ0c1szXQogICAgICAgICAgICBpZiBzdGF0ZSAhPSAiMEEiOiAgIyAwQSA9IExJU1RFTgogICAgICAgICAgICAgICAgY29udGludWUKICAgICAgICAgICAgYWRkcl9oZXgsIF8sIHBvcnRfaGV4ID0gbG9jYWwucGFydGl0aW9uKCI6IikKICAgICAgICAgICAgIyBsb29wYmFjazogSVB2NCAwMTAwMDA3RiwgSVB2NiAuLi4wMDAwMDAwMSAoYWNjZXB0IGFueSDigJQgd2UgdmVyaWZ5IHZpYSAvaGVhbHRoeiBhbnl3YXkpCiAgICAgICAgICAgIHRyeToKICAgICAgICAgICAgICAgIHBvcnRzLmFkZChpbnQocG9ydF9oZXgsIDE2KSkKICAgICAgICAgICAgZXhjZXB0IFZhbHVlRXJyb3I6CiAgICAgICAgICAgICAgICBjb250aW51ZQogICAgcmV0dXJuIHNvcnRlZChwb3J0cykKCgpkZWYgX2lzX2F1dGhfcHJveHkob3JpZ2luOiBzdHIpIC0+IGJvb2w6CiAgICAiIiJBIGxpc3RlbmVyIGlzIHRoZSBhdXRoIHByb3h5IGlmZiAvaGVhbHRoeiA9PSB7InN0YXR1cyI6Im9rIn0gQU5EIC9vcGVuYXBpLmpzb24gdGl0bGUgbWF0Y2hlcy4iIiIKICAgIHN0YXR1cywgYm9keSA9IF9nZXQoZiJ7b3JpZ2lufS9oZWFsdGh6IikKICAgIGlmIHN0YXR1cyAhPSAyMDA6CiAgICAgICAgcmV0dXJuIEZhbHNlCiAgICB0cnk6CiAgICAgICAgaWYganNvbi5sb2Fkcyhib2R5KSAhPSBfSEVBTFRIWl9PSzoKICAgICAgICAgICAgcmV0dXJuIEZhbHNlCiAgICBleGNlcHQgKFZhbHVlRXJyb3IsIFR5cGVFcnJvcik6CiAgICAgICAgcmV0dXJuIEZhbHNlCiAgICAjIENvbmZpcm0gaWRlbnRpdHkgKGFub3RoZXIgbG9jYWwgbGlzdGVuZXIgY291bGQgdGhlb3JldGljYWxseSByZXR1cm4gdGhlIHNhbWUgSlNPTikuCiAgICBzdGF0dXMsIGJvZHkgPSBfZ2V0KGYie29yaWdpbn0vb3BlbmFwaS5qc29uIikKICAgIGlmIHN0YXR1cyA9PSAyMDA6CiAgICAgICAgdHJ5OgogICAgICAgICAgICBpZiBqc29uLmxvYWRzKGJvZHkpLmdldCgiaW5mbyIsIHt9KS5nZXQoInRpdGxlIikgPT0gX1BST1hZX1RJVExFOgogICAgICAgICAgICAgICAgcmV0dXJuIFRydWUKICAgICAgICBleGNlcHQgKFZhbHVlRXJyb3IsIFR5cGVFcnJvcik6CiAgICAgICAgICAgIHBhc3MKICAgICMgb3BlbmFwaSBjaGVjayBpcyBiZXN0LWVmZm9ydDsgdGhlIGV4YWN0LUpTT04gL2hlYWx0aHogbWF0Y2ggaXMgYWxyZWFkeSBzdHJvbmcuCiAgICByZXR1cm4gVHJ1ZQoKCmRlZiBfYXV0aGVudGljYXRlcyhvcmlnaW46IHN0ciwgd29ya3NwYWNlOiBzdHIpIC0+IGJvb2w6CiAgICAiIiJDb25maXJtIHRoZSBvcmlnaW4gYWN0dWFsbHkgQVVUSEVOVElDQVRFUyBhIHBsYXRmb3JtIEFQSSBjYWxsIChub3QgNDAxKS4iIiIKICAgIHN0YXR1cywgXyA9IF9nZXQoZiJ7b3JpZ2lufS9hcGlzL2FnZW50cy92Mi93b3Jrc3BhY2VzL3t3b3Jrc3BhY2V9L2FnZW50cyIpCiAgICByZXR1cm4gMCA8IHN0YXR1cyA8IDQwMAoKCmRlZiByZXNvbHZlKCkgLT4gc3RyIHwgTm9uZToKICAgIHdvcmtzcGFjZSA9IG9zLmVudmlyb24uZ2V0KCJORU1PX0pPQl9XT1JLU1BBQ0UiLCAiZGVmYXVsdCIpCgogICAgcHVibGlzaGVkID0gb3MuZW52aXJvbi5nZXQoIk5IWF9QTEFURk9STV9QUk9YWV9VUkwiLCAiIikuc3RyaXAoKQogICAgaWYgcHVibGlzaGVkOgogICAgICAgIF9sb2coZiJ1c2luZyBOSFhfUExBVEZPUk1fUFJPWFlfVVJMPXtwdWJsaXNoZWR9IikKICAgICAgICByZXR1cm4gcHVibGlzaGVkCgogICAgY2FuZGlkYXRlcyA9IFtmImh0dHA6Ly8xMjcuMC4wLjE6e3B9IiBmb3IgcCBpbiBfbG9vcGJhY2tfcG9ydHMoKV0KICAgIF9sb2coZiJzY2FubmluZyB7bGVuKGNhbmRpZGF0ZXMpfSBsb29wYmFjayBsaXN0ZW5lcnMgZm9yIHRoZSBhdXRoIHByb3h5IikKICAgIHZlcmlmaWVkOiBsaXN0W3N0cl0gPSBbXQogICAgZm9yIG9yaWdpbiBpbiBjYW5kaWRhdGVzOgogICAgICAgIGlmIF9pc19hdXRoX3Byb3h5KG9yaWdpbik6CiAgICAgICAgICAgIGlmIF9hdXRoZW50aWNhdGVzKG9yaWdpbiwgd29ya3NwYWNlKToKICAgICAgICAgICAgICAgIF9sb2coZiJmb3VuZCBhdXRoZW50aWNhdGVkIGF1dGggcHJveHk6IHtvcmlnaW59IikKICAgICAgICAgICAgICAgIHJldHVybiBvcmlnaW4KICAgICAgICAgICAgdmVyaWZpZWQuYXBwZW5kKG9yaWdpbikKICAgICMgQSBwcm94eSB0aGF0IGxvb2tlZCByaWdodCBidXQgZGlkbid0IGF1dGhlbnRpY2F0ZSAoZS5nLiB3cm9uZyB3b3Jrc3BhY2UpIOKAlCBzdGlsbCBiZXR0ZXIgdGhhbiBkaXJlY3QuCiAgICBpZiB2ZXJpZmllZDoKICAgICAgICBfbG9nKGYiYXV0aC1wcm94eS1zaGFwZWQgbGlzdGVuZXIocykgZm91bmQgYnV0IGRpZCBub3QgYXV0aGVudGljYXRlIHt3b3Jrc3BhY2V9OiB7dmVyaWZpZWR9IikKCiAgICBiYXNlID0gb3MuZW52aXJvbi5nZXQoIk5IWF9CQVNFX1VSTCIsICIiKS5zdHJpcCgpCiAgICBpZiBiYXNlIGFuZCBfYXV0aGVudGljYXRlcyhiYXNlLCB3b3Jrc3BhY2UpOgogICAgICAgIF9sb2coZiJOSFhfQkFTRV9VUkwgYXV0aGVudGljYXRlcyBkaXJlY3RseSAoYXV0aC1kaXNhYmxlZCBwbGF0Zm9ybSk6IHtiYXNlfSIpCiAgICAgICAgcmV0dXJuIGJhc2UKICAgIGlmIGJhc2U6CiAgICAgICAgX2xvZyhmImZhbGxpbmcgYmFjayB0byBOSFhfQkFTRV9VUkwgKHVudmVyaWZpZWQpOiB7YmFzZX0iKQogICAgICAgIHJldHVybiBiYXNlCiAgICByZXR1cm4gTm9uZQoKCmRlZiBtYWluKCkgLT4gaW50OgogICAgb3JpZ2luID0gcmVzb2x2ZSgpCiAgICBpZiBub3Qgb3JpZ2luOgogICAgICAgIF9sb2coImNvdWxkIG5vdCByZXNvbHZlIGEgcGxhdGZvcm0gQVBJIGJhc2UgKG5vIHByb3h5LCBubyBOSFhfQkFTRV9VUkwpIikKICAgICAgICByZXR1cm4gMQogICAgcHJpbnQob3JpZ2luKQogICAgcmV0dXJuIDAKCgppZiBfX25hbWVfXyA9PSAiX19tYWluX18iOgogICAgcmFpc2UgU3lzdGVtRXhpdChtYWluKCkpCg==' | base64 -d > /tmp/resolve_platform_api.py
-        API_BASE="$(python3 /tmp/resolve_platform_api.py)"
+      ```sh
+      cat > /tmp/resolve_platform_api.py <<'PYTHON'
+      #!/usr/bin/env python3
+      # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+      # SPDX-License-Identifier: Apache-2.0
+      """Resolve the platform API URL, including compatibility with older job images.
 
-      If API_BASE is empty, STOP and report that the platform API could not be reached. Use
-      ${API_BASE} (NOT NHX_BASE_URL) for every agents.execute submit, job poll, results download,
-      and your own job-record self-read below. (The resolver is an interim for platforms that do
-      not yet publish NHX_PLATFORM_PROXY_URL; once that exists the script returns it directly and
-      the proxy scan is skipped.)
+      Prefer NHX_PLATFORM_PROXY_URL when explicitly supplied. Otherwise discover a
+      loopback proxy using /healthz and a successful workspace API probe; checking
+      its OpenAPI title is best-effort. Fall back to NHX_BASE_URL, which newer job
+      runtimes set to the proxy URL. The final fallback may be unverified: callers
+      must check API errors before submitting reviewer jobs.
+
+      Print the URL to stdout, or exit 1 if no URL is available.
+      """
+      from __future__ import annotations
+
+      import json
+      import os
+      import sys
+      import urllib.error
+      import urllib.request
+
+      _HEALTHZ_OK = {"status": "ok"}
+      _PROXY_TITLE = "nhx-auth-proxy"
+      _TIMEOUT = 2.0
+
+
+      def _log(*a: object) -> None:
+          print(*a, file=sys.stderr)
+
+
+      def _get(url: str, timeout: float = _TIMEOUT) -> tuple[int, bytes]:
+          req = urllib.request.Request(url, method="GET")
+          try:
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  return resp.status, resp.read()
+          except urllib.error.HTTPError as exc:
+              return exc.code, exc.read() if exc.fp else b""
+          except Exception:
+              return 0, b""
+
+
+      def _loopback_ports() -> list[int]:
+          """Collect listening ports from /proc/net/tcp and /proc/net/tcp6 for loopback probes."""
+          ports: set[int] = set()
+          for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+              try:
+                  lines = open(path).read().splitlines()[1:]
+              except OSError:
+                  continue
+              for line in lines:
+                  parts = line.split()
+                  if len(parts) < 4:
+                      continue
+                  local, state = parts[1], parts[3]
+                  if state != "0A":  # 0A = LISTEN
+                      continue
+                  addr_hex, _, port_hex = local.partition(":")
+                  # loopback: IPv4 0100007F, IPv6 ...00000001 (accept any — we verify via /healthz anyway)
+                  try:
+                      ports.add(int(port_hex, 16))
+                  except ValueError:
+                      continue
+          return sorted(ports)
+
+
+      def _is_auth_proxy(origin: str) -> bool:
+          """Identify a candidate by health response; the OpenAPI title check is best-effort."""
+          status, body = _get(f"{origin}/healthz")
+          if status != 200:
+              return False
+          try:
+              if json.loads(body) != _HEALTHZ_OK:
+                  return False
+          except (ValueError, TypeError):
+              return False
+          # Confirm identity (another local listener could theoretically return the same JSON).
+          status, body = _get(f"{origin}/openapi.json")
+          if status == 200:
+              try:
+                  if json.loads(body).get("info", {}).get("title") == _PROXY_TITLE:
+                      return True
+              except (ValueError, TypeError):
+                  pass
+          # openapi check is best-effort; the exact-JSON /healthz match is already strong.
+          return True
+
+
+      def _authenticates(origin: str, workspace: str) -> bool:
+          """Confirm the origin actually AUTHENTICATES a platform API call (not 401)."""
+          status, _ = _get(f"{origin}/apis/agents/v2/workspaces/{workspace}/agents")
+          return 0 < status < 400
+
+
+      def resolve() -> str | None:
+          workspace = os.environ.get("NEMO_JOB_WORKSPACE", "default")
+
+          published = os.environ.get("NHX_PLATFORM_PROXY_URL", "").strip()
+          if published:
+              _log(f"using NHX_PLATFORM_PROXY_URL={published}")
+              return published
+
+          candidates = [f"http://127.0.0.1:{p}" for p in _loopback_ports()]
+          _log(f"scanning {len(candidates)} loopback listeners for the auth proxy")
+          verified: list[str] = []
+          for origin in candidates:
+              if _is_auth_proxy(origin):
+                  if _authenticates(origin, workspace):
+                      _log(f"found authenticated auth proxy: {origin}")
+                      return origin
+                  verified.append(origin)
+          # Report candidates that failed the workspace API probe before trying the base URL.
+          if verified:
+              _log(f"auth-proxy-shaped listener(s) found but did not authenticate {workspace}: {verified}")
+
+          base = os.environ.get("NHX_BASE_URL", "").strip()
+          if base and _authenticates(base, workspace):
+              _log(f"NHX_BASE_URL authenticates directly (auth-disabled platform): {base}")
+              return base
+          if base:
+              _log(f"falling back to NHX_BASE_URL (unverified): {base}")
+              return base
+          return None
+
+
+      def main() -> int:
+          origin = resolve()
+          if not origin:
+              _log("could not resolve a platform API base (no proxy, no NHX_BASE_URL)")
+              return 1
+          print(origin)
+          return 0
+
+
+      if __name__ == "__main__":
+          raise SystemExit(main())
+      PYTHON
+      API_BASE="$(python3 /tmp/resolve_platform_api.py)"
+      ```
+
+      If the resolver fails or API_BASE is empty, STOP and report that no platform API base
+      could be resolved. Use ${API_BASE} for every agents.execute submit, job poll, results
+      download, and your own job-record self-read below. The fallback URL can be unverified:
+      if the self-read fails, STOP and report the API error before submitting reviewer jobs.
 
       ## Self-configuration (derive the sub-job image + GitHub secret ref from your OWN record)
       The reviewer sub-jobs must run on the SAME image as you (the pi-harness image) and read the
