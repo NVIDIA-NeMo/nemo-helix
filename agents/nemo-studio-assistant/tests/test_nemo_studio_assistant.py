@@ -157,7 +157,7 @@ def test_every_configured_skill_is_packaged() -> None:
     assert config.skills is not None
     assert config.skills.paths == SKILL_PATHS
     skill_files = sorted((AGENT_ROOT / "skills").glob("*/SKILL.md"))
-    assert len(skill_files) == 9
+    assert len(skill_files) == 10
     assert all(skill_file.is_file() for skill_file in skill_files)
     assert all(skill_file.read_text(encoding="utf-8").startswith("---\n") for skill_file in skill_files)
 
@@ -180,6 +180,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
         "benchmark-execution",
         "entities",
         "evals",
+        "experiments",
         "files",
         "guardrails",
         "inference",
@@ -229,6 +230,7 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
         "benchmark-execution",
         "entities",
         "evals",
+        "experiments",
         "files",
         "guardrails",
         "inference",
@@ -1470,3 +1472,190 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
 
     assert json.loads(response) == {"workspace": "default"}
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
+
+
+_INTAKE = "/apis/intake/v2/workspaces/default"
+_SESSION_ID = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+
+
+def _experiment(name: str, **fields: Any) -> dict[str, Any]:
+    return {"id": f"exp-{name}", "name": name, "workspace": "default", "default_sort": "-created_at", **fields}
+
+
+def _evaluation(name: str, experiment_ids: list[str], dataset_name: str) -> dict[str, Any]:
+    return {
+        "id": f"eval-{name}",
+        "name": name,
+        "workspace": "default",
+        "experiment_ids": experiment_ids,
+        "dataset_name": dataset_name,
+    }
+
+
+def _record_approvals(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Approve every mutation, returning the inputs the user was asked to approve."""
+    approvals: list[dict[str, Any]] = []
+
+    def approve(_session: str, _tool_name: str, arguments: dict[str, Any], **_kwargs: object) -> dict[str, str]:
+        approvals.append(arguments)
+        return {"behavior": "allow"}
+
+    monkeypatch.setattr(register, "_call_studio_tool", approve)
+    return approvals
+
+
+def test_experiments_are_exposed_as_api_resources() -> None:
+    assert "experiments" in register._members_at("")
+    assert register._members_at("experiments") == ["create", "delete", "evaluations", "list", "retrieve", "update"]
+    # Evaluations belong to an experiment and cannot be deleted through the assistant.
+    assert register._members_at("experiments.evaluations") == ["create", "list", "retrieve", "update"]
+
+
+def test_listing_and_retrieving_experiments_needs_no_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix(
+        {
+            ("GET", f"{_INTAKE}/experiments"): lambda _request: _page([_experiment("alpha")]),
+            ("GET", f"{_INTAKE}/experiments/alpha"): _json_route(_experiment("alpha", description="first")),
+        }
+    )
+    _install_client(monkeypatch, platform.client())
+
+    listed = json.loads(register.nemo_api("experiments", "list", workspace="default"))
+    retrieved = json.loads(register.nemo_api("experiments", "retrieve", {"name": "alpha"}, workspace="default"))
+
+    assert [item["name"] for item in listed["data"]] == ["alpha"]
+    assert retrieved["description"] == "first"
+    assert platform.mutations() == []
+
+
+def test_creating_an_experiment_requires_a_studio_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("experiments", "create", {"name": "alpha"}, workspace="default")
+
+    assert response.startswith("Denied:")
+    assert platform.requests == []
+
+
+def test_creating_an_experiment_asks_approval_then_posts_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha", description="d"), status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = json.loads(
+        register.nemo_api(
+            "experiments",
+            "create",
+            {"name": "alpha", "description": "d"},
+            studio_session_id=_SESSION_ID,
+            workspace="default",
+        )
+    )
+
+    assert response["id"] == "exp-alpha"
+    assert [(a["input"]["resource"], a["input"]["action"]) for a in approvals] == [("experiments", "create")]
+    body = json.loads(platform.requests[0].content)
+    assert body["name"] == "alpha"
+    assert body["description"] == "d"
+
+
+def test_creating_an_experiment_with_unknown_fields_never_reaches_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha"), status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments",
+        "create",
+        {"name": "alpha", "bogus": 1},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    # The body is validated when the call is made, after the user approves it, so the approval is still
+    # requested; what matters is that nothing is sent to the platform.
+    assert response.startswith("Error:")
+    assert len(approvals) == 1
+    assert platform.requests == []
+
+
+def test_creating_an_evaluation_without_an_experiment_id_never_reaches_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/evaluations", {}, status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments.evaluations",
+        "create",
+        {"name": "run-1", "dataset_name": "data"},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    assert response.startswith("Error:")
+    assert "at least one experiment id" in response
+    assert len(approvals) == 1
+    assert platform.requests == []
+
+
+def test_creating_an_evaluation_posts_its_experiment_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/evaluations", _evaluation("run-1", ["exp-alpha"], "data"), status=201)
+    _install_client(monkeypatch, platform.client())
+    _record_approvals(monkeypatch)
+
+    response = json.loads(
+        register.nemo_api(
+            "experiments.evaluations",
+            "create",
+            {"name": "run-1", "dataset_name": "data", "experiment_ids": ["exp-alpha"]},
+            studio_session_id=_SESSION_ID,
+            workspace="default",
+        )
+    )
+
+    assert response["experiment_ids"] == ["exp-alpha"]
+    body = json.loads(platform.requests[0].content)
+    assert body["experiment_ids"] == ["exp-alpha"]
+    assert body["dataset_name"] == "data"
+
+
+def test_deleting_an_experiment_requires_a_studio_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("DELETE", f"{_INTAKE}/experiments/alpha", status=204)
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("experiments", "delete", {"name": "alpha"}, workspace="default")
+
+    assert response.startswith("Denied:")
+    assert platform.requests == []
+
+
+def test_experiment_evaluations_have_no_delete_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments.evaluations",
+        "delete",
+        {"name": "run-1"},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    assert "Invalid API action 'delete'" in response
+    assert approvals == []
+    assert platform.requests == []
+
+
+def test_experiments_skill_describes_the_create_flow_and_keeps_evaluations_distinct() -> None:
+    skill = (AGENT_ROOT / "skills/experiments/SKILL.md").read_text(encoding="utf-8")
+
+    assert skill.startswith("---\n")
+    assert "name: experiments" in skill
+    assert "`experiments.evaluations`" in skill
+    assert "`evaluation.metrics`" in skill
+    assert "experiment_ids" in skill
+    assert 'destination="experiment_group"' in skill

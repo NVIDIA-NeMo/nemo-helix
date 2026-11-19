@@ -28,6 +28,7 @@ from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.projects.client import ProjectsClient
@@ -220,6 +221,18 @@ _RESOURCES: dict[str, _Resource] = {
             "get_logs": "list_job_logs",
             "cancel": "cancel_job",
             "delete": "delete_job",
+        },
+    ),
+    # Experiments group evaluations for comparison in Studio. They are served by the Intake API and are
+    # distinct from ``evaluation.*`` (the evaluator's metrics and metric jobs).
+    "experiments": _crud(IntakeClient, "experiment"),
+    "experiments.evaluations": _Resource(
+        IntakeClient,
+        {
+            "list": "list_evaluations",
+            "retrieve": "get_evaluation",
+            "create": "create_evaluation",
+            "update": "update_evaluation",
         },
     ),
 }
@@ -1054,7 +1067,8 @@ def nemo_api(
 
     ``resource`` is a dot-separated API path such as ``workspaces``,
     ``inference.providers``, ``files.filesets``, ``evaluation.metrics``,
-    ``guardrail.configs``, ``secrets`` or ``models``. Use
+    ``experiments``, ``experiments.evaluations``, ``guardrail.configs``, ``secrets`` or ``models``.
+    ``experiments`` are Studio experiment groups, not the evaluator's ``evaluation.*`` resources. Use
     ``resource='guardrail.configs'`` for guardrail config CRUD and
     ``resource='guardrail', action='check'`` only for standalone checks. ``action`` is the
     operation name (``list``, ``retrieve``, ``create``, ``update``, ``delete`` or a
