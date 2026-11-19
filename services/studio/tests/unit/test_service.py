@@ -706,6 +706,92 @@ class TestConfigureAppPluginRouter:
         assert client.get("/plugin-ui/ex/index.js").status_code == 200
         assert client.get("/plugin-ui/ex/leak.js").status_code == 404
 
+    def test_sidecar_manifest_is_served(self, tmp_path: Path):
+        """plugin.manifest.json is served as JSON next to the bundle."""
+        (tmp_path / "index.js").write_text("export function mount(){}")
+        (tmp_path / "plugin.manifest.json").write_text('{"name": "ex"}')
+        manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
+
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
+            app = FastAPI()
+            StudioService().configure_app(app)
+
+        client = TestClient(app)
+        response = client.get("/plugin-ui/ex/plugin.manifest.json")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.text == '{"name": "ex"}'
+        assert client.get("/plugin-ui/ex/index.js").status_code == 200
+
+    def test_sidecar_allowlist_blocks_other_json(self, tmp_path: Path):
+        """Only the exact sidecar name is served; other .json, traversal and nesting are 404."""
+        (tmp_path / "plugin.manifest.json").write_text("{}")
+        (tmp_path / "secrets.json").write_text("{}")
+        (tmp_path / "package.json").write_text("{}")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "plugin.manifest.json").write_text("{}")
+        manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
+
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
+            app = FastAPI()
+            StudioService().configure_app(app)
+
+        client = TestClient(app)
+        assert client.get("/plugin-ui/ex/plugin.manifest.json").status_code == 200
+        assert client.get("/plugin-ui/ex/secrets.json").status_code == 404
+        assert client.get("/plugin-ui/ex/package.json").status_code == 404
+        assert client.get("/plugin-ui/ex/..%2Fplugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/ex/%2e%2e/ex/plugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/ex/sub/plugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/unknown/plugin.manifest.json").status_code == 404
+
+    @staticmethod
+    def _asset_client(bundle_dir: Path) -> TestClient:
+        manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=bundle_dir)]
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
+            app = FastAPI()
+            StudioService().configure_app(app)
+        return TestClient(app)
+
+    def test_plugin_assets_always_revalidate(self, tmp_path: Path):
+        """Every served asset carries Cache-Control: no-cache and keeps its ETag."""
+        (tmp_path / "index.js").write_text("export function mount(){}")
+        (tmp_path / "index.js.map").write_text("{}")
+        (tmp_path / "styles.css").write_text("body{}")
+        (tmp_path / "plugin.manifest.json").write_text('{"name": "ex"}')
+        client = self._asset_client(tmp_path)
+
+        for name in ("plugin.manifest.json", "index.js", "index.js.map", "styles.css"):
+            response = client.get(f"/plugin-ui/ex/{name}")
+            assert response.status_code == 200, name
+            assert "no-cache" in response.headers.get("cache-control", ""), name
+            assert response.headers.get("etag"), name
+
+    def test_plugin_asset_conditional_request_returns_304_with_no_cache(self, tmp_path: Path):
+        """Revalidating with the returned ETag is a cheap 304 that still says no-cache."""
+        (tmp_path / "plugin.manifest.json").write_text('{"name": "ex"}')
+        client = self._asset_client(tmp_path)
+
+        first = client.get("/plugin-ui/ex/plugin.manifest.json")
+        assert first.status_code == 200
+        etag = first.headers["etag"]
+        assert "no-cache" in first.headers.get("cache-control", "")
+
+        second = client.get("/plugin-ui/ex/plugin.manifest.json", headers={"If-None-Match": etag})
+        assert second.status_code == 304
+        assert "no-cache" in second.headers.get("cache-control", "")
+
+    def test_plugin_asset_rejections_stay_404(self, tmp_path: Path):
+        """Disallowed files are still 404 (the cache header only applies to served assets)."""
+        (tmp_path / "index.js").write_text("// bundle")
+        (tmp_path / "secrets.json").write_text("{}")
+        client = self._asset_client(tmp_path)
+
+        assert "no-cache" in client.get("/plugin-ui/ex/index.js").headers.get("cache-control", "")
+        for path in ("secrets.json", "missing.js", "sub/nested.js"):
+            assert client.get(f"/plugin-ui/ex/{path}").status_code == 404, path
+        assert client.get("/plugin-ui/unknown/index.js").status_code == 404
+
 
 class TestBuildCSPHeader:
     """_build_csp_header wires configured STUDIO_UI_* endpoints into CSP directives."""
