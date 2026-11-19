@@ -1,0 +1,1 @@
+Models on this platform: put exactly {"alias": "llm", "model": "default/nemotron3-5-lightning", "provider": "m-station-1"} in model_configs and set every LLM column's model_alias to "llm". No other models or providers exist, so never use OpenAI, GPT or any other model name.

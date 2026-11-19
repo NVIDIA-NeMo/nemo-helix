@@ -1,11 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Serves Studio's pre-#3857 `generate_data_designer_job_request` tool over MCP stdio."""
+"""Serves Studio's `generate_data_designer_job_request` tool over MCP stdio.
+
+Pass a tool definition JSON to advertise a different schema; calls are always validated the same way.
+"""
 
 import json
 import os
 import re
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -16,9 +20,11 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
-TOOL_PATH = Path(__file__).with_name("generate_data_designer_job_request.json")
-TOOL_DEF = json.loads(TOOL_PATH.read_text())
-INPUT_SCHEMA = TOOL_DEF["inputSchema"]
+VALIDATION_TOOL_PATH = Path(__file__).with_name("generate_data_designer_job_request.json")
+VALIDATION_TOOL_DEF = json.loads(VALIDATION_TOOL_PATH.read_text())
+INPUT_SCHEMA = VALIDATION_TOOL_DEF["inputSchema"]
+ADVERTISED_TOOL_PATH = Path(__file__).with_name(sys.argv[1]) if len(sys.argv) > 1 else VALIDATION_TOOL_PATH
+TOOL_DEF = json.loads(ADVERTISED_TOOL_PATH.read_text())
 COLUMN_SCHEMA = INPUT_SCHEMA["properties"]["job_request"]["properties"]["spec"]["properties"]["config"]["properties"][
     "columns"
 ]["items"]
@@ -155,7 +161,7 @@ def validate_job_request(arguments: dict[str, Any]) -> list[str]:
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    return [types.Tool(name=TOOL_DEF["name"], description=TOOL_DEF["description"], inputSchema=INPUT_SCHEMA)]
+    return [types.Tool(name=TOOL_DEF["name"], description=TOOL_DEF["description"], inputSchema=TOOL_DEF["inputSchema"])]
 
 
 @server.call_tool(validate_input=False)

@@ -1,0 +1,5 @@
+{"id": "product-reviews", "prompt": "100 product reviews for electronics with a star rating, a sentiment label and the review text"}
+{"id": "support-tickets", "prompt": "Customer support tickets: product category, a subcategory that depends on the category, priority, and an LLM-written ticket body"}
+{"id": "cooking-qa-judge", "prompt": "Q&A pairs about cooking: a topic, an LLM-written question, an LLM-written answer, and an LLM judge that scores the answer 1-5 for accuracy"}
+{"id": "people-dates", "prompt": "Generate a Product-Reviews dataset with reviewer name, age, city, a review date in 2025, and the review text"}
+{"id": "orders-expression", "prompt": "Orders dataset: quantity between 1 and 10, a unit price around $20, a total that is quantity times unit price, and a short LLM-written order note"}

@@ -1,0 +1,785 @@
+{
+  "name": "generate_data_designer_job_request",
+  "description": "Generate a Data Designer job request from the user's description, writing keys in schema order. Each column starts with \"name\" then \"column_type\" (one of: \"sampler\", \"expression\", \"llm-text\", \"llm-structured\", \"llm-judge\", \"llm-code\", \"validation\"), followed by that type's fields in the order listed here.\n- sampler: \"sampler_type\", then \"params\" (object), both set on the column itself, then optional \"convert_to\" (e.g. \"int\", \"float\", or a date format like \"%Y-%m-%d\"). \"params\" is never empty except for \"uuid\". Examples: \"category\" -> { \"values\": [\"a\", \"b\"], \"weights\"?: number[] }; \"subcategory\" -> { \"category\": \"<parent column name>\", \"values\": { \"<parent value>\": [\"x\", \"y\"] } } (parent column must come earlier, and \"values\" needs a key for every parent value); \"uniform\" -> { \"low\", \"high\" }; \"gaussian\" -> { \"mean\", \"stddev\" }; \"datetime\" -> { \"start\": \"YYYY-MM-DD\", \"end\": \"YYYY-MM-DD\", \"unit\"?: \"D\" }; \"uuid\" -> {} or { \"prefix\" }. Use \"subcategory\" for values that depend on another column instead of an expression.\n- expression: \"expr\" (Jinja2 only; not Python), then optional \"dtype\" (\"int\"|\"float\"|\"str\"|\"bool\"). Reference other columns only as {{ column_name }}, never bare identifiers. Do not use Python ternary forms like \"1 if cond else 0\" without proper Jinja wrapping and {{ }} output. Order columns so expr only references earlier columns. Avoid keyword substring rules for sentiment—use sampler or LLM columns instead.\n- llm-text: \"prompt\", \"model_alias\", then optional \"system_prompt\", \"extract_reasoning_content\". Prompt may only reference columns listed earlier in \"columns\" (exact {{ name }} match).\n- llm-structured, llm-judge, llm-code: \"prompt\", \"model_alias\", then \"output_format\", \"scores\" or \"code_lang\" respectively, then the same optional fields as llm-text.\n- validation: \"target_columns\", \"validator_type\", \"validator_params\". Prefer sampler/expression/llm-text for simple specs.",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "job_request"
+    ],
+    "properties": {
+      "job_request": {
+        "type": "object",
+        "required": [
+          "name",
+          "spec"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Lowercase job name starting with a letter; letters, digits and hyphens only (e.g. \"my-data-job\")."
+          },
+          "spec": {
+            "type": "object",
+            "required": [
+              "num_records",
+              "config"
+            ],
+            "properties": {
+              "num_records": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Number of records to generate."
+              },
+              "config": {
+                "type": "object",
+                "required": [
+                  "model_configs",
+                  "columns"
+                ],
+                "properties": {
+                  "model_configs": {
+                    "type": "array",
+                    "description": "Every alias referenced by a column model_alias, defined before the columns. [] if no column uses a model.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "alias",
+                        "model",
+                        "provider"
+                      ],
+                      "properties": {
+                        "alias": {
+                          "type": "string",
+                          "description": "Short stable alias, e.g. \"review-model\"."
+                        },
+                        "model": {
+                          "type": "string",
+                          "description": "Model identifier (e.g. workspace/model-name)."
+                        },
+                        "provider": {
+                          "type": "string",
+                          "description": "Model provider name. Use the provider part of the model or \"workspace/provider-name\" if workspace-scoped."
+                        },
+                        "inference_parameters": {
+                          "type": "object",
+                          "properties": {
+                            "generation_type": {
+                              "type": "string",
+                              "enum": [
+                                "chat-completion"
+                              ]
+                            },
+                            "max_tokens": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "temperature": {
+                              "type": "number"
+                            },
+                            "top_p": {
+                              "type": "number"
+                            },
+                            "max_parallel_requests": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "extra_body": {
+                              "type": "object",
+                              "description": "Provider-specific JSON merged into the chat request (e.g. flags to disable thinking mode); keys depend on the inference backend."
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "columns": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Columns in dependency order. Each starts with name, column_type, then the fields of that type.",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "sampler_type",
+                            "params"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "sampler"
+                              ]
+                            },
+                            "sampler_type": {
+                              "type": "string",
+                              "enum": [
+                                "bernoulli",
+                                "bernoulli_mixture",
+                                "binomial",
+                                "category",
+                                "datetime",
+                                "gaussian",
+                                "person",
+                                "person_from_faker",
+                                "poisson",
+                                "scipy",
+                                "subcategory",
+                                "timedelta",
+                                "uniform",
+                                "uuid"
+                              ]
+                            },
+                            "params": {
+                              "description": "Sampler parameters. Must match sampler_type; required fields are listed per variant.",
+                              "anyOf": [
+                                {
+                                  "description": "sampler_type \"category\"",
+                                  "type": "object",
+                                  "required": [
+                                    "values"
+                                  ],
+                                  "properties": {
+                                    "values": {
+                                      "type": "array",
+                                      "minItems": 1,
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "weights": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "number"
+                                      }
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"subcategory\"",
+                                  "type": "object",
+                                  "required": [
+                                    "category",
+                                    "values"
+                                  ],
+                                  "properties": {
+                                    "category": {
+                                      "type": "string",
+                                      "description": "Name of the parent category column."
+                                    },
+                                    "values": {
+                                      "type": "object",
+                                      "description": "Maps each parent category value to its list of subcategory values.",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "number"
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"uniform\"",
+                                  "type": "object",
+                                  "required": [
+                                    "low",
+                                    "high"
+                                  ],
+                                  "properties": {
+                                    "low": {
+                                      "type": "number"
+                                    },
+                                    "high": {
+                                      "type": "number"
+                                    },
+                                    "decimal_places": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"gaussian\"",
+                                  "type": "object",
+                                  "required": [
+                                    "mean",
+                                    "stddev"
+                                  ],
+                                  "properties": {
+                                    "mean": {
+                                      "type": "number"
+                                    },
+                                    "stddev": {
+                                      "type": "number"
+                                    },
+                                    "decimal_places": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"poisson\"",
+                                  "type": "object",
+                                  "required": [
+                                    "mean"
+                                  ],
+                                  "properties": {
+                                    "mean": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"bernoulli\"",
+                                  "type": "object",
+                                  "required": [
+                                    "p"
+                                  ],
+                                  "properties": {
+                                    "p": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"binomial\"",
+                                  "type": "object",
+                                  "required": [
+                                    "n",
+                                    "p"
+                                  ],
+                                  "properties": {
+                                    "n": {
+                                      "type": "integer"
+                                    },
+                                    "p": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"bernoulli_mixture\"",
+                                  "type": "object",
+                                  "required": [
+                                    "p",
+                                    "dist_name",
+                                    "dist_params"
+                                  ],
+                                  "properties": {
+                                    "p": {
+                                      "type": "number"
+                                    },
+                                    "dist_name": {
+                                      "type": "string"
+                                    },
+                                    "dist_params": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"scipy\"",
+                                  "type": "object",
+                                  "required": [
+                                    "dist_name",
+                                    "dist_params"
+                                  ],
+                                  "properties": {
+                                    "dist_name": {
+                                      "type": "string"
+                                    },
+                                    "dist_params": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    },
+                                    "decimal_places": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"timedelta\"",
+                                  "type": "object",
+                                  "required": [
+                                    "dt_min",
+                                    "dt_max",
+                                    "reference_column_name"
+                                  ],
+                                  "properties": {
+                                    "dt_min": {
+                                      "type": "integer"
+                                    },
+                                    "dt_max": {
+                                      "type": "integer"
+                                    },
+                                    "reference_column_name": {
+                                      "type": "string"
+                                    },
+                                    "unit": {
+                                      "type": "string",
+                                      "enum": [
+                                        "D",
+                                        "h",
+                                        "m",
+                                        "s"
+                                      ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"datetime\"",
+                                  "type": "object",
+                                  "required": [
+                                    "start",
+                                    "end"
+                                  ],
+                                  "properties": {
+                                    "start": {
+                                      "type": "string",
+                                      "description": "Inclusive start, e.g. YYYY-MM-DD."
+                                    },
+                                    "end": {
+                                      "type": "string",
+                                      "description": "Exclusive end, e.g. YYYY-MM-DD."
+                                    },
+                                    "unit": {
+                                      "type": "string",
+                                      "enum": [
+                                        "Y",
+                                        "M",
+                                        "D",
+                                        "h",
+                                        "m",
+                                        "s"
+                                      ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"uuid\"; all fields optional",
+                                  "type": "object",
+                                  "properties": {
+                                    "prefix": {
+                                      "type": "string"
+                                    },
+                                    "short_form": {
+                                      "type": "boolean"
+                                    },
+                                    "uppercase": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "sampler_type \"person\" or \"person_from_faker\"; all fields optional",
+                                  "type": "object",
+                                  "properties": {
+                                    "locale": {
+                                      "type": "string"
+                                    },
+                                    "sex": {
+                                      "type": "string",
+                                      "enum": [
+                                        "Male",
+                                        "Female"
+                                      ]
+                                    },
+                                    "age_range": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "city": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "select_field_values": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    },
+                                    "with_synthetic_personas": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "convert_to": {
+                              "type": "string",
+                              "description": "Optional conversion after sampling: \"int\", \"float\", \"str\", or a date format."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "expr"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "expression"
+                              ]
+                            },
+                            "expr": {
+                              "type": "string",
+                              "description": "Full Jinja2 template; use {{ col }} for every column reference (not bare col). No Python if/else expressions unless expressed as Jinja {{ a if b else c }}."
+                            },
+                            "dtype": {
+                              "type": "string",
+                              "enum": [
+                                "int",
+                                "float",
+                                "str",
+                                "bool"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "prompt",
+                            "model_alias"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "llm-text"
+                              ]
+                            },
+                            "prompt": {
+                              "type": "string",
+                              "description": "Prompt template; reference earlier columns as {{ column_name }}."
+                            },
+                            "model_alias": {
+                              "type": "string",
+                              "description": "Alias of an entry in config.model_configs."
+                            },
+                            "system_prompt": {
+                              "type": "string",
+                              "description": "Use to constrain style (e.g. no chain-of-thought in the answer)."
+                            },
+                            "extract_reasoning_content": {
+                              "type": "boolean",
+                              "description": "If true, reasoning split by the provider goes to {column}__reasoning_content instead of the value."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "prompt",
+                            "model_alias",
+                            "output_format"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "llm-structured"
+                              ]
+                            },
+                            "prompt": {
+                              "type": "string",
+                              "description": "Prompt template; reference earlier columns as {{ column_name }}."
+                            },
+                            "model_alias": {
+                              "type": "string",
+                              "description": "Alias of an entry in config.model_configs."
+                            },
+                            "output_format": {
+                              "type": "object",
+                              "description": "JSON schema of the output."
+                            },
+                            "system_prompt": {
+                              "type": "string",
+                              "description": "Use to constrain style (e.g. no chain-of-thought in the answer)."
+                            },
+                            "extract_reasoning_content": {
+                              "type": "boolean",
+                              "description": "If true, reasoning split by the provider goes to {column}__reasoning_content instead of the value."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "prompt",
+                            "model_alias",
+                            "scores"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "llm-judge"
+                              ]
+                            },
+                            "prompt": {
+                              "type": "string",
+                              "description": "Prompt template; reference earlier columns as {{ column_name }}."
+                            },
+                            "model_alias": {
+                              "type": "string",
+                              "description": "Alias of an entry in config.model_configs."
+                            },
+                            "scores": {
+                              "type": "array",
+                              "minItems": 1,
+                              "description": "Scoring rubrics.",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "description",
+                                  "options"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "description": "Short name of the scored dimension."
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "description": "How to judge this dimension."
+                                  },
+                                  "options": {
+                                    "type": "object",
+                                    "description": "Map of each score to what it means, e.g. { \"1\": \"Not helpful\", \"5\": \"Very helpful\" }.",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "system_prompt": {
+                              "type": "string",
+                              "description": "Use to constrain style (e.g. no chain-of-thought in the answer)."
+                            },
+                            "extract_reasoning_content": {
+                              "type": "boolean",
+                              "description": "If true, reasoning split by the provider goes to {column}__reasoning_content instead of the value."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "prompt",
+                            "model_alias",
+                            "code_lang"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "llm-code"
+                              ]
+                            },
+                            "prompt": {
+                              "type": "string",
+                              "description": "Prompt template; reference earlier columns as {{ column_name }}."
+                            },
+                            "model_alias": {
+                              "type": "string",
+                              "description": "Alias of an entry in config.model_configs."
+                            },
+                            "code_lang": {
+                              "type": "string",
+                              "description": "Target language, e.g. \"python\"."
+                            },
+                            "system_prompt": {
+                              "type": "string",
+                              "description": "Use to constrain style (e.g. no chain-of-thought in the answer)."
+                            },
+                            "extract_reasoning_content": {
+                              "type": "boolean",
+                              "description": "If true, reasoning split by the provider goes to {column}__reasoning_content instead of the value."
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "column_type",
+                            "target_columns",
+                            "validator_type",
+                            "validator_params"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "description": "Column name."
+                            },
+                            "column_type": {
+                              "type": "string",
+                              "enum": [
+                                "validation"
+                              ]
+                            },
+                            "target_columns": {
+                              "type": "array",
+                              "minItems": 1,
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "validator_type": {
+                              "type": "string",
+                              "enum": [
+                                "code",
+                                "local_callable",
+                                "remote"
+                              ]
+                            },
+                            "validator_params": {
+                              "type": "object",
+                              "description": "For \"code\": { \"code_lang\": \"python\" }. For \"remote\": { \"url\": \"https://...\" }."
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "seed_config": {
+                    "type": "object",
+                    "description": "Only when the user names an existing dataset to seed rows from.",
+                    "required": [
+                      "source"
+                    ],
+                    "properties": {
+                      "source": {
+                        "type": "object",
+                        "required": [
+                          "seed_type",
+                          "path"
+                        ],
+                        "properties": {
+                          "seed_type": {
+                            "type": "string",
+                            "enum": [
+                              "nhx"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "description": "Fileset file as \"<workspace>/<fileset>#<file>\", e.g. \"default/reviews#data.csv\"."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "sampling_strategy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered",
+                          "shuffle"
+                        ]
+                      },
+                      "selection_strategy": {
+                        "type": "object"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+}

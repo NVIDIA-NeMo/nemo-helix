@@ -30,6 +30,9 @@ instructions:
 
 default_harness: deepagents
 
+runtime:
+  max_turns: 30
+
 harnesses:
   deepagents:
     kind: deepagents
@@ -55,10 +58,8 @@ mcp:
     data_designer:
       transport: stdio
       url: python
-      # Studio's MCP status probe ignores the agent's cwd, so resolve the staged subprocess copy absolutely.
       args:
-        - -c
-        - "import glob, os, runpy; runpy.run_path(max(glob.glob(os.path.expanduser('~/.local/share/nemo/agents/system/default/data-designer-toolcall*-fabric/mcps/dd_job_request_server.py')), key=os.path.getmtime), run_name='__main__')"
+        - ../mcps/dd_job_request_server.py
 
 tools:
   blocked: []
