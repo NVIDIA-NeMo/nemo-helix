@@ -201,6 +201,44 @@ def test_shell_reference_counts_only_when_the_read_returns_the_skill_document(mo
     assert evidence.observe_codex([launch, completion], SKILL, DOCUMENT).activated is None
 
 
+@pytest.mark.parametrize(
+    ("command", "stdout", "exit_code", "activated"),
+    [
+        (
+            f"sed -n '2,4p' {REGISTERED}; sed -n '1,2p' reference.md",
+            "".join(DOCUMENT.splitlines(keepends=True)[1:4]),
+            0,
+            True,
+        ),
+        (f"cat {REGISTERED} && cat reference.md", DOCUMENT, 0, True),
+        (f"sed -n '2,4p' {REGISTERED}; cat reference.md", DOCUMENT, 0, None),
+        (f"cat {REGISTERED} && cat reference.md", DOCUMENT, 1, None),
+        (f"cat {REGISTERED} '&&' reference.md", DOCUMENT, 0, None),
+    ],
+)
+def test_compound_command_counts_a_proven_leading_skill_read(
+    monkeypatch: pytest.MonkeyPatch, command: str, stdout: str, exit_code: int, activated: bool | None
+) -> None:
+    evidence = _load_example(monkeypatch, "codex_evidence")
+    events = [
+        _catalog(_list_entry(f"- {SKILL}: (file: {REGISTERED})")),
+        _event(
+            "response_item",
+            type="function_call",
+            name="exec_command",
+            call_id="read1",
+            arguments=json.dumps({"cmd": command}),
+        ),
+        _event(
+            "response_item",
+            type="function_call_output",
+            call_id="read1",
+            output=f"Process exited with code {exit_code}\nOutput:\n{stdout}Reference text\n",
+        ),
+    ]
+    assert evidence.observe_codex(events, SKILL, DOCUMENT).activated is activated
+
+
 def test_replay_payload_preserves_zero_reward_and_omits_inaccessible_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     scoring = _load_example(monkeypatch, "score")
     trial = AgentEvalTrial(

@@ -129,15 +129,20 @@ def _json_object(text: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _is_document_read(command: object, registered: str) -> bool:
-    """Recognize simple reads. Compound shell commands are inconclusive."""
+def _proves_shell_read(command: object, output: object, registered: str, document: str) -> bool:
+    """Recognize simple reads and compare the output prefix for a leading read in a command list."""
+    if not isinstance(output, str):
+        return False
+    compound = False
     if isinstance(command, list) and all(isinstance(arg, str) for arg in command):
         if len(command) == 3 and command[1] in {"-c", "-lc"} and PurePosixPath(command[0]).name in {"bash", "sh"}:
-            return _is_document_read(command[-1], registered)
+            return _proves_shell_read(command[-1], output, registered, document)
         args = command
     elif isinstance(command, str):
+        first, *remaining = re.split(r"\s*(?:&&|;)\s*", command, maxsplit=1)
+        compound = bool(remaining)
         try:
-            lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+            lexer = shlex.shlex(first, posix=True, punctuation_chars=True)
             lexer.whitespace_split = True
             lexer.commenters = ""
             args = list(lexer)
@@ -154,18 +159,32 @@ def _is_document_read(command: object, registered: str) -> bool:
             break
     if path != registered:
         return False
-    tool = PurePosixPath(args[0]).name
-    options = args[1:-1]
-    if tool == "cat":
-        return options in ([], ["--"])
-    if tool == "head":
-        return not options or (len(options) == 2 and options[0] == "-n" and options[1].isdigit())
-    return (
-        tool == "sed"
-        and len(options) == 2
-        and options[0] == "-n"
-        and re.fullmatch(r"(?:\d+,)?\d+p", options[1]) is not None
-    )
+    try:
+        excerpt = _document_lines(PurePosixPath(args[0]).name, args[1:-1])
+    except ValueError:
+        return False
+    if excerpt is None:
+        return False
+    if not compound:
+        return _read_document_output(output, document)
+    expected = "".join(document.splitlines(keepends=True)[excerpt])
+    return bool(expected.strip()) and output.startswith(expected)
+
+
+def _document_lines(tool: str, options: list[str]) -> slice | None:
+    if tool == "cat" and options in ([], ["--"]):
+        return slice(None)
+    if tool == "head" and not options:
+        return slice(10)
+    if len(options) == 2 and options[0] == "-n":
+        if tool == "head" and options[1].isascii() and options[1].isdigit():
+            return slice(int(options[1]))
+        if tool == "sed" and (match := re.fullmatch(r"(?:([0-9]+),)?([0-9]+)p", options[1])):
+            last = int(match[2])
+            first = int(match[1]) if match[1] else last
+            if first > 0:
+                return slice(first - 1, max(first, last))
+    return None
 
 
 def _read_document_output(text: object, document: str) -> bool:
@@ -187,12 +206,15 @@ def _proves_tool_read(call: dict[str, Any], output: object, registered: str, doc
             and _locator_path(resource) == registered
             and _read_document_output(contents, document)
         )
-    if call.get("name") != "exec_command" or not _is_document_read(
-        _json_object(call.get("arguments")).get("cmd"), registered
-    ):
+    if call.get("name") != "exec_command":
         return False
     status, delimiter, stdout = output.partition("\nOutput:\n")
-    return bool(delimiter) and "Process exited with code 0" in status and _read_document_output(stdout, document)
+    command = _json_object(call.get("arguments")).get("cmd")
+    return (
+        bool(delimiter)
+        and "Process exited with code 0" in status.splitlines()
+        and _proves_shell_read(command, stdout, registered, document)
+    )
 
 
 def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: str) -> CodexEvidence:
@@ -232,8 +254,7 @@ def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: s
                     listed
                     and item.get("status") == "completed"
                     and _token_count(item.get("exit_code")) == 0
-                    and _is_document_read(item.get("command"), registered)
-                    and _read_document_output(item.get("aggregated_output"), document)
+                    and _proves_shell_read(item.get("command"), item.get("aggregated_output"), registered, document)
                 ):
                     activated = True
     if listed is None:
