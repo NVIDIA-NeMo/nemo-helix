@@ -42,7 +42,7 @@ export const estimateCostPer1kTasks = (
 export const buildMockResults = (distillationName: string, studentModel: string): MockArmResult[] => [
   {
     id: 'original',
-    title: 'Original agent',
+    title: 'Baseline',
     model: ORIGINAL_MODEL,
     score: 0.88,
     inputTokensPerTask: 3200,
@@ -53,7 +53,7 @@ export const buildMockResults = (distillationName: string, studentModel: string)
   },
   {
     id: 'base',
-    title: 'Small model, before training',
+    title: 'Model swap',
     model: studentModel,
     score: 0.54,
     inputTokensPerTask: 3400,
@@ -64,7 +64,7 @@ export const buildMockResults = (distillationName: string, studentModel: string)
   },
   {
     id: 'distilled',
-    title: 'Distilled model',
+    title: 'After distillation',
     model: `${studentModel} + adapter`,
     score: 0.85,
     inputTokensPerTask: 3150,
@@ -74,3 +74,22 @@ export const buildMockResults = (distillationName: string, studentModel: string)
     evalJobName: `${distillationName}-eval-distilled`,
   },
 ];
+
+/** One neutral color per model; green, yellow and red are kept for better or worse. */
+export const ARM_COLOR_CLASSES: Record<ArmId, string> = {
+  original: 'bg-(--color-gray-400)',
+  base: 'bg-(--color-blue-500)',
+  distilled: 'bg-(--color-purple-500)',
+};
+
+export const ARM_COLORS: Record<ArmId, string> = {
+  original: 'var(--color-gray-400)',
+  base: 'var(--color-blue-500)',
+  distilled: 'var(--color-purple-500)',
+};
+
+export const ARM_PRICES: Record<ArmId, TokenPrice> = {
+  original: ORIGINAL_PRICE,
+  base: STUDENT_PRICE,
+  distilled: STUDENT_PRICE,
+};

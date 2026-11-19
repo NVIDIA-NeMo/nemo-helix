@@ -1,9 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ArrowDown, ArrowUp } from '@nemo/icons/icons';
-import { Badge, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import type { MockArmResult } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
+import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
+import { StatTile, type StatTileStatus } from '@nemo/common/src/components/StatTile';
+import { Badge, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  costDelta,
+  type Delta,
+  latencyDelta,
+  scoreDelta,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/distillationDeltas';
+import {
+  ARM_COLOR_CLASSES,
+  type MockArmResult,
+} from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
+import cn from 'classnames';
 import type { FC } from 'react';
 
 export interface DistillationArmCardProps {
@@ -13,69 +24,38 @@ export interface DistillationArmCardProps {
   highlighted?: boolean;
 }
 
-const percentChange = (value: number, reference: number): number =>
-  Math.round(((value - reference) / reference) * 100);
+interface TileDelta {
+  hint: string;
+  hintStatus: StatTileStatus;
+  status?: StatTileStatus;
+}
 
-const formatUsd = (value: number): string => `$${value.toFixed(2)}`;
+const toTileDelta = (delta: Delta | undefined): TileDelta | undefined =>
+  delta && {
+    hint: delta.text,
+    hintStatus: delta.tone,
+    ...(delta.tone === 'success' ? {} : { status: delta.tone }),
+  };
 
-/** One arm of the three-way comparison: its model, score, estimated cost and latency. */
+/** One arm of the three-way comparison: its model and four headline numbers as stat tiles. */
 export const DistillationArmCard: FC<DistillationArmCardProps> = ({
   arm,
   baseline,
   highlighted,
 }) => {
   const isBaseline = arm.id === baseline.id;
-
-  const renderDelta = (change: number, label: string, higherIsBetter: boolean) => {
-    if (change === 0) return null;
-    const isGood = higherIsBetter ? change > 0 : change < 0;
-    const Arrow = change > 0 ? ArrowUp : ArrowDown;
-    return (
-      <Flex
-        align="center"
-        gap="density-xs"
-        className={isGood ? 'text-feedback-success' : 'text-feedback-danger'}
-      >
-        <Arrow size="12" aria-hidden />
-        <Text kind="body/semibold/xs">{label}</Text>
-        <span className="sr-only">{isGood ? 'better' : 'worse'} than original</span>
-      </Flex>
-    );
-  };
-
-  const rows = [
-    {
-      label: 'Est. cost per 1,000 tasks',
-      value: formatUsd(arm.estimatedCostPer1kTasks),
-      delta: isBaseline
-        ? null
-        : renderDelta(
-            percentChange(arm.estimatedCostPer1kTasks, baseline.estimatedCostPer1kTasks),
-            `${Math.abs(percentChange(arm.estimatedCostPer1kTasks, baseline.estimatedCostPer1kTasks))}%`,
-            false
-          ),
-    },
-    {
-      label: 'Median latency',
-      value: `${arm.medianLatencySec.toFixed(1)} s`,
-      delta: isBaseline
-        ? null
-        : renderDelta(
-            percentChange(arm.medianLatencySec, baseline.medianLatencySec),
-            `${Math.abs(percentChange(arm.medianLatencySec, baseline.medianLatencySec))}%`,
-            false
-          ),
-    },
-    {
-      label: 'Tokens per task (in / out)',
-      value: `${arm.inputTokensPerTask.toLocaleString()} / ${arm.outputTokensPerTask.toLocaleString()}`,
-    },
-  ];
+  const scoreTile = isBaseline ? undefined : toTileDelta(scoreDelta(arm, baseline));
+  const costTile = isBaseline ? undefined : toTileDelta(costDelta(arm, baseline));
+  const latencyTile = isBaseline ? undefined : toTileDelta(latencyDelta(arm, baseline));
 
   return (
     <Panel
       slotHeading={
         <Flex align="center" gap="density-md">
+          <span
+            aria-hidden
+            className={cn('size-3 shrink-0 rounded-full', ARM_COLOR_CLASSES[arm.id])}
+          />
           <Text kind="title/xs">{arm.title}</Text>
           {highlighted && (
             <Badge kind="solid" color="green">
@@ -86,40 +66,52 @@ export const DistillationArmCard: FC<DistillationArmCardProps> = ({
       }
       elevation="high"
       density="compact"
+      className={cn(
+        'h-full',
+        highlighted && 'border-2 border-(--color-purple-500)'
+      )}
       data-testid={`distillation-arm-${arm.id}`}
     >
       <Stack gap="density-lg">
-        <Text kind="mono/sm" className="text-secondary">
-          {arm.model}
-        </Text>
-        <Stack gap="density-xs">
-          <Text kind="body/regular/xs" className="text-secondary">
-            Score on held-out tasks
-          </Text>
-          <Flex align="baseline" gap="density-md">
-            <Text kind="title/lg">{arm.score.toFixed(2)}</Text>
-            {!isBaseline &&
-              renderDelta(
-                Math.sign(arm.score - baseline.score),
-                `${Math.abs(arm.score - baseline.score).toFixed(2)} vs original`,
-                true
-              )}
-          </Flex>
-        </Stack>
-        {rows.map((row) => (
-          <Flex key={row.label} justify="between" align="center" gap="density-md">
-            <Text kind="body/regular/sm" className="text-secondary">
-              {row.label}
-            </Text>
-            <Flex align="center" gap="density-md">
-              <Text kind="body/semibold/sm">{row.value}</Text>
-              {row.delta}
-            </Flex>
-          </Flex>
-        ))}
-        <Text kind="body/regular/xs" className="text-secondary">
-          Evaluation job <span className="font-mono">{arm.evalJobName}</span>
-        </Text>
+        <KeyValueGrid
+          items={[
+            { key: 'model', label: 'Model', value: arm.model, wrapValue: true },
+            { key: 'eval', label: 'Evaluation', value: arm.evalJobName, wrapValue: true },
+            {
+              key: 'tokens',
+              label: 'Input / output tokens per task',
+              value: `${arm.inputTokensPerTask.toLocaleString()} / ${arm.outputTokensPerTask.toLocaleString()}`,
+            },
+          ]}
+        />
+        <Grid cols={2} gap="density-lg">
+          <StatTile
+            variant="metric"
+            label="Score"
+            value={arm.score.toFixed(2)}
+            trailingLabel="/ 1.00"
+            {...(isBaseline ? { hint: 'Baseline' } : scoreTile)}
+          />
+          <StatTile
+            variant="metric"
+            label="Cost / 1k tasks"
+            value={`$${arm.estimatedCostPer1kTasks.toFixed(2)}`}
+            trailingLabel="est."
+            {...costTile}
+          />
+          <StatTile
+            variant="metric"
+            label="Median latency"
+            value={arm.medianLatencySec.toFixed(1)}
+            trailingLabel="s"
+            {...latencyTile}
+          />
+          <StatTile
+            variant="metric"
+            label="Tokens / task"
+            value={(arm.inputTokensPerTask + arm.outputTokensPerTask).toLocaleString()}
+          />
+        </Grid>
       </Stack>
     </Panel>
   );

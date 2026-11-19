@@ -120,6 +120,8 @@ export const createDeploymentWizardSchema = z
     diskSize: z.string().optional(),
     /** Key/value rows mapped to `DeploymentParams.additional_envs` (NGC flow only). */
     additionalEnvs: z.array(additionalEnvRowSchema).default([]),
+    /** Extra command-line arguments, as typed; mapped to `ContainerExecutorConfig.additional_args`. */
+    additionalArgs: z.string().optional(),
     repoId: z.string().optional(),
     hfTokenSecret: z.string().optional().or(z.literal('')),
     /** Which kind of workspace resource the user is picking. */
@@ -173,6 +175,14 @@ export const createDeploymentWizardSchema = z
       }
     }
 
+    if (data.additionalArgs && splitArguments(data.additionalArgs) === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Unterminated quote in the arguments',
+        path: ['additionalArgs'],
+      });
+    }
+
     const seenKeys = new Set<string>();
     for (let i = 0; i < data.additionalEnvs.length; i++) {
       const k = data.additionalEnvs[i]?.key?.trim();
@@ -207,6 +217,7 @@ export const defaultWizardValues = (): WizardFormValues => ({
   loraEnabled: true,
   diskSize: '50Gi',
   additionalEnvs: [],
+  additionalArgs: '',
   repoId: '',
   hfTokenSecret: '',
   workspacePickerType: WORKSPACE_PICKER_MODEL,
@@ -225,4 +236,40 @@ export function additionalEnvsFormToApi(
     out[key] = row.value?.trim() ?? '';
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Split typed arguments the way a shell would: on whitespace, keeping quoted text together.
+ * Returns null when a quote is left open.
+ */
+export function splitArguments(text: string): string[] | null {
+  const args: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let started = false;
+  for (const char of text) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+    } else if (/\s/.test(char)) {
+      if (started) args.push(current);
+      current = '';
+      started = false;
+    } else {
+      current += char;
+      started = true;
+    }
+  }
+  if (quote) return null;
+  if (started) args.push(current);
+  return args;
+}
+
+/** Build API `additional_args` from the typed text; omitted when nothing was entered. */
+export function additionalArgsFormToApi(text: WizardFormValues['additionalArgs']): string[] | undefined {
+  const args = splitArguments(text ?? '');
+  return args && args.length > 0 ? args : undefined;
 }

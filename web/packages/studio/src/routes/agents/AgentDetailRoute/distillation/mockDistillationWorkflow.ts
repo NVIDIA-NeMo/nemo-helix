@@ -8,7 +8,7 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/distillation/mockDistillationResults';
 import { useEffect, useState } from 'react';
 
-export type MockStageStatus = 'pending' | 'active' | 'completed';
+export type MockStageStatus = 'pending' | 'active' | 'completed' | 'failed';
 
 export interface MockStageMetric {
   label: string;
@@ -139,7 +139,7 @@ export const buildMockWorkflow = (
     ),
     evalStage(
       'eval-base',
-      'Evaluate small model before training',
+      'Evaluate model swap (no training)',
       'The same agent with the student model and no training, on the held-out tasks.',
       EVAL_BASE,
       results[1]
