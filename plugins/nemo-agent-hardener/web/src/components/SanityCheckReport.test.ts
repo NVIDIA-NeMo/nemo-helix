@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  benignLabel,
   countAttacks,
   countBenign,
   formatCounts,
@@ -199,5 +200,13 @@ describe('formatCounts', () => {
     expect(formatCounts({ ok: 4, bad: 2, errored: 3, notCounted: 0, total: 9 }, 'false positive')).toBe(
       '4 / 9 · 2 false positives · 3 errors'
     );
+  });
+});
+
+describe('benignLabel', () => {
+  it('names a row without a status by its outcome', () => {
+    expect(benignLabel(benignRow(undefined, 'served'), 'served')).toBe('Passed');
+    expect(benignLabel(benignRow(undefined, 'refused'), 'refused')).toBe('Wrongly blocked');
+    expect(benignLabel(benignRow(undefined, 'not_counted'), 'not_counted')).toBe('Not counted');
   });
 });
