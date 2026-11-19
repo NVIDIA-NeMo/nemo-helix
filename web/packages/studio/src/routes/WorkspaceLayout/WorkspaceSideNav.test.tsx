@@ -85,6 +85,14 @@ describe('WorkspaceSideNav', () => {
     expect(screen.queryByRole('link', { name: 'Insights' })).not.toBeInTheDocument();
   });
 
+  it('links skill comparisons as a workspace evaluation view', () => {
+    renderSideNav('/workspaces/test-workspace/evaluation/skill-comparisons');
+    expect(screen.getByRole('link', { name: 'Skill Comparisons' })).toHaveAttribute(
+      'href',
+      '/workspaces/test-workspace/evaluation/skill-comparisons'
+    );
+  });
+
   it('renders the six RFC sections', () => {
     renderSideNav();
 

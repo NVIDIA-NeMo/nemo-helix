@@ -473,6 +473,7 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef | None, *, exp
                     )
                     report["arms"][name]["discovery"] = evidence.skill_listed
                     report["arms"][name]["activation"] = evidence.activated
+                    report["arms"][name]["measurements"] = evidence.measurements.model_dump(mode="json")
                 except _ERRORS as exc:
                     report["arms"][name]["evidence_error"] = str(exc)
                     success = False

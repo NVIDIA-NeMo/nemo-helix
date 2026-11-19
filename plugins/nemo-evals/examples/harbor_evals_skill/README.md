@@ -147,6 +147,21 @@ Job IDs, metrics, views, coverage and diagnostics. The scoring Jobs use a separa
 Taskset revision from the live Taskset. Each arm's original bundle and the scoring artifacts
 are retained in the run directory.
 
+### Inspect the comparison in Studio
+
+Open **Evaluations → Skill Comparisons** and import `$RUN_DIR/skill-eval-summary.json`.
+**Scores by Metric** shows mean scores and marks the observed minimum and maximum
+for variant scores when they vary across trials. Select a metric or a cell in
+**Task Results** to inspect its scoring evidence. **Every Metric** includes counts
+and scores with up to two decimal places. **Package Checks** shows scan findings
+and other diagnostics when the report includes them.
+
+**Load Saved Runs** can open a completed variant and select its linked control.
+Older runs can be paired manually using the same pinned taskset. The loader
+supports one task and one trial per arm and uses the most recent completed
+scoring replay for each trial. **Evidence** lists the source jobs and revision
+pins. Use the exported report to include the verified skill discovery evidence.
+
 Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
 The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.
 [Custom metrics and views](https://docs.nvidia.com/nemo-helix/v0.10/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
