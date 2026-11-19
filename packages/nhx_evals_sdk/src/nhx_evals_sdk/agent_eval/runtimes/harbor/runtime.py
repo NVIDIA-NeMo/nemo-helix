@@ -73,6 +73,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
 from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import SetupSlots, default_slot_dir, max_concurrent_setups
+from nhx_evals_sdk.agent_eval.runtimes.harbor.skills import skill_digests, validate_skill_dirs
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
@@ -98,9 +99,6 @@ logger = logging.getLogger(__name__)
 
 # Default reward key inside Harbor's ``verifier_result.rewards`` mapping.
 DEFAULT_REWARD_KEY = "reward"
-# Temporary input for the skills evaluation demo. The same env_vars field reaches every worker.
-_MOCK_SKILL_ENV = "NHX_HARBOR_MOCK_SKILL"
-_MOCK_SKILL_DIR = Path(__file__).resolve().parents[2] / "example_skills" / "supercool-guidelines"
 #: The Harbor jobs of a split run (see :data:`HARBOR_SPLIT_MARKER`): public tasks with the host-gateway
 #: alias, and network-restricted tasks, where Docker refuses it.
 HOST_ALIAS_JOB = "host-alias"
@@ -123,8 +121,10 @@ CACHE_STAMP_FILENAME = ".nemo-eval-harbor-cache.json"
 CACHE_STAMP_VERSION = 3
 # Excluded from the cache fingerprint — see :func:`_cache_stamp` for why each one.
 _CACHE_IRRELEVANT_OPTIONS = frozenset(
-    {"jobs_dir", "job_name", "force_rerun", "quiet", "n_concurrent_trials", "agent_dir", "reward_key"}
+    {"jobs_dir", "job_name", "force_rerun", "quiet", "n_concurrent_trials", "agent_dir", "reward_key", "skills"}
 )
+# The Harbor agent kwarg that points an agent at a skills directory of its own choosing.
+_SKILLS_DIR_KWARG = "skills_dir"
 # Where Harbor persists the JobConfig it will compare a resume against.
 _HARBOR_JOB_CONFIG_FILENAME = "config.json"
 # Fields Harbor's own JobConfig equality ignores, so they can never be why it refused
@@ -244,6 +244,20 @@ class HarborRuntimeConfig(BaseModel):
     environment: HarborEnvironmentConfig | None = Field(
         default=None, description="Installed custom environment; omitted uses Harbor's default environment."
     )
+    skills: list[Path] | None = Field(
+        default=None,
+        description=(
+            "Skill directories injected into every trial. None leaves skills to the task and agent configuration. "
+            "A list, even an empty one, is exactly the skills the run sees: each an absolute directory with a "
+            "``SKILL.md`` at its root, named by its basename, and neither ``agent_kwargs['skills_dir']`` nor a "
+            "task's ``environment.skills_dir`` may add others."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _managed_skills_are_exact(self) -> HarborRuntimeConfig:
+        _validate_managed_skills(self)
+        return self
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
@@ -260,6 +274,15 @@ class HarborRuntimeConfig(BaseModel):
         if self.agent_dir is not None and self.agent_import_path is None:
             raise ValueError("agent_dir only applies to a custom agent_import_path")
         return self
+
+
+def _validate_managed_skills(config: HarborRuntimeConfig) -> None:
+    """Check the parts of a managed skill list that need no task: paths, names, and agent kwargs."""
+    if config.skills is None:
+        return
+    if _SKILLS_DIR_KWARG in config.agent_kwargs:
+        raise ValueError(f"agent_kwargs[{_SKILLS_DIR_KWARG!r}] cannot be combined with skills")
+    validate_skill_dirs(config.skills)
 
 
 def _effective_harbor_agent(config: HarborRuntimeConfig | None) -> str | None:
@@ -410,6 +433,8 @@ class HarborAgentTaskRunner:
         """
         if self._config is not None:
             _require_jobs_dir(self._config)
+            # Re-checked here: `model_copy(update=...)` skips the config's validators.
+            _validate_managed_skills(self._config)
             typed_paths = _typed_task_dirs(tasks)
             dataset_path = self._dataset_path or _dataset_path_from_tasks(tasks)
             folder_names = _harbor_folder_names(tasks)
@@ -474,15 +499,20 @@ class HarborAgentTaskRunner:
                 before = _cache_stamp(self._config, dataset_path, coverage)
                 await run_job()
                 if self._config.job_name is not None:
-                    after = _cache_stamp(self._config, dataset_path, coverage)
-                    if after == before:
+                    try:
+                        after: dict[str, Any] | None = _cache_stamp(self._config, dataset_path, coverage)
+                    except (OSError, ValueError):
+                        # A skill removed or turned into a symlink mid-run: the run finished, so
+                        # leave it unstamped rather than fail it.
+                        after = None
+                    if after is not None and after == before:
                         _write_cache_stamp(job_dir, after)
                     else:
                         # Leaving it unstamped re-runs next time, which is the safe
                         # direction: we cannot say which inputs produced these results.
                         logger.warning(
-                            "Agent or task contents changed while Harbor job %s was running; leaving it unstamped "
-                            "so the next run re-executes rather than trusting these results.",
+                            "Agent, task or skill contents changed while Harbor job %s was running; leaving it "
+                            "unstamped so the next run re-executes rather than trusting these results.",
                             job_dir,
                         )
             return build_trials_from_job_dir(
@@ -862,13 +892,13 @@ def _cache_stamp(
     and ``reward_key``, which only selects which reward
     :func:`build_trials_from_job_dir` reads back and must not cost a Docker re-run.
     ``env_secrets`` participates by ref and ``env_vars`` by value: secret values are not
-    fingerprinted, so rotating a credential keeps the cache valid.
+    fingerprinted, so rotating a credential keeps the cache valid. ``skills`` is recorded apart from
+    the options, as each skill's name and mode-aware tree digest, so a relocated but identical skill
+    still hits while a byte or executable-bit change misses.
     """
     # Missing execution storage is invalid configuration, not a best-effort filesystem failure.
     jobs_dir = _require_jobs_dir(config)
     options = config.model_dump(exclude=set(_CACHE_IRRELEVANT_OPTIONS), mode="json")
-    if skill_dir := _mock_skill_path(config):
-        options["mock_skill_digest"] = _digest_directory(skill_dir)
     # `_safe_resolve` throughout, matching `_task_dirs_for`: fingerprinting is
     # best-effort, so a symlink loop or a vanished link under any of these must
     # degrade to an unresolved path rather than raise out of `run_tasks` and fail a
@@ -890,6 +920,8 @@ def _cache_stamp(
         "options": hashlib.sha256(json.dumps(options, sort_keys=True, default=str).encode("utf-8")).hexdigest(),
         "agent": agent_digest,
         "tasks": task_digests,
+        # Absent from stamps written before skills existed, which reads as None: unmanaged.
+        "skills": None if config.skills is None else skill_digests(config.skills),
     }
 
 
@@ -918,6 +950,8 @@ def _cache_is_stale(job_dir: Path, stamp: Mapping[str, Any]) -> bool:
         reason = "a result-affecting option changed"
     elif stored.get("agent") != stamp["agent"]:
         reason = "the agent directory changed"
+    elif stored.get("skills") != stamp.get("skills"):
+        reason = "the injected skills changed"
     else:
         stored_tasks = stored.get("tasks")
         stored_tasks = stored_tasks if isinstance(stored_tasks, Mapping) else {}
@@ -1008,15 +1042,6 @@ def _trial_network_plan(task_config: Any, agent: Any, environment: Any, step: An
     return resolve_trial_network_plan(task_config, agent, environment, step, verifier_mode=verifier_mode)
 
 
-def _mock_skill_path(config: HarborRuntimeConfig) -> Path | None:
-    if config.env_vars.get(_MOCK_SKILL_ENV) != "1":
-        return None
-    manifest = _MOCK_SKILL_DIR / "SKILL.md"
-    if not manifest.is_file():
-        raise FileNotFoundError(f"The bundled Harbor mock skill is missing {manifest}")
-    return _MOCK_SKILL_DIR
-
-
 def _build_native_job(
     config: HarborRuntimeConfig,
     dataset_path: Path,
@@ -1073,7 +1098,6 @@ def _build_native_job(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
             )
         validate_harbor_env(config.env_vars, config.env_secrets)
-        mock_skill = _mock_skill_path(config)
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
         warn_unscrubbed_secret_keys(config.env_secrets)
         try:
@@ -1087,6 +1111,12 @@ def _build_native_job(
             )
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(_HARBOR_EXTRA_REQUIRED_MESSAGE) from exc
+
+        if config.skills is not None:
+            # Before the force_rerun rmtree, like the other refusals: a run that cannot start keeps its job dir.
+            # Re-checked here too: `model_copy(update=...)` skips the config's validators.
+            _validate_managed_skills(config)
+            await _reject_task_skills_dirs(dataset_path, task_names)
 
         if effective_force_rerun and job_dir.exists():
             rmtree(job_dir)
@@ -1252,15 +1282,15 @@ def _build_native_job(
                 environment=EnvironmentConfig(extra_docker_compose=sidecar_alias),
             )
 
-        agent_env = {**config.env_vars, **env_templates}
-        if mock_skill is not None:
-            del agent_env[_MOCK_SKILL_ENV]
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
             "kwargs": dict(config.agent_kwargs),
-            "env": agent_env,
-            "skills": [mock_skill] if mock_skill is not None else [],
+            # Secret templates merged last, so a secret always wins over a same-named literal. Literal
+            # env_vars reach only the agent: nothing here is written to os.environ.
+            "env": {**config.env_vars, **env_templates},
         }
+        if config.skills is not None:
+            agent_options["skills"] = [str(path) for path in config.skills]
         if config.agent_import_path is None:
             await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))
         elif config.agent_dir is not None:
@@ -1278,6 +1308,28 @@ def _build_native_job(
             await _create_and_run(AgentConfig(import_path=config.agent_import_path, **agent_options))
 
     return job_dir, run_job
+
+
+async def _reject_task_skills_dirs(dataset_path: Path, task_names: Sequence[str] | None) -> None:
+    """Refuse managed skills when a selected task brings its own ``environment.skills_dir``.
+
+    Harbor gives a task's ``skills_dir`` precedence over its default injection directory, and the agent
+    discovers whatever that directory holds, so the run would no longer see exactly the managed skills. A
+    task that is not a local directory cannot be checked, so it is refused too.
+    """
+    from harbor.job import DatasetConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+    from harbor.models.task.task import Task  # ty: ignore[unresolved-import,unused-ignore-comment]
+
+    selected = await DatasetConfig(
+        path=dataset_path, task_names=list(task_names) if task_names else None
+    ).get_task_configs()
+    for entry in selected:
+        if entry.path is None:
+            raise ValueError(f"skills need local Harbor tasks to check environment.skills_dir; got {entry}")
+        if Task(entry.path).config.environment.skills_dir:
+            raise ValueError(
+                f"Harbor task {entry.path.name!r} sets environment.skills_dir, which cannot be combined with skills"
+            )
 
 
 async def _partition_by_egress_control(
