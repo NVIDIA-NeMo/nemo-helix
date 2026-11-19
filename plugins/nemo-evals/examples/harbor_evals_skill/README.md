@@ -1,0 +1,144 @@
+<!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Evaluate the NeMo Evals skill with Harbor
+
+Run one pinned Taskset twice with the same Codex model and sandbox images. The baseline has no
+injected skills. The treatment receives a published NeMo Evals skill revision through
+`spec.target.skills`. The task asks Codex to submit a two-row offline exact-match evaluation
+to NeMo Helix and retrieve its results. A separate Harbor verifier checks the live job evidence.
+The scorer replays the saved trials with the Harbor reward, skill activation, token efficiency
+and expected-behavior metrics, and scores the skill archive once.
+
+Run the commands from the checkout root in Bash with `jq`, Python 3.12 or newer, and the
+checkout's NeMo CLI and SDK available. Use a Kubernetes deployment with Builder, OpenSandbox and
+Scoped Access Keys enabled. Its API and workers need the `skills-evaluation-hackathon` changes
+for managed Harbor skill injection and the skill metric types. Set these values for an authenticated
+workspace editor with read and inference access to both models.
+
+```bash
+export CONTEXT=dev WORKSPACE=default SANDBOX_PROFILE=harbor-standard
+export MODEL_REF="$WORKSPACE/codex-gateway" JUDGE_MODEL_REF="$WORKSPACE/judge"
+export INFERENCE_KEY_SECRET="$WORKSPACE/evals-inference-key"
+export RUN_DIR="$PWD/temp/harbor-evals-skill-run"
+example=plugins/nemo-evals/examples/harbor_evals_skill
+nhx=(uv run --frozen nemo --context "$CONTEXT")
+mkdir -p "$RUN_DIR"
+```
+
+`INFERENCE_KEY_SECRET` is the name of a secret containing an inference-scoped NeMo access key.
+The Harbor worker issues the effective key for each trial. The standard sandbox profile permits
+the platform API on its agent channel.
+
+## Publish and check with Oracle
+
+The task image derives from a pinned `nhx-api:0.10.0` image and uses a separate task-owned
+Python verifier image. Edit [skill-removals.toml](dataset/nemo-evals-plugin-001/environment/skill-removals.toml)
+before publishing to change which baked-in skill directories are removed. Entries must identify
+existing skill directories beneath the image's approved skill roots. Builder needs HTTPS access
+to `github.com` and `release-assets.githubusercontent.com` to fetch Codex. To use an approved
+mirror, change the Dockerfile's `CODEX_RELEASE_URL` default and retain the checksums.
+
+```bash
+TASKSET_REF=$("${nhx[@]}" evals tasksets create --harbor-dir "$example/dataset" \
+    --workspace "$WORKSPACE" --json | jq -er '.taskset_ref')
+export TASKSET_REF
+"${nhx[@]}" evals tasksets build-images "$TASKSET_REF" --wait
+"${nhx[@]}" evals runs submit --taskset "$TASKSET_REF" --workspace "$WORKSPACE" \
+    --agent oracle --sandbox-profile "$SANDBOX_PROFILE"
+```
+
+Copy the printed Oracle run ID into `ORACLE_RUN_ID`.
+
+```bash
+"${nhx[@]}" evals runs status "$ORACLE_RUN_ID" --workspace "$WORKSPACE" --watch
+"${nhx[@]}" evals runs results "$ORACLE_RUN_ID" --workspace "$WORKSPACE" --json
+TASK_JOB=$("${nhx[@]}" evals runs tasks "$ORACLE_RUN_ID" --workspace "$WORKSPACE" --json \
+    | jq -er '.data | select(length == 1) | .[0].job')
+```
+
+Require one completed trial with Harbor reward `1` and inner mean `0.5`. Download from the
+task Job to inspect the verifier evidence and `startup.log`, including when startup failed and
+the run has no merged bundle.
+
+```bash
+"${nhx[@]}" jobs results download agent-eval-results --job "$TASK_JOB" \
+    --workspace "$WORKSPACE" --output-file "$RUN_DIR/oracle.tar.gz"
+```
+
+The [reference solution](dataset/nemo-evals-plugin-001/solution/solve.sh) runs the inner
+`nemo evals evaluate --spec-file`, polls `nemo jobs get-status`, and downloads the service's
+`aggregate-scores` result using `nemo jobs results download`. The inner service is loopback-only
+and auth-disabled for this cooperative benchmark.
+
+## Publish the skill and check the trial credential
+
+```bash
+skill=$("${nhx[@]}" agents skills publish nemo-evals-plugin \
+    --from-dir skills/nemo-evals-plugin --taskset "$TASKSET_REF" \
+    --workspace "$WORKSPACE" --output-format json)
+skill_digest=$(jq -er '.content_hash' <<< "$skill")
+export SKILL_REF="$WORKSPACE/nemo-evals-plugin#$skill_digest"
+```
+
+For the unscored smoke, confirm the editor can read the pinned revision and the archive it
+references. Supply those two paths only to this trial. The standard profile exposes the full
+platform API at the same origin as the Codex gateway.
+
+```bash
+revision=$("${nhx[@]}" agents skills get nemo-evals-plugin --revision "$skill_digest" \
+    --workspace "$WORKSPACE" --output-format json)
+archive_ref=$(jq -er '.archive.archive_ref' <<< "$revision")
+fileset_ref=${archive_ref%%#*}
+archive_path=${archive_ref#*#}
+fileset_workspace=${fileset_ref%%/*}
+fileset_name=${fileset_ref#*/}
+"${nhx[@]}" files download "$fileset_name" --workspace "$fileset_workspace" \
+    --remote-path "$archive_path" -o "$RUN_DIR/smoke-skill.tar"
+jq -n --arg model "$MODEL_REF" --arg secret "$INFERENCE_KEY_SECRET" \
+    --arg profile "$SANDBOX_PROFILE" --arg key "$(python3 -c 'import uuid; print(uuid.uuid4())')" \
+    --arg revision "/apis/agents/v2/workspaces/$WORKSPACE/skills/nemo-evals-plugin/revisions/$skill_digest" \
+    --arg archive "/apis/files/v2/workspaces/$fileset_workspace/filesets/$fileset_name/-/$archive_path" '
+    {
+      idempotency_key: $key,
+      spec: {target: {
+        kind: "harbor", source: {name: "codex", model: {ref: $model}},
+        agent_kwargs: {version: "0.162.1", disable_web_search: true},
+        env_secrets: {OPENAI_API_KEY: $secret}, n_attempts: 1, skills: [],
+        env_vars: {NHX_SCOPE_PROBE: "1", NHX_SCOPE_PROBE_SKILL_PATH: $revision,
+                   NHX_SCOPE_PROBE_ARCHIVE_PATH: $archive}
+      }},
+      execution: {dispatcher_profile: "default", sandbox: {profile: $profile}}
+    }' > "$RUN_DIR/scope-smoke-request.json"
+"${nhx[@]}" evals runs submit --taskset "$TASKSET_REF" --workspace "$WORKSPACE" \
+    --spec-file "$RUN_DIR/scope-smoke-request.json"
+```
+
+Watch the smoke run and fetch its task Job bundle as for Oracle. Require a successful Codex
+model response and `agent/scope-probe.json` with `enabled: true` and both `skill_status` and
+`archive_status` equal to `403`. In `trial.log`, look for
+`Codex is already available at the requested version` and, when the profile enables a setup
+window, `Closed agent setup egress`.
+
+## Compare and score
+
+```bash
+uv run --frozen bash plugins/nemo-evals/examples/harbor_skill_injection/run_codex_demo.sh
+uv run --frozen python "$example/score.py" "$RUN_DIR"
+```
+
+Resume an interrupted pair with the same inputs and `RUN_DIR` to reuse the saved request keys.
+The launcher checks equal effective agent and verifier digests and one error-free binary reward
+per arm. Either reward and ties are valid. The scorer reads the raw Codex catalog and
+`skill-inventory.json`, then checks that the treatment discovered the pinned skill and the
+baseline catalog excluded it. A successful registered-skill read establishes activation.
+Missing activation or usage evidence produces unmeasured coverage.
+
+The output `$RUN_DIR/skill-eval-summary.json` records the live rewards, image digests, scoring
+Job IDs, metrics, views, coverage and diagnostics. The scoring Jobs use a separate pinned
+Taskset revision from the live Taskset. Each arm's original bundle and the scoring artifacts
+are retained in the run directory.
+
+Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
+The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.
+[Custom metrics and views](https://docs.nvidia.com/nemo-helix/v0.10/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
