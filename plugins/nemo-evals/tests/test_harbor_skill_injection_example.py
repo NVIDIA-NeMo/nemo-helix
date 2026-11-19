@@ -91,11 +91,14 @@ elif args[:4] == ["jobs", "results", "download", "agent-eval-results"]:
         entry.size = len(data)
         tar.addfile(entry, io.BytesIO(data))
 elif args[:3] == ["evals", "runs", "results"]:
-    incomplete = args[3] == "run-0000000000000002" and mode == "incomplete"
-    out({"run": {"phase": "completed", "result_state": "ready"}, "tasks": [{"result": {"summary": {
-        "trial_count": 1, "error_count": int(incomplete),
-        "scores": {"scores": [{"name": "harbor_reward.reward", "mean": 0, "count": 1, "nan_count": 0}]},
-    }}}]})
+    second = args[3] == "run-0000000000000002"
+    scores = [] if second and mode == "missing-score" else [
+        {"name": "harbor_reward.reward", "mean": 0, "count": 1, "nan_count": 0}
+    ]
+    out({"run": {"phase": "completed", "result_state": "ready"}, "tasks": [{"result": {
+        "summary": {"trial_count": 1, "error_count": int(second and mode == "incomplete")},
+        "scores": {"scores": scores},
+    }}]})
 else:
     raise AssertionError(args)
 """,
@@ -178,7 +181,7 @@ def test_ambiguous_submission_reuses_saved_spec_and_key(launcher_env: dict[str, 
     assert first_attempt["spec"]["idempotency_key"]
 
 
-@pytest.mark.parametrize("mode", ["agent-drift", "verifier-drift", "layer-fallback", "incomplete"])
+@pytest.mark.parametrize("mode", ["agent-drift", "verifier-drift", "layer-fallback", "incomplete", "missing-score"])
 def test_unusable_pair_keeps_the_task_bundles(launcher_env: dict[str, str], mode: str) -> None:
     result = _run(launcher_env | {"STUB_MODE": mode})
     assert result.returncode != 0

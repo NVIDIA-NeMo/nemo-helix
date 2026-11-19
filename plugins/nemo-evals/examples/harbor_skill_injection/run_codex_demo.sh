@@ -162,8 +162,8 @@ collect_arm() {
         select(.run.phase == "completed" and .run.result_state == "ready")
         | .tasks
         | select(length == 1)
-        | .[0].result.summary
-        | select(.trial_count == 1 and .error_count == 0)
+        | .[0].result
+        | select(.summary.trial_count == 1 and .summary.error_count == 0)
         | [.scores.scores[]? | select(.name == "harbor_reward.reward")]
         | select(length == 1)
         | .[0]
