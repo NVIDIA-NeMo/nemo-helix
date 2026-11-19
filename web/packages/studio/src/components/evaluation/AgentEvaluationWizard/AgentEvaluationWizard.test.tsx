@@ -111,18 +111,6 @@ const renderWizard = () =>
   });
 
 describe('AgentEvaluationWizard', () => {
-  it('offers a parallel-requests setting that defaults to 1', async () => {
-    mockLists();
-    const user = userEvent.setup();
-    renderWizard();
-
-    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
-    expect(await screen.findByRole('spinbutton', { name: 'Parallel Requests' })).toHaveValue(1);
-  });
-
   it('will not advance past the experiment step without a name', async () => {
     mockLists();
     const user = userEvent.setup();

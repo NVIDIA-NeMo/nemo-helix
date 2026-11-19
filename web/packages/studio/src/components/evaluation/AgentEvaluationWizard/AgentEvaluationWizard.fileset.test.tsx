@@ -225,12 +225,10 @@ const clickNextWhenReady = async (user: User) => {
   await user.click(screen.getByRole('button', { name: 'Next' }));
 };
 
-/** Next out of Configuration; parallelism is the one field only that step shows. */
+/** Next out of Configuration, onto the Run step. */
 const leaveConfiguration = async (user: User) => {
   await clickNextWhenReady(user);
-  await waitFor(() =>
-    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument()
-  );
+  await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
 };
 
 const nameAndRun = async (user: User) => {
@@ -275,6 +273,36 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+/** A dataset and an uploaded config, then on to the Run step. */
+const configureAndContinue = async (user: User) => {
+  await openConfigurationStep(user);
+  await pickDataset(user);
+  await chooseConfigKind(user, 'Upload');
+  await uploadConfig(user);
+  await leaveConfiguration(user);
+};
+
+const runWhenReady = async (user: User) => {
+  await nameAndRun(user);
+  await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+};
+
+describe('AgentEvaluationWizard run target', () => {
+  it('submits the chosen parallelism', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    const field = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
+    await user.clear(field);
+    await user.type(field, '2');
+    await runWhenReady(user);
+
+    const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(request.spec?.params?.parallelism).toBe(2);
+  });
 });
 
 describe('AgentEvaluationWizard dataset', () => {
@@ -386,7 +414,7 @@ describe('AgentEvaluationWizard dataset', () => {
     await user.click(await screen.findByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText('Select an input file.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 
   it('holds Next and says why while the picked file is still being read', async () => {
@@ -542,7 +570,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
 
     await clickNextWhenReady(user);
     expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
 
     await user.click(promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' }));
     await waitFor(() =>
@@ -564,7 +592,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     await clickNextWhenReady(user);
 
     expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 
   it('builds the prompt in the order fields are checked, dropping unchecked ones', async () => {
@@ -675,7 +703,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     await clickNextWhenReady(user);
 
     expect(await screen.findByText('Select a judge model.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 });
 
@@ -782,21 +810,5 @@ describe('AgentEvaluationWizard existing eval config', () => {
     expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
     expect(await screen.findByText('Select an eval configuration')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
-  });
-
-  it('keeps errors outside the eval config when switching its source', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    await openConfigurationStep(user);
-    await pickDataset(user);
-    const parallelism = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
-    await user.clear(parallelism);
-    await user.type(parallelism, '99');
-    await clickNextWhenReady(user);
-    expect(await screen.findByText('At most 16')).toBeVisible();
-
-    await chooseConfigKind(user, 'Upload');
-    expect(screen.getByText('At most 16')).toBeVisible();
   });
 });

@@ -55,15 +55,6 @@ import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluati
 import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
 import { parquetBatchGroups } from '@studio/components/evaluation/AgentEvaluationWizard/parquetBatchGroups';
 import { PromptTemplateSection } from '@studio/components/evaluation/AgentEvaluationWizard/PromptTemplateSection';
-import {
-  isLastStep,
-  nextStep,
-  previousStep,
-  stepHeading,
-  stepIndex,
-  stepsFor,
-  type WizardStep,
-} from '@studio/components/evaluation/AgentEvaluationWizard/wizardSteps';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
 import { DatasetPanel } from '@studio/components/evaluation/EvalWizard/DatasetPanel';
 import {
@@ -97,7 +88,6 @@ import {
   type EvalConfigFormat,
   dataFilesetName,
   injectJudgeModel,
-  MODE_DEFAULT,
   parseUploadedDatasetConfig,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
@@ -131,6 +121,8 @@ const CONFIG_KIND_ITEMS = [
   { value: CONFIG_KIND_FILESET, children: 'Choose from Fileset' },
   { value: CONFIG_KIND_UPLOAD, children: 'Upload' },
 ];
+
+const STEPS = ['Create experiment', 'Configuration', 'Run Evaluation'];
 
 const MAX_PARALLELISM = 16;
 
@@ -185,81 +177,33 @@ const isUnusablePrompt = (prompt: string | null) => prompt !== null && hasMalfor
 
 const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
   submitEvaluationBaseSchema.superRefine((data, ctx) => {
+    const issue = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
     if (requiresJudgeModel() && !data.judgeModel) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Select a model to override the config',
-        path: ['judgeModel'],
-      });
+      issue(['judgeModel'], 'Select a model to override the config');
     }
-    {
-      // Values here are already sanitized by the field transform, so the only naming failures
-      // left are "nothing salvageable" and the derived fileset name — which is longer, so a name
-      // that is legal on its own can still overflow once "-data" is appended, and there is no
-      // fileset field to correct it in.
-      const nameError = unsalvageableNameError(data.newName, 'Experiment name');
-      if (nameError) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: nameError, path: ['newName'] });
-      }
-      if (!data.dataset) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Select an input file.',
-          path: ['dataset'],
-        });
-      }
-      if (data.configKind === CONFIG_KIND_FORM) {
-        if (
-          data.promptTemplate === null
-            ? data.promptColumns.length === 0
-            : !data.promptTemplate.trim()
-        ) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: EMPTY_PROMPT_MESSAGE,
-            path: ['promptTemplate'],
-          });
-        }
-        if (isUnusablePrompt(data.promptTemplate)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Write a prompt.',
-            path: ['promptTemplate'],
-          });
-        }
-        if (isUnusablePrompt(data.body.judgePrompt)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Write a prompt.',
-            path: ['body', 'judgePrompt'],
-          });
-        }
-        if (!data.body.judgeModel) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Select a judge model.',
-            path: ['body', 'judgeModel'],
-          });
-        }
-        if (data.body.scores.length === 0) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Add at least one score for the judge to extract.',
-            path: ['body', 'scores'],
-          });
-        }
+    if (!data.dataset) issue(['dataset'], 'Select an input file.');
+    if (data.configKind === CONFIG_KIND_FORM) {
+      const promptEmpty =
+        data.promptTemplate === null
+          ? data.promptColumns.length === 0
+          : !data.promptTemplate.trim();
+      if (promptEmpty) issue(['promptTemplate'], EMPTY_PROMPT_MESSAGE);
+      if (isUnusablePrompt(data.promptTemplate)) issue(['promptTemplate'], 'Write a prompt.');
+      if (isUnusablePrompt(data.body.judgePrompt))
+        issue(['body', 'judgePrompt'], 'Write a prompt.');
+      if (!data.body.judgeModel) issue(['body', 'judgeModel'], 'Select a judge model.');
+      if (data.body.scores.length === 0) {
+        issue(['body', 'scores'], 'Add at least one score for the judge to extract.');
       }
     }
-    const recordNameError =
+    const experimentNameError = unsalvageableNameError(data.newName, 'Experiment name');
+    if (experimentNameError) issue(['newName'], experimentNameError);
+
+    const nameError =
       unsalvageableNameError(data.evaluationRecordName, 'Evaluation name') ??
       getEntityNameError(dataFilesetName(data.evaluationRecordName), 'Derived fileset name');
-    if (recordNameError) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: recordNameError,
-        path: ['evaluationRecordName'],
-      });
-    }
+    if (nameError) issue(['evaluationRecordName'], nameError);
   });
 
 const makeDefaultValues = (agent: string): SubmitEvaluationFormData => ({
@@ -426,7 +370,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const judgeRequiredRef = useRef(false);
   const [schema] = useState(() => makeSubmitEvaluationSchema(() => judgeRequiredRef.current));
 
-  const [step, setStep] = useState<WizardStep>('experiment');
+  const [step, setStep] = useState(0);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
 
@@ -442,8 +386,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   });
   const { control, setValue, handleSubmit, clearErrors, trigger, formState, setError } = methods;
   const { errors } = formState;
-
-  const steps = stepsFor(MODE_DEFAULT).slice(1);
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
@@ -775,7 +717,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // schema: the schema judges the whole submission, and a step must only answer for its own
   // fields — otherwise step one would refuse to advance over a field two steps away.
   const stepBlocker = (): StepBlocker | undefined => {
-    if (step === 'experiment') {
+    if (step === 0) {
       if (!experimentPreview) {
         return blockedWith('Name the experiment to continue.');
       }
@@ -784,7 +726,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       }
       return errors.newName ? SHOWN_ON_FIELD : undefined;
     }
-    if (step === 'configuration') {
+    if (step === 1) {
       if (isReadingDataset || isLoadingFilesetConfig) {
         return blockedWith('Reading the selected file...');
       }
@@ -803,7 +745,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     }
     // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
     // click. Schema errors stay out: those only show once a submit is tried.
-    if (step === 'evaluation') {
+    if (step === 2) {
       // invalidModelRefs is empty while the list is in flight, so submitting inside that window
       // would skip the judge-model check entirely.
       if (isLlmJudge && isJudgeModelsLoading) {
@@ -833,23 +775,21 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (blocker) {
       return;
     }
-    if (step === 'configuration') {
+    if (step === 1) {
       setSubmitAttempted(true);
       const valid = await trigger(
-        isFormConfig
-          ? ['parallelism', 'dataset', 'promptTemplate', 'body']
-          : ['parallelism', 'dataset', 'judgeModel']
+        isFormConfig ? ['dataset', 'promptTemplate', 'body'] : ['dataset', 'judgeModel']
       );
       if (!valid || (!isFormConfig && !pickedSpec) || isAgentPromptMissing()) {
         return;
       }
     }
-    setStep(nextStep(steps, step));
+    setStep(step + 1);
   };
 
   const goBack = () => {
     clearErrors();
-    setStep(previousStep(steps, step));
+    setStep(step - 1);
   };
 
   const onSubmit: SubmitHandler<SubmitEvaluationFormData> = async (formData) => {
@@ -865,7 +805,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       promptIssues.errors.length > 0 ||
       judgePromptIssues.errors.length > 0
     ) {
-      setStep('configuration');
+      setStep(1);
       return;
     }
     try {
@@ -879,15 +819,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const onInvalid: SubmitErrorHandler<SubmitEvaluationFormData> = (invalid) => {
     const failed = (fields: string[]) => fields.some((field) => field in invalid);
-    if (
-      steps.includes('configuration') &&
-      failed(['parallelism', 'dataset', 'promptTemplate', 'body', 'judgeModel'])
-    ) {
-      setStep('configuration');
+    if (failed(['dataset', 'promptTemplate', 'body', 'judgeModel'])) {
+      setStep(1);
     }
   };
 
-  const onLastStep = isLastStep(steps, step);
+  const onLastStep = step === STEPS.length - 1;
 
   // Enter on an intermediate step means "next", not "submit the half-filled form".
   const handleContinue = () => {
@@ -920,8 +857,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     <EvalWizard
       heading="Run Agent Evaluation"
       headingDescription="Score your agent against a dataset."
-      steps={steps.map(stepHeading)}
-      activeStep={stepIndex(steps, step)}
+      steps={STEPS}
+      activeStep={step}
       onSubmit={(event) => {
         event.preventDefault();
         handleContinue();
@@ -934,7 +871,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         ) : null
       }
       slotFooterStart={
-        stepIndex(steps, step) > 0 ? (
+        step > 0 ? (
           <Button kind="secondary" onClick={goBack} disabled={isPending}>
             Back
           </Button>
@@ -949,7 +886,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     >
       <FormProvider {...methods}>
         <Stack gap="density-xl">
-          {step === 'experiment' && (
+          {step === 0 && (
             <>
               <Text kind="label/bold/xl">Experiment</Text>
               <Text className="text-secondary" kind="body/regular/md">
@@ -989,7 +926,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
             </>
           )}
 
-          {step === 'configuration' && (
+          {step === 1 && (
             <>
               <DatasetPanel
                 slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
@@ -1164,12 +1101,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   )}
                 </Stack>
               ) : null}
-
-              {parallelismField}
             </>
           )}
 
-          {step === 'evaluation' && (
+          {step === 2 && (
             <>
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}
@@ -1179,6 +1114,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                   ...recordNameSlots,
                 }}
               />
+              {parallelismField}
             </>
           )}
         </Stack>
