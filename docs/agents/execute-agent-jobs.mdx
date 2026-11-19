@@ -170,10 +170,20 @@ nemo jobs watch calc-run-1
 nemo jobs get-status calc-run-1
 nemo jobs tail calc-run-1 -n 200
 
-# List what the run produced, then download one result
+# List what the run produced
 nemo jobs results list calc-run-1
+
+# Download the run record; the agent's answer is in its "response" field
+nemo jobs results download fabric_run_result --job calc-run-1 -o fabric_run_result.json
+
+# For diagnostics, download the agent's stdout/stderr and Fabric's per-run artifacts
 nemo jobs results download output_artifacts --job calc-run-1 -o output_artifacts.tar.gz
 ```
+
+`fabric_run_result.json` is the run record. Its `status` field holds the run's
+status and its `response` field holds the agent's reply, the same values the
+Python SDK reads. `output_artifacts` is a gzipped tarball with the agent's
+captured stdout and stderr, for diagnosing a run rather than reading its answer.
 
 </Tab>
 <Tab title="Python SDK">
