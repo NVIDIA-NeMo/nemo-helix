@@ -13,6 +13,7 @@ const DETAIL_TABS = [
   'insights',
   'optimizations',
   'deployments',
+  'network',
   'logs',
 ] as const;
 
@@ -25,6 +26,7 @@ const TAB_LABELS: Record<AgentDetailTab, string> = {
   insights: 'Insights',
   optimizations: 'Optimizations',
   deployments: 'Deployment',
+  network: 'Network access',
   logs: 'Logs',
 };
 

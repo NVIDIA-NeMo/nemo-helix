@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 
 import httpx
+import pytest
 from nemo_helix_plugin.openshell.draft_events import DraftEventSource, DraftPolicyTracker, publish_events
 
 
@@ -71,6 +72,47 @@ def test_event_addresses_the_people_to_notify() -> None:
 
     assert "email_to" not in anonymous["data"]
     assert addressed["data"]["email_to"] == ["creator@example.com"]
+
+
+def test_request_from_an_agents_sandbox_is_reviewed_on_the_agent() -> None:
+    source = DraftEventSource.for_sandbox(
+        {"nemo.agents/workspace": "team", "nemo.agents/agent": "researcher"},
+        kind="job",
+        workspace="team",
+        name="researcher-run-1",
+        sandbox="nhx-abc",
+        link="/workspaces/team/jobs/researcher-run-1",
+    )
+    tracker = DraftPolicyTracker()
+
+    [pending] = tracker.observe(source, [Chunk("c1")])
+    [approved] = tracker.observe(source, [Chunk("c1", status="approved")])
+
+    assert pending["link"] == "/workspaces/team/agents/researcher?tab=network"
+    assert pending["data"]["agent"] == "researcher"
+    assert pending["data"]["link_label"] == "Review request"
+    assert "agent researcher (job researcher-run-1)" in pending["message"]
+    assert approved["data"]["link_label"] == "View agent"
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {},
+        # An agent in another workspace has no page in this one to review the request on.
+        {"nemo.agents/workspace": "other", "nemo.agents/agent": "researcher"},
+    ],
+)
+def test_request_from_any_other_sandbox_links_to_its_workload(labels: dict[str, str]) -> None:
+    source = DraftEventSource.for_sandbox(
+        labels, kind="job", workspace="team", name="train", sandbox="nhx-abc", link="/workspaces/team/jobs/train"
+    )
+
+    [event] = DraftPolicyTracker().observe(source, [Chunk("c1")])
+
+    assert event["link"] == "/workspaces/team/jobs/train"
+    assert event["data"]["agent"] is None
+    assert event["data"]["link_label"] == "View job"
 
 
 def test_decision_on_a_reported_chunk_is_reported() -> None:

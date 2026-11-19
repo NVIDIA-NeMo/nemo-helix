@@ -109,7 +109,9 @@ from nemo_helix_plugin.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import StepSandbox
 from nemo_helix_plugin.openshell.authorization import authorize_provider_references
+from nemo_helix_plugin.openshell.network_policy import agent_labels
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -375,6 +377,9 @@ class ExecuteAgentStepConfig(BaseModel):
     compute: ComputeSpecInline | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
     providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    # Network rules approved for the agent, as they stood at create time. Added to
+    # the policy of the step's OpenShell sandbox; other executors ignore them.
+    network_policies: dict[str, dict[str, Any]] = Field(default_factory=dict)
     stage_ethos_fileset: bool = True
     post_run_action: PostRunActionConfig = Field(default_factory=_make_noop_post_run_action_config)
 
@@ -521,6 +526,7 @@ class ExecuteAgentJob(NemoJob):
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
             providers=merged.providers,
+            network_policies=source.network_policies,
             stage_ethos_fileset=stage_ethos_fileset,
             post_run_action=post_run_action,
         )
@@ -593,6 +599,7 @@ class ExecuteAgentJob(NemoJob):
                     environment=environment,
                     gateway_providers=step_config.providers,
                     gateway_read_filesets=sorted(read_filesets),
+                    sandbox=_step_sandbox(step_config),
                 )
             ],
         )
@@ -938,6 +945,7 @@ class _AgentSource(BaseModel):
     default_input: str | None = None
     post_run_actions: set[str] | None = None
     """Kinds the Agent entity allows, or None for an inline agent, which declares none."""
+    network_policies: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 def _resolve_input(requested: str | None, source: _AgentSource) -> str:
@@ -1027,11 +1035,26 @@ async def _resolve_agent_source(
         context_schema=entity.context_schema,
         default_input=entity.default_input,
         post_run_actions=entity.post_run_actions,
+        network_policies=entity.network_policies,
     )
 
 
 def _has_workdir_inputs(workdir: AgentWorkdir) -> bool:
     return workdir.base_workdir is not None or bool(workdir.artifact_mounts)
+
+
+def _step_sandbox(step_config: ExecuteAgentStepConfig) -> StepSandbox | None:
+    """Label the step's sandbox with its agent and carry the agent's approved network rules.
+
+    None for an inline agent: it is not an entity, so there is nothing to find its
+    requests from and nowhere its approvals were saved.
+    """
+    if step_config.agent_ref is None:
+        return None
+    return StepSandbox(
+        labels=agent_labels(step_config.agent.workspace, step_config.agent.name),
+        network_policies=step_config.network_policies,
+    )
 
 
 def _secret_environment(secrets: dict[str, str]) -> list[EnvironmentVariable]:

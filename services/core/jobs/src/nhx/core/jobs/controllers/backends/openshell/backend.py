@@ -43,6 +43,7 @@ from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nemo_helix_plugin.openshell.draft_events import DraftEventSource, DraftPolicyTracker, publish_events
+from nemo_helix_plugin.openshell.network_policy import with_network_rules
 from nemo_helix_plugin.openshell.types import GatewayWorkload, ProviderAccessRevoked
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth import AuthContext
@@ -419,6 +420,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
 
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
         labels = {
+            **(step_spec.sandbox.labels if step_spec.sandbox else {}),
             **self._base_controller_labels(),
             JOB_WORKSPACE_ID_LABEL: step.workspace,
             JOB_ID_LABEL: step.job,
@@ -483,6 +485,12 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                 return JobUpdate(
                     status=HelixJobStatus.ERROR, status_details={"message": "Gateway provider provisioning failed."}
                 )
+
+        if step_spec.sandbox and step_spec.sandbox.network_policies:
+            try:
+                spec.policy.CopyFrom(with_network_rules(spec.policy, step_spec.sandbox.network_policies))
+            except ValueError as exc:
+                return JobUpdate(status=HelixJobStatus.ERROR, status_details={"message": str(exc)})
 
         try:
             self._client.create(workspace=self._workspace, spec=spec, name=sandbox_name, labels=labels)
@@ -654,7 +662,8 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
             logger.debug("GetDraftPolicy failed for sandbox %s: %s", sandbox_name, _rpc_detail(exc))
             return
         creator_email = step.auth_context.principal_email if step.auth_context else None
-        source = DraftEventSource(
+        source = DraftEventSource.for_sandbox(
+            step.step_spec.sandbox.labels if step.step_spec and step.step_spec.sandbox else {},
             kind="job",
             workspace=step.workspace,
             name=step.job,

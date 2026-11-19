@@ -22,6 +22,7 @@ pytest.importorskip("openshell")
 
 import grpc
 from nemo_helix_plugin.jobs.execution_profiles import OpenShellJobTLSConfig
+from nemo_helix_plugin.jobs.spec import StepSandbox
 from nemo_helix_plugin.jobs.types import AuthContext
 from nemo_helix_plugin.openshell.types import GatewayCredentialConfig, GatewayProviderBinding, ProviderAccessRevoked
 from nhx.common.jobs.schemas import HelixJobStatus
@@ -285,6 +286,58 @@ class TestSchedule:
         }
         result = backend.schedule(step.step_spec.executor, step)
         assert result.status == HelixJobStatus.ERROR
+        backend._client.create.assert_not_called()
+
+    def test_agent_step_labels_the_sandbox_and_brings_its_network_rules(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        step.step_spec.sandbox = StepSandbox(
+            labels={"nemo.agents/workspace": "default", "nemo.agents/agent": "researcher"},
+            network_policies={
+                "allow_example_com_443": {
+                    "name": "allow_example_com_443",
+                    "endpoints": [{"host": "example.com", "port": 443}],
+                    "binaries": [{"path": "/usr/local/bin/python3.13"}],
+                }
+            },
+        )
+
+        assert backend.schedule(step.step_spec.executor, step).status == HelixJobStatus.PENDING
+
+        request = _create_request(backend)
+        assert request.labels["nemo.agents/agent"] == "researcher"
+        # The step's own labels cannot replace the ones the controller finds its sandboxes by.
+        assert request.labels["nhx.nvidia.com/job_id"] == step.job
+        rules = request.spec.policy.network_policies
+        assert rules["allow_example_com_443"].endpoints[0].host == "example.com"
+        assert sorted(rules) == sorted([*backend._policy.network_policies, "allow_example_com_443"])
+        # Every sandbox shares the executor policy, so one agent's rules must not leak into it.
+        assert "allow_example_com_443" not in backend._policy.network_policies
+
+    def test_step_label_cannot_claim_another_job(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        step.step_spec.sandbox = StepSandbox(labels={"nhx.nvidia.com/job_id": "someone-elses-job"})
+
+        backend.schedule(step.step_spec.executor, step)
+
+        assert _create_request(backend).labels["nhx.nvidia.com/job_id"] == step.job
+
+    def test_invalid_network_rule_fails_the_step_before_a_sandbox_exists(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        step.step_spec.sandbox = StepSandbox(network_policies={"bad": {"name": "bad", "hosts": ["example.com"]}})
+
+        update = backend.schedule(step.step_spec.executor, step)
+
+        assert update.status == HelixJobStatus.ERROR
+        assert "invalid network rule" in update.status_details["message"]
         backend._client.create.assert_not_called()
 
     def test_creates_sandbox_with_launcher_command(
@@ -666,6 +719,26 @@ class TestSync:
 
         _, _, events = publish.call_args.args
         assert events[0]["data"]["email_to"] == ["creator@example.com"]
+
+    def test_draft_event_of_an_agent_step_links_to_the_agent(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        backend._client.get_draft_policy.return_value = pb.GetDraftPolicyResponse(
+            chunks=[pb.PolicyChunk(id="c1", status="pending", rule_name="allow_example_com_443")]
+        )
+        step = test_step_pending
+        step.step_spec.sandbox = StepSandbox(
+            labels={"nemo.agents/workspace": step.workspace, "nemo.agents/agent": "researcher"}
+        )
+
+        with patch.object(backend_module, "publish_events") as publish:
+            backend.sync(step)
+
+        _, _, events = publish.call_args.args
+        assert events[0]["link"] == f"/workspaces/{step.workspace}/agents/researcher?tab=network"
+        assert events[0]["data"]["agent"] == "researcher"
 
     def test_draft_policy_rpc_error_does_not_change_the_step(
         self, mock_nemo_client, mock_platform_config, test_step_pending

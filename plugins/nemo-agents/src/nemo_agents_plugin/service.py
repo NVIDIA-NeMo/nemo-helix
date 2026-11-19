@@ -80,6 +80,7 @@ class AgentsService(NemoService):
             deployments,
             environments,
             gateway,
+            network_policy,
             post_run_actions,
             sample_agent,
             sessions,
@@ -100,6 +101,12 @@ class AgentsService(NemoService):
                 prefix="/v2",
             ),
             RouterSpec(agents.router, tag="Agents", description="Agent CRUD", prefix=_prefix),
+            RouterSpec(
+                network_policy.router,
+                tag="Agents",
+                description="Network access of an agent's OpenShell sandboxes",
+                prefix=_prefix,
+            ),
             RouterSpec(deployments.router, tag="Agent Deployments", description="Deployment lifecycle", prefix=_prefix),
             RouterSpec(sessions.router, tag="Agent Sessions", description="Session lifecycle", prefix=_prefix),
             RouterSpec(

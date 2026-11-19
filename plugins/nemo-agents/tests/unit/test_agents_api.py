@@ -227,6 +227,31 @@ class TestRegisterAgent:
         assert created_entity.name == "calc"
         assert created_entity.workspace == "default"
 
+    def test_register_stores_network_rules(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.create = AsyncMock(return_value=_make_agent("calc"))
+        rule = {"name": "allow_example_com_443", "endpoints": [{"host": "example.com", "port": 443}]}
+
+        response = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "calc", "config": {}, "network_policies": {"allow_example_com_443": rule}},
+        )
+
+        assert response.status_code == 201
+        created_entity: Agent = mock_entity_client.create.call_args[0][0]
+        assert created_entity.network_policies == {"allow_example_com_443": rule}
+
+    def test_register_rejects_a_network_rule_the_sandbox_policy_would_not_accept(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        response = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "calc", "config": {}, "network_policies": {"bad": {"name": "bad", "hosts": ["example.com"]}}},
+        )
+
+        assert response.status_code == 400
+        assert "invalid network rule" in response.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
     @pytest.mark.parametrize("config", [None, {"llms": {}}, _fabric_agent_config()])
     @pytest.mark.parametrize("fileset", ["agent-source", "other/agent-source"])
     def test_register_stores_references(

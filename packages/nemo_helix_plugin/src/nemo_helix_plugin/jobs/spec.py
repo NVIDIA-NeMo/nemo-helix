@@ -131,6 +131,19 @@ class StepNetwork(JobSpecModel):
     )
 
 
+class StepSandbox(JobSpecModel):
+    """What a step asks of its sandbox. Read by the OpenShell backend; other backends ignore it."""
+
+    labels: dict[str, str] = Field(default_factory=dict, description="Labels added to the step's sandbox.")
+    network_policies: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Network rules added to the sandbox policy, keyed by rule name, in the OpenShell policy "
+            "YAML shape (name, endpoints, binaries). A rule the executor policy already has is kept."
+        ),
+    )
+
+
 class HelixJobStepSpec(JobSpecModel):
     """Specification for a single step in a platform job."""
 
@@ -154,6 +167,9 @@ class HelixJobStepSpec(JobSpecModel):
     )
     network: Optional[StepNetwork] = Field(
         default=None, description="Network isolation for the step's pods. Unset leaves ingress unrestricted."
+    )
+    sandbox: Optional[StepSandbox] = Field(
+        default=None, description="Labels and extra network rules for the step's OpenShell sandbox."
     )
 
     @field_validator("environment", mode="before")

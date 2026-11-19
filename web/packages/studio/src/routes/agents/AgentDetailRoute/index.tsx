@@ -37,6 +37,7 @@ import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/Evaluatio
 import { HeaderDeploymentSelect } from '@studio/routes/agents/AgentDetailRoute/HeaderDeploymentSelect';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { InsightsTab } from '@studio/routes/agents/AgentDetailRoute/InsightsTab';
+import { NetworkAccessTab } from '@studio/routes/agents/AgentDetailRoute/network/NetworkAccessTab';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
@@ -405,6 +406,16 @@ export const AgentDetailRoute: FC = () => {
             onImageAvailable={rememberBuiltImage}
             pendingBuild={pendingBuildForAgent}
           />
+        </TabsContent>
+
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="network">
+          {agentName && (
+            <NetworkAccessTab
+              workspace={workspace}
+              agentName={agentName}
+              active={selectedTab === 'network'}
+            />
+          )}
         </TabsContent>
 
         <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">

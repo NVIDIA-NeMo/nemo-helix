@@ -1351,6 +1351,50 @@ async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_create_deployment_openshell_carries_the_agents_network_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agents_plugin.entities import Agent
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-local", "openshell"),
+        default="openshell-local",
+        configs={"openshell-local": {"platform_egress": {"host": "host.docker.internal", "port": 8080}}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    rule = {
+        "name": "allow_example_com_443",
+        "endpoints": [{"host": "example.com", "port": 443}],
+        "binaries": [{"path": "/opt/uv/python/cpython-3.13/bin/python3.13"}],
+    }
+    entities = AsyncMock()
+    entities.get.return_value = Agent(
+        name="researcher", workspace="default", network_policies={"allow_example_com_443": rule}
+    )
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
+
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="researcher-live",
+            config={"llms": {}},
+            port=0,
+            agent="researcher",
+            deployment_mode="openshell",
+        )
+
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    assert created_config.backend_config.openshell.network_policies == {"allow_example_com_443": rule}
+    # The deployments backend copies these onto the sandbox, where the agent's page finds it.
+    assert created_config.labels["nemo.agents/agent"] == "researcher"
+    assert created_config.labels["nemo.agents/workspace"] == "default"
+    # What the deployments reconciler hands the backend must still carry the rules.
+    dumped = created_config.backend_config.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["openshell"]["networkPolicies"] == {"allow_example_com_443": rule}
+
+
+@pytest.mark.asyncio
 async def test_create_deployment_openshell_without_platform_egress_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_deployments_plugin.config import DeploymentsConfig
 

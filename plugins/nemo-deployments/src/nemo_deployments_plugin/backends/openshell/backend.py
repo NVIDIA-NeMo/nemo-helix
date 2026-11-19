@@ -78,6 +78,7 @@ from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.openshell.draft_events import DraftEventSource, DraftPolicyTracker, publish_events
+from nemo_helix_plugin.openshell.network_policy import with_network_rules
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding, GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
@@ -525,6 +526,10 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             except Exception:
                 logger.warning("Provider provisioning failed for deployment %s/%s", workspace, name)
                 return BackendStatusUpdate(status="FAILED", status_message="Gateway provider provisioning failed.")
+        try:
+            policy = with_network_rules(policy, openshell_cfg.network_policies)
+        except ValueError as exc:
+            return BackendStatusUpdate(status="FAILED", status_message=str(exc))
         # Identity labels go on the sandbox record only. The driver copies template labels
         # onto the workload container/pod, where the docker and k8s backends' orphan sweeps
         # would claim them as their own deployments and delete them.
@@ -606,7 +611,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             message = _condition_message(sandbox.status) or f"Sandbox phase {pb.SandboxPhase.Name(phase)}"
             return BackendStatusUpdate(status=status, status_message=message)
 
-        await self._notify_draft_policy(sandbox_name, workspace, name)
+        await self._notify_draft_policy(sandbox_name, workspace, name, dict(sandbox.metadata.labels))
 
         # Sandbox READY: drive provisioning (launch the serve command, expose ports) on
         # the reconciler's poll cycles rather than blocking create.
@@ -623,7 +628,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 error_details={"error": _rpc_detail(exc), "sandbox": sandbox_name},
             )
 
-    async def _notify_draft_policy(self, sandbox_name: str, workspace: str, name: str) -> None:
+    async def _notify_draft_policy(self, sandbox_name: str, workspace: str, name: str, labels: dict[str, str]) -> None:
         """Publish the sandbox's new and newly decided network requests as notification events."""
         if not self._draft_tracker.due(sandbox_name):
             return
@@ -635,7 +640,8 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         except grpc.RpcError as exc:
             logger.debug("GetDraftPolicy failed for sandbox %s: %s", sandbox_name, _rpc_detail(exc))
             return
-        source = DraftEventSource(
+        source = DraftEventSource.for_sandbox(
+            labels,
             kind="deployment",
             workspace=workspace,
             name=name,
@@ -651,6 +657,46 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 events,
                 headers=self._nemo_client.default_headers,
             )
+
+    # --- network requests ---
+    # These act on any sandbox in the gateway workspace by name, so they also reach the
+    # sandboxes the Jobs backend creates on the same gateway.
+
+    async def list_sandboxes(self) -> list[pb.Sandbox]:
+        """Every sandbox in the executor's gateway workspace."""
+        return await self._list_all(
+            self._stub.ListSandboxes,
+            lambda token: pb.ListSandboxesRequest(workspace_scope=self._workspace_scope(), page_token=token),
+            "sandboxes",
+        )
+
+    async def get_draft_chunks(self, sandbox_name: str) -> list[pb.PolicyChunk]:
+        """The sandbox's network requests, pending and decided."""
+        response: pb.GetDraftPolicyResponse = await self._unary(
+            self._stub.GetDraftPolicy,
+            pb.GetDraftPolicyRequest(workspace_scope=self._workspace_scope(), sandbox=sandbox_name),
+        )
+        return list(response.chunks)
+
+    async def approve_draft_chunk(self, sandbox_name: str, chunk: pb.PolicyChunk) -> None:
+        """Add the chunk's rule to the running sandbox's policy."""
+        await self._unary(
+            self._stub.ApproveDraftChunk,
+            pb.ApproveDraftChunkRequest(
+                workspace_scope=self._workspace_scope(),
+                sandbox=sandbox_name,
+                chunk_id=chunk.id,
+                review_token=chunk.review_token,
+            ),
+        )
+
+    async def reject_draft_chunk(self, sandbox_name: str, chunk_id: str, reason: str) -> None:
+        await self._unary(
+            self._stub.RejectDraftChunk,
+            pb.RejectDraftChunkRequest(
+                workspace_scope=self._workspace_scope(), sandbox=sandbox_name, chunk_id=chunk_id, reason=reason
+            ),
+        )
 
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)

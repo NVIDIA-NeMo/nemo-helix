@@ -42,6 +42,7 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.openshell.network_policy import validate_rules
 from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -84,6 +85,7 @@ async def register_agent(
         default_input=body.default_input,
         post_run_actions=body.post_run_actions,
         reference=reference,
+        network_policies=body.network_policies,
     )
     try:
         saved = await entity_client.create(agent)
@@ -275,6 +277,7 @@ def _validate_run_declarations(body: RegisterAgentRequest, config: dict[str, Any
             check_context_schema(body.context_schema)
             _check_adapter_reads_context(body.config_format, config)
         validate_post_run_action_kinds(body.post_run_actions)
+        validate_rules(body.network_policies)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

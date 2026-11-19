@@ -20,6 +20,7 @@ from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
+    NETWORK_POLICIES_DESCRIPTION,
     POST_RUN_ACTIONS_DESCRIPTION,
     PostRunActionKinds,
     ReferenceConfig,
@@ -184,6 +185,7 @@ class AgentRegistration(BaseModel):
     context_schema: dict[str, Any] | None = Field(default=None, description=CONTEXT_SCHEMA_DESCRIPTION)
     default_input: str | None = Field(default=None, description=DEFAULT_INPUT_DESCRIPTION)
     post_run_actions: PostRunActionKinds | None = Field(default=None, description=POST_RUN_ACTIONS_DESCRIPTION)
+    network_policies: dict[str, dict[str, Any]] | None = Field(default=None, description=NETWORK_POLICIES_DESCRIPTION)
 
 
 class AgentConfig(BaseModel):

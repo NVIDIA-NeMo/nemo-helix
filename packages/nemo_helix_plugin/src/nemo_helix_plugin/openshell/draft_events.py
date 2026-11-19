@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 import httpx
+from nemo_helix_plugin.openshell.network_policy import agent_from_labels, agent_network_link
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,35 @@ class DraftEventSource:
     step: str | None = None
     link: str | None = None
     notify_emails: tuple[str, ...] = ()
+    agent: str | None = None
+    """The agent the workload runs, in the workload's workspace. Its page is where requests are reviewed."""
+
+    @classmethod
+    def for_sandbox(
+        cls,
+        labels: Mapping[str, str],
+        *,
+        kind: Literal["job", "deployment"],
+        workspace: str,
+        name: str,
+        sandbox: str,
+        link: str,
+        step: str | None = None,
+        notify_emails: tuple[str, ...] = (),
+    ) -> DraftEventSource:
+        """The source for a sandbox, pointing at its agent when its labels name one."""
+        owner = agent_from_labels(labels)
+        agent = owner[1] if owner is not None and owner[0] == workspace else None
+        return cls(
+            kind=kind,
+            workspace=workspace,
+            name=name,
+            sandbox=sandbox,
+            step=step,
+            link=agent_network_link(workspace, agent) if agent else link,
+            notify_emails=notify_emails,
+            agent=agent,
+        )
 
 
 def _endpoints(chunk: DraftChunk) -> list[str]:
@@ -83,6 +113,8 @@ def build_event(chunk: DraftChunk, source: DraftEventSource) -> dict[str, Any]:
     target = ", ".join(endpoints) or chunk.rule_name
     binary = chunk.binary.rsplit("/", 1)[-1] or "A process"
     workload = f"{source.kind} {source.name}"
+    if source.agent:
+        workload = f"agent {source.agent} ({workload})"
     if chunk.status == "pending":
         title = f"Network access requested: {target}"
         message = f"{binary} in {workload} was blocked from {target}. {chunk.rationale}".strip()
@@ -92,6 +124,10 @@ def build_event(chunk: DraftChunk, source: DraftEventSource) -> dict[str, Any]:
     else:
         title = f"Network access {chunk.status}: {target}"
         message = f"{binary} in {workload} stays blocked from {target}. {chunk.rejection_reason}".strip()
+    if source.agent:
+        link_label = "Review request" if chunk.status == "pending" else "View agent"
+    else:
+        link_label = _LINK_LABEL[source.kind]
     # The notif service emails these people, e.g. the creator of the job that is blocked.
     email_to = {"email_to": list(source.notify_emails)} if source.notify_emails else {}
     return {
@@ -102,7 +138,8 @@ def build_event(chunk: DraftChunk, source: DraftEventSource) -> dict[str, Any]:
         "link": source.link,
         "data": {
             # Studio labels the notification's link with this.
-            "link_label": _LINK_LABEL[source.kind],
+            "link_label": link_label,
+            "agent": source.agent,
             "source": {"kind": source.kind, "workspace": source.workspace, "name": source.name, "step": source.step},
             "sandbox": source.sandbox,
             "chunk_id": chunk.id,

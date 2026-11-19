@@ -30,6 +30,7 @@ from nemo_agents_plugin.entities import (
     AGENT_CONFIG_FILENAME,
     CONTAINER_DEPLOYMENT_MODES,
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+    Agent,
     ComputeResources,
     DeploymentMode,
     DeploymentStatus,
@@ -61,9 +62,11 @@ from nemo_deployments_plugin.entities import (
     Container,
     ContainerPort,
     Deployment,
+    DeploymentBackendConfig,
     DeploymentConfig,
     EnvVar,
     HTTPGetAction,
+    OpenShellDeploymentConfig,
     Probe,
     ResourceRequirements,
     SecretRef,
@@ -79,6 +82,7 @@ from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.network_policy import agent_labels
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
@@ -852,6 +856,9 @@ class DeploymentsRunnerBackend(RunnerBackend):
         }
         if is_fabric:
             deployment_labels["nemo.agents/runtime"] = "fabric"
+        if agent:
+            # The sandbox carries these, so its network requests can be found from the agent.
+            deployment_labels.update(agent_labels(workspace, agent))
 
         staged_config_files: list[ConfigFile] | None = None
         staged_spec: SpecRevision | None = None
@@ -905,6 +912,15 @@ class DeploymentsRunnerBackend(RunnerBackend):
             return DeploymentInfo(name=name, status="failed", error=str(exc))
         deployment_config.gateway_providers = providers or {}
         async with self._entity_client() as entities:
+            if deployment_mode == "openshell" and agent:
+                # Network access approved for the agent earlier applies to this sandbox from the start.
+                try:
+                    rules = (await entities.get(Agent, name=agent, workspace=workspace)).network_policies
+                except NemoEntityNotFoundError:
+                    rules = {}
+                deployment_config.backend_config = DeploymentBackendConfig(
+                    openshell=OpenShellDeploymentConfig(networkPolicies=rules)
+                )
             created_config = await entities.create(deployment_config)
             try:
                 deployment = Deployment(
@@ -1055,6 +1071,12 @@ class DeploymentsRunnerBackend(RunnerBackend):
     def get_log_location(self, workspace: str, name: str) -> LogLocation:
         del workspace, name
         return ExternalLog(hint="Inspect container logs via the deployments plugin or substrate CLI.")
+
+    async def openshell_backend(self) -> Any:
+        """The deployments backend of the openshell executor, which holds the gateway connection."""
+        executor = executor_for_mode(self._config, "openshell")
+        require_executor_matches_mode(executor, "openshell")
+        return (await self._registry()).resolve(executor)
 
     async def shutdown(self) -> None:
         if self._executor_registry_task is not None and not self._executor_registry_task.done():

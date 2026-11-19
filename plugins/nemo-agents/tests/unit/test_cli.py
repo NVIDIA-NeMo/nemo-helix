@@ -424,6 +424,40 @@ def test_register_references_without_runtime_config(tmp_path: Path, config_forma
     resolve_model.assert_not_called()
 
 
+def test_register_sends_the_network_rules_agent_yaml_declares(tmp_path: Path) -> None:
+    config = tmp_path / "agent.yaml"
+    # The fragment Studio offers after a network request is allowed and remembered.
+    config.write_text(
+        "name: calc\n"
+        "helix_registration:\n"
+        "  network_policies:\n"
+        "    allow_example_com_443:\n"
+        "      name: allow_example_com_443\n"
+        "      endpoints:\n"
+        "      - host: example.com\n"
+        "        port: 443\n"
+        "      binaries:\n"
+        "      - path: /usr/local/bin/python3.13\n"
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert json.loads(req.content)["network_policies"] == {
+            "allow_example_com_443": {
+                "name": "allow_example_com_443",
+                "endpoints": [{"host": "example.com", "port": 443}],
+                "binaries": [{"path": "/usr/local/bin/python3.13"}],
+            }
+        }
+        return httpx.Response(201, json={"name": "calc"})
+
+    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli._upload_ethos_fileset"):
+        result = CliRunner().invoke(
+            AgentsCLI().get_cli(), ["register", "--name", "calc", "--agent-config", str(config)]
+        )
+
+    assert result.exit_code == 0, result.output
+
+
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
 def test_register_resolves_default_model_placeholder(tmp_path, placeholder: str) -> None:
     """`nemo agents register` resolves NEMO_DEFAULT_MODEL before POST.

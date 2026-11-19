@@ -242,6 +242,14 @@ class OpenShellDeploymentConfig(BaseModel):
             "Overrides the executor-level default_policy_path for this deployment only."
         ),
     )
+    network_policies: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        alias="networkPolicies",
+        description=(
+            "Network rules added to this deployment's sandbox policy, keyed by rule name, in the "
+            "OpenShell policy YAML shape (name, endpoints, binaries). A rule the policy already has is kept."
+        ),
+    )
 
     model_config = {"populate_by_name": True}
 

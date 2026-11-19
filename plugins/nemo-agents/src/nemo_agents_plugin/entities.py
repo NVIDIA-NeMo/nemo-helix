@@ -20,6 +20,7 @@ from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
     LABELS_DESCRIPTION,
+    NETWORK_POLICIES_DESCRIPTION,
     NOOP_POST_RUN_ACTION_KIND,
     POST_RUN_ACTIONS_DESCRIPTION,
     Labels,
@@ -300,6 +301,7 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
+    network_policies: dict[str, dict[str, Any]] = Field(default_factory=dict, description=NETWORK_POLICIES_DESCRIPTION)
 
 
 class AgentDeployment(NemoEntity, entity_type="agent_deployment"):

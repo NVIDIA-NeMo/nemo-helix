@@ -3415,3 +3415,51 @@ def test_run_without_optional_ethos_does_not_request_it(
         else:
             assert ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=client)["status"] == "completed"
         download.assert_not_awaited()
+
+
+_EXAMPLE_RULE = {
+    "name": "allow_example_com_443",
+    "endpoints": [{"host": "example.com", "port": 443}],
+    "binaries": [{"path": "/usr/local/bin/python3.13"}],
+}
+
+
+async def _compiled_step(step_config: ExecuteAgentStepConfig) -> Any:
+    with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
+        platform_spec = await ExecuteAgentJob.compile(
+            workspace="default",
+            spec=step_config,
+            entity_client=MagicMock(),
+            job_name=None,
+            async_sdk=MagicMock(),
+        )
+    [step] = platform_spec["steps"]
+    return step
+
+
+@pytest.mark.asyncio
+async def test_agents_remembered_network_rules_reach_the_steps_sandbox() -> None:
+    step_config = await _step_config_for(_agent(network_policies={"allow_example_com_443": _EXAMPLE_RULE}), input="hi")
+
+    step = await _compiled_step(step_config)
+
+    assert step_config.network_policies == {"allow_example_com_443": _EXAMPLE_RULE}
+    assert step.sandbox.network_policies == {"allow_example_com_443": _EXAMPLE_RULE}
+    # The sandbox's requests are found again from the agent through these labels.
+    assert step.sandbox.labels == {"nemo.agents/workspace": "default", "nemo.agents/agent": "calc"}
+
+
+@pytest.mark.asyncio
+async def test_agent_without_remembered_rules_still_labels_its_sandbox() -> None:
+    step = await _compiled_step(await _step_config_for(_agent(), input="hi"))
+
+    assert step.sandbox.labels == {"nemo.agents/workspace": "default", "nemo.agents/agent": "calc"}
+    assert step.sandbox.network_policies == {}
+
+
+@pytest.mark.asyncio
+async def test_inline_agent_has_no_sandbox_settings() -> None:
+    step = await _compiled_step(await _step_config_for(_inline_agent(), input="hi"))
+
+    assert step.sandbox is None

@@ -566,6 +566,92 @@ async def test_create_uses_per_deployment_policy_when_policy_path_set(
     assert spec.policy != executor_policy
 
 
+_EXAMPLE_RULE = {
+    "name": "allow_example_com_443",
+    "endpoints": [{"host": "example.com", "port": 443}],
+    "binaries": [{"path": "/opt/uv/python/cpython-3.13/bin/python3.13"}],
+}
+
+
+async def test_create_adds_the_deployments_network_rules_to_the_policy(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.side_effect = _not_found()
+    mock_stub.CreateSandbox.return_value = MagicMock()
+
+    await openshell_backend.create_deployment(
+        workspace="default",
+        name="srv",
+        config_name="cfg1",
+        labels={},
+        backend_config={"openshell": {"networkPolicies": {"allow_example_com_443": _EXAMPLE_RULE}}},
+    )
+
+    rules = mock_stub.CreateSandbox.call_args.args[0].spec.policy.network_policies
+    assert rules["allow_example_com_443"].endpoints[0].host == "example.com"
+    assert sorted(rules) == sorted([*openshell_backend._policy.network_policies, "allow_example_com_443"])
+    # Every deployment shares the executor policy, so one deployment's rules must not leak into it.
+    assert "allow_example_com_443" not in openshell_backend._policy.network_policies
+
+
+async def test_create_fails_on_an_invalid_network_rule(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_entities.get.return_value = _config()
+    mock_stub.GetSandbox.side_effect = _not_found()
+
+    result = await openshell_backend.create_deployment(
+        workspace="default",
+        name="srv",
+        config_name="cfg1",
+        labels={},
+        backend_config={"openshell": {"networkPolicies": {"bad": {"name": "bad", "hosts": ["example.com"]}}}},
+    )
+
+    assert result.status == "FAILED"
+    assert "invalid network rule" in result.status_message
+    mock_stub.CreateSandbox.assert_not_called()
+
+
+async def test_network_request_of_an_agents_sandbox_links_to_the_agent(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    mock_stub.GetDraftPolicy.return_value = pb.GetDraftPolicyResponse(
+        chunks=[pb.PolicyChunk(id="c1", status="pending", rule_name="allow_example_com_443")]
+    )
+
+    with patch("nemo_deployments_plugin.backends.openshell.backend.publish_events") as publish:
+        await openshell_backend._notify_draft_policy(
+            "nhx-abc", "default", "srv", {"nemo.agents/workspace": "default", "nemo.agents/agent": "researcher"}
+        )
+
+    _, workspace, events = publish.call_args.args
+    assert workspace == "default"
+    assert events[0]["link"] == "/workspaces/default/agents/researcher?tab=network"
+    assert events[0]["data"]["source"]["kind"] == "deployment"
+
+
+async def test_network_requests_are_read_and_decided_by_sandbox_name(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
+) -> None:
+    chunk = pb.PolicyChunk(id="c1", status="pending", rule_name="allow_example_com_443", review_token="token-1")
+    mock_stub.ListSandboxes.return_value = pb.ListSandboxesResponse(sandboxes=[pb.Sandbox()])
+    mock_stub.GetDraftPolicy.return_value = pb.GetDraftPolicyResponse(chunks=[chunk])
+
+    assert len(await openshell_backend.list_sandboxes()) == 1
+    assert await openshell_backend.get_draft_chunks("nhx-abc") == [chunk]
+    await openshell_backend.approve_draft_chunk("nhx-abc", chunk)
+    await openshell_backend.reject_draft_chunk("nhx-abc", "c2", "Too broad.")
+
+    assert mock_stub.GetDraftPolicy.call_args.args[0].sandbox == "nhx-abc"
+    approve = mock_stub.ApproveDraftChunk.call_args.args[0]
+    # The gateway refuses an approval that does not carry the token of the chunk it was read from.
+    assert (approve.sandbox, approve.chunk_id, approve.review_token) == ("nhx-abc", "c1", "token-1")
+    reject = mock_stub.RejectDraftChunk.call_args.args[0]
+    assert (reject.sandbox, reject.chunk_id, reject.reason) == ("nhx-abc", "c2", "Too broad.")
+
+
 async def test_create_requires_serve_command(
     openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
 ) -> None:

@@ -91,6 +91,10 @@ CONTEXT_SCHEMA_DESCRIPTION = (
     "created; set `additionalProperties: false` to reject unknown keys. Omit to accept any context."
 )
 DEFAULT_INPUT_DESCRIPTION = "Prompt an execute job uses when its request omits `input`."
+NETWORK_POLICIES_DESCRIPTION = (
+    "Network rules added to the policy of every OpenShell sandbox this agent runs in, as a deployment "
+    "or as an execute job. Keyed by rule name, in the OpenShell policy YAML shape (name, endpoints, binaries)."
+)
 POST_RUN_ACTIONS_DESCRIPTION = (
     "Post-run action kinds an execute job of this agent may choose. A job that names none runs "
     f"{NOOP_POST_RUN_ACTION_KIND!r} when it is in the set, or the only member when there is one; "
@@ -340,6 +344,7 @@ class Agent(EntityMetadata, AgentInline):
     )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
+    network_policies: dict[str, JsonMap] = Field(default_factory=dict, description=NETWORK_POLICIES_DESCRIPTION)
 
 
 class AgentComputeSpec(EntityMetadata, ComputeSpecInline):
@@ -431,6 +436,7 @@ class RegisterAgentRequest(BaseModel):
     post_run_actions: PostRunActionKinds = Field(
         default_factory=_default_post_run_actions, description=POST_RUN_ACTIONS_DESCRIPTION
     )
+    network_policies: dict[str, JsonMap] = Field(default_factory=dict, description=NETWORK_POLICIES_DESCRIPTION)
     config_format: str = Field(
         default_factory=lambda data: (
             data["config"].get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
