@@ -281,6 +281,10 @@ class JobReconciler(HeartbeatMixin, Controller):
         retries status projection from the persisted ERROR record after failures
         or controller replacement.
 
+        Current workflows can legitimately wait without any Steps. Recover only
+        unpublished workflow reruns, fencing the held Job version before marking
+        the Attempt ERROR directly, without a synthetic sequential Step.
+
         Initial creation uses pending-Job cleanup. A rerun belongs to an
         existing Job whose earlier Attempts and results must remain intact.
         """
@@ -300,8 +304,6 @@ class JobReconciler(HeartbeatMixin, Controller):
         for attempt in response.data:
             if self._stop_signal and self._stop_signal.is_set():
                 return
-            if attempt.platform_spec.workflow is not None:
-                continue
             if attempt.seq == 0 or attempt.created_at is None:
                 continue
             created_at = attempt.created_at
@@ -323,9 +325,17 @@ class JobReconciler(HeartbeatMixin, Controller):
                 job = self._system_entities.get_by_id(HelixJob, attempt.job)
                 if job.status in HelixJobStatus.lifecycle_pending():
                     continue
+                workflow = attempt.platform_spec.workflow is not None
+                if workflow and job.current_attempt_id == attempt.id:
+                    continue
                 # Invalidate an unpublished rerun's held Job version. If publication
                 # wins this race, leave the Attempt for the next pass.
                 self._system_entities.update(job)
+                if workflow:
+                    attempt.status = HelixJobStatus.ERROR
+                    attempt.error_details = {"message": "Workflow rerun was not published before the creation deadline"}
+                    self._system_entities.update(attempt)
+                    continue
                 first_step = attempt.get_first_step()
                 step = self._system_entities.create(
                     HelixJobStep(

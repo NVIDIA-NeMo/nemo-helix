@@ -13,14 +13,17 @@ from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.execution_profiles import E2EJobExecutionProfile
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatusUpdateRequest
 from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowMode, WorkflowNodeState, WorkflowSpec
-from nhx.common.entities.client import SyncEntityClient
+from nhx.common.entities.client import EntityBase, EntityConflictError, SyncEntityClient
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.app.test_helpers import TestConstants
-from nhx.core.jobs.entities import HelixJobAttempt, HelixJobStep
+from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.reconciler import JobReconciler
+from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep, HelixJobStorageReclaim
 from nhx.core.jobs.service import JobsService
 from nhx.testing import ClientContext, create_test_client
 
@@ -2104,3 +2107,204 @@ def test_event_workflow_once_mode_remains_terminal(workflow_harness: WorkflowHar
     h.files.commit_fileset(workspace="default", name=source.name)
     still_terminal = h.tick(job)
     assert still_terminal.status == HelixJobStatus.COMPLETED and len(still_terminal.steps) == 2
+
+
+@dataclass
+class WorkflowRerunRecovery:
+    store: SyncEntityClient
+    job: HelixJob
+    previous: HelixJobAttempt
+    prepared: HelixJobAttempt
+    registry: BackendRegistry
+    controller: JobReconciler
+
+
+def _prepared_workflow_rerun(h: WorkflowHarness) -> WorkflowRerunRecovery:
+    response = h.create({"work": []}, mode="run_to_completion")
+    h.tick(response)
+    h.finish(response, "work", HelixJobStatus.ERROR)
+    assert h.tick(response).status == HelixJobStatus.ERROR
+    store = SyncEntityClient(EntitiesClient.from_client(h.context.client)).as_service("jobs", internal=True)
+    job = store.get_by_id(HelixJob, response.id)
+    assert job.current_attempt_id is not None
+    previous = store.get_by_id(HelixJobAttempt, job.current_attempt_id)
+    prepared = store.create(
+        HelixJobAttempt(
+            name="prepared-" + uuid4().hex[:12],
+            job=job.id,
+            workspace="default",
+            seq=previous.seq + 1,
+            platform_spec=previous.platform_spec,
+            spec=previous.spec,
+        ).with_auth_context(previous.auth_context)
+    )
+    registry = BackendRegistry.from_config(
+        nemo_client=h.context.client, profiles=[E2EJobExecutionProfile(provider="cpu", profile="default")]
+    )
+    controller = JobReconciler(registry, h.context.client, system_entity_client=store)
+    return WorkflowRerunRecovery(store, job, previous, prepared, registry, controller)
+
+
+@pytest.mark.parametrize("published", [False, True])
+@pytest.mark.parametrize("has_step", [False, True])
+def test_unpublished_workflow_rerun_recovery_preserves_current_work(
+    workflow_harness: WorkflowHarness,
+    published: bool,
+    has_step: bool,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    import time_machine
+
+    h = workflow_harness
+    case = _prepared_workflow_rerun(h)
+    if published:
+        case.job.current_attempt_id = case.prepared.id
+        case.job.status = HelixJobStatus.CREATED
+        case.job = case.store.update(case.job)
+    if has_step:
+        case.store.create(HelixJobStep(name="wf-existing", attempt_id=case.prepared.id, workspace="default"))
+    held_job = case.job.model_copy(deep=True)
+    previous = case.previous.model_dump()
+    case.controller._recover_unstarted_reruns()
+    assert case.store.get_by_id(HelixJobAttempt, case.prepared.id).status == HelixJobStatus.CREATED
+    with time_machine.travel(datetime.now(timezone.utc) + timedelta(hours=1), tick=False):
+        case.controller._recover_unstarted_reruns()
+    saved = case.store.get_by_id(HelixJobAttempt, case.prepared.id)
+    assert saved.platform_spec == case.prepared.platform_spec and saved.spec == case.prepared.spec
+    assert saved.auth_context == case.prepared.auth_context
+    assert case.store.get_by_id(HelixJobAttempt, case.previous.id).model_dump() == previous
+    assert case.store.get_by_id(HelixJob, case.job.id).current_attempt_id == case.job.current_attempt_id
+    steps = case.store.list(HelixJobStep, workspace="default", filter_obj={"attempt_id": saved.id}).data
+    assert len(steps) == int(has_step)
+    if published or has_step:
+        assert saved.status == HelixJobStatus.CREATED
+        return
+    assert saved.status == HelixJobStatus.ERROR
+    assert saved.error_details and "not published" in saved.error_details["message"]
+    status = h.jobs.get_job_status(workspace="default", name=case.job.id, attempt_id=saved.id).data()
+    assert status.status == HelixJobStatus.ERROR and status.error_details == saved.error_details
+    held_job.current_attempt_id = saved.id
+    with pytest.raises(EntityConflictError):
+        case.store.update(held_job)
+    assert case.job.fileset_id is not None
+    assert (
+        h.files.get_fileset_by_id(workspace="default", fileset_id=case.job.fileset_id).data().id == case.job.fileset_id
+    )
+    assert not case.store.list(HelixJobStorageReclaim, workspace="system", filter_obj={"job_id": case.job.id}).data
+    h.jobs.delete_job(workspace="default", name=case.job.id)
+    assert case.store.get_by_id(HelixJob, case.job.id).status == HelixJobStatus.DELETION_PENDING
+
+
+@pytest.mark.parametrize("after_save", [False, True])
+def test_unpublished_workflow_rerun_recovery_survives_interrupted_retirement(
+    workflow_harness: WorkflowHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    after_save: bool,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    import time_machine
+
+    h = workflow_harness
+    case = _prepared_workflow_rerun(h)
+    original_update = case.store.update
+    interrupted = False
+
+    def update[EntityT: EntityBase](entity: EntityT, *, original_name: str | None = None) -> EntityT:
+        nonlocal interrupted
+        if isinstance(entity, HelixJobAttempt) and entity.id == case.prepared.id:
+            interrupted = True
+            if after_save:
+                original_update(entity, original_name=original_name)
+            raise RuntimeError("interrupted workflow retirement")
+        return original_update(entity, original_name=original_name)
+
+    with time_machine.travel(datetime.now(timezone.utc) + timedelta(hours=1), tick=False):
+        with monkeypatch.context() as patch:
+            patch.setattr(case.store, "update", update)
+            case.controller._recover_unstarted_reruns()
+        assert interrupted
+        saved = case.store.get_by_id(HelixJobAttempt, case.prepared.id)
+        assert saved.status == (HelixJobStatus.ERROR if after_save else HelixJobStatus.CREATED)
+        restarted = JobReconciler(case.registry, h.context.client, system_entity_client=case.store)
+        restarted._recover_unstarted_reruns()
+        finished = case.store.get_by_id(HelixJobAttempt, saved.id)
+        assert finished.status == HelixJobStatus.ERROR
+        snapshot = finished.model_dump()
+        restarted._recover_unstarted_reruns()
+        assert case.store.get_by_id(HelixJobAttempt, saved.id).model_dump() == snapshot
+    assert case.store.get_by_id(HelixJob, case.job.id).current_attempt_id == case.previous.id
+    assert not case.store.list(HelixJobStep, workspace="default", filter_obj={"attempt_id": saved.id}).data
+
+
+def test_unpublished_workflow_rerun_recovery_leaves_a_winning_publication(
+    workflow_harness: WorkflowHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    import time_machine
+
+    h = workflow_harness
+    case = _prepared_workflow_rerun(h)
+    original_update = case.store.update
+    published = False
+
+    def update[EntityT: EntityBase](entity: EntityT, *, original_name: str | None = None) -> EntityT:
+        nonlocal published
+        if isinstance(entity, HelixJob) and entity.id == case.job.id:
+            fresh = case.store.get_by_id(HelixJob, entity.id)
+            fresh.current_attempt_id = case.prepared.id
+            fresh.status = HelixJobStatus.CREATED
+            original_update(fresh)
+            published = True
+        return original_update(entity, original_name=original_name)
+
+    with time_machine.travel(datetime.now(timezone.utc) + timedelta(hours=1), tick=False):
+        with monkeypatch.context() as patch:
+            patch.setattr(case.store, "update", update)
+            case.controller._recover_unstarted_reruns()
+    assert published
+    assert case.store.get_by_id(HelixJob, case.job.id).current_attempt_id == case.prepared.id
+    assert case.store.get_by_id(HelixJobAttempt, case.prepared.id).status == HelixJobStatus.CREATED
+    h.jobs.update_attempt_status_details(
+        case.job.id, case.prepared.id, workspace="default", body={"workflow_reconcile": True}
+    )
+    assert case.store.get_by_id(HelixJobAttempt, case.prepared.id).status == HelixJobStatus.ACTIVE
+    assert (
+        len(case.store.list(HelixJobStep, workspace="default", filter_obj={"attempt_id": case.prepared.id}).data) == 1
+    )
+
+
+@pytest.mark.parametrize("terminal_status", [HelixJobStatus.COMPLETED, HelixJobStatus.CANCELLED, HelixJobStatus.ERROR])
+def test_unpublished_workflow_rerun_recovery_preserves_concurrent_terminal_status(
+    workflow_harness: WorkflowHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_status: HelixJobStatus,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    import time_machine
+
+    case = _prepared_workflow_rerun(workflow_harness)
+    original_update = case.store.update
+    intervened = False
+
+    def update[EntityT: EntityBase](entity: EntityT, *, original_name: str | None = None) -> EntityT:
+        nonlocal intervened
+        if isinstance(entity, HelixJobAttempt) and entity.id == case.prepared.id:
+            fresh = case.store.get_by_id(HelixJobAttempt, entity.id)
+            fresh.status = terminal_status
+            fresh.error_details = {"message": "another terminal update"}
+            original_update(fresh)
+            intervened = True
+        return original_update(entity, original_name=original_name)
+
+    with time_machine.travel(datetime.now(timezone.utc) + timedelta(hours=1), tick=False):
+        with monkeypatch.context() as patch:
+            patch.setattr(case.store, "update", update)
+            case.controller._recover_unstarted_reruns()
+    assert intervened
+    saved = case.store.get_by_id(HelixJobAttempt, case.prepared.id)
+    assert saved.status == terminal_status and saved.error_details == {"message": "another terminal update"}

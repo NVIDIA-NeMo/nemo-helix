@@ -88,6 +88,11 @@ Editing the Job takes effect in a new Attempt through the existing start/rerun
 operation. Terminal Attempts stay terminal. Sequential jobs retain their current
 behavior when `workflow` is omitted.
 
+A current workflow can wait without creating any Steps. If a rerun Attempt is
+saved but never becomes current, the controller marks it `ERROR` after the
+existing creation timeout. This recovery preserves the current Attempt and
+shared storage, and allows Job deletion to proceed.
+
 A continuous Attempt stays active when its nodes are clean, failed or cancelled.
 Unchanged failed or cancelled inputs wait for an input commit or manual
 invalidation; backend retries are unchanged. Cancelling a node cancels its
