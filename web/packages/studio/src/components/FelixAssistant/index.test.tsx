@@ -410,6 +410,7 @@ describe('FelixAssistant', () => {
         'felix-frame-book-reading',
         'felix-frame-book-glance',
         'felix-frame-thinking',
+        'felix-frame-notepad',
         'felix-frame-done',
       ]) {
         expect(screen.getByTestId(testId)).toHaveAttribute('aria-hidden', 'true');
@@ -571,12 +572,42 @@ describe('FelixAssistant', () => {
       expect(screen.getByTestId('felix-frame-thinking')).toHaveClass('opacity-0');
     });
 
-    it('is not thinking while the assistant waits on the user', () => {
+    it('takes notes for 10 seconds when the assistant waits on the user, then rests', () => {
       mocks.chat.isRunning = true;
       mocks.chat.inputRequest = { requestId: 'request-1', kind: 'dataset_file', input: {} };
       renderFelix();
 
+      expect(getFrame()).toBe('notepad');
+      expect(screen.getByTestId('felix-frame-notepad')).not.toHaveClass('opacity-0');
+      expect(screen.getByTestId('felix-image')).toHaveClass('opacity-0');
+
+      advance(9_999);
+      expect(getFrame()).toBe('notepad');
+      advance(1);
+      // Not thinking either: he is waiting on the user, not working.
       expect(getFrame()).toBe('base');
+    });
+
+    it('keeps the attention badge while he takes notes', () => {
+      mocks.chat.isRunning = true;
+      mocks.chat.inputRequest = { requestId: 'request-1', kind: 'dataset_file', input: {} };
+      renderFelix();
+
+      expect(getFrame()).toBe('notepad');
+      expect(screen.getByTestId('assistant-unread-indicator')).toBeInTheDocument();
+    });
+
+    it('takes notes for a permission request too, and it beats a tool pose', () => {
+      mocks.chat.isRunning = true;
+      mocks.chat.messages = assistantCalling('Write');
+      mocks.chat.decisionRequest = {
+        id: 'decision-1',
+        title: 'Approval required',
+        description: 'Agent wants to use Write.',
+      };
+      renderFelix();
+
+      expect(getFrame()).toBe('notepad');
     });
 
     it('leaves the thinking frame once the run ends', () => {

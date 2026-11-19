@@ -16,6 +16,7 @@ import felixBookReadingImage from '@studio/assets/felix-book-reading.png';
 import felixDoneImage from '@studio/assets/felix-done.png';
 import felixHammerDownImage from '@studio/assets/felix-hammer-down.png';
 import felixHammerUpImage from '@studio/assets/felix-hammer-up.png';
+import felixNotepadImage from '@studio/assets/felix-notepad.png';
 import felixThinkingImage from '@studio/assets/felix-thinking.png';
 import felixWinkImage from '@studio/assets/felix-wink.png';
 import felixImage from '@studio/assets/felix.png';
@@ -25,6 +26,7 @@ import {
 } from '@studio/components/FelixAssistant/felixActivity';
 import { useBubbleTail } from '@studio/components/FelixAssistant/useBubbleTail';
 import { useFelixCelebration } from '@studio/components/FelixAssistant/useFelixCelebration';
+import { useFelixNotepad } from '@studio/components/FelixAssistant/useFelixNotepad';
 import { useFelixPose } from '@studio/components/FelixAssistant/useFelixPose';
 import { useFelixPosition } from '@studio/components/FelixAssistant/useFelixPosition';
 import { useFelixWink } from '@studio/components/FelixAssistant/useFelixWink';
@@ -66,6 +68,7 @@ type FelixFrame =
   | 'book-reading'
   | 'book-glance'
   | 'thinking'
+  | 'notepad'
   | 'done';
 
 const FRAME_SOURCES: Record<FelixFrame, string> = {
@@ -76,6 +79,7 @@ const FRAME_SOURCES: Record<FelixFrame, string> = {
   'book-reading': felixBookReadingImage,
   'book-glance': felixBookGlanceImage,
   thinking: felixThinkingImage,
+  notepad: felixNotepadImage,
   done: felixDoneImage,
 };
 
@@ -87,15 +91,18 @@ const OVERLAY_FRAMES: readonly Exclude<FelixFrame, 'base'>[] = [
   'book-reading',
   'book-glance',
   'thinking',
+  'notepad',
   'done',
 ];
 
 /**
- * Which frame to show. Celebrating a finished run wins over everything; then a work pose; then
+ * Which frame to show. Celebrating a finished run wins over everything; then the notepad (he is
+ * waiting on the user, which matters more than whatever tool he last ran); then a work pose; then
  * thinking (a run is going but no tool pose applies); then a wink; then the resting pose.
  */
 const getFelixFrame = ({
   isCelebrating,
+  isTakingNotes,
   pose,
   hammerUp,
   glancingUp,
@@ -103,6 +110,7 @@ const getFelixFrame = ({
   isWinking,
 }: {
   isCelebrating: boolean;
+  isTakingNotes: boolean;
   pose: 'building' | 'docs' | null;
   hammerUp: boolean;
   glancingUp: boolean;
@@ -110,6 +118,7 @@ const getFelixFrame = ({
   isWinking: boolean;
 }): FelixFrame => {
   if (isCelebrating) return 'done';
+  if (isTakingNotes) return 'notepad';
   if (pose === 'building') return hammerUp ? 'hammer-up' : 'hammer-down';
   // Eyes on the page, with an occasional glance up.
   if (pose === 'docs') return glancingUp ? 'book-glance' : 'book-reading';
@@ -171,8 +180,11 @@ export const FelixAssistant: FC = () => {
   // thinking — surface the attention badge instead of the loading dots.
   const isAwaitingUserInput = !!decisionRequest || !!inputRequest;
   const isThinking = isRunning && !isAwaitingUserInput;
+  // He jots notes for a few seconds when a question arrives; the badge keeps saying he needs you.
+  const isTakingNotes = useFelixNotepad(decisionRequest?.id ?? inputRequest?.requestId ?? null);
   const frame = getFelixFrame({
     isCelebrating,
+    isTakingNotes,
     pose,
     hammerUp,
     glancingUp,

@@ -205,6 +205,7 @@ export const Thinking: Story = {
   args: { isRunning: true },
 };
 
+/** The assistant is waiting on you: Felix jots notes for 10 seconds, with the attention badge. */
 export const NeedsYourInput: Story = {
   args: { awaitingInput: true },
 };
