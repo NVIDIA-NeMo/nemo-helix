@@ -256,7 +256,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         if now < self._next_event_cleanup:
             return
         try:
-            deleted = SyncJobEventStream(self._system_entities).cleanup(batch_size=100)
+            deleted = SyncJobEventStream(self._system_entities).cleanup(batch_size=100, on_progress=self.emit_heartbeat)
             self._next_event_cleanup = time.monotonic() + (0 if deleted == 100 else 60)
         except Exception:
             self._next_event_cleanup = time.monotonic() + 15
@@ -396,7 +396,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                 if not self._settle_pending_storage(job):
                     continue
                 job = self._settle_pending_artifacts(job)
-                deleted_images = self._events.deletion_images(job)
+                deleted_images = self._events.deletion_images(job, self._stop_signal)
                 self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
                 self._events.deleted(deleted_images)
                 if job.output_location is None and job.fileset_id is None and job.current_attempt_id is not None:

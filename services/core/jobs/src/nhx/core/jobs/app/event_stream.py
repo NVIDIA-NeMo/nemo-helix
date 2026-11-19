@@ -5,6 +5,7 @@
 
 import asyncio
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from time import time as wall_time
 from typing import ClassVar
@@ -155,13 +156,21 @@ class JobEventStream:
                 state = await self.state()
         raise RuntimeError("Lifecycle publication contention")
 
+    async def advance_pending(self, state: JobEventSequence) -> bool:
+        try:
+            record = await self.store.get(StoredJobEvent, slot_name(state.position + 1), workspace=SYSTEM_WORKSPACE)
+        except EntityNotFoundError:
+            if state.pending_until is None or state.pending_until > wall_time():
+                return False
+            record = abandoned_slot(state)
+        await self.complete(state, record)
+        return True
+
     async def append(self, change: LifecycleChange) -> JobLifecycleEvent | None:
         while True:
             state = await self.state()
             if state.pending_until is not None:
-                if state.pending_until <= wall_time():
-                    await self.complete(state, abandoned_slot(state))
-                else:
+                if not await self.advance_pending(state):
                     await asyncio.sleep(0.01)
                 continue
             try:
@@ -185,8 +194,7 @@ class JobEventStream:
 
     async def read(self, request: JobEventRequest) -> JobEventPage:
         state = await self.state()
-        if state.pending_until is not None and state.pending_until <= wall_time():
-            await self.complete(state, abandoned_slot(state))
+        if state.pending_until is not None and await self.advance_pending(state):
             state = await self.state()
         highwater = state.position
         cutoff = wall_time() - RETENTION_SECONDS
@@ -202,7 +210,8 @@ class JobEventStream:
                 raise ExpiredJobEventCursor("cursor history is outside the seven-day window")
         else:
             direction = request.direction or "forward"
-            position = highwater + (direction == "backward") if request.start == "latest" else floor
+            start = request.start or ("latest" if direction == "backward" else "oldest")
+            position = highwater + (direction == "backward") if start == "latest" else floor
             cursor = JobEventCursor(
                 position=str(position), direction=direction, filters=request.filters or JobEventFilters()
             )
@@ -285,14 +294,22 @@ class SyncJobEventStream:
                 state = self.state()
         raise RuntimeError("Lifecycle publication contention")
 
+    def advance_pending(self, state: JobEventSequence) -> bool:
+        try:
+            record = self.store.get(StoredJobEvent, slot_name(state.position + 1), workspace=SYSTEM_WORKSPACE)
+        except EntityNotFoundError:
+            if state.pending_until is None or state.pending_until > wall_time():
+                return False
+            record = abandoned_slot(state)
+        self.complete(state, record)
+        return True
+
     def append(self, change: LifecycleChange) -> JobLifecycleEvent | None:
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             state = self.state()
             if state.pending_until is not None:
-                if state.pending_until <= wall_time():
-                    self.complete(state, abandoned_slot(state))
-                else:
+                if not self.advance_pending(state):
                     time.sleep(0.01)
                 continue
             try:
@@ -302,7 +319,7 @@ class SyncJobEventStream:
             return self.complete(claimed, change.stored(claimed)).event
         raise TimeoutError("Lifecycle publication busy")
 
-    def cleanup(self, batch_size: int = 100) -> int:
+    def cleanup(self, batch_size: int = 100, on_progress: Callable[[], None] | None = None) -> int:
         for _ in range(32):
             state = self.state()
             expired = self.store.list(
@@ -315,6 +332,8 @@ class SyncJobEventStream:
                     condition("recorded_at_epoch", FilterOperator.LTE, wall_time() - RETENTION_SECONDS),
                 ),
             )
+            if on_progress is not None:
+                on_progress()
             floor = max(state.expired_through, expired.data[0].number if expired.data else 0)
             if floor == state.expired_through:
                 break
@@ -337,4 +356,6 @@ class SyncJobEventStream:
                 self.store.delete(StoredJobEvent, row.name, workspace=SYSTEM_WORKSPACE)
             except EntityNotFoundError:
                 pass
+            if on_progress is not None:
+                on_progress()
         return len(rows)

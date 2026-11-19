@@ -1563,7 +1563,7 @@ class JobDispatcher:
         if attempt.job != job.id or attempt.workspace != workspace:
             return None
         attempt.status_details = self._update_status_details_object(dict(attempt.status_details), status_details)
-        return await self._update(attempt)
+        return await self.store.update(attempt)
 
     @staticmethod
     def _update_status_details_object(existing: Optional[Dict[str, Any]], updates: Dict[str, Any]) -> Dict[str, Any]:

@@ -93,11 +93,12 @@ def run(parent_stop_signal: threading.Event | None = None):
     )
 
     # Job reconciler loop
-    event_store = SyncEntityClient(EntitiesClient.from_client(nemo_client.with_options(timeout=2)))
+    event_client = nemo_client.with_options(timeout=2, retry=RetryPolicy(max_retries=0))
+    event_store = SyncEntityClient(EntitiesClient.from_client(event_client))
     job_reconciler = JobReconciler(
         backend_registry,
         nemo_client,
-        events=SyncJobEventRecorder(event_store, WorkspacesClient.from_client(nemo_client)),
+        events=SyncJobEventRecorder(event_store, WorkspacesClient.from_client(event_client)),
         stop_signal=local_stop_signal,
     )
     job_reconciler_monitored = TrackLastExecutionTime(job_reconciler)

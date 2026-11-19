@@ -5,11 +5,12 @@
 
 import asyncio
 import os
+import threading
 import time
 from collections.abc import Generator
 from datetime import datetime, timezone
-from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit, urlunsplit
+from unittest.mock import Mock, patch
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
@@ -21,6 +22,7 @@ from nemo_helix_plugin.jobs.events import (
     ExpiredJobEventCursor,
     JobEventCursor,
     JobEventFilters,
+    JobEventPage,
     JobEventRequest,
     JobEventType,
 )
@@ -34,7 +36,13 @@ from nhx.core.entities.service import EntitiesService
 from nhx.core.jobs.api.dependencies import dep_system_entity_client
 from nhx.core.jobs.api.v2.jobs.endpoints import router
 from nhx.core.jobs.app.dispatcher import JobDispatcher
-from nhx.core.jobs.app.event_capture import JobEventRecorder, SyncJobEventRecorder
+from nhx.core.jobs.app.event_capture import (
+    JobEventRecorder,
+    LifecycleImage,
+    LifecycleResource,
+    SyncJobEventRecorder,
+    image,
+)
 from nhx.core.jobs.app.event_stream import (
     RETENTION_SECONDS,
     JobEventStream,
@@ -57,17 +65,19 @@ def event_context(request: pytest.FixtureRequest) -> Generator[ClientContext]:
     database = "events_" + uuid4().hex
     admin = None
     if request.param == "postgresql":
+        # Accept PostgreSQL authority URLs and Unix-socket host/port query parameters.
         configured = os.environ.get("NHX_TEST_JOB_EVENTS_POSTGRES_URL")
         if configured is None:
             pytest.skip("PostgreSQL integration URL is not configured")
         url = urlsplit(configured)
-        query = parse_qs(url.query)
-        admin = connect(dbname=url.path.lstrip("/"), user=url.username, host=query["host"][0], port=query["port"][0])
+        admin = connect(urlunsplit(url._replace(scheme="postgresql")))
         admin.autocommit = True
         with admin.cursor() as cursor:
             cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
         configs[EntitiesService] = EntitiesConfig(
-            database_config=DatabaseConfig(url=urlunsplit(url._replace(path="/" + database)))
+            database_config=DatabaseConfig(
+                url=urlunsplit(url._replace(scheme="postgresql+asyncpg", path="/" + database))
+            )
         )
     try:
         with create_test_client(
@@ -122,6 +132,8 @@ async def test_generic_entities_page_filters_and_reverse(event_context: ClientCo
     empty = await stream.read(JobEventRequest(filters=JobEventFilters(event_types=[JobEventType.JOB_DELETED])))
     assert not empty.data and JobEventCursor.decode(empty.next_cursor).position == "5"
     assert JobEventCursor.decode(empty.next_cursor).model_dump().keys() == {"v", "position", "direction", "filters"}
+    reverse_default = await stream.read(JobEventRequest(direction="backward"))
+    assert [event.id for event in reverse_default.data] == ["5", "4", "3", "2", "1"]
 
 
 async def test_replica_append_order_and_abandoned_slot_fences_late_writer(event_context: ClientContext):
@@ -161,7 +173,9 @@ async def test_retention_cleanup_restart_and_source_independence(event_context: 
         await stream.read(JobEventRequest(cursor=JobEventCursor(position="0").encode()))
     assert not (await stream.read(JobEventRequest())).data
     sync_store = SyncEntityClient(EntitiesClient.from_client(event_context.client))
-    assert SyncJobEventStream(sync_store).cleanup() == 1
+    progress = Mock()
+    assert SyncJobEventStream(sync_store).cleanup(on_progress=progress) == 1
+    assert progress.call_count == 2
     restarted = JobEventStream(event_context.entity_client)
     fresh = await restarted.append(change(2))
     assert fresh is not None and fresh.id == "2"
@@ -228,7 +242,7 @@ async def test_controller_capture_and_deletion_survive_source_removal(event_cont
     sync_store = SyncEntityClient(EntitiesClient.from_client(event_context.client))
     recorder = SyncJobEventRecorder(sync_store, WorkspacesClient.from_client(event_context.client))
     recorder.created(step)
-    images = recorder.deletion_images(job)
+    images = recorder.deletion_images(job, None)
     await store.delete_by_id(HelixJob, job.id)
     recorder.deleted(images)
     events = (await JobEventStream(store).read(JobEventRequest())).data
@@ -250,10 +264,27 @@ async def test_post_only_typed_api_cursor_validation_and_polling(event_context: 
     assert not (await jobs.read_job_events(body=JobEventRequest(cursor=page.next_cursor))).data().data
     assert event_context.test_client.get("/apis/jobs/v2/jobs/events").status_code == 405
     assert event_context.test_client.post("/apis/jobs/v2/jobs/events", json={"cursor": "broken"}).status_code == 400
-    waiting = asyncio.ensure_future(jobs.read_job_events(body=JobEventRequest(cursor=page.next_cursor, wait_seconds=2)))
-    await asyncio.sleep(0)
-    await stream.append(change(2))
-    assert [event.id for event in (await waiting).data().data] == ["2"]
+    first_empty = threading.Event()
+    read = JobEventStream.read
+
+    async def observe_read(self: JobEventStream, request: JobEventRequest) -> JobEventPage:
+        result = await read(self, request)
+        if not result.data:
+            first_empty.set()
+        return result
+
+    with patch.object(JobEventStream, "read", observe_read):
+        waiting = asyncio.ensure_future(
+            jobs.read_job_events(body=JobEventRequest(cursor=page.next_cursor, wait_seconds=5))
+        )
+        try:
+            assert await asyncio.to_thread(first_empty.wait, 3)
+            assert not waiting.done()
+            await stream.append(change(2))
+            assert [event.id for event in (await asyncio.wait_for(waiting, 5)).data().data] == ["2"]
+        finally:
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
 
 
 async def test_large_ids_remain_decimal_strings(event_context: ClientContext):
@@ -332,8 +363,118 @@ async def test_noncurrent_and_pending_job_projection_do_not_emit_job_changes(
     target = current if pending else other
     recorder = JobEventRecorder(store, AsyncWorkspacesClient.from_client(event_context.async_client))
     before = await recorder.before(target)
+    if not pending:
+        await store.update(current.model_copy(update={"status": HelixJobStatus.PENDING}))
     saved = await store.update(target.model_copy(update={"status": HelixJobStatus.ACTIVE}))
     await recorder.updated(before, saved)
     assert [event.event_type for event in (await recorder.stream.read(JobEventRequest())).data] == [
         JobEventType.ATTEMPT_STATE_CHANGED
     ]
+
+
+@pytest.mark.parametrize("recoverer", ["reader", "async_writer", "sync_writer"])
+async def test_persisted_slot_is_published_before_lease_expiry(event_context: ClientContext, recoverer: str):
+    store = event_context.entity_client
+    stream = JobEventStream(store)
+    claimed = await store.update(reservation(await stream.state()))
+    await store.create(change(1).stored(claimed))
+    if recoverer == "reader":
+        assert [event.id for event in (await stream.read(JobEventRequest())).data] == ["1"]
+    elif recoverer == "async_writer":
+        saved = await stream.append(change(2))
+        assert saved is not None and saved.id == "2"
+    else:
+        sync_store = SyncEntityClient(EntitiesClient.from_client(event_context.client))
+        saved = SyncJobEventStream(sync_store).append(change(2))
+        assert saved is not None and saved.id == "2"
+    state = await stream.state()
+    assert state.pending_until is None
+    assert state.position == (1 if recoverer == "reader" else 2)
+    assert [event.id for event in (await stream.read(JobEventRequest())).data] == (
+        ["1"] if recoverer == "reader" else ["1", "2"]
+    )
+
+
+async def test_current_attempt_projection_uses_the_saved_transition(event_context: ClientContext):
+    store = event_context.entity_client
+    job = await store.create(
+        HelixJob(
+            name="projection-race",
+            workspace="default",
+            source="test",
+            fileset="files",
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+    attempt = await store.create(
+        HelixJobAttempt(
+            name="attempt",
+            workspace="default",
+            job=job.id,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+    await store.update(job.model_copy(update={"current_attempt_id": attempt.id}))
+    recorder = JobEventRecorder(store, AsyncWorkspacesClient.from_client(event_context.async_client))
+    before = await recorder.before(attempt)
+    saved = await store.update(attempt.model_copy(update={"status": HelixJobStatus.PENDING}))
+    await store.update(saved.model_copy(update={"status": HelixJobStatus.ACTIVE}))
+    await recorder.updated(before, saved)
+    events = (await recorder.stream.read(JobEventRequest())).data
+    assert [event.event_type for event in events] == [
+        JobEventType.ATTEMPT_STATE_CHANGED,
+        JobEventType.JOB_STATE_CHANGED,
+    ]
+    assert all(event.previous_state == "created" and event.new_state == "pending" for event in events)
+    assert events[0].occurred_at == events[1].occurred_at
+
+
+@pytest.mark.parametrize("interruption", ["deadline", "shutdown", "already_stopped"])
+async def test_deletion_capture_stops_and_preserves_partial_images(event_context: ClientContext, interruption: str):
+    store = event_context.entity_client
+    job = await store.create(
+        HelixJob(
+            name="bounded-delete",
+            workspace="default",
+            source="test",
+            fileset="files",
+            status=HelixJobStatus.DELETION_PENDING,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+    attempt = await store.create(
+        HelixJobAttempt(
+            name="attempt",
+            workspace="default",
+            job=job.id,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+        )
+    )
+    for name in ["first", "second"]:
+        await store.create(HelixJobStep(name=name, workspace="default", attempt_id=attempt.id))
+    sync_store = SyncEntityClient(EntitiesClient.from_client(event_context.client))
+    recorder = SyncJobEventRecorder(sync_store, WorkspacesClient.from_client(event_context.client))
+    stop = threading.Event()
+    clock = [0.0]
+    if interruption == "already_stopped":
+        stop.set()
+
+    def interrupt(
+        resource: LifecycleResource, job: HelixJob, workspace_id: str, job_state: HelixJobStatus
+    ) -> LifecycleImage:
+        captured = image(resource, job, workspace_id, job_state)
+        if isinstance(resource, HelixJobStep):
+            if interruption == "deadline":
+                clock[0] = 3.0
+            else:
+                stop.set()
+        return captured
+
+    with patch("nhx.core.jobs.app.event_capture.monotonic", side_effect=lambda: clock[0]):
+        with patch("nhx.core.jobs.app.event_capture.image", side_effect=interrupt):
+            captured = recorder.deletion_images(job, stop)
+    assert len(captured) == (0 if interruption == "already_stopped" else 1)
+    assert all(item.kind == "step" for item in captured)
+    await store.delete_by_id(HelixJob, job.id)
+    recorder.deleted(captured)
+    assert len((await JobEventStream(store).read(JobEventRequest())).data) == len(captured)

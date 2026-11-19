@@ -1357,7 +1357,7 @@ def test_reconciler_runs_bounded_event_cleanup_and_drains_backlog(
         reconciler.step()
         reconciler.step()
         assert cleanup.call_count == expected_calls
-        cleanup.assert_called_with(batch_size=100)
+        cleanup.assert_called_with(batch_size=100, on_progress=reconciler.emit_heartbeat)
         reconciler._next_event_cleanup = 0
         reconciler.step()
         assert cleanup.call_count == expected_calls + 1

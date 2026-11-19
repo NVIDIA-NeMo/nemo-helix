@@ -70,12 +70,11 @@ Definition updates must provide both `spec` and `platform_spec`; the Jobs Factor
 
 The deployment-wide event stream records Job, Attempt, and Step creation, state changes, and deletion. Task events, progress updates, and notification delivery are outside this API. Access uses the existing `jobs.list` permission in the system workspace and `jobs:read` or `platform:read` scopes. Both users and service principals can read the deployment-wide stream when authorized; the optional workspace filter narrows results.
 
-Use `POST /apis/jobs/v2/jobs/events` to start reading, continue from a returned cursor, replace filters, or poll for new events. The operation accepts `limit` (1–1000, default 100) and `wait_seconds` (0–30, default 0) outside the cursor. A request returns immediately when matching events exist. Otherwise, a forward request can wait until a match is detected or the wait expires. Timeout returns an empty page with a continuation cursor.
+Use `POST /apis/jobs/v2/jobs/events` to start reading, continue from a returned cursor, replace filters, or poll for new events. When `start` is omitted, forward reads begin at the oldest retained event and backward reads begin at the newest. The operation accepts `limit` (1–1000, default 100) and `wait_seconds` (0–30, default 0) outside the cursor. A request returns immediately when matching events exist. Otherwise, a forward request can wait until a match is detected or the wait expires. Timeout returns an empty page with a continuation cursor.
 
 Use the typed Python Jobs client:
 
 ```python
-from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.events import (
@@ -86,8 +85,8 @@ from nemo_helix_plugin.jobs.events import (
 )
 
 
-async def read_attempt_events(base_url: str, access_token: str) -> JobEventPage:
-    async with AsyncNemoClient(base_url=base_url, auth=StaticToken(access_token)) as client:
+async def read_attempt_events() -> JobEventPage:
+    async with AsyncNemoClient.from_config() as client:
         jobs = AsyncJobsClient.from_client(client)
         response = await jobs.read_job_events(
             body=JobEventRequest(

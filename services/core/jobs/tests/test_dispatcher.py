@@ -4320,3 +4320,19 @@ async def test_attempt_status_projection_preserves_pending_job(
         HelixJobStepsListFilter(), HelixJobSortField.CREATED_AT_ASC, 100, 0, DEFAULT_WORKSPACE
     )
     assert steps == []
+
+
+@pytest.mark.asyncio
+async def test_progress_details_update_does_not_capture_lifecycle_preimages(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, sample_platform_job_request: CreateHelixJobRequest
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    with patch.object(mock_dispatcher.events, "before") as before:
+        with patch.object(mock_dispatcher.events, "updated") as updated:
+            await mock_dispatcher.update_attempt_status_details(
+                job.name, job.attempt_id, DEFAULT_WORKSPACE, {"percentage_done": 25}
+            )
+    before.assert_not_awaited()
+    updated.assert_not_awaited()
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt.status_details["percentage_done"] == 25

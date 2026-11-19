@@ -5,9 +5,11 @@
 
 import asyncio
 import logging
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Literal, Self
 
 from nemo_helix_plugin.jobs.events import JobEventType
@@ -92,7 +94,11 @@ class JobEventRecorder:
         state = job.status or HelixJobStatus.CREATED
         if job.current_attempt_id and job.status not in HelixJobStatus.lifecycle_pending():
             try:
-                state = (await self.store.get_by_id(HelixJobAttempt, job.current_attempt_id)).status
+                state = (
+                    resource.status
+                    if isinstance(resource, HelixJobAttempt) and resource.id == job.current_attempt_id
+                    else (await self.store.get_by_id(HelixJobAttempt, job.current_attempt_id)).status
+                )
             except EntityNotFoundError:
                 pass
         workspace = (await self.workspaces.get_workspace(name=resource.workspace)).data()
@@ -130,11 +136,14 @@ class JobEventRecorder:
                 if (
                     before.related_job is not None
                     and after.related_job is not None
-                    and before.related_job.state != after.related_job.state
+                    and before.related_job.attempt_id == entity.id
+                    and after.related_job.attempt_id == entity.id
+                    and HelixJobStatus(before.related_job.state) not in HelixJobStatus.lifecycle_pending()
+                    and HelixJobStatus(after.related_job.state) not in HelixJobStatus.lifecycle_pending()
+                    and before.state != after.state
                 ):
-                    change = after.related_job.change(before.related_job.state, "state_changed")
-                    change.occurred_at = after.occurred_at
-                    await self.stream.append(change)
+                    job_image = replace(after.related_job, state=after.state, occurred_at=after.occurred_at)
+                    await self.stream.append(job_image.change(before.state, "state_changed"))
         except Exception:
             logger.warning("Jobs lifecycle state event was dropped", exc_info=True)
 
@@ -182,33 +191,59 @@ class SyncJobEventRecorder:
         except Exception:
             logger.warning("Controller lifecycle state event was dropped", exc_info=True)
 
-    def deletion_images(self, job: HelixJob) -> list[LifecycleImage]:
+    def deletion_images(self, job: HelixJob, stop_signal: threading.Event | None) -> list[LifecycleImage]:
+        images: list[LifecycleImage] = []
+        deadline = monotonic() + 2
+
+        def collecting() -> bool:
+            return monotonic() < deadline and not (stop_signal is not None and stop_signal.is_set())
+
         try:
-            images: list[LifecycleImage] = []
+            if not collecting():
+                return images
+            workspace_id = self.workspaces.get_workspace(name=job.workspace).data().id
+            if not collecting():
+                return images
+            job_state = job.status or HelixJobStatus.CREATED
+            if job.current_attempt_id and job.status not in HelixJobStatus.lifecycle_pending():
+                try:
+                    job_state = self.store.get_by_id(HelixJobAttempt, job.current_attempt_id).status
+                except EntityNotFoundError:
+                    pass
             page = 1
-            while True:
+            while collecting():
                 attempts = self.store.list(
-                    HelixJobAttempt, workspace=job.workspace, filter_obj={"job": job.id}, page=page
+                    HelixJobAttempt, workspace=job.workspace, filter_obj={"job": job.id}, page=page, page_size=100
                 )
                 for attempt in attempts.data:
                     step_page = 1
-                    while True:
+                    while collecting():
                         steps = self.store.list(
-                            HelixJobStep, workspace=job.workspace, filter_obj={"attempt_id": attempt.id}, page=step_page
+                            HelixJobStep,
+                            workspace=job.workspace,
+                            filter_obj={"attempt_id": attempt.id},
+                            page=step_page,
+                            page_size=100,
                         )
-                        images.extend(self._image(step) for step in steps.data)
+                        for step in steps.data:
+                            if not collecting():
+                                return images
+                            images.append(image(step, job, workspace_id, job_state))
                         if step_page >= steps.pagination.total_pages:
                             break
                         step_page += 1
-                    images.append(self._image(attempt))
+                    if not collecting():
+                        return images
+                    images.append(image(attempt, job, workspace_id, job_state))
+                if not collecting():
+                    return images
                 if page >= attempts.pagination.total_pages:
-                    break
+                    images.append(image(job, job, workspace_id, job_state))
+                    return images
                 page += 1
-            images.append(self._image(job))
-            return images
         except Exception:
             logger.warning("Could not capture Jobs deletion preimages", exc_info=True)
-            return []
+        return images
 
     def deleted(self, images: list[LifecycleImage]) -> None:
         deadline = time.monotonic() + 2
