@@ -1,7 +1,5 @@
 {
   "ticket": "REPLACE-WITH-LINEAR-ISSUE-ID-OR-URL",
-  "repo": "NVIDIA-NeMo/nemo-helix",
-  "base_branch": "main",
   "constraints": [
     "Keep the implementation scoped to the ticket's acceptance criteria."
   ]
