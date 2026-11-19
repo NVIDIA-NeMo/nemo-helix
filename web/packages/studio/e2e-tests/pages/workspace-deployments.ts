@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { waitForLongOperation } from '@e2e-tests/utils/pageUtils';
-import { type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 export class WorkspaceDeploymentsPage {
   constructor(public readonly page: Page) {

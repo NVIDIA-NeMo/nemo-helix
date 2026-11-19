@@ -4,7 +4,7 @@
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import {
   Anchor,
   Banner,
@@ -27,7 +27,7 @@ import {
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getHumanReadableFileSize } from '@studio/util/files';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 
 const GymEnvironmentInfo: FC<{

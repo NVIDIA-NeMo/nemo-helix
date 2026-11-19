@@ -3,9 +3,9 @@
 
 import { stringToNumber } from '@nemo/common/src/components/form/ControlledTextInput/utils';
 import { MaskedTextInput } from '@nemo/common/src/components/form/MaskedTextInput';
-import { UseControllerComponentProps } from '@nemo/common/src/types';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
 import { Flex, FormField, TextInput } from '@nvidia/foundations-react-core';
-import { ComponentProps, FocusEvent, ReactNode, useCallback } from 'react';
+import { type ComponentProps, type FocusEvent, type ReactNode, useCallback } from 'react';
 import { useController } from 'react-hook-form';
 
 interface Props extends ComponentProps<typeof TextInput>, UseControllerComponentProps {

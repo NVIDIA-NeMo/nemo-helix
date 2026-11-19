@@ -19,9 +19,8 @@ in-process call is the ``find_spec`` availability probe below, which is delibera
 a top-level name so that it imports nothing.
 """
 
-import asyncio
-import builtins
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -74,15 +73,60 @@ def _is_harbor_module(name: str) -> bool:
     return name == "harbor" or name.startswith("harbor.")
 
 
-def _block_harbor_import(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_import = builtins.__import__
+# Out of process: blocking an import means replacing ``builtins.__import__``, which every thread in
+# this test process shares. The probe imports the runtime first, then makes Harbor unimportable and
+# prints the message of the ``ModuleNotFoundError`` the named call raises.
+_HARBOR_BLOCKED_PROBE = """
+import asyncio, builtins, json, sys
+from pathlib import Path
 
-    def blocked_harbor_import(name, *args, **kwargs):
-        if _is_harbor_module(name):
-            raise ModuleNotFoundError("blocked Harbor import")
-        return real_import(name, *args, **kwargs)
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
+    HarborRuntimeConfig,
+    _build_native_job,
+    build_trials_from_job_dir,
+)
 
-    monkeypatch.setattr(builtins, "__import__", blocked_harbor_import)
+call, work_dir = sys.argv[1], Path(sys.argv[2])
+real_import = builtins.__import__
+
+def blocked_harbor_import(name, *args, **kwargs):
+    if name == "harbor" or name.startswith("harbor."):
+        raise ModuleNotFoundError("blocked Harbor import")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = blocked_harbor_import
+
+def invoke():
+    if call == "build_trials_from_job_dir":
+        build_trials_from_job_dir(".", [])
+        return
+    config = HarborRuntimeConfig(jobs_dir=work_dir / "jobs")
+    _job_dir, run_job = _build_native_job(config, work_dir / "dataset", None, env_templates={})
+
+    async def invoke_run_job():
+        await run_job()
+
+    asyncio.run(invoke_run_job())
+
+try:
+    invoke()
+except ModuleNotFoundError as exc:
+    print(json.dumps(str(exc)))
+else:
+    raise SystemExit(f"{call} did not raise ModuleNotFoundError")
+"""
+
+
+def _harbor_blocked_error(call: str, work_dir: Path) -> str:
+    """Run ``call`` with Harbor unimportable and return its ``ModuleNotFoundError`` message."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _HARBOR_BLOCKED_PROBE, call, str(work_dir)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
 def test_fabric_env_import_does_not_pull_the_execution_stack() -> None:
@@ -138,35 +182,20 @@ def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
     assert len(modules) < 380, f"agent_eval import surface grew to {len(modules)} modules"
 
 
-def test_harbor_adapter_invocation_without_extra_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import build_trials_from_job_dir
+def test_harbor_adapter_invocation_without_extra_has_actionable_error(tmp_path: Path) -> None:
+    message = _harbor_blocked_error("build_trials_from_job_dir", tmp_path)
 
-    _block_harbor_import(monkeypatch)
-    with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
-        build_trials_from_job_dir(".", [])
-
-    assert "repository root" in str(exc_info.value)
-    assert "uv sync --frozen --package nhx-evals-sdk --extra harbor" in str(exc_info.value)
+    assert re.search(r"optional `harbor` extra on Python >=3\.12", message)
+    assert "repository root" in message
+    assert "uv sync --frozen --package nhx-evals-sdk --extra harbor" in message
 
 
-def test_harbor_execution_without_extra_has_actionable_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, _build_native_job
+def test_harbor_execution_without_extra_has_actionable_error(tmp_path: Path) -> None:
+    message = _harbor_blocked_error("run_job", tmp_path)
 
-    _block_harbor_import(monkeypatch)
-    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
-    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
-
-    async def invoke_run_job() -> None:
-        await run_job()
-
-    with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
-        asyncio.run(invoke_run_job())
-
-    assert "repository root" in str(exc_info.value)
-    assert "uv sync --frozen --package nhx-evals-sdk --extra harbor" in str(exc_info.value)
+    assert re.search(r"optional `harbor` extra on Python >=3\.12", message)
+    assert "repository root" in message
+    assert "uv sync --frozen --package nhx-evals-sdk --extra harbor" in message
 
 
 @pytest.mark.parametrize(

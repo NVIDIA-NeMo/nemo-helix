@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isPlainObject } from '@studio/util/functions';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 
 /** Key the evaluator job writes its run rollup under in the job's `status_details`. */
 export const RUN_OUTCOME_STATUS_DETAILS_KEY = 'evaluation';

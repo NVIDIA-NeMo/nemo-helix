@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ProgressBar } from '@nvidia/foundations-react-core';
-import { CreateWorkerOptions, WorkersContextValue } from '@studio/providers/workers/types';
+import type { CreateWorkerOptions, WorkersContextValue } from '@studio/providers/workers/types';
 import { WorkersContext } from '@studio/providers/workers/WorkersContext';
-import { FC, PropsWithChildren, useState } from 'react';
+import { type FC, type PropsWithChildren, useState } from 'react';
 
 export const WorkersProvider: FC<PropsWithChildren> = ({ children }) => {
   const [workers, setWorkers] = useState<Set<Worker>>(new Set());

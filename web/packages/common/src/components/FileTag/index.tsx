@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CheckCircle, Close, Refresh, IconError } from '@nemo/icons/icons';
-import { Button, Flex, Tag, TagProps } from '@nvidia/foundations-react-core';
-import { FC, ReactNode, MouseEventHandler } from 'react';
+import { Button, Flex, Tag, type TagProps } from '@nvidia/foundations-react-core';
+import type { FC, ReactNode, MouseEventHandler } from 'react';
 
 export type FileTagStatus = 'success' | 'pending' | 'error' | 'idle';
 

@@ -28,11 +28,19 @@ from collections import deque
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import Popen, run
 from types import FrameType
 
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nhx.customization_common.training.errors.exceptions import format_exception_string
 from nhx.customization_common.training.errors.parser import MAX_OUTPUT_LINES, read_subprocess_output
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
+from nhx.rl.tasks.training.backends.nemo_rl.ray_failure_logs import (
+    diagnose_ray_startup,
+    ray_session_log_dir,
+    read_ray_failure_logs,
+    render_ray_failure_logs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +208,7 @@ class RayClusterBootstrap:
     _stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _driver_output: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_OUTPUT_LINES), repr=False)
     _driver_process: subprocess.Popen | None = field(default=None, repr=False)
+    _driver_was_started: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize the bootstrap environment."""
@@ -366,6 +375,7 @@ class RayClusterBootstrap:
 
             logger.info("--- Starting driver ---")
             print(f"[ray_bootstrap] --- Starting driver: {driver_script} ---", flush=True)
+            self._driver_was_started = True
             exit_code = self._run_driver(driver_script, driver_args)
             logger.info(f"Driver completed with exit code: {exit_code}")
             print(f"[ray_bootstrap] Driver completed with exit code: {exit_code}", flush=True)
@@ -378,6 +388,10 @@ class RayClusterBootstrap:
             self._driver_output.append(format_exception_string(e))
             exit_code = 1
         finally:
+            # `ray stop` runs next, and the agent logs are not in the driver output. Print them
+            # first. When they name why the agent died, append a line the error rules classify.
+            if exit_code not in (0, PAUSE_EXIT_CODE):
+                self._capture_ray_failure_logs(startup_failure=not self._driver_was_started)
             self._cleanup_with_timeout()
 
         return exit_code
@@ -389,6 +403,7 @@ class RayClusterBootstrap:
             Exit code (0 for graceful termination, non-zero otherwise)
         """
         if not self._start_worker_background():
+            self._capture_ray_failure_logs(startup_failure=True)
             return 1
         return self._monitor_for_termination()
 
@@ -498,7 +513,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting head: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting head: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
+            result = run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray head start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -538,7 +553,7 @@ class RayClusterBootstrap:
         logger.info(f"Starting worker: {' '.join(cmd)}")
         print(f"[ray_bootstrap] Starting worker: {' '.join(cmd)}", flush=True)
         try:
-            result = subprocess.run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
+            result = run(cmd, check=False, timeout=RAY_START_TIMEOUT_SECONDS, env=self._ray_start_env())
         except subprocess.TimeoutExpired:
             logger.warning(f"Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s")
             print(f"[ray_bootstrap] Ray worker start timed out after {RAY_START_TIMEOUT_SECONDS}s", flush=True)
@@ -587,7 +602,7 @@ class RayClusterBootstrap:
             Total number of worker_units available in the cluster
         """
         try:
-            result = subprocess.run(
+            result = run(
                 [self.ray_executable, "status"],
                 capture_output=True,
                 text=True,
@@ -684,7 +699,7 @@ class RayClusterBootstrap:
         # After workers have connected.
         clock = self.progress.training_wall_clock() if self.progress is not None else nullcontext()
         with clock:
-            process = subprocess.Popen(
+            process = Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -728,6 +743,9 @@ class RayClusterBootstrap:
         while not self._stop_event.is_set():
             if self.ended_file.exists():
                 logger.info("Detected ENDED file, terminating worker...")
+                # The head reports the job error. A worker's agent log is on this pod, so print it
+                # before ray stop when this node's agent is what the raylet shut down over.
+                self._capture_ray_failure_logs(startup_failure=False, only_if_agent_died=True)
                 self._stop_ray()
                 return 0
 
@@ -755,7 +773,7 @@ class RayClusterBootstrap:
         # Bound the call so a wedged `ray stop` can't keep the (non-daemon)
         # cleanup thread — and therefore the whole process — alive indefinitely.
         try:
-            subprocess.run(
+            run(
                 [self.ray_executable, "stop", "--force", f"--grace-period={grace_period}"],
                 check=False,
                 capture_output=True,
@@ -789,10 +807,36 @@ class RayClusterBootstrap:
         if cleanup_thread.is_alive():
             logger.warning("[WARN] Cleanup timed out. Forcing termination.")
 
+    def _capture_ray_failure_logs(self, startup_failure: bool, only_if_agent_died: bool = False) -> None:
+        """Print the Ray agent and raylet logs, and record a diagnosis when the logs name one.
+
+        A failure to read the logs must not replace the training error or skip Ray cleanup.
+        ``only_if_agent_died`` skips the print when this node's raylet did not fate-share with an
+        agent, so a healthy worker shutdown stays quiet.
+        """
+        try:
+            log_dir = ray_session_log_dir()
+            if log_dir is None:
+                if not only_if_agent_died:
+                    print("[ray_bootstrap] No Ray session logs found for this failure.", flush=True)
+                return
+            logs = read_ray_failure_logs(log_dir)
+            diagnosis = diagnose_ray_startup(logs, startup_failure=startup_failure)
+            if only_if_agent_died and diagnosis is None:
+                return
+            print(render_ray_failure_logs(log_dir, logs), flush=True)
+            if diagnosis is None:
+                return
+            print(f"[ray_bootstrap] {diagnosis}", flush=True)
+            self._driver_output.append(diagnosis)
+        except Exception as exc:
+            logger.warning(f"Failed to read Ray session logs: {exc}")
+            print(f"[ray_bootstrap] Failed to read Ray session logs: {exc}", flush=True)
+
     def _log_ray_status(self) -> None:
         """Log current Ray cluster status."""
         try:
-            status_result = subprocess.run(
+            status_result = run(
                 [self.ray_executable, "status"],
                 capture_output=True,
                 text=True,
@@ -801,7 +845,7 @@ class RayClusterBootstrap:
             )
             logger.info(f"Ray status:\n{status_result.stdout}")
 
-            memory_result = subprocess.run(
+            memory_result = run(
                 [self.ray_executable, "memory"],
                 capture_output=True,
                 text=True,

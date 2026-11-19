@@ -220,6 +220,58 @@ Consequences worth knowing before you rely on this:
   login|status|logout` are gone and `auth whoami` is now top-level
   `scaled-evals whoami`.
 
+Evaluation and benchmark-run APIs enforce owner/admin access in their Entity
+Store reads and compare-and-swap writes. Private resources are visible only to
+their effective owner or an authorized platform admin. Existing `public`,
+`team` and `org` visibility permits authenticated reads; it does not authorize
+another owner to cancel, retry, delete or build archives. Team/org membership
+is not implemented by this sharing convention. Lists apply access checks before
+search and pagination; missing, deleted and inaccessible resources return 404.
+Streams retain request scope and recheck resource access on each poll. Internal
+controllers and workers keep deliberately unrestricted storage access.
+
+Benchmark-run initialization is tracked separately from execution. New runs start
+with `initialization_status=created` while their predetermined member evaluations
+are written, then become `complete` after every write succeeds. Their combined
+status is `initializing` during creation; after completion, execution status is
+derived from the members as before. Workers leave these members queued until
+initialization completes. Further member creation is rejected once it is complete.
+
+Cancelling an initializing run returns `409 benchmark_run_initializing` without
+setting `cancelled_at`, changing members or starting runtime cleanup. Once
+initialization completes, queued and active runs can be cancelled. Records written
+before initialization tracking was added are treated as complete for compatibility;
+this does not retroactively detect a previously interrupted creation. A crash can
+leave a new run in `created`, requiring recovery or cleanup; no automatic recovery
+is introduced here.
+
+Evaluation and run storage has separate interfaces for each caller:
+
+| Interface | Intended caller and access |
+| --- | --- |
+| `EvaluationRequestRepository`, `BenchmarkRunRequestRepository`, `BenchmarkArchiveRequestRepository` | Request handlers; an explicit owner/admin scope is required. |
+| `EvaluationGlobalQueries`, `BenchmarkRunGlobalQueries` | Read-only checks and reports across owners, including resource-in-use checks and fleet metrics. Admin reports remain gated by platform authorization. |
+| `EvaluationWorkerRepository`, `BenchmarkRunWorkerRepository`, `BenchmarkArchiveWorkerRepository` | Service workers and internal lifecycle operations, including claims, execution updates, archive publication, and cleanup. |
+
+The generic `Database` exposes catalog stores only. `RequestDatabase` supplies
+scoped repositories, including for stream polls. A task or profile in use by
+another owner's private evaluation still cannot be deleted: those guards use
+global queries without giving the handler a worker repository. Global-query
+interfaces expose no public mutation methods.
+
+Run cancellation authorizes the parent and its current live members once, then
+keeps that fixed set of member IDs for the accepted operation. Later ownership
+changes do not revoke that in-flight cancellation. Each member mutation still
+loads the current record and uses a version check, so retries preserve concurrent
+edits. Cleanup is limited to members actually cancelled by that operation. The
+response reloads the original IDs after cleanup to report current results without
+rediscovering members or repeating authorization. Later requests authorize again.
+
+Deleting a benchmark run soft-deletes its parent entity; member evaluations and
+stored artifacts remain. Cascading member deletion is a
+separate follow-up, not part of the ownership-isolation port. The isolation unit
+tests use in-memory entities and do not require Postgres or other services.
+
 ## Verify locally (end to end)
 
 **1. Plugin loads.** The `nemo.services` loader swallows import errors, so a broken
@@ -331,9 +383,11 @@ Postgres version:
   time can each admit one evaluation past a cap.
 - List endpoints, admin counts, and queue scans read every live evaluation or
   run, and run status is derived from all members on each read.
-- A benchmark run and its members are separate writes. A failed create deletes
-  what it wrote; a crash in between can leave queued members of a missing run.
-  Cancelling a run likewise cancels members one at a time.
+- A benchmark run and its members are separate writes. Initialization closes
+  membership after all member writes succeed. Failed creation attempts cleanup;
+  a crash can leave an incomplete run requiring recovery. Workers skip members
+  of incomplete, missing, deleted or cancelled parents. Cancelling an initialized
+  run still cancels members one at a time.
 - A superseded execution is detected with a check, not a lock, so it can
   publish once more if a retry lands in between.
 - Cleanup ids are strings (`<evaluation>/<execution>`), not integers.

@@ -19,7 +19,7 @@ import { EvaluationDetailMetrics } from '@studio/routes/EvaluationDetailRoute/Ev
 import { getExperimentDetailRoute, getExperimentRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { evaluationSessionsExport } from '@studio/util/resultExports';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 const SESSIONS_PAGE_SIZE = 1000;
 
@@ -98,7 +98,7 @@ export const EvaluationDetailRoute: FC = () => {
             </Stack>
           </Card>
         ) : null}
-        <div className="flex flex-col gap-4 border-t border-base pt-4">
+        <Stack className="min-h-[480px] flex-1 gap-4 border-t border-base pt-4">
           <div className="flex items-center gap-3">
             <Text kind="title/sm">Test cases</Text>
             {evaluation?.run_count !== undefined && (
@@ -111,7 +111,7 @@ export const EvaluationDetailRoute: FC = () => {
             evaluationName={evaluationName}
             experimentName={experimentName}
           />
-        </div>
+        </Stack>
       </Stack>
     </AccessibleTitle>
   );

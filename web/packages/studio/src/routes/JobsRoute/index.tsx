@@ -5,7 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 export const JobsRoute: FC = () => {
   useBreadcrumbs({ items: [{ slotLabel: 'Jobs' }] });

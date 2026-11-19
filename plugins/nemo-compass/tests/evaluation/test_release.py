@@ -70,7 +70,7 @@ def test_aws_passes_css_credentials_and_endpoint(monkeypatch):
         seen["env"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, stdout="ok")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(release, "run", fake_run)
     assert release._aws(STORE, "s3api", "list-buckets", env=CREDS) == "ok"
     assert seen["command"] == [
         "aws",
@@ -87,7 +87,7 @@ def test_aws_passes_css_credentials_and_endpoint(monkeypatch):
 
 
 def test_aws_requires_dedicated_credentials(monkeypatch):
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("missing credentials invoked AWS"))
+    monkeypatch.setattr(release, "run", lambda *args, **kwargs: pytest.fail("missing credentials invoked AWS"))
     with pytest.raises(SystemExit) as exc:
         release._aws(STORE, "s3api", "list-buckets", env={})
     assert release.ACCESS_KEY_ENV in str(exc.value)
@@ -98,7 +98,7 @@ def test_aws_prints_stderr_on_failure(monkeypatch, capsys):
     def fake_run(*args, **kwargs):
         raise subprocess.CalledProcessError(1, args[0], stderr="s3: some auth error\n")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(release, "run", fake_run)
     with pytest.raises(subprocess.CalledProcessError):
         release._aws(STORE, "s3api", "list-buckets", env=CREDS)
     assert "s3: some auth error" in capsys.readouterr().err
@@ -108,7 +108,7 @@ def test_aws_missing_binary_exits_with_install_pointer(monkeypatch):
     def fake_run(*args, **kwargs):
         raise FileNotFoundError(2, "No such file or directory", "aws")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(release, "run", fake_run)
     with pytest.raises(SystemExit) as exc:
         release._aws(STORE, "s3api", "list-buckets", env=CREDS)
     assert str(exc.value) == "AWS CLI not found — install it with `brew install awscli`"

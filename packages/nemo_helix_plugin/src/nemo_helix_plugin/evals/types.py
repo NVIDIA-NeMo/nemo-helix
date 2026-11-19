@@ -109,6 +109,24 @@ class RetrieveEvalSecretRef(RootModel[str]):
     )
 
 
+class RetrieveEvalRankingInference(BaseModel):
+    """Reranking invocation metadata returned by model resolution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ranking"] = "ranking"
+    contract: (
+        Literal[
+            "nim-ranking-v1",
+            "hosted-rerank-v1",
+            "hosted-ranking-v1",
+            "hosted-retrieval-reranking-v1",
+        ]
+        | None
+    ) = None
+    path: str | None = None
+
+
 class RetrieveEvalModel(BaseModel):
     """Inline model definition accepted by retrieve-eval specs."""
 
@@ -119,6 +137,14 @@ class RetrieveEvalModel(BaseModel):
     host_url: str | None = Field(
         default=None,
         description="Direct NIM endpoint URL populated when a model reference is resolved.",
+    )
+    served_model_name: str | None = Field(
+        default=None,
+        description="Provider model identifier preserved when resolving a model reference.",
+    )
+    inference: Annotated[RetrieveEvalRankingInference, Field(discriminator="type")] | None = Field(
+        default=None,
+        description="Capability-specific invocation metadata populated during model resolution.",
     )
     api_key_secret: RetrieveEvalSecretRef | None = Field(
         default=None,
@@ -134,6 +160,10 @@ class RetrieveEvalRetrievalInputSpec(BaseModel):
     """Submitter-facing retrieval target before platform model refs are resolved."""
 
     model_config = ConfigDict(extra="forbid")
+
+    embedding_in_flight: int = Field(default=2, ge=1, description="Concurrent embedding POSTs to one NIM.")
+    query_prefix: str = Field(default="query: ", description="Literal prefix prepended to each query.")
+    passage_prefix: str = Field(default="passage: ", description="Literal prefix prepended to each passage.")
 
     embeddings: RetrieveEvalModel | RetrieveEvalModelRef
     reranker: RetrieveEvalModel | RetrieveEvalModelRef | None = None
@@ -184,6 +214,10 @@ class RetrieveEvalRetrievalSpec(BaseModel):
     """Canonical retrieval target returned after model refs are resolved."""
 
     model_config = ConfigDict(extra="forbid")
+
+    embedding_in_flight: int = Field(default=2, ge=1, description="Concurrent embedding POSTs to one NIM.")
+    query_prefix: str = Field(default="query: ", description="Literal prefix prepended to each query.")
+    passage_prefix: str = Field(default="passage: ", description="Literal prefix prepended to each passage.")
 
     embeddings: RetrieveEvalModel = Field(description="Embedding NIM used to encode queries and passages.")
     reranker: RetrieveEvalModel | None = Field(
@@ -350,6 +384,9 @@ class SubmitAgentEvalJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     spec: dict[str, Any]
+    output_location: str | None = None
+
+    _validate_output_location = field_validator("output_location")(validate_output_location)
 
 
 class SubmitRetrieveEvalJobRequest(BaseModel):

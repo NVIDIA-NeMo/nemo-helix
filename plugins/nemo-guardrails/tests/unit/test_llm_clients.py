@@ -3,6 +3,7 @@
 
 """Unit tests for request-scoped LLM client header plumbing."""
 
+import asyncio
 from typing import Any, Protocol, cast
 
 from nemo_guardrails_plugin import llm_clients
@@ -81,7 +82,7 @@ class TestRequestHeadersContext:
 
         assert get_request_headers() == {}
 
-        with platform_headers_context(client):
+        with platform_headers_context(client, {}):
             assert get_request_headers() == {
                 "traceparent": "00-platform",
                 "X-NHX-Principal-Id": "service:guardrails-test",
@@ -93,10 +94,10 @@ class TestRequestHeadersContext:
         outer_client = _make_client(traceparent="outer")
         inner_client = _make_client(traceparent="inner")
 
-        with platform_headers_context(outer_client):
+        with platform_headers_context(outer_client, {}):
             assert get_request_headers() == {"traceparent": "outer"}
 
-            with platform_headers_context(inner_client):
+            with platform_headers_context(inner_client, {}):
                 assert get_request_headers() == {"traceparent": "inner"}
 
             assert get_request_headers() == {"traceparent": "outer"}
@@ -132,7 +133,7 @@ class TestHeaderAwareChatNVIDIA:
                 "traceparent": "00-platform",
             }
         )
-        with platform_headers_context(client_context):
+        with platform_headers_context(client_context, {}):
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
             assert headers == {
                 "X-Static": "yes",
@@ -162,7 +163,7 @@ class TestHeaderAwareChatNVIDIA:
         )
 
         client_context = _make_client(**{"X-NHX-Principal-Id": "service:guardrails-test"})
-        with platform_headers_context(client_context):
+        with platform_headers_context(client_context, {}):
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
 
         assert headers == {
@@ -203,7 +204,7 @@ class TestRegisterHeaderAwareNimProvider:
         assert client.default_headers == {"X-Static": "yes"}
 
         client_context = _make_client(traceparent="00-platform")
-        with platform_headers_context(client_context):
+        with platform_headers_context(client_context, {}):
             # The registered client must keep static config headers and merge
             # request-scoped platform headers at call time.
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
@@ -223,3 +224,64 @@ class TestRegisterHeaderAwareNimProvider:
         register_header_aware_nim_provider()
 
         assert calls == [("nim", llm_clients._init_header_aware_nim_model)]
+
+
+class TestCallerTraceContext:
+    """The caller's W3C trace headers reach rail model calls, and nothing else of the caller's does.
+
+    A request-scoped client carries identity but never the caller's trace, so the trace has to be
+    taken from the headers the caller sent. Task models are separate upstreams, so the other
+    headers a caller sends must stay out.
+    """
+
+    def test_trace_headers_come_from_the_caller_and_other_headers_do_not(self) -> None:
+        client = _make_client(**{"X-NHX-Principal-Id": "service:guardrails-test"})
+        inbound = {
+            "traceparent": "00-c2ed2936886c4a9eb796a1f78c2cafd8-a39abb1b346c4988-01",
+            "tracestate": "qa=f4fbf03024e344d09aff76adac4d86f4",
+            "baggage": "tenant=a",
+            "X-Custom-Trace-Id": "custom",
+            "Authorization": "Bearer secret",
+        }
+
+        with platform_headers_context(client, inbound):
+            assert get_request_headers() == {
+                "traceparent": "00-c2ed2936886c4a9eb796a1f78c2cafd8-a39abb1b346c4988-01",
+                "tracestate": "qa=f4fbf03024e344d09aff76adac4d86f4",
+                "baggage": "tenant=a",
+                "X-NHX-Principal-Id": "service:guardrails-test",
+            }
+
+        assert get_request_headers() == {}
+
+    def test_trace_header_names_match_in_any_case(self) -> None:
+        client = _make_client()
+
+        with platform_headers_context(client, {"Traceparent": "00-trace", "TraceState": "qa=1"}):
+            assert get_request_headers() == {"Traceparent": "00-trace", "TraceState": "qa=1"}
+
+    def test_a_header_the_client_already_carries_is_not_replaced(self) -> None:
+        client = _make_client(traceparent="00-client")
+
+        with platform_headers_context(client, {"Traceparent": "00-caller", "tracestate": "qa=1"}):
+            assert get_request_headers() == {"traceparent": "00-client", "tracestate": "qa=1"}
+
+    def test_a_request_without_trace_headers_adds_nothing(self) -> None:
+        client = _make_client(**{"X-NHX-Principal-Id": "service:guardrails-test"})
+
+        with platform_headers_context(client, {"X-Custom-Trace-Id": "custom"}):
+            assert get_request_headers() == {"X-NHX-Principal-Id": "service:guardrails-test"}
+
+    async def test_concurrent_requests_keep_their_own_trace(self) -> None:
+        client = _make_client()
+        seen: dict[str, str] = {}
+
+        async def run(trace: str) -> None:
+            with platform_headers_context(client, {"traceparent": trace}):
+                # Yield so the other request runs while this one's headers are in scope.
+                await asyncio.sleep(0)
+                seen[trace] = get_request_headers()["traceparent"]
+
+        await asyncio.gather(run("00-first"), run("00-second"))
+
+        assert seen == {"00-first": "00-first", "00-second": "00-second"}

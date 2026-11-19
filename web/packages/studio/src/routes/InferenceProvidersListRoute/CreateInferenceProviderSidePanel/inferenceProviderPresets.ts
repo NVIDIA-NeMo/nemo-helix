@@ -16,8 +16,8 @@ import Mistral from '@nemo/common/src/svgs/model_icon_mistral.svg?react';
 import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
 import OpenAi from '@nemo/common/src/svgs/model_icon_openai.svg?react';
 import OpenRouter from '@nemo/common/src/svgs/model_icon_openrouter.svg?react';
-import { LinkBreak, ChartFlow } from '@nemo/icons/icons';
-import { FC, SVGProps } from 'react';
+import { PlugReceptacle, ChartFlow } from '@nemo/icons/icons';
+import type { FC, SVGProps } from 'react';
 
 export type InferenceProviderPresetId =
   | 'build'
@@ -98,5 +98,5 @@ export function getInferenceProviderPresetLabel(id: InferenceProviderPresetId): 
 
 export function getInferenceProviderPresetIcon(id: InferenceProviderPresetId) {
   if (id === 'custom') return CUSTOM_ROW.Icon;
-  return MODEL_PROVIDER_ROWS.find((r) => r.id === id)?.Icon ?? LinkBreak;
+  return MODEL_PROVIDER_ROWS.find((r) => r.id === id)?.Icon ?? PlugReceptacle;
 }

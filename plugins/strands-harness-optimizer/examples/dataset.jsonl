@@ -1,0 +1,6 @@
+{"id": "add", "input": "What is 17 + 26?", "expected_output": "43"}
+{"id": "sub", "input": "What is 100 - 58?", "expected_output": "42"}
+{"id": "mul", "input": "What is 12 * 12?", "expected_output": "144"}
+{"id": "div", "input": "What is 144 / 12?", "expected_output": "12"}
+{"id": "cmp", "input": "Which is larger, 0.7 or 0.65? Answer with the number only.", "expected_output": "0.7"}
+{"id": "pct", "input": "What is 15% of 200?", "expected_output": "30"}

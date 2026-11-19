@@ -11,7 +11,8 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { isForbiddenError } from '@nemo/common/src/api/common/utils';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
@@ -24,8 +25,8 @@ import { FormField, Stack, TextArea, TextInput } from '@nvidia/foundations-react
 import { queryClient } from '@studio/api/queryClient';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { AxiosError } from 'axios';
-import { FC } from 'react';
-import { SubmitHandler, useController, useForm } from 'react-hook-form';
+import type { FC } from 'react';
+import { type SubmitHandler, useController, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
@@ -116,6 +117,11 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
 
       if (errorDetail === `Workspace ${data.name} already exists.`) {
         setError('name', { message: errorDetail });
+      } else if (isForbiddenError(error) && (!errorDetail || errorDetail === 'Forbidden')) {
+        // Authz denials carry a generic detail; business-rule 403s (e.g. reserved names) fall through.
+        toast.error(
+          "You don't have permission to create workspaces. Ask an administrator for access."
+        );
       } else {
         // Extract message from errorDetail if it's an array with msg property
         let errorMessage: string;

@@ -14,6 +14,7 @@ from nemo_deployments_plugin.types import DeploymentStatus, Endpoint, VolumeStat
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding, GatewayWorkload
 from pydantic import BaseModel, Field
 
 
@@ -55,6 +56,8 @@ class LogResult:
 class DeploymentBackend(abc.ABC):
     """Abstract substrate backend for deployment and volume lifecycle."""
 
+    supports_gateway_providers = False
+
     def __init__(self, client: AsyncNemoClient, config: dict[str, Any]) -> None:
         self._nemo_client = client
         self._config = config
@@ -84,6 +87,15 @@ class DeploymentBackend(abc.ABC):
     @abstractmethod
     async def read_status(self, *, workspace: str, name: str) -> BackendStatusUpdate:
         raise NotImplementedError
+
+    async def renew_gateway_credentials(
+        self,
+        *,
+        workload: GatewayWorkload,
+        bindings: dict[str, GatewayProviderBinding],
+        auth_context: AuthContext | None,
+    ) -> None:
+        """Renew active workload bindings when the executor uses controller renewal."""
 
     @abstractmethod
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:

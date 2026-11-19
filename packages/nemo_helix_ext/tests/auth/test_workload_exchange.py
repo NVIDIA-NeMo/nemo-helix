@@ -63,7 +63,7 @@ def test_read_subject_token_file_rejects_empty_file(tmp_path):
         read_subject_token_file(token_file)
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_sends_rfc8693_request(mock_post):
     access_token = _make_jwt({"exp": int(time.time()) + 3600})
     response = MagicMock()
@@ -92,7 +92,7 @@ def test_token_exchange_grant_sends_rfc8693_request(mock_post):
     }
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_uses_docker_opaque_subject_token_type(mock_post):
     mock_post.return_value = httpx.Response(200, json={"access_token": "exchanged-token", "expires_in": 300})
 
@@ -105,7 +105,7 @@ def test_token_exchange_grant_uses_docker_opaque_subject_token_type(mock_post):
     assert mock_post.call_args.kwargs["data"]["subject_token_type"] == DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_rejects_http_non_loopback_endpoint_before_sending_subject_token(mock_post):
     with pytest.raises(ValueError, match="must use HTTPS"):
         token_exchange_grant(
@@ -117,7 +117,7 @@ def test_token_exchange_grant_rejects_http_non_loopback_endpoint_before_sending_
     mock_post.assert_not_called()
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 @pytest.mark.parametrize(
     "token_endpoint",
     [
@@ -143,7 +143,7 @@ def test_token_exchange_grant_allows_http_loopback_endpoints(mock_post, token_en
     mock_post.assert_called_once()
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_uses_nemo_scoped_ca_bundle(mock_post, monkeypatch):
     access_token = _make_jwt({"exp": int(time.time()) + 3600})
     response = MagicMock()
@@ -162,7 +162,7 @@ def test_token_exchange_grant_uses_nemo_scoped_ca_bundle(mock_post, monkeypatch)
     assert mock_post.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_uses_context_certificate_authority(mock_post, tmp_path, monkeypatch):
     access_token = _make_jwt({"exp": int(time.time()) + 3600})
     response = MagicMock()
@@ -183,7 +183,7 @@ def test_token_exchange_grant_uses_context_certificate_authority(mock_post, tmp_
     assert mock_post.call_args.kwargs["verify"] == context_ca
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_surfaces_idp_error(mock_post):
     response = MagicMock()
     response.status_code = 400
@@ -203,7 +203,7 @@ def test_token_exchange_grant_surfaces_idp_error(mock_post):
         )
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 def test_token_exchange_grant_rejects_non_object_error_payload(mock_post):
     response = MagicMock()
     response.status_code = 400
@@ -220,7 +220,7 @@ def test_token_exchange_grant_rejects_non_object_error_payload(mock_post):
         )
 
 
-@patch("nemo_helix_ext.auth.workload_exchange.httpx.post")
+@patch("nemo_helix_ext.auth.workload_exchange.post")
 @pytest.mark.parametrize("payload", [[], {}, {"access_token": ""}, {"access_token": None}])
 def test_token_exchange_grant_rejects_success_response_without_non_empty_access_token(mock_post, payload):
     response = MagicMock()

@@ -5,14 +5,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool, ProcessPoolExecutor
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.dependencies import IntakeConfigDep
+from nhx.intake.dependencies import IntakeConfigDep, IntakeServiceDep, get_atif_ingest_executor
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
-from nhx.intake.spans.domain import TraceBatch
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
     AtifFinalMetrics,
@@ -24,15 +28,14 @@ from nhx.intake.spans.ingest.atif_domain import (
     validate_atif_tool_call_references,
     validate_atif_v17_subagent_ref_resolution_keys,
 )
-from nhx.intake.spans.ingest.atif_mapping import (
-    AtifTrajectoryDepthError,
-    trajectory_to_evaluator_results,
-    trajectory_to_spans,
-)
+from nhx.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError
+from nhx.intake.spans.ingest.atif_offload import PreparedAtifBatch, prepare_atif_batch
 from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from nhx.intake.spans.ingest.evaluation_context_validation import validate_evaluation_context
 from nhx.intake.spans.storage import utc_now
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_workspace_access)])
 API_TAG = "Ingest"
@@ -140,6 +143,25 @@ class AtifIngestRequest(BaseModel):
         )
 
 
+def _submit_atif_batch(
+    executor: ProcessPoolExecutor,
+    workspace: str,
+    trajectory: AtifTrajectory,
+    ingested_at: datetime,
+    max_subagent_depth: int,
+) -> Future[PreparedAtifBatch]:
+    try:
+        return executor.submit(prepare_atif_batch, workspace, trajectory, ingested_at, max_subagent_depth)
+    except BrokenProcessPool:
+        raise
+    except RuntimeError as error:
+        # Shut down by on_shutdown after this request read the pool.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest is unavailable; the intake service is not running or is shutting down",
+        ) from error
+
+
 @router.post(
     "/v2/workspaces/{workspace}/ingest/atif",
     tags=[API_TAG],
@@ -153,32 +175,45 @@ async def ingest_atif(
     service: SpansServiceDep,
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
+    intake: IntakeServiceDep,
 ) -> Response:
     await validate_evaluation_context(
         workspace=workspace,
         context=body.evaluation_context,
         entity_client=entity_client,
     )
+    if intake.atif_ingest_pending >= config.atif_ingest_max_pending:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest is at capacity; retry the request",
+            headers={"Retry-After": "1"},
+        )
     ingested_at = utc_now()
     trajectory = body.to_trajectory()
-    max_subagent_depth = config.atif_max_subagent_depth
+    # Read the pool only now: the validation await above can outlast a rebuild or shutdown.
+    executor = get_atif_ingest_executor(intake)
+    intake.atif_ingest_pending += 1
     try:
-        spans = trajectory_to_spans(
-            workspace=workspace,
-            trajectory=trajectory,
-            ingested_at=ingested_at,
-            max_subagent_depth=max_subagent_depth,
-        )
+        future = _submit_atif_batch(executor, workspace, trajectory, ingested_at, config.atif_max_subagent_depth)
+        prepared = await asyncio.wrap_future(future)
     except AtifTrajectoryDepthError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    evaluator_results = trajectory_to_evaluator_results(
-        workspace=workspace,
-        trajectory=trajectory,
-        spans=spans,
-        ingested_at=ingested_at,
-        max_subagent_depth=max_subagent_depth,
+    except BrokenProcessPool as error:
+        # Nothing is stored yet, so the producer's retry of this 503 lands on the rebuilt pool.
+        logger.error("ATIF ingest worker died; rebuilding the pool", exc_info=error)
+        intake.rebuild_atif_ingest_executor(broken=executor)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest worker failed; retry the request",
+        ) from error
+    finally:
+        intake.atif_ingest_pending -= 1
+    # The 201 and mark_dirty wait for both inserts. A failure between them leaves spans without
+    # evaluator results; stable ids make the producer's retry converge.
+    await service.ingest_prepared_batch(
+        span_rows=prepared.span_rows,
+        evaluator_result_rows=prepared.evaluator_result_rows,
     )
-    await service.ingest_batch(TraceBatch(spans=spans, evaluator_results=evaluator_results))
     context = body.evaluation_context
     if denormalizer is not None and context is not None and context.evaluation_name:
         denormalizer.mark_dirty(workspace=workspace, evaluation_name=context.evaluation_name)

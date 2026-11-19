@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledDatasetFileSelect } from '@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect';
-import { FileListItem } from '@nemo/common/src/components/FileList';
+import type { FileListItem } from '@nemo/common/src/components/FileList';
 import { render } from '@testing-library/react';
-import { act, FC } from 'react';
+import { act, type FC } from 'react';
 import { useForm } from 'react-hook-form';
 
 // Capture props passed to DatasetFileSelect so tests can call onChange and inspect value

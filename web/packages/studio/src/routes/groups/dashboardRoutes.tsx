@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { LayoutGrid } from '@nemo/icons/icons';
+import { Apps } from '@nemo/icons/icons';
 import { DASHBOARD_ROUTE_ENABLED, DASHBOARD_SANDBOX_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
@@ -44,7 +44,7 @@ export const getDashboardSideNavItems = (workspace: string) =>
     ? [
         {
           id: 'dashboard',
-          slotIcon: <LayoutGrid className={iconColorClass} />,
+          slotIcon: <Apps className={iconColorClass} />,
           slotLabel: 'Dashboard',
           href: getWorkspaceDashboardRoute(workspace),
         },

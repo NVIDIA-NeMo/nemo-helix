@@ -20,12 +20,11 @@ import struct
 import sys
 import time
 import tomllib
-import urllib.error
-import urllib.request
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import urlopen
 
 CRATES_IO_DOWNLOAD = "https://static.crates.io/crates"
 #: crates.io crates are downloaded; local (workspace) crates are in the project's own pinned archive.
@@ -110,7 +109,7 @@ def download_crate(crate: Crate, sha256: str, destination: Path) -> None:
     last_error: Exception | None = None
     for attempt in range(DOWNLOAD_ATTEMPTS):
         try:
-            with urllib.request.urlopen(url, timeout=120) as response:
+            with urlopen(url, timeout=120) as response:
                 data = response.read()
             actual = hashlib.sha256(data).hexdigest()
             if actual != sha256:

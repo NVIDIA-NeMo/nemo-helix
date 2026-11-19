@@ -4,7 +4,7 @@
 import type { ResourceRef } from '@nemo/common/src/types';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
-import { ChatCompletionTool } from 'openai/resources/index.mjs';
+import type { ChatCompletionTool } from 'openai/resources/index.mjs';
 
 /**
  * Get the tools for a model

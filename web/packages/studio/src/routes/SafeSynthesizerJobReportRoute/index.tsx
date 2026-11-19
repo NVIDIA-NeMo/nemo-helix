@@ -19,7 +19,7 @@ import { SyntheticQualityPanel } from '@studio/routes/SafeSynthesizerJobReportRo
 import { getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { FC, useRef } from 'react';
+import { type FC, useRef } from 'react';
 
 export type ReportSection = 'overview' | 'synthetic-quality' | 'data-privacy';
 export interface MenuItem {

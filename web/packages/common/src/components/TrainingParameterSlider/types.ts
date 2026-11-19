@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Slider } from '@nvidia/foundations-react-core';
-import { ComponentProps } from 'react';
+import type { Slider } from '@nvidia/foundations-react-core';
+import type { ComponentProps } from 'react';
 
 type SliderProps = ComponentProps<typeof Slider>;
 

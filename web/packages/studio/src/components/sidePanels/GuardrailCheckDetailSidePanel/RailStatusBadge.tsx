@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Shield } from '@nemo/icons/icons';
+import { Secure } from '@nemo/icons/icons';
 import { Badge } from '@nvidia/foundations-react-core';
 import type { Verdict } from '@studio/api/guardrail-checks/types';
 import type { FC } from 'react';
@@ -22,7 +22,7 @@ export const RailStatusBadge: FC<RailStatusBadgeProps> = ({ status }) => {
   if (status === 'blocked') {
     return (
       <Badge color="yellow" kind="solid">
-        <Shield size="10" />
+        <Secure size="10" />
         Blocked
       </Badge>
     );

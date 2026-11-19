@@ -3,7 +3,7 @@
 
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { FileListItem } from '@nemo/common/src/components/FileList';
+import type { FileListItem } from '@nemo/common/src/components/FileList';
 
 /**
  * Parse fileset URL format (fileset://workspace/name/filepath) into a FileListItem.

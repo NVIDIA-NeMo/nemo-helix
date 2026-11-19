@@ -70,6 +70,56 @@ class TestFilterFilesByPatterns:
         result = _filter_files_by_patterns(files, "cache/")
         assert result == ["results.json", "metrics.json"]
 
+    def test_directory_path_pattern_is_anchored_at_the_root(self):
+        """Test that a dir/sub/ pattern excludes files inside that directory only at the root."""
+        files = [
+            "home/.tmp/plugins/catalog.json",
+            "home/.tmp/plugins/nested/skill.md",
+            "home/.tmp/plugins.sha",
+            "home/.tmp/plugins-extra/kept.json",
+            "workspace/home/.tmp/plugins/kept.json",
+        ]
+        result = _filter_files_by_patterns(files, "home/.tmp/plugins/")
+        assert result == [
+            "home/.tmp/plugins.sha",
+            "home/.tmp/plugins-extra/kept.json",
+            "workspace/home/.tmp/plugins/kept.json",
+        ]
+
+    def test_single_folder_glob_matches_directories_at_any_depth(self):
+        """Slash-terminated folder globs keep same-prefix files while excluding matching directories."""
+        files = [
+            "plugins/catalog.json",
+            "plugins-clone-a1/nested/skill.md",
+            "nested/plugins/catalog.json",
+            "nested/plugins-clone-b2/catalog.json",
+            "plugins.sha",
+            "nested/plugins.sha",
+            "other/keep.txt",
+        ]
+
+        assert _filter_files_by_patterns(files, "plugins*/") == [
+            "plugins.sha",
+            "nested/plugins.sha",
+            "other/keep.txt",
+        ]
+
+    def test_directory_path_pattern_folders_are_globs(self):
+        """Test that each folder name in a dir/sub/ pattern is a glob, still anchored at the root."""
+        files = [
+            "home/.tmp/plugins/catalog.json",
+            "home/.tmp/plugins-clone-a1/catalog.json",
+            "home/.tmp/plugins.sha",
+            "home/.tmp/other/kept.json",
+            "workspace/home/.tmp/plugins-clone-a1/kept.json",
+        ]
+        result = _filter_files_by_patterns(files, "home/.tmp/plugins*/")
+        assert result == [
+            "home/.tmp/plugins.sha",
+            "home/.tmp/other/kept.json",
+            "workspace/home/.tmp/plugins-clone-a1/kept.json",
+        ]
+
     def test_combined_patterns_from_evaluator(self):
         """Test the actual patterns used by the evals service."""
         files = [

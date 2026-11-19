@@ -110,7 +110,9 @@ class TestMCPServerSmoke:
         import nhx.core.mcp.server as mcp_server_module
         from nhx.common.mcp import format_error_response
 
-        def create_failing_entities_mcp(_base_url: str | None = None) -> FastMCP:
+        def create_failing_entities_mcp(
+            _base_url: str | None = None, enable_destructive_tools: bool = False
+        ) -> FastMCP:
             server = FastMCP("Failing Entities Service")
 
             @server.tool(description="List workspaces in the NeMo Helix")

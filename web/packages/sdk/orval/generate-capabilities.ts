@@ -18,13 +18,11 @@ import fs from 'fs';
 import path from 'path';
 import { parse as parseYaml } from 'yaml';
 import { serviceConfigs } from './constants';
+import { isRecord } from './utils';
 import type { CapabilityMeta, HttpMethod, JsonSchema } from '../src/capabilities/types';
 
 const HTTP_METHODS: readonly HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const COMPONENT_SCHEMA_PREFIX = '#/components/schemas/';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 interface OpenApiSpec {
   paths?: Record<string, unknown>;

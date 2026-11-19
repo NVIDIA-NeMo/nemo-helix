@@ -309,12 +309,15 @@ async def test_unsafe_file_types_fail_closed_without_content(tmp_path, caplog, t
         os.mkfifo(path)
     observer = _observer(tmp_path)
     task = asyncio.create_task(observer.run())
-    await asyncio.sleep(0.02)
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    if target == "directory":
+        await asyncio.sleep(0.02)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    else:
+        await asyncio.wait_for(task, timeout=5)
     assert observer.last_event is None
     assert "secret" not in caplog.text
     if target != "directory":
@@ -483,7 +486,7 @@ def test_volume_memory_and_file_count_are_bounded(tmp_path, caplog):
         path.write_bytes(_record() * 1000)
     # Duplicate sinks must not multiply the per-file/per-poll byte budget.
     observer.sinks *= 4
-    with patch("nemo_agents_plugin.fabric.progress.os.read", wraps=os.read) as read:
+    with patch("nemo_agents_plugin.fabric.progress.read", wraps=os.read) as read:
         observer.poll()
     assert read.call_count == 4
     assert all(call.args[1] == 65536 for call in read.call_args_list)

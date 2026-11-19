@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from abc import abstractmethod
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -62,6 +63,7 @@ from nhx.common.jobs.constants import (
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -118,7 +120,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_task_image,
     staleness_error_message,
     step_ttl_seconds_active,
-    validate_no_reserved_managed_job_environment_variable_names,
+    validate_step_environment,
 )
 from nhx.core.jobs.controllers.backends.exceptions import (
     FailedToScheduleError,
@@ -134,6 +136,7 @@ from opentelemetry import trace
 from pydantic import Field
 
 import docker
+from docker import from_env as docker_from_env
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
@@ -242,7 +245,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
         probe = probe_docker()
         if not probe.available:
             raise CapabilityUnavailableError(probe.detail or "Docker daemon is unavailable")
-        self._client = docker.from_env(timeout=180)
+        self._client = docker_from_env(timeout=180)
         if NEMO_JOBS_IMAGE_REGISTRY:
             logger.info(
                 f"Got image registry config, logging into {NEMO_JOBS_IMAGE_REGISTRY} with {NEMO_JOBS_IMAGE_REGISTRY_USER_NAME}"
@@ -709,6 +712,7 @@ fi
                     type=vol_mount.kind,
                     source=vol_mount.volume_name,
                     target=vol_mount.mount_path,
+                    read_only=vol_mount.read_only,
                 )
                 if vol_mount.options:
                     mount["VolumeOptions"] = vol_mount.options
@@ -875,10 +879,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         # Profile-level env vars first (e.g. HOME=/tmp); system, step, and shared env override these
         env = self._execution_profile_config.env.copy()
-        validate_no_reserved_managed_job_environment_variable_names(
-            (envvar.name for envvar in step_spec.environment or []),
-            source="Job step environment keys",
-        )
+        validate_step_environment(step_spec.environment or [], source="Job step environment keys")
 
         # identify the task using a uuid.  In docker, there's only one task per step.
         # because parallelism and completions are not supported.
@@ -891,6 +892,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR: step.artifact_base_path or "",
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
@@ -2142,7 +2144,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         return container_args
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         containers = self._client.containers.list(
             all=True,
             filters=self._cleanup_container_filters(),

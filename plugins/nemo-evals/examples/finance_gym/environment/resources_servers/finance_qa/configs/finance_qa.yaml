@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+finance_qa:
+  resources_servers:
+    finance_qa:
+      entrypoint: app.py
+      domain: knowledge
+      verified: false
+      description: Financial document QA scored with the Nemotron finance cookbook's own scoring code
+      value: Every score the cookbook records per row, as reward components
+      tolerance: 0.05

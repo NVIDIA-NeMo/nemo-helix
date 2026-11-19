@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { IconError, HourglassMid } from '@nemo/icons/icons';
+import { IconError, CircleTick } from '@nemo/icons/icons';
 import { Button, Panel, StatusMessage } from '@nvidia/foundations-react-core';
 import { useState, type FC } from 'react';
 
@@ -38,7 +38,7 @@ export const QuickstartSamplePanelError: FC<QuickstartSamplePanelErrorProps> = (
         slotFooter={
           <Button kind="secondary" disabled={retrying} aria-busy={retrying} onClick={handleRetry}>
             Retry
-            {retrying && <HourglassMid className="size-4 animate-spin" aria-hidden="true" />}
+            {retrying && <CircleTick className="size-4 animate-spin" aria-hidden="true" />}
           </Button>
         }
       />

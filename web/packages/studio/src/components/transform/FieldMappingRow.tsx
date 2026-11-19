@@ -17,7 +17,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import type { OutputFormatField } from '@studio/components/transform/formats';
 import { columnReference } from '@studio/components/transform/template';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface FieldMappingRowProps {
   field: OutputFormatField;

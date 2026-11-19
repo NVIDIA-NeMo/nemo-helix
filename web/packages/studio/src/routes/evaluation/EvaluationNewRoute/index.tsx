@@ -7,7 +7,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /** `/workspaces/:workspace/evaluation/new` -- the Run Model Evaluation wizard. */
 export const EvaluationNewRoute: FC = () => {

@@ -10,6 +10,7 @@ from typing import ClassVar, List
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from nemoguardrails.exceptions import InvalidRailsConfigurationError
+from nemoguardrails.guardrails.model_engine import ModelEngineError
 from nemoguardrails.rails.llm.llmrails import ModelInitializationError
 from nhx.common.service import RouterConfig, Service
 from nhx.guardrails.api.v2.checks import endpoints as checks
@@ -22,6 +23,7 @@ from nhx.guardrails.app.exceptions.exception_handlers import (
     custom_exception_handler,
     invalid_rails_configuration_error_handler,
     llm_call_exception_handler,
+    model_engine_error_handler,
     model_initialization_error_handler,
     validation_error_handler,
 )
@@ -93,6 +95,7 @@ class GuardrailsService(Service[GuardrailsServiceConfig]):
         app.add_exception_handler(GuardrailConfigurationNotFoundError, config_not_found_error_handler)
         app.add_exception_handler(CustomHTTPException, custom_exception_handler)
         app.add_exception_handler(LLMCallException, llm_call_exception_handler)
+        app.add_exception_handler(ModelEngineError, model_engine_error_handler)
         app.add_exception_handler(ModelInitializationError, model_initialization_error_handler)
         app.add_exception_handler(InvalidRailsConfigurationError, invalid_rails_configuration_error_handler)
         app.add_exception_handler(RequestValidationError, validation_error_handler)

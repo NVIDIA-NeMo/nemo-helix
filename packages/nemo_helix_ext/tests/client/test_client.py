@@ -181,7 +181,7 @@ class TestBuildNemoClientOAuth:
         assert client._http.auth is None
         assert _sent_authorization(client) == f"Bearer {token}"
 
-    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    @patch("nemo_helix_ext.client.bootstrap.Client")
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_uses_nemo_scoped_ca_bundle(self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
@@ -192,7 +192,7 @@ class TestBuildNemoClientOAuth:
 
         assert mock_httpx_client.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
-    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    @patch("nemo_helix_ext.client.bootstrap.Client")
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_uses_context_certificate_authority(self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
@@ -207,7 +207,7 @@ class TestBuildNemoClientOAuth:
         assert mock_httpx_client.call_args.kwargs["verify"] == context_ca
         assert _mock_discover.call_args.kwargs["http_client"] is mock_httpx_client.return_value
 
-    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    @patch("nemo_helix_ext.client.bootstrap.Client")
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     def test_env_ca_bundle_overrides_context_certificate_authority(
         self, _mock_discover, mock_httpx_client, tmp_path, monkeypatch
@@ -224,7 +224,7 @@ class TestBuildNemoClientOAuth:
         assert _mock_discover.call_args.kwargs["http_client"] is mock_httpx_client.return_value
 
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_persist_refreshed_tokens_writes_to_config(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         new_token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
@@ -266,7 +266,7 @@ class TestBuildNemoClientAuthDisabledCluster:
         "nemo_helix_ext.auth.bootstrap.discover_nhx_config",
         return_value=NHXOIDCConfig(auth_enabled=False),
     )
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_expired_token_on_auth_disabled_cluster_does_not_attempt_refresh(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")
@@ -390,7 +390,7 @@ class TestBuildNemoClientWorkloadIdentity:
             kwargs["verify"] = True
             return real_httpx_client(*args, **kwargs)
 
-        with patch("nemo_helix_ext.client.bootstrap.httpx.Client", side_effect=default_httpx_client) as client_cls:
+        with patch("nemo_helix_ext.client.bootstrap.Client", side_effect=default_httpx_client) as client_cls:
             client = build_nemo_client(config_path=config_path)
         discovery_http_client = client._http
         try:
@@ -500,7 +500,7 @@ class TestBuildNemoClientNoAuth:
         assert "Authorization" not in client.default_headers
         assert _sent_authorization(client) is None
 
-    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    @patch("nemo_helix_ext.client.bootstrap.Client")
     def test_non_oauth_context_uses_context_certificate_authority(self, mock_httpx_client, tmp_path, monkeypatch):
         context_ca = str(tmp_path / "context-ca.pem")
         config_path = _write_config(tmp_path, user_type="no-auth", certificate_authority=context_ca)
@@ -532,7 +532,7 @@ class TestBuildNemoClientProviderReuse:
         assert callable(provider_kwargs["load_tokens"])
         assert callable(provider_kwargs["refresh_lock"])
 
-    @patch("nemo_helix_ext.client.bootstrap.httpx.Client")
+    @patch("nemo_helix_ext.client.bootstrap.Client")
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
     @patch("nemo_helix_ext.auth.bootstrap.OIDCTokenProvider")
     def test_context_certificate_authority_participates_in_provider_cache_key(
@@ -630,7 +630,7 @@ class TestBuildNemoClientBootstrapFailures:
             _sent_authorization(client)
 
     @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_MOCK_NHX_CONFIG)
-    @patch("nemo_helix_plugin.client.oidc.httpx.post")
+    @patch("nemo_helix_plugin.client.oidc.post")
     def test_refresh_grant_failure_surfaces_clear_error(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         config_path = _write_config(tmp_path, token=expired_token, refresh_token="refresh_abc")

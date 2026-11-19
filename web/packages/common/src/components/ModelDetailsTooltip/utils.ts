@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MODEL_METADATA, ModelMetadata } from '@nemo/common/src/constants/modelMetadata';
+import { MODEL_METADATA, type ModelMetadata } from '@nemo/common/src/constants/modelMetadata';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
-import { FinetuningType, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { FinetuningType, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 interface TrainingOption {
   finetuning_type: FinetuningType;

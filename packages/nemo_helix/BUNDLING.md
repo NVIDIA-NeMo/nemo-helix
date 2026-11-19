@@ -108,6 +108,8 @@ Service and plugin dependencies are behind optional extras. They are composed vi
 - `services` — aggregates `core-service`, all non-core service `-service` extras, and `plugins`
 - `all` — hand-written alias for the full packaged install; expands to `services`. The recommended user-facing extra (`pip install nemo-helix[all]`).
 
+Shared workspace libraries imported by bundled plugins must also have bundle entries, even when they have no entry points of their own. For example, `nemo-evals-plugin` imports `nhx_sandbox` during service discovery; bundling `nhx-sandbox` both ships its source and preserves its runtime dependencies through the generated `nhx-sandbox` extra. A workspace editable install can hide a missing bundle entry. The wheel install smoke test therefore imports the evals service entry point and sandbox schemas in an isolated interpreter outside the checkout, for both venv and tool installs.
+
 The `services` extra includes `plugins` because Python entry points are distribution-level metadata and are not conditional on extras. If the wrapper publishes plugin `nemo.services` entry points, installing service discovery dependencies must also install the plugin dependencies needed by those entry points.
 
 Vendor-owned extras (those generated from `[tool.bundle-package]`) are marked with a `# Generated from [tool.bundle-package]; do not edit by hand.` comment immediately above the key, and `make vendor` will overwrite them on every run. Extras without the marker are hand-written — add new ones (like `all`) directly in the pyproject and they will be left alone. The wheel rewrite step assumes the generated `deps_group` extras already exist before the build starts.

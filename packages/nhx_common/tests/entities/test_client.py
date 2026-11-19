@@ -23,6 +23,7 @@ from nhx.common.entities import (
     EntityClient,
     EntityConflictError,
     EntityNotFoundError,
+    EntityValidationError,
     StringFilter,
     SyncEntityClient,
 )
@@ -1182,13 +1183,13 @@ async def test_delete_by_id_passes_fetched_db_version():
             )
         )
     )
-    mock_api.delete_entity_by_name = AsyncMock(return_value=_data_resp(DeleteResponse(id="123")))
+    mock_api.delete_entity_by_id = AsyncMock(return_value=_data_resp(DeleteResponse(id="123")))
     client = EntityClient(mock_api)
 
     await client.delete_by_id(TestEntity, "123")
 
-    mock_api.delete_entity_by_name.assert_awaited_once()
-    call_kwargs = mock_api.delete_entity_by_name.call_args.kwargs
+    mock_api.delete_entity_by_id.assert_awaited_once()
+    call_kwargs = mock_api.delete_entity_by_id.call_args.kwargs
     assert call_kwargs["query_params"]["expected_db_version"] == 7
 
 
@@ -1220,7 +1221,7 @@ async def test_update_with_automatic_version_check():
     now = datetime.now()
     mock_api = Mock()
     mock_api.get_entity_by_name = AsyncMock()
-    mock_api.update_entity_by_name = AsyncMock()
+    mock_api.update_entity_by_id = AsyncMock()
 
     # Mock get returns entity with version 2
     existing_entity = Entity(
@@ -1246,7 +1247,7 @@ async def test_update_with_automatic_version_check():
         db_version=3,  # Version incremented after update
         data={"field_1": "new_value"},
     )
-    mock_api.update_entity_by_name.return_value = _data_resp(updated_entity)
+    mock_api.update_entity_by_id.return_value = _data_resp(updated_entity)
 
     client = EntityClient(mock_api)
     # Get entity (db_version automatically populated)
@@ -1259,8 +1260,8 @@ async def test_update_with_automatic_version_check():
     # Verify get was called to fetch existing entity
     mock_api.get_entity_by_name.assert_called_once()
     # Verify update was called with expected_db_version in request body (not headers)
-    mock_api.update_entity_by_name.assert_called_once()
-    call_kwargs = mock_api.update_entity_by_name.call_args[1]
+    mock_api.update_entity_by_id.assert_called_once()
+    call_kwargs = mock_api.update_entity_by_id.call_args[1]
     assert call_kwargs["body"].expected_db_version == 2
     # Verify result has updated field
     assert result.field_1 == "new_value"
@@ -1277,7 +1278,7 @@ async def test_update_version_mismatch_raises_conflict():
     now = datetime.now()
     mock_api = Mock()
     mock_api.get_entity_by_name = AsyncMock()
-    mock_api.update_entity_by_name = AsyncMock()
+    mock_api.update_entity_by_id = AsyncMock()
 
     # Mock get returns entity with version 2
     existing_entity = Entity(
@@ -1302,7 +1303,7 @@ async def test_update_version_mismatch_raises_conflict():
             "Expected version 2, but current version is 3. Please refetch and retry."
         )
     }
-    mock_api.update_entity_by_name.side_effect = ClientConflictError(mock_response)
+    mock_api.update_entity_by_id.side_effect = ClientConflictError(mock_response)
 
     client = EntityClient(mock_api)
     # Get entity (db_version automatically populated as 2)
@@ -1316,54 +1317,20 @@ async def test_update_version_mismatch_raises_conflict():
     # Verify error message mentions version mismatch
     assert "modified" in str(exc_info.value).lower() or "version" in str(exc_info.value).lower()
     # Verify update was called with expected_db_version in request body (not headers)
-    mock_api.update_entity_by_name.assert_called_once()
-    call_kwargs = mock_api.update_entity_by_name.call_args[1]
+    mock_api.update_entity_by_id.assert_called_once()
+    call_kwargs = mock_api.update_entity_by_id.call_args[1]
     assert call_kwargs["body"].expected_db_version == 2
 
 
 @pytest.mark.asyncio
-async def test_update_without_version_works():
-    """Test update works for entities created directly (not fetched), using default db_version=1."""
-
+async def test_update_without_persisted_id_is_rejected():
     class TestEntity(EntityBase):
         field_1: str
 
-    now = datetime.now()
-    mock_api = Mock()
-    mock_api.update_entity_by_name = AsyncMock()
-
-    # Mock update returns updated entity
-    updated_entity = Entity(
-        entity_type="test_entity",
-        name="test-entity",
-        workspace="test-workspace",
-        id="123",
-        created_at=now,
-        updated_at=now,
-        db_version=1,  # First version
-        data={"field_1": "new_value"},
-    )
-    mock_api.update_entity_by_name.return_value = _data_resp(updated_entity)
-
-    client = EntityClient(mock_api)
-    # Create entity directly (_db_version defaults to 1)
-    entity = TestEntity(
-        name="test-entity",
-        workspace="test-workspace",
-        field_1="old_value",
-    )
-    # Modify entity
-    entity.field_1 = "new_value"
-    # Update should work with default db_version=1
-    result = await client.update(entity)
-
-    # Verify update was called with expected_db_version=1 (default for new entities)
-    mock_api.update_entity_by_name.assert_called_once()
-    call_kwargs = mock_api.update_entity_by_name.call_args[1]
-    # expected_db_version should be 1 (default for new entities)
-    assert call_kwargs["body"].expected_db_version == 1
-    # Verify result has updated field
-    assert result.field_1 == "new_value"
+    client = EntityClient(Mock())
+    entity = TestEntity(name="test-entity", workspace="test-workspace", field_1="value")
+    with pytest.raises(EntityValidationError, match="persisted entity ID"):
+        await client.update(entity)
 
 
 class _EntityWithAuthContext(EntityBase):

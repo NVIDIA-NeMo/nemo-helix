@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import jwt
 import nhx.common.auth.access_keys as access_keys_mod
+import nhx.common.auth.jwks as jwks_mod
 import nhx.common.auth.signing_keys as signing_keys_mod
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -52,11 +53,23 @@ def test_access_key_jwks_uri_uses_canonical_auth_jwks_path() -> None:
     assert "/access-keys/" not in jwks_uri
 
 
+class _FakeJwtModule:
+    """Stand-in for a module's ``jwt`` reference: overrides some names, delegates the rest to PyJWT."""
+
+    def __init__(self, **overrides: Any) -> None:
+        self._overrides = overrides
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(jwt, name)
+
+
 def test_access_key_candidate_rejects_any_pyjwt_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_invalid_token(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise jwt.InvalidTokenError("invalid token")
 
-    monkeypatch.setattr(jwt, "decode", raise_invalid_token)
+    monkeypatch.setattr(access_keys_mod, "jwt", _FakeJwtModule(decode=raise_invalid_token))
 
     assert access_keys_mod.is_access_key_token_candidate("invalid") is False
 
@@ -644,7 +657,9 @@ async def test_validate_access_key_token_fetches_remote_jwks_once_with_async_cli
     fake_client = FakeAsyncClient()
     monkeypatch.setattr(access_keys_mod, "access_key_jwks_uri", lambda config: jwks_uri)
     monkeypatch.setattr(http_clients, "shared_async_http_client", lambda: fake_client)
-    monkeypatch.setattr(access_keys_mod.jwt, "PyJWKClient", ForbiddenPyJWKClient)
+    fake_jwt = _FakeJwtModule(PyJWKClient=ForbiddenPyJWKClient)
+    monkeypatch.setattr(access_keys_mod, "jwt", fake_jwt)
+    monkeypatch.setattr(jwks_mod, "jwt", fake_jwt)
 
     first_claims = await validate_access_key_token(config, created.token)
     second_claims = await validate_access_key_token(config, created.token)

@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+from asyncio import create_task
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Union
@@ -66,7 +67,7 @@ class ConfigRegistry:
         # for this event to finish, then access the cache, rather than directly querying the database for the config.
         self._cache_loading_events: Dict[str, asyncio.Event] = {}
 
-        logger.info(f"ConfigRegistry initialized with TTL {ttl} seconds")
+        logger.debug(f"ConfigRegistry initialized with TTL {ttl} seconds")
 
     async def register(self, config: RailsConfig, config_ids: Union[str, List[str]]):
         if isinstance(config_ids, str):
@@ -198,7 +199,7 @@ class ConfigRegistry:
 
         # If the entry is older than the TTL, delete it
         if entry.is_older_than(self.staleness_threshold):
-            asyncio.create_task(self.refresh_all())
+            create_task(self.refresh_all())
 
         return entry
 
@@ -253,12 +254,39 @@ class ConfigRegistry:
                 # Start loading the config
                 rails_config = await self._load_config_with_event(cache_key, config_list)
 
-        # Validate config
-        if rails_config.colang_version != "1.0":
-            raise ValueError(
-                "Guardrail configurations using Colang 2.0 is not supported (only Colang 1.0)",
-            )
+        _validate_colang_version(rails_config)
+        return rails_config
 
+    async def fetch_entities(self, config_ids: List[str]) -> Dict[str, GuardrailConfig]:
+        """Fetch the stored configs using this request's entity client.
+
+        This always goes to the entity store and skips the cache, because fetching as the caller is
+        how we check they can read each config. The returned entities also carry the id and version
+        that decide whether a cached engine is still current.
+        """
+        if not self.entities_client:
+            raise ValueError("No entities client available")
+
+        entities: Dict[str, GuardrailConfig] = {}
+        for config_id in config_ids:
+            ref = parse_entity_ref(config_id)
+            try:
+                entities[config_id] = await self.entities_client.get(
+                    GuardrailConfig, name=ref.name, workspace=ref.workspace
+                )
+            except EntityNotFoundError as e:
+                raise GuardrailConfigurationNotFoundError(
+                    config_id,
+                    f"Guardrail config not found for ID: {config_id}",
+                ) from e
+            except Exception as e:
+                raise ValueError(f"Failed to retrieve guardrail config: {config_id}: {e}") from e
+        return entities
+
+    def build_config(self, config_ids: List[str], entities: Dict[str, GuardrailConfig]) -> RailsConfig:
+        """Combine already-fetched configs into one RailsConfig, in ``config_ids`` order."""
+        rails_config = self._build_combined_config(config_ids, entities)
+        _validate_colang_version(rails_config)
         return rails_config
 
     async def _load_config_with_event(self, cache_key: str, config_ids: List[str]) -> RailsConfig:
@@ -373,6 +401,13 @@ class ConfigRegistry:
 
     def __repr__(self):
         return "ConfigRegistry()"
+
+
+def _validate_colang_version(rails_config: RailsConfig) -> None:
+    if rails_config.colang_version != "1.0":
+        raise ValueError(
+            "Guardrail configurations using Colang 2.0 is not supported (only Colang 1.0)",
+        )
 
 
 def get_config_registry_instance():

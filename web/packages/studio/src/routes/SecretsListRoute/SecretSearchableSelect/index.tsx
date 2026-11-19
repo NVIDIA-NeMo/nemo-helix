@@ -12,7 +12,7 @@
 
 import {
   ControlledSearchableSelect,
-  SelectItemOption,
+  type SelectItemOption,
 } from '@nemo/common/src/components/form/ControlledSearchableSelect';
 import {
   getSecretsListSecretsQueryKey,
@@ -21,7 +21,7 @@ import {
 import { MenuItem } from '@nvidia/foundations-react-core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useMemo } from 'react';
-import { type FieldValues, type UseControllerProps } from 'react-hook-form';
+import type { FieldValues, UseControllerProps } from 'react-hook-form';
 
 const SECRETS_PAGE_SIZE = 20;
 

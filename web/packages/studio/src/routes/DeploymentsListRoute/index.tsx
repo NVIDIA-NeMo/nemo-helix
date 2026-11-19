@@ -12,7 +12,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DeploymentsDataView } from '@studio/components/dataViews/DeploymentsDataView';
 import { DocumentationButton } from '@studio/components/DocumentationButton';
@@ -27,7 +27,7 @@ import {
   getWorkspaceDeploymentsRoute,
   getWorkspaceNewDeploymentRoute,
 } from '@studio/routes/utils';
-import { FC, useCallback, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 
 export const DeploymentsListRoute: FC = () => {
@@ -157,12 +157,11 @@ export const DeploymentsListRoute: FC = () => {
       {deploymentToDelete ? (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="deployment"
+          ids={[deploymentToDelete.name]}
+          description="The deployment and its configuration are deleted, and its model stops being served until it's deployed again."
+          successText={`Started deleting deployment '${deploymentToDelete.name}'.`}
           onDelete={handleDeleteDeployment}
-          title={`Delete deployment: ${deploymentToDelete.name}`}
-          confirmationText={deploymentToDelete.name}
-          successText="Deployment deletion started."
-          errorText="Failed to start deleting the deployment. Please try again later."
           onClose={handleModalClose}
         />
       ) : null}

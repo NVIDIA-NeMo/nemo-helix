@@ -320,6 +320,7 @@ _EVALUATOR_PUBLIC_RESOURCE_NAMES = {
     "metrics",
     "plugin_status",
     "submit",
+    "taskset_runs",
     "tasks",
     "tasksets",
 }

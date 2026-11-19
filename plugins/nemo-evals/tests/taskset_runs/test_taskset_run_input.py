@@ -29,6 +29,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from pydantic import ValidationError
@@ -288,9 +289,12 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
         (("spec", "target", "closed_book"), False, True),
+        (("spec", "result_ignore_patterns"), ["*.tmp"], ["*.log"]),
+        (("spec", "result_ignore_patterns"), [], ["*.tmp"]),
     ],
 )
 def test_digest_preserves_meaningful_request_differences(run_body, path, left, right):
+    """Execution and retention changes distinguish requests reusing an idempotency key."""
     requests = []
     for value in (left, right):
         body = deepcopy(run_body)
@@ -320,7 +324,16 @@ def test_publication_is_part_of_the_request_identity(run_body):
     assert len({plain, *digests.values()}) == 3
 
 
-def test_digest_hashes_the_exact_compact_json_projection(run_body):
+@pytest.mark.parametrize(
+    "retention_settings",
+    [
+        {},
+        {"result_ignore_patterns": []},
+    ],
+)
+def test_digest_hashes_the_exact_compact_json_projection(run_body, retention_settings):
+    """Omitted and empty retention settings preserve the pre-upgrade request digest."""
+    run_body["spec"].update(retention_settings)
     request = TasksetRunInput.model_validate(run_body)
     expected_body = {
         "spec": {
@@ -433,7 +446,7 @@ def test_status_schema_covers_every_run_domain_field():
         domain_fields
         == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by", "progress"}) | _INTERNAL_FIELDS
     )
-    assert _INTERNAL_FIELDS == {"plan_ref", "plan_digest", "request_digest"}
+    assert _INTERNAL_FIELDS == {"plan_ref", "plan_fileset_id", "plan_digest", "request_digest"}
 
 
 def test_status_rejects_unmapped_future_domain_fields():
@@ -467,6 +480,7 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         name="task-10",
         workspace="default",
         task_index=10,
+        task_name="sort-numbers" if with_details else None,
         phase=phase,
         task_job="run-selected-task-10" if with_details else None,
         job_status=HelixJobStatus.ACTIVE if with_details else None,
@@ -476,6 +490,16 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         publication=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="e", trial_count=2)
         if with_details
         else None,
+        trial_counts=(
+            TrialCounts(
+                total=3,
+                phases={TrialPhase.SUCCEEDED: 2, TrialPhase.AGENT_RUNNING: 1},
+                rewarded=2,
+                reward=0.5,
+            )
+            if with_details
+            else None
+        ),
     )
     member._parent = "taskset_run-parent"
     member._id = "taskset_run_member-identifier"
@@ -483,6 +507,7 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
     assert task.model_dump() == {
         "task": "task-10",
         "task_index": 10,
+        "task_name": "sort-numbers" if with_details else None,
         "phase": phase,
         "job": "run-selected-task-10" if with_details else None,
         "job_status": HelixJobStatus.ACTIVE if with_details else None,
@@ -497,4 +522,30 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         }
         if with_details
         else None,
+        "trial_counts": {
+            "total": 3,
+            "phases": {"succeeded": 2, "agent_running": 1},
+            "rewarded": 2,
+            "reward": 0.5,
+            "errors": {},
+        }
+        if with_details
+        else None,
     }
+
+
+@pytest.mark.parametrize("pattern", ["metadata.json", "trials.jsonl", "scores.jsonl", "*.json", "*.jsonl", "*"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_run_rejects_excluded_aggregation_inputs(run_body, pattern, as_json):
+    run_body["spec"]["result_ignore_patterns"] = [pattern]
+    with pytest.raises(ValidationError, match="required Kubernetes aggregation inputs"):
+        if as_json:
+            TasksetRunInput.model_validate_json(json.dumps(run_body))
+        else:
+            TasksetRunInput.model_validate(run_body)
+
+
+@pytest.mark.parametrize("patterns", [[], ["/evidence/"], ["*.tmp", "evidence/"], ["nested/metadata.json"]])
+def test_run_accepts_exclusions_that_keep_aggregation_inputs(run_body, patterns):
+    run_body["spec"]["result_ignore_patterns"] = patterns
+    assert TasksetRunInput.model_validate(run_body).spec.result_ignore_patterns == patterns

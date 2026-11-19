@@ -54,9 +54,9 @@ describe('FeatureFlagPanel', () => {
 
   it('lists real flags with a control each', async () => {
     await openPanel();
-    expect(screen.getByText('traceGraphEnabled')).toBeInTheDocument();
+    expect(screen.getByText('anonymizerEnabled')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'traceGraphEnabled override' })
+      screen.getByRole('combobox', { name: 'anonymizerEnabled override' })
     ).toBeInTheDocument();
   });
 
@@ -69,7 +69,7 @@ describe('FeatureFlagPanel', () => {
   it('reflects an override already in storage', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ traceGraphEnabled: 'false' })
+      JSON.stringify({ anonymizerEnabled: 'false' })
     );
 
     await openPanel();
@@ -78,9 +78,9 @@ describe('FeatureFlagPanel', () => {
 
   it('filters by flag name', async () => {
     const user = await openPanel();
-    await user.type(screen.getByLabelText('Filter flags'), 'traceGraphEnabled');
+    await user.type(screen.getByLabelText('Filter flags'), 'anonymizerEnabled');
 
-    expect(screen.getByText('traceGraphEnabled')).toBeInTheDocument();
+    expect(screen.getByText('anonymizerEnabled')).toBeInTheDocument();
     expect(screen.queryByText('monitorEnabled')).not.toBeInTheDocument();
   });
 
@@ -99,10 +99,10 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await chooseOption(user, 'traceGraphEnabled override', 'false');
+    await chooseOption(user, 'anonymizerEnabled override', 'false');
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
-    expect(readBlob()).toEqual({ traceGraphEnabled: 'false' });
+    expect(readBlob()).toEqual({ anonymizerEnabled: 'false' });
     expect(reload).toHaveBeenCalledOnce();
   });
 
@@ -116,11 +116,11 @@ describe('FeatureFlagPanel', () => {
     });
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ traceGraphEnabled: 'false' })
+      JSON.stringify({ anonymizerEnabled: 'false' })
     );
 
     const user = await openPanel();
-    await user.click(screen.getByRole('button', { name: 'Clear traceGraphEnabled override' }));
+    await user.click(screen.getByRole('button', { name: 'Clear anonymizerEnabled override' }));
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
     expect(readBlob()).toBeNull();
@@ -148,7 +148,7 @@ describe('FeatureFlagPanel', () => {
 
     const blob = readBlob()!;
     expect(Object.values(blob).every((value) => value === 'false')).toBe(true);
-    expect(blob['traceGraphEnabled']).toBe('false');
+    expect(blob['anonymizerEnabled']).toBe('false');
   });
 
   // The gate is excluded from the list, so a bulk action must not reach it —
@@ -176,11 +176,11 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await user.type(screen.getByLabelText('Filter flags'), 'traceGraphEnabled');
+    await user.type(screen.getByLabelText('Filter flags'), 'anonymizerEnabled');
     await user.click(screen.getByRole('button', { name: 'All off' }));
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
-    expect(readBlob()).toEqual({ traceGraphEnabled: 'false' });
+    expect(readBlob()).toEqual({ anonymizerEnabled: 'false' });
   });
 
   // "Reset all" removes overrides so flags fall back to the deployment default;
@@ -196,7 +196,7 @@ describe('FeatureFlagPanel', () => {
     // path runs; otherwise this would only assert that nothing happened.
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ traceGraphEnabled: 'true' })
+      JSON.stringify({ anonymizerEnabled: 'true' })
     );
 
     const user = await openPanel();
@@ -222,7 +222,7 @@ describe('FeatureFlagPanel', () => {
     vi.spyOn(logger, 'warn').mockImplementation(() => {});
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ flagOverridesEnabled: 'false', traceGraphEnabled: 'false' })
+      JSON.stringify({ flagOverridesEnabled: 'false', anonymizerEnabled: 'false' })
     );
 
     const user = await openPanel();
@@ -237,7 +237,7 @@ describe('FeatureFlagPanel', () => {
   it('reset all clears every pending override', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ traceGraphEnabled: 'false' })
+      JSON.stringify({ anonymizerEnabled: 'false' })
     );
 
     const user = await openPanel();
@@ -272,7 +272,7 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await chooseOption(user, 'traceGraphEnabled override', 'false');
+    await chooseOption(user, 'anonymizerEnabled override', 'false');
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
     expect(screen.getByText(/Could not save/)).toBeInTheDocument();

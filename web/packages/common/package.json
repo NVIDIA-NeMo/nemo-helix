@@ -54,7 +54,6 @@
     "@vitest/coverage-v8": "catalog:",
     "happy-dom": "catalog:",
     "msw": "catalog:",
-    "p-limit": "catalog:",
     "react-dropzone": "catalog:",
     "react-hook-form": "catalog:",
     "rolldown": "^1.2.2",

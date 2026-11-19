@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ToastObject } from '@nemo/common/src/providers/toast/types';
 import { vi } from 'vitest';
-
-import type { ToastObject } from './types';
 
 /**
  * Builds a ToastObject with every method stubbed as a vi.fn(), so tests only

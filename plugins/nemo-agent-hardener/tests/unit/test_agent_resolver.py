@@ -9,6 +9,7 @@ the agents service routes, so no live platform or agent-hardener install is need
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -179,8 +180,9 @@ def test_telemetry_dir_complaint_names_only_a_path_agent_hardener_will_not_read(
 
 
 # --------------------------------------------------------------------------- resolve_agent_to_manifest
-def test_resolve_builds_a_runnable_agent_package(tmp_path):
-    agent = _agent()
+@pytest.mark.parametrize("harness", ["deepagents", "hermes"])
+def test_resolve_builds_a_runnable_agent_package(tmp_path, harness):
+    agent = _agent(default_harness=harness, harnesses={harness: {"kind": harness}})
     client = _client(
         agent,
         deployments=[{"agent": "calc", "status": "running", "port": 9123}],
@@ -213,6 +215,9 @@ def test_resolve_builds_a_runnable_agent_package(tmp_path):
     dockerfile = (resolved.project_dir / "Dockerfile").read_text(encoding="utf-8")
     assert "nemo_agents_plugin.fabric.server" in dockerfile
     assert "sandbox" in dockerfile  # the openshell profile's non-root user
+    if harness == "hermes":
+        assert agent_block["env"]["ADAPTER_PYTHON"] == "/opt/hermes-venv/bin/python"
+        assert "/opt/uv/python/**/bin/python*" in agent_block["binaries"]
 
 
 def test_resolve_declares_gateway_backend_for_local_platform(tmp_path):
@@ -389,9 +394,49 @@ def test_guardable_harnesses_pass_through() -> None:
 
 def test_the_manifest_carries_the_harness() -> None:
     """Agent Hardener needs it to stage Hermes' extra wiring — not to choose a victim kind."""
-    manifest = build_manifest_dict(agent_name="a", project_dir=".", port=8000, secrets=[], harness="hermes")
+    manifest = build_manifest_dict(
+        agent_name="a", project_dir=".", port=8000, secrets=[], harness="hermes", env={"EXAMPLE": "value"}
+    )
 
     assert manifest["agent"]["harness"] == "hermes"
+    assert manifest["agent"]["env"] == {"EXAMPLE": "value"}
+
+
+@pytest.mark.parametrize("install_dir", ["/custom/python", None, "$PYTHON_ROOT"])
+def test_registered_hermes_uses_image_paths_and_agent_overrides(tmp_path, monkeypatch, install_dir):
+    dockerfile = (
+        "FROM python:3.12-slim\n"
+        "ENV ADAPTER_PYTHON=/image/hermes/bin/python\n"
+        "ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/custom/plugins.toml\n"
+        "ENV DATABASE_URL=postgres://db.example.com/db\n"
+        "ENV DATABASE_PASSWORD=hidden-password\n"
+    )
+    if install_dir:
+        dockerfile += f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n"
+    _fake_ethos(monkeypatch, {"Dockerfile": dockerfile})
+    agent = _agent(
+        default_harness="hermes",
+        harnesses={"hermes": {"kind": "hermes"}},
+        environment={"env": {"ADAPTER_PYTHON": "/custom/hermes/bin/python"}},
+    )
+    client = _client(agent)
+    if install_dir != "/custom/python":
+        with pytest.raises(AgentResolutionError, match="UV_PYTHON_INSTALL_DIR"):
+            resolve_agent_to_manifest(
+                "calc", client=client, base_url="http://host:8080", default_workspace="default", manifest_dir=tmp_path
+            )
+        return
+    victim = resolve_agent_to_manifest(
+        "calc", client=client, base_url="http://host:8080", default_workspace="default", manifest_dir=tmp_path
+    ).manifest["agent"]
+    assert victim["env"]["ADAPTER_PYTHON"] == "/custom/hermes/bin/python"
+    assert victim["env"]["HERMES_NEMO_RELAY_PLUGINS_TOML"] == "/custom/plugins.toml"
+    assert "DATABASE_URL" not in victim["env"]
+    assert "DATABASE_PASSWORD" not in victim["env"]
+    assert "hidden-password" not in yaml.safe_dump(victim)
+    assert "/custom/hermes/bin/python" in victim["binaries"]
+    assert "/custom/python/**/bin/python*" in victim["binaries"]
+    assert not any(path.startswith(("/image/", "/opt/")) for path in victim["binaries"])
 
 
 def test_declared_env_reaches_the_manifest() -> None:
@@ -425,6 +470,66 @@ def test_network_mcp_servers_and_model_endpoints_are_allow_listed() -> None:
         "inference-api.nvidia.com:443",
         "ledger-tools.internal:443",
     ]
+
+
+def test_harness_model_discovery_retains_custom_credentials() -> None:
+    """The Hermes model lives under its harness, not the shared models table."""
+    config = {
+        "harnesses": {
+            "hermes": {
+                "model": {
+                    "base_url": "https://inference-api.nvidia.com/v1",
+                    "api_key_env": "CUSTOM_MODEL_KEY",
+                    "api_key": "dummy-inline-value",
+                }
+            }
+        }
+    }
+    original = deepcopy(config)
+
+    assert derive_egress(config) == ["inference-api.nvidia.com:443"]
+    assert derive_secret_names(config) == ["CUSTOM_MODEL_KEY"]
+    assert config == original
+
+
+def test_model_and_mcp_discovery_deduplicates_and_ignores_non_mapping_models() -> None:
+    model = {"base_url": "https://model.example/v1", "api_key_env": "MODEL_KEY"}
+    config = {
+        "models": {"shared": model, "invalid": None},
+        "harnesses": {
+            "hermes": {"model": model},
+            "reference": {"model": "shared"},
+            "invalid": None,
+        },
+        "mcp": {
+            "servers": {
+                "remote": {
+                    "transport": "streamable-http",
+                    "url": "https://mcp.example/mcp",
+                    "env": {"TOKEN": "${MCP_KEY}", "INLINE": "dummy-inline-value"},
+                },
+                "local": {"transport": "stdio", "url": "/usr/bin/python"},
+            }
+        },
+    }
+
+    assert derive_egress(config) == ["mcp.example:443", "model.example:443"]
+    assert derive_secret_names(config, ["MODEL_KEY", "EXTRA_KEY"]) == ["EXTRA_KEY", "MCP_KEY", "MODEL_KEY"]
+
+
+@pytest.mark.parametrize("location", ["shared", "harness"])
+@pytest.mark.parametrize("base_url", [None, "https://explicit.example/v1"])
+def test_legacy_model_endpoint_matches_packaged_config(location: str, base_url: str | None) -> None:
+    """Fabric promotes settings.base_url only when base_url is absent or None."""
+    model = {"base_url": base_url, "settings": {"base_url": "http://legacy.example:8080/v1"}}
+    config = {"models": {"default": model}} if location == "shared" else {"harnesses": {"hermes": {"model": model}}}
+    original = deepcopy(config)
+    packaged = inject_gateway_url(config, "default", "https://platform.example")
+    expected = ["explicit.example:443"] if base_url is not None else ["legacy.example:8080"]
+
+    assert derive_egress(config) == expected
+    assert derive_egress(config) == derive_egress(packaged)
+    assert config == original
 
 
 def test_a_stdio_server_contributes_no_egress() -> None:

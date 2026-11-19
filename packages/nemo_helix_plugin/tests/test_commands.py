@@ -391,6 +391,7 @@ class TestSubmitVerb:
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--profile" in output
+        assert "--output-location" in output
         assert "--cluster" not in output
         assert "--base-url" not in output
 
@@ -445,6 +446,44 @@ class TestSubmitVerb:
 
         assert result.exit_code == 0, result.output
         assert captured["metadata"] == {"custom_fields": {"_nemo_telemetry": {"session_id": "session-123"}}}
+
+    @pytest.mark.parametrize("output_location", [None, "evaluation-files"])
+    @pytest.mark.parametrize("telemetry", [False, True])
+    def test_submit_output_location_is_an_envelope_field(
+        self, monkeypatch: pytest.MonkeyPatch, output_location: str | None, telemetry: bool
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        def capture(_url: str, body: dict[str, Any], **_kwargs: object) -> dict[str, str]:
+            captured.update(body)
+            return {"id": "job-123"}
+
+        class State:
+            def get_job_telemetry_custom_fields(self) -> dict[str, object]:
+                return {"_nemo_telemetry": {"session_id": "session-123"}} if telemetry else {}
+
+        class OutputLocationSpec(BaseModel):
+            output_location: str = "spec-default"
+
+        class OutputLocationJob(_GreetJob):
+            spec_schema: ClassVar[type[BaseModel]] = OutputLocationSpec
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler._post_submit", staticmethod(capture))
+        args = ["greet", "--spec", '{"output_location": "spec-value"}']
+        if output_location is not None:
+            args += ["--output-location", output_location]
+        result = runner.invoke(_app_with_jobs(OutputLocationJob), args, obj=State())
+
+        assert result.exit_code == 0, result.output
+        assert captured["spec"] == {"output_location": "spec-value"}
+        if telemetry:
+            assert captured["custom_fields"] == {"_nemo_telemetry": {"session_id": "session-123"}}
+        else:
+            assert "custom_fields" not in captured
+        if output_location is None:
+            assert "output_location" not in captured
+        else:
+            assert captured["output_location"] == output_location
 
     def test_non_legacy_job_name_submits_remotely(self, monkeypatch) -> None:
         captured: dict[str, object] = {}
@@ -958,7 +997,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.Client", _client_factory)
 
         app = _app_with_functions(_CountFunction)
         result = runner.invoke(
@@ -1007,7 +1046,7 @@ class TestFunctionSubmitVerb:
                 cli_kwargs=cli_kwargs,
             )
 
-        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.Client", _client_factory)
         monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _capture_post)
         state = _SubmitCLIContext(base_url=HttpUrl("http://localhost:8080"), token="shared-client-token")
         try:
@@ -1096,7 +1135,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.Client", _client_factory)
 
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(

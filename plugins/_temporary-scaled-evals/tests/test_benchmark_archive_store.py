@@ -9,8 +9,8 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from scaled_evals.api import artifacts
-from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
-from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveWorkerRepository
+from scaled_evals.api.benchmark_run_store import BenchmarkRunWorkerRepository
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.archive_validation import benchmark_archive_object_key
 from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives
@@ -39,11 +39,11 @@ def _seed_run(**member_fields) -> None:  # noqa: ANN003
 
 def _stored_status() -> str | None:
     """Return the run's top-level archive status, the field queue scans filter on."""
-    entity = BenchmarkRunStore()._get("bmr_1")
+    entity = BenchmarkRunWorkerRepository()._get("bmr_1")
     return None if entity is None else entity.archive_status
 
 
-def _publish(store: BenchmarkArchiveStore, job: dict) -> bool:
+def _publish(store: BenchmarkArchiveWorkerRepository, job: dict) -> bool:
     return store.finish(job, object_key="published", size_bytes=1)
 
 
@@ -53,7 +53,7 @@ def test_request_snapshots_members_and_is_idempotent_until_forced() -> None:
         current_execution=2,
         execution_snapshot={"task": {"slug": "smoke-one", "name": "Smoke One"}},
     )
-    store = BenchmarkArchiveStore()
+    store = BenchmarkArchiveWorkerRepository()
     assert store.get("bmr_1") is None
     queued = store.request("bmr_1")
     assert queued["status"] == "queued"
@@ -87,14 +87,14 @@ def test_request_snapshots_members_and_is_idempotent_until_forced() -> None:
 def test_request_rejects_unstable_members(changes, code) -> None:  # noqa: ANN001
     _seed_run(**changes)
     with pytest.raises(Conflict) as exc:
-        BenchmarkArchiveStore().request("bmr_1")
+        BenchmarkArchiveWorkerRepository().request("bmr_1")
     assert exc.value.code == code
-    assert BenchmarkArchiveStore().get("bmr_1") is None
+    assert BenchmarkArchiveWorkerRepository().get("bmr_1") is None
 
 
 def test_lease_is_bounded_and_fences_stale_workers() -> None:
     _seed_run()
-    store = BenchmarkArchiveStore()
+    store = BenchmarkArchiveWorkerRepository()
     assert store.claim(claim_timeout=30, run_id="bmr_missing") is None
     store.request("bmr_1")
     assert [row["benchmark_run_id"] for row in store.list_claimable(claim_timeout=30, limit=10)] == ["bmr_1"]
@@ -129,7 +129,7 @@ def test_lease_is_bounded_and_fences_stale_workers() -> None:
 
 def test_finish_refuses_changed_members() -> None:
     _seed_run()
-    store = BenchmarkArchiveStore()
+    store = BenchmarkArchiveWorkerRepository()
     store.request("bmr_1")
     job = store.claim(claim_timeout=30, run_id="bmr_1")
     assert job is not None
@@ -141,11 +141,11 @@ def test_finish_refuses_changed_members() -> None:
 
 def test_cleanup_sweep_is_throttled_and_reaches_deleted_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_run()
-    store = BenchmarkArchiveStore()
+    store = BenchmarkArchiveWorkerRepository()
     store.request("bmr_1")
     job = store.claim(claim_timeout=30, run_id="bmr_1")
     assert job is not None
-    assert BenchmarkRunStore().soft_delete("bmr_1")
+    assert BenchmarkRunWorkerRepository().soft_delete("bmr_1")
     assert store.get("bmr_1") is None and store.list_claimable(claim_timeout=30, limit=10) == []
     assert not store.heartbeat("bmr_1", job["claim_token"])
     assert store.claim_cleanup(interval_seconds=300) == "bmr_1"

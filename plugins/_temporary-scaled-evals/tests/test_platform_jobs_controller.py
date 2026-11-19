@@ -119,7 +119,7 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     async def _get_job_status(*, workspace: str, name: str) -> Any:
         if name not in statuses:
             raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://jobs")))
-        return SimpleNamespace(data=lambda: SimpleNamespace(status=statuses[name]))
+        return SimpleNamespace(data=lambda: SimpleNamespace(id=f"platform-{name}", status=statuses[name]))
 
     cancelled: list[str] = []
 
@@ -130,14 +130,14 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     controller = ScaledEvalsJobsController()
     controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status, cancel_job=_cancel_job))
     monkeypatch.setattr(controller, "_list_cancelled_evaluations", lambda: rows)
-    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: repo)
+    monkeypatch.setattr(controller_module, "EvaluationWorkerRepository", lambda *_: repo)
 
     await controller._cancel_evaluation_jobs()
 
     # A queued Job is stopped before it pulls an image and runs a cancelled
     # evaluation. A running one is left alone because its task owns sandbox
     # teardown, and cancelling it would race a sandbox launch.
-    assert cancelled == ["job-3"]
+    assert cancelled == ["platform-job-3"]
     # A dead Job still holding a sandbox has no task left to release it. It must
     # terminalize, or it pins the head of the teardown window forever and hides
     # the leaked runtime.
@@ -188,7 +188,7 @@ async def test_an_active_job_keeps_its_reconcile_lease_so_the_drain_advances(
     controller = ScaledEvalsJobsController()
     controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status))
     monkeypatch.setattr(controller, "_claim_stale_evaluation", _claim)
-    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: repo)
+    monkeypatch.setattr(controller_module, "EvaluationWorkerRepository", lambda *_: repo)
 
     await controller._drain(controller._reconcile_one_evaluation)()
 
@@ -353,7 +353,9 @@ async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatc
         claim_kwargs.append(kwargs)
         return next(claims)
 
-    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: SimpleNamespace(claim_cleanup=claim_one))
+    monkeypatch.setattr(
+        controller_module, "EvaluationWorkerRepository", lambda *_: SimpleNamespace(claim_cleanup=claim_one)
+    )
     release = threading.Event()
     teardown = MagicMock(side_effect=lambda *a, **k: release.wait(5))
     monkeypatch.setattr(controller_module, "teardown_orphaned_execution", teardown)
@@ -423,7 +425,7 @@ async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.M
 
     repo = MagicMock()
     repo.claim_cleanup.side_effect = ["run_1", None]
-    monkeypatch.setattr(controller_module, "BenchmarkArchiveStore", lambda: repo)
+    monkeypatch.setattr(controller_module, "BenchmarkArchiveWorkerRepository", lambda: repo)
     await phases["cleanup_benchmark_archives"]()
     await asyncio.gather(*controller._background.values())
     dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")
@@ -436,7 +438,7 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
     row = {"id": "eval_1", "name": "e", "status": "provisioning", "current_execution": 3, "created_at": _CREATED}
     repo = MagicMock()
     repo.load_for_dispatch.return_value = row
-    monkeypatch.setattr(submitter_module, "EvaluationStore", lambda *_: repo)
+    monkeypatch.setattr(submitter_module, "EvaluationWorkerRepository", lambda *_: repo)
     entities = MagicMock()
     submitter = submitter_module.EvaluationSubmitter(AsyncMock(), "w", entities)
 

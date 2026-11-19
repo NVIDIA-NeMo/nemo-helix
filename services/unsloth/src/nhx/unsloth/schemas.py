@@ -36,7 +36,11 @@ from nemo_helix_plugin.deployment import (
     DeploymentParams,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
-from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.schema import (
+    LearningRateDefault,
+    NamespacedModel,
+    match_learning_rate_default,
+)
 from nhx.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import Field, model_validator
 
@@ -285,14 +289,22 @@ class OptimizerSpec(UnslothSchema):
     )
 
 
-FULL_WEIGHTS_LEARNING_RATE = 2e-5
+# Applied by ``resolve_learning_rate`` and published on ``UnslothJobInput`` for Studio.
+UNSLOTH_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
+    {"when": {"training.finetuning_type": "all_weights"}, "value": 2e-5},
+]
 
 
 def resolve_learning_rate(training: TrainingSpec, optimizer: OptimizerSpec) -> OptimizerSpec:
     """Lower an unset learning rate for a full-weight run, following Unsloth's guidance."""
-    if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
-        return optimizer.model_copy(update={"learning_rate": FULL_WEIGHTS_LEARNING_RATE})
-    return optimizer
+    if "learning_rate" in optimizer.model_fields_set:
+        return optimizer
+    learning_rate = match_learning_rate_default(
+        UNSLOTH_LEARNING_RATE_DEFAULTS, {"training.finetuning_type": training.finetuning_type}
+    )
+    if learning_rate is None:
+        return optimizer
+    return optimizer.model_copy(update={"learning_rate": learning_rate})
 
 
 class HardwareSpec(UnslothSchema):

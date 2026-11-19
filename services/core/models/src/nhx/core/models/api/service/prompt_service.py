@@ -161,7 +161,8 @@ class PromptService:
         logger.debug("Deleting prompt", extra={"workspace": request.workspace, "prompt_name": request.name})
 
         try:
-            await self.entity_client.delete(PromptEntity, request.name, workspace=request.workspace)
+            entity = await self.entity_client.get(PromptEntity, name=request.name, workspace=request.workspace)
+            await self.entity_client.delete_by_id(PromptEntity, entity.id, expected_db_version=entity.db_version)
         except EntityNotFoundError:
             logger.warning(
                 "Prompt not found for deletion",

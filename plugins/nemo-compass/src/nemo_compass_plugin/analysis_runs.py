@@ -36,6 +36,7 @@ from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
@@ -197,8 +198,7 @@ async def submit_analysis_run(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisRunPerms.LIST])
 async def list_analysis_runs(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at", description="Sort field."),
     agent: str | None = Query(default=None, description="Filter by the agent that was analyzed."),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -211,8 +211,8 @@ async def list_analysis_runs(
         result = await entity_client.list(
             AnalysisRun,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_obj or None,
         )

@@ -8,6 +8,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import run
 
 from nemo_helix_plugin.capabilities import probe_docker
 
@@ -49,7 +50,7 @@ def validate_ngc_credentials(api_key: str) -> ValidationResult:
         ValidationResult indicating success or failure.
     """
     try:
-        result = subprocess.run(
+        result = run(
             [
                 "docker",
                 "login",
@@ -90,7 +91,7 @@ def validate_registry_credentials(
         ValidationResult indicating success or failure.
     """
     try:
-        result = subprocess.run(
+        result = run(
             ["docker", "login", registry, "-u", username, "--password-stdin"],
             capture_output=True,
             input=password,
@@ -118,7 +119,7 @@ def validate_image_registry_access(image: str) -> ValidationResult:
         ValidationResult indicating success or failure.
     """
     try:
-        result = subprocess.run(
+        result = run(
             ["docker", "manifest", "inspect", image],
             capture_output=True,
             text=True,

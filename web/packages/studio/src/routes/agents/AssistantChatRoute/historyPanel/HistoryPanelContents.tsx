@@ -105,10 +105,9 @@ export const HistoryPanelContents = ({
       {sessionToDelete && (
         <DeleteConfirmationModal
           open
-          title="Delete chat?"
-          description={`Delete “${getHistorySessionTitle(sessionToDelete)}”? This chat cannot be recovered.`}
-          successText="Chat deleted."
-          errorText="Could not delete this chat."
+          entity="chat"
+          ids={[getHistorySessionTitle(sessionToDelete)]}
+          description="The chat and its messages are deleted and can't be restored."
           onClose={() => setSessionToDelete(null)}
           onDelete={handleDelete}
         />

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FileQuickActions } from '@studio/components/FilesTable/FileQuickActions';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -164,6 +164,8 @@ describe('FileQuickActions', () => {
     await openMenu();
     const deleteButton = screen.getByText('Delete');
     await user.click(deleteButton);
-    expect(screen.getByText('Delete File')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: "Delete file 'test.json'?" })
+    ).toBeInTheDocument();
   });
 });

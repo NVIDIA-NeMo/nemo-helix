@@ -6,7 +6,10 @@ import { FilterPanel } from '@nemo/common/src/components/DataView/FilterPanel';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import '@nemo/common/src/components/DataView/StudioDataView.css';
 import { StudioDataViewToolbar } from '@nemo/common/src/components/DataView/StudioDataViewToolbar';
-import { RowClickHandler, useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
+import {
+  type RowClickHandler,
+  useRowClick,
+} from '@nemo/common/src/components/DataView/useRowClick';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import {
@@ -23,7 +26,7 @@ import {
   Block,
   Stack,
 } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode, RefObject, useMemo, useState } from 'react';
+import { type ComponentProps, type ReactNode, type RefObject, useMemo, useState } from 'react';
 
 const PREBUILT_COLUMN_IDS = new Set(['row-selection', 'row-actions', 'row-expansion']);
 
@@ -120,12 +123,20 @@ export const StudioDataView = <DataType,>({
     className: rowClickClassName,
   } = useRowClick(onRowClick, data);
 
+  const isLoading = attributes?.DataViewRoot?.requestStatus === 'loading';
+
   const effectiveMakeColumns: typeof makeColumns = useMemo(() => {
     const withRowClick = wrapColumns(makeColumns);
-    if (!maxTwoLines) return withRowClick;
+    const withRowActionsGuard: typeof makeColumns = isLoading
+      ? (helper, prebuilt) =>
+          withRowClick(helper, prebuilt).map((col) =>
+            col.id === 'row-actions' ? { ...col, cell: () => null } : col
+          )
+      : withRowClick;
+    if (!maxTwoLines) return withRowActionsGuard;
 
     return (helper, prebuilt) => {
-      const columns = withRowClick(helper, prebuilt);
+      const columns = withRowActionsGuard(helper, prebuilt);
 
       return columns.map((col) => {
         if (PREBUILT_COLUMN_IDS.has(col.id ?? '')) return col;
@@ -150,7 +161,7 @@ export const StudioDataView = <DataType,>({
         };
       });
     };
-  }, [makeColumns, wrapColumns, maxTwoLines]);
+  }, [makeColumns, wrapColumns, maxTwoLines, isLoading]);
 
   return (
     <DataView.Root

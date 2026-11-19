@@ -8,7 +8,7 @@ import { StatsBadge } from '@studio/components/chat/StatsBadge';
 import { ModelCompareTable } from '@studio/components/ModelComparePrompts/ModelCompareTable';
 import type { ModelComparePromptsProps } from '@studio/components/ModelComparePrompts/types';
 import { useModelComparePrompts } from '@studio/components/ModelComparePrompts/useModelComparePrompts';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export const ModelComparePrompts: FC<ModelComparePromptsProps> = ({
   workspace,

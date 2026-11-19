@@ -2,19 +2,54 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Fabric 0.5 Upgrade and Adapter Support"
-description: "Agent migration, telemetry compatibility and adapter installation for NeMo Helix 0.9."
+title: "Fabric 0.6 Upgrade and Adapter Support"
+description: "Agent migration, HTTP telemetry allowlisting and adapter installation."
 ---
 
-NeMo Helix 0.9 locks Fabric to `0.5.0` and supports the package families
-`nemo-fabric>=0.5.0,<0.6.0` and Harbor `>=0.23,<0.24`.
+NeMo Helix 0.10 uses Fabric `0.6.0`, Relay `0.11.0`, and Harbor `0.24.0`.
+
+Hermes remains on Relay `0.10` in an isolated Python 3.14 environment,
+using Fabric's tested Hermes revision. HTTP allowlisting is not yet supported
+for Hermes.
+
+## HTTP OTLP collectors in a cluster
+
+Set `telemetry.insecure_http_hosts` in `agent.yaml` to allow a non-loopback
+HTTP collector:
+
+```yaml
+telemetry:
+  enabled: true
+  provider: relay
+  insecure_http_hosts:
+    - collector.observability.svc.cluster.local
+  opentelemetry:
+    enabled: true
+    endpoints:
+      - type: gen_ai
+        endpoint: http://collector.observability.svc.cluster.local:4318/v1/traces
+        service_name: my-agent
+```
+
+Each `insecure_http_hosts` entry is only a hostname or IP address; `endpoint`
+is the full collector URL. Host matching is exact, so list subdomains separately.
+
+Helix forwards the list to `relay.observability.insecure_http_hosts`; `[]`
+clears inherited allowances. Relay rejects other non-loopback HTTP trace
+destinations. HTTPS needs no allowlist.
+
+The list also applies to logs, metrics, ATOF and ATIF exports. HTTP sends
+telemetry and authentication headers unencrypted. Model-provider HTTP policy
+is separate.
+
+Rebuild and redeploy existing agent images with the upgraded Helix wheel
+to install Fabric `0.6.0` and Relay `0.11.0`. No manual Relay config edit is needed.
 
 ## Migrate agent registration
 
-`nemo agents create` was renamed to `nemo agents register`, with **no compatibility
-alias**. The old command fails with `No such command 'create'`. Update scripts
-and CI while preserving their arguments; replace Python
-`AgentsResource.create(...)` calls with `AgentsResource.register(...)`.
+Replace `nemo agents create` with `nemo agents register` in scripts and CI;
+there is **no compatibility alias**. In Python, replace
+`AgentsResource.create(...)` with `AgentsResource.register(...)`.
 
 ```bash
 nemo agents register --name my-agent --agent-config ./agent.yaml
@@ -81,9 +116,9 @@ or Pi SDK. There is no `nemo-agents-plugin-pi` Python extra.
 
 For a Pi-selected config, [agent packaging](/documentation/agents/deploy-agents#build-and-publish-agent-images)
 installs Node 22 (Pi requires **Node >=22.19.0**),
-`nemo-fabric-adapters-pi@^0.5.0`, and the `pi-ai`, `pi-coding-agent` and `pi-mcp`
-SDK peers at `^1.0.0` under `@earendil-works`. It links the npm descriptor into
-Fabric discovery and adds Relay CLI 0.9 plus the Relay 0.9.0 Pi extension at
+`nemo-fabric-adapters-pi@^0.6.0`, and the `pi-ai`, `pi-coding-agent`, `pi-mcp`
+and `pi-codemode` SDK peers at `1.0.3` under `@earendil-works`. It links the npm descriptor into
+Fabric discovery and adds Relay CLI 0.11 plus the Relay 0.11.0 Pi extension at
 `/opt/pi-relay-extension`. Subprocess hosts must provision these themselves.
 
 For startup failures, distinguish a readable host descriptor from an installed

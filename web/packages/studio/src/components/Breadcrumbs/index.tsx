@@ -4,7 +4,7 @@
 import { Breadcrumbs as KuiBreadcrumbs } from '@nvidia/foundations-react-core';
 import { WORKSPACE_BREADCRUMB_ITEM } from '@studio/components/Breadcrumbs/constants';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import { Link, useParams } from 'react-router';
 
 // Breadcrumb links navigate "up" the hierarchy, so query/hash from the current detail context is irrelevant at the parent level and only leaks state.

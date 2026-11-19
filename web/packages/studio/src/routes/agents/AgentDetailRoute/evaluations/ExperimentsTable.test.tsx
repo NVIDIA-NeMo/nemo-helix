@@ -32,13 +32,15 @@ it('warns that deleting selected experiments also deletes their sole-membership 
   await userEvent.click(selectAll);
   await userEvent.click(await screen.findByRole('button', { name: 'Delete selected experiments' }));
   const dialog = await screen.findByRole('dialog');
-  expect(within(dialog).getByText('Delete 1 experiment?')).toBeVisible();
+  expect(
+    within(dialog).getByRole('heading', { name: "Delete experiment 'sample'?" })
+  ).toBeVisible();
   expect(
     within(dialog).getByText(
       /Evaluations belonging only to the selected experiments will also be deleted/
     )
   ).toBeVisible();
   expect(deleted).not.toHaveBeenCalled();
-  await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Experiment' }));
   await waitFor(() => expect(deleted).toHaveBeenCalledOnce());
 });

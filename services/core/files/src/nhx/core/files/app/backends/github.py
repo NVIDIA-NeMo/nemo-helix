@@ -74,7 +74,7 @@ def raise_for_github_status(status: int, subject: str, headers: Mapping[str, str
     # A private repository is indistinguishable from a missing one without the right
     # token, so 404 is reported as a config error rather than an access error.
     if status == 404:
-        raise GithubConfigError(f"GitHub has no {subject}, or the token cannot see it")
+        raise GithubConfigError(f"GitHub has no {subject}, or the token does not have access")
     if status in (401, 403):
         if _header(headers, "x-ratelimit-remaining") == "0":
             raise GithubUnavailableError(f"GitHub rate limit exhausted while reading {subject}")

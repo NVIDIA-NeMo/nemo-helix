@@ -244,7 +244,7 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
 
   return (
     <AccessibleTitle title={title}>
-      <Stack gap="density-2xl" padding="density-2xl" className="h-full overflow-auto">
+      <Stack gap="density-2xl" padding="density-2xl">
         <PageHeader
           className="p-0"
           slotHeading={title}

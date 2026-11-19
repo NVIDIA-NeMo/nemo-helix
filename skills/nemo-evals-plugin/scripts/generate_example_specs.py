@@ -31,6 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec
 from nemo_evals.jobs.evaluate import EvaluateInputSpec
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -250,6 +251,25 @@ def build_gym_agent_eval_spec() -> dict[str, Any]:
     }
 
 
+def build_harbor_taskset_run_openhands_spec() -> dict[str, Any]:
+    """Return a ``nemo evals runs submit --spec-file`` request: openhands on a gateway model, Kubernetes defaults."""
+    return {
+        # No spec.tasks: the submit's --harbor-dir, --harbor-hub, --harbor-git or --taskset supplies them.
+        "spec": {
+            "target": {
+                "kind": "harbor",
+                "source": {"name": "openhands", "model": {"ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"}},
+                "agent_kwargs": {"version": "1.6.0", "temperature": "1", "top_p": "0.95", "disable_vision": True},
+                # Platform auth on: an inference-scoped access key in this secret. Auth off: drop env_secrets.
+                "env_secrets": {"LLM_API_KEY": "evals-inference-key"},
+                "n_attempts": 1,
+                "max_retries": 1,
+            }
+        },
+        "execution": {},
+    }
+
+
 SPEC_BUILDERS: dict[str, SpecBuilder] = {
     "exact_match_metric.json": build_exact_match_spec,
     "llm_as_judge.json": build_llm_as_judge_spec,
@@ -283,8 +303,25 @@ def generated_agent_specs() -> dict[Path, dict[str, Any]]:
     return specs
 
 
+TASKSET_RUN_SPEC_BUILDERS: dict[str, SpecBuilder] = {
+    "harbor_taskset_run_openhands.json": build_harbor_taskset_run_openhands_spec,
+}
+# A stand-in for the taskset the submit's task source supplies, so the request validates as submitted.
+EXAMPLE_TASKSET_REF = "default/example-taskset#" + "0" * 64
+
+
+def generated_taskset_run_specs() -> dict[Path, dict[str, Any]]:
+    """Build and validate every checked Kubernetes taskset-run request."""
+    specs: dict[Path, dict[str, Any]] = {}
+    for name, builder in TASKSET_RUN_SPEC_BUILDERS.items():
+        payload = builder()
+        TasksetRunInput.model_validate({**payload, "spec": {**payload["spec"], "tasks": EXAMPLE_TASKSET_REF}})
+        specs[SPEC_DIR / name] = payload
+    return specs
+
+
 def _all_generated_specs() -> dict[Path, dict[str, Any]]:
-    return {**generated_specs(), **generated_agent_specs()}
+    return {**generated_specs(), **generated_agent_specs(), **generated_taskset_run_specs()}
 
 
 def _render(payload: dict[str, Any]) -> str:
@@ -312,7 +349,7 @@ def check_specs() -> int:
         print("run with --write to refresh the checked specs")
         return EXIT_CHECK_FAILED
 
-    count = len(SPEC_BUILDERS) + len(AGENT_SPEC_BUILDERS)
+    count = len(SPEC_BUILDERS) + len(AGENT_SPEC_BUILDERS) + len(TASKSET_RUN_SPEC_BUILDERS)
     print(f"{count} evaluator example specs are up to date")
     return EXIT_SUCCESS
 

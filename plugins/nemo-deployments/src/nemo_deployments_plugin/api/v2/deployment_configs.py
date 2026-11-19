@@ -20,6 +20,7 @@ from nemo_deployments_plugin.schema import (
     RequestContainer,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -74,8 +75,7 @@ async def create_deployment_config(
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentConfigPerms.LIST])
 async def list_deployment_configs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: DeploymentConfigFilter = Depends(_config_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -84,8 +84,8 @@ async def list_deployment_configs(
     result = await entity_client.list(
         DeploymentConfig,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter_obj=filter_dict or None,
     )
@@ -118,6 +118,13 @@ async def delete_deployment_config(
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
+    try:
+        _delete_target = await entity_client.get(DeploymentConfig, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"DeploymentConfig '{name}' not found in workspace '{workspace}'."
+        ) from exc
+
     # Best-effort referential check before delete. The version check below protects the
     # config row itself, but cannot make this relationship check atomic against a
     # concurrent deployment create.
@@ -136,7 +143,9 @@ async def delete_deployment_config(
         )
 
     try:
-        await entity_client.delete(DeploymentConfig, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            DeploymentConfig, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

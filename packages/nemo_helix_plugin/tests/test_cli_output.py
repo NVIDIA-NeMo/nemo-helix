@@ -733,7 +733,7 @@ def test_format_csv_with_data_field_for_files():
     "output_format",
     ["json", "yaml", "raw"],
 )
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_simple_formats(mock_print, output_format):
     """Test format_output with simple formats (json, yaml, raw)."""
     data = {"key": "value"}
@@ -753,7 +753,7 @@ def test_format_output_simple_formats(mock_print, output_format):
     ],
 )
 @patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_table_formats(
     mock_print,
     mock_resolve_cols,
@@ -773,7 +773,7 @@ def test_format_output_table_formats(
     assert expected_content in call_args
 
 
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_table_fallback_to_json(mock_print):
     """Test format_output falls back to JSON for single item with table format."""
     data = {"key": "value"}
@@ -786,7 +786,7 @@ def test_format_output_table_fallback_to_json(mock_print):
 
 
 @patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_with_no_truncate(mock_print, mock_resolve_cols):
     """Test format_output with no_truncate enabled."""
     mock_resolve_cols.return_value = [Column("id", "ID"), Column("description", "Description")]
@@ -805,7 +805,7 @@ def test_format_output_with_no_truncate(mock_print, mock_resolve_cols):
 
 
 @patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_with_custom_columns(mock_print, mock_resolve_cols):
     """Test format_output with custom output_columns."""
     mock_resolve_cols.return_value = [Column("name", "Name")]  # Only name column
@@ -828,7 +828,7 @@ def test_format_output_with_custom_columns(mock_print, mock_resolve_cols):
 
 
 @patch("nemo_helix_plugin.cli_output_columns.resolve_and_validate_columns")
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_output_switches_to_markdown_for_many_columns(mock_print, mock_resolve_cols):
     """Test format_output switches to markdown when too many columns with no_truncate."""
     # Create 15 columns
@@ -845,7 +845,7 @@ def test_format_output_switches_to_markdown_for_many_columns(mock_print, mock_re
     assert mock_print.call_count >= 1
 
 
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_stream_event_with_dict(mock_print):
     """Test format_stream_event with a dictionary event."""
     event = {"type": "message", "content": "Hello", "id": 123}
@@ -859,7 +859,7 @@ def test_format_stream_event_with_dict(mock_print):
     assert parsed == event
 
 
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_stream_event_with_pydantic_model(mock_print):
     """Test format_stream_event with a Pydantic model."""
     mock_event = Mock()
@@ -876,7 +876,7 @@ def test_format_stream_event_with_pydantic_model(mock_print):
     mock_event.model_dump.assert_called_once_with(mode="json")
 
 
-@patch("builtins.print")
+@patch("nemo_helix_plugin.cli_output.print", create=True)
 def test_format_stream_event_with_nested_data(mock_print):
     """Test format_stream_event with nested data structures."""
     event = {"type": "complex", "nested": {"data": [1, 2, 3], "meta": {"count": 3}}}

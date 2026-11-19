@@ -95,8 +95,8 @@ class TestRaiseForGithubStatus:
         raise_for_github_status(200, "repo")
         raise_for_github_status(206, "repo")
 
-    def test_missing_or_invisible_repository_is_a_config_error(self):
-        with pytest.raises(GithubConfigError, match="cannot see it"):
+    def test_missing_or_inaccessible_repository_is_a_config_error(self):
+        with pytest.raises(GithubConfigError, match="the token does not have access"):
             raise_for_github_status(404, "repository acme/agents")
 
     def test_forbidden_is_an_access_error(self):

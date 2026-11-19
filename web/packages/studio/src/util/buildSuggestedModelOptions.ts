@@ -58,13 +58,3 @@ export const pickDefaultModelName = (models: ModelListEntry[]): string | undefin
   const names = models.map((m) => m.name);
   return names.find(isSuggested) ?? names.find(isLlmCandidate);
 };
-
-export const pickModelNameForExample = (
-  models: ModelListEntry[],
-  preferred: string | null | undefined
-): string | undefined => {
-  if (preferred && models.some((m) => m.name === preferred && isLlmCandidate(m.name))) {
-    return preferred;
-  }
-  return pickDefaultModelName(models);
-};

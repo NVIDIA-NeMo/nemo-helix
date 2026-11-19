@@ -16,7 +16,7 @@ def test_run_hard_negative_mining_inherits_stdio(tmp_path: Path) -> None:
     config.write_text("mining: {}\n", encoding="utf-8")
     completed = Mock(returncode=0)
 
-    with patch("nhx.automodel.tasks.retrieval_mine.launch.subprocess.run", return_value=completed) as run:
+    with patch("nhx.automodel.tasks.retrieval_mine.launch.run", return_value=completed) as run:
         run_hard_negative_mining(config_file=config, nproc_per_node="1")
 
     kwargs = run.call_args.kwargs
@@ -37,7 +37,7 @@ def test_run_hard_negative_mining_raises_on_nonzero(tmp_path: Path) -> None:
 
     with (
         patch(
-            "nhx.automodel.tasks.retrieval_mine.launch.subprocess.run",
+            "nhx.automodel.tasks.retrieval_mine.launch.run",
             side_effect=subprocess.CalledProcessError(1, ["torchrun"]),
         ),
         pytest.raises(RuntimeError, match="Hard-negative mining failed: exit 1"),

@@ -70,16 +70,24 @@ HARBOR_REJECTED_VALUES = {
 }
 
 
-def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
+class _OfflinePath(Path):
+    """A path that fails the test if anything inspects or creates it on the local filesystem."""
+
+    def exists(self, *, follow_symlinks: bool = True) -> bool:
+        raise AssertionError("local filesystem accessed")
+
+    def mkdir(self, mode: int = 0o777, parents: bool = False, exist_ok: bool = False) -> None:
+        raise AssertionError("local filesystem modified")
+
+
+def test_harbor_configuration_survives_submission_without_local_storage(tmp_path):
     config = HarborRuntimeConfig.model_validate(
-        {"jobs_dir": tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES}
+        {"jobs_dir": _OfflinePath(tmp_path / "jobs"), **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES}
     )
+    assert isinstance(config.jobs_dir, _OfflinePath)
     runner = HarborAgentTaskRunner(config=config)
     # Conversion must not inspect the caller's filesystem or start Harbor.
-    with monkeypatch.context() as scoped:
-        scoped.setattr(Path, "exists", Mock(side_effect=AssertionError("local filesystem accessed")))
-        scoped.setattr(Path, "mkdir", Mock(side_effect=AssertionError("local filesystem modified")))
-        target = runner_to_target(runner)
+    target = runner_to_target(runner)
     assert isinstance(target, HarborRunnerTarget)
     assert target.model_dump(mode="json") == {
         "kind": "harbor",

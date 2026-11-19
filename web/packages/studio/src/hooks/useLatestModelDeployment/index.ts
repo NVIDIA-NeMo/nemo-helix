@@ -5,11 +5,8 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useModelsListDeploymentConfigs } from '@nemo/sdk/generated/platform/model-deployment-configs';
 import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
 import { getModelsGetModelQueryKey } from '@nemo/sdk/generated/platform/models';
-import {
-  type ModelDeployment,
-  ModelDeploymentStatus,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { LIVE_STATUSES } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';

@@ -8,8 +8,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, cast
 
-import httpx
-from httpx import Timeout
+from httpx import AsyncClient, Timeout
 from jsonpath_ng import parse as jsonpath_parse
 from jsonpath_ng.exceptions import JsonPathParserError
 from nhx_evals_sdk.inference import requests_log_var
@@ -51,7 +50,7 @@ async def _post_to_remote_endpoint(
     endpoint_key = endpoint_identity(url, model_id="remote-metric", auth_identity=api_key)
     max_attempts = max(1, max_retries + 1)
 
-    async with httpx.AsyncClient(timeout=Timeout(timeout)) as client:
+    async with AsyncClient(timeout=Timeout(timeout)) as client:
 
         async def _invoke_post() -> dict[str, Any]:
             response = await client.post(url, json=payload, headers=headers)

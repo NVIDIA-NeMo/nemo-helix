@@ -82,6 +82,7 @@ from nemo_deployments_plugin.entities import (
     Deployment,
     DeploymentConfig,
 )
+from nemo_deployments_plugin.quantity import quantity_bytes
 from nemo_deployments_plugin.secrets import (
     SecretResolutionError,
     resolve_deployment_config_secrets,
@@ -122,6 +123,12 @@ if TYPE_CHECKING:
     import docker
 
 logger = logging.getLogger(__name__)
+
+
+def _docker_from_env(**kwargs: Any) -> docker.DockerClient:
+    import docker
+
+    return docker.from_env(**kwargs)
 
 
 _ONE_SHOT_RESTART_POLICIES = frozenset({"Never", "OnFailure"})
@@ -234,7 +241,7 @@ class DockerDeploymentBackend(DeploymentBackend):
     def _create_client(self) -> docker.DockerClient:
         # docker-py 7.x rejects base_url= on from_env; override DOCKER_HOST instead
         # so TLS env vars (DOCKER_TLS_VERIFY, cert paths) still apply.
-        client = self._docker.from_env(
+        client = _docker_from_env(
             **docker_from_env_kwargs(
                 timeout=self._executor_config.docker_timeout,
                 docker_host=self._executor_config.docker_host,
@@ -1093,6 +1100,9 @@ class DockerDeploymentBackend(DeploymentBackend):
         device_requests = device_requests_for_gpus(gpu_ids)
         if device_requests:
             run_kwargs["device_requests"] = device_requests
+        if config.shm_size:
+            # Bytes: docker reads "8G" as GiB and rejects "Ti", unlike Kubernetes.
+            run_kwargs["shm_size"] = quantity_bytes(config.shm_size)
 
         return run_kwargs
 

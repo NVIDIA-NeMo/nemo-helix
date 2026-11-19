@@ -6,7 +6,7 @@ import { logger } from '@nemo/common/src/utils/logger';
 import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { useDatasetFilesUpload } from '@studio/api/datasets/useDatasetFilesUpload';
 import { useDownloadFileAsArrayBuffer } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
-import { FileSystemFile } from '@studio/components/FilesTable/utils';
+import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { useCallback, useState } from 'react';
 
 export interface UseBulkDuplicateOptions {

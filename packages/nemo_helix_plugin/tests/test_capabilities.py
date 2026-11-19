@@ -30,7 +30,7 @@ def _clear_capability_cache() -> Iterator[None]:
 def test_probe_docker_available() -> None:
     client = MagicMock()
     client.ping.return_value = True
-    with patch("docker.from_env", return_value=client) as from_env:
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client) as from_env:
         result = probe_docker()
     assert result.available is True
     assert result.detail is None
@@ -49,7 +49,7 @@ def test_probe_docker_available() -> None:
     ],
 )
 def test_probe_docker_unavailable_on_connection_failures(exc: Exception) -> None:
-    with patch("docker.from_env", side_effect=exc):
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", side_effect=exc):
         result = probe_docker()
     assert result.available is False
     assert result.detail is not None
@@ -59,7 +59,7 @@ def test_probe_docker_unavailable_on_connection_failures(exc: Exception) -> None
 def test_probe_docker_unavailable_on_ping_failure() -> None:
     client = MagicMock()
     client.ping.side_effect = DockerException("ping failed")
-    with patch("docker.from_env", return_value=client):
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client):
         result = probe_docker()
     assert result.available is False
     client.close.assert_called_once()
@@ -67,7 +67,7 @@ def test_probe_docker_unavailable_on_ping_failure() -> None:
 
 def test_probe_docker_caches_result() -> None:
     client = MagicMock()
-    with patch("docker.from_env", return_value=client) as from_env:
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client) as from_env:
         first = probe_docker()
         second = probe_docker()
     assert first.available is True
@@ -77,7 +77,7 @@ def test_probe_docker_caches_result() -> None:
 
 def test_reset_capability_cache_allows_reprobe() -> None:
     client = MagicMock()
-    with patch("docker.from_env", return_value=client) as from_env:
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client) as from_env:
         probe_docker()
         reset_capability_cache()
         probe_docker()
@@ -86,7 +86,7 @@ def test_reset_capability_cache_allows_reprobe() -> None:
 
 def test_probe_docker_use_cache_false_bypasses_memo() -> None:
     client = MagicMock()
-    with patch("docker.from_env", return_value=client) as from_env:
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", return_value=client) as from_env:
         probe_docker()
         probe_docker(use_cache=False)
     assert from_env.call_count == 2
@@ -103,7 +103,7 @@ def test_probe_docker_host_keys_are_independent() -> None:
             return remote_client
         return default_client
 
-    with patch("docker.from_env", side_effect=_from_env) as from_env:
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", side_effect=_from_env) as from_env:
         default = probe_docker()
         remote = probe_docker(docker_host="tcp://remote:2375")
 
@@ -124,7 +124,7 @@ def test_probe_docker_explicit_host_returns_unavailable_without_typeerror() -> N
 
 
 def test_require_docker_raises_when_unavailable() -> None:
-    with patch("docker.from_env", side_effect=DockerException("down")):
+    with patch("nemo_helix_plugin.capabilities._docker_from_env", side_effect=DockerException("down")):
         with pytest.raises(CapabilityUnavailableError, match="unreachable"):
             require_docker()
 

@@ -4,10 +4,13 @@
 """Tests for provider router endpoints."""
 
 import json
+from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from multidict import CIMultiDict
 from nhx.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.api.v2 import providers
 
 
 def test_provider_proxy_endpoint(client: TestClient, mock_proxy_client, mock_proxy_response):
@@ -71,6 +74,44 @@ def test_provider_proxy_with_unresolved_provider_secret(client: TestClient, mode
     response = client.post("/v2/workspaces/default/provider/tot/-/v1/models", headers=headers)
     assert response.status_code == 424
     assert "secret not found or unreachable" in response.json()["detail"]
+
+
+_FILESET_IMAGE = {"type": "image_url", "image_url": {"url": "fileset://pics#a.png"}}
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        # Fileset image references are inlined, as on the model routes.
+        (
+            json.dumps({"messages": [{"role": "user", "content": [_FILESET_IMAGE]}]}).encode(),
+            {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:inlined"}}]}]},
+        ),
+        # A body that only mentions the prefix but is not JSON is forwarded unchanged.
+        (b"not json fileset://pics#a.png", b"not json fileset://pics#a.png"),
+    ],
+    ids=["json-inlined", "non-json-unchanged"],
+)
+def test_provider_proxy_inlines_fileset_images(
+    client: TestClient, mock_proxy_client, monkeypatch: pytest.MonkeyPatch, content: bytes, expected: Any
+):
+    calls: list[str] = []
+
+    async def fake_resolve(body: dict[str, Any], *, workspace: str, request_nemo_client: object) -> None:
+        calls.append(workspace)
+        body["messages"][0]["content"][0]["image_url"]["url"] = "data:inlined"
+
+    monkeypatch.setattr(providers, "resolve_fileset_images", fake_resolve)
+    response = client.post("/v2/workspaces/default/provider/ollama/-/v1/chat/completions", content=content)
+
+    assert response.status_code == 200
+    data = mock_proxy_client.request.call_args.kwargs["data"]
+    if isinstance(expected, dict):
+        assert calls == ["default"]
+        assert json.loads(data) == expected
+    else:
+        assert calls == []
+        assert data == expected
 
 
 def test_provider_proxy_with_default_extra_body(client: TestClient, mock_proxy_client, model_cache: ModelCache):

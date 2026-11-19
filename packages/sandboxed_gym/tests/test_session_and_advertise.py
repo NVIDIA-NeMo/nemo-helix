@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import signal
 from collections.abc import Callable
 from unittest.mock import MagicMock
@@ -27,27 +26,23 @@ from sandboxed_gym.serve_config import SandboxedGymServeConfig
 
 
 @pytest.fixture(autouse=True)
-def _drop_the_reaper_the_session_arms():
+def _drop_the_reaper_the_session_arms(monkeypatch: pytest.MonkeyPatch):
     """start() arms a process-exit sweep. These tests must not leave it installed."""
     original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    # Tests replace signal.signal through the same monkeypatch, which is undone only after this
+    # teardown, so restore the handlers with the real function.
+    set_handler = signal.signal
     registered: list[Callable[..., object]] = []
-    real_register = atexit.register
     installed = set(_INSTALLED)
     prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
 
-    def _tracking_register(func, *args, **kwargs):
-        registered.append(func)
-        return real_register(func, *args, **kwargs)
-
-    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    # Record the hooks instead of registering them, so the test process never runs them at exit.
+    monkeypatch.setattr(orchestrator_module, "register_atexit", registered.append)
     try:
         yield
     finally:
-        atexit.register = real_register
-        for func in registered:
-            atexit.unregister(func)
         for signum, handler in original.items():
-            signal.signal(signum, handler)
+            set_handler(signum, handler)
         _INSTALLED.clear()
         _INSTALLED.update(installed)
         _TERMINATION_SHUTDOWNS.clear()

@@ -24,6 +24,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import duckdb
+from duckdb import connect as duckdb_connect
 from nhx.common.files.storage_config import S3StorageConfig
 from nhx.common.jobs.schemas import (
     HelixJobLog,
@@ -160,7 +161,7 @@ class DuckDBLogRepository:
     @classmethod
     def _connect(cls, storage: StorageImpl) -> duckdb.DuckDBPyConnection:
         with tracer.start_as_current_span("logs.duckdb.connect"):
-            conn = duckdb.connect(
+            conn = duckdb_connect(
                 ":memory:",
                 config={
                     "autoload_known_extensions": "false",
@@ -684,7 +685,7 @@ class DuckDBLogRepository:
         nested logs directory. This method is synchronous; ``LogStorage`` runs it in
         a thread pool to avoid blocking the event loop.
         """
-        conn = duckdb.connect(":memory:")
+        conn = duckdb_connect(":memory:")
         table_name = f"temp_logs_{uuid.uuid4().hex[:8]}"
 
         try:

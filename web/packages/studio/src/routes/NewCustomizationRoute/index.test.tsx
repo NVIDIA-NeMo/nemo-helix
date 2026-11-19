@@ -97,7 +97,7 @@ describe('NewCustomizationRoute', () => {
 
     await user.click(await screen.findByRole('radio', { name: /my-sft-recipe/ }));
     await user.click(await screen.findByRole('button', { name: /Delete template/ }));
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete Template' }));
 
     expect(
       await screen.findByRole('radiogroup', { name: 'How do you want to start?' })

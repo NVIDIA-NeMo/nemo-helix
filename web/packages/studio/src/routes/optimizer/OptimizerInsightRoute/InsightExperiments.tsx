@@ -12,7 +12,7 @@ import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Text } from '@nvidia/foundations-react-core';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { type ComponentProps, type FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 import { useNavigate } from 'react-router';
 
 const makeColumns: ComponentProps<typeof DataView.Root<ExperimentResponse>>['makeColumns'] = ({

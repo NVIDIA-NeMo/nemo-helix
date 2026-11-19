@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -150,10 +151,10 @@ async def test_port_conflict_uses_caller_hint(
     [
         (
             "tcp",
-            compose_inspection.socket.SOCK_STREAM,
-            [(compose_inspection.socket.SOL_SOCKET, compose_inspection.socket.SO_REUSEADDR, 1)],
+            socket.SOCK_STREAM,
+            [(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)],
         ),
-        ("udp", compose_inspection.socket.SOCK_DGRAM, []),
+        ("udp", socket.SOCK_DGRAM, []),
     ],
 )
 def test_published_port_probe_reuses_only_tcp_addresses(
@@ -179,11 +180,11 @@ def test_published_port_probe_reuses_only_tcp_addresses(
             bindings.append(address)
 
     def socket_factory(family: int, kind: int) -> ProbeSocket:
-        assert family == compose_inspection.socket.AF_INET
+        assert family == socket.AF_INET
         assert kind == socket_type
         return ProbeSocket()
 
-    monkeypatch.setattr(compose_inspection.socket, "socket", socket_factory)
+    monkeypatch.setattr(compose_inspection, "socket", socket_factory)
     published_port = compose_inspection._PublishedPort("agent", "127.0.0.1", 18080, 8080, protocol)
 
     assert compose_inspection._published_port_available(published_port)
@@ -192,9 +193,9 @@ def test_published_port_probe_reuses_only_tcp_addresses(
 
 
 def test_published_port_probe_rejects_active_tcp_listener() -> None:
-    with compose_inspection.socket.socket(
-        compose_inspection.socket.AF_INET,
-        compose_inspection.socket.SOCK_STREAM,
+    with socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM,
     ) as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
@@ -218,7 +219,7 @@ async def test_preflight_parses_rendered_config_once(
         payloads.append(text)
         return original_loads(text)
 
-    monkeypatch.setattr(compose_inspection.json, "loads", tracked_loads)
+    monkeypatch.setattr(compose_inspection, "loads", tracked_loads)
 
     await provider._preflight(dict(os.environ))
 

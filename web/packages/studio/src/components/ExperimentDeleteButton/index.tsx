@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
-import {
-  Button,
-  DropdownContent,
-  DropdownItem,
-  DropdownRoot,
-  DropdownTrigger,
-} from '@nvidia/foundations-react-core';
+import { Button } from '@nvidia/foundations-react-core';
 import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
 import { useQueryClient } from '@tanstack/react-query';
-import { EllipsisVertical, Trash } from 'lucide-react';
+import { Trash } from 'lucide-react';
 import { useState } from 'react';
 
 export const EXPERIMENT_DELETE_DESCRIPTION =
@@ -37,18 +32,11 @@ export const ExperimentDeleteButton = ({
   return (
     <div onClick={(event) => event.stopPropagation()}>
       {asMenu ? (
-        <DropdownRoot>
-          <DropdownTrigger asChild showChevron={false}>
-            <Button kind="tertiary" aria-label={`More actions for experiment ${name}`}>
-              <EllipsisVertical />
-            </Button>
-          </DropdownTrigger>
-          <DropdownContent align="end">
-            <DropdownItem onClick={() => setOpen(true)} danger>
-              Delete
-            </DropdownItem>
-          </DropdownContent>
-        </DropdownRoot>
+        <QuickActionsMenuRoot
+          ariaLabel={`More actions for experiment ${name}`}
+          actions={[]}
+          deleteAction={{ onSelect: () => setOpen(true) }}
+        />
       ) : (
         <Button
           kind="secondary"
@@ -62,9 +50,9 @@ export const ExperimentDeleteButton = ({
       <DeleteConfirmationModal
         open={open}
         onClose={() => setOpen(false)}
-        title={`Delete experiment “${name}”?`}
+        entity="experiment"
+        ids={[name]}
         description={EXPERIMENT_DELETE_DESCRIPTION}
-        successText="Experiment deleted."
         onDelete={async () => {
           await deleteExperiment(workspace, name);
           onDeleted?.();

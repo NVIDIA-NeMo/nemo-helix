@@ -33,7 +33,7 @@ async def test_upload_uses_temp_file_then_rename(tmp_path):
         observed_files.append(Path(path).name)
         return await original_open_file(path, mode, **kwargs)
 
-    with patch("anyio.open_file", side_effect=tracking_open_file):
+    with patch("nhx.core.files.app.backends.local.open_file", side_effect=tracking_open_file):
         chunks = [b"test", b"data"]
         await storage.upload("test.txt", async_iter_from_list(chunks))
 

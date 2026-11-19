@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UseControllerComponentProps } from '@nemo/common/src/types';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
 import { FormField, TextArea } from '@nvidia/foundations-react-core';
-import { ComponentProps } from 'react';
+import type { ComponentProps } from 'react';
 import { useController } from 'react-hook-form';
 
 interface Props

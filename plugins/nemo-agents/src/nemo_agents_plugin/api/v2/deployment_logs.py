@@ -45,6 +45,7 @@ from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import AgentDeployment
 from nemo_agents_plugin.runner.registry import get_runner_registry
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from pydantic import BaseModel, Field
 
@@ -158,6 +159,8 @@ async def _resolve_external_logs(
         return None
     try:
         log_result = await get_logs(workspace=workspace, name=name, tail=tail)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to read deployment logs")
         raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc
@@ -456,6 +459,8 @@ async def stream_deployment_logs(
 
         try:
             initial_result = await get_logs(workspace=workspace, name=name, tail=_TAIL_LINE_CAP)
+        except CLIENT_ERRORS:
+            raise
         except Exception as exc:
             logger.exception("Failed to open deployment log stream")
             raise HTTPException(status_code=500, detail="Failed to read deployment logs.") from exc

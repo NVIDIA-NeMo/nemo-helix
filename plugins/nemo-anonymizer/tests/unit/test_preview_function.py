@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import data_designer.config as dd
@@ -66,16 +68,93 @@ def test_preview_worker_sends_original_text_column_metadata(
     assert trace_frame.original_text_column == "biography"
 
 
+def test_preview_worker_writes_artifacts_outside_read_only_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # A deployed service runs from a read-only working directory. Upstream's
+    # default artifact dir is relative to it, so preview must pass its own.
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    read_only_cwd = tmp_path / "cwd"
+    read_only_cwd.mkdir()
+    read_only_cwd.chmod(0o555)
+    monkeypatch.chdir(read_only_cwd)
+    seen: dict[str, Path] = {}
+
+    class FakeResult:
+        dataframe = pd.DataFrame([{"biography": "hello"}])
+        trace_dataframe = pd.DataFrame([{"biography": "hello"}])
+        failed_records: list[object] = []
+
+    class FakeAnonymizer:
+        def __init__(self, artifact_path: Path) -> None:
+            self.artifact_path = artifact_path
+
+        def preview(self, **kwargs: object) -> FakeResult:
+            # Mirrors upstream, which writes intermediate files under artifact_path.
+            (self.artifact_path / "run").mkdir(parents=True)
+            (self.artifact_path / "run" / "trace.parquet").write_text("trace")
+            return FakeResult()
+
+    def fake_make_anonymizer(*, artifact_path: Path, **kwargs: object) -> FakeAnonymizer:
+        seen["artifact_path"] = artifact_path
+        return FakeAnonymizer(artifact_path)
+
+    monkeypatch.setattr(worker_module, "_make_anonymizer", fake_make_anonymizer)
+
+    try:
+        worker_module._make_preview(
+            [].append,
+            _preview_spec(),
+            data=AnonymizerInput(source="https://example.com/input.csv", text_column="biography"),
+            model_configs_yaml="model_configs:\n- alias: detector\n  model: test/model\n  provider: provider\n",
+            dd_providers=None,
+            num_records=1,
+        )
+    finally:
+        read_only_cwd.chmod(0o755)
+
+    artifact_path = seen["artifact_path"]
+    assert artifact_path.is_absolute()
+    assert not artifact_path.is_relative_to(read_only_cwd)
+    assert not artifact_path.exists(), "per-preview artifact dir should be removed afterwards"
+
+
+def test_make_anonymizer_passes_artifact_path_to_gliner_detector(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_build(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(worker_module, "build_gliner_anonymizer", fake_build)
+
+    worker_module._make_anonymizer(
+        model_configs_yaml="model_configs: []",
+        dd_providers=None,
+        artifact_path=Path("/scratch/preview"),
+    )
+
+    assert captured["artifact_path"] == Path("/scratch/preview")
+
+
 def test_preview_worker_requires_model_configs() -> None:
     with pytest.raises(RuntimeError, match="requires resolved model_configs"):
-        worker_module._make_anonymizer(model_configs_yaml="", dd_providers=None)
+        worker_module._make_anonymizer(model_configs_yaml="", dd_providers=None, artifact_path=Path("unused"))
 
 
 def test_make_anonymizer_uses_gateway_when_caller_supplies_detector(monkeypatch: pytest.MonkeyPatch) -> None:
     # When the caller supplies its own detector, the worker must build the plain
     # gateway Anonymizer and must NOT spin up the in-process GLiNER runtime.
     sentinel = object()
-    monkeypatch.setattr(worker_module, "Anonymizer", lambda **kwargs: sentinel)
+    captured: dict[str, object] = {}
+
+    def _fake_anonymizer(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(worker_module, "Anonymizer", _fake_anonymizer)
 
     def _must_not_run(**kwargs: object) -> object:
         raise AssertionError("in-process GLiNER must not be built on the gateway path")
@@ -85,9 +164,11 @@ def test_make_anonymizer_uses_gateway_when_caller_supplies_detector(monkeypatch:
     result = worker_module._make_anonymizer(
         model_configs_yaml="model_configs: []",
         dd_providers=None,
+        artifact_path=Path("/scratch/preview"),
         use_in_process_detector=False,
     )
     assert result is sentinel
+    assert captured["artifact_path"] == Path("/scratch/preview")
 
 
 @pytest.mark.asyncio

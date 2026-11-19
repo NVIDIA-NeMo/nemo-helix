@@ -171,15 +171,19 @@ def discover_managed_gpu_allocations(client: docker.DockerClient) -> dict[str, l
     return allocations
 
 
+def _docker_from_env() -> docker.DockerClient:
+    import docker
+
+    return docker.from_env()
+
+
 def _recover_pool_allocations(pool: DockerGPUPool) -> bool:
     """Restore in-use GPUs from running containers. Returns False on transient failure."""
     try:
-        import docker
+        client = _docker_from_env()
     except ImportError:
         logger.debug("Docker SDK unavailable for GPU pool recovery")
         return True
-
-    client = docker.from_env()
     try:
         allocations = discover_managed_gpu_allocations(client)
         pool.restore_allocations(allocations)

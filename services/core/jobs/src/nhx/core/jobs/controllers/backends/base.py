@@ -5,16 +5,20 @@ from __future__ import annotations
 
 import datetime
 import logging
+import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from bisect import bisect_right
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from time import monotonic
 from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
 from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -33,6 +37,7 @@ from nhx.common.config.base import (
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -48,12 +53,26 @@ from nhx.common.jobs.constants import (
 from nhx.common.platform_endpoint import parse_platform_endpoint
 from nhx.core.jobs.app.constants import DEFAULT_PROFILE as DEFAULT_PROFILE
 from nhx.core.jobs.app.constants import DEFAULT_PROVIDER as DEFAULT_PROVIDER
+from nhx.core.jobs.app.constants import (
+    JOB_ATTEMPT_ID_LABEL,
+    JOB_ID_LABEL,
+    JOB_MANAGED_BY_JOBS_CONTROLLER,
+    JOB_MANAGED_BY_LABEL,
+    JOB_STEP_ID_LABEL,
+    JOB_STEP_NAME_LABEL,
+    JOB_TYPE_JOB,
+    JOB_TYPE_LABEL,
+    JOB_WORKSPACE_ID_LABEL,
+)
 from nhx.core.jobs.app.lifecycle import active_ttl_anchor, ensure_aware, step_provider_profile
 from nhx.core.jobs.app.providers import ComputeResources
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
 
 logger = logging.getLogger(__name__)
+CANCELLED_WORKLOAD_BATCH_SIZE = 5
+CANCELLED_WORKLOAD_BUDGET_SECONDS = 2
 
 WORKLOAD_IDENTITY_TOKEN_FILE_PATH = _workload_identity.WORKLOAD_IDENTITY_TOKEN_FILE_PATH
 WORKLOAD_IDENTITY_VOLUME_NAME = _workload_identity.WORKLOAD_IDENTITY_VOLUME_NAME
@@ -79,6 +98,9 @@ RESERVED_MANAGED_JOB_AUTH_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset
         "NEMO_WORKLOAD_TOKEN",
         "NEMO_WORKLOAD_TOKEN_FILE",
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+        # Delegated identity and secret references are injected by the platform; a step must not override them.
+        NHX_PRINCIPAL_ENVVAR,
+        NEMO_JOB_SECRETS_ENVVAR,
     }
 )
 
@@ -96,6 +118,7 @@ RESERVED_JOB_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = (
             # From nhx.common.jobs.constants
             CONFIG_TASK_STORAGE_PATH_ENVVAR,
             EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+            NEMO_JOB_ARTIFACT_BASE_PATH_ENVVAR,
             NEMO_JOB_ATTEMPT_ID_ENVVAR,
             NEMO_JOB_FILESET_ENVVAR,
             NEMO_JOB_ID_ENVVAR,
@@ -137,11 +160,40 @@ def find_reserved_managed_job_environment_variable_names(env_names: Iterable[str
     )
 
 
+_VALID_ENVIRONMENT_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS = re.compile(r"[=\x00]")
+
+
 def validate_no_reserved_managed_job_environment_variable_names(env_names: Iterable[str], *, source: str) -> None:
     """Reject user-provided platform-managed env names for managed jobs."""
     conflicting = find_reserved_managed_job_environment_variable_names(env_names)
     if conflicting:
         raise ValueError(f"{source} must not use platform-reserved managed environment keys: {conflicting}")
+
+
+def validate_step_environment(environment: Iterable[HelixJobEnvironmentVariable], *, source: str) -> None:
+    """Reject platform-reserved step env names, unsafe names, and non-identifier secret-backed names.
+
+    Secret-backed names are joined into NEMO_JOB_SECRETS with ``,`` and ``=`` separators, so they must
+    be plain identifiers. Every name is later rendered as ``NAME=value`` (docker), so ``=`` or NUL in a
+    name could shift that boundary and spoof a reserved name such as NHX_PRINCIPAL.
+    """
+    environment = list(environment)
+    validate_no_reserved_managed_job_environment_variable_names((envvar.name for envvar in environment), source=source)
+    malformed = sorted(
+        {
+            envvar.name
+            for envvar in environment
+            if envvar.from_secret is not None and not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(envvar.name)
+        }
+    )
+    if malformed:
+        raise ValueError(f"{source} for secrets must match {_VALID_ENVIRONMENT_VARIABLE_NAME.pattern}: {malformed}")
+    unsafe = sorted(
+        {envvar.name for envvar in environment if _ENVIRONMENT_VARIABLE_NAME_UNSAFE_CHARS.search(envvar.name)}
+    )
+    if unsafe:
+        raise ValueError(f"{source} must not contain '=' or NUL: {unsafe}")
 
 
 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
@@ -342,6 +394,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
         self._jobs = JobsClient.from_client(nemo_client)
         self._execution_profile_config = execution_profile_config
         self._profile_name = profile_name
+        self._cancelled_workload_cursor = ""
         self.init()
 
     def init(self): ...
@@ -357,7 +410,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate: ...
 
     @abstractmethod
-    def cleanup_steps(self): ...
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None): ...
 
     @abstractmethod
     def shutdown(self): ...
@@ -427,6 +480,42 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             return True
         except Exception as e:
             raise RuntimeError(f"Could not fetch job step '{job}/{step_name}' to check if terminal") from e
+
+    def cancelled_step_workloads(
+        self, workloads: Mapping[str, Mapping[str, str]], on_progress: Callable[[], None] | None = None
+    ) -> Iterator[str]:
+        """Select a bounded, rotating batch of exact cancelled-step resources to terminate."""
+        identity = (JOB_ID_LABEL, JOB_STEP_NAME_LABEL, JOB_WORKSPACE_ID_LABEL, JOB_ATTEMPT_ID_LABEL, JOB_STEP_ID_LABEL)
+        names = sorted(
+            name
+            for name, labels in workloads.items()
+            if labels.get(JOB_MANAGED_BY_LABEL) == JOB_MANAGED_BY_JOBS_CONTROLLER
+            and labels.get(JOB_TYPE_LABEL) == JOB_TYPE_JOB
+            and all(labels.get(key) for key in identity)
+        )
+        start = bisect_right(names, self._cancelled_workload_cursor)
+        batch = names[start : start + CANCELLED_WORKLOAD_BATCH_SIZE] or names[:CANCELLED_WORKLOAD_BATCH_SIZE]
+        deadline = monotonic() + CANCELLED_WORKLOAD_BUDGET_SECONDS
+        progress = on_progress or (lambda: None)
+        for index, name in enumerate(batch):
+            if index and monotonic() >= deadline:
+                break
+            self._cancelled_workload_cursor = name
+            labels = workloads[name]
+            try:
+                step = self.get_step_safe(
+                    job=labels[JOB_ID_LABEL],
+                    step_name=labels[JOB_STEP_NAME_LABEL],
+                    workspace=labels[JOB_WORKSPACE_ID_LABEL],
+                    attempt_id=labels[JOB_ATTEMPT_ID_LABEL],
+                )
+            except NemoClientError:
+                logger.warning("Could not check step cancellation; will retry", extra={"workload": name}, exc_info=True)
+                continue
+            finally:
+                progress()
+            if step is not None and step.id == labels[JOB_STEP_ID_LABEL] and step.status == HelixJobStatus.CANCELLED:
+                yield name
 
     def check_job_persistent_storage_cleanup_allowed(
         self, job: str, step_name: str, workspace: str, attempt_id: str | None = None

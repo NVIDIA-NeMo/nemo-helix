@@ -6,7 +6,6 @@ from typing import List, Optional, Type
 
 import yaml
 from fastapi import HTTPException, Request, status
-from nemoguardrails import LLMRails
 from nhx.guardrails.app.constants import X_MODEL_AUTHORIZATION_HEADER
 from nhx.guardrails.app.handlers.utils import (
     get_main_model_from_config,
@@ -15,6 +14,7 @@ from nhx.guardrails.app.handlers.utils import (
     get_model_config_object,
     get_rail_types_from_config,
     get_rails_name_from_config,
+    run_check_async,
     run_generate_async,
     set_main_model_merged_custom_headers_into_context,
     to_internal_rails_config,
@@ -28,6 +28,7 @@ from nhx.guardrails.app.schemas.utils.request_converters import convert_check_re
 from nhx.guardrails.app.schemas.utils.response_transformers import (
     create_guardrail_check_response_from_generation_response,
 )
+from nhx.guardrails.app.services.rails.engine import RailsEngine, create_rails_engine, retire_rails_engine, uses_iorails
 from nhx.guardrails.app.services.rails.service import RailsService
 from nhx.guardrails.app.services.utils import normalize_config_ids
 from nhx.guardrails.app.utils.config_utils import configure_rails_config
@@ -64,6 +65,8 @@ class CheckRequestHandler:
     ):
         self.request_body = request_body
         self.llm_rails = None
+        # True when this request built its own engine (inline config) and must shut it down.
+        self._inline_engine = False
         self.response_model = response_model
         self.request = request
         self.body = None
@@ -78,6 +81,18 @@ class CheckRequestHandler:
         self.current_activated_rails_logging_options = None
 
     async def handle_request(self):
+        try:
+            return await self._handle_request()
+        finally:
+            self._retire_inline_engine()
+
+    def _retire_inline_engine(self) -> None:
+        """Shut down the engine an inline config built for this request; registry engines are shared."""
+        if self._inline_engine and self.llm_rails is not None:
+            retire_rails_engine(self.llm_rails)
+        self._inline_engine = False
+
+    async def _handle_request(self):
         self.set_api_request_headers()
         self.ensure_request_id()
         await self.set_custom_headers()
@@ -164,12 +179,14 @@ class CheckRequestHandler:
             self.body = convert_check_request_to_guardrails(self.request_body)
 
             try:
-                self.llm_rails = LLMRails(to_internal_rails_config(rails_config))
+                self.llm_rails = create_rails_engine(to_internal_rails_config(rails_config))
             except Exception as e:
                 log.error(
                     f"Failed to instantiate LLMRails instance for config {config_ids} and model {main_model_name}"
                 )
                 raise e
+
+            self._inline_engine = True
 
             # if we get here then the `enable_rails_exceptions` is set to True
             # so we must control it in the `handle_normal` method
@@ -196,12 +213,22 @@ class CheckRequestHandler:
         try:
             options = self.body.options.model_dump(exclude_unset=True)
 
-            res = await run_generate_async(
-                self.llm_rails,
-                messages=messages,
-                options=options,
-                state=self.body.state,
-            )
+            if uses_iorails(self.llm_rails):
+                # IORails' generate_async always calls the main model and judges its reply, not the
+                # supplied messages. A check must judge the supplied messages as they are.
+                res = await run_check_async(
+                    self.llm_rails,
+                    messages=messages,
+                    rail_types=get_rail_types_from_config(self.llm_rails.config)["rails"],
+                    state=self.body.state,
+                )
+            else:
+                res = await run_generate_async(
+                    self.llm_rails,
+                    messages=messages,
+                    options=options,
+                    state=self.body.state,
+                )
 
             self.llm_rails.config.enable_rails_exceptions = self.current_rails_exceptions
         except Exception as e:
@@ -223,7 +250,7 @@ class CheckRequestHandler:
 
         return result
 
-    async def instantiate_llm_rails(self, config_ids, token, enable_rails_exceptions: bool = True) -> LLMRails:
+    async def instantiate_llm_rails(self, config_ids, token, enable_rails_exceptions: bool = True) -> RailsEngine:
         # get the main model name
         model_name = self.request_body.model
 

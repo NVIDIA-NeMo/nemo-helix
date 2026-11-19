@@ -111,12 +111,14 @@ auth:
     introspection_client_id:
     # Environment variable containing the client secret used to authenticate RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens is enabled. Store only the environment variable name here; the secret value must come from the process environment.
     introspection_client_secret_env_var:
-    # Fall back to the OIDC UserInfo endpoint when a bearer token is not a JWT (some IdPs issue opaque access tokens and don't support introspecting them via RFC 7662). Requires userinfo_endpoint to be set or discoverable. Takes priority over introspect_opaque_tokens when both are enabled, except when oidc.audience is also configured: UserInfo responses can't be checked against an audience, so validation falls back to introspect_opaque_tokens (if enabled) instead. The token's original OAuth scope grant also can't be recovered from UserInfo responses, so it goes unenforced for tokens resolved this way (RBAC/permissions still apply). Enable only for IdPs that don't issue narrower per-token scopes in practice. | default: False
+    # Removed; true is rejected at config load because UserInfo responses have no 'aud' claim. Use introspect_opaque_tokens for opaque access tokens. | default: False
     resolve_opaque_tokens_via_userinfo: false
-    # Override OIDC UserInfo endpoint (defaults to discovery). Only used when resolve_opaque_tokens_via_userinfo is enabled.
+    # UserInfo endpoint advertised by auth discovery. Defaults to the identity provider's value. Not used for token validation.
     userinfo_endpoint:
-    # Expected token audience. When set, tokens must include this value in their 'aud' claim. When not set, audience validation is skipped entirely.
+    # Expected token audience. Required when OIDC is enabled; tokens must include this value in their 'aud' claim.
     audience:
+    # Extra audiences accepted alongside audience, for identity providers that set 'aud' to the issuing client's ID so tokens from several clients carry different values. A token is accepted when its 'aud' claim includes audience or any of these.
+    additional_audiences: []
     # JWT claim containing the principal email (maps to X-NHX-Principal-Email). Set explicitly for your IdP. | default: 'email'
     email_claim: email
     # JWT claim containing user groups. Supports 'groups' (standard) and 'cognito:groups' (AWS Cognito). | default: 'groups'
@@ -237,6 +239,10 @@ files:
   file_lock_ttl_seconds: 300
   # Maximum concurrent downloads during cache warming | default: 3
   cache_warming_max_concurrent: 3
+  # Seconds to reuse S3 object metadata before checking freshness with HEAD. 0 checks every request. API mutations invalidate this process's metadata immediately; direct bucket changes and writes through other processes may remain stale until expiry. | default: 10.0
+  s3_metadata_cache_ttl_seconds: 10.0
+  # Maximum completed versions retained per S3 object in the local content cache. Superseded versions are pruned after a successful cache write. | default: 2
+  s3_cache_max_versions_per_object: 2
   # Maximum Hugging Face request attempts for transient failures. | default: 4
   hf_retry_attempts: 4
   # Initial Hugging Face retry delay in seconds before exponential backoff. | default: 0.5
@@ -519,6 +525,8 @@ jobs:
     maximum_pause_ttl_seconds: 2592000
     # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
     failed_storage_ttl_seconds: 14400
+    # Grace before the controller abandons a CREATION_PENDING Job; accepted deletion does not wait. | default: 900
+    creation_timeout_seconds: 900
     # How often the jobs controller checks paused, failed and cancelled jobs for storage to reclaim. Storage of deleted jobs is reclaimed on every reconcile tick instead. | default: 300
     retention_interval_seconds: 300
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False
@@ -566,8 +574,10 @@ models:
         default_nimservice_image_tag: latest
         # Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names. | default: 'docker.io/vllm/vllm-openai'
         default_vllm_image: docker.io/vllm/vllm-openai
-        # default: 'v0.22.1'
-        default_vllm_image_tag: v0.22.1
+        # default: 'v0.32.0'
+        default_vllm_image_tag: v0.32.0
+        # --max-lora-rank for vLLM deployments with LoRA enabled, unless additional_args sets it. vLLM refuses adapters above this rank; set it to the highest rank you train. | default: 32
+        default_vllm_max_lora_rank: 32
         # default: 1000
         default_user_id: 1000
         # default: 2000
@@ -929,7 +939,7 @@ builder:
   control_profile: build-control
   # The one the push step runs on, the only step that holds the registry credential and signing key. | default: 'build-push'
   push_profile: build-push
-  # Most build jobs running at once, across every workspace. Set, every submit returns its images `queued`, and the `builder-queue` controller starts each job, oldest first, while fewer than this many run. Size it to the build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null skips the queue and creates every job as it is submitted; jobs the ResourceQuota then rejects fail without a retry.
+  # Deprecated and ignored since 0.11: Jobs caps builds now. Set the build profiles' `max_active_jobs` instead, which the Helm chart's `builder.maxConcurrentBuilds` does.
   max_concurrent_builds:
   # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
   registry:

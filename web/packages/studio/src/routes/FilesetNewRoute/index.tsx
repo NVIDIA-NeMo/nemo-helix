@@ -7,20 +7,21 @@ import {
   type DatasetQualityReport,
 } from '@nemo/common/src/utils/datasetQuality';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { type FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Button, SidePanel, Stack } from '@nvidia/foundations-react-core';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { CustomFilesetForm } from '@studio/routes/FilesetNewRoute/CustomFilesetForm';
 import {
   DatasetCreateFilesetFormSchema,
-  DatasetFormFields,
+  type DatasetFormFields,
 } from '@studio/routes/FilesetNewRoute/types';
 import { useCreateFileset } from '@studio/routes/FilesetNewRoute/useCreateFileset';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { isHuggingFaceUrl, isNgcUrl } from '@studio/util/storageConfigFromUrl';
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 

@@ -176,7 +176,7 @@ def test_snapshot_export_scopes_authentication_to_each_subject(
     monkeypatch.setattr(artifact.export, "export_workspaces", fake_export)
     monkeypatch.setattr(artifact, "build_export_manifest", fake_manifest)
     monkeypatch.setattr(artifact, "fetch_platform_info", lambda base_url: None)
-    monkeypatch.setattr(artifact.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(artifact, "run", lambda *args, **kwargs: None)
 
     artifact.snapshot_export(
         [_glamr_subject(base_url=source_url), other, plain, duplicate_workspace],

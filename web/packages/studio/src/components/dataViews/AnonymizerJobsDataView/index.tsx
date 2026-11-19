@@ -8,6 +8,7 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -27,10 +28,9 @@ import type {
   RunJobsListFilter as AnonymizerJobsListFilter,
   RunJobsSortField as AnonymizerJobsSortField,
 } from '@nemo/sdk/generated/anonymizer/schema';
-import { Banner, Button, Text } from '@nvidia/foundations-react-core';
+import { Button, Text } from '@nvidia/foundations-react-core';
 import { AnonymizerJobActionsMenu } from '@studio/components/AnonymizerJobActionsMenu';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
-import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
+import { getDeleteJobsDescription, STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAnonymizerJobRoute, getNewAnonymizerRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
@@ -52,7 +52,6 @@ export const AnonymizerJobsDataView: FC = () => {
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<AnonymizerJobWithId[]>([]);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
 
   const deleteJobMutation = useAnonymizerDeleteRunJob({
     mutation: {
@@ -63,28 +62,29 @@ export const AnonymizerJobsDataView: FC = () => {
     },
   });
 
-  const handleDeleteJobs = async (jobsToDelete: AnonymizerJobWithId[]) => {
-    const invalid = jobsToDelete.filter((job) => !job.workspace || !job.name);
+  const handleDeleteJobs = async () => {
+    const invalid = deleteJobs.filter((job) => !job.workspace || !job.name);
     if (invalid.length > 0) {
       throw new Error(
         `Cannot delete ${invalid.length} job${invalid.length !== 1 ? 's' : ''}: missing workspace or name.`
       );
     }
     const results = await Promise.allSettled(
-      jobsToDelete.map((job) =>
+      deleteJobs.map((job) =>
         deleteJobMutation.mutateAsync({ workspace: job.workspace!, name: job.name })
       )
     );
-    const failed = jobsToDelete.filter((_, i) => results[i].status === 'rejected');
+    const failed = deleteJobs.filter((_, i) => results[i].status === 'rejected');
     if (failed.length > 0) {
       // Keep only the failed jobs selected so a retry doesn't re-delete succeeded ones.
       dataViewState.rowSelection.set(Object.fromEntries(failed.map((job) => [job.id, true])));
       throw new Error(
-        `Failed to delete ${failed.length} of ${jobsToDelete.length} job${
-          jobsToDelete.length !== 1 ? 's' : ''
+        `Failed to delete ${failed.length} of ${deleteJobs.length} job${
+          deleteJobs.length !== 1 ? 's' : ''
         }: ${failed.map((job) => `"${job.name}"`).join(', ')}`
       );
     }
+    return true;
   };
 
   const {
@@ -182,13 +182,7 @@ export const AnonymizerJobsDataView: FC = () => {
         rowActionsColumn({
           size: 70,
           enableResizing: false,
-          cell: ({ row }) => (
-            <AnonymizerJobActionsMenu
-              job={row.original}
-              includeViewDetails
-              onCancelError={setCancelError}
-            />
-          ),
+          cell: ({ row }) => <AnonymizerJobActionsMenu job={row.original} includeViewDetails />,
         }),
       ],
       []
@@ -198,12 +192,6 @@ export const AnonymizerJobsDataView: FC = () => {
 
   return (
     <>
-      {cancelError && (
-        <Banner kind="inline" status="error">
-          {cancelError}
-        </Banner>
-      )}
-
       <StudioDataView<AnonymizerJobWithId>
         dataViewState={dataViewState}
         searchField="name"
@@ -268,16 +256,19 @@ export const AnonymizerJobsDataView: FC = () => {
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteJobs}
-        open={deleteJobs.length > 0}
-        onDelete={handleDeleteJobs}
-        title={(count) => `Delete ${count} Anonymizer Job${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteJobs([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteJobs.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="Anonymizer job"
+          ids={deleteJobs.map((job) => job.name)}
+          description={getDeleteJobsDescription(deleteJobs.length)}
+          onDelete={handleDeleteJobs}
+          onClose={() => {
+            setDeleteJobs([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
     </>
   );
 };

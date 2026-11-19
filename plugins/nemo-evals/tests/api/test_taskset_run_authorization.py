@@ -42,8 +42,6 @@ def test_taskset_run_real_authorization_denies_create_service_and_source(tmp_pat
         tmp_dir=tmp_path,
         workspaces=["destination", "source"],
         projects=[],
-        auth_bundle_cache_seconds=0,
-        auth_policy_data_refresh_interval=3600,
         access_log=True,
     ) as ctx:
         admin = {"X-NHX-Principal-Id": "service:integration-test"}
@@ -53,11 +51,19 @@ def test_taskset_run_real_authorization_denies_create_service_and_source(tmp_pat
         direct_service = ctx.test_client.post(PATH, json=request_body, headers=admin)
         assert direct_service.status_code == 403, direct_service.text
         grant = ctx.test_client.post(
-            "/apis/auth/v2/iam/role-bindings?wait_role_propagation=false",
+            "/apis/auth/v2/iam/role-bindings",
             headers=admin,
             json={"principal": user["X-NHX-Principal-Id"], "workspace": "destination", "role": "Owner"},
         )
         assert grant.status_code == 200, grant.text
+        # The source denial below only means something once the PDP sees this grant.
+        role = ctx.test_client.post(
+            "/apis/auth/v2/authz/has_role",
+            headers=admin,
+            json={"input": {"principal_id": user["X-NHX-Principal-Id"], "workspace": "destination", "role": "Owner"}},
+        )
+        assert role.status_code == 200, role.text
+        assert role.json()["result"]["has_role"] is True, role.text
         request_body["spec"]["tasks"] = "source/suite"
         # The resolver's service identity has the wildcard grant; the caller's source
         # check must still reject the same cross-workspace read before any write.

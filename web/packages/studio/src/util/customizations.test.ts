@@ -568,6 +568,9 @@ describe('getGrpoRunConfig', () => {
     expect(getGrpoRunConfig(spec({ finetuning_type: 'lora' })).trainingBackend).toBe(
       'Automodel · LoRA'
     );
+    expect(getGrpoRunConfig(spec({ finetuning_type: 'lora_merged' })).trainingBackend).toBe(
+      'Automodel · LoRA (merged)'
+    );
   });
 
   it('spells out the parallelism plan, defaulting the unset degrees to 1', () => {

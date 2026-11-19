@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import {
   useSafeSynthesizerDownloadJobResultSummary as useDownloadJobResultSummaryV1beta1GenerateJobsJobIdResultsSummaryDownloadGet,
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
@@ -20,7 +20,7 @@ import { SAFE_SYNTHESIZER_POLLING_INTERVAL_MS } from '@studio/routes/SafeSynthes
 import { getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful, isJobTerminated } from '@studio/util/safeSynthesizer';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 
 export const GenerateJobDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

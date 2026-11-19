@@ -287,6 +287,10 @@ class PathRule:
     Within a rule, ``callers`` are OR'd and ``permissions`` are AND'd. Multiple rules on
     one endpoint are OR'd (any satisfied rule allows access).
 
+    Contribution serialization maps permissions to the direct actor and, for
+    user-facing routes, the delegated subject. Service-only rules have no
+    delegated branch. Policy loading consumes these explicit contracts unchanged.
+
     ``method`` and ``path`` are unknown at decoration time and are filled in during
     derivation once the route is mounted (see ``authz_discovery``).
     """
@@ -443,13 +447,23 @@ class AuthzContribution:
     """Optional explicit role → permission grants (merged with defaults)."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize for :func:`nhx.common.auth.authz_merge.merge_authz_contributions`."""
+        """Compile PathRule-derived requirements into explicit policy contracts.
+
+        User-facing routes require actor grants directly and subject grants under
+        delegation. Service-only routes have no delegated branch. This is the
+        only conversion from the PathRule permissions shorthand.
+        """
         return {
             "permissions": dict(self.permissions),
             "endpoints": {
                 path: {
                     method: {
-                        "permissions": spec.permissions,
+                        "direct": {"actor_perms": list(spec.permissions)},
+                        **(
+                            {"delegated": {"actor_perms": [], "subject_perms": list(spec.permissions)}}
+                            if "service_principal" not in (spec.callers or []) or "principal" in (spec.callers or [])
+                            else {}
+                        ),
                         **({"scopes": spec.scopes} if spec.scopes is not None else {}),
                         **({"callers": spec.callers} if spec.callers is not None else {}),
                         **({"deny": True} if spec.deny else {}),

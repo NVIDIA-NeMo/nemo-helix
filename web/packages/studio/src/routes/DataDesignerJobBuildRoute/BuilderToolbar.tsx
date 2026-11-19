@@ -3,7 +3,7 @@
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
-import { Stop, IconDocument, ChartTree, Pencil, HandPoint } from '@nemo/icons/icons';
+import { Stop, WindowCode, ChartTree, Pencil, LineSegment } from '@nemo/icons/icons';
 import { Button, Flex, SegmentedControl, Tag, Text } from '@nvidia/foundations-react-core';
 import type { StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
@@ -53,7 +53,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
       className="shrink-0 border-b border-base bg-surface-base px-density-2xl py-density-md"
     >
       <Flex align="center" gap="density-sm" className="min-w-0">
-        <IconDocument size="20" className="shrink-0 text-secondary" aria-hidden />
+        <WindowCode size="20" className="shrink-0 text-secondary" aria-hidden />
         {isEditingName ? (
           <ControlledTextInput
             autoFocus
@@ -97,7 +97,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
           onValueChange={(value) => onViewModeChange(value as BuilderViewMode)}
           items={[
             { value: 'list', children: <ChartTree /> },
-            { value: 'canvas', children: <HandPoint /> },
+            { value: 'canvas', children: <LineSegment /> },
           ]}
         />
         <Flex align="center" gap="density-sm">

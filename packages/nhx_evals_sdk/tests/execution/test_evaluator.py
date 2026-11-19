@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import builtins
-import importlib
+import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any, cast
@@ -23,6 +22,28 @@ from nhx_evals_sdk.values.results import (
 )
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
+
+# Loads the evaluator's dependencies normally, then re-executes only ``evaluator.py`` with
+# ``nemo_helix`` and ``nemo_evals`` unimportable.
+_IMPORT_EVALUATOR_WITHOUT_NEMO_HELIX_PROBE = """
+import builtins, importlib, sys
+
+import nhx_evals_sdk.execution.evaluator
+
+sys.modules.pop("nhx_evals_sdk.execution.evaluator")
+real_import = builtins.__import__
+
+def import_without_nemo_helix(name, *args, **kwargs):
+    if name == "nemo_helix" or name.startswith("nemo_helix."):
+        raise ModuleNotFoundError("No module named 'nemo_helix'", name="nemo_helix")
+    if name == "nemo_evals" or name.startswith("nemo_evals."):
+        raise ModuleNotFoundError("No module named 'nemo_evals'", name="nemo_evals")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_nemo_helix
+imported = importlib.import_module("nhx_evals_sdk.execution.evaluator")
+assert imported.Evaluator is not None
+"""
 
 
 class _CustomMetric:
@@ -505,29 +526,16 @@ class TestEvaluator:
 
         assert not hasattr(evaluator_module, "Evaluatorv2")
 
-    def test_evaluator_module_import_does_not_require_nemo_helix(self, mocker: MockerFixture):
-        evaluator_module = sys.modules.pop("nhx_evals_sdk.execution.evaluator", None)
-        real_import = builtins.__import__
-
-        def import_without_nemo_helix(name: str, *args: Any, **kwargs: Any) -> object:
-            if name == "nemo_helix" or name.startswith("nemo_helix."):
-                raise ModuleNotFoundError("No module named 'nemo_helix'", name="nemo_helix")
-            if name == "nemo_evals" or name.startswith("nemo_evals."):
-                raise ModuleNotFoundError("No module named 'nemo_evals'", name="nemo_evals")
-            return real_import(name, *args, **kwargs)
-
-        mocker.patch("builtins.__import__", side_effect=import_without_nemo_helix)
-        try:
-            imported = importlib.import_module("nhx_evals_sdk.execution.evaluator")
-            assert imported.Evaluator is not None
-        finally:
-            if evaluator_module is not None:
-                sys.modules["nhx_evals_sdk.execution.evaluator"] = evaluator_module
-                # import_module also rebinds `evaluator` on the parent package, and that binding is
-                # what monkeypatch's string form resolves. Leaving the duplicate there sends later
-                # patches to a module object nobody holds a reference to, so the patch silently
-                # misses and the real call runs.
-                setattr(sys.modules["nhx_evals_sdk.execution"], "evaluator", evaluator_module)
+    def test_evaluator_module_import_does_not_require_nemo_helix(self):
+        # Out of process: blocking an import means replacing ``builtins.__import__``, which every
+        # thread in this test process shares.
+        proc = subprocess.run(
+            [sys.executable, "-c", _IMPORT_EVALUATOR_WITHOUT_NEMO_HELIX_PROBE],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr
 
     def test_run_sync_uses_async_backend_through_run_bridge(self):
         expected = _empty_benchmark_result()

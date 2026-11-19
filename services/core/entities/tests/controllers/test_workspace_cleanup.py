@@ -50,10 +50,10 @@ class _MockAsyncPaginatedResponse:
 
 
 def _make_mock_files_client(filesets: list | None = None) -> AsyncMock:
-    """Build a mock AsyncFilesClient with list_filesets/delete_fileset."""
+    """Build a mock AsyncFilesClient with list_filesets/delete_fileset_by_id."""
     mock_files = AsyncMock()
     mock_files.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse(filesets or []))
-    mock_files.delete_fileset = AsyncMock()
+    mock_files.delete_fileset_by_id = AsyncMock()
     return mock_files
 
 
@@ -81,6 +81,7 @@ def _make_jobs_client(jobs: list | None = None) -> MagicMock:
     jobs_client.list_jobs = AsyncMock(return_value=_MockAsyncPaginatedResponse(jobs or []))
     jobs_client.cancel_job = AsyncMock()
     jobs_client.delete_job = AsyncMock()
+    jobs_client.get_job = AsyncMock(side_effect=_not_found())
     jobs_client.get_job_status = AsyncMock(return_value=_make_response(_make_job_status("cancelled")))
     return jobs_client
 
@@ -137,6 +138,8 @@ def _patch_clients(jobs_client: MagicMock, files_client: MagicMock, models_clien
 def _make_job(name: str, status: str = "completed") -> MagicMock:
     job = MagicMock()
     job.name = name
+    job.id = f"job-id-{name}"
+    job.attempt_id = "attempt-original"
     job.status = status
     return job
 
@@ -144,6 +147,7 @@ def _make_job(name: str, status: str = "completed") -> MagicMock:
 def _named(name: str) -> MagicMock:
     item = MagicMock()
     item.name = name
+    item.id = f"allocation-{name}"
     return item
 
 
@@ -216,6 +220,25 @@ class TestWorkspaceCleanupStep:
         controller.step()
         assert not controller.is_healthy
 
+    def test_failed_step_pins_unhealthy_until_the_next_successful_step_clears_it(self):
+        repo = AsyncMock()
+        failures = {"count": 0}
+
+        def _list_workspaces(*args, **kwargs):
+            if failures["count"] == 0:
+                failures["count"] += 1
+                raise Exception("db error")
+            return ([], None)
+
+        repo.list_workspaces.side_effect = _list_workspaces
+        controller = _make_controller(workspace_repo=repo)
+
+        controller.step()
+        assert not controller.is_healthy
+
+        controller.step()
+        assert controller.is_healthy
+
 
 class TestWorkspaceCleanupAsyncStep:
     @pytest.mark.asyncio
@@ -273,7 +296,7 @@ class TestWorkspaceCleanupAsyncStep:
         models_client.delete_adapter = AsyncMock(side_effect=lambda **_: call_order.append("adapter"))
         models_client.delete_model = AsyncMock(side_effect=lambda **_: call_order.append("model"))
         mock_files = _make_mock_files_client([fileset])
-        mock_files.delete_fileset = AsyncMock(side_effect=lambda **_: call_order.append("fileset"))
+        mock_files.delete_fileset_by_id = AsyncMock(side_effect=lambda **_: call_order.append("fileset"))
         controller = _make_controller(workspace_repo=repo)
 
         with _patch_clients(_make_jobs_client([]), mock_files, models_client):
@@ -466,7 +489,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             renewal_release.set()
@@ -517,7 +540,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -559,7 +582,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -613,7 +636,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -718,20 +741,22 @@ class TestWorkspaceCleanupAsyncStep:
             attempted = models_client.delete_model
         else:
             files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([first, second]))
-            files_client.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
-            attempted = files_client.delete_fileset
+            files_client.delete_fileset_by_id = AsyncMock(side_effect=[Exception("fail"), None])
+            attempted = files_client.delete_fileset_by_id
 
         controller = _make_controller(workspace_repo=repo)
         with _patch_clients(_make_jobs_client([]), files_client, models_client):
             await controller._async_step()
 
-        assert [call.kwargs["name"] for call in attempted.await_args_list] == ["first", "second"]
+        assert [call.kwargs["fileset_id" if kind == "fileset" else "name"] for call in attempted.await_args_list] == (
+            [first.id, second.id] if kind == "fileset" else ["first", "second"]
+        )
         if kind == "adapter":
             models_client.delete_model.assert_awaited_once_with(name="model", workspace="test-workspace")
         if kind == "model":
             models_client.delete_adapter.assert_awaited_once_with(name="adapter", workspace="test-workspace")
         if kind != "fileset":
-            files_client.delete_fileset.assert_not_called()
+            files_client.delete_fileset_by_id.assert_not_called()
         repo.delete_workspace_if_claimed.assert_not_called()
         failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
         assert failure["name"] == workspace.name
@@ -762,7 +787,7 @@ class TestWorkspaceCleanupAsyncStep:
             models_client.delete_model = AsyncMock(side_effect=_not_found())
         else:
             files_client.list_filesets = AsyncMock(return_value=_MockAsyncPaginatedResponse([item]))
-            files_client.delete_fileset = AsyncMock(side_effect=_not_found())
+            files_client.delete_fileset_by_id = AsyncMock(side_effect=_not_found())
 
         controller = _make_controller(workspace_repo=repo)
         with _patch_clients(_make_jobs_client([]), files_client, models_client):
@@ -849,6 +874,7 @@ class TestWorkspaceCleanupJobs:
         workspace = _make_workspace()
         running_job = MagicMock()
         running_job.name = "running-job"
+        running_job.id = "job-id-running-job"
         running_job.status = "active"
 
         jobs_client = _make_jobs_client([running_job])
@@ -858,11 +884,11 @@ class TestWorkspaceCleanupJobs:
             await controller._cleanup_jobs(workspace)
 
         jobs_client.cancel_job.assert_awaited_once_with(
-            name="running-job",
+            name="job-id-running-job",
             workspace="test-workspace",
         )
         jobs_client.delete_job.assert_awaited_once_with(
-            name="running-job",
+            name="job-id-running-job",
             workspace="test-workspace",
         )
 
@@ -916,7 +942,7 @@ class TestWorkspaceCleanupJobs:
             with pytest.raises(WorkspaceJobCleanupError):
                 await controller._cleanup_jobs(workspace)
 
-        jobs_client.cancel_job.assert_awaited_once_with(name="still-running-job", workspace="test-workspace")
+        jobs_client.cancel_job.assert_awaited_once_with(name="job-id-still-running-job", workspace="test-workspace")
         jobs_client.delete_job.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1073,8 +1099,8 @@ class TestWorkspaceCleanupFilesets:
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
             await controller._cleanup_filesets(workspace)
 
-        mock_files.delete_fileset.assert_awaited_once_with(
-            name="test-fileset",
+        mock_files.delete_fileset_by_id.assert_awaited_once_with(
+            fileset_id=fileset.id,
             workspace="test-workspace",
         )
 
@@ -1083,18 +1109,19 @@ class TestWorkspaceCleanupFilesets:
         workspace = _make_workspace()
         fs1 = MagicMock()
         fs1.name = "fs1"
+        fs1.id = "allocation-fs1"
         fs2 = MagicMock()
         fs2.name = "fs2"
 
         mock_files = _make_mock_files_client([fs1, fs2])
-        mock_files.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
+        mock_files.delete_fileset_by_id = AsyncMock(side_effect=[Exception("fail"), None])
         controller = _make_controller()
 
         with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
-            with pytest.raises(WorkspaceResourceCleanupError, match="fs1: fail"):
+            with pytest.raises(WorkspaceResourceCleanupError, match="allocation-fs1: fail"):
                 await controller._cleanup_filesets(workspace)
 
-        assert mock_files.delete_fileset.await_count == 2
+        assert mock_files.delete_fileset_by_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_fileset_conflict_is_stored_on_the_failed_workspace(self):
@@ -1106,8 +1133,9 @@ class TestWorkspaceCleanupFilesets:
         repo.fail_workspace_deletion_if_claimed.return_value = True
         fileset = MagicMock()
         fileset.name = "shared-weights"
+        fileset.id = "allocation-shared-weights"
         files_client = _make_mock_files_client([fileset])
-        files_client.delete_fileset = AsyncMock(
+        files_client.delete_fileset_by_id = AsyncMock(
             side_effect=Exception(
                 "HTTP 409: Cannot delete fileset 'team-a/shared-weights' because 1 model entity reference(s) still use it"
             )
@@ -1120,7 +1148,7 @@ class TestWorkspaceCleanupFilesets:
         failure = repo.fail_workspace_deletion_if_claimed.await_args.kwargs
         assert failure["name"] == workspace.name
         assert failure["expected_updated_at"] == claimed.updated_at
-        assert "shared-weights:" in failure["deletion_error"]
+        assert "allocation-shared-weights:" in failure["deletion_error"]
         assert "HTTP 409:" in failure["deletion_error"]
         assert "1 model entity reference" in failure["deletion_error"]
         repo.delete_workspace_if_claimed.assert_not_called()
@@ -1138,8 +1166,8 @@ class TestJobCancellationBranches:
         with _patch_jobs_client(jobs_client):
             await controller._cleanup_jobs(workspace)
 
-        jobs_client.cancel_job.assert_awaited_once_with(name="pending-job", workspace="test-workspace")
-        jobs_client.delete_job.assert_awaited_once_with(name="pending-job", workspace="test-workspace")
+        jobs_client.cancel_job.assert_awaited_once_with(name="job-id-pending-job", workspace="test-workspace")
+        jobs_client.delete_job.assert_awaited_once_with(name="job-id-pending-job", workspace="test-workspace")
 
     @pytest.mark.asyncio
     async def test_cancels_created_jobs(self):
@@ -1179,10 +1207,11 @@ class TestJobCancellationBranches:
 
         controller = _make_controller()
         with _patch_jobs_client(jobs_client):
-            await controller._cleanup_jobs(workspace)
+            with pytest.raises(WorkspaceJobCleanupError, match="cancel failed"):
+                await controller._cleanup_jobs(workspace)
 
         jobs_client.cancel_job.assert_awaited_once()
-        jobs_client.delete_job.assert_awaited_once_with(name="flaky-job", workspace="test-workspace")
+        jobs_client.delete_job.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_mixed_statuses(self):
@@ -1199,5 +1228,40 @@ class TestJobCancellationBranches:
             await controller._cleanup_jobs(workspace)
 
         cancel_calls = [c.kwargs["name"] for c in jobs_client.cancel_job.call_args_list]
-        assert set(cancel_calls) == {"active-job", "pending-job"}
+        assert set(cancel_calls) == {"job-id-active-job", "job-id-pending-job"}
         assert jobs_client.delete_job.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,has_attempt",
+    [
+        ("completed", True),
+        ("created", False),
+        ("creation_pending", False),
+        ("creation_pending", True),
+        ("deletion_pending", False),
+    ],
+)
+async def test_job_cleanup_waits_for_actual_absence_and_keeps_the_workspace_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, status: str, has_attempt: bool
+):
+    from nhx.core.entities.controllers import workspace_cleanup as module
+
+    monkeypatch.setattr(module, "_JOB_TERMINAL_WAIT_TIMEOUT_SECONDS", 0)
+    job = _make_job("same-name", status=status)
+    job.attempt_id = "attempt-original" if has_attempt else None
+    jobs = _make_jobs_client([job])
+    jobs.get_job.side_effect = None
+    jobs.get_job.return_value = _make_response(_make_job("same-name", status="deletion_pending"))
+    controller = _make_controller()
+    with _patch_jobs_client(jobs):
+        with pytest.raises(WorkspaceJobCleanupError, match="Timed out waiting"):
+            await controller._cleanup_jobs(_make_workspace())
+    jobs.cancel_job.assert_not_awaited()
+    assert jobs.delete_job.await_count == (0 if status == "deletion_pending" else 1)
+    jobs.get_job.assert_awaited_once_with(name=job.id, workspace="test-workspace")
+    # A restart observes the remaining owner; absence is the completion signal.
+    jobs.get_job.side_effect = _not_found()
+    with _patch_jobs_client(jobs):
+        await controller._cleanup_jobs(_make_workspace())

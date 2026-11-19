@@ -6,11 +6,14 @@ import { UploadModalProvider } from '@nemo/common/src/components/UploadModal/Con
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { uploadModalInitialState } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { InlinePickerSlotProvider } from '@nemo/common/src/components/UploadModal/InlinePickerSlot';
-import { SubmitUploadType, UploadModalProps } from '@nemo/common/src/components/UploadModal/types';
+import type {
+  SubmitUploadType,
+  UploadModalProps,
+} from '@nemo/common/src/components/UploadModal/types';
 import { UploadPickerBody } from '@nemo/common/src/components/UploadModal/UploadPickerBody';
 import { useUploadSubmit } from '@nemo/common/src/components/UploadModal/useUploadSubmit';
 import { Flex, Stack } from '@nvidia/foundations-react-core';
-import { FC, MouseEvent, useCallback, useEffect, useMemo, useRef } from 'react';
+import { type FC, type MouseEvent, useCallback, useEffect, useMemo, useRef } from 'react';
 
 type InlineUploadPickerProps = Pick<
   UploadModalProps,

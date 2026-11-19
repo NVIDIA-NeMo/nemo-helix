@@ -71,6 +71,34 @@ def canonical_egress_target(target: str) -> str:
         return target.strip().rstrip(".").lower()
 
 
+def egress_target_covers(trusted: str, target: str) -> bool:
+    """Whether every destination ``target`` admits is also admitted by ``trusted``.
+
+    - Same target after canonicalization -> covered.
+    - Address or CIDR -> covered by a CIDR of the same family that contains it.
+    - Hostname or ``*.`` wildcard -> covered by a ``*.`` wildcard it is a subdomain of, at any depth,
+      as the sidecar matches wildcards. The bare domain is not: ``*.example.com`` doesn't cover
+      ``example.com``.
+    - Anything else, such as a hostname under an address, is not covered.
+    """
+    trusted, target = canonical_egress_target(trusted), canonical_egress_target(target)
+    if trusted == target:
+        return True
+    try:
+        trusted_network = ipaddress.ip_network(trusted)
+    except ValueError:
+        return trusted.startswith("*.") and target.endswith(trusted[1:])
+    try:
+        target_network = ipaddress.ip_network(target)
+    except ValueError:
+        return False
+    if isinstance(target_network, ipaddress.IPv4Network) and isinstance(trusted_network, ipaddress.IPv4Network):
+        return target_network.subnet_of(trusted_network)
+    if isinstance(target_network, ipaddress.IPv6Network) and isinstance(trusted_network, ipaddress.IPv6Network):
+        return target_network.subnet_of(trusted_network)
+    return False
+
+
 async def verify_applied_egress(
     sandbox: Any,
     expected: EgressPolicy,

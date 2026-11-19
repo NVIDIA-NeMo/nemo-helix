@@ -154,25 +154,19 @@ def test_backend_registry_multiple_enabled_backends_raises_error(mock_client):
 
 def test_deployments_plugin_missing_package_raises_guidance(mock_client):
     """Missing nemo-deployments-plugin should surface install guidance."""
-    import builtins
-
     from nhx.core.models.controllers.backends.registry import _resolve_backend_class, backend_classes
 
-    real_import = builtins.__import__
-
-    def mock_import(name: str, *args: object, **kwargs: object) -> object:
-        if name == "nhx.core.models.controllers.backends.deployments_plugin.backend":
-            raise ImportError("No module named 'nemo_deployments_plugin'")
-        return real_import(name, *args, **kwargs)
+    missing_plugin = ImportError("No module named 'nemo_deployments_plugin'")
+    registry_module = "nhx.core.models.controllers.backends.registry"
 
     with (
-        patch("builtins.__import__", side_effect=mock_import),
+        patch(f"{registry_module}._import_deployments_plugin_backend", side_effect=missing_plugin),
         pytest.raises(ImportError, match=r'pip install "nemo-helix\[all\]"'),
     ):
         _resolve_backend_class("deployments_plugin", backend_classes)
 
     with (
-        patch("builtins.__import__", side_effect=mock_import),
+        patch(f"{registry_module}._import_deployments_plugin_backend", side_effect=missing_plugin),
         pytest.raises(ImportError, match=r'pip install "nemo-helix\[all\]"'),
     ):
         BackendRegistry.from_config(

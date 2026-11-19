@@ -10,7 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
-import { flagDefinitions, FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
+import { flagDefinitions, type FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import { readFlagOverrides } from '@studio/constants/featureFlags/overrides';
 import { parseFlags } from '@studio/constants/featureFlags/utils';
 

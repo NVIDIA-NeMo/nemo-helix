@@ -6,8 +6,8 @@
 import logging
 import time
 
-import httpx
 from fastapi import APIRouter
+from httpx import AsyncClient
 from nhx.common.auth.discovery import (
     AuthDiscoveryResponse,
     ConfidentialOidcAdvertisedClient,
@@ -50,7 +50,7 @@ async def _fetch_idp_discovery(issuer: str, cache_ttl: int) -> dict[str, object]
         return _idp_discovery_cache
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with AsyncClient() as client:
             response = await client.get(
                 f"{issuer.rstrip('/')}/.well-known/openid-configuration",
                 timeout=5.0,

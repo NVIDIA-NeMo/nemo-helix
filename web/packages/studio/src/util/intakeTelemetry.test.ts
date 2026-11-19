@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  SpanKind,
-  SpanStatus,
-  type Span,
-  type SpanEvaluationContext,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Span, SpanEvaluationContext } from '@nemo/sdk/generated/platform/schema';
+import { SpanKind } from '@nemo/sdk/generated/platform/schema/SpanKind';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import {
   buildSpanHierarchyRows,
   buildSpanTree,

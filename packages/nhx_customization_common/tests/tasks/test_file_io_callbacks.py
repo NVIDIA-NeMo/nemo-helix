@@ -32,7 +32,7 @@ def test_a_long_upload_reports_bytes_in_flight_at_a_bounded_rate(
     (tmp_path / "config.json").write_bytes(b"x" * 100)
     (tmp_path / "model.safetensors").write_bytes(b"x" * 1000)
     now = [0.0]
-    monkeypatch.setattr(callbacks.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(callbacks, "monotonic", lambda: now[0])
     reporter = RecordingReporter()
     parent = FileUploadProgressCallback(reporter, tmp_path, "default/out", UploadStats())
 

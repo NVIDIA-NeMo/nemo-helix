@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_scaled_evals_plugin.authz import admin_only
 
 from scaled_evals.api import execution_analytics
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import get_evaluation_global_queries
+from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
 from scaled_evals.api.schemas.common import (
     AdminCapacityResponse,
     AdminComputeSummaryResponse,
@@ -24,15 +25,15 @@ from scaled_evals.api.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
-Db = Annotated[Database, Depends(get_db)]
+Queries = Annotated[EvaluationGlobalQueries, Depends(get_evaluation_global_queries)]
 FromTime = Annotated[datetime | None, Query(alias="from")]
 ToTime = Annotated[datetime | None, Query(alias="to")]
 
 
 @router.get("/users/{user_id}/summary", response_model=AdminUserSummaryResponse)
 @admin_only
-def admin_user_summary(user_id: str, db: Db) -> AdminUserSummaryResponse:
-    summary = db.evaluations.summary(user_id)
+def admin_user_summary(user_id: str, queries: Queries) -> AdminUserSummaryResponse:
+    summary = queries.summary(user_id)
     return AdminUserSummaryResponse(user_id=user_id, **summary)
 
 
@@ -40,17 +41,14 @@ def admin_user_summary(user_id: str, db: Db) -> AdminUserSummaryResponse:
 @admin_only
 def admin_user_evaluations(
     user_id: str,
-    db: Db,
+    queries: Queries,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> ListEnvelope[Evaluation]:
-    rows = db.evaluations.list(
+    rows = queries.list_for_owner(
         limit=limit,
         cursor=cursor,
         order="desc",
-        status=None,
-        task_id=None,
-        shared=False,
         owner_id=user_id,
     )
     return page_from_rows(rows, limit, Evaluation)
@@ -58,9 +56,9 @@ def admin_user_evaluations(
 
 @router.get("/capacity", response_model=AdminCapacityResponse)
 @admin_only
-def admin_capacity(db: Db) -> AdminCapacityResponse:
+def admin_capacity(queries: Queries) -> AdminCapacityResponse:
     return AdminCapacityResponse(
-        **db.evaluations.capacity(),
+        **queries.capacity(),
         cluster_limit=settings.control_plane_cluster_run_limit,
         per_user_limit=settings.control_plane_per_user_run_limit,
     )
@@ -124,16 +122,14 @@ def _records(window_start: datetime, window_end: datetime) -> list[dict]:
 @router.get("/usage", response_model=AdminUsageSummaryResponse)
 @admin_only
 def admin_usage(
-    db: Db,
+    queries: Queries,
     limit: int = Query(default=20, ge=1, le=100),
     days: int = Query(default=7, ge=1, le=90),
     from_time: FromTime = None,
     to_time: ToTime = None,
 ) -> AdminUsageSummaryResponse:
     window_start, window_end, window_days = _admin_window(days=days, from_time=from_time, to_time=to_time, noun="usage")
-    summary = execution_analytics.usage_summary(
-        _records(window_start, window_end), db.evaluations.live_usage(), limit=limit
-    )
+    summary = execution_analytics.usage_summary(_records(window_start, window_end), queries.live_usage(), limit=limit)
     return AdminUsageSummaryResponse(
         window_days=window_days, window_start=window_start, window_end=window_end, **summary
     )

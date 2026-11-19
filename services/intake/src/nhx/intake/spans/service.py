@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from nhx.common.api.common import PaginatedResult
 from nhx.intake.repository.annotations import AnnotationsRepository
@@ -87,6 +88,24 @@ class IntakeSpansService:
         if batch.evaluator_results:
             await self._evaluator_results.save_evaluator_results(batch.evaluator_results)
 
+    async def ingest_prepared_batch(
+        self,
+        *,
+        span_rows: list[list[Any]],
+        evaluator_result_rows: list[list[Any]],
+    ) -> None:
+        """Insert rows that an ingest worker process built off the event loop.
+
+        Mirrors ``ingest_batch``: spans first, then evaluator results. These
+        awaited inserts are the commit point of an ATIF ingest ``201``: it is
+        returned only after both succeed. Like ``ingest_batch``, the inserts are
+        sequential, so a failure between them can leave spans stored without
+        their evaluator results; stable ids make a producer retry converge.
+        """
+        await self._spans.insert_span_rows(span_rows)
+        if evaluator_result_rows:
+            await self._evaluator_results.insert_evaluator_result_rows(evaluator_result_rows)
+
     async def list_spans(
         self,
         *,
@@ -121,8 +140,8 @@ class IntakeSpansService:
             sort=sort,
         )
 
-    async def get_span(self, *, workspace: str, span_id: str) -> IntakeSpan:
-        span = await self._spans.get_span(workspace=workspace, span_id=span_id)
+    async def get_span(self, *, workspace: str, span_id: str, session_id: str | None = None) -> IntakeSpan:
+        span = await self._spans.get_span(workspace=workspace, span_id=span_id, session_id=session_id)
         if span is None:
             raise SpanNotFoundError(workspace, span_id)
         return span
@@ -138,8 +157,10 @@ class IntakeSpansService:
     ) -> PaginatedResult[IntakeTrace]:
         return await self._traces.list_traces(filters=filters, page=page, page_size=page_size, sort=sort, mode=mode)
 
-    async def get_trace(self, *, workspace: str, trace_id: str, mode: TraceMode) -> IntakeTrace:
-        trace = await self._traces.get_trace(workspace=workspace, trace_id=trace_id, mode=mode)
+    async def get_trace(
+        self, *, workspace: str, trace_id: str, mode: TraceMode, session_id: str | None = None
+    ) -> IntakeTrace:
+        trace = await self._traces.get_trace(workspace=workspace, trace_id=trace_id, mode=mode, session_id=session_id)
         if trace is None:
             raise TraceNotFoundError(workspace, trace_id)
         return trace

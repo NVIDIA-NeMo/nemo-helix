@@ -5,7 +5,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { InfoCircle, Retry } from '@nemo/icons/icons';
+import { InfoCircle, Reset } from '@nemo/icons/icons';
 import {
   Text,
   Stack,
@@ -20,7 +20,7 @@ import {
   PRETRAINED_MODEL_OPTIONS,
 } from '@studio/routes/SafeSynthesizerNewRoute/constants';
 import {
-  SafeSynthesizerFormData,
+  type SafeSynthesizerFormData,
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useFormContext } from 'react-hook-form';
@@ -241,7 +241,7 @@ export const AdvancedParameters = () => {
                 className="shrink-0"
                 type="button"
               >
-                <Retry />
+                <Reset />
               </Button>
             }
           />
@@ -322,7 +322,7 @@ export const AdvancedParameters = () => {
               className="shrink-0"
               type="button"
             >
-              <Retry />
+              <Reset />
             </Button>
           }
         />

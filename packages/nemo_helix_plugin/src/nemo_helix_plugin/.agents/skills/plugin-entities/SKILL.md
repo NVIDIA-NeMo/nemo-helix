@@ -129,9 +129,12 @@ return saved
 
 ```python
 try:
-    await entity_client.delete(Widget, name=name, workspace=workspace)
+    selected = await entity_client.get(Widget, name=name, workspace=workspace)
+    await entity_client.delete_by_id(Widget, selected.id, expected_db_version=selected.db_version)
 except NemoEntityNotFoundError as exc:
     raise HTTPException(status_code=404, detail=f"Widget '{name}' not found.") from exc
+except NemoEntityConflictError as exc:
+    raise HTTPException(status_code=409, detail="Concurrent modification.") from exc
 ```
 
 ## filter_obj Patterns

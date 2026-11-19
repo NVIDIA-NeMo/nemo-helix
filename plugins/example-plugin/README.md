@@ -35,12 +35,25 @@ GET  /apis/example/v2/workspaces/{workspace}/items                       (requir
 GET  /apis/example/v2/workspaces/{workspace}/items/{name}                (requires running platform)
 PATCH /apis/example/v2/workspaces/{workspace}/items/{name}               (requires running platform)
 DELETE /apis/example/v2/workspaces/{workspace}/items/{name}              (requires running platform)
+DELETE /apis/example/v2/workspaces/{workspace}/items/by-id/{entity_id}    (requires running platform)
 POST /apis/example/v2/workspaces/{workspace}/middleware-configs          (requires running platform)
 GET  /apis/example/v2/workspaces/{workspace}/middleware-configs          (requires running platform)
 GET  /apis/example/v2/workspaces/{workspace}/middleware-configs/{name}   (requires running platform)
 PATCH /apis/example/v2/workspaces/{workspace}/middleware-configs/{name}  (requires running platform)
 DELETE /apis/example/v2/workspaces/{workspace}/middleware-configs/{name} (requires running platform)
 ```
+
+Delete an item or middleware config by its persisted `id` with
+`DELETE /apis/example/v2/workspaces/{workspace}/items/by-id/{entity_id}` or
+`DELETE /apis/example/v2/workspaces/{workspace}/middleware-configs/by-id/{entity_id}`.
+Both return 204 and accept `?expected_db_version=<version>` to reject stale deletion
+with 409. An absent ID, a different entity type, or a different workspace returns 404.
+Name-based deletion remains available for compatibility. Use IDs retained from create,
+get, or list responses when deleting a previously selected resource.
+
+The sync and async example clients expose `delete_item_by_id` and
+`delete_middleware_config_by_id`. Pass the optional version as
+`query_params={"expected_db_version": version}`.
 
 The `/hello/{name}` route works standalone. Entity (`/items`) routes require a running platform with `NHX_BASE_URL` set.
 

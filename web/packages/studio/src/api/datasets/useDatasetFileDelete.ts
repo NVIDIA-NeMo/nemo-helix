@@ -10,7 +10,7 @@ import type {
   ListFilesetFilesResponse,
 } from '@nemo/sdk/generated/platform/schema';
 import { queryClient } from '@studio/api/queryClient';
-import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 
 export interface DeleteDatasetFileParams {
   workspace: string;

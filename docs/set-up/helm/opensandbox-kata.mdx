@@ -5,6 +5,7 @@
 title: "OpenSandbox with Kata"
 description: "Install Kata Containers and an OpenSandbox server that pins sandboxes to RuntimeClass kata-qemu."
 ---
+
 <a id="install-opensandbox-kata"></a>
 
 Use this path when **sandboxed GRPO / NeMo Gym** sandbox pods must be isolated from the host kernel. We document **Kata QEMU** (`RuntimeClass/kata-qemu`) because it runs each sandbox in a QEMU VM with its own guest kernel. Other kernel-isolated runtimes (for example Kata Firecracker, or a different hardware-isolated RuntimeClass) may work the same way, but they have **not been tested** with NeMo Helix. **Kata is optional**; most installs only need the [shared-kernel OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) path. This does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
@@ -43,14 +44,21 @@ Pin kata-deploy **4.0.0**. Restrict shims to QEMU so the cluster gets `RuntimeCl
 ```yaml
 # example kata-deploy values — replace the custom label with one you apply
 nodeSelector:
-  virt.nvidia.com/kvm: "true"  # apply after confirming BIOS VMX or SVM and /dev/kvm
+  virt.nvidia.com/kvm: "true" # apply after confirming BIOS VMX or SVM and /dev/kvm
 shims:
+  # turns off every shim not explicitly enabled below
   disableAll: true
   qemu:
     enabled: true
     runtimeClass:
       nodeSelector:
         katacontainers.io/kata-runtime: "true"
+# must name an enabled shim; qemu is enabled above
+defaultShim:
+  amd64: qemu
+  arm64: qemu
+  s390x: qemu
+  ppc64le: qemu
 ```
 
 ```sh

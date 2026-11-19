@@ -25,11 +25,14 @@ import {
 import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import { ProgressReportingFields } from '@studio/components/NewCustomizationForm/ProgressReportingFields';
+import { useResolvedAutomodelRecipe } from '@studio/components/NewCustomizationForm/useResolvedAutomodelRecipe';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
+  LEARNING_RATE_UNSET_HINT,
   UNSLOTH_SPEC_DEFAULTS,
+  learningRateSliderProps,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
@@ -38,6 +41,13 @@ export const GeneralParametersSection = () => {
   const { control, watch, setValue, formState } = useFormContext<CustomizationFormFields>();
   const backend = watch('backend');
   const disabled = formState.isSubmitting;
+  const automodelFinetuningType = watch('automodel.training.finetuning_type');
+  const automodelRecipe = useResolvedAutomodelRecipe(
+    watch('automodel.model'),
+    watch('automodel.training.recipe'),
+    backend === 'automodel'
+  );
+  const unslothFinetuningType = watch('unsloth.training.finetuning_type');
 
   if (backend === 'rl') {
     return (
@@ -59,9 +69,9 @@ export const GeneralParametersSection = () => {
             useControllerProps={{ name: 'rl.training.learning_rate', control }}
             formFieldProps={{
               slotLabel: 'Learning Rate',
-              slotInfo: 'Learning rate reached at the end of warmup, before decay begins.',
+              slotInfo: `Learning rate reached at the end of warmup, before decay begins. ${LEARNING_RATE_UNSET_HINT}`,
             }}
-            {...specSliderProps(DPO_SPEC_DEFAULTS, 'learning_rate')}
+            {...learningRateSliderProps({ backend: 'rl', method: 'dpo' })}
             min={1e-6}
             max={1e-3}
             step={1e-6}
@@ -295,9 +305,13 @@ export const GeneralParametersSection = () => {
             useControllerProps={{ name: 'automodel.optimizer.learning_rate', control }}
             formFieldProps={{
               slotLabel: 'Learning Rate',
-              slotInfo: 'Peak learning rate. Start near 5e-5 for full SFT, or 1e-4 with LoRA.',
+              slotInfo: `Peak learning rate. ${LEARNING_RATE_UNSET_HINT}`,
             }}
-            {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_learning_rate')}
+            {...learningRateSliderProps({
+              backend: 'automodel',
+              finetuningType: automodelFinetuningType,
+              recipe: automodelRecipe,
+            })}
             min={1e-6}
             max={1e-3}
             step={1e-6}
@@ -600,9 +614,12 @@ export const GeneralParametersSection = () => {
           useControllerProps={{ name: 'unsloth.optimizer.learning_rate', control }}
           formFieldProps={{
             slotLabel: 'Learning Rate',
-            slotInfo: 'Learning rate reached at the end of warmup, before decay begins.',
+            slotInfo: `Learning rate reached at the end of warmup, before decay begins. ${LEARNING_RATE_UNSET_HINT}`,
           }}
-          {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_learning_rate')}
+          {...learningRateSliderProps({
+            backend: 'unsloth',
+            finetuningType: unslothFinetuningType,
+          })}
           min={1e-6}
           max={1e-3}
           step={1e-6}

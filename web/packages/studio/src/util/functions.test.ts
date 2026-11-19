@@ -6,7 +6,6 @@ import {
   assertUnreachable,
   debounceAsyncRequest,
   isNaNScore,
-  isPlainObject,
   isPowerOf,
   isScalar,
 } from '@studio/util/functions';
@@ -92,20 +91,6 @@ describe('assertUnreachable', () => {
 
   it('should throw with custom message', () => {
     expect(() => assertUnreachable('unexpected' as never, 'Custom error')).toThrow('Custom error');
-  });
-});
-
-describe('isPlainObject', () => {
-  it('accepts keyed objects', () => {
-    expect(isPlainObject({})).toBe(true);
-    expect(isPlainObject({ a: 1 })).toBe(true);
-  });
-
-  it('rejects null, arrays and primitives', () => {
-    expect(isPlainObject(null)).toBe(false);
-    expect(isPlainObject([1, 2])).toBe(false);
-    expect(isPlainObject('a')).toBe(false);
-    expect(isPlainObject(undefined)).toBe(false);
   });
 });
 

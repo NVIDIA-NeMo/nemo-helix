@@ -1,10 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import builtins
 import io
 import tarfile
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -181,20 +179,10 @@ def test_module_imports_without_agents_extra() -> None:
 
 
 def test_missing_optional_dependency_raises_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_import = builtins.__import__
+    def missing_agents_sdk() -> docker_sandbox.SandboxSDK:
+        raise ImportError("missing optional dependency")
 
-    def fake_import(
-        name: str,
-        globals: dict[str, Any] | None = None,
-        locals: dict[str, Any] | None = None,
-        fromlist: Sequence[str] = (),
-        level: int = 0,
-    ) -> Any:
-        if name == "agents" or name.startswith("agents.") or name == "docker":
-            raise ImportError("missing optional dependency")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(docker_sandbox, "_import_agents_sdk", missing_agents_sdk)
 
     with pytest.raises(RuntimeError, match=r"nhx-evals-sdk\[agent-runtimes\]") as exc_info:
         docker_sandbox._load_agents_sdk()

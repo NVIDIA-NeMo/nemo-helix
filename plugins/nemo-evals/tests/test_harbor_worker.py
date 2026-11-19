@@ -158,7 +158,7 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(
         http_client=async_http, base_url="https://platform.test", workspace="default", default_headers=headers
     )
     # Isolate onto a real async transport that records requests, as the worker normally does.
-    monkeypatch.setattr("nemo_evals.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
+    monkeypatch.setattr("nemo_evals.jobs.utils.AsyncClient", lambda **_: async_http)
     ctx = JobContext(
         workspace="default",
         job_id="bridge",
@@ -192,7 +192,7 @@ def test_worker_executes_additional_metric_and_view(tmp_path, stored_packages, m
     """Reorder task snapshots and verify custom scoring stays attached to its task in live and offline runs."""
     source, handler, _ = stored_packages
     async_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr("nemo_evals.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
+    monkeypatch.setattr("nemo_evals.jobs.utils.AsyncClient", lambda **_: async_http)
     metric = to_inline(
         bundle_metric(
             ExactMatchMetric(reference="Fix it", candidate="{{inputs.instruction}}"), HybridMetricBundlePackager()

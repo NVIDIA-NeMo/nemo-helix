@@ -5,7 +5,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useDownloadFileAsArrayBuffer } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
-import { FileSystemFile } from '@studio/components/FilesTable/utils';
+import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { getFileNameFromPath } from '@studio/util/files';
 import { useCallback, useState } from 'react';
 

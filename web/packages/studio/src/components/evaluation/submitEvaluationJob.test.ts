@@ -77,7 +77,7 @@ describe('buildAgentTarget', () => {
 
 describe('buildDatasetAgentTarget', () => {
   it('renders the row prompt into the chat message', () => {
-    const target = buildDatasetAgentTarget('ws-a', 'support-bot');
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', '{{ item.question }}');
     expect(target.format).toBe('generic');
     expect(target.response_path).toBe('$.choices[0].message.content');
     expect(target.body).toEqual({
@@ -86,6 +86,22 @@ describe('buildDatasetAgentTarget', () => {
       stream: false,
     });
     expect(target.url).toContain('/agents/support-bot/-/v1/chat/completions');
+  });
+
+  it('passes a chat-messages prompt template through whole', () => {
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', {
+      messages: [{ role: 'user', content: '{{input}}' }],
+    });
+    expect(target.body).toEqual({
+      model: 'support-bot',
+      messages: '{{ messages }}',
+      stream: false,
+    });
+  });
+
+  it('keeps the prompt message for a dict template that renders to a prompt', () => {
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', { prompt: '{{input}}' });
+    expect(target.body.messages).toEqual([{ role: 'user', content: '{{ prompt }}' }]);
   });
 });
 
@@ -182,8 +198,18 @@ describe('buildAgentEvalRequestBody', () => {
       agent: 'a',
       evaluationId: 'nightly-eval-a3f2',
     });
-    // agent_name is omitted deliberately: the backend derives it from the agent target.
-    expect(body.spec.publication).toEqual({ intake: { evaluation_id: 'nightly-eval-a3f2' } });
+    expect(body.spec.publication).toEqual({
+      intake: { evaluation_id: 'nightly-eval-a3f2', agent_name: 'a' },
+    });
+  });
+
+  it('stamps the bare agent name even when the selection is workspace-qualified', () => {
+    const body = buildAgentEvalRequestBody(persisted(), {
+      workspace: 'ws-a',
+      agent: 'ws-a/a',
+      evaluationId: 'eval-1',
+    });
+    expect(body.spec.publication?.intake.agent_name).toBe('a');
   });
 
   it('omits publication entirely when no evaluation is selected', () => {
@@ -221,7 +247,9 @@ describe('buildDatasetEvalRequestBody', () => {
       { workspace: 'ws-a', agent: 'a', evaluationId: 'eval-1' },
       null
     );
-    expect(withPublication.spec.publication).toEqual({ intake: { evaluation_id: 'eval-1' } });
+    expect(withPublication.spec.publication).toEqual({
+      intake: { evaluation_id: 'eval-1', agent_name: 'a' },
+    });
 
     const without = buildDatasetEvalRequestBody(
       datasetConfig,

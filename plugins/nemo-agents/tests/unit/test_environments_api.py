@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import TypeVar
 from unittest.mock import AsyncMock
 
+import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import environments as environments_router_module
@@ -19,6 +21,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentSpec,
     EnvironmentSpecInline,
 )
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
@@ -211,3 +214,18 @@ class TestEnvironmentRoutes:
         resp = client.get("/apis/agents/v2/workspaces/default/environments")
         assert resp.status_code == 200
         assert resp.json()["data"][0]["name"] == "env1"
+
+
+@pytest.mark.parametrize("collection", ["compute-specs", "environment-specs", "environments"])
+def test_list_unknown_workspace_is_not_wrapped_as_500(collection: str) -> None:
+    """The entity store's 404 reaches the platform's handlers instead of becoming a 500."""
+    request = httpx.Request("GET", "http://entities/apis/entities/v2/workspaces/no-such-ws/entities")
+    error = NotFoundError(httpx.Response(404, json={"detail": "Workspace not found"}, request=request))
+    client_mock = AsyncMock()
+    client_mock.list = AsyncMock(side_effect=error)
+    client = TestClient(_test_client(client_mock).app)
+
+    with pytest.raises(NotFoundError) as raised:
+        client.get(f"/apis/agents/v2/workspaces/no-such-ws/{collection}")
+
+    assert raised.value is error

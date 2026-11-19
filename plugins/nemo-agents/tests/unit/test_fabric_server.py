@@ -11,13 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.agent_config import AgentConfig, AgentConfigLoadError
-from nemo_agents_plugin.fabric import server
+from nemo_agents_plugin.fabric import environment, server
 from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeExecutionError,
     FabricRuntimeResult,
@@ -34,7 +34,11 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
+from nemo_fabric import Fabric, FabricError, RuntimeStatus
 from starlette.requests import ClientDisconnect
+
+SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
 
 class _FakeStreamContext:
@@ -155,13 +159,17 @@ def _sse_line_payload(line: str) -> dict[str, object]:
     return json.loads(line.removeprefix("data: "))
 
 
-def test_shutdown_removes_a_staged_agent_root(
+@pytest.mark.parametrize("stop_failed", [False, True])
+def test_shutdown_removes_a_staged_agent_root_only_after_runtime_stop(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    stop_failed: bool,
 ) -> None:
     mounted = tmp_path / "mounted"
     mounted.mkdir()
-    config_path = _write_agent_config(mounted)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config_path = _write_agent_config(mounted, config)
     mounted.chmod(0o555)
     app = create_fabric_serving_app(config_path)
     try:
@@ -171,11 +179,20 @@ def test_shutdown_removes_a_staged_agent_root(
 
             assert staged != mounted
             assert (staged / "agent.yaml").exists()
+            runtime = SimpleNamespace(
+                stop=AsyncMock(side_effect=FabricError("stop failed") if stop_failed else None),
+                status=RuntimeStatus.FAILED if stop_failed else RuntimeStatus.STOPPED,
+            )
+            assert client.portal is not None
+            session = client.portal.call(app.state.session_registry.register, runtime)
+            session.workspace_dir = environment.create_deepagents_workspace(app.state.workspace_baseline)
 
-        assert not staged.exists()
+        assert staged.exists() is stop_failed
         assert config_path.exists()
     finally:
         mounted.chmod(0o755)
+        if app.state.base_dir.exists():
+            environment.release_runtime_base_dir(environment.RuntimeBaseDir(path=app.state.base_dir, staged=True))
 
 
 def test_failed_startup_removes_a_staged_agent_root(
@@ -237,6 +254,208 @@ def test_startup_loads_and_validates_agent_config(
     assert mock_validate_agent_config == [(app.state.agent_config, tmp_path)]
 
 
+@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
+def test_startup_captures_workspace_inputs_and_reuses_them_after_restart(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    configured_workspace: str,
+) -> None:
+    base_dir = tmp_path / "agent"
+    workspace = base_dir / configured_workspace
+    (workspace / "data").mkdir(parents=True)
+    source = workspace / "data" / "input.bin"
+    source.write_bytes(b"original input")
+    (workspace / "absolute-link").symlink_to(source.resolve())
+    external = tmp_path / "outside.txt"
+    external.write_text("outside workspace")
+    (workspace / "external-link").symlink_to(external)
+    excluded = (
+        ".venv",
+        "large_tool_results",
+        "conversation_history",
+        "traces",
+    )
+    for name in excluded:
+        (workspace / name).mkdir()
+        (workspace / name / "existing.txt").write_text("not an input")
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["environment"] = {
+        "workspace": configured_workspace,
+        "artifacts": str(Path(configured_workspace) / "traces"),
+    }
+    config_path = _write_agent_config(base_dir, config)
+
+    app = create_fabric_serving_app(config_path)
+    with TestClient(app):
+        baseline = app.state.workspace_baseline
+        assert baseline.is_relative_to(workspace.resolve())
+        assert (baseline / "data/input.bin").read_bytes() == b"original input"
+        assert (baseline / "absolute-link").resolve() == baseline / "data/input.bin"
+        for name in (*excluded, "external-link", environment.DEEPAGENTS_WORKSPACE_DIR):
+            assert not (baseline / name).exists()
+        assert (workspace / ".venv/existing.txt").exists()
+        source.write_text("changed during a conversation")
+        (workspace / "late.txt").write_text("later conversation output")
+
+    restarted = create_fabric_serving_app(config_path)
+    with TestClient(restarted):
+        assert restarted.state.workspace_baseline == baseline
+        assert (baseline / "data/input.bin").read_bytes() == b"original input"
+        assert not (baseline / "late.txt").exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "settings", "provider"),
+    [
+        ("hermes", {}, "local"),
+        ("acme.image-only-adapter", {}, "local"),
+        ("deepagents", {"deepagents": {"backend": {"type": "local_shell"}}}, "local"),
+        ("deepagents", {}, "remote"),
+    ],
+)
+def test_startup_leaves_other_backends_without_a_workspace_baseline(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    kind: str,
+    settings: dict[str, Any],
+    provider: str,
+) -> None:
+    config = _example_config()
+    config["harnesses"]["hermes"].update(kind=kind, settings=settings)
+    config["environment"] = {"provider": provider}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+
+    with TestClient(app):
+        assert app.state.workspace_baseline is None
+        assert not (tmp_path / "workspace").exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "skill_path", "expected_names"),
+    [
+        ("deepagents", "skills/review", ["review"]),
+        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"]),
+    ],
+)
+def test_startup_stages_skills_and_maps_runtime_paths(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    skill_path: str,
+    expected_names: list[str],
+) -> None:
+    linked_asset = tmp_path / "linked-asset.txt"
+    linked_asset.write_text("skill input")
+    for name in ("review", "audit"):
+        bundle = tmp_path / "skills" / name
+        (bundle / "references").mkdir(parents=True)
+        (bundle / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Review inputs\n---\nRead references/input.txt.\n"
+        )
+        (bundle / "references/input.txt").symlink_to(linked_asset)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = kind
+    config["skills"] = {"paths": [skill_path]}
+    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
+    fabric = Fabric()
+    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
+
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+    with TestClient(app) as client:
+        app.state.session_manager._fabric = fabric
+        assert client.portal is not None
+        session = client.portal.call(app.state.session_manager.open_session)
+        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
+        assert sorted(path.name for path in skills.iterdir()) == expected_names
+        for name in expected_names:
+            assert (skills / name / "SKILL.md").read_text() == (tmp_path / "skills" / name / "SKILL.md").read_text()
+            assert (skills / name / "references/input.txt").read_text() == "skill input"
+            assert not (skills / name / "references/input.txt").is_symlink()
+        runtime_config = start_runtime.call_args.args[0]
+        assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
+        assert runtime_config.skills.paths == [f"/{environment.DEEPAGENTS_SKILLS_DIR}"]
+        assert app.state.agent_config.skills.paths == [skill_path]
+
+
+@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
+def test_startup_refreshes_skills_without_recapturing_workspace(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    configured_workspace: str,
+) -> None:
+    workspace = tmp_path / configured_workspace
+    workspace.mkdir(exist_ok=True)
+    (workspace / "input.txt").write_text("original input")
+    for name in ("review", "retired"):
+        bundle = tmp_path / ".agents/skills" / name
+        bundle.mkdir(parents=True)
+        (bundle / "SKILL.md").write_text(name)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["environment"] = {"workspace": configured_workspace}
+    config["skills"] = {"paths": [".agents/skills/review", ".agents/skills/retired"]}
+    config_path = _write_agent_config(tmp_path, config)
+    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
+    fabric = Fabric()
+    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
+
+    app = create_fabric_serving_app(config_path)
+    with TestClient(app) as client:
+        app.state.session_manager._fabric = fabric
+        baseline = app.state.workspace_baseline
+        (tmp_path / ".agents/skills/review/SKILL.md").write_text("updated review")
+        new_bundle = tmp_path / ".agents/skills/new"
+        new_bundle.mkdir()
+        (new_bundle / "SKILL.md").write_text("new")
+        config["skills"]["paths"] = [".agents/skills/review", ".agents/skills/new"]
+        _write_agent_config(tmp_path, config)
+        (workspace / "input.txt").write_text("later conversation output")
+        assert client.portal is not None
+        session = client.portal.call(app.state.session_manager.open_session)
+        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
+        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
+            "review": "review",
+            "retired": "retired",
+        }
+
+    restarted = create_fabric_serving_app(config_path)
+    with TestClient(restarted) as client:
+        restarted.state.session_manager._fabric = fabric
+        assert restarted.state.workspace_baseline == baseline
+        assert client.portal is not None
+        session = client.portal.call(restarted.state.session_manager.open_session)
+        assert (session.workspace_dir / "input.txt").read_text() == "original input"
+        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
+        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
+            "review": "updated review",
+            "new": "new",
+        }
+    assert not list(baseline.parent.glob("skills-*"))
+
+
+def test_skill_collision_cleans_up_partial_snapshot(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+) -> None:
+    paths = ["skills/review", "other/review"]
+    for skill_path in paths:
+        bundle = tmp_path / skill_path
+        bundle.mkdir(parents=True)
+        (bundle / "SKILL.md").write_text(skill_path)
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["skills"] = {"paths": paths}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+
+    with pytest.raises(ValueError, match="both stage as"), TestClient(app):
+        pass
+
+    assert not list((tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
+
+
 @pytest.mark.parametrize("socket_fd", [None, 123])
 def test_main_starts_packaged_server(tmp_path: Path, socket_fd: int | None) -> None:
     config_path = _write_agent_config(tmp_path)
@@ -244,7 +463,7 @@ def test_main_starts_packaged_server(tmp_path: Path, socket_fd: int | None) -> N
 
     with (
         patch("nemo_agents_plugin.fabric.server.create_fabric_serving_app", return_value=app) as create_app,
-        patch("uvicorn.run") as run,
+        patch("nemo_agents_plugin.fabric.server.run") as run,
     ):
         result = server.main(
             [
@@ -281,7 +500,7 @@ def test_shutdown_stops_all_registered_runtimes(
         registry = app.state.session_registry
 
         async def register_runtime() -> None:
-            await registry.register(cast(Any, runtime), session_id="session-1")
+            await registry.register(cast(Any, runtime), session_id=SESSION_ID)
 
         assert client.portal is not None
         client.portal.call(register_runtime)
@@ -392,6 +611,7 @@ def test_chat_completion_without_session_id_invokes_once_without_creating_sessio
     }
     assert [request.input for request in invocation_calls] == ["hello", "again"]
     assert all(request.caller_context == {} for request in invocation_calls)
+    assert all(request.relay_session_root is None for request in invocation_calls)
     assert asyncio.run(app.state.session_registry.count()) == 0
 
 
@@ -438,20 +658,28 @@ def test_chat_completion_returns_reasoning_from_fabric_messages(
     }
 
 
+@pytest.mark.parametrize(
+    ("session_id", "relay_session_root"),
+    [(SESSION_ID, SESSION_UUID), (SESSION_UUID, SESSION_UUID), ("session-1", None)],
+)
 def test_chat_completion_with_session_id_reuses_session(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    session_id: str,
+    relay_session_root: str | None,
 ) -> None:
     config_path = _write_agent_config(tmp_path)
     app = create_fabric_serving_app(config_path)
     resolve_calls: list[str] = []
 
-    async def resolve_session(session_id: str) -> Any:
-        resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object())
+    async def resolve_session(requested_session_id: str) -> Any:
+        resolve_calls.append(requested_session_id)
+        return SimpleNamespace(session_id=requested_session_id, runtime=object())
 
     async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
+        assert request.caller_context == {"session_id": session_id}
+        assert request.relay_session_root == relay_session_root
         return FabricRuntimeResult(status="succeeded", response="hello again")
 
     with TestClient(app) as client:
@@ -459,13 +687,13 @@ def test_chat_completion_with_session_id_reuses_session(
         monkeypatch.setattr(app.state.session_manager, "invoke_session", invoke_session)
         response = client.post(
             "/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: session_id},
             json={"messages": [{"role": "user", "content": "hello again"}]},
         )
 
     assert response.status_code == 200
-    assert response.headers[SESSION_ID_HEADER] == "session-1"
-    assert resolve_calls == ["session-1"]
+    assert response.headers[SESSION_ID_HEADER] == session_id
+    assert resolve_calls == [session_id]
 
 
 @pytest.mark.parametrize(
@@ -518,12 +746,12 @@ def test_session_chat_completion_runtime_error_returns_session_header(
         monkeypatch.setattr(app.state.session_manager, "invoke_session", invoke_session)
         response = client.post(
             "/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: SESSION_ID},
             json={"messages": [{"role": "user", "content": "hello"}]},
         )
 
     assert response.status_code == 504
-    assert response.headers[SESSION_ID_HEADER] == "session-1"
+    assert response.headers[SESSION_ID_HEADER] == SESSION_ID
     assert response.json() == {"detail": "timed out"}
 
 
@@ -631,6 +859,7 @@ def test_streaming_chat_completion_without_session_uses_one_shot_stream(
     invocation_request = stream_calls[0]
     assert invocation_request.input == "hello"
     assert invocation_request.caller_context == {}
+    assert invocation_request.relay_session_root is None
     assert stream_context.exit_calls == 1
     assert fabric_stream.aclose_calls == 0
 
@@ -643,19 +872,27 @@ def test_streaming_chat_completion_without_session_uses_one_shot_stream(
     assert _sse_line_payload(lines[-2])["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
 
 
+@pytest.mark.parametrize(
+    ("session_id", "relay_session_root"),
+    [(SESSION_ID, SESSION_UUID), (SESSION_UUID, SESSION_UUID), ("session-1", None)],
+)
 def test_streaming_chat_completion_reuses_supplied_session_id(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    session_id: str,
+    relay_session_root: str | None,
 ) -> None:
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
     resolve_calls: list[str] = []
 
-    async def resolve_session(session_id: str) -> Any:
-        resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object())
+    async def resolve_session(requested_session_id: str) -> Any:
+        resolve_calls.append(requested_session_id)
+        return SimpleNamespace(session_id=requested_session_id, runtime=object())
 
     def stream_session(session: Any, request: Any) -> _FakeStreamContext:
+        assert request.caller_context == {"session_id": session_id}
+        assert request.relay_session_root == relay_session_root
         return _FakeStreamContext(_FakeFabricStream(result=FabricRuntimeResult(status="succeeded", response="done")))
 
     with TestClient(app) as client:
@@ -664,14 +901,14 @@ def test_streaming_chat_completion_reuses_supplied_session_id(
         with client.stream(
             "POST",
             "/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: session_id},
             json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
         ) as response:
             lines = [line for line in response.iter_lines() if line]
 
     assert response.status_code == 200
-    assert response.headers[SESSION_ID_HEADER] == "session-1"
-    assert resolve_calls == ["session-1"]
+    assert response.headers[SESSION_ID_HEADER] == session_id
+    assert resolve_calls == [session_id]
     assert _sse_line_payload(lines[1])["choices"] == [{"index": 0, "delta": {"content": "done"}}]
 
 
@@ -1022,10 +1259,11 @@ def test_chat_completion_request_preserves_single_user_turn() -> None:
         }
     )
 
-    invocation_request = server._to_fabric_invocation_request(request, session_id="session-1")
+    invocation_request = server._to_fabric_invocation_request(request, session_id=SESSION_ID)
 
     assert invocation_request.input == "Say hello."
-    assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.caller_context == {"session_id": SESSION_ID}
+    assert invocation_request.relay_session_root == SESSION_UUID
 
 
 def test_chat_completion_request_serializes_full_transcript() -> None:
@@ -1041,10 +1279,11 @@ def test_chat_completion_request_serializes_full_transcript() -> None:
         }
     )
 
-    invocation_request = server._to_fabric_invocation_request(request, session_id="session-1")
+    invocation_request = server._to_fabric_invocation_request(request, session_id=SESSION_ID)
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
-    assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.caller_context == {"session_id": SESSION_ID}
+    assert invocation_request.relay_session_root == SESSION_UUID
 
 
 def test_stateless_chat_completion_request_serializes_full_transcript_without_session_context() -> None:
@@ -1062,6 +1301,7 @@ def test_stateless_chat_completion_request_serializes_full_transcript_without_se
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {}
+    assert invocation_request.relay_session_root is None
 
 
 def test_close_session_stops_registered_runtime(
@@ -1077,11 +1317,11 @@ def test_close_session_stops_registered_runtime(
 
     with TestClient(app) as client:
         monkeypatch.setattr(app.state.session_manager, "close_session", close_session)
-        response = client.delete("/v1/sessions/session-1")
+        response = client.delete(f"/v1/sessions/{SESSION_ID}")
 
     assert response.status_code == 204
     assert response.content == b""
-    assert close_calls == ["session-1"]
+    assert close_calls == [SESSION_ID]
 
 
 @pytest.mark.parametrize(

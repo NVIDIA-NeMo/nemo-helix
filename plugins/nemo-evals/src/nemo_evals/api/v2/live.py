@@ -21,23 +21,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import AbstractContextManager, ExitStack, asynccontextmanager, nullcontext
 from typing import Any, Self
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from nemo_agents_plugin.jobs.gateway_proxy import serve_auth_proxy
 from nemo_evals.api.dependencies import delegated_service_client
 from nemo_evals.api.schemas import MetricRefOrInline
 from nemo_evals.authz import scope
 from nemo_evals.jobs.metric_resolution import (
     HelixMetricSecretResolver,
     caller_model_read_authorizer,
+    gateway_models_via_proxy,
     resolve_metrics_to_inline,
     resolve_model_ref,
     to_runtime_bundle,
 )
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evals.source_authorization import SourceReadAuthorizer
+from nemo_helix_plugin.auth import current_auth_context, platform_auth_enabled
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
@@ -253,9 +259,12 @@ async def run_live_evaluation(
                     secret_resolver = HelixMetricSecretResolver(
                         client_from_platform(service_client, AsyncSecretsClient), workspace=workspace
                     )
-                    output, results = await _score(
-                        metrics, request=request, params=params, secret_resolver=secret_resolver
-                    )
+                    async with _gateway_called_as_caller(metrics, target, service_client) as called_target:
+                        if called_target is not target:
+                            request = request.model_copy(update={"target": called_target})
+                        output, results = await _score(
+                            metrics, request=request, params=params, secret_resolver=secret_resolver
+                        )
         except HTTPException:
             raise
         except TimeoutError:
@@ -279,6 +288,50 @@ async def run_live_evaluation(
             detail="; ".join(f"{entry.metric}: {entry.error}" for entry in results),
         )
     return LiveScoreResponse(output=output, metrics=results)
+
+
+@asynccontextmanager
+async def _gateway_called_as_caller(
+    metrics: Sequence[Metric], target: Model | None, service_client: AsyncHelixClient
+) -> AsyncGenerator[Model | None]:
+    """Route key-less gateway calls from the metrics and ``target`` through a proxy that calls as the caller.
+
+    Yields the target to call. The proxy authenticates as ``service_client``, the evals service acting
+    on behalf of the caller, so the gateway allows exactly the models the caller may use. Starting and
+    stopping the proxy blocks, so both run off the event loop.
+    """
+    headers = await _caller_headers(service_client)
+
+    def proxy() -> AbstractContextManager[str | None]:
+        if headers is None:
+            return nullcontext(None)
+        return serve_auth_proxy(build_auth_proxy_app(base_url=str(service_client.base_url), headers=headers))
+
+    called_as_caller = gateway_models_via_proxy(metrics, target, proxy)
+    stack = ExitStack()
+
+    def enter() -> Model | None:
+        return stack.enter_context(called_as_caller)
+
+    entering = asyncio.create_task(asyncio.to_thread(enter))
+    try:
+        yield await asyncio.shield(entering)
+    finally:
+        # Shielded so a timeout landing mid-start still stops the proxy once it is up.
+        await asyncio.shield(_close_once_entered(entering, stack))
+
+
+async def _close_once_entered(entering: asyncio.Task[Model | None], stack: ExitStack) -> None:
+    await asyncio.wait([entering])
+    await asyncio.to_thread(stack.close)
+
+
+async def _caller_headers(service_client: AsyncHelixClient) -> dict[str, str] | None:
+    """The headers that authenticate ``service_client``, or ``None`` when there is no caller to call as."""
+    if not platform_auth_enabled() or current_auth_context() is None:
+        return None
+    assert isinstance(service_client, AsyncNemoClient)
+    return await service_client.request_headers() or {}
 
 
 def _reject_target_secret(target: Model | None) -> None:

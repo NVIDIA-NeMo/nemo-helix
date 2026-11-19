@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
-from nemo_helix_plugin.capabilities import reset_capability_cache
+from nemo_helix_plugin.capabilities import ProbeResult, reset_capability_cache
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,8 @@ def docker_backend(
         patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
-        patch("docker.from_env", return_value=mock_docker_client),
+        patch("nemo_deployments_plugin.backends.docker.backend.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nemo_deployments_plugin.backends.docker.backend._docker_from_env", return_value=mock_docker_client),
     ):
         backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": False})
         backend._client = mock_docker_client

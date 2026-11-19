@@ -68,7 +68,7 @@ Entity Store provides a schema-agnostic storage system for all entity types in t
                            ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  PostgreSQL Database                                            │
-│  - workspaces (id, description, created_at, updated_at)         │
+│  - workspaces (id, description, limits, created_at, updated_at) │
 │  - entities (workspace, entity_type, name, parent, project,     │
 │              data, created_at, updated_at)                      │
 │      → FK workspace                                             │

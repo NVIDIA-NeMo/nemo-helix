@@ -171,6 +171,7 @@ def _confidential_auth_config(
         enabled=True,
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://idp.example.com",
             confidential_client=OIDCConfidentialClientConfig(
                 client_id="nemo-helix-user",
@@ -190,6 +191,7 @@ def _public_broker_auth_config() -> AuthConfig:
         enabled=True,
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://idp.example.com",
             public_client=OIDCPublicClientConfig(
                 client_id="nemo-helix-public",

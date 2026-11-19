@@ -8,9 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
 from nhx.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nhx.rl.schemas.job import GRPO_LEARNING_RATE_DEFAULTS
 
 
 def _make_output(name: str = "out", out_type: OutputNameType = OutputNameType.MODEL) -> OutputResponse:
@@ -156,6 +158,7 @@ def test_grpo_lora_defaults_params() -> None:
         ({"type": "dpo"}, 5e-6),
         ({"type": "grpo"}, 5e-6),
         ({"type": "grpo", "finetuning_type": "lora"}, 1e-5),
+        ({"type": "grpo", "finetuning_type": "lora_merged"}, 1e-5),
         ({"type": "grpo", "finetuning_type": "lora", "learning_rate": 3e-5}, 3e-5),
         ({"type": "dpo", "learning_rate": 1e-6}, 1e-6),
     ],
@@ -169,6 +172,10 @@ def test_grpo_lora_default_rate_is_checked_against_min_learning_rate() -> None:
     """The LoRA default must be in place before the min-vs-peak check runs."""
     t = GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora", "min_learning_rate": 9e-6})
     assert t.learning_rate == 1e-5
+
+
+def test_grpo_schema_publishes_learning_rate_defaults() -> None:
+    assert GRPOTraining.model_json_schema()[LEARNING_RATE_DEFAULTS_KEY] == GRPO_LEARNING_RATE_DEFAULTS
 
 
 def test_grpo_advanced_knobs_default_to_current_behaviour() -> None:
@@ -404,12 +411,44 @@ def test_stored_dtensor_backend_reads_as_automodel() -> None:
     assert job.training.policy_backend is PolicyBackend.AUTOMODEL
 
 
-def test_grpo_lora_rejects_lora_merged() -> None:
-    # `type` is required, so omitting it raises before finetuning_type is ever
-    # looked at -- this would pass even if lora_merged were accepted. Match on the
-    # field name so the assertion is about lora_merged and nothing else.
-    with pytest.raises(ValueError, match="finetuning_type"):
-        GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora_merged"})
+def test_grpo_lora_merged_trains_an_adapter_and_publishes_a_model() -> None:
+    t = GRPOTraining(type="grpo", finetuning_type="lora_merged")
+    assert t.lora is not None
+    assert t.policy_backend is PolicyBackend.AUTOMODEL
+    job = RlJobOutput(
+        model="default/base",
+        dataset="default/gym-data",
+        environment="default/env",
+        training=t,
+        output=_make_output(out_type=OutputNameType.MODEL),
+    )
+    assert job.trains_lora_adapter is False
+
+
+def test_grpo_lora_merged_rejects_adapter_output() -> None:
+    with pytest.raises(ValueError, match="full-weight model"):
+        RlJobOutput(
+            model="default/base",
+            dataset="default/gym-data",
+            environment="default/env",
+            training=GRPOTraining(type="grpo", finetuning_type="lora_merged"),
+            output=_make_output(out_type=OutputNameType.ADAPTER),
+        )
+
+
+@pytest.mark.parametrize("stored", [True, False])
+def test_stored_v4_compatible_is_dropped(stored: bool) -> None:
+    """GRPO jobs persisted ``v4_compatible``. List and get revalidate that JSON."""
+    job = RlJobOutput.model_validate(
+        {
+            "model": "default/base",
+            "dataset": "default/gym-data",
+            "environment": "default/env",
+            "training": {"type": "grpo", "v4_compatible": stored},
+            "output": {"name": "out", "type": "model", "fileset": "out-fs"},
+        }
+    )
+    assert "v4_compatible" not in job.training.model_dump()
 
 
 def test_grpo_lora_requires_adapter_output() -> None:

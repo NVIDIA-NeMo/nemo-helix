@@ -126,20 +126,13 @@ def test_load_env_file_wraps_read_failures_without_raw_chain(tmp_path: Path) -> 
     assert exc_info.value.__cause__ is None
 
 
-def test_load_env_file_wraps_permission_errors(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    path = tmp_path / ".env"
-    path.write_text("KEY=value\n", encoding="utf-8")
-    original_read_text = Path.read_text
-
-    def deny(candidate: Path, encoding: str | None = None, errors: str | None = None) -> str:
-        if candidate == path:
+def test_load_env_file_wraps_permission_errors(tmp_path: Path) -> None:
+    class _DeniedPath(Path):
+        def read_text(self, encoding: str | None = None, errors: str | None = None) -> str:
             raise PermissionError("permission denied")
-        return original_read_text(candidate, encoding=encoding, errors=errors)
 
-    monkeypatch.setattr(Path, "read_text", deny)
+    path = _DeniedPath(tmp_path / ".env")
+    path.write_text("KEY=value\n", encoding="utf-8")
 
     with pytest.raises(EnvFileError, match="permission denied") as exc_info:
         load_env_file(path, {})

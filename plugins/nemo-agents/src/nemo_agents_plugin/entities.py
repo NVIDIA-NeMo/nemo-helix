@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self
 
+from nemo_agents_plugin.session_protocol import session_id_to_uuid
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
@@ -60,6 +61,7 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
@@ -311,6 +313,7 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
     """
 
     _auth_context: AuthContext | None = PrivateAttr(default=None)
+    providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
 
     agent: str = Field(default="", description="Name of the Agent entity this deployment is for.")
     config: dict[str, Any] = Field(
@@ -453,3 +456,10 @@ class AgentSession(NemoEntity, entity_type="agent_session"):
         description="UTC rolling idle deadline derived from the latest session activity.",
         json_schema_extra={"nullable": True},
     )
+
+    @computed_field(
+        description="Unique identifier for the session. Can be used to group and retrieve the session's traces in Intake."
+    )
+    @property
+    def session_uuid(self) -> str:
+        return session_id_to_uuid(self.id) if self.id else ""

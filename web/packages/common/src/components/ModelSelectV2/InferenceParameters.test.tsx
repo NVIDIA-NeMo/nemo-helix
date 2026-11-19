@@ -44,6 +44,21 @@ describe('InferenceParameters', () => {
     );
   });
 
+  it('keeps the current value when a box is cleared', () => {
+    const { onChange } = renderComponent({ value: { temperature: 0.4, max_tokens: 512 } });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ temperature: 0.4, max_tokens: 512 });
+  });
+
+  it('sends the default when a box with no value is cleared', () => {
+    const { onChange } = renderComponent({
+      value: {},
+      fieldMetadata: { temperature: { default: 0.3 } },
+    });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ temperature: 0.3 });
+  });
+
   it('calls onChange with updated max_tokens only (not max_completion_tokens)', () => {
     const { onChange } = renderComponent({ value: { temperature: 0.5 } });
     const inputs = screen.getAllByRole('spinbutton');
@@ -78,6 +93,34 @@ describe('InferenceParameters', () => {
 
     fireEvent.change(temperature, { target: { value: '0.7' } });
     expect(temperature).toHaveValue(0.7);
+  });
+
+  it('renders only the requested fields, in the given order', () => {
+    renderComponent({ fields: ['temperature', 'max_tokens'] });
+    expect(screen.getByText('Temperature')).toBeInTheDocument();
+    expect(screen.getByText('Max Tokens')).toBeInTheDocument();
+    expect(screen.queryByText('Top P')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
+  });
+
+  it('applies per-field metadata overrides to defaults and bounds', () => {
+    const { onChange } = renderComponent({
+      fieldMetadata: { max_tokens: { default: 512, min: 32, max: 4096 } },
+    });
+    const maxTokens = screen.getAllByRole('spinbutton')[1];
+    expect(maxTokens).toHaveValue(512);
+    fireEvent.change(maxTokens, { target: { value: '8192' } });
+    fireEvent.blur(maxTokens);
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ max_tokens: 4096 }));
+  });
+
+  it('names each slider, number input, and reset button after its field', () => {
+    renderComponent();
+    expect(screen.getByRole('slider', { name: 'Temperature' })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Max Tokens value' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Reset Top P to default value' })
+    ).toBeInTheDocument();
   });
 
   it('disables all inputs when disabled', () => {

@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import yaml
 from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
@@ -32,10 +35,12 @@ from nemo_agents_plugin.runner.deployments_backend import (
     rewrite_fabric_config_base_urls,
 )
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
+from nemo_deployments_plugin.backends.base import LogResult
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
@@ -988,6 +993,11 @@ def test_build_deployment_config_fabric_k8s_mounts_multiple_config_files() -> No
     assert len(cfg.config_files) == 2
 
 
+@asynccontextmanager
+async def _entity_client_scope(entities: Any) -> AsyncGenerator[Any]:
+    yield entities
+
+
 def _backend(**deployments_kwargs: Any) -> DeploymentsRunnerBackend:
     agents = AgentsConfig.model_validate({"deployments": DeploymentsRunnerConfig(**deployments_kwargs)})
     return DeploymentsRunnerBackend(agents)
@@ -1016,7 +1026,7 @@ async def test_create_deployment_readiness_probe_settings(
         **overrides,
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="agent", config=agent_config, port=0, deployment_mode="k8s"
@@ -1036,9 +1046,11 @@ async def test_create_deployment_readiness_probe_settings(
     }
 
 
-def test_entity_client_builds_typed_entities_client() -> None:
+@pytest.mark.asyncio
+async def test_entity_client_builds_typed_entities_client() -> None:
     backend = _backend()
     client = MagicMock()
+    client.__aenter__.return_value = client
     typed_client = MagicMock()
     entity_client = MagicMock()
 
@@ -1056,11 +1068,111 @@ def test_entity_client_builds_typed_entities_client() -> None:
             return_value=entity_client,
         ) as mock_entity_client,
     ):
-        result = backend._entity_client()
+        async with backend._entity_client() as result:
+            assert result is entity_client
 
+    client.__aexit__.assert_awaited_once()
     mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert result is entity_client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "error", "cancel"])
+async def test_entity_operation_closes_owned_client_on_calling_loop(outcome: str) -> None:
+    backend = _backend()
+    http_client = httpx.AsyncClient()
+    client = AsyncNemoClient(base_url="http://platform", http_client=http_client, owns_http_client=True)
+    entities = AsyncMock()
+    started = asyncio.Event()
+    calling_loop = asyncio.get_running_loop()
+
+    async def get(*_args: Any, **_kwargs: Any) -> Deployment:
+        assert not http_client.is_closed
+        if outcome == "error":
+            raise RuntimeError("entity read failed")
+        if outcome == "cancel":
+            started.set()
+            await asyncio.Event().wait()
+        return Deployment(name="dep", workspace="default", deployment_config="dep", status="FAILED")
+
+    close_http_client = http_client.aclose
+
+    async def close() -> None:
+        assert asyncio.get_running_loop() is calling_loop
+        await close_http_client()
+
+    entities.get.side_effect = get
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client", return_value=client),
+        patch("nemo_agents_plugin.runner.deployments_backend.NemoEntitiesClient", return_value=entities),
+        patch.object(http_client, "aclose", side_effect=close) as close_client,
+    ):
+        if outcome == "cancel":
+            task = asyncio.create_task(backend.get_deployment_status("default", "dep"))
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif outcome == "error":
+            with pytest.raises(RuntimeError, match="entity read failed"):
+                await backend.get_deployment_status("default", "dep")
+        else:
+            info = await backend.get_deployment_status("default", "dep")
+            assert info is not None and info.status == "failed"
+        close_client.assert_awaited_once()
+    assert http_client.is_closed
+
+
+def test_entity_client_does_not_retain_transport_across_event_loops() -> None:
+    backend = _backend()
+    deployment = Deployment(
+        name="dep", workspace="default", deployment_config="dep", status="FAILED", executor="local-docker"
+    )
+    deployment_config = DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"})
+    diagnostic = "Unsupported harness kind 'nvidia.fabric.nonexistent-kind'"
+    registry = MagicMock()
+    registry.resolve.return_value.get_logs = AsyncMock(return_value=LogResult(lines=[diagnostic]))
+    backend._executor_registry = registry
+
+    def make_entities(_client: Any) -> AsyncMock:
+        # Model the transport's loop-affine synchronization, without networking.
+        # Waiting before set() binds this real asyncio.Event to the caller's loop.
+        ready = asyncio.Event()
+
+        async def get(entity_type: Any, **_kwargs: Any) -> Any:
+            ready.clear()
+            asyncio.get_running_loop().call_soon(ready.set)
+            await ready.wait()
+            return deployment if entity_type is Deployment else deployment_config
+
+        return AsyncMock(get=AsyncMock(side_effect=get))
+
+    async def reconcile() -> None:
+        info = await backend.get_deployment_status("default", "dep")
+        assert info is not None and info.status == "failed"
+
+    async def read_logs() -> None:
+        result = await backend.get_logs(workspace="default", name="dep", tail=500)
+        assert result.lines == [diagnostic]
+
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client") as client_factory,
+        patch("nemo_agents_plugin.runner.deployments_backend.AsyncEntitiesClient.from_client"),
+        patch("nemo_agents_plugin.runner.deployments_backend.NemoEntitiesClient", side_effect=make_entities),
+        asyncio.Runner() as controller,
+        asyncio.Runner() as api,
+    ):
+        controller.run(reconcile())
+        api.run(read_logs())
+        # Both loops remain alive: API use must not replace a singleton cache
+        # that the controller could subsequently reuse on the wrong loop.
+        controller.run(reconcile())
+        api.run(read_logs())
+        assert client_factory.call_count == 4
+        client_factory.assert_called_with(as_service="agents", internal=True)
+
+    registry.resolve.return_value.get_logs.assert_awaited_with(workspace="default", name="dep", tail=500)
 
 
 @pytest.mark.asyncio
@@ -1086,7 +1198,7 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
             DeploymentConfig(name="dep", workspace="default", labels={"nemo.agents/deployment": "dep"}),
         ]
     )
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     registry = MagicMock()
     registry.resolve.side_effect = KeyError("missing")
     backend._executor_registry = registry
@@ -1101,7 +1213,7 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
 async def test_create_deployment_writes_config_and_deployment() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"):
         info = await backend.create_deployment(
@@ -1129,7 +1241,7 @@ async def test_create_deployment_writes_config_and_deployment() -> None:
 async def test_create_deployment_docker_rewrites_loopback_base_url() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "llms": {
             "llm": {
@@ -1161,7 +1273,7 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "llms": {
             "llm": {
@@ -1187,7 +1299,7 @@ async def test_create_deployment_k8s_rewrites_loopback_to_internal() -> None:
 async def test_create_deployment_k8s_without_internal_url_fails() -> None:
     backend = _backend(default_image="nat:latest", default_executor="k8s")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_agents_plugin.runner.deployments_backend.get_internal_base_url", return_value=None),
@@ -1213,7 +1325,7 @@ async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypa
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "llms": {
             "llm": {
@@ -1249,7 +1361,7 @@ async def test_create_deployment_openshell_without_platform_egress_fails(monkeyp
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
@@ -1276,7 +1388,7 @@ async def test_create_deployment_openshell_override_wins_without_platform_egress
         gateway_url_override="http://igw.example:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
@@ -1292,7 +1404,7 @@ async def test_create_deployment_openshell_override_wins_without_platform_egress
 async def test_create_deployment_openshell_rejects_image_entrypoint_before_entity_create() -> None:
     backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     info = await backend.create_deployment(
         workspace="default",
         name="hello-dep",
@@ -1316,7 +1428,7 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "llms": {
             "llm": {
@@ -1372,7 +1484,7 @@ async def test_create_deployment_k8s_trusted_header_auth_without_creator_omits_o
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
@@ -1400,7 +1512,7 @@ async def test_create_deployment_k8s_token_exchange_without_auth_context_fails_c
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
@@ -1431,7 +1543,7 @@ async def test_create_deployment_k8s_token_exchange_uses_proxy_without_trusted_o
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1474,7 +1586,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "llms": {
             "llm": {
@@ -1505,7 +1617,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
 async def test_create_deployment_fabric_docker_rewrites_model_base_url() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1540,7 +1652,7 @@ async def test_create_deployment_fabric_docker_rewrites_model_base_url() -> None
 async def test_create_deployment_fabric_can_preserve_image_entrypoint() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1583,7 +1695,7 @@ async def test_create_deployment_fabric_k8s_rewrites_model_base_url() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1620,7 +1732,7 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1670,7 +1782,8 @@ async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_ove
     backend = _backend(
         default_image="fabric:latest", default_executor="k8s", k8s_internal_base_url="http://nhx-api:8080"
     )
-    backend._entities = AsyncMock()
+    entities = AsyncMock()
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1693,9 +1806,7 @@ async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_ove
 
     # Each deployment creates a DeploymentConfig and a Deployment; only the
     # former carries the baked agent config.
-    configs = [
-        call.args[0] for call in backend._entities.create.await_args_list if hasattr(call.args[0], "config_files")
-    ]
+    configs = [call.args[0] for call in entities.create.await_args_list if hasattr(call.args[0], "config_files")]
     baked = yaml.safe_load(configs[1].config_files[0].content)
     endpoint = baked["telemetry"]["atif"]["storage"][0]["endpoint"]
     assert "workspace-b" in endpoint and "workspace-a" not in endpoint
@@ -1719,9 +1830,12 @@ async def test_create_deployment_missing_image_fails() -> None:
 async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
     backend = _backend(default_image="nat:latest")
     entities = AsyncMock()
-    entities.create = AsyncMock(side_effect=[None, RuntimeError("boom")])
-    entities.delete = AsyncMock()
-    backend._entities = entities
+    saved_config = DeploymentConfig(name="hello-dep", workspace="default")
+    saved_config._id = "original-config-id"
+    saved_config._db_version = 7
+    entities.create = AsyncMock(side_effect=[saved_config, RuntimeError("boom")])
+    entities.delete_by_id = AsyncMock()
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"),
@@ -1735,11 +1849,11 @@ async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
             deployment_mode="docker",
         )
 
-    entities.delete.assert_awaited_once()
-    delete_call = entities.delete.await_args
+    entities.delete_by_id.assert_awaited_once()
+    delete_call = entities.delete_by_id.await_args
     assert delete_call is not None
-    assert delete_call.args[0] is DeploymentConfig
-    assert delete_call.kwargs["expected_db_version"] == 1
+    assert delete_call.args == (DeploymentConfig, "original-config-id")
+    assert delete_call.kwargs["expected_db_version"] == 7
 
 
 @pytest.mark.asyncio
@@ -1755,7 +1869,7 @@ async def test_get_deployment_status_projects_endpoints() -> None:
             endpoints=[PluginEndpoint(name="http", url="http://127.0.0.1:32768", protocol="http")],
         )
     )
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     info = await backend.get_deployment_status("default", "hello-dep")
     assert info is not None
@@ -1777,7 +1891,7 @@ async def test_get_deployment_status_surfaces_deleting_message() -> None:
             status_message="Waiting for backend to delete deployment: docker paused",
         )
     )
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     info = await backend.get_deployment_status("default", "hello-dep")
     assert info is not None
@@ -1796,12 +1910,15 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
         status="READY",
     )
     deployment_config = DeploymentConfig(name="hello-dep", workspace="default")
-    # First get returns the deployment; the wait-loop get raises NotFound; final get
-    # fetches the config version used for the conditional delete.
-    entities.get = AsyncMock(side_effect=[deployment, NemoEntityNotFoundError("gone"), deployment_config])
+    # Retain the config ID across the wait, then reload its current version.
+    deployment_config._id = "original-config-id"
+    refreshed = deployment_config.model_copy()
+    refreshed._db_version = 2
+    entities.get_by_id = AsyncMock(return_value=refreshed)
+    entities.get = AsyncMock(side_effect=[deployment, deployment_config, NemoEntityNotFoundError("gone")])
     entities.update = AsyncMock()
-    entities.delete = AsyncMock()
-    backend._entities = entities
+    entities.delete_by_id = AsyncMock()
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
         cleaned = await backend.delete_deployment("default", "hello-dep")
@@ -1809,11 +1926,12 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     assert cleaned
     entities.update.assert_awaited_once()
     assert deployment.status == "DELETING"
-    entities.delete.assert_awaited_once()
-    delete_call = entities.delete.await_args
+    entities.delete_by_id.assert_awaited_once()
+    delete_call = entities.delete_by_id.await_args
     assert delete_call is not None
-    assert delete_call.args[0] is DeploymentConfig
-    assert delete_call.kwargs["expected_db_version"] == 1
+    assert delete_call.args == (DeploymentConfig, "original-config-id")
+    assert delete_call.kwargs["expected_db_version"] == 2
+    entities.get_by_id.assert_awaited_once_with(DeploymentConfig, "original-config-id")
 
 
 @pytest.mark.asyncio
@@ -1829,11 +1947,11 @@ async def test_delete_leaves_timed_out_teardown_failed() -> None:
             error_details={"reason": "deleting_timeout"},
         )
     )
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     assert not await backend.delete_deployment("default", "hello-dep")
     entities.update.assert_not_awaited()
-    entities.delete.assert_not_awaited()
+    entities.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1848,15 +1966,15 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     )
     entities.get = AsyncMock(return_value=deployment)
     entities.update = AsyncMock()
-    entities.delete = AsyncMock()
-    backend._entities = entities
+    entities.delete_by_id = AsyncMock()
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
 
     with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
         with patch("nemo_agents_plugin.runner.deployments_backend.monotonic", side_effect=[0.0, 0.0, 6.0]):
             cleaned = await backend.delete_deployment("default", "hello-dep")
 
     assert not cleaned
-    entities.delete.assert_not_called()
+    entities.delete_by_id.assert_not_called()
 
 
 def test_agent_deployment_defaults_are_subprocess() -> None:
@@ -1874,7 +1992,7 @@ def test_agent_deployment_defaults_are_subprocess() -> None:
 async def test_create_deployment_fabric_docker_stages_fileset_artifacts(source_fileset: FilesetRef | None) -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1931,7 +2049,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
         k8s_internal_base_url="http://nhx-api:8080",
     )
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -1978,7 +2096,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
 async def test_create_deployment_fabric_staging_error_fails_before_entity_create() -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -2020,7 +2138,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
 async def test_create_deployment_enables_workload_identity_with_auth_context() -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
-    backend._entities = entities
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
     auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
 
     with (
@@ -2052,3 +2170,20 @@ async def test_create_deployment_enables_workload_identity_with_auth_context() -
     assert created_config.workload_identity.workload_id == "hello-dep"
     assert created_config.workload_identity.token_audience == "agent-audience"
     assert created_dep.auth_context == auth_context
+
+
+@pytest.mark.parametrize("failure", [NemoEntityConflictError("changed"), NemoEntityNotFoundError("gone")])
+async def test_config_delete_handles_concurrent_change(failure: Exception) -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    config = DeploymentConfig(name="hello-dep", workspace="default")
+    config._id = "original-config-id"
+    entities.get.side_effect = [NemoEntityNotFoundError("deployment gone"), config]
+    entities.get_by_id.return_value = config
+    entities.delete_by_id.side_effect = failure
+    backend._entity_client = MagicMock(side_effect=lambda: _entity_client_scope(entities))  # type: ignore[method-assign]
+
+    cleaned = await backend.delete_deployment("default", "hello-dep")
+
+    assert cleaned is isinstance(failure, NemoEntityNotFoundError)
+    entities.get_by_id.assert_awaited_once_with(DeploymentConfig, "original-config-id")

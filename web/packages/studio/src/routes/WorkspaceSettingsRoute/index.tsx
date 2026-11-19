@@ -13,7 +13,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
-import { INFERENCE_PROVIDER_ENABLED, MEMBERS_ENABLED } from '@studio/constants/environment';
+import { MEMBERS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
@@ -25,7 +25,7 @@ import {
 import { MEMBERS_ROUTE_HEADER_DESCRIPTION } from '@studio/routes/WorkspaceMembersRoute/constants';
 import { DeleteWorkspaceModal } from '@studio/routes/WorkspaceSettingsRoute/DeleteWorkspaceModal';
 import { EditDescriptionModal } from '@studio/routes/WorkspaceSettingsRoute/EditDescriptionModal';
-import { FC, ReactNode, useState } from 'react';
+import { type FC, type ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface SettingsSectionProps {
@@ -125,25 +125,23 @@ export const WorkspaceSettingsRoute: FC = () => {
               />
             </>
 
-            {INFERENCE_PROVIDER_ENABLED && (
-              <>
-                <Divider />
-                <SettingsSection
-                  label="Inference Providers"
-                  body="Manage inference endpoints (NVIDIA Build, OpenAI, NIMs). Create an API key secret and reference it when adding a provider."
-                  action={
-                    <Button
-                      color="neutral"
-                      kind="secondary"
-                      onClick={() => navigate(getWorkspaceInferenceProvidersRoute(workspace))}
-                      className="shrink-0"
-                    >
-                      Manage Providers
-                    </Button>
-                  }
-                />
-              </>
-            )}
+            <>
+              <Divider />
+              <SettingsSection
+                label="Inference Providers"
+                body="Manage inference endpoints (NVIDIA Build, OpenAI, NIMs). Create an API key secret and reference it when adding a provider."
+                action={
+                  <Button
+                    color="neutral"
+                    kind="secondary"
+                    onClick={() => navigate(getWorkspaceInferenceProvidersRoute(workspace))}
+                    className="shrink-0"
+                  >
+                    Manage Providers
+                  </Button>
+                }
+              />
+            </>
 
             <Divider />
             <SettingsSection

@@ -25,7 +25,6 @@ from nhx.automodel.app.constants import (
     DEFAULT_DATASET_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_TEACHER_MODEL_PATH,
-    V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
 )
 from nhx.automodel.app.jobs.training.schemas import (
     BackendConfig,
@@ -41,10 +40,17 @@ from nhx.automodel.app.jobs.training.schemas import (
 from nhx.automodel.config import config
 from nhx.automodel.entities.values import Precision, TrainingType
 from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
+from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
+from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.model_utils import is_embedding_model
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
+)
+from nhx.customization_common.schemas.checkpoint import (
+    CheckpointTraits,
+    reject_incompatible_checkpoint,
+    traits_from_model_spec,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,16 +100,6 @@ def _resolve_training_recipe(me: ModelEntity, requested: str) -> TrainingRecipe:
     if head_type == "cross_encoder":
         return TrainingRecipe.CROSS_ENCODER
     return TrainingRecipe.SFT
-
-
-def _resolve_v4_compatible(me: ModelEntity) -> bool:
-    """Check if the model requires transformers-v4-compatible checkpoint output."""
-    if me.spec is None:
-        return False
-    checkpoint_model_name = getattr(me.spec, "checkpoint_model_name", None)
-    is_v4_compatible = checkpoint_model_name in V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
-    logger.info(f"Checkpoint model name {checkpoint_model_name} is v4 compatible: {is_v4_compatible}")
-    return is_v4_compatible
 
 
 def _resolve_custom_implementation_override(me: ModelEntity) -> bool:
@@ -164,7 +160,6 @@ def compile_training_step(
     chat_template = me.spec.chat_template if me.spec else None
     checkpoint_head_type = _resolve_checkpoint_head_type(me)
     override_custom_impl = _resolve_custom_implementation_override(me)
-    v4_compatible = _resolve_v4_compatible(me)
     training = job_spec.training
     training_recipe = _resolve_training_recipe(me, training.recipe)
     training = training.with_resolved_recipe(training_recipe.value)
@@ -172,6 +167,23 @@ def compile_training_step(
         raise ValueError("Knowledge distillation only supports the sft recipe.")
     p = training.parallelism
     num_gpus_per_node = p.num_gpus_per_node
+    traits = traits_from_model_spec(me.spec)
+    try:
+        reject_incompatible_checkpoint(
+            traits,
+            training_type=TrainingType(training.type).value,
+            recipe=training_recipe.value,
+            sequence_packing=bool(getattr(training, "sequence_packing", False)),
+            expert_parallel_size=p.expert_parallel_size,
+            num_gpus_per_node=p.num_gpus_per_node,
+            num_nodes=p.num_nodes,
+            # Registered text MoE fails here, before the download step reserves GPUs.
+            # An architecture outside the map keeps the Hugging Face path.
+            enforce_text_moe_expert_parallel=uses_custom_automodel_impl(traits.checkpoint_model_name),
+        )
+        _reject_inapplicable_options(training, training_recipe, has_vision_tower=traits.has_vision_tower)
+    except ValueError as exc:
+        raise HelixJobCompilationError(str(exc)) from exc
 
     training_config = TrainingStepConfig(
         model=_translate_model_config(
@@ -181,11 +193,12 @@ def compile_training_step(
             checkpoint_head_type=checkpoint_head_type,
             chat_template=chat_template,
             override_custom_impl=override_custom_impl,
-            v4_compatible=v4_compatible,
+            traits=traits,
         ),
         dataset=TrainingStepConfig.DatasetConfig(
             path=DEFAULT_DATASET_PATH,
             shuffle=training.shuffle,
+            mask_generation_prompt=training.mask_generation_prompt,
         ),
         training=_translate_training_config(training, me, teacher_me=teacher_me, recipe=training_recipe),
         schedule=TrainingStepConfig.ScheduleConfig(
@@ -288,22 +301,28 @@ def _translate_model_config(
     checkpoint_head_type: str = "unknown",
     chat_template: str | None = None,
     override_custom_impl: bool = False,
-    v4_compatible: bool = False,
+    traits: CheckpointTraits | None = None,
 ) -> ModelConfig:
     """Translate job spec to internal ModelConfig."""
     training = job_spec.training
+    recorded = traits or CheckpointTraits()
     return ModelConfig(
         path=path,
         name=_extract_model_name(job_spec),
         max_seq_length=training.max_seq_length,
         precision=training.precision,
         attn_implementation=training.attn_implementation,
+        tokenizer_backend=training.tokenizer_backend,
         trust_remote_code=trust_remote_code,
         checkpoint_head_type=checkpoint_head_type,
         is_embedding_model=checkpoint_head_type == "embedding",
         chat_template=chat_template,
         override_custom_impl=override_custom_impl,
-        v4_compatible=v4_compatible,
+        has_vision_tower=recorded.has_vision_tower,
+        has_audio_tower=recorded.has_audio_tower,
+        num_experts=recorded.expert_count,
+        num_nextn_predict_layers=recorded.num_nextn_predict_layers,
+        checkpoint_model_name=recorded.checkpoint_model_name,
     )
 
 
@@ -347,6 +366,21 @@ def _translate_training_config(
         mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
         backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
     )
+
+
+def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, *, has_vision_tower: bool) -> None:
+    """Reject settings the resolved recipe would otherwise ignore."""
+    if has_vision_tower and training.tokenizer_backend is not None:
+        raise ValueError(
+            "tokenizer_backend is not supported for vision-language models, which load the checkpoint's processor."
+        )
+    if training.mask_generation_prompt and (
+        has_vision_tower or recipe in (TrainingRecipe.BI_ENCODER, TrainingRecipe.CROSS_ENCODER)
+    ):
+        raise ValueError(
+            "mask_generation_prompt applies only to chat-format data in the text sft recipe, not to "
+            "vision-language models or the bi_encoder and cross_encoder recipes."
+        )
 
 
 def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:

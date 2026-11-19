@@ -9,6 +9,7 @@ import logging
 
 from fastapi import HTTPException
 from nemo_agents_plugin.entities import AgentSession
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,8 @@ async def get_owned_session(
         session = await entity_client.get(AgentSession, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise session_not_found(workspace, name) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get session '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get session.") from exc
@@ -60,6 +63,8 @@ async def get_owned_session_by_id(
         )
     except NemoEntityNotFoundError as exc:
         raise session_id_not_found(workspace, session_id) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get session ID '%s'", session_id)
         raise HTTPException(status_code=500, detail="Failed to get session.") from exc

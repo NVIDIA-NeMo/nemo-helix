@@ -11,7 +11,7 @@ import {
 } from '@studio/components/agents/AgentBlockingInput';
 import { getBlockingInputRequest } from '@studio/routes/agents/AssistantChatRoute/blockingInputRequest';
 import type { AssistantInputRequest } from '@studio/routes/agents/AssistantChatRoute/types';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface BlockingInputComposerProps {
   readonly inputRequest: AssistantInputRequest;

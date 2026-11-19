@@ -77,21 +77,6 @@ def client() -> Generator[NemoClient, None, None]:
         yield client
 
 
-@pytest.fixture
-def no_hf_network(monkeypatch):
-    """Fixture to disable live HuggingFace network calls: make validation/config-resolution purely local."""
-
-    async def _validate_noop(self):
-        return None
-
-    async def _resolve_passthrough(self):
-        # Keep config unchanged; enough for create path testing.
-        return self.config
-
-    monkeypatch.setattr(HuggingfaceStorageImpl, "validate_storage", _validate_noop)
-    monkeypatch.setattr(HuggingfaceStorageImpl, "resolve_config", _resolve_passthrough)
-
-
 @pytest.mark.integration
 class TestFilesetCreateWithSecretAuth:
     def test_editor_can_create_hf_fileset_with_token_secret(

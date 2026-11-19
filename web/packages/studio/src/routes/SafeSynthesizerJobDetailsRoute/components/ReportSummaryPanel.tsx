@@ -3,11 +3,11 @@
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { IconDocument } from '@nemo/icons/icons';
-import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getGenerateJobReportRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface ReportSummaryPanelProps {

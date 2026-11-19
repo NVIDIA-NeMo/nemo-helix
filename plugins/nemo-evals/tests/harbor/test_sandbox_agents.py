@@ -66,6 +66,56 @@ def test_allowlist_without_channel_keeps_the_task_hosts():
     assert allowed & {IGW, "pypi.org"} == {"pypi.org"}
 
 
+def _is_denied(policy: Any, address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return any(
+        ip in network
+        for network in (ipaddress.ip_network(rule.target) for rule in policy.rules if rule.action == "deny")
+        if network.version == ip.version
+    )
+
+
+@pytest.mark.parametrize("address", ["10.0.0.51", "169.254.169.254"])
+def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(monkeypatch, address):
+    """The task's host is allowed by name only; the operator's channel host still gets its carve-out."""
+    answers = {"internal.attacker.com": address, IGW: "10.0.0.60"}
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
+    environment = _environment(NetworkMode.ALLOWLIST, (IGW,), trusted=("*.com",), allowed=("internal.attacker.com",))
+    environment._agent_setup_hosts = ("registry.npmjs.org",)
+
+    policy = environment.egress_policy()
+    opened = opensandbox_environment.build_egress_policy(
+        environment._egress_allowlist(
+            (*_allowed(policy), *environment._agent_setup_hosts),
+            extra_operator_hosts=environment._agent_setup_hosts,
+        )
+    )
+
+    for built in (policy, opened):
+        assert {"internal.attacker.com"} <= _allowed(built)
+        assert _is_denied(built, address)
+        assert not _is_denied(built, "10.0.0.60")
+
+
+def test_a_task_naming_a_setup_host_gets_no_carve_out_from_the_closed_policy(monkeypatch):
+    """Setup hosts are trusted for the window only, so a task naming one under a wildcard is name-only."""
+    monkeypatch.setattr(
+        egress,
+        "_resolve_host",
+        lambda target: (ipaddress.ip_network("10.77.0.9"),) if target == "registry.corp.example" else (),
+    )
+    environment = _environment(
+        NetworkMode.ALLOWLIST, (IGW,), trusted=("*.corp.example",), allowed=("registry.corp.example",)
+    )
+    environment._agent_setup_hosts = ("registry.corp.example",)
+
+    policy = environment.egress_policy()
+    assert {"registry.corp.example"} <= _allowed(policy)
+    assert _is_denied(policy, "10.77.0.9")
+
+
 def test_public_tasks_keep_the_profile_allowlist():
     policy = _environment(NetworkMode.PUBLIC, (IGW,), trusted=(IGW, "pypi.org")).egress_policy()
     assert {IGW, "pypi.org"} <= _allowed(policy)
@@ -127,16 +177,25 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
 
 
 def _setup_environment(
-    monkeypatch, *, mode: NetworkMode = NetworkMode.NO_NETWORK, setup: tuple[str, ...] = SETUP, kill_exit: int = 0
+    monkeypatch,
+    *,
+    mode: NetworkMode = NetworkMode.NO_NETWORK,
+    setup: tuple[str, ...] = SETUP,
+    kill_exit: int = 0,
+    trusted: tuple[str, ...] = ("registry.npmjs.org",),
+    allowed: tuple[str, ...] = (),
+    answers: dict[str, str] | None = None,
 ) -> _SetupWindowEnvironment:
     monkeypatch.setattr(opensandbox_environment, "network_rules", lambda rules: list(rules))
-    monkeypatch.setattr(egress, "_resolve_host", lambda target: ())  # no DNS from unit tests
+    answers = answers or {}  # no DNS from unit tests
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
     environment = object.__new__(_SetupWindowEnvironment)
-    environment._network_policy = NetworkPolicy(network_mode=mode)
+    environment._network_policy = NetworkPolicy(network_mode=mode, allowed_hosts=list(allowed))
     environment._agent_channel_hosts = (IGW,)
     environment._agent_setup_hosts = setup
-    environment._trusted_allowed_hosts = ("registry.npmjs.org",)
-    environment._trusted_targets = frozenset(environment._trusted_allowed_hosts)
+    environment._trusted_allowed_hosts = trusted
     environment._resolver_addresses = ()
     environment._egress_verification = "strict"
     environment._services = None
@@ -263,7 +322,7 @@ async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatc
 async def test_a_setup_host_the_task_already_allows_is_left_in_place(monkeypatch):
     environment = _setup_environment(monkeypatch, mode=NetworkMode.PUBLIC)
     before = _allowed_now(environment)
-    assert "registry.npmjs.org" in before  # the trusted allowlist already has it
+    assert {"registry.npmjs.org"} <= before  # the trusted allowlist already has it
     async with environment.agent_setup_egress():
         assert "*.pypi.org" in _allowed_now(environment)
     assert _allowed_now(environment) == before
@@ -304,6 +363,24 @@ async def test_a_private_setup_host_is_carved_out_of_the_deny_ranges(monkeypatch
         assert not any(registry in network for network in _denied_networks(environment))
     assert "10.77.0.9" not in _allowed_now(environment)
     assert any(registry in network for network in _denied_networks(environment))
+
+
+async def test_a_task_naming_a_private_setup_host_reaches_it_only_during_setup(monkeypatch):
+    """A task may narrow a wildcard to the setup hostname, but that must not keep its address open."""
+    environment = _setup_environment(
+        monkeypatch,
+        mode=NetworkMode.ALLOWLIST,
+        setup=("registry.corp.example",),
+        trusted=("*.corp.example",),
+        allowed=("registry.corp.example",),
+        answers={"registry.corp.example": "10.77.0.9"},
+    )
+    registry = ipaddress.ip_address("10.77.0.9")
+    assert any(registry in network for network in _denied_networks(environment))  # before setup: denied
+    async with environment.agent_setup_egress():
+        assert not any(registry in network for network in _denied_networks(environment))  # during: allowed
+    assert {"registry.corp.example"} <= _allowed_now(environment)  # the task still has it by name
+    assert any(registry in network for network in _denied_networks(environment))  # after setup: denied
 
 
 @pytest.mark.parametrize("failure", [asyncio.CancelledError, RuntimeError], ids=["cancelled", "failed"])

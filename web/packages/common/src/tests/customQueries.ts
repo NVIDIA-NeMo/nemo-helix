@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { queryHelpers, buildQueries, Matcher, MatcherOptions } from '@testing-library/react';
+import {
+  queryHelpers,
+  buildQueries,
+  type Matcher,
+  type MatcherOptions,
+} from '@testing-library/react';
 
 // The queryAllByAttribute is a shortcut for attribute-based matchers
 // You can also use document.querySelector or a combination of existing

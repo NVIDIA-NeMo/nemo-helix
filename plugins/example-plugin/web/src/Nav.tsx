@@ -17,25 +17,25 @@ export const navItems = (workspaceId: string): PluginNavGroup[] => [
     items: [
       {
         id: 'example-overview',
-        iconName: 'flask-conical',
+        iconName: 'beaker',
         label: 'Overview',
         href: pluginPath(workspaceId, 'overview'),
       },
       {
         id: 'example-auth',
-        iconName: 'key-round',
+        iconName: 'key',
         label: 'Auth',
         href: pluginPath(workspaceId, 'auth'),
       },
       {
         id: 'example-workspace',
-        iconName: 'building-2',
+        iconName: 'business',
         label: 'Workspace',
         href: pluginPath(workspaceId, 'workspace'),
       },
       {
         id: 'example-shared-ui',
-        iconName: 'table',
+        iconName: 'layout-grid',
         label: 'Shared UI',
         href: pluginPath(workspaceId, 'shared-ui'),
       },

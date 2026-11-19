@@ -14,7 +14,7 @@ import {
   STRATEGY_REWRITE,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 export const StrategyParamsSection: FC = () => {

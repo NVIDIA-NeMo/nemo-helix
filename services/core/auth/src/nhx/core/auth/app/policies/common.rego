@@ -7,6 +7,8 @@ import future.keywords.if
 
 import data.authz.extract_actor_account_id
 import data.authz.extract_actor_aliases
+import data.authz.extract_actor_email
+import data.authz.extract_actor_groups
 import data.authz.extract_caller_kind
 import data.authz.extract_method
 import data.authz.extract_on_behalf_of_principal_id
@@ -51,24 +53,19 @@ permission_satisfied(role_permissions, required_perm) if {
 # When multiple permissions are required, ALL must be satisfied
 # Supports workspace-scoped permissions (format: "workspace/permission")
 has_permissions(principal, workspace, required_permissions) if {
+	has_identity_permissions(principal, workspace, required_permissions, false)
+}
+
+has_identity_permissions(principal, workspace, required_permissions, actor_side) if {
 	satisfied := [perm |
 		perm := required_permissions[_]
-		has_specific_permission(principal, workspace, perm)
+		has_identity_permission(principal, workspace, perm, actor_side)
 	]
 	count(satisfied) == count(required_permissions)
 }
 
-# Get required permissions for an endpoint/method combination.
-# Returns undefined (not []) for unknown endpoints so callers cannot accidentally
-# treat "not configured" the same as "no permissions required".
-get_required_permissions(path, method) := perms if {
-	endpoint := normalize_endpoint(path)
-	method_lower := lower(method)
-	perms := data.authz.endpoints[endpoint][method_lower].permissions
-}
-
 # Get the allowed caller kinds for an endpoint/method combination.
-# Uses the same most-specific endpoint match as get_required_permissions.
+# Uses the most-specific endpoint match.
 # Returns undefined (not []) when the matched endpoint has no `callers` key, so
 # callers can treat absence as the default (PRINCIPAL) semantics — no new restriction.
 endpoint_callers(path, method) := callers if {
@@ -94,6 +91,10 @@ endpoint_denied(path, method) if {
 #   - Use the workspace (existing behavior)
 #   - Falls back to checking wildcard principal "*" for workspace access
 has_specific_permission(principal, workspace, required_perm) if {
+	has_identity_permission(principal, workspace, required_perm, false)
+}
+
+has_identity_permission(principal, workspace, required_perm, actor_side) if {
 	# Check if permission has explicit workspace (format: workspace/permission)
 	contains(required_perm, "/")
 	parts := split(required_perm, "/")
@@ -102,20 +103,20 @@ has_specific_permission(principal, workspace, required_perm) if {
 	base_permission := parts[1]
 
 	some role in effective_roles(principal, target_workspace)
-	role_permissions := get_role_permissions_for_principal(role, principal)
+	role_permissions := get_identity_role_permissions(role, principal, actor_side)
 	permission_satisfied(role_permissions, base_permission)
 } else if {
 	# No explicit workspace - use context workspace (existing behavior)
 	not contains(required_perm, "/")
 	some role in effective_roles(principal, workspace)
-	role_permissions := get_role_permissions_for_principal(role, principal)
+	role_permissions := get_identity_role_permissions(role, principal, actor_side)
 	permission_satisfied(role_permissions, required_perm)
 } else if {
 	# Fallback: check if wildcard principal "*" has this permission in the workspace
 	# This enables public/shared access via role bindings for "*"
 	not contains(required_perm, "/")
 	some role in data.authz.principals["*"].workspaces[workspace]
-	role_permissions := get_role_permissions_for_principal(role, "*")
+	role_permissions := get_identity_role_permissions(role, "*", actor_side)
 	permission_satisfied(role_permissions, required_perm)
 }
 
@@ -132,19 +133,29 @@ all_permissions_satisfied(required_permissions, role_permissions) if {
 }
 
 role_applies_to_principal(role_name, principal) if {
+	role_applies_to_identity(role_name, principal, false)
+}
+
+role_applies_to_identity(role_name, principal, actor_side) if {
 	not object.get(data.authz.roles[role_name], "service_only", false)
 } else if {
 	valid_service_principal(principal)
 	principal == extract_principal_id
 	request_caller_kind == "service_principal"
-	extract_on_behalf_of_principal_id == ""
+	service_role_context_allowed(actor_side)
 }
 
-get_role_permissions_for_principal(role_name, principal) := permissions if {
+service_role_context_allowed(actor_side) if actor_side
+
+service_role_context_allowed(actor_side) if extract_on_behalf_of_principal_id == ""
+
+get_role_permissions_for_principal(role_name, principal) := get_identity_role_permissions(role_name, principal, false)
+
+get_identity_role_permissions(role_name, principal, actor_side) := permissions if {
 	all_roles := get_all_roles_in_chain(role_name)
 	permissions := {permission |
 		some inherited_role in all_roles
-		role_applies_to_principal(inherited_role, principal)
+		role_applies_to_identity(inherited_role, principal, actor_side)
 		role := data.authz.roles[inherited_role]
 		some permission in object.get(role, "permissions", [])
 	}
@@ -272,6 +283,102 @@ get_applicable_principals := principals if {
 	# Ensure we have at least one principal
 	count(principals) > 0
 } else := set()
+
+# Permission queries keep actor and subject grants separate. Legacy email/groups
+# describe the effective user; new actor fields retain the caller's own claims.
+get_actor_principals := principals if {
+	id := extract_principal_id
+	id != ""
+	ids := {id, extract_actor_account_id}
+	aliases := {alias | alias := extract_actor_aliases[_]}
+	principals := (((ids | aliases) | actor_email_principals) | actor_group_principals) - {"", "*"}
+} else := set()
+
+actor_email_principals := {email | email := extract_actor_email; email != ""}
+
+actor_group_principals := {group | group := extract_actor_groups[_]}
+
+get_subject_principals := principals if {
+	subject := extract_on_behalf_of_principal_id
+	subject != ""
+	ids := {subject, extract_subject_account_id, extract_principal_email}
+	aliases := {alias | alias := extract_subject_aliases[_]}
+	groups := {group | group := extract_principal_groups[_]}
+	principals := ((ids | aliases) | groups) - {"", "*"}
+} else := set()
+
+identity_permissions_satisfied(principals, workspace, permissions, actor_side) if {
+	count(principals) > 0
+	is_array(permissions)
+	every permission in permissions { is_string(permission) }
+	some principal in principals
+	"HelixAdmin" in data.authz.principals[principal].workspaces.system
+} else if {
+	count(principals) > 0
+	is_array(permissions)
+	every permission in permissions { is_string(permission) }
+	some principal in principals
+	has_identity_permissions(principal, workspace, permissions, actor_side)
+}
+
+actor_permissions_satisfied(workspace, permissions) if {
+	identity_permissions_satisfied(get_actor_principals, workspace, permissions, true)
+}
+
+subject_permissions_satisfied(workspace, permissions) if {
+	identity_permissions_satisfied(get_subject_principals, workspace, permissions, false)
+}
+
+# Bundle compilation supplies explicit contracts. Missing selected branches deny;
+# neither direct requirements nor subject requirements are inferred at evaluation.
+selected_route_contract := contract if {
+	extract_on_behalf_of_principal_id == ""
+	contract := data.authz.endpoints[endpoint_scan][req_method_lower].direct
+	valid_actor_requirement(contract)
+	not "subject_perms" in object.keys(contract)
+} else := contract if {
+	extract_on_behalf_of_principal_id != ""
+	contract := data.authz.endpoints[endpoint_scan][req_method_lower].delegated
+	valid_actor_requirement(contract)
+	valid_subject_requirement(contract)
+}
+
+valid_actor_requirement(contract) if {
+	is_array(contract.actor_perms)
+	every permission in contract.actor_perms { is_string(permission) }
+}
+
+valid_subject_requirement(contract) if {
+	not "subject_perms" in object.keys(contract)
+} else if {
+	is_array(contract.subject_perms)
+	every permission in contract.subject_perms { is_string(permission) }
+}
+
+get_route_principals := get_actor_principals if {
+	extract_on_behalf_of_principal_id == ""
+} else := get_actor_principals if {
+	count(selected_route_contract.actor_perms) > 0
+} else := get_subject_principals
+
+route_permissions_satisfied(workspace) if {
+	actor_permissions_satisfied(workspace, selected_route_contract.actor_perms)
+	selected_subject_permissions_satisfied(workspace)
+}
+
+selected_subject_permissions_satisfied(workspace) if {
+	not "subject_perms" in object.keys(selected_route_contract)
+} else if {
+	subject_permissions_satisfied(workspace, selected_route_contract.subject_perms)
+}
+
+ordinary_permissions_satisfied(workspace, permissions) if {
+	extract_on_behalf_of_principal_id == ""
+	actor_permissions_satisfied(workspace, permissions)
+} else if {
+	extract_on_behalf_of_principal_id != ""
+	subject_permissions_satisfied(workspace, permissions)
+}
 
 # PATH MATCHING HELPERS
 
@@ -426,7 +533,7 @@ endpoint_scan := e if {
 
 req_method_lower := lower(extract_method)
 
-req_permissions := data.authz.endpoints[endpoint_scan][req_method_lower].permissions
+req_permissions := array.concat(selected_route_contract.actor_perms, object.get(selected_route_contract, "subject_perms", []))
 
 req_callers := data.authz.endpoints[endpoint_scan][req_method_lower].callers
 

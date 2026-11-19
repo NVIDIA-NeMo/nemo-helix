@@ -175,6 +175,16 @@ describe('validateDraft', () => {
       expect(automodel.parallelism?.num_gpus_per_node).toBe(2);
     });
 
+    it('leaves the learning rate to the backend when the model chose none', () => {
+      const draft = automodelDraft({
+        training: { training_type: 'sft', finetuning_type: 'all_weights' },
+        optimizer: { weight_decay: 0.01 },
+      });
+      const { values, config } = expectValid(validate(draft));
+      expect(values.automodel.optimizer?.learning_rate).toBeUndefined();
+      expect(JSON.parse(config).spec.optimizer).not.toHaveProperty('learning_rate');
+    });
+
     it("builds the full config with the form's own request builder", () => {
       const { config } = expectValid(validate(automodelDraft()));
       const request = JSON.parse(config);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AmbientParticle } from '@nemo/common/src/components/Nebula/particles/AmbientParticle';
-import { type Particle } from '@nemo/common/src/components/Nebula/particles/Base';
+import type { Particle } from '@nemo/common/src/components/Nebula/particles/Base';
 import { SphereParticle } from '@nemo/common/src/components/Nebula/particles/SphereParticle';
 import type {
   NebulaAppearance,

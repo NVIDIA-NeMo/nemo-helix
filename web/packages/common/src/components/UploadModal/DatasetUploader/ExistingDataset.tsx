@@ -14,7 +14,7 @@ import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/C
 import { FileUpload } from '@nemo/common/src/components/UploadModal/FileUpload';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
 import { Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * Component for handling file selection from an existing dataset.

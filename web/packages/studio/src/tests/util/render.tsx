@@ -4,7 +4,7 @@
 import * as customQueries from '@nemo/common/src/tests/customQueries';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { routes as appRoutes } from '@studio/routes';
-import { TestProviders, TestProvidersOptions } from '@studio/tests/util/TestProviders';
+import { TestProviders, type TestProvidersOptions } from '@studio/tests/util/TestProviders';
 import { queries, render, within } from '@testing-library/react';
 import { Suspense } from 'react';
 import { createMemoryRouter, MemoryRouter, type RouteObject } from 'react-router';
@@ -15,7 +15,7 @@ import { RouterProvider } from 'react-router/dom';
 /**
  * Options for the renderRoute function
  */
-export interface RenderRouteOptions {
+interface RenderRouteOptions {
   /**
    * Mock browsing history - initializes the router at these URL(s).
    * If array, last item will be used as the current path.
@@ -60,10 +60,7 @@ const allQueries = {
   ...customQueries,
 };
 
-export const customRender = (
-  element: React.ReactElement,
-  testProviderOptions?: TestProvidersOptions
-) => {
+const customRender = (element: React.ReactElement, testProviderOptions?: TestProvidersOptions) => {
   return render(
     <TestProviders options={testProviderOptions}>
       <Suspense fallback={<Loading />}>

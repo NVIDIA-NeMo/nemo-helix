@@ -7,9 +7,9 @@ import {
   filesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
-import { EntityIdentifier } from '@studio/api/common/types';
+import type { EntityIdentifier } from '@studio/api/common/types';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
-import { UseMutationOptions, useMutation } from '@tanstack/react-query';
+import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 type RenameDatasetFileParams = Required<EntityIdentifier> & {
   path: string;

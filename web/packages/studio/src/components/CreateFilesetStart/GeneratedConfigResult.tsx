@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { IconDocument, Sparkle, Wand } from '@nemo/icons/icons';
+import { WindowCode, Sparkle, Wand } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
 import type { GeneratedConfigResultProps } from '@studio/components/CreateFilesetStart/types';
@@ -93,7 +93,7 @@ export const GeneratedConfigResult: FC<GeneratedConfigResultProps> = ({
         <>
           <Flex justify="end">
             <Button kind="tertiary" size="small" onClick={() => setIsConfigOpen(true)}>
-              <IconDocument size="14" aria-hidden />
+              <WindowCode size="14" aria-hidden />
               View config
             </Button>
           </Flex>

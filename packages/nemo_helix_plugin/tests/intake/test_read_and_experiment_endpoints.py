@@ -66,12 +66,14 @@ def _client(handler) -> IntakeClient:
 
 
 def test_get_trace_endpoint_shape() -> None:
-    prepared = endpoints.get_trace(workspace="team-a", id="trace-1", query_params={"mode": "summary"})
+    prepared = endpoints.get_trace(
+        workspace="team-a", id="trace-1", query_params={"mode": "summary", "session_id": "session-a"}
+    )
 
     assert prepared.method == "GET"
     assert prepared.path_template == "/apis/intake/v2/workspaces/{workspace}/traces/{id}"
     assert prepared.path_params == {"workspace": "team-a", "id": "trace-1"}
-    assert prepared.query_params == {"mode": "summary"}
+    assert prepared.query_params == {"mode": "summary", "session_id": "session-a"}
     assert prepared.response_type is Trace
 
 
@@ -89,7 +91,7 @@ def test_get_trace_metrics_endpoint_shape() -> None:
 def test_span_endpoint_shapes() -> None:
     listed = endpoints.list_spans(workspace="team-a", query_params={"page": 2, "filter": {"trace_id": "t-1"}})
     grouped = endpoints.list_span_groups(workspace="team-a", query_params={"by": "trace_id", "sort": "-span_count"})
-    single = endpoints.get_span(workspace="team-a", span_id="span-1")
+    single = endpoints.get_span(workspace="team-a", span_id="span-1", query_params={"session_id": "session-a"})
 
     assert listed.path_template == "/apis/intake/v2/workspaces/{workspace}/spans"
     assert listed.query_params == {"page": 2, "filter": {"trace_id": "t-1"}}
@@ -100,6 +102,7 @@ def test_span_endpoint_shapes() -> None:
     assert single.method == "GET"
     assert single.path_template == "/apis/intake/v2/workspaces/{workspace}/spans/{span_id}"
     assert single.path_params == {"workspace": "team-a", "span_id": "span-1"}
+    assert single.query_params == {"session_id": "session-a"}
     assert single.response_type is Span
 
 

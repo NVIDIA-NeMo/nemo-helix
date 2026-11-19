@@ -165,3 +165,23 @@ class TestProjectValidation:
         )
         assert response.status_code == 422
         assert "does not exist" in response.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_delete_project_preserves_a_concurrent_change(client, ctx, repos, monkeypatch):
+    """The selected project version is required at deletion; conflicts remain HTTP 409."""
+    from nhx.core.entities.app.repository.exceptions import EntityVersionConflictError
+
+    response = await client.post("/apis/entities/v2/workspaces/default/projects", json={"name": "concurrent"})
+    assert response.status_code == 201
+    selected = response.json()
+
+    async def conflict(*, entity_id, expected_db_version, session=None):
+        assert entity_id == selected["id"]
+        assert expected_db_version is not None
+        raise EntityVersionConflictError("changed")
+
+    monkeypatch.setattr(repos["entity"], "delete_entity", conflict)
+    deleted = await client.delete("/apis/entities/v2/workspaces/default/projects/concurrent")
+    assert deleted.status_code == 409
+    assert (await client.get("/apis/entities/v2/workspaces/default/projects/concurrent")).status_code == 200

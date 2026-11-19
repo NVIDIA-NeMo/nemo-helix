@@ -707,6 +707,7 @@ data:
             "__ZITADEL_NEMO_CLIENT_ID__": json.dumps(state["public_client_id"]),
             "__ZITADEL_USER_LOGIN_CLIENT_ID__": json.dumps(state["user_login_client_id"]),
             "__ZITADEL_INTROSPECTION_CLIENT_ID__": json.dumps(state["nemo_client_id"]),
+            "__ZITADEL_PROJECT_ID_QUOTED__": json.dumps(state["project_id"]),
             "__ZITADEL_PROJECT_ID__": state["project_id"],
         }
         patched = config

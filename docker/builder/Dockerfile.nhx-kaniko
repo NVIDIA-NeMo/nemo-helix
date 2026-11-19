@@ -24,9 +24,9 @@ WORKDIR /src
 ADD --checksum=sha256:37362cb5fb31c1b1f4de07d4c1150f158864b52aa85a9c9a93f145666fd6eef8 \
     https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.28.5.tar.gz /tmp/kaniko.tar.gz
 RUN tar -xzf /tmp/kaniko.tar.gz --strip-components=1 -C /src
-# Upstream's vendor tree still carries x/crypto v0.55.0. Refresh it before the
-# vendor-mode builds to fix GO-2026-6354 and GO-2026-6355 without changing Kaniko.
-RUN GOFLAGS=-mod=mod go get golang.org/x/crypto@v0.56.0 && go mod vendor
+# Refresh the vendor tree before building: x/crypto fixes GO-2026-6354/6355;
+# x/net fixes GO-2026-6603/6610/6611/6612/6617 without changing Kaniko.
+RUN GOFLAGS=-mod=mod go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 && go mod vendor
 RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -mod=vendor -ldflags="-w -s" -o out/ github.com/GoogleCloudPlatform/docker-credential-gcr/v2 && \
     go build -mod=vendor -ldflags="-w -s" -o out/ github.com/awslabs/amazon-ecr-credential-helper/ecr-login/cli/docker-credential-ecr-login && \
@@ -35,26 +35,29 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go version -m out/executor | grep -q 'go1.27.3' && \
     for binary in out/*; do \
         go version -m "$binary" | awk \
-            '$1 == "dep" && $2 == "golang.org/x/crypto" && $3 != "v0.56.0" { exit 1 }' || exit 1; \
+            '$1 == "dep" && $2 == "golang.org/x/crypto" && $3 != "v0.57.0" { exit 1 } \
+             $1 == "dep" && $2 == "golang.org/x/net" && $3 != "v0.60.0" { exit 1 }' || exit 1; \
     done
 
 FROM kaniko AS patched-kaniko
 COPY --from=go-builder /src/out/ /kaniko/
 
 # The image has no Python, so its sources are collected here. docker/sources/nhx-kaniko.json pins the
-# components its Go binaries don't record: kaniko itself; BusyBox with the patches and build script
-# Docker builds it with, and Alpine 3.23's musl package it links statically; tini's release binaries
+# components its Go binaries don't record: kaniko itself; tini's release binaries
 # and the Ubuntu xenial glibc they link statically (glibc 2.23-0ubuntu10 on amd64, and on arm64 the
 # 2.23-0ubuntu3 that cross-toolchain-base 10ubuntu1 built); and Debian trixie's ca-certificates, from
-# which the CA bundle is generated. Re-check it whenever the digest above moves.
+# which the CA bundle is generated. docker/sources/kaniko-busybox.json pins BusyBox with the patches and
+# build script Docker builds it with, and Alpine 3.23's musl package it links statically; the agent
+# installer image ships the same BusyBox. Re-check both whenever the digest above moves.
 FROM ${NHX_PYTHON_BASE} AS sources
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
-COPY docker/sources/nhx-kaniko.json /tmp/nhx-kaniko.json
+COPY docker/sources/nhx-kaniko.json docker/sources/kaniko-busybox.json /tmp/
 COPY --from=patched-kaniko /kaniko/executor /kaniko/warmer /kaniko/docker-credential-gcr \
     /kaniko/docker-credential-ecr-login /kaniko/docker-credential-acr-env /tmp/kaniko/
 RUN python3 /usr/local/bin/collect-pinned-sources.py \
         --manifest /tmp/nhx-kaniko.json \
+        --manifest /tmp/kaniko-busybox.json \
         --output /source-distributions/nhx-kaniko && \
     bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-kaniko/apt ca-certificates && \
     python3 /usr/local/bin/collect-go-module-sources.py \

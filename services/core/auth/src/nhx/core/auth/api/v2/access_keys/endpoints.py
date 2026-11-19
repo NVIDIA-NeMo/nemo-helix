@@ -6,8 +6,9 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
@@ -242,12 +243,11 @@ async def create_access_key(
     responses=_ACCESS_KEY_LIFECYCLE_ERROR_RESPONSES,
 )
 async def list_access_keys(
-    page: int = Query(default=1, ge=1, description="Page number to retrieve."),
-    page_size: int = Query(default=100, ge=1, le=100, description="Number of keys to retrieve per page."),
+    page_params: PageParams = Depends(make_page_dep(max_size=100)),
     issuer: PersistentAccessKeyIssuer = Depends(get_access_key_issuer),
 ) -> schemas.AccessKeyListResponse | JSONResponse:
     try:
-        return await issuer.list_async(page=page, page_size=page_size)
+        return await issuer.list_async(page=page_params.page, page_size=page_params.page_size)
     except AccessKeyFeatureDisabledError:
         return _disabled_response()
     except AccessKeyOperationNotImplementedError as exc:

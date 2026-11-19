@@ -6,16 +6,72 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nhx.automodel.tasks.training.backends.config import (
+    _build_base_model,
+    _build_integrations,
+    _build_peft,
+    _configure_chat_dataset,
+    _configure_moe_backend,
+    _configure_retrieval_dataset,
+    _configure_sft_dataset,
+    _keep_full_weight_kd_student_in_fp32,
+    _resolve_optimizer_target,
+    compile_automodel_config,
+    estimate_steps_per_epoch,
+    resolve_compiled_recipe,
+    resolve_warmup_steps,
+)
+from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset
+from nhx.automodel.tasks.training.schemas import (
+    Precision,
+    RetrievalConfig,
+    TrainingRecipe,
+    TrainingStepConfig,
+    TrainingType,
+)
 
-# Mock nemo_automodel before importing the config module
-# (nemo_automodel is only available in the training container)
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
+
+def _hf_config(**overrides: object) -> SimpleNamespace:
+    """A checkpoint config whose nested language configs are None.
+
+    The expert walk reads these names. A MagicMock invents a new child for each
+    one and never repeats an id, so the walk allocates until the worker is killed.
+    """
+    config = SimpleNamespace(
+        architectures=None,
+        num_local_experts=None,
+        num_experts=None,
+        n_routed_experts=None,
+        text_config=None,
+        thinker_config=None,
+        language_config=None,
+        llm_config=None,
+    )
+    for name, value in overrides.items():
+        setattr(config, name, value)
+    return config
+
+
+class _AutoConfig:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return _hf_config()
+
+
+class _AutoTokenizer:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(vocab_size=None)
+
+
+class _TransformersStandIn(ModuleType):
+    AutoConfig = _AutoConfig
+    AutoTokenizer = _AutoTokenizer
 
 
 @pytest.fixture(autouse=True)
@@ -36,27 +92,10 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
     try:
         import transformers  # noqa: F401
     except ImportError:
-        monkeypatch.setitem(sys.modules, "transformers", MagicMock())
+        monkeypatch.setitem(sys.modules, "transformers", _TransformersStandIn("transformers"))
 
-
-from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
-    _build_base_model,
-    _build_peft,
-    _configure_chat_dataset,
-    _configure_moe_backend,
-    _configure_retrieval_dataset,
-    _configure_sft_dataset,
-    _resolve_optimizer_target,
-    compile_automodel_config,
-    estimate_steps_per_epoch,
-    resolve_compiled_recipe,
-    resolve_warmup_steps,
-)
-from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
 CONFIG_MODULE = "nhx.automodel.tasks.training.backends.config"
-AUTOCONFIG_PATCH = "transformers.AutoConfig"
 MODEL_REGISTRY_PATCH = f"{CONFIG_MODULE}.ModelRegistry"
 
 
@@ -66,6 +105,8 @@ def mock_customizer_config() -> MagicMock:
     config = MagicMock()
     config.model.path = "/models/test-model"
     config.model.name = "test/model"
+    config.model.tokenizer_backend = None
+    config.dataset.mask_generation_prompt = False
     return config
 
 
@@ -100,23 +141,29 @@ class TestConfigureChatDataset:
         assert cfg["dataset"]["split"] == "train"
         assert cfg["validation_dataset"]["split"] == "validation"
 
+    @pytest.mark.parametrize("mask_generation_prompt", [False, True], ids=["default", "masked"])
     def test_chat_dataset_includes_required_fields(
         self,
         mock_customizer_config: MagicMock,
         temp_dataset_files: tuple[Path, Path],
         mocker,
+        mask_generation_prompt: bool,
     ) -> None:
+        """mask_generation_prompt reaches both splits only when asked; unset keeps ChatDataset's default."""
         train_file, val_file = temp_dataset_files
         cfg: dict[str, Any] = {}
 
         mocker.patch(f"{CONFIG_MODULE}.resolve_chat_template", return_value="mock_template")
         mock_customizer_config.parallelism.pipeline_parallel_size = 1
+        mock_customizer_config.dataset.mask_generation_prompt = mask_generation_prompt
         _configure_chat_dataset(cfg, mock_customizer_config, train_file, val_file, seq_length=2048)
 
         assert cfg["dataset"]["_target_"] == "nemo_automodel.components.datasets.llm.chat_dataset.ChatDataset"
         assert cfg["dataset"]["path_or_dataset_id"] == str(train_file)
         assert cfg["dataset"]["seq_length"] == 2048
         assert cfg["dataset"]["chat_template"] == "mock_template"
+        for split in ("dataset", "validation_dataset"):
+            assert cfg[split].get("mask_generation_prompt") is (True if mask_generation_prompt else None)
 
 
 class TestConfigureSftDataset:
@@ -177,6 +224,26 @@ class TestConfigureSftDataset:
         assert cfg["dataset"]["padding"] == "do_not_pad"
         assert cfg["dataset"]["truncation"] == "longest_first"
 
+    def test_sft_dataset_rejects_mask_generation_prompt(
+        self,
+        temp_dataset_files: tuple[Path, Path],
+        mock_customizer_config: MagicMock,
+    ) -> None:
+        """Prompt/completion rows have no chat-template generation prompt to leave out of the loss."""
+        train_file, val_file = temp_dataset_files
+        mock_customizer_config.dataset.mask_generation_prompt = True
+
+        with pytest.raises(ValueError, match="chat-format"):
+            _configure_sft_dataset(
+                {},
+                mock_customizer_config,
+                train_file,
+                val_file,
+                question_col="prompt",
+                answer_col="completion",
+                seq_length=2048,
+            )
+
 
 class TestConfigureRetrievalDataset:
     def test_bi_encoder_uses_bi_encoder_collator(
@@ -203,11 +270,35 @@ class TestConfigureRetrievalDataset:
         assert cfg["dataloader"]["dataset"]["model_type"] == "bi_encoder"
         assert cfg["dataloader"]["collate_fn"]["_target_"].endswith("BiEncoderCollator")
 
-    def test_cross_encoder_uses_cross_encoder_collator(
+    @pytest.mark.parametrize(
+        ("base_config", "collator", "prompt_template"),
+        [
+            (
+                {"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]},
+                "nemo_automodel.components.datasets.llm.CrossEncoderCollator",
+                "question:{query} \n \n passage:{passage}",
+            ),
+            (
+                {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]},
+                "nemo_automodel.components.models.qwen3_reranker.collator.Qwen3ContextAwareRerankerCollator",
+                None,
+            ),
+        ],
+        ids=["classifier-head", "qwen3-causal-reranker"],
+    )
+    def test_cross_encoder_collator_matches_the_scoring_head(
         self,
         tmp_path: Path,
         mock_customizer_config: MagicMock,
+        base_config: dict[str, Any],
+        collator: str,
+        prompt_template: str | None,
     ) -> None:
+        """A Qwen3 causal reranker trains on its own prompt, the one Automodel and vLLM score it with."""
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "config.json").write_text(json.dumps(base_config))
+        mock_customizer_config.model.path = str(base)
         train_file = tmp_path / "train.jsonl"
         val_file = tmp_path / "validation.jsonl"
         train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
@@ -225,8 +316,42 @@ class TestConfigureRetrievalDataset:
         )
 
         assert cfg["dataloader"]["dataset"]["model_type"] == "cross_encoder"
-        assert cfg["dataloader"]["collate_fn"]["_target_"].endswith("CrossEncoderCollator")
-        assert cfg["dataloader"]["collate_fn"]["rerank_max_length"] == 512
+        for loader in ("dataloader", "validation_dataloader"):
+            assert cfg[loader]["collate_fn"]["_target_"] == collator
+            assert cfg[loader]["collate_fn"]["rerank_max_length"] == 512
+            assert cfg[loader]["collate_fn"].get("prompt_template") == prompt_template
+
+    def test_cross_encoder_stops_for_a_causal_reranker_without_a_known_prompt(
+        self, tmp_path: Path, mock_customizer_config: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A causal reranker Automodel adds later fails at setup until Helix knows its prompt."""
+
+        class NewCausalReranker:
+            @classmethod
+            def can_generate(cls) -> bool:
+                return True
+
+        monkeypatch.setattr(
+            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
+            lambda _config: NewCausalReranker,
+        )
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "config.json").write_text('{"model_type": "new_model", "architectures": ["NewModelForCausalLM"]}')
+        mock_customizer_config.model.path = str(base)
+        train_file = tmp_path / "train.jsonl"
+        train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
+
+        with pytest.raises(ValueError, match="NewCausalReranker yes/no reranker"):
+            _configure_retrieval_dataset(
+                {},
+                mock_customizer_config,
+                train_file,
+                train_file,
+                seed=42,
+                retrieval_config=RetrievalConfig(),
+                recipe=TrainingRecipe.CROSS_ENCODER,
+            )
 
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,
@@ -273,47 +398,29 @@ class TestConfigureMoeBackend:
         num_gpus_per_node: int = 1,
         tensor_parallel_size: int = 1,
         expert_parallel_size: int | None = None,
+        architecture: str | None = "NemotronHForCausalLM",
+        num_experts: int | None = 8,
     ) -> MagicMock:
         config = MagicMock()
         config.model.path = model_path
+        config.model.checkpoint_model_name = architecture
+        config.model.num_experts = num_experts
         config.parallelism.num_nodes = num_nodes
         config.parallelism.num_gpus_per_node = num_gpus_per_node
         config.parallelism.tensor_parallel_size = tensor_parallel_size
         config.parallelism.expert_parallel_size = expert_parallel_size
         return config
 
-    def _make_hf_config(
-        self,
-        architectures: list[str],
-        num_local_experts: int | None = None,
-        num_experts: int | None = None,
-    ) -> MagicMock:
-        hf_config = MagicMock()
-        hf_config.architectures = architectures
-
-        original_getattr = type(hf_config).__getattr__
-
-        def _controlled_getattr(self: Any, name: str) -> Any:
-            if name == "num_local_experts":
-                return num_local_experts
-            if name == "num_experts":
-                return num_experts
-            return original_getattr(self, name)
-
-        type(hf_config).__getattr__ = cast(Any, _controlled_getattr)
-        return hf_config
-
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_model_gets_backend_and_parallelizer(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_model_gets_backend_and_parallelizer(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        with patch(
+            "transformers.AutoConfig.from_pretrained", side_effect=AssertionError("traits already recorded")
+        ) as load:
+            _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        load.assert_not_called()
 
         assert cfg["model"]["backend"] == {
             "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
@@ -321,13 +428,8 @@ class TestConfigureMoeBackend:
         }
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_requested_backend_settings_survive_the_moe_default(self, mock_autoconfig_cls, mock_registry) -> None:
+    def test_requested_backend_settings_survive_the_moe_default(self, mock_registry) -> None:
         """The torch-dispatcher default sits under whatever the job spec asked for."""
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
         cfg: dict[str, Any] = {
             "model": {
@@ -348,12 +450,7 @@ class TestConfigureMoeBackend:
         }
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_tp_gt1_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_tp_gt1_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -364,12 +461,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_ep_not_set_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_ep_not_set_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -380,12 +472,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_ep_eq1_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_ep_eq1_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -396,12 +483,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_single_gpu_skips_multi_gpu_validation(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_single_gpu_skips_multi_gpu_validation(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -410,51 +492,123 @@ class TestConfigureMoeBackend:
         assert cfg["model"]["backend"]["_target_"] == "nemo_automodel.components.models.common.utils.BackendConfig"
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_dense_custom_model_no_moe_config(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["LlamaForCausalLM"],
-        )
+    def test_dense_custom_model_no_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
 
         cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
+        _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
 
         assert "backend" not in cfg["model"]
         assert "parallelizer" not in cfg
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_standard_hf_model_no_custom_config(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["LlamaForCausalLM"],
-        )
+    def test_standard_hf_model_no_custom_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {}
-
-        cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
-
-        assert "backend" not in cfg["model"]
-        assert "parallelizer" not in cfg
-
-    @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_autoconfig_exception_handled_gracefully(self, mock_autoconfig_cls, _mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.side_effect = OSError("Model not found")
-
-        cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
-
-        assert "backend" not in cfg["model"]
-        assert "parallelizer" not in cfg
-
-    @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_validation_error_propagates(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
         )
+
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_a_checkpoint_id_uses_the_loaded_architecture(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"MixtralForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["MixtralForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(
+                    architecture="mistralai/Mixtral-8x7B-v0.1",
+                    num_experts=8,
+                    num_gpus_per_node=8,
+                    expert_parallel_size=None,
+                ),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_a_nested_language_config_supplies_the_expert_count(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronH_Omni": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronH_Omni"],
+                text_config={"n_routed_experts": 128},
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"num_experts=128"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_loads_a_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronHForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_with_a_dense_config_skips_moe(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    def test_missing_architecture_skips_moe_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _unloadable(path: str, trust_remote_code: bool = False) -> None:
+            raise OSError(f"cannot load {path}")
+
+        monkeypatch.setattr("transformers.AutoConfig.from_pretrained", _unloadable)
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_moe_validation_error_propagates(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {}
@@ -552,6 +706,27 @@ def test_peft_forwards_use_memory_efficient_lora_only_when_set(requested: bool |
 
 
 @pytest.mark.parametrize(
+    ("wandb_block", "base_url"),
+    [
+        ({"project": "p", "settings": {"base_url": "https://wandb.internal"}}, "https://wandb.internal"),
+        ({"project": "p"}, None),
+    ],
+    ids=["self-hosted", "cloud"],
+)
+def test_wandb_block_never_carries_settings(wandb_block: dict[str, Any], base_url: str | None) -> None:
+    """Automodel passes its own ``settings=`` to ``wandb.init``, so a second one would be a TypeError."""
+    cfg: dict[str, Any] = {}
+    with (
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=dict(wandb_block)),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        _build_integrations(cfg, _lora_step_config(), MagicMock())
+
+    assert cfg["wandb"] == {"project": "p"}
+    assert cfg.get("_wandb_base_url") == base_url
+
+
+@pytest.mark.parametrize(
     ("mtp", "expected"),
     [
         (None, {}),
@@ -574,6 +749,80 @@ def test_base_model_forwards_only_the_mtp_fields_that_were_set(
 
     mtp_keys = {"num_nextn_predict_layers", "mtp_use_repeated_layer", "mtp_loss_scaling_factor"}
     assert {k: v for k, v in cfg["model"].items() if k in mtp_keys} == expected
+
+
+def _compile_causal_lm(config: TrainingStepConfig, tmp_path: Path) -> dict[str, Any]:
+    prepared = PreparedDataset(
+        merged_dir=tmp_path,
+        train_file=tmp_path / "train.jsonl",
+        validation_file=tmp_path / "validation.jsonl",
+        train_samples=100,
+        validation_samples=10,
+    )
+
+    def chat_datasets(cfg: dict[str, Any], *_: Any) -> None:
+        cfg["dataset"] = {"_target_": "ChatDataset"}
+        cfg["validation_dataset"] = {"_target_": "ChatDataset"}
+
+    with (
+        patch(f"{CONFIG_MODULE}.prepare_dataset", return_value=prepared),
+        patch(f"{CONFIG_MODULE}.DatasetValidator"),
+        patch(f"{CONFIG_MODULE}.estimate_dataset_sequence_lengths", return_value=None),
+        patch(f"{CONFIG_MODULE}._configure_datasets", side_effect=chat_datasets),
+        patch(f"{CONFIG_MODULE}._configure_moe_backend"),
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        return compile_automodel_config(config, tmp_path, MagicMock())
+
+
+@pytest.mark.parametrize("tokenizer_backend", [None, "nemo_wrapped_auto"], ids=["unset", "requested"])
+def test_causal_lm_writes_a_dataset_tokenizer_only_when_requested(
+    tmp_path: Path, tokenizer_backend: str | None
+) -> None:
+    """Unset leaves Automodel's default tokenizer as before; the recipe reuses one tokenizer for validation."""
+    config = _lora_step_config()
+    config.model.tokenizer_backend = tokenizer_backend
+
+    compiled = _compile_causal_lm(config, tmp_path)
+
+    expected = (
+        None
+        if tokenizer_backend is None
+        else {"pretrained_model_name_or_path": config.model.path, "tokenizer_backend": tokenizer_backend}
+    )
+    assert compiled["dataset"].get("tokenizer") == expected
+    assert "tokenizer" not in compiled["validation_dataset"]
+
+
+@pytest.mark.parametrize(
+    ("training_type", "peft", "precision", "optimizer", "expected"),
+    [
+        (TrainingType.DISTILLATION, False, None, "torch.optim.Adam", "float32"),
+        (TrainingType.DISTILLATION, True, None, "torch.optim.Adam", "auto"),
+        (TrainingType.DISTILLATION, False, Precision.BF16, "torch.optim.Adam", "bfloat16"),
+        (TrainingType.DISTILLATION, False, None, "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam", "auto"),
+        (TrainingType.SFT, False, None, "torch.optim.Adam", "auto"),
+    ],
+    ids=["full-weight-kd", "lora-kd", "explicit-precision", "fused-adam", "sft"],
+)
+def test_full_weight_kd_student_keeps_fp32_weights(
+    training_type: TrainingType, peft: bool, precision: Precision | None, optimizer: str, expected: str
+) -> None:
+    """torch.optim keeps no fp32 master copy; Automodel r0.6.0's KD recipe stored such a student in fp32."""
+    config = _lora_step_config()
+    config.training.training_type = training_type
+    config.model.precision = precision
+    cfg: dict[str, Any] = {
+        "model": {"torch_dtype": "auto" if precision is None else "bfloat16"},
+        "optimizer": {"_target_": optimizer},
+    }
+    if peft:
+        cfg["peft"] = {}
+
+    _keep_full_weight_kd_student_in_fp32(cfg, config)
+
+    assert cfg["model"]["torch_dtype"] == expected
 
 
 def test_compile_prepares_training_for_pause_and_resume(tmp_path: Path) -> None:
@@ -737,10 +986,37 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
     assert compiled["_recipe"] == "sft"
 
 
-def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("base_config", "classifier_head", "torch_dtype"),
+    [
+        ({"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalModel"]}, True, "auto"),
+        (
+            {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"], "torch_dtype": "bfloat16"},
+            False,
+            "bfloat16",
+        ),
+        (
+            {"model_type": "qwen3", "architectures": ["Qwen3ForSequenceClassification"], "torch_dtype": "bfloat16"},
+            True,
+            "auto",
+        ),
+    ],
+    ids=["classifier-head", "qwen3-causal-reranker", "qwen3-converted-classifier"],
+)
+def test_compile_cross_encoder_recipe_selects_cross_encoder_model(
+    tmp_path: Path, base_config: dict[str, Any], classifier_head: bool, torch_dtype: str
+) -> None:
+    """A Qwen3 causal LM scores by its yes/no logits; Automodel rejects classifier options for it.
+
+    Its loader also cannot resolve torch_dtype "auto", so it gets the checkpoint's own dtype.
+    """
     fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "embed-1b" / "embed_1b_full_sft.json"
     raw = json.loads(fixture.read_text())
     raw.pop("backend")
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "config.json").write_text(json.dumps(base_config))
+    raw["model"]["path"] = str(base)
     config = TrainingStepConfig.model_validate(raw)
     config.training.recipe = TrainingRecipe.CROSS_ENCODER
 
@@ -763,6 +1039,10 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path
 
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["model"]["num_labels"] == 1
+    assert ("pooling" in compiled["model"]) is classifier_head
+    assert ("temperature" in compiled["model"]) is classifier_head
+    assert compiled["model"]["torch_dtype"] == torch_dtype
+    assert compiled["temperature"] == 1.0
     assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled
 
@@ -845,6 +1125,34 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: P
     assert compiled["model"]["attn_implementation"] == "sdpa"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelBiEncoder.from_pretrained")
     assert compiled["_recipe"] == "bi_encoder"
+
+
+@pytest.mark.parametrize(
+    ("recipe", "tokenizer_backend", "temperature", "expected_backend", "expected_temperature"),
+    [
+        (TrainingRecipe.BI_ENCODER, None, None, "nemo_wrapped_auto", 0.02),
+        (TrainingRecipe.CROSS_ENCODER, None, None, "nemo_wrapped_auto", 1.0),
+        (TrainingRecipe.CROSS_ENCODER, "nemo_auto", 0.3, "nemo_auto", 0.3),
+    ],
+    ids=["bi-encoder-defaults", "cross-encoder-defaults", "explicit-values"],
+)
+def test_retrieval_compile_tokenizer_backend_and_temperature(
+    tmp_path: Path,
+    recipe: TrainingRecipe,
+    tokenizer_backend: str | None,
+    temperature: float | None,
+    expected_backend: str,
+    expected_temperature: float,
+) -> None:
+    """Unset, retrieval loads the checkpoint's Hugging Face tokenizer, the one NIM and vLLM serve with."""
+    config, prepared = _embed_training_config(tmp_path, retrieval=RetrievalConfig(temperature=temperature))
+    config.training.recipe = recipe
+    config.model.tokenizer_backend = tokenizer_backend
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert compiled["tokenizer"]["tokenizer_backend"] == expected_backend
+    assert compiled["temperature"] == expected_temperature
 
 
 @pytest.mark.parametrize("requested", [False, True])
@@ -958,3 +1266,192 @@ class TestBackendSettings:
         explicit = self._explicit(BackendConfig(rope_fusion=False))
 
         assert explicit == {"rope_fusion": False}
+
+
+def _vision_training_config(
+    tmp_path: Path,
+    rows: list[dict[str, Any]],
+    has_vision_tower: bool = True,
+    has_audio_tower: bool = False,
+    num_experts: int | None = None,
+    num_nextn_predict_layers: int | None = None,
+    checkpoint_model_name: str | None = None,
+    gpus_per_node: int = 1,
+) -> TrainingStepConfig:
+    dataset = tmp_path / "data"
+    dataset.mkdir()
+    payload = "".join(json.dumps(row) + "\n" for row in rows)
+    (dataset / "training.jsonl").write_text(payload, encoding="utf-8")
+    (dataset / "validation.jsonl").write_text(payload, encoding="utf-8")
+    fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora.json"
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    raw["model"]["path"] = str(tmp_path / "model")
+    raw["dataset"]["path"] = str(dataset)
+    raw["parallelism"]["num_gpus_per_node"] = gpus_per_node
+    config = TrainingStepConfig.model_validate(raw)
+    config.model.has_vision_tower = has_vision_tower
+    config.model.has_audio_tower = has_audio_tower
+    config.model.num_experts = num_experts
+    config.model.num_nextn_predict_layers = num_nextn_predict_layers
+    config.model.checkpoint_model_name = checkpoint_model_name
+    return config
+
+
+def test_the_missing_transformers_stand_in_is_a_finite_config() -> None:
+    config = _AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B")
+
+    assert config.text_config is None
+    assert config.thinker_config is None
+    assert config.language_config is None
+    assert config.llm_config is None
+
+
+def _compile_vision(config: TrainingStepConfig, tmp_path: Path) -> dict[str, Any]:
+    with (
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+        patch("transformers.AutoConfig.from_pretrained", return_value=_hf_config()),
+    ):
+        return compile_automodel_config(config, tmp_path / "work", MagicMock())
+
+
+def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
+    """Text and image rows share FinetuneRecipeForVLM. The causal-LM class cannot load this checkpoint."""
+    from nhx.automodel.tasks.training.backends.vlm import make_conversation_dataset
+
+    image = {"type": "image_url", "image_url": {"url": "receipt.png"}}
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [image, {"type": "text", "text": "read this"}]},
+                {"role": "assistant", "content": "total 12"},
+            ]
+        },
+        {
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+            ]
+        },
+    ]
+    config = _vision_training_config(tmp_path, rows)
+    (tmp_path / "data" / "receipt.png").write_bytes(b"png")
+    config.model.chat_template = "vision-template"
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["_recipe"] == "vlm_sft"
+    assert compiled["model"]["_target_"] == "nemo_automodel.NeMoAutoModelForImageTextToText.from_pretrained"
+    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
+    assert compiled["dataset"]["chat_template"] == "vision-template"
+    assert compiled["validation_dataset"]["chat_template"] == "vision-template"
+    assert compiled["_resolved_chat_template"] == "vision-template"
+    # Automodel rejects any freeze_config key outside its own option set.
+    assert compiled["freeze_config"] == {"freeze_vision_tower": True, "freeze_language_model": False}
+    assert compiled["distributed"]["ep_size"] == 1
+    assert "num_nextn_predict_layers" not in compiled["model"]
+    assert compiled["peft"]["exclude_modules"] == [
+        "*vision_tower*",
+        "*vision_model*",
+        "*vision_projector*",
+        "*visual*",
+        "*image_encoder*",
+        "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
+        "*mlp1*",
+        "*lm_head*",
+    ]
+    assert "target_modules" not in compiled["peft"]
+    assert "collate_fn" not in compiled["dataloader"]
+
+    train_rows = [
+        json.loads(line)
+        for line in Path(compiled["dataset"]["path_or_dataset"]).read_text(encoding="utf-8").splitlines()
+    ]
+    image_part = train_rows[0]["conversation"][0]["content"][0]
+    assert image_part == {"type": "image", "image": str(tmp_path / "data" / "receipt.png")}
+    assert train_rows[0]["conversation"][0]["content"][1] == {"type": "text", "text": "read this"}
+    assert train_rows[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
+
+    loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
+    assert "_injected_fake" not in loaded[0]
+    assert loaded[1]["_injected_fake"] is True
+    assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
+
+
+def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_path: Path) -> None:
+    from nhx.automodel.tasks.training.backends.vlm import make_conversation_dataset
+
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    compiled = _compile_vision(_vision_training_config(tmp_path, rows), tmp_path)
+
+    assert compiled["_recipe"] == "vlm_sft"
+    loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
+    assert loaded[0]["_injected_fake"] is True
+    assert loaded[0]["conversation"][1]["content"] == [{"type": "text", "text": "hi"}]
+
+
+def test_a_data_url_is_decoded_next_to_the_workspace(tmp_path: Path) -> None:
+    import base64
+
+    raw = b"\x89PNG\r\n"
+    url = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]},
+                {"role": "assistant", "content": "a"},
+            ]
+        }
+    ]
+    compiled = _compile_vision(_vision_training_config(tmp_path, rows), tmp_path)
+    image = json.loads(Path(compiled["dataset"]["path_or_dataset"]).read_text(encoding="utf-8").splitlines()[0])
+    path = Path(image["conversation"][0]["content"][0]["image"])
+
+    assert path.is_file()
+    assert path.read_bytes() == raw
+    assert path.parent == (tmp_path / "work" / "dataset" / "images").resolve()
+
+
+def test_a_text_checkpoint_rejects_an_image_row(tmp_path: Path) -> None:
+    from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
+
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "a.png"}}]},
+                {"role": "assistant", "content": "a"},
+            ]
+        }
+    ]
+    config = _vision_training_config(tmp_path, rows, has_vision_tower=False)
+
+    with pytest.raises(DatasetFormatError, match="image row"):
+        _compile_vision(config, tmp_path)
+
+
+def test_omni_experts_are_read_from_the_nested_config(tmp_path: Path) -> None:
+    rows = [{"prompt": "q", "completion": "a"}]
+    config = _vision_training_config(
+        tmp_path,
+        rows,
+        has_audio_tower=True,
+        num_experts=16,
+        num_nextn_predict_layers=1,
+        checkpoint_model_name="NemotronH_Omni",
+        gpus_per_node=4,
+    )
+
+    with patch(MODEL_REGISTRY_PATCH) as registry:
+        registry.model_arch_name_to_cls = {"NemotronH_Omni": object()}
+        compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["distributed"]["ep_size"] == 4
+    assert compiled["model"]["num_nextn_predict_layers"] == 0
+    assert compiled["freeze_config"] == {
+        "freeze_vision_tower": True,
+        "freeze_language_model": False,
+        "freeze_audio_tower": True,
+    }
+    assert compiled["model"]["backend"]["dispatcher"] == "torch"

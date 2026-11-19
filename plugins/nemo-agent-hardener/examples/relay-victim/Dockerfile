@@ -22,7 +22,7 @@ WORKDIR /workspace
 
 # The Fabric entrypoint, its DeepAgents adapter, and the MCP SDK the tool server uses.
 #
-# nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10. Keep the
+# nemo-relay is pinned to the 0.11 line because the Fabric 0.6 adapters require >=0.11,<0.12. Keep the
 # uploaded plugins.toml on a schema this Relay accepts: a rejected schema fails the whole plugin
 # initialize() — taking the guardrail component in the same file down with it.
 #
@@ -38,7 +38,7 @@ RUN python -m venv /workspace/.venv \
       "nemo-helix[nemo-agents-plugin]" \
       "nemo-fabric" \
       "nemo-fabric-adapters-deepagents" \
-      "nemo-relay>=0.9.3,<0.10" \
+      "nemo-relay>=0.11.0,<0.12" \
       "mcp[cli]"
 
 COPY agent.yaml /workspace/agent.yaml

@@ -22,6 +22,7 @@ from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import
     compile_nim_server_env,
     pod_security_context_for_engine,
 )
+from nhx.core.models.controllers.backends.deployments_plugin.request_converters import deployment_config_create_request
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
 
@@ -143,7 +144,7 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     server = compiled.server_config.containers[0]
     assert server.command == ["vllm", "serve"]
     assert server.args[0] == MODEL_STORE_PATH
-    assert server.image == "docker.io/vllm/vllm-openai:v0.22.1"
+    assert server.image == "docker.io/vllm/vllm-openai:v0.32.0"
     assert server.resources is not None
     assert server.resources.limits["nvidia.com/gpu"] == "1"
     assert compiled.puller_config is not None
@@ -640,7 +641,7 @@ def test_nim_override_config_wins_over_k8s_nim_operator_config() -> None:
             ),
             override_config={
                 "nodeSelector": {"zone": "override-zone"},
-                "resources": {"requests": {"cpu": "16"}},
+                "resources": {"requests": {"cpu": "16"}, "limits": {"nvidia.com/gpu": "2"}},
             },
         ),
         weights_type=ModelWeightsType.BAKED_CONTAINER,
@@ -654,6 +655,8 @@ def test_nim_override_config_wins_over_k8s_nim_operator_config() -> None:
     compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
     server = compiled.server_config.containers[0]
     assert server.resources.requests["cpu"] == "16"
+    # Shared memory follows the GPUs the override requests, not the deployment's gpu count (0).
+    assert compiled.server_config.shm_size == "16Gi"
     k8s = compiled.server_config.backend_config.k8s
     assert k8s is not None
     assert k8s.affinity is not None
@@ -707,6 +710,9 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
         docker = compile_model_deployment(_resolved("vllm", lora=True, runtime=Runtime.DOCKER), config)
 
     assert k8s.scratch_volume is not None
+    # The server accepts adapters up to the configured rank, not vLLM's default of 16.
+    server_args = k8s.server_config.containers[0].args
+    assert server_args[server_args.index("--max-lora-rank") + 1] == str(config.default_vllm_max_lora_rank) == "32"
     init = k8s.server_config.init_containers[0]
     assert init.name == "lora-cache-init"
     assert init.image == "docker.io/library/busybox:latest"
@@ -881,3 +887,17 @@ def test_compile_model_deployment_adds_workload_identity_when_auth_context_prese
     assert compiled.puller_config.workload_identity.token_audience == "model-audience"
     assert compiled.server_config.workload_identity.workload_id == "my-dep/v3"
     assert compiled.server_config.workload_identity.token_audience == "model-audience"
+
+
+@pytest.mark.parametrize("engine", ["vllm", "nim"])
+@pytest.mark.parametrize(("gpu", "expected"), [(4, "32Gi"), (1, "8Gi"), (0, None)])
+def test_gpu_server_gets_shared_memory_per_gpu(engine: str, gpu: int, expected: str | None) -> None:
+    # Multi-GPU servers fail at startup on the 64Mi runtime default for /dev/shm.
+    resolved = _resolved(engine)
+    resolved.view.gpu = gpu
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    assert compiled.server_config.shm_size == expected
+    # The controller sends the plugin a request DTO, which must carry the field. Unset takes the
+    # plugin's 8Gi default.
+    assert deployment_config_create_request(compiled.server_config).shm_size == (expected or "8Gi")
+    assert compiled.puller_config is not None and compiled.puller_config.shm_size is None

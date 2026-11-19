@@ -20,6 +20,7 @@ import re
 import types
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,7 +30,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
-    CreateModelAdapterRequest,
+    CreateAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -416,6 +417,7 @@ class TestCreateFullEntity:
 
 class TestCreateAdapter:
     def test_creates_adapter_for_lora(self) -> None:
+        """A LoRA run registers the adapter in the output workspace, naming the base model by reference."""
         from nhx.customization_common.schemas.file_io import FileSetRef
         from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nhx.unsloth.entities.values import FinetuningType
@@ -423,7 +425,7 @@ class TestCreateAdapter:
         models, files = _make_clients()
         base_me = _model_entity(name="base-model")
         models.get_model.return_value = _response(base_me)
-        models.create_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
@@ -436,13 +438,13 @@ class TestCreateAdapter:
 
         _result, deploy_target = runner.create_model_entity(config)
 
-        models.create_model_adapter.assert_called_once()
-        create_call = models.create_model_adapter.call_args
-        assert create_call.kwargs["model_name"] == "base-model"
+        models.create_adapter.assert_called_once()
+        create_call = models.create_adapter.call_args
         assert create_call.kwargs["workspace"] == "default"
         body = create_call.kwargs["body"]
-        assert isinstance(body, CreateModelAdapterRequest)
+        assert isinstance(body, CreateAdapterRequest)
         assert body.name == "adapter-x"
+        assert body.model == "default/base-model"
         assert body.fileset == "default/adapter-x"
         assert body.lora_config is not None
         assert body.lora_config.rank == 8
@@ -451,14 +453,16 @@ class TestCreateAdapter:
         assert deploy_target is base_me
 
     def test_adapter_conflict_falls_back_to_update(self) -> None:
+        """An existing adapter is updated in place when create conflicts."""
         from nhx.customization_common.schemas.file_io import FileSetRef
         from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
-        models.create_model_adapter.side_effect = lambda **_: _raise_runner_conflict()
-        models.update_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
+        models.create_adapter.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_adapter.return_value = _response(SimpleNamespace(model="default/base-model"))
+        models.update_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
         runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
@@ -471,10 +475,9 @@ class TestCreateAdapter:
 
         runner.create_model_entity(config)
 
-        models.update_model_adapter.assert_called_once()
-        update_call = models.update_model_adapter.call_args
-        assert update_call.kwargs["adapter"] == "adapter-x"
-        assert update_call.kwargs["model_name"] == "base-model"
+        models.update_adapter.assert_called_once()
+        update_call = models.update_adapter.call_args
+        assert update_call.kwargs["name"] == "adapter-x"
         assert update_call.kwargs["workspace"] == "default"
         body = update_call.kwargs["body"]
         assert isinstance(body, UpdateAdapterRequest)
@@ -536,7 +539,13 @@ class TestLaunchModel:
             workspace="other",
             fileset=FileSetRef(workspace="other", name="x"),
             model_entity="other/base",
-            deployment_config=DeploymentParams(gpu=1, image_name="img", image_tag="1.0"),
+            deployment_config=DeploymentParams(
+                gpu=1,
+                image_name="img",
+                image_tag="1.0",
+                disk_size="300Gi",
+                additional_args=["--max-model-len", "8192"],
+            ),
         )
 
         runner.launch_model(config, me)
@@ -552,6 +561,8 @@ class TestLaunchModel:
         assert config_body.executor_config.gpu == 1
         assert config_body.executor_config.image_name == "img"
         assert config_body.executor_config.image_tag == "1.0"
+        assert config_body.executor_config.disk_size == "300Gi"
+        assert config_body.executor_config.additional_args == ["--max-model-len", "8192"]
 
         deployment_call = models.create_deployment.call_args
         assert deployment_call.kwargs["workspace"] == "other"
@@ -602,6 +613,8 @@ class TestLaunchModel:
         assert isinstance(body, UpdateModelDeploymentConfigRequest)
         assert body.engine is Engine.VLLM
         assert body.executor_config.gpu == 2
+        # No disk_size on the job keeps the executor default.
+        assert body.executor_config.disk_size == "50Gi"
         models.create_deployment.assert_called_once()
 
     def test_inline_nim_engine_creates_a_nim_config(self) -> None:

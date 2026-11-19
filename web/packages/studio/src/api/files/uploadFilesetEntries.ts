@@ -51,11 +51,15 @@ export const uploadFilesetEntries = (
 
 export const copyFilesetFiles = async (
   source: FilesetLocation,
-  target: FilesetLocation
+  target: FilesetLocation,
+  onProgress?: (copied: number, total: number) => void
 ): Promise<void> => {
   const { data: files } = await filesListFilesetFiles(source.workspace, source.name);
+  let copied = 0;
+  onProgress?.(copied, files.length);
   await forEachBounded(files, async ({ path }) => {
     const data = await filesDownloadFile(source.workspace, source.name, path);
-    await filesUploadFile(target.workspace, target.name, path, await asOctetStream(data));
+    await filesUploadFile(target.workspace, target.name, path, data);
+    onProgress?.(++copied, files.length);
   });
 };

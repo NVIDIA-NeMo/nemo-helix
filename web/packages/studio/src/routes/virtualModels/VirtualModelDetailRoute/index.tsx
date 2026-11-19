@@ -13,7 +13,7 @@ import {
   getWorkspaceVirtualModelsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
 
 /**

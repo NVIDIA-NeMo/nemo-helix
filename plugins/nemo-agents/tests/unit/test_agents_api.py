@@ -29,7 +29,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
-from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import BadRequestError, InternalServerError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -658,7 +658,7 @@ class TestDeleteAgent:
     def test_delete_existing_returns_204(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
@@ -667,19 +667,19 @@ class TestDeleteAgent:
     def test_delete_calls_entity_client_delete(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
-        mock_entity_client.delete.assert_called_once_with(
+        mock_entity_client.delete_by_id.assert_called_once_with(
             Agent,
-            name="calc",
-            workspace="default",
+            mock_entity_client.get.return_value.id,
+            expected_db_version=mock_entity_client.get.return_value.db_version,
         )
 
     def test_delete_not_found_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityNotFoundError("not found"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityNotFoundError("not found"))
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/nonexistent")
 
@@ -687,7 +687,7 @@ class TestDeleteAgent:
 
     def test_delete_conflict_returns_409(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityConflictError("changed"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityConflictError("changed"))
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
@@ -726,7 +726,7 @@ class TestDeleteAgent:
         dep = _make_deployment(agent="calc", status="failed")
         mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
@@ -739,7 +739,7 @@ class TestDeleteAgent:
         dep = _make_deployment(agent="calc", status="deleting")
         mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
@@ -752,7 +752,7 @@ class TestDeleteAgent:
         other_dep = _make_deployment(name="other-dep", agent="other-agent", status="running")
         mock_entity_client.list = AsyncMock(return_value=_list_response([other_dep]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
@@ -761,11 +761,54 @@ class TestDeleteAgent:
     def test_delete_server_error_on_delete_returns_500(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))
         mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
-        mock_entity_client.delete = AsyncMock(side_effect=RuntimeError("db error"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=RuntimeError("db error"))
 
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
         assert resp.status_code == 500
+
+
+def _entity_store_error(error_type: type[Exception], status: int, detail: str) -> Exception:
+    request = httpx.Request("GET", "http://entities/apis/entities/v2/workspaces/no-such-ws/entities")
+    return error_type(httpx.Response(status, json={"detail": detail}, request=request))
+
+
+class TestEntityStoreErrors:
+    """Entity-store client errors reach the platform's handlers; server failures stay a generic 500."""
+
+    ROUTES = [
+        pytest.param("GET", "/apis/agents/v2/workspaces/no-such-ws/agents", id="list-agents"),
+        pytest.param("DELETE", "/apis/agents/v2/workspaces/no-such-ws/agents/calc", id="delete-agent"),
+    ]
+
+    @pytest.mark.parametrize(("method", "url"), ROUTES)
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(_entity_store_error(NotFoundError, 404, "Workspace not found"), id="unknown-workspace"),
+            pytest.param(_entity_store_error(BadRequestError, 400, "Invalid sort field -name"), id="bad-sort"),
+        ],
+    )
+    def test_client_error_is_not_wrapped_as_500(
+        self, test_app: FastAPI, mock_entity_client: AsyncMock, method: str, url: str, error: Exception
+    ) -> None:
+        mock_entity_client.list = AsyncMock(side_effect=error)
+
+        with pytest.raises(type(error)) as raised:
+            TestClient(test_app).request(method, url)
+
+        assert raised.value is error
+
+    @pytest.mark.parametrize(("method", "url"), ROUTES)
+    def test_upstream_server_error_stays_500(
+        self, client: TestClient, mock_entity_client: AsyncMock, method: str, url: str
+    ) -> None:
+        mock_entity_client.list = AsyncMock(side_effect=_entity_store_error(InternalServerError, 500, "db down"))
+
+        resp = client.request(method, url)
+
+        assert resp.status_code == 500
+        assert "db down" not in resp.text
 
 
 class TestAgentRunDeclarations:
@@ -847,6 +890,64 @@ class TestAgentRunDeclarations:
         assert resp.status_code == 400
         assert "context_schema is not a valid JSON Schema" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
+
+    @staticmethod
+    def _spec_config(harness_kind: str) -> dict[str, Any]:
+        return {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "analyst",
+            "default_harness": "main",
+            "harnesses": {"main": {"kind": harness_kind}},
+            "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
+        }
+
+    def test_register_rejects_a_context_schema_a_stock_adapter_would_ignore(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={
+                "name": "analyst",
+                "config_format": "nemo-agents-spec-v1",
+                "config": self._spec_config("hermes"),
+                "context_schema": {"type": "object"},
+            },
+        )
+
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "default harness 'main' (nvidia.fabric.hermes) does not read the request context" in detail
+        mock_entity_client.create.assert_not_called()
+
+    def test_register_accepts_a_context_schema_for_an_adapter_that_reads_context(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        self._echo_create(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={
+                "name": "analyst",
+                "config_format": "nemo-agents-spec-v1",
+                "config": self._spec_config("nvidia.helix.compass.analyst"),
+                "context_schema": {"type": "object"},
+            },
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["context_schema"] == {"type": "object"}
+
+    def test_register_accepts_a_stock_adapter_without_a_context_schema(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        self._echo_create(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "analyst", "config_format": "nemo-agents-spec-v1", "config": self._spec_config("hermes")},
+        )
+
+        assert resp.status_code == 201
 
     def test_register_rejects_a_registration_block_inside_config(
         self, client: TestClient, mock_entity_client: AsyncMock

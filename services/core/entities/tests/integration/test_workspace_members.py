@@ -23,6 +23,28 @@ class TestWorkspaceMemberCRUD:
         # Initially empty (no role bindings)
         assert len(result["data"]) == 0
 
+    @pytest.mark.parametrize(
+        "principal",
+        ["a" * 257, "user:" + "a" * 70000, "é" * 12000],
+        ids=["above-limit", "oversized-ascii", "oversized-unicode"],
+    )
+    async def test_add_member_rejects_long_principal(self, client: AsyncClient, ctx, principal: str) -> None:
+        response = await client.post("/apis/entities/v2/workspaces/default/members", json={"principal": principal})
+        assert response.status_code == 422, response.text
+        # The standalone Entities app renders validation errors as a string.
+        detail = response.json()["detail"]
+        assert "principal" in detail
+        assert "at most 256 characters" in detail
+
+    async def test_add_member_accepts_max_length_principal(self, client: AsyncClient, ctx) -> None:
+        principal = "user:" + "a" * 251
+        response = await client.post(
+            "/apis/entities/v2/workspaces/default/members?wait_role_propagation=false",
+            json={"principal": principal, "roles": ["Viewer"]},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["principal"] == principal
+
     async def test_add_member_with_default_role(self, client: AsyncClient, ctx):
         """Test adding a member with default role (Editor)."""
         response = await client.post(

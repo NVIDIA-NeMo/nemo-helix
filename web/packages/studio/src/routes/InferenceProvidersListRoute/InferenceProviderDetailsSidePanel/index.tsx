@@ -13,9 +13,10 @@
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { ModelProvider, ModelProviderStatus } from '@nemo/sdk/generated/platform/schema';
+import type { ModelProvider } from '@nemo/sdk/generated/platform/schema';
+import { ModelProviderStatus } from '@nemo/sdk/generated/platform/schema/ModelProviderStatus';
 import { Banner, SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 
 function servedModelLabels(provider: ModelProvider): string[] {
   if (provider.served_models?.length) {

@@ -147,7 +147,13 @@ def _load_skills_from_root(
     return skills
 
 
-def _load_skills_from_provider(provider: SkillProvider) -> dict[str, Skill]:
+def _warn(warnings: list[str], message: str, *args: object, exc_info: bool = False) -> None:
+    """Log a discovery warning and record it for callers that must know discovery was degraded."""
+    logger.warning(message, *args, exc_info=exc_info)
+    warnings.append(message % args)
+
+
+def _load_skills_from_provider(provider: SkillProvider, warnings: list[str]) -> dict[str, Skill]:
     """Load all skills from a single provider's skills directory."""
     skills: dict[str, Skill] = {}
     for entry in sorted(provider.path.iterdir()):
@@ -156,12 +162,7 @@ def _load_skills_from_provider(provider: SkillProvider) -> dict[str, Skill]:
         try:
             skill = _load_skill(entry, source_plugin=provider.name, source_dist=provider.dist_name)
         except ValueError:
-            logger.warning(
-                "Skipping invalid skill from provider %r in %s",
-                provider.name,
-                entry,
-                exc_info=True,
-            )
+            _warn(warnings, "Skipping invalid skill from provider %r in %s", provider.name, entry, exc_info=True)
             continue
         skills[skill.name] = skill
     return skills
@@ -180,7 +181,7 @@ def _raw_entry_points(group: str) -> Iterable[EntryPoint]:
     return entry_points(group=group)
 
 
-def _resolve_provider_candidate(ep: EntryPoint) -> Path | None:
+def _resolve_provider_candidate(ep: EntryPoint, warnings: list[str]) -> Path | None:
     """Load and validate a single ``nemo.skills`` entry-point candidate.
 
     Returns the resolved skills-root path on success, or ``None`` (with a
@@ -194,7 +195,8 @@ def _resolve_provider_candidate(ep: EntryPoint) -> Path | None:
     try:
         skills_dir_factory = ep.load()
     except Exception:
-        logger.warning(
+        _warn(
+            warnings,
             "Failed to load 'nemo.skills' entry point %r (%s) — skipping",
             provider_name,
             ep.value,
@@ -204,20 +206,21 @@ def _resolve_provider_candidate(ep: EntryPoint) -> Path | None:
     try:
         skills_root = skills_dir_factory()
     except Exception:
-        logger.warning("Failed to resolve skills directory for provider %r", provider_name, exc_info=True)
+        _warn(warnings, "Failed to resolve skills directory for provider %r", provider_name, exc_info=True)
         return None
     if not isinstance(skills_root, Path):
-        logger.warning(
+        _warn(
+            warnings,
             "Skipping provider %r skills: expected Path from nemo.skills entry point, got %s",
             provider_name,
             type(skills_root).__name__,
         )
         return None
     if not skills_root.exists():
-        logger.warning("Skipping provider %r skills: path does not exist: %s", provider_name, skills_root)
+        _warn(warnings, "Skipping provider %r skills: path does not exist: %s", provider_name, skills_root)
         return None
     if not skills_root.is_dir():
-        logger.warning("Skipping provider %r skills: path is not a directory: %s", provider_name, skills_root)
+        _warn(warnings, "Skipping provider %r skills: path is not a directory: %s", provider_name, skills_root)
         return None
     return skills_root
 
@@ -328,7 +331,7 @@ def _strict_superset_path(signatures: dict[Path, frozenset[tuple[str, str]]]) ->
     return None
 
 
-def _discover_skill_providers() -> dict[str, SkillProvider]:
+def _discover_skill_providers(warnings: list[str]) -> dict[str, SkillProvider]:
     """Resolve all ``nemo.skills`` entry points to ``{provider_name: SkillProvider}``.
 
     Walks every registered entry point in the group (not the deduplicated map
@@ -352,13 +355,13 @@ def _discover_skill_providers() -> dict[str, SkillProvider]:
     try:
         from nemo_helix_plugin.discovery import discover_entry_points
     except ImportError:
-        logger.warning("nemo-helix-plugin is unavailable; loading only bundled platform skills", exc_info=True)
+        _warn(warnings, "nemo-helix-plugin is unavailable; loading only bundled platform skills", exc_info=True)
     else:
         allowed_names = set(discover_entry_points("nemo.skills").keys())
         for ep in _raw_entry_points("nemo.skills"):
             if ep.name not in allowed_names:
                 continue
-            skills_root = _resolve_provider_candidate(ep)
+            skills_root = _resolve_provider_candidate(ep, warnings)
             if skills_root is None:
                 continue
             dist_name = ep.dist.name if ep.dist is not None else None
@@ -374,18 +377,29 @@ def _discover_skill_providers() -> dict[str, SkillProvider]:
     return {name: _join_same_name_candidates(name, candidates) for name, candidates in candidates_by_name.items()}
 
 
+def skill_providers_excluded_by_allowlist() -> list[str]:
+    """Names of installed ``nemo.skills`` providers the plugin allowlist hides from discovery."""
+    try:
+        from nemo_helix_plugin.discovery import discover_entry_points
+    except ImportError:
+        return []
+    allowed_names = set(discover_entry_points("nemo.skills").keys())
+    return sorted({ep.name for ep in _raw_entry_points("nemo.skills") if ep.name not in allowed_names})
+
+
 @lru_cache(maxsize=1)
-def _load_skills_cached() -> dict[str, Skill]:
-    """Discover and load all skills via the ``nemo.skills`` entry-point mechanism.
+def _load_skills_cached() -> tuple[dict[str, Skill], tuple[str, ...]]:
+    """Discover and load all skills, returning them with any discovery warnings.
 
     The platform's own bundled skills are exposed through ``nemo_helix_ext.skills``
     using the same entry point that third-party plugins use, so this loader has a
     single uniform path. Two providers declaring the same skill name is a hard
     error (``DuplicateSkillError``) so accidental shadowing fails loudly.
     """
+    warnings: list[str] = []
     all_skills: dict[str, Skill] = {}
-    for provider in _discover_skill_providers().values():
-        for skill in _load_skills_from_provider(provider).values():
+    for provider in _discover_skill_providers(warnings).values():
+        for skill in _load_skills_from_provider(provider, warnings).values():
             existing = all_skills.get(skill.name)
             if existing is not None:
                 raise DuplicateSkillError(
@@ -393,12 +407,21 @@ def _load_skills_cached() -> dict[str, Skill]:
                     f"{skill.source_dir}. Already defined in {existing.source_dir}."
                 )
             all_skills[skill.name] = skill
-    return dict(sorted(all_skills.items()))
+    return dict(sorted(all_skills.items())), tuple(warnings)
 
 
 def load_skills() -> dict[str, Skill]:
     """Load all CLI-visible skills via the ``nemo.skills`` entry-point mechanism."""
-    return dict(_load_skills_cached())
+    return dict(_load_skills_cached()[0])
+
+
+def load_skills_with_warnings() -> tuple[dict[str, Skill], list[str]]:
+    """Load all CLI-visible skills plus the warnings for providers or skills that failed to load.
+
+    Callers that prune must treat a non-empty warning list as incomplete discovery.
+    """
+    skills, warnings = _load_skills_cached()
+    return dict(skills), list(warnings)
 
 
 def clear_cache() -> None:

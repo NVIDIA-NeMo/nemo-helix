@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, call, patch
 import httpx
 import pytest
 from filesets import UPLOAD_RETRY_POLICY
+from nhx.customization_common.tasks.file_io.run import FileIORunner
 from pydantic import ValidationError
 
 
@@ -434,10 +435,11 @@ class TestRun:
 def no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip tenacity's exponential backoff so retry tests don't sleep for seconds.
 
-    ``tenacity.nap.sleep`` resolves ``time.sleep`` per call, so patching it here
-    takes effect even though the retry policy was bound at decoration time.
+    Each call copies the decorator's ``Retrying`` object, and the copy inherits its ``sleep``, so
+    replacing ``sleep`` on that one instance skips the backoff without touching ``time.sleep``.
     """
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _seconds: None)
+    retrying = vars(FileIORunner._create_fileset_with_retry)["retry"]
+    monkeypatch.setattr(retrying, "sleep", lambda _seconds: None)
 
 
 class TestCreateFilesetRetry:

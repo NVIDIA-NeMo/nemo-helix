@@ -156,6 +156,23 @@ class TestSyncConstruction:
 
 
 class TestAsyncConstruction:
+    @pytest.mark.asyncio
+    async def test_factory_owns_new_transport(self):
+        async with cf.get_async_nemo_client() as first, cf.get_async_nemo_client() as second:
+            # Endpoint construction creates independent, unshared transports.
+            assert first._http is not second._http
+            assert not first._http.is_closed
+            assert not second._http.is_closed
+        assert first._http.is_closed
+        assert second._http.is_closed
+
+    @pytest.mark.asyncio
+    async def test_factory_borrows_injected_transport(self):
+        async with httpx.AsyncClient() as http_client:
+            async with cf.get_async_nemo_client(http_client=http_client):
+                assert not http_client.is_closed
+            assert not http_client.is_closed
+
     def test_base_url_from_config(self):
         client = cf.get_async_nemo_client()
         assert isinstance(client, AsyncNemoClient)

@@ -99,7 +99,8 @@ def test_list_agents_paginates() -> None:
     assert names == ["calc"]
 
 
-def test_deployment_session_and_invoke_routes() -> None:
+@pytest.mark.parametrize("session_uuid", [None, "c46d3588-d205-497f-b96b-37f938263064"])
+def test_deployment_session_and_invoke_routes(session_uuid: str | None) -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -111,7 +112,12 @@ def test_deployment_session_and_invoke_routes() -> None:
             assert _read_json(request) == {"deployment_id": "dep-id"}
             return httpx.Response(
                 201,
-                json={"name": "session-one", "workspace": "default", "deployment_id": "dep-id"},
+                json={
+                    "name": "session-one",
+                    "workspace": "default",
+                    "deployment_id": "dep-id",
+                    **({"session_uuid": session_uuid} if session_uuid is not None else {}),
+                },
             )
         assert request.url.path.endswith("/deployments/calc-prod/-/v1/chat/completions")
         assert request.headers["X-Nemo-Session-Id"] == "session-one"
@@ -122,6 +128,7 @@ def test_deployment_session_and_invoke_routes() -> None:
 
     deployment = client.create_deployment(body=CreateDeploymentRequest(agent="calc", name="calc-prod")).data()
     session = client.create_session(body=CreateSessionRequest(deployment_id="dep-id")).data()
+    assert session.session_uuid == (session_uuid or "")
     completion = client.with_headers({"X-Nemo-Session-Id": session.name}).invoke_deployment(
         name=deployment.name,
         body=InvokeAgentRequest(messages=[{"role": "user", "content": "hello"}]),

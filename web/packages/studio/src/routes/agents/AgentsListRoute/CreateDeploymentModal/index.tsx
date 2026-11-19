@@ -7,6 +7,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { FABRIC_CONFIG_FORMAT } from '@nemo/common/src/utils/agents';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   getAgentsListDeploymentsQueryKey,
@@ -15,7 +16,6 @@ import {
 import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Accordion, Stack, Text } from '@nvidia/foundations-react-core';
 import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
-import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import {
   type DeploymentMode,
   DeploymentModeAvailabilityMode,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Breadcrumbs } from '@nvidia/foundations-react-core';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 
 interface BreadcrumbItem {
   /** Display label for the breadcrumb */

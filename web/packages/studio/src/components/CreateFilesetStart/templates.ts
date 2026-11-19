@@ -5,13 +5,13 @@ import {
   Code,
   Beaker,
   ScaleBalance,
-  Shield,
+  Secure,
   Graduate,
   Envelope,
-  MagnifyingGlass,
+  DocumentPreview,
   IconFunction,
 } from '@nemo/icons/icons';
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema/SamplerType';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_EMBEDDER_MODEL_NAME } from '@studio/constants/constants';
 
@@ -128,7 +128,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Phishing analyzer fine-tuning (SFT)',
     description:
       'Prompt–completion pairs teaching a small model the phishing-analyzer task. Keep it disjoint from the eval set.',
-    icon: Shield,
+    icon: Secure,
     tag: { label: 'Fine-tuning', color: 'red', kind: 'outline' },
     columns: [
       {
@@ -465,7 +465,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Semantic search dataset',
     description:
       'Query–passage pairs with embeddings for retrieval and RAG evaluation. Needs an "embedder" model.',
-    icon: MagnifyingGlass,
+    icon: DocumentPreview,
     tag: { label: 'Retrieval', color: 'blue', kind: 'outline' },
     columns: [
       {

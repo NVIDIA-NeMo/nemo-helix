@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
 import httpx
 from fastapi import HTTPException
+from httpx import AsyncClient, Client
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -19,7 +20,6 @@ from nhx.guardrails.app.llms.completion.base import FlexibleLLMBase
 from nhx.guardrails.app.llms.utils import (
     determine_main_model_base_url,
     get_main_model_api_key,
-    get_provider_from_context,
 )
 from nhx.guardrails.app.utils.context_utils import (
     get_main_model_from_context,
@@ -69,17 +69,13 @@ class NIM(FlexibleLLMBase, BaseRequest):
             # Determine Base URL for model
             inference_base_url = determine_main_model_base_url(values)
             values["api_host"] = inference_base_url
-            cls._endpoint_url = inference_base_url
-
-            # Determine provider for model
-            cls._endpoint_provider = get_provider_from_context()
 
             # Determine API key for model
             api_key = get_main_model_api_key()
             if api_key:
                 values["api_key"] = api_key
 
-            log.info(f"Setting base URL to {cls._endpoint_url} for model {main_model.model if main_model else ''}")
+            log.info(f"Setting base URL to {inference_base_url} for model {main_model.model if main_model else ''}")
 
         except Exception as e:
             log.error(f"Failed to determine base URL and API key for {main_model.model if main_model else ''}: {e}")
@@ -123,9 +119,14 @@ class NIM(FlexibleLLMBase, BaseRequest):
         return f"{api_host}/completions"
 
     def _get_api_host(self) -> str:
-        if self._endpoint_url is None:
-            return self.api_host
-        return self._endpoint_url
+        """Return the endpoint this model was built with.
+
+        Engines are reused across requests, so the endpoint has to be stored on each instance. It used
+        to be stored on the class, where whichever engine was built last overwrote it for all of them.
+        """
+        if self.api_host is None:
+            raise ValueError(f"No API host resolved for model {self.model}")
+        return self.api_host
 
     def _append_v1_if_not_present(self, api_host: str) -> str:
         return api_host if api_host.endswith("/v1") else f"{api_host}/v1"
@@ -196,7 +197,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
         **kwargs: Any,
     ) -> Iterator[GenerationChunk]:
         stop = self.stop if stop is None else stop
-        with httpx.Client(timeout=self._get_timeout()) as client:
+        with Client(timeout=self._get_timeout()) as client:
             with client.stream(
                 "POST",
                 url=self._get_request_url(),
@@ -258,7 +259,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
 
             return completion
 
-        with httpx.Client(timeout=self._get_timeout()) as client:
+        with Client(timeout=self._get_timeout()) as client:
             response = client.post(
                 url=self._get_request_url(),
                 headers=self._get_request_headers(**kwargs),
@@ -303,7 +304,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
                         }
                     )
             else:
-                with httpx.Client(timeout=self._get_timeout()) as client:
+                with Client(timeout=self._get_timeout()) as client:
                     response = client.post(
                         url=self._get_request_url(),
                         headers=self._get_request_headers(**kwargs),
@@ -333,7 +334,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
         **kwargs: Any,
     ) -> AsyncIterator[GenerationChunk]:
         stop = self.stop if stop is None else stop
-        async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+        async with AsyncClient(timeout=self._get_timeout()) as client:
             async with client.stream(
                 "POST",
                 url=self._get_request_url(),
@@ -404,7 +405,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
 
             return generation.text
 
-        async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+        async with AsyncClient(timeout=self._get_timeout()) as client:
             response = await client.post(
                 url=self._get_request_url(),
                 headers=self._get_request_headers(**kwargs),
@@ -455,7 +456,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
                     }
                 )
             else:
-                async with httpx.AsyncClient(timeout=self._get_timeout()) as client:
+                async with AsyncClient(timeout=self._get_timeout()) as client:
                     response = await client.post(
                         url=self._get_request_url(),
                         headers=self._get_request_headers(**kwargs),

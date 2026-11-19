@@ -10,7 +10,7 @@ import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { parseFileContent } from '@studio/util/files';
 import { splitRandomDistribution, splitSequentialDistribution } from '@studio/util/list';
-import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 interface FileSplitsProps {

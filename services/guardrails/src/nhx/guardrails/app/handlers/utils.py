@@ -1,13 +1,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
 
-from nemoguardrails import LLMRails
 from nemoguardrails import RailsConfig as InternalSdkRailsConfig
+from nemoguardrails.rails.llm.config import _get_flow_name
+from nemoguardrails.rails.llm.options import (
+    ActivatedRail,
+    GenerationLog,
+    GenerationResponse,
+    RailsResult,
+    RailStatus,
+    RailType,
+)
 from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
+from nhx.guardrails.app.services.rails.engine import RailsEngine, uses_iorails
 from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
@@ -64,11 +73,14 @@ def get_main_model_from_config(models: List[Model]) -> Optional[Model]:
 
 
 def get_merged_custom_headers_token(token: str | None) -> str:
-    """Merge the custom headers from the request context into the token."""
-    headers = {
-        **get_request_default_headers_from_context(),
-        **get_platform_auth_headers_from_context(),
-    }
+    """Return the caller-specific part of the engine cache key.
+
+    Only values that get built into the engine belong here: the caller's model credential and the
+    platform auth headers. Request ``x-*`` headers aren't built into the engine, so they're left out.
+    Including them would rebuild the engine on every request whenever a proxy like Envoy adds a
+    unique ``x-request-id``.
+    """
+    headers = get_platform_auth_headers_from_context()
     headers_str = json.dumps(headers, sort_keys=True)
     merged_token_headers = f"{token}{headers_str}" if token else headers_str
     return merged_token_headers
@@ -98,7 +110,12 @@ def model_with_req_scoped_custom_headers(model: Model, req_custom_headers: dict[
 
 
 def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) -> None:
-    """Set the merged custom headers for the main model."""
+    """Set the headers the main model sends for this request.
+
+    That's the model's configured ``default_headers`` with the request's headers on top (header
+    names are compared case-insensitively). The engine is shared across requests, so this has to
+    happen per request instead of when the engine is built.
+    """
     # for /v1/checks, main model is currently set, but not required technically and might be removed in the future
     # so we don't raise an error on no main model here
     if model is None:
@@ -109,7 +126,9 @@ def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) ->
     default_headers = (model.parameters or {}).get("default_headers", None)
     if not default_headers:
         return
-    set_request_default_headers_into_context(default_headers)
+    set_request_default_headers_into_context(
+        get_merged_custom_headers(default_headers, get_request_default_headers_from_context())
+    )
 
 
 def update_models_in_config(config: RailsConfig, main_model: Model):
@@ -121,17 +140,13 @@ def update_models_in_config(config: RailsConfig, main_model: Model):
     models = config.models.copy()
     main_model_index = None
 
-    # Custom headers defined in the guardrail config
-    req_custom_headers = get_request_default_headers_from_context()
-
     for index, model in enumerate(models):
         if model.type == main_model.type:
             main_model_index = index
-        # Merge the custom headers from the request context into the model
-        # The model.parameters["default_headers"] is a source of truth for the request custom headers
-        # Although this object is cached, the cache key includes the custom headers,
-        # so it will be invalidated when any request custom header changes
-        models[index] = model_with_req_scoped_custom_headers(model, req_custom_headers)
+        # The engine built from this config is shared across requests, so only the configured
+        # headers go into its models. The main model gets request headers per call (see
+        # `set_main_model_merged_custom_headers_into_context`). Task models don't get them at all.
+        models[index] = model_with_req_scoped_custom_headers(model, None)
 
     main_model_parameters = {k: v for k, v in (main_model.parameters or {}).items() if v is not None}
 
@@ -183,75 +198,146 @@ def get_main_model_from_rails_config(rails_config: RailsConfig) -> Model | None:
     return next((model for model in rails_config.models if model.type == "main"), None)
 
 
-def _run_generate_in_new_loop(
-    llm_rails: LLMRails,
-    messages: Optional[List[dict]] = None,
-    prompt: Optional[str] = None,
-    options: Optional[Any] = None,
-    state: Optional[Any] = None,
-) -> Any:
-    """Run LLMRails.generate_async in a new event loop in the current thread.
-
-    Called via asyncio.to_thread, which copies the current context so all
-    context variables (auth token, headers, main model, etc.) are available.
-
-    NemoGuardrails' generate_async has CPU-intensive Colang flow processing
-    between LLM calls that can hold the asyncio event loop for multiple seconds at
-    a time. This could block the event loop for an extended period, causing Kubernetes
-    liveness probes to time out and kill the pod. Running the function in a
-    dedicated thread with its own event loop keeps the main event loop free to
-    respond to health checks and other concurrent requests.
-    """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(
-            llm_rails.generate_async(
-                messages=messages,
-                prompt=prompt,
-                options=options,
-                state=state,
-            )
-        )
-    finally:
-        try:
-            # Cancel any tasks that are still pending (ex. aiohttp/httpx cleanup tasks
-            # that were created during generate_async but not yet completed).
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # Exit the worker threads created for each LLM call in this request.
-            # Without this, they linger as idle pool threads into the next request.
-            # When the next request initializes a new LLMRails object, those idle
-            # threads compete for the Python GIL with LLMRails' internal setup thread.
-            # The main event loop is starved of the GIL for that duration and cannot
-            # respond to Kubernetes liveness probes, which kills the pod.
-            loop.run_until_complete(loop.shutdown_default_executor())
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-
-
 async def run_generate_async(
-    llm_rails: LLMRails,
+    llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
     prompt: Optional[str] = None,
     options: Optional[Any] = None,
     state: Optional[Any] = None,
 ) -> Any:
-    """Run LLMRails.generate_async without blocking the FastAPI event loop.
+    """Run the rails on the server event loop, like the standalone NeMo Guardrails server does.
 
-    asyncio.to_thread copies the current contextvars context before entering
-    the thread, so context variables set prior to this call remain accessible
-    inside the guardrails pipeline.
+    Model HTTP clients are tied to the event loop that first used them. NeMo Guardrails shares one
+    client per endpoint across the whole process, and IORails keeps its own. We used to run each
+    request on a new loop, which left those clients attached to a closed loop. Later requests then
+    had to wait and retry, or hung under load. Building an engine is the slow part, and that still
+    happens in a worker thread.
     """
-    return await asyncio.to_thread(
-        _run_generate_in_new_loop,
-        llm_rails,
-        messages=messages,
-        prompt=prompt,
-        options=options,
-        state=state,
+    return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
+
+
+def _text_of_content_parts(parts: List[Any]) -> str:
+    """Join the text parts of OpenAI-style message content with newlines, dropping non-text parts."""
+    texts = []
+    for part in parts:
+        if isinstance(part, str):
+            texts.append(part)
+        elif isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
+
+
+def _text_only_messages(messages: List[dict]) -> List[dict]:
+    """Copy of ``messages`` with list-valued ``content`` flattened to its text.
+
+    IORails reads a message only when ``content`` is a string, so content parts would look empty and the
+    rail would be skipped, passing the request unchecked. Parts a text rail cannot inspect (images,
+    audio, files) are dropped; a message made only of those is therefore not checked.
+    """
+    return [
+        {**message, "content": _text_of_content_parts(message["content"])}
+        if isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
+def _last_text_by_role(messages: List[dict], role: str) -> str:
+    """Text of the last message with ``role``, or "" when there is none or it is not plain text."""
+    for message in reversed(messages):
+        if message.get("role") == role:
+            content = message.get("content")
+            return content if isinstance(content, str) else ""
+    return ""
+
+
+def _rails_result_to_generation_response(
+    result: RailsResult,
+    flows_by_type: Dict[RailType, List[str]],
+) -> GenerationResponse:
+    """Shape an IORails verdict like the LLMRails generation result the checks response is built from.
+
+    The checks response reads ``log.activated_rails`` to report each rail's status, with ``stop``
+    meaning blocked. IORails reports only the verdict and which rail blocked, so every rail that ran is
+    reported as passed, up to the one that blocked. The blocking rail is reported even when it is not
+    one of the config's flows (a rail that failed to run), so a block is never reported as success.
+    """
+    activated_rails: List[ActivatedRail] = []
+    blocked = result.status is RailStatus.BLOCKED
+    for rail_type, flows in flows_by_type.items():
+        for flow in flows:
+            # IORails names the blocking rail without the ``$model=...`` / ``(...)`` suffix its flow
+            # carries, using this same helper.
+            is_blocking_rail = blocked and _get_flow_name(flow) == result.rail
+            activated_rails.append(ActivatedRail(type=rail_type.value, name=flow, stop=is_blocking_rail))
+            if is_blocking_rail:
+                return GenerationResponse(
+                    response=[{"role": "assistant", "content": result.content}],
+                    log=GenerationLog(activated_rails=activated_rails),
+                )
+
+    if blocked:
+        rail_type = next(iter(flows_by_type), RailType.OUTPUT)
+        activated_rails.append(ActivatedRail(type=rail_type.value, name=result.rail or rail_type.value, stop=True))
+
+    return GenerationResponse(
+        response=[{"role": "assistant", "content": result.content}],
+        log=GenerationLog(activated_rails=activated_rails),
     )
+
+
+async def run_check_async(
+    rails_engine: RailsEngine,
+    messages: List[dict],
+    rail_types: List[str],
+    state: Optional[Any] = None,
+) -> GenerationResponse:
+    """Run the config's rails over ``messages`` as supplied, without generating a response.
+
+    A check audits text the caller already has, so the main model must not run: IORails'
+    ``generate_async`` always calls it and then judges its reply, which would report a verdict on text
+    nobody supplied. IORails' ``check_async`` judges the supplied messages. Runs on the server loop for
+    the same reason as :func:`run_generate_async`.
+
+    Only IORails needs this. LLMRails treats a trailing assistant message as the text to check and
+    skips generation, so its checks stay on :func:`run_generate_async`.
+    """
+    if not uses_iorails(rails_engine):
+        raise ValueError("run_check_async only serves IORails engines; use run_generate_async for LLMRails")
+    if state is not None:
+        raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+
+    messages = _text_only_messages(messages)
+    rails_config = rails_engine.config
+    flows_by_type: Dict[RailType, List[str]] = {}
+    for rail_type in (RailType.INPUT, RailType.OUTPUT):
+        if rail_type.value not in rail_types:
+            continue
+        flows = list(getattr(rails_config.rails, rail_type.value).flows or [])
+        # A rail that has nothing to read does not run, so it is not reported as having passed.
+        checked_role = "user" if rail_type is RailType.INPUT else "assistant"
+        if flows and _last_text_by_role(messages, checked_role):
+            flows_by_type[rail_type] = flows
+
+    result = await rails_engine.check_async(messages, rail_types=list(flows_by_type))
+    return _rails_result_to_generation_response(result, flows_by_type)
+
+
+def stream_rails_async(
+    llm_rails: RailsEngine,
+    prompt: Optional[str] = None,
+    messages: Optional[List[dict]] = None,
+    options: Optional[Any] = None,
+    state: Optional[Any] = None,
+) -> AsyncIterator[Union[str, dict]]:
+    """Stream a guarded response from either rails engine.
+
+    IORails is stateless and only honors ``options``, so ``state`` would be silently dropped. Reject
+    it instead, as the non-streaming IORails path does.
+    """
+    if uses_iorails(llm_rails):
+        if state is not None:
+            raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+        return llm_rails.stream_async(prompt=prompt, messages=messages, options=options)
+
+    return llm_rails.stream_async(prompt=prompt, messages=messages, options=options, state=state)

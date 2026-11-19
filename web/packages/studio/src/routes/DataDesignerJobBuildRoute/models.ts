@@ -37,8 +37,6 @@ export interface BuilderModel {
   inferenceParams: Partial<InferenceParams>;
 }
 
-export type BuilderModelPatch = Partial<Omit<BuilderModel, 'id'>>;
-
 /**
  * The provider a dropdown selection carries: the picked model's first `model_providers` entry
  * (a `workspace/provider-name` resource ref). Data Designer needs an explicit provider on each

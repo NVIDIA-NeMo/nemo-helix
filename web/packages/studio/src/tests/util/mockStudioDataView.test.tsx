@@ -54,4 +54,25 @@ describe('MockStudioDataView row actions', () => {
     expect(onSelect).toHaveBeenCalledOnce();
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('renders a custom row actions cell with the row', () => {
+    render(
+      <MockStudioDataView
+        dataViewState={{}}
+        attributes={{ DataViewRoot: { data: [{ name: 'Insight' }] } }}
+        makeColumns={(_helper, prebuilt) => {
+          const rowActionsColumn = prebuilt.rowActionsColumn as (options: {
+            cell: (ctx: { row: { original: { name: string } } }) => React.ReactNode;
+          }) => unknown;
+          return [
+            rowActionsColumn({
+              cell: ({ row }) => <button type="button">{`Menu for ${row.original.name}`}</button>,
+            }),
+          ];
+        }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Menu for Insight' })).toBeInTheDocument();
+  });
 });

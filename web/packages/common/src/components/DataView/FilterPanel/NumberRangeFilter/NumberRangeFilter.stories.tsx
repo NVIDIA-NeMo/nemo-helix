@@ -14,7 +14,7 @@ import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataV
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
-import { ComponentProps, FC, useCallback, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Sandbox — the NumberRangeFilterControl in isolation, with a live value readout

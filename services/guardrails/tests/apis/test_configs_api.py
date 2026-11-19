@@ -119,7 +119,7 @@ class TestGuardrailConfigsAPI:
         entities_client.get.return_value = GuardrailConfig(name="delete-race-config", workspace="default")
         # Delete first scans for VirtualModels applying this config; nothing references it here.
         entities_client.list.return_value = _empty_page()
-        entities_client.delete.side_effect = EntityNotFoundError("not found")
+        entities_client.delete_by_id.side_effect = EntityNotFoundError("not found")
         dependency_overrides = getattr(client.app, "dependency_overrides")
         dependency_overrides[get_entity_client] = lambda: entities_client
         try:

@@ -3,6 +3,7 @@
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 import {
   buildJobNotification,
   findJobTransitions,
@@ -19,7 +20,7 @@ const job = (name: string, status: HelixJobStatus, source = 'customization'): No
 describe('getJobNotificationPath', () => {
   it.each([
     ['customization', `/workspaces/${DEFAULT_WORKSPACE}/fine-tune/my-job`],
-    ['data-designer', `/workspaces/${DEFAULT_WORKSPACE}/data-designer/my-job`],
+    [JOB_SOURCE.DATA_DESIGNER, `/workspaces/${DEFAULT_WORKSPACE}/data-designer/my-job`],
     ['safe-synthesizer', `/workspaces/${DEFAULT_WORKSPACE}/safe-synthesizer/job/my-job`],
     ['evaluator-metrics', `/workspaces/${DEFAULT_WORKSPACE}/jobs/my-job`],
     ['anonymizer', `/workspaces/${DEFAULT_WORKSPACE}/jobs/my-job`],

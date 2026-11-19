@@ -7,7 +7,7 @@ import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Stack } from '@nvidia/foundations-react-core';
 import { isEvalConfigCandidate } from '@studio/components/evaluation/AgentEvaluationWizard/consts';
 import { filesetNameOption } from '@studio/components/evaluation/utils';
-import { type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import {
   type Control,
   type FieldValues,

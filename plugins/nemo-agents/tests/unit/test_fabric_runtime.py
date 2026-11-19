@@ -24,7 +24,9 @@ from nemo_agents_plugin.fabric.runtime import (
     stream_fabric_runtime,
 )
 from nemo_agents_plugin.fabric.streaming import iter_fabric_chat_completion_sse
-from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig
+from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig, RuntimeStatus
+
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
 
 class _FabricMapping:
@@ -81,6 +83,7 @@ class _FakeRuntime:
         self.invoke_stream_requests: list[Any] = []
         self.invoke_openai_stream_requests: list[Any] = []
         self.stream = stream
+        self.status = RuntimeStatus.ACTIVE
 
     async def __aenter__(self) -> "_FakeRuntime":
         if self.enter_delay:
@@ -99,7 +102,12 @@ class _FakeRuntime:
         self.exited = True
         self.exit_calls += 1
         if self.exit_error is not None:
+            self.status = RuntimeStatus.FAILED
             raise self.exit_error
+        self.status = RuntimeStatus.STOPPED
+
+    async def stop(self) -> None:
+        await self.__aexit__(None, None, None)
 
     async def invoke(self, *, request: Any) -> Any:
         self.invoke_requests.append(request)
@@ -210,17 +218,43 @@ class _SequenceFabric:
 
 
 @pytest.mark.asyncio
+async def test_one_shot_retains_workspace_when_stop_error_is_suppressed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    workspace = tmp_path / "private"
+    workspace.mkdir()
+
+    class _CleanupRuntime(_FakeRuntime):
+        async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+            # Fabric reports stop failures as notes when invocation already failed.
+            self.status = RuntimeStatus.FAILED
+
+    runtime = _CleanupRuntime(invoke_error=fabric_runtime.FabricError("invoke failed"))
+    request = FabricOneShotRequest(
+        fabric_config=cast(FabricConfig, object()), base_dir=tmp_path, workspace_dir=workspace
+    )
+    with pytest.raises(FabricRuntimeExecutionError, match="invoke failed"):
+        await run_fabric_agent_once(request, fabric=_FakeFabric(runtime=runtime))
+    assert workspace.exists()
+    assert str(workspace) in caplog.text
+
+
+@pytest.mark.asyncio
 class TestRunFabricAgentOnce:
-    async def test_starts_invokes_and_cleans_up_ephemeral_runtime(self) -> None:
+    async def test_starts_invokes_and_cleans_up_ephemeral_runtime(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         fabric_config = cast(FabricConfig, object())
         fake_runtime = _FakeRuntime()
         fake_fabric = _FakeFabric(runtime=fake_runtime)
         request = FabricOneShotRequest(
             fabric_config=fabric_config,
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
             overrides={"models": {"default": {"temperature": 0.1}}},
         )
 
@@ -240,11 +274,13 @@ class TestRunFabricAgentOnce:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.status == "succeeded"
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
         assert result.invocation_id == "invocation-1"
         assert result.request_id == "request-1"
+        assert not workspace.exists()
 
     async def test_wraps_timeout(self) -> None:
         fake_runtime = _FakeRuntime(invoke_delay=1.0)
@@ -291,15 +327,19 @@ class TestRunFabricAgentOnce:
 
         assert exc_info.value.__cause__ is timeout_error
 
-    async def test_wraps_runtime_start_errors(self) -> None:
+    async def test_wraps_runtime_start_errors(self, tmp_path: Path) -> None:
         fake_fabric = _FakeFabric(start_error=fabric_runtime.FabricError("native unavailable"))
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
 
         with pytest.raises(FabricRuntimeStartError, match="Fabric runtime startup failed: native unavailable"):
             await run_fabric_agent_once(request, fabric=fake_fabric)
+        assert not workspace.exists()
 
     async def test_wraps_runtime_context_entry_errors_as_start_errors(self) -> None:
         fake_runtime = _FakeRuntime(enter_error=fabric_runtime.FabricError("harness unavailable"))
@@ -331,26 +371,36 @@ class TestRunFabricAgentOnce:
         assert first_runtime.exit_calls == 1
         assert second_runtime.exit_calls == 1
 
-    async def test_cleans_up_once_after_invocation_error(self) -> None:
+    async def test_cleans_up_once_after_invocation_error(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         fake_runtime = _FakeRuntime(invoke_error=fabric_runtime.FabricError("invoke failed"))
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
 
         with pytest.raises(FabricRuntimeExecutionError, match="Fabric runtime invocation failed: invoke failed"):
             await run_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime))
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
-    async def test_cleans_up_once_after_cancellation(self) -> None:
+    @pytest.mark.parametrize("phase", ["start", "invoke"])
+    async def test_cleans_up_once_after_cancellation(self, tmp_path: Path, phase: str) -> None:
         fake_runtime = _FakeRuntime(invoke_delay=60)
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
-        invocation = asyncio.create_task(run_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime)))
-        while not fake_runtime.invoke_requests:
+        fabric = _FakeFabric(runtime=fake_runtime, start_delay=0.05 if phase == "start" else 0)
+        invocation = asyncio.create_task(run_fabric_agent_once(request, fabric=fabric))
+        calls = fabric.start_calls if phase == "start" else fake_runtime.invoke_requests
+        while not calls:
             await asyncio.sleep(0)
 
         invocation.cancel()
@@ -358,18 +408,23 @@ class TestRunFabricAgentOnce:
             await invocation
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
-    async def test_maps_cleanup_errors_after_successful_invocation(self) -> None:
+    async def test_maps_cleanup_errors_after_successful_invocation(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         fake_runtime = _FakeRuntime(exit_error=fabric_runtime.FabricError("stop failed"))
         request = FabricOneShotRequest(
             fabric_config=cast(FabricConfig, object()),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
 
         with pytest.raises(FabricRuntimeExecutionError, match="Fabric runtime cleanup failed: stop failed"):
             await run_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime))
 
         assert fake_runtime.exit_calls == 1
+        assert workspace.exists()
 
     async def test_failed_run_result_is_returned_as_normalized_result(self) -> None:
         failed_result = _FakeRunResult(
@@ -418,7 +473,11 @@ class TestRunFabricAgentOnce:
 @pytest.mark.asyncio
 class TestStreamFabricAgentOnce:
     @pytest.mark.parametrize("method", list(StreamingMethod))
-    async def test_keeps_ephemeral_runtime_alive_for_stream_context(self, method: StreamingMethod) -> None:
+    async def test_keeps_ephemeral_runtime_alive_for_stream_context(
+        self, tmp_path: Path, method: StreamingMethod
+    ) -> None:
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         fabric_config = FabricConfig(
             metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
         )
@@ -427,9 +486,11 @@ class TestStreamFabricAgentOnce:
         request = FabricOneShotRequest(
             fabric_config=fabric_config,
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
             input="hello",
             request_id="platform-request-1",
             caller_context={"source": "server"},
+            relay_session_root=SESSION_UUID,
         )
 
         async with stream_fabric_agent_once(request, fabric=fake_fabric, streaming_method=method) as stream:
@@ -459,7 +520,9 @@ class TestStreamFabricAgentOnce:
         assert fabric_request.input == "hello"
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"source": "server"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.response == "hello"
+        assert not workspace.exists()
 
     @pytest.mark.parametrize("method", list(StreamingMethod))
     async def test_runtime_setup_does_not_consume_result_timeout(self, method: StreamingMethod) -> None:
@@ -538,7 +601,9 @@ class TestStreamFabricAgentOnce:
         assert fake_runtime.exit_calls == 1
 
     @pytest.mark.parametrize("method", list(StreamingMethod))
-    async def test_cleans_up_runtime_after_stream_result_error(self, method: StreamingMethod) -> None:
+    async def test_cleans_up_runtime_after_stream_result_error(self, tmp_path: Path, method: StreamingMethod) -> None:
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         stream = _FakeInvokeStream(result_error=fabric_runtime.FabricError("result failed"))
         fake_runtime = _FakeRuntime(
             stream=stream,
@@ -549,6 +614,7 @@ class TestStreamFabricAgentOnce:
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
             ),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
 
         with pytest.raises(FabricRuntimeExecutionError, match="result failed"):
@@ -558,6 +624,7 @@ class TestStreamFabricAgentOnce:
                 await runtime_stream.result()
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
     @pytest.mark.parametrize("method", list(StreamingMethod))
     async def test_cleans_up_runtime_after_stream_result_timeout(self, method: StreamingMethod) -> None:
@@ -583,13 +650,16 @@ class TestStreamFabricAgentOnce:
 
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_once_after_cancellation(self) -> None:
+    async def test_cleans_up_once_after_cancellation(self, tmp_path: Path) -> None:
         fake_runtime = _FakeRuntime()
+        workspace = tmp_path / "private"
+        workspace.mkdir()
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
             ),
             base_dir=Path("/tmp/agent"),
+            workspace_dir=workspace,
         )
         stream_started = asyncio.Event()
 
@@ -605,16 +675,27 @@ class TestStreamFabricAgentOnce:
             await invocation
 
         assert fake_runtime.exit_calls == 1
+        assert not workspace.exists()
 
 
 @pytest.mark.asyncio
 class TestInvokeFabricRuntime:
+    async def test_session_roots_preserve_distinct_request_ids(self) -> None:
+        fake_runtime = _FakeRuntime()
+        roots = [SESSION_UUID, SESSION_UUID, "00000000-0000-0000-0000-000000000001", None, None]
+        for root in roots:
+            await invoke_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest(relay_session_root=root))
+
+        assert [request.relay_session_root for request in fake_runtime.invoke_requests] == roots
+        assert len({request.request_id for request in fake_runtime.invoke_requests}) == len(roots)
+
     async def test_invokes_active_runtime_without_changing_its_lifecycle(self) -> None:
         fake_runtime = _FakeRuntime()
         request = FabricInvocationRequest(
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
         )
 
         result = await invoke_fabric_runtime(cast(Any, fake_runtime), request)
@@ -625,6 +706,7 @@ class TestInvokeFabricRuntime:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.status == "succeeded"
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
@@ -689,6 +771,7 @@ class TestStreamFabricRuntime:
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
         )
 
         stream = stream_fabric_runtime(cast(Any, fake_runtime), request)
@@ -697,6 +780,7 @@ class TestStreamFabricRuntime:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
 
         records = [record async for record in stream.records()]
         assert records == [{"type": "span", "message": "thinking"}]

@@ -10,7 +10,7 @@ import {
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import { getEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
-import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import type { EvaluationResponse, HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
 import { fetchExperimentsByIds } from '@studio/api/evaluation/experiments';
 import {
@@ -19,9 +19,12 @@ import {
   targetNameForEvalJob,
   toEvalJobRow,
 } from '@studio/api/evaluation/utils';
-import { RECENT_EVAL_LIMIT } from '@studio/routes/agents/AgentDetailRoute/constants';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import {
+  AGENT_EVALUATIONS_PAGE_SIZE,
+  EVALUATION_PUBLICATION_GRACE_MS,
+} from '@studio/routes/agents/AgentDetailRoute/constants';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useRef } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'error', 'cancelled']);
@@ -70,6 +73,9 @@ export const useAgentDetails = ({
 }: UseAgentPanelParams) => {
   const queryClient = useQueryClient();
   const toast = useToast();
+  // Fallback for older job responses without updated_at. Record first observation only,
+  // so polling another live job cannot keep extending a terminal job's publication grace.
+  const terminalObservedAt = useRef(new Map<string, number>());
 
   const {
     data: agent,
@@ -110,7 +116,7 @@ export const useAgentDetails = ({
     workspace,
     {
       filter: { agent_name: agentName ?? '' },
-      page_size: RECENT_EVAL_LIMIT,
+      page_size: AGENT_EVALUATIONS_PAGE_SIZE,
       sort: '-created_at',
     },
     {
@@ -125,14 +131,13 @@ export const useAgentDetails = ({
 
   const { data: agentJobsData } = useQuery({
     queryKey: ['evaluator-jobs', workspace, 'agent-panel', agentName] as const,
-    queryFn: ({ signal }) =>
-      fetchEvaluatorJobs(workspace, signal, (all) => {
-        const matched = all.filter((job) => targetNameForEvalJob(job) === agentName).length;
-        return matched >= RECENT_EVAL_LIMIT;
-      }),
+    // Scope on the server before paging; retain this agent's history for older Evaluation links.
+    queryFn: ({ signal }) => fetchEvaluatorJobs(workspace, signal, undefined, agentName),
     enabled: evalsEnabled && !!agentName && !!workspace,
     refetchInterval: (query) => {
-      const rows = (query.state.data ?? []).map(toEvalJobRow);
+      const rows = (query.state.data ?? [])
+        .filter((job) => targetNameForEvalJob(job) === agentName)
+        .map(toEvalJobRow);
       const live = rows.some((row) => !TERMINAL_JOB_STATUSES.has(row.status ?? ''));
       return live ? JOB_POLLING_INTERVAL_MS : false;
     },
@@ -141,35 +146,67 @@ export const useAgentDetails = ({
   // Evaluations a job says it publishes to that the agent-filtered query cannot see: Intake
   // denormalizes `agent_name` from ingested spans, so a run's evaluation stays invisible to that
   // filter even though the record and its experiment exist from the moment it is submitted.
+  const publicationJobsByName = useMemo(() => {
+    const byName = new Map<string, HelixJobResponse[]>();
+    // Jobs are newest first. Hydrate only a page of this agent's recent publications,
+    // while keeping the full job history above for linkage of older displayed evaluations.
+    const recentJobs = (agentJobsData ?? [])
+      .filter((job) => targetNameForEvalJob(job) === agentName)
+      .slice(0, AGENT_EVALUATIONS_PAGE_SIZE);
+    for (const job of recentJobs) {
+      const name = publishedEvaluationName(job);
+      if (name) byName.set(name, [...(byName.get(name) ?? []), job]);
+    }
+    return byName;
+  }, [agentJobsData, agentName]);
+
   const pendingEvaluationNames = useMemo(() => {
     const known = new Set((agentEvalsResponse?.data ?? []).map((evaluation) => evaluation.name));
-    const names = new Set<string>();
-    for (const job of agentJobsData ?? []) {
-      if (targetNameForEvalJob(job) !== agentName) continue;
-      const name = publishedEvaluationName(job);
-      if (name && !known.has(name)) names.add(name);
-    }
-    return [...names].sort();
-  }, [agentEvalsResponse, agentJobsData, agentName]);
+    return [...publicationJobsByName.keys()].filter((name) => !known.has(name)).sort();
+  }, [agentEvalsResponse, publicationJobsByName]);
 
-  const { data: pendingEvals } = useQuery({
-    queryKey: ['agent-pending-evaluations', workspace, pendingEvaluationNames] as const,
-    queryFn: async ({ signal }) => {
-      // Settled, not all: a job names its evaluation at submit, so the record can 404 in the gap
-      // before Intake creates it, and one missing row must not blank the others.
-      const settled = await Promise.allSettled(
-        pendingEvaluationNames.map((name) => getEvaluation(workspace, name, signal))
-      );
-      return settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
-    },
-    enabled: evalsEnabled && !!workspace && pendingEvaluationNames.length > 0,
-    refetchInterval: JOB_POLLING_INTERVAL_LONG,
+  const pendingEvals = useQueries({
+    queries: pendingEvaluationNames.map((name) => ({
+      queryKey: ['agent-pending-evaluation', workspace, name] as const,
+      queryFn: ({ signal }: { signal: AbortSignal }) => getEvaluation(workspace, name, signal),
+      enabled: evalsEnabled && !!workspace,
+      // A record may exist before its scores do. Refresh both successful and missing
+      // publications while live, then allow bounded post-terminal Intake delivery.
+      retry: false,
+      staleTime: Infinity,
+      refetchInterval: () => {
+        const jobs = publicationJobsByName.get(name) ?? [];
+        const awaitingPublication = jobs.some((job) => {
+          const key = `${workspace}/${job.id}`;
+          if (!TERMINAL_JOB_STATUSES.has(job.status ?? '')) {
+            terminalObservedAt.current.delete(key);
+            return true;
+          }
+          const updatedAt = Date.parse(job.updated_at ?? '');
+          const terminalAt = Number.isFinite(updatedAt)
+            ? updatedAt
+            : (terminalObservedAt.current.get(key) ?? Date.now());
+          terminalObservedAt.current.set(key, terminalAt);
+          return Date.now() < terminalAt + EVALUATION_PUBLICATION_GRACE_MS;
+        });
+        return awaitingPublication ? JOB_POLLING_INTERVAL_LONG : false;
+      },
+    })),
+    combine: (results) => results.flatMap((result) => (result.data ? [result.data] : [])),
   });
 
-  const evalResponses: EvaluationResponse[] = useMemo(
-    () => [...(agentEvalsResponse?.data ?? []), ...(pendingEvals ?? [])],
-    [agentEvalsResponse, pendingEvals]
-  );
+  const evalResponses: EvaluationResponse[] = useMemo(() => {
+    const evaluations = new Map(
+      (agentEvalsResponse?.data ?? []).map((evaluation) => [evaluation.name, evaluation])
+    );
+    // Prefer the regularly refreshed list once Intake has indexed the agent name.
+    for (const evaluation of pendingEvals) {
+      if (!evaluations.has(evaluation.name)) evaluations.set(evaluation.name, evaluation);
+    }
+    return [...evaluations.values()]
+      .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+      .slice(0, AGENT_EVALUATIONS_PAGE_SIZE);
+  }, [agentEvalsResponse, pendingEvals]);
 
   const deleteDeploymentMutation = useAgentsDeleteDeployment({
     mutation: {
@@ -225,11 +262,25 @@ export const useAgentDetails = ({
 
   const agentJobs: EvalJobRow[] = useMemo(() => {
     if (!agentName) return [];
-    return (agentJobsData ?? [])
-      .filter((job) => targetNameForEvalJob(job) === agentName)
-      .slice(0, RECENT_EVAL_LIMIT)
+    const matchingJobs = (agentJobsData ?? []).filter(
+      (job) => targetNameForEvalJob(job) === agentName
+    );
+    const displayed = new Set(evalResponses.map((evaluation) => evaluation.name));
+    const resolved = new Set([
+      ...(agentEvalsResponse?.data ?? []).map((evaluation) => evaluation.name),
+      ...pendingEvals.map((evaluation) => evaluation.name),
+    ]);
+    return matchingJobs
+      .filter((job, index) => {
+        const name = publishedEvaluationName(job);
+        // Preserve every displayed row's job link. Only recent, genuinely unpublished jobs
+        // may stand in as scoreless rows, not historical publications outside the page.
+        return name && resolved.has(name)
+          ? displayed.has(name)
+          : index < AGENT_EVALUATIONS_PAGE_SIZE;
+      })
       .map(toEvalJobRow);
-  }, [agentJobsData, agentName]);
+  }, [agentJobsData, agentName, evalResponses, agentEvalsResponse, pendingEvals]);
 
   const healthyDeployments = useMemo(
     () => agentDeployments.filter((d) => d.status === 'running'),

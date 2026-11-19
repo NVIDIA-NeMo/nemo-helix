@@ -24,7 +24,12 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
+from shutil import copytree
 
+from nhx.automodel.tasks.training.backends.registry import (
+    is_causal_reranker_checkpoint,
+    uses_custom_automodel_impl,
+)
 from nhx.automodel.tasks.training.chat_templates import (
     apply_chat_template_to_checkpoint,
     resolve_chat_template,
@@ -38,6 +43,7 @@ from nhx.automodel.tasks.training.schemas import (
     Precision,
     TrainingStepConfig,
 )
+from nhx.customization_common.training.lora import merge_lora_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +62,9 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
     """
     Extract precision from a HuggingFace model's config.json.
 
-    HuggingFace models store their torch_dtype in config.json (e.g., "bfloat16").
-    This function reads that value and maps it to our Precision enum.
+    HuggingFace models store their dtype in config.json (e.g., "bfloat16"): transformers v5
+    writes it as ``dtype``, v4 as ``torch_dtype``. This function reads that value and maps it
+    to our Precision enum.
 
     This is used to determine the actual training precision when "auto" was used
     for torch_dtype. The precision comes from the base model's config, not from
@@ -78,9 +85,9 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
         with open(config_path, "r") as f:
             config = json.load(f)
 
-        torch_dtype = config.get("torch_dtype")
+        torch_dtype = config.get("dtype") or config.get("torch_dtype")
         if torch_dtype is None:
-            logger.warning("torch_dtype not found in config.json")
+            logger.warning("Neither dtype nor torch_dtype is set in config.json")
             return None
 
         try:
@@ -94,6 +101,43 @@ def extract_precision_from_model_config(model_path: str | Path) -> Precision | N
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"Failed to read config.json: {e}")
         return None
+
+
+_SAFETENSORS_FLOAT_DTYPES = {"BF16": "bfloat16", "F16": "float16", "F32": "float32"}
+
+
+def auto_torch_dtype(model_path: str | Path) -> str:
+    """The dtype that ``torch_dtype: "auto"`` resolves to for a checkpoint.
+
+    Like transformers: the dtype config.json declares, else that of the stored weights.
+    """
+    declared = extract_precision_from_model_config(model_path)
+    if declared is not None and declared != Precision.FP8:
+        return declared.to_torch_dtype()
+    for shard in sorted(Path(model_path).glob("*.safetensors")):
+        with shard.open("rb") as f:
+            header = json.loads(f.read(int.from_bytes(f.read(8), "little")))
+        for entry in header.values():
+            if isinstance(entry, dict) and entry.get("dtype") in _SAFETENSORS_FLOAT_DTYPES:
+                return _SAFETENSORS_FLOAT_DTYPES[entry["dtype"]]
+    return "float32"
+
+
+def trained_automodel_model_class(customizer_config: TrainingStepConfig) -> bool:
+    """Whether Automodel trained its own implementation rather than the HF class.
+
+    Its implementations save adapters under the module names of transformers' own class
+    for the model type. With ``override_custom_impl`` it trains the HF class the job
+    loads, remote code included, and the adapter follows that class's names.
+    """
+    if customizer_config.model.override_custom_impl:
+        return False
+    try:
+        config = json.loads((Path(customizer_config.model.path) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    architectures = config.get("architectures") if isinstance(config, dict) else None
+    return bool(architectures) and uses_custom_automodel_impl(architectures[0])
 
 
 def extract_step_number(path: Path) -> int:
@@ -277,83 +321,6 @@ def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
     )
 
 
-def merge_lora_adapter(
-    adapter_path: Path,
-    base_model_path: str,
-    output_path: Path,
-    trust_remote_code: bool,
-) -> None:
-    """
-    Merge LoRA adapter weights into the base model.
-
-    Uses HuggingFace's PEFT library to:
-    1. Load the base model
-    2. Attach the LoRA adapter
-    3. Merge weights using merge_and_unload()
-    4. Save as a standard HuggingFace checkpoint
-
-    Note: This function only supports LLM models. For embedding models,
-    use merge_lora_embedding_adapter() instead.
-
-    Args:
-        adapter_path: Path to the LoRA adapter checkpoint
-        base_model_path: Path to the base model (for loading weights)
-        output_path: Where to save the merged model
-        trust_remote_code: Job flag for loading the *base* fileset.
-    """
-    try:
-        import torch
-        from peft import PeftModel
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as e:
-        raise ImportError(
-            "LoRA merge requires 'peft' and 'transformers' packages. Ensure they are installed in the container."
-        ) from e
-
-    logger.info(f"Merging LoRA adapter from {adapter_path} with base model {base_model_path}")
-
-    # Use scratch directory if available for better I/O performance
-    tmp_path = Path("/scratch/merged_lora") if Path("/scratch").is_dir() else Path("/tmp/merged_lora")
-    shutil.rmtree(tmp_path, ignore_errors=True)
-    tmp_path.mkdir(parents=True, exist_ok=True)
-
-    try:
-        # 1. Load base model in mergeable dtype (not quantized)
-        logger.info("Loading base model...")
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=trust_remote_code,
-        )
-
-        # 2. Attach the LoRA adapter
-        logger.info("Loading LoRA adapter...")
-        model = PeftModel.from_pretrained(model, str(adapter_path))
-
-        # 3. Merge LoRA weights into base model
-        logger.info("Merging LoRA weights...")
-        model = model.merge_and_unload()
-
-        # 4. Save merged model
-        logger.info(f"Saving merged model to {tmp_path}...")
-        model.save_pretrained(tmp_path, safe_serialization=True)
-
-        # 5. Save tokenizer from base model
-        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
-        tokenizer.save_pretrained(tmp_path)
-
-        # 6. Copy to output path
-        output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
-
-        logger.info(f"Successfully merged LoRA adapter to {output_path}")
-
-    finally:
-        # Cleanup temp directory
-        shutil.rmtree(tmp_path, ignore_errors=True)
-
-
 def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
@@ -416,7 +383,7 @@ def merge_lora_embedding_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged embedding LoRA adapter to %s", output_path)
 
     finally:
@@ -481,7 +448,7 @@ def merge_lora_cross_encoder_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged cross-encoder LoRA adapter to %s", output_path)
 
     finally:
@@ -501,6 +468,15 @@ _EXPORT_SAMPLES = {
 _TORCH_DTYPES = {
     "fp32": "float32",
     "fp16": "float16",
+}
+
+# Allowed ONNX-vs-PyTorch drift as (atol, rtol); rtol scales with the largest reference value.
+# Drift tracks activation size, so a score near zero carries the error of the larger logits it is
+# computed from: fp16 Qwen3 rerankers drift 1-2e-2 on scores of 2-10. A tracing bug (mask, pooling,
+# last token) is off by the order of the score itself.
+_ONNX_TOLERANCES = {
+    "fp32": (1e-3, 1e-3),
+    "fp16": (1e-2, 1e-2),
 }
 
 
@@ -546,11 +522,42 @@ def _onnx_safe_bidirectional_mask():
                 setattr(sys.modules[mod_name], "create_bidirectional_mask", orig)
 
 
-def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
-    """Pool embeddings or emit logits, matching the NIM graph contract."""
+def _build_export_module(
+    inner,
+    model_type: ModelType,
+    cfg: ExportConfig,
+    score_token_ids: tuple[int, int] | None = None,
+):
+    """Pool embeddings or emit logits, matching the NIM graph contract.
+
+    ``score_token_ids`` (yes, no) selects a causal reranker, whose ``inner`` is a causal LM.
+    """
     import torch
     import torch.nn.functional as F
     from torch import nn
+
+    class _CausalRerankerForExport(nn.Module):
+        """``logit("yes") - logit("no")`` at the last attended token, as Automodel trains it.
+
+        For Qwen3 cross-encoders on a ``Qwen3ForCausalLM`` base (``is_causal_reranker_checkpoint``).
+        Automodel trains these as ``Qwen3RerankerForCausalReranking``, which has no score head
+        (``nemo_automodel/components/models/qwen3_reranker/model.py``, ``forward``). The output
+        keeps the score-head graph's ``logits`` shape, ``[batch, 1]``.
+        """
+
+        def __init__(self, model, yes_token_id: int, no_token_id: int):
+            super().__init__()
+            self.model = model
+            self.yes_token_id = yes_token_id
+            self.no_token_id = no_token_id
+
+        def forward(self, input_ids, attention_mask):
+            hidden = self.model.model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            # The highest attended position per row, for either padding side.
+            positions = torch.arange(hidden.shape[1], device=hidden.device).expand_as(attention_mask)
+            last = positions.masked_fill(~attention_mask.bool(), -1).argmax(dim=1)
+            logits = self.model.lm_head(hidden[torch.arange(hidden.shape[0], device=hidden.device), last])
+            return (logits[:, self.yes_token_id] - logits[:, self.no_token_id]).unsqueeze(-1)
 
     class _CrossEncoderForExport(nn.Module):
         def __init__(self, model):
@@ -599,8 +606,21 @@ def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
             return embeddings
 
     if model_type == ModelType.CROSS_ENCODER:
+        if score_token_ids is not None:
+            return _CausalRerankerForExport(inner, *score_token_ids)
         return _CrossEncoderForExport(inner)
     return _EmbeddingForExport(inner, pooling=cfg.pooling, normalize=cfg.normalize)
+
+
+def _reranker_token_ids(config, tokenizer) -> tuple[int, int]:
+    """The (yes, no) ids a causal reranker scores with: its config's, else the tokenizer's."""
+    yes_token_id = getattr(config, "yes_token_id", None)
+    no_token_id = getattr(config, "no_token_id", None)
+    if yes_token_id is None:
+        yes_token_id = tokenizer.convert_tokens_to_ids("yes")
+    if no_token_id is None:
+        no_token_id = tokenizer.convert_tokens_to_ids("no")
+    return int(yes_token_id), int(no_token_id)
 
 
 def export_onnx(
@@ -611,19 +631,28 @@ def export_onnx(
     cfg: ExportConfig | None = None,
     trust_remote_code: bool = False,
     load_trust_remote_code: bool = False,
+    causal_reranker: bool = False,
 ) -> Path:
-    """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module."""
+    """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module.
+
+    ``causal_reranker`` exports a cross-encoder that scores with a causal LM's yes/no
+    next-token logits (see ``is_causal_reranker_checkpoint``) rather than a score head.
+    """
     import torch
-    from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer
+    from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
     cfg = cfg or ExportConfig()
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
+    causal_reranker = causal_reranker and is_cross_encoder
     logger.info("Exporting %s at %s to ONNX at %s", model_type.value, model_path, output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
     torch_dtype = getattr(torch, _TORCH_DTYPES[cfg.precision])
 
-    loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
+    if causal_reranker:
+        loader = AutoModelForCausalLM
+    else:
+        loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=trust_remote_code)
     inner = loader.from_pretrained(
         str(model_path),
@@ -632,7 +661,8 @@ def export_onnx(
         trust_remote_code=load_trust_remote_code,
     ).eval()
 
-    export_model = _build_export_module(inner, model_type, cfg)
+    score_token_ids = _reranker_token_ids(inner.config, tokenizer) if causal_reranker else None
+    export_model = _build_export_module(inner, model_type, cfg, score_token_ids)
     device = torch.device("cuda")
     export_model = export_model.to(device=device, dtype=torch_dtype).eval()
 
@@ -646,7 +676,7 @@ def export_onnx(
         output_name: {0: "batch_size", 1: "num_labels" if is_cross_encoder else "embedding_dim"},
     }
 
-    if is_cross_encoder and "token_type_ids" in getattr(tokenizer, "model_input_names", []):
+    if is_cross_encoder and not causal_reranker and "token_type_ids" in getattr(tokenizer, "model_input_names", []):
         token_type_ids = tokenized.get("token_type_ids")
         if token_type_ids is None:
             token_type_ids = torch.zeros_like(tokenized["input_ids"])
@@ -688,11 +718,13 @@ def export_onnx(
     with torch.no_grad():
         reference = export_model.eval()(*args)
     feed_args = [tensor.detach().cpu() for tensor in args]
+    atol, rtol = _ONNX_TOLERANCES[cfg.precision]
     verify_onnx_matches_reference(
         onnx_path=onnx_path,
         feed={name: tensor.numpy() for name, tensor in zip(input_names, feed_args)},
         reference=reference.float().cpu().numpy(),
-        atol=1e-2 if cfg.precision == "fp16" else 1e-3,
+        atol=atol,
+        rtol=rtol,
     )
 
     logger.info("ONNX %s exported to %s", model_type.value, onnx_path)
@@ -704,9 +736,11 @@ def verify_onnx_matches_reference(
     feed: dict,
     reference,
     atol: float,
+    rtol: float = 0.0,
     providers: list[str] | None = None,
 ) -> float:
-    """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > *atol*."""
+    """Return max abs diff. Raise ``ValueError`` on a shape mismatch, a NaN or infinite output, or
+    diff > ``atol + rtol * max|reference|``."""
     import numpy as np
     import onnxruntime
 
@@ -725,13 +759,20 @@ def verify_onnx_matches_reference(
 
     if actual.shape != expected.shape:
         raise ValueError(f"ONNX output shape {actual.shape} does not match HuggingFace output shape {expected.shape}.")
+    # A NaN or infinite value makes the diff or the tolerance non-finite, and the comparison below then passes.
+    for source, values in (("ONNX", actual), ("HuggingFace", expected)):
+        if not np.isfinite(values).all():
+            raise ValueError(f"The {source} output has NaN or infinite values; the ONNX export cannot be verified.")
 
     max_diff = float(np.max(np.abs(actual.astype("float64") - expected.astype("float64"))))
-    if max_diff > atol:
+    scale = float(np.max(np.abs(expected)))
+    tolerance = atol + rtol * scale
+    if max_diff > tolerance:
         raise ValueError(
-            f"ONNX output diverges from the HuggingFace checkpoint: max abs diff {max_diff:.3e} > atol {atol:.3e}."
+            f"ONNX output diverges from the HuggingFace checkpoint: max abs diff {max_diff:.3e} > tolerance "
+            f"{tolerance:.3e} (atol {atol:.0e} + rtol {rtol:.0e} x max |reference| {scale:.3e})."
         )
-    logger.info("ONNX verification passed (max abs diff %.3e <= atol %.3e)", max_diff, atol)
+    logger.info("ONNX verification passed (max abs diff %.3e <= tolerance %.3e)", max_diff, tolerance)
     return max_diff
 
 
@@ -803,6 +844,8 @@ def process_checkpoint(
     is_embedding = model_type == ModelType.EMBEDDING
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
     is_llm = model_type == ModelType.LLM
+    # A cross-encoder that scores with a causal LM's yes/no logits saves a plain causal LM.
+    causal_reranker = is_cross_encoder and is_causal_reranker_checkpoint(base_model_path)
     type_label = "" if is_llm else model_type.value
 
     # Resolve chat template using the same priority logic as training:
@@ -831,7 +874,7 @@ def process_checkpoint(
                 output_path=output_path,
                 trust_remote_code=job_trust_remote_code,
             )
-        elif is_cross_encoder:
+        elif is_cross_encoder and not causal_reranker:
             merge_lora_cross_encoder_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
@@ -839,11 +882,14 @@ def process_checkpoint(
                 trust_remote_code=job_trust_remote_code,
             )
         else:
+            # Causal LMs, and rerankers that score with a causal LM's yes/no logits.
             merge_lora_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
                 output_path=output_path,
                 trust_remote_code=job_trust_remote_code,
+                has_vision_tower=customizer_config.model.has_vision_tower,
+                builtin_model_class=trained_automodel_model_class(customizer_config),
             )
         checkpoint_format = CheckpointFormat.HF
 
@@ -856,7 +902,7 @@ def process_checkpoint(
     elif finetuning_type == FinetuningType.LORA:
         # LoRA unmerged: just copy the adapter files
         logger.info(f"Copying {type_label} LoRA adapter from {checkpoint_path} to {output_path}".replace("  ", " "))
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF_PEFT
         # Note: For hf-peft, chat template is inherited from base model at inference time
 
@@ -866,7 +912,7 @@ def process_checkpoint(
         logger.info(
             f"Copying {type_label} full weights checkpoint from {checkpoint_path} to {output_path}".replace("  ", " ")
         )
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF
 
         # Fix FSDP2 architecture naming
@@ -887,6 +933,7 @@ def process_checkpoint(
             cfg=export_cfg,
             trust_remote_code=job_trust_remote_code,
             load_trust_remote_code=load_trust_remote_code,
+            causal_reranker=causal_reranker,
         )
         if not job_trust_remote_code:
             sanitize_encoder_hf(output_path, Path(base_model_path))

@@ -10,7 +10,7 @@ import { server } from '@studio/mocks/node';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * Shape we serialize from the hook into the DOM. JSON-stringified so each

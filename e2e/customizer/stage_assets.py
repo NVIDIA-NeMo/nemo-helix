@@ -12,6 +12,7 @@ A dataset whose manifest entry sets ``"s3_published": false`` has not been
 published yet; it is read from the local ``generation.output_dir`` instead of S3.
 """
 
+import json
 import logging
 import os
 import subprocess
@@ -40,13 +41,21 @@ _UPLOAD_SKIP_NAMES = {".cache", ".gitattributes"}
 # Fail fast on a hung transfer or an interactive credential prompt rather than
 # blocking the whole GPU E2E run. Overridable for very large/slow syncs.
 _SYNC_TIMEOUT_S = int(os.environ.get("E2E_ASSETS_SYNC_TIMEOUT", "1800"))
+_REUSE_LOCAL_ENV = "E2E_ASSETS_REUSE_LOCAL"
 
 
 def cache_dir() -> Path:
     return Path(os.environ.get("E2E_ASSETS_CACHE_DIR", _DEFAULT_CACHE_DIR))
 
 
-def _aws_sync(s3_uri: str, local_dir: Path) -> None:
+def _aws_sync(s3_uri: str, local_dir: Path, *, reuse: bool | None = None) -> None:
+    # Opt-in: trust a cache staged by hand instead of calling `aws s3 sync`. Off by default
+    # so CI always syncs. Callers pass reuse=False for a partial cache so the sync can finish it.
+    if reuse is None:
+        reuse = local_dir.is_dir() and any(local_dir.iterdir())
+    if os.environ.get(_REUSE_LOCAL_ENV) == "1" and reuse:
+        logger.info("Reusing staged %s (%s=1); skipping sync from %s", local_dir, _REUSE_LOCAL_ENV, s3_uri)
+        return
     local_dir.mkdir(parents=True, exist_ok=True)
     cmd = ["aws"]
     endpoint = os.environ.get("S3_ENDPOINT_URL")
@@ -82,7 +91,16 @@ def sync_dataset_format(format_name: str, *, manifest: dict | None = None) -> Pa
         return _local_dataset_format(format_name, manifest)
     bucket = s3_bucket(manifest)
     local_dir = cache_dir() / "datasets" / format_name
-    _aws_sync(f"s3://{bucket}/datasets/{format_name}/", local_dir)
+    required = next(
+        (
+            tuple(dataset["outputs"][format_name].values())
+            for dataset in manifest["datasets"].values()
+            if format_name in dataset.get("outputs", {})
+        ),
+        (),
+    )
+    ready = bool(required) and all((local_dir / name).exists() for name in required)
+    _aws_sync(f"s3://{bucket}/datasets/{format_name}/", local_dir, reuse=ready if required else None)
     return local_dir
 
 
@@ -101,12 +119,30 @@ def _local_dataset_format(format_name: str, manifest: dict) -> Path:
     return local_dir
 
 
+def _model_snapshot_ready(local_dir: Path) -> bool:
+    """True when config, tokenizer, and every weight file are present. An index lists the shards."""
+    if not (local_dir / "config.json").is_file():
+        return False
+    if not any((local_dir / name).is_file() for name in ("tokenizer.json", "tokenizer.model")):
+        return False
+    for index_name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
+        index = local_dir / index_name
+        if not index.is_file():
+            continue
+        try:
+            shards = set(json.loads(index.read_text()).get("weight_map", {}).values())
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+            return False
+        return bool(shards) and all(isinstance(name, str) and (local_dir / name).is_file() for name in shards)
+    return any(path.suffix in {".safetensors", ".bin"} and path.is_file() for path in local_dir.glob("*"))
+
+
 def sync_model(s3_folder: str, *, manifest: dict | None = None) -> Path:
     """Sync ``s3://<bucket>/models/<s3_folder>/`` into the local cache."""
     manifest = manifest or load_manifest()
     bucket = s3_bucket(manifest)
     local_dir = cache_dir() / "models" / s3_folder
-    _aws_sync(f"s3://{bucket}/models/{s3_folder}/", local_dir)
+    _aws_sync(f"s3://{bucket}/models/{s3_folder}/", local_dir, reuse=_model_snapshot_ready(local_dir))
     return local_dir
 
 

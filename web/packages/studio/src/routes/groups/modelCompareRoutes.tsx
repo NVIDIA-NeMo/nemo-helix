@@ -3,37 +3,31 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { Play } from '@nemo/icons/icons';
-import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateModelCompareRoutes, getModelCompareRoute } from '@studio/routes/utils';
+import { getModelCompareRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
-const ModelCompareRoute =
-  MODEL_COMPARE_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/ModelCompareRoute').then((module) => ({
-      default: module.ModelCompareRoute,
-    }))
-  );
+const ModelCompareRoute = lazy(() =>
+  import('@studio/routes/ModelCompareRoute').then((module) => ({
+    default: module.ModelCompareRoute,
+  }))
+);
 
-export const modelCompareRoutes: RouteObject[] = gateModelCompareRoutes([
+export const modelCompareRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.modelCompare,
-    element: ModelCompareRoute ? <ModelCompareRoute /> : null,
+    element: <ModelCompareRoute />,
     errorElement: <RouteErrorPanel title="Chat" />,
   },
-]);
+];
 
-export const getModelCompareSideNavItems = (workspace: string) =>
-  MODEL_COMPARE_ENABLED
-    ? [
-        {
-          id: 'playground',
-          slotIcon: <Play className={iconColorClass} />,
-          slotLabel: 'Playground',
-          href: getModelCompareRoute(workspace),
-        },
-      ]
-    : [];
+export const getModelCompareSideNavItems = (workspace: string) => [
+  {
+    id: 'playground',
+    slotIcon: <Play className={iconColorClass} />,
+    slotLabel: 'Playground',
+    href: getModelCompareRoute(workspace),
+  },
+];

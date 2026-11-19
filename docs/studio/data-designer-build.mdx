@@ -37,7 +37,7 @@ This page walks through the full workflow:
 
 Navigate to **Data > Datasets > Data Designer** in the workspace sidebar to open the jobs list. The list shows every Data Designer job in the current workspace with its status, and supports searching by name, filtering by status, and narrowing by creation or update date range.
 
-Selecting a job opens its [details page](#view-job-details). Each row also has a quick-actions menu with **View details**, **Clone**, **Cancel** (when the job is still cancellable), and **Delete**.
+Selecting a job opens its [details page](#view-job-details). Each row also has a quick-actions menu with **View details**, **Clone**, **Cancel** (when the job is still cancellable; asks for confirmation before stopping the job), and **Delete**.
 
 Job status values match the platform-wide [Jobs](/documentation/studio#jobs) statuses (Created, Pending, Active, Completed, Error, Cancelled, and so on).
 
@@ -225,7 +225,7 @@ On success, the job is created with your configured name, row count, and generat
 
 ## View job details after completion
 
-The job details page shows the job name, status badge, description, and created/updated timestamps, plus a job actions menu with **Transform** (see [Transform the dataset](#transform-the-dataset)), **Split** (see [Split the dataset](#split-the-dataset)), **View config** (opens the generated Data Designer config), **Clone**, **Cancel**, and **Delete**. **Transform** and **Split** are disabled until the job has produced `.json`, `.jsonl`, or `.parquet` output.
+The job details page shows the job name, status badge, description, and created/updated timestamps, plus a job actions menu with **Transform** (see [Transform the dataset](#transform-the-dataset)), **Split** (see [Split the dataset](#split-the-dataset)), **View config** (opens the generated Data Designer config), **Clone**, **Cancel** (asks for confirmation before stopping the job), and **Delete**. **Transform** and **Split** are disabled until the job has produced `.json`, `.jsonl`, or `.parquet` output.
 
 Details are organized into four tabs. The page opens on **Profile** for a job in a terminal state and on **Logs** for one that's still running.
 

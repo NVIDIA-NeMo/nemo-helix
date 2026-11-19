@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from subprocess import run
 
 _MINING_SCRIPT = Path(__file__).with_name("mine_hard_negatives.py")
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ def run_hard_negative_mining(config_file: Path, nproc_per_node: str | None = Non
     env.setdefault("PYTHONUNBUFFERED", "1")
     logger.info("Launching hard-negative mining: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True, env=env)
+        run(cmd, check=True, env=env)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(f"Hard-negative mining failed: exit {exc.returncode}") from exc
     logger.info("Hard-negative mining subprocess exited 0")

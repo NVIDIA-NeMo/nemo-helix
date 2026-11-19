@@ -32,6 +32,7 @@ from nemo_agents_plugin.fabric.translator import (
     translate_agent_config,
     upgrade_relay_observability_version,
 )
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files, snapshot_registered_agent_files
@@ -85,7 +86,7 @@ class _ResolvedRegisteredAgent:
     ref: AgentRef
     config: dict[str, Any]
     env_secrets: dict[str, SecretRef]
-    files: FilesetRef | None
+    files: FilesetReceipt | None
 
 
 async def _load_registered_agent(
@@ -135,7 +136,7 @@ async def _load_registered_agent(
         ) from exc
 
     config = _template_mcp_secret_env(fabric_config.model_dump(mode="json", exclude_none=True), environment)
-    files: FilesetRef | None = None
+    files: FilesetReceipt | None = None
     if registered_agent_config_needs_files(config):
         files_client = client_from_platform(platform, AsyncFilesClient)
         try:
@@ -329,7 +330,13 @@ def _fill_target(
     agent: _ResolvedRegisteredAgent,
 ) -> FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget:
     """The target with the loaded agent written into it, per runner kind. Pure: no I/O, so it can fail freely."""
-    resolved_source = source.model_copy(update={"agent": agent.ref, "files": agent.files})
+    resolved_source = source.model_copy(
+        update={
+            "agent": agent.ref,
+            "files": FilesetRef(root=agent.files.ref) if agent.files else None,
+            "fileset_id": agent.files.fileset_id if agent.files else None,
+        }
+    )
     env_secrets = _merge_env_secrets(target.env_secrets, agent.env_secrets, agent=agent.ref.root)
     if isinstance(target, FabricRunnerTarget):
         return target.model_copy(

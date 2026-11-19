@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import type { GithubStorageConfig } from '@nemo/sdk/generated/platform/schema';
 
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com']);
@@ -155,6 +156,11 @@ export const githubStorageConfig = (
   ...(source.ref ? { revision: source.ref } : {}),
   ...(source.path ? { path: source.path } : {}),
   ...(secretName ? { token_secret: secretName } : {}),
+});
+
+export const githubTokenSecretDefaults = (source: GitHubAgentSource | undefined) => ({
+  name: toValidEntityName(source ? `github-${source.owner}-${source.repo}` : '', 'github-token'),
+  description: 'GitHub personal access token with read access to repository contents',
 });
 
 /** A starting point for the agent name, which the user can still edit before submitting. */

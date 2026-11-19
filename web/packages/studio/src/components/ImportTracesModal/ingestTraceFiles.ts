@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import {
   ingestAtif,
   ingestChatCompletion,
@@ -71,9 +72,6 @@ export const readTraceFile = async (file: File): Promise<SelectedTraceFile> => {
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? getErrorMessage(error) || error.message : 'Import failed.';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
@@ -172,12 +170,12 @@ const ingestSpansFile = async (
   { workspace, agent, source }: IngestOptions
 ): Promise<IngestOutcome> => {
   const document = 'document' in detection ? detection.document : undefined;
-  const wrapper = isRecord(document) && Array.isArray(document.spans) ? document : undefined;
+  const wrapper = isPlainObject(document) && Array.isArray(document.spans) ? document : undefined;
   const rawSpans: unknown[] = wrapper
     ? (wrapper.spans as unknown[])
     : Array.isArray(document)
       ? document
-      : isRecord(document)
+      : isPlainObject(document)
         ? [document]
         : [];
   const batchSource =
@@ -186,7 +184,7 @@ const ingestSpansFile = async (
   const errors: string[] = [];
   const spans: DirectSpanInput[] = [];
   rawSpans.forEach((entry, index) => {
-    if (isRecord(entry)) {
+    if (isPlainObject(entry)) {
       spans.push(entry as unknown as DirectSpanInput);
     } else {
       errors.push(`Span ${index + 1}: not a valid span object.`);

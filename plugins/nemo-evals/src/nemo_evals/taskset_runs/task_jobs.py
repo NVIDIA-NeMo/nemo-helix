@@ -12,7 +12,7 @@ outcome is unknown keeps its slot until the Job is found, or until ``create_grac
 import logging
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from nemo_evals.jobs.harbor_task_dispatch import TASK_JOB_SOURCE, HarborTaskDispatchJob
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, build_task_job_input
@@ -35,11 +35,30 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
 logger = logging.getLogger(__name__)
 
 
+class TaskJobDetails(NamedTuple):
+    """What a read of a Job by name found: its id and status details.
+
+    The id travels with the details because a name can outlive the Job a member registered under it: Jobs deletes
+    only ended Jobs, so another Job can take the name. Details are the member's only when ``job_id`` is its own.
+    """
+
+    job_id: str
+    status_details: dict[str, Any] | None
+
+
 class TaskJobs(Protocol):
-    """The Jobs check submit needs, acting as the caller."""
+    """The Jobs reads the run API needs, acting as the caller."""
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         """True when Jobs runs ``profile``'s CPU steps as host subprocesses."""
+        ...
+
+    async def job_details(self, workspace: str, name: str) -> TaskJobDetails | None:
+        """The Job named ``name``: its id and status details, where a task Job reports its trials.
+
+        None when there's no such Job. The Job under a name isn't necessarily the one a member registered, so
+        callers compare ``job_id`` with the member's.
+        """
         ...
 
 
@@ -52,6 +71,13 @@ class JobsServiceTaskJobs:
     async def is_subprocess_profile(self, profile: str) -> bool:
         profiles = (await self._jobs.get_execution_profiles()).data()
         return any(isinstance(item, SubprocessJobExecutionProfile) and item.profile == profile for item in profiles)
+
+    async def job_details(self, workspace: str, name: str) -> TaskJobDetails | None:
+        try:
+            job = (await self._jobs.get_job(workspace=workspace, name=name)).data()
+        except NotFoundError:
+            return None
+        return TaskJobDetails(job_id=job.id, status_details=job.status_details)
 
 
 async def task_job_request(
@@ -68,6 +94,14 @@ async def task_job_request(
         ),
         source=TASK_JOB_SOURCE,
     )
+
+
+def member_environment(plan: TasksetRunPlan, member: TasksetRunMemberEntity) -> PreparedHarborEnvironment:
+    """The images ``member``'s task Job runs on: the plan's, with its agent layer as the agent image when it has one."""
+    environment = plan.task_environments[member.task_index]
+    if member.agent_layer is None:
+        return environment
+    return environment.model_copy(update={"agent": member.agent_layer, "agent_preinstalled": True})
 
 
 def runs_request(job: HelixJobResponse, body: CreateHelixJobRequest) -> bool:
@@ -106,7 +140,7 @@ class RegistrationJobs(Protocol):
 
     async def get(self, name: str) -> HelixJobResponse | None: ...
 
-    async def has_steps(self, name: str) -> bool: ...
+    async def has_job_steps(self, job_id: str) -> bool: ...
 
 
 async def adoption(
@@ -114,12 +148,12 @@ async def adoption(
 ) -> Literal["ours", "foreign", "stepless"]:
     """Whether the Job under ``request.name`` is the one this request creates.
 
-    ``foreign`` when it runs something else (``runs_request``). ``stepless`` when it is ours but its current
-    attempt has no step yet: a create still saving, or one that failed midway and will never run (AIRCORE-1379).
+    ``foreign`` when it runs something else (``runs_request``). ``stepless`` when it is ours but no
+    attempt has a step yet: a create still saving, or one that failed midway and will never run (AIRCORE-1379).
     """
     if not runs_request(job, request):
         return "foreign"
-    if not await jobs.has_steps(job.name):
+    if not await jobs.has_job_steps(job.id):
         return "stepless"
     return "ours"
 
@@ -169,7 +203,7 @@ async def register_member(
         NemoEntityConflictError: A member write lost to another write; the next cycle re-reads it.
         Exception: Member writes that fail; the member keeps its intent, so the next cycle resolves it.
     """
-    request = await task_job_request(plan, run, member.task_index, plan.task_environments[member.task_index])
+    request = await task_job_request(plan, run, member.task_index, member_environment(plan, member))
     assert request.name is not None
     first_post = member.task_job is None
     overwritten = member.create_sent_at

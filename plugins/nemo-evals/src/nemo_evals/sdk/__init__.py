@@ -17,6 +17,12 @@ from nemo_evals.sdk.types import (
 if TYPE_CHECKING:
     from nemo_evals.sdk.job_resources import AsyncEvaluatorJobResource, EvaluatorJobResource
     from nemo_evals.sdk.resources import AsyncEvaluator, Evaluator
+    from nemo_evals.sdk.taskset_run_resources import (
+        NamedTask,
+        TaskResult,
+        TasksetRunResults,
+        TasksetRunSubmitError,
+    )
 
 __all__ = [
     "AsyncEvaluator",
@@ -29,7 +35,13 @@ __all__ = [
     "ExecutionMode",
     "FilesetRef",
     "PluginDatasetInput",
+    "NamedTask",
+    "TaskResult",
+    "TasksetRunResults",
+    "TasksetRunSubmitError",
 ]
+
+_TASKSET_RUN_EXPORTS = frozenset({"NamedTask", "TaskResult", "TasksetRunResults", "TasksetRunSubmitError"})
 
 
 def __getattr__(name: str) -> object:
@@ -58,4 +70,8 @@ def __getattr__(name: str) -> object:
         from nemo_evals.sdk.job_resources import EvaluatorJobResource
 
         return EvaluatorJobResource
+    if name in _TASKSET_RUN_EXPORTS:
+        from nemo_evals.sdk import taskset_run_resources
+
+        return getattr(taskset_run_resources, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

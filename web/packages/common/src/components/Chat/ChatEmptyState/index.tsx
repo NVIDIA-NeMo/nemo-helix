@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Nebula } from '@nemo/common/src/components/Nebula';
 import { Stack, Text, type StackProps } from '@nvidia/foundations-react-core';
 import type { FC, ReactNode } from 'react';
-
-import { Nebula } from '../../Nebula';
 
 export interface ChatEmptyStateProps extends StackProps {
   slotHeading?: string;

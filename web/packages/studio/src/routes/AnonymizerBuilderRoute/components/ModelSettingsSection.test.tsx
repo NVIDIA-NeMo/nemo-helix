@@ -12,7 +12,7 @@ import {
   type AnonymizerFormData,
 } from '@studio/routes/AnonymizerBuilderRoute/schema';
 import { render, screen, within } from '@testing-library/react';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 
 vi.mock('@studio/routes/AnonymizerBuilderRoute/useAnonymizerModels', () => ({

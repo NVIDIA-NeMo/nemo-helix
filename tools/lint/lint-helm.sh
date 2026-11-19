@@ -63,6 +63,66 @@ helm dependency update "${HELM_FOLDER}"
 
 # Lint the Helm chart
 helm lint --strict "${HELM_FOLDER}"
+
+# PostgreSQL rendering cases use the same CI values files as schema validation.
+# Secret lookup reuse is covered separately: offline renders cannot query a cluster.
+reject_postgres_output() {
+  if grep -Fq "$1" <<<"$2"; then
+    echo "Unexpected PostgreSQL render content: $1" >&2
+    exit 1
+  fi
+}
+postgres_secret=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --show-only templates/postgres/postgres-secret.yaml)
+grep -Eq '^  password: "[[:alnum:]]{32}"$' <<<"${postgres_secret}"
+test "${postgres_secret}" != "$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --show-only templates/postgres/postgres-secret.yaml)"
+postgres_upgrade_error=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  --is-upgrade --set envFromSecret=test-api-env 2>&1) && {
+  echo "PostgreSQL accepted missing upgrade credentials" >&2
+  exit 1
+}
+grep -Fq "PostgreSQL Secret not found on upgrade" <<<"${postgres_upgrade_error}"
+
+postgres_explicit=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  -f "${HELM_FOLDER}/ci/33-postgres-explicit-password.yaml" \
+  --is-upgrade --set envFromSecret=test-api-env \
+  --show-only templates/postgres/postgres-secret.yaml)
+grep -Fq 'password: "postgres-render-test-password"' <<<"${postgres_explicit}"
+postgres_existing=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  -f "${HELM_FOLDER}/ci/32-postgres-existing-secret.yaml" \
+  --is-upgrade --set envFromSecret=test-api-env)
+reject_postgres_output '# Source: nemo-helix/templates/postgres/postgres-secret.yaml' "${postgres_existing}"
+test "$(grep -c 'name: custom-db' <<<"${postgres_existing}")" = 3
+test "$(grep -c 'key: db-password' <<<"${postgres_existing}")" = 3
+
+postgres_policy=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  -f "${HELM_FOLDER}/ci/32-postgres-existing-secret.yaml" \
+  --show-only templates/networking/postgres-networkpolicy.yaml)
+grep -Fq 'app.kubernetes.io/component: postgres' <<<"${postgres_policy}"
+grep -Fq 'app.kubernetes.io/component: "legacy-api"' <<<"${postgres_policy}"
+grep -Fq 'app.kubernetes.io/component: "legacy-controller"' <<<"${postgres_policy}"
+# Ingress matches the pod port, even when the Service exposes 15432.
+grep -Fq 'port: 5432' <<<"${postgres_policy}"
+reject_postgres_output 'port: 15432' "${postgres_policy}"
+reject_postgres_output 'namespaceSelector:' "${postgres_policy}"
+test "$(grep -c "app.kubernetes.io/instance: ${HELM_RELEASE_NAME}" <<<"${postgres_policy}")" = 4
+postgres_extra=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+  -f "${HELM_FOLDER}/ci/33-postgres-explicit-password.yaml" \
+  --show-only templates/networking/postgres-networkpolicy.yaml)
+grep -Fq 'app: backup' <<<"${postgres_extra}"
+reject_postgres_output 'app.kubernetes.io/component: "nhx-core-controller"' "${postgres_extra}"
+
+for postgres_case in default disabled external; do
+  postgres_args=()
+  case "${postgres_case}" in
+    disabled) postgres_args=(--set networkPolicies.enabled=true --set networkPolicies.postgresql.enabled=false) ;;
+    external) postgres_args=(-f "${HELM_FOLDER}/ci/34-postgres-external.yaml") ;;
+  esac
+  postgres_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" "${postgres_args[@]}")
+  reject_postgres_output '# Source: nemo-helix/templates/networking/postgres-networkpolicy.yaml' "${postgres_output}"
+done
+
 validate_rendered_envoy_config
 
 # StatefulSet volumeClaimTemplates are immutable, so chart metadata must not change them.
@@ -203,6 +263,7 @@ opensandbox_ext_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
   --show-only templates/opensandbox-ext.yaml \
   --set sandboxClusterCapable=true \
   --set opensandbox.namespace=os-ns \
+  --set opensandbox.domain=opensandbox-server.os-ns.svc.cluster.local \
   --set opensandbox.composeServices.enabled=true)
 test "$(grep -c "namespace: release-ns" <<<"${opensandbox_ext_output}")" = 2   # the Role and the RoleBinding
 test "$(grep -c "namespace: os-ns" <<<"${opensandbox_ext_output}")" = 2        # the ConfigMap, and the RoleBinding's subject

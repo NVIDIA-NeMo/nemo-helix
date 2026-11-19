@@ -188,7 +188,7 @@ def _load_rsa_signing_key(
     invalid_private_key_message: str,
 ) -> RSASigningKey:
     try:
-        private_key_pem = path.read_bytes()
+        private_key_pem = _read_private_key_bytes(path)
     except OSError as exc:
         raise RuntimeError(missing_private_key_message) from exc
 
@@ -197,6 +197,10 @@ def _load_rsa_signing_key(
         private_key_pem=private_key_pem,
         invalid_private_key_message=invalid_private_key_message,
     )
+
+
+def _read_private_key_bytes(path: Path) -> bytes:
+    return path.read_bytes()
 
 
 async def _file_cache_key_async(kid: str, path: Path) -> _FileCacheKey:

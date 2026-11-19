@@ -604,7 +604,7 @@ class TestGenericAgentExecutor:
         )
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1262,7 +1262,7 @@ class TestNATAgentExecutor:
         mock_client.stream = MagicMock(return_value=AsyncContextManagerMock(mock_stream_response))
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1305,7 +1305,7 @@ class TestNATAgentExecutor:
                 yield line
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1352,7 +1352,7 @@ class TestNATAgentExecutor:
                 yield line
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1490,7 +1490,7 @@ class TestNATAgentExecutor:
             yield 'data: {"value": "ok"}'
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1544,7 +1544,7 @@ class TestNATAgentExecutor:
             yield data_line
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience") as mock_resilience,
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):
@@ -1666,7 +1666,7 @@ class TestNATAgentExecutor:
         http_error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
 
         with (
-            patch("nhx_evals_sdk.agent_inference.httpx.AsyncClient") as MockClient,
+            patch("nhx_evals_sdk.agent_inference.AsyncClient") as MockClient,
             patch("nhx_evals_sdk.agent_inference.run_with_resilience", side_effect=http_error),
             patch("nhx_evals_sdk.agent_inference.get_logger", return_value=MagicMock()),
         ):

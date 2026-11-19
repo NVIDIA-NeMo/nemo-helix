@@ -11,13 +11,13 @@ import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evals
 import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { createEvalConfigFileset } from '@studio/api/evaluation/eval-config-fileset';
-import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
-import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
+import { buildEvaluationSpec } from '@studio/components/evaluation/EvalWizard/buildEvaluationSpec';
 import {
   type DatasetBindings,
   type EvaluationFormValues,
   NEW_CONFIG,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
 import {
   buildEvalJobName,
   MODEL_EVAL_CONFIG_DESCRIPTION,

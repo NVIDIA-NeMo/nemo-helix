@@ -408,6 +408,34 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
         print(f"Gateway timeout after {int(time.monotonic() - start)}s\n")
         return False
 
+    def wait_for_model(
+        self,
+        model: str,
+        *,
+        workspace: str | None = None,
+        timeout: float = 60,
+        poll_interval: float = 1.0,
+    ) -> bool:
+        """Poll until the gateway can route inference for *model*. Returns False on timeout or a non-transient error."""
+        gateway = InferenceGatewayClient.from_client(self)
+        start = time.monotonic()
+        print(f"Waiting for gateway to route '{model}'...")
+        while time.monotonic() - start < timeout:
+            try:
+                gateway.get_openai_model(workspace=workspace, name=model)
+            except (NotFoundError, NemoTransportError):
+                pass
+            except NemoHTTPError as exc:
+                if exc.status_code not in _TRANSIENT_GATEWAY_STATUS_CODES:
+                    print(f"Gateway model readiness failed: {exc}\n")
+                    return False
+            else:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}] Model route is ready!\n")
+                return True
+            time.sleep(poll_interval)
+        print(f"Model route timeout after {int(time.monotonic() - start)}s\n")
+        return False
+
     def wait_for_deployment_status(
         self,
         deployment_name: str,
@@ -600,6 +628,34 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
                 return True
             await asyncio.sleep(poll_interval)
         print(f"Gateway timeout after {int(time.monotonic() - start)}s\n")
+        return False
+
+    async def wait_for_model(
+        self,
+        model: str,
+        *,
+        workspace: str | None = None,
+        timeout: float = 60,
+        poll_interval: float = 1.0,
+    ) -> bool:
+        """Async twin of :meth:`ModelsClient.wait_for_model`."""
+        gateway = AsyncInferenceGatewayClient.from_client(self)
+        start = time.monotonic()
+        print(f"Waiting for gateway to route '{model}'...")
+        while time.monotonic() - start < timeout:
+            try:
+                await gateway.get_openai_model(workspace=workspace, name=model)
+            except (NotFoundError, NemoTransportError):
+                pass
+            except NemoHTTPError as exc:
+                if exc.status_code not in _TRANSIENT_GATEWAY_STATUS_CODES:
+                    print(f"Gateway model readiness failed: {exc}\n")
+                    return False
+            else:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}] Model route is ready!\n")
+                return True
+            await asyncio.sleep(poll_interval)
+        print(f"Model route timeout after {int(time.monotonic() - start)}s\n")
         return False
 
     async def wait_for_deployment_status(

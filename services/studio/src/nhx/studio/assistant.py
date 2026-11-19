@@ -10,18 +10,20 @@ import json
 import logging
 import os
 import re
-import shutil
 import uuid
+from asyncio import create_subprocess_exec
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
+from shutil import which
 from typing import Any, Protocol
 from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from httpx import AsyncClient
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError, EntityStoreError
 from nhx.common.entities.constants import NAME_PATTERN
@@ -481,7 +483,7 @@ def _build_studio_system_prompt(
         "If the user asks for a deployment, deployment chat, or deployment playground link and the agent name is known from the conversation, use destination='agent_chat' with the agent name; otherwise use destination='agents'.",
         "For a newly started job, use destination='job' and the job name when available; otherwise use destination='jobs'.",
         "For generated filesets, custom models, deployments, evaluations, guardrails, secrets, Data Designer, Safe Synthesizer, settings, members, or intake work, choose the matching studio_link destination.",
-        "For created datasets or filesets use destination='fileset_panel' with the fileset name when available; otherwise use destination='filesets'.",
+        "For created datasets or filesets use destination='fileset' with the fileset name when available; otherwise use destination='filesets'.",
         "For started evaluations use destination='evaluation_result' with the result or job name when available; otherwise use destination='evaluation_results' or destination='evaluation_metrics'.",
         "For the evaluation results list specifically, use destination='evaluation_results'; it resolves to /workspaces/{workspace}/evaluation/results.",
         "For Data Designer jobs use destination='data_designer_job' with the job name when available; otherwise use destination='data_designer'.",
@@ -504,10 +506,6 @@ def _build_studio_system_prompt(
                 "Do not list agents or ask the user to choose an agent for model-chat intent unless the user explicitly asks to chat with an agent.",
                 "For model chat, model comparison, or trying an available model, use destination='model_chat'.",
             ]
-        )
-    else:
-        lines.append(
-            "The model_chat destination is not enabled in this Studio instance; do not link to the Studio Chat page."
         )
     return "\n".join(lines)
 
@@ -1291,7 +1289,7 @@ async def _stream_claude(
     mcp_url: str,
     studio_system_prompt: str | None = None,
 ) -> AsyncIterator[str]:
-    if shutil.which("claude") is None:
+    if which("claude") is None:
         yield _sse(
             json.dumps({"exit_code": None, "stderr": "Claude Code CLI not found on PATH"}),
             event="error",
@@ -1313,7 +1311,7 @@ async def _stream_claude(
     stderr_task: asyncio.Task[None] | None = None
 
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_subprocess_exec(
             *argv,
             cwd=str(SERVER_CWD),
             env=_claude_env(),
@@ -1449,7 +1447,7 @@ async def _authorized_workspace(workspace: str, headers: Mapping[str, str], sess
     list_url = f"{base_url}/apis/entities/v2/workspaces"
     timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with AsyncClient(timeout=timeout) as client:
             for page in range(1, _WORKSPACE_LOOKUP_MAX_PAGES + 1):
                 response = await client.get(
                     list_url,
@@ -1688,7 +1686,7 @@ async def _invoke_assistant(
     model = _studio_assistant_name()
     seen_tool_ids: set[str] = set()
     seen_reasoning_ids: set[str] = set()
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with AsyncClient(timeout=timeout) as client:
         # The origin and agent name are server-configured; the workspace path segment is
         # an Entity-Store-confirmed name resolved by _authorized_workspace before this call.
         async with client.stream(

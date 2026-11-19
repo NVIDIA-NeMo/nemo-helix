@@ -50,10 +50,3 @@ export const formatElapsedTime = (startDate: Date, endDate: Date) => {
 
   return `${formatDigit(hours)}:${formatDigit(minutes)}:${formatDigit(seconds)}`;
 };
-
-/**
- * Returns the epoch time value in seconds
- */
-export const getEpochSeconds = (date?: Date) => {
-  return date ? date.getTime() / 1000 : undefined;
-};

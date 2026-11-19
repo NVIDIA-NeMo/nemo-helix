@@ -123,8 +123,8 @@ describe('VirtualModelDetailRoute', () => {
     expect(screen.getByPlaceholderText('Message my-vm')).toBeInTheDocument();
     expect(detailRequests).toBe(0);
 
-    await user.click(screen.getByRole('button', { name: 'Inference parameters' }));
-    expect(screen.getByRole('spinbutton', { name: 'Max tokens value' })).toHaveValue(4096);
+    await user.click(screen.getByRole('button', { name: 'Model parameters' }));
+    expect(await screen.findByRole('spinbutton', { name: 'Max Tokens value' })).toHaveValue(4096);
   });
 
   it('redirects the bare detail path to the details tab', async () => {

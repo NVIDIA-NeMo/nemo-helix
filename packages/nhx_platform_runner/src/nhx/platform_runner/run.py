@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import logging
 import os
-import signal
 import threading
 import time
 from collections.abc import Callable, Mapping
+from signal import SIG_DFL, SIGINT, SIGTERM, signal
 from typing import cast
 
 from nhx.common.config import get_auth_config, get_common_service_config, get_platform_config, get_service_config
@@ -131,12 +131,12 @@ def run_platform(
                 on_shutdown()
             except Exception:
                 logger.debug("on_shutdown callback failed", exc_info=True)
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal(SIGINT, SIG_DFL)
+        signal(SIGTERM, SIG_DFL)
         os.kill(os.getpid(), signum)
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    signal(SIGINT, signal_handler)
+    signal(SIGTERM, signal_handler)
 
     _display_banner(
         services=service_instances,
@@ -197,7 +197,7 @@ def run_platform(
 
 def _load_service_instances(
     service_names: list[str],
-    available_services: dict[str, str | Service],
+    available_services: Mapping[str, str | Service],
 ) -> list[Service]:
     service_instances: list[Service] = []
     if not service_names:

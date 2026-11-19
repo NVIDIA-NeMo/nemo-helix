@@ -12,7 +12,7 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
 from scaled_evals.api import execution_analytics
-from scaled_evals.api.db import get_db
+from scaled_evals.api.db import get_evaluation_global_queries
 from scaled_evals.api.execution_analytics import ANALYTICS_SOURCE, emit_execution_span, failure_category
 from scaled_evals.dispatch import worker as worker_module
 from scaled_evals.dispatch.worker import Dispatcher
@@ -65,7 +65,7 @@ def test_terminal_spans_round_trip_into_admin_views(monkeypatch: pytest.MonkeyPa
         "total_tasks": 7,
         "actors": [{"owner_id": "usr_1", "queued_runs": 1, "active_runs": 0, "total_parallelism": 3}],
     }
-    v1.dependency_overrides[get_db] = lambda: db
+    v1.dependency_overrides[get_evaluation_global_queries] = lambda: db.evaluations
     recent = datetime.now(UTC) - timedelta(hours=1)
     failed = _row(
         "ev_504",
@@ -88,7 +88,7 @@ def test_terminal_spans_round_trip_into_admin_views(monkeypatch: pytest.MonkeyPa
         failures = client.get("/v1/admin/failures", params={"examples": 1}).json()
         compute = client.get("/v1/admin/compute").json()
     finally:
-        v1.dependency_overrides.pop(get_db, None)
+        v1.dependency_overrides.pop(get_evaluation_global_queries, None)
 
     assert intake.queries[0]["filter"]["source"] == ANALYTICS_SOURCE
     assert (usage_body["total_runs"], usage_body["succeeded_runs"], usage_body["failed_runs"]) == (3, 1, 1)
@@ -147,7 +147,7 @@ def test_failed_evidence_still_records_the_terminal_span(monkeypatch: pytest.Mon
     store = MagicMock()
     store.load_for_dispatch.side_effect = rows.get
     store.resource_totals_for.side_effect = ConnectionError("store down")
-    monkeypatch.setattr(worker_module, "EvaluationStore", lambda: store)
+    monkeypatch.setattr(worker_module, "EvaluationWorkerRepository", lambda: store)
     worker = Dispatcher()
 
     worker.build_evidence("ev_bad")

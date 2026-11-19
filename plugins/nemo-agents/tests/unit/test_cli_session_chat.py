@@ -30,6 +30,9 @@ from typer.testing import CliRunner
 
 runner = CliRunner()
 
+SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
+
 
 class _CLIState:
     def __init__(self, *, base_url: str = "http://localhost:8080", workspace: str | None = "default") -> None:
@@ -98,7 +101,8 @@ def _session_response(
         status=status,
         expires_at=expires_at,
     ).model_dump(mode="json")
-    response["id"] = "session-id"
+    response["id"] = SESSION_ID
+    response["session_uuid"] = SESSION_UUID
     return response
 
 
@@ -128,7 +132,7 @@ def _install_mock_transport(handler):
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.Client", _Client)
 
 
 def _scripted_responses(*responses: dict[str, Any]):
@@ -258,9 +262,13 @@ def test_session_chat_requires_an_interactive_terminal() -> None:
     session_chat.assert_not_called()
 
 
-def test_session_chat_creates_named_session_and_passes_values_to_transport() -> None:
+@pytest.mark.parametrize("has_session_uuid", [True, False])
+def test_session_chat_creates_named_session_and_passes_values_to_transport(has_session_uuid: bool) -> None:
     app = AgentsCLI().get_cli()
-    transport, requests = _scripted_responses(_deployment_response(), _session_response())
+    response = _session_response()
+    if not has_session_uuid:
+        response.pop("session_uuid")
+    transport, requests = _scripted_responses(_deployment_response(), response)
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
@@ -299,7 +307,7 @@ def test_session_chat_creates_named_session_and_passes_values_to_transport() -> 
     assert run_kwargs["timeout"] == 42.0
     assert run_kwargs["deployment"].name == "fabric-deployment"
     assert run_kwargs["session"].name == "debug-auth"
-    assert run_kwargs["session_id"] == "session-id"
+    assert run_kwargs["session_id"] == (SESSION_UUID if has_session_uuid else SESSION_ID)
 
 
 def test_session_chat_preserves_api_generated_session_name() -> None:
@@ -320,11 +328,15 @@ def test_session_chat_preserves_api_generated_session_name() -> None:
     assert requests[1].url.path == "/apis/agents/v2/workspaces/default/sessions"
     assert json.loads(requests[1].content) == {"deployment_id": "deployment-id"}
     assert run_chat.call_args.kwargs["session"].name == generated_name
-    assert run_chat.call_args.kwargs["session_id"] == "session-id"
+    assert run_chat.call_args.kwargs["session_id"] == SESSION_UUID
 
 
-def test_session_chat_resumes_active_session_and_passes_values_to_transport() -> None:
-    transport, requests = _scripted_responses(_session_response(), _deployment_page(_deployment_response()))
+@pytest.mark.parametrize("has_session_uuid", [True, False])
+def test_session_chat_resumes_active_session_and_passes_values_to_transport(has_session_uuid: bool) -> None:
+    response = _session_response()
+    if not has_session_uuid:
+        response.pop("session_uuid")
+    transport, requests = _scripted_responses(response, _deployment_page(_deployment_response()))
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
@@ -351,7 +363,7 @@ def test_session_chat_resumes_active_session_and_passes_values_to_transport() ->
     assert run_kwargs["timeout"] == 42.0
     assert run_kwargs["deployment"].name == "fabric-deployment"
     assert run_kwargs["session"].name == "debug-auth"
-    assert run_kwargs["session_id"] == "session-id"
+    assert run_kwargs["session_id"] == (SESSION_UUID if has_session_uuid else SESSION_ID)
 
 
 def test_session_chat_pages_until_it_finds_the_session_deployment() -> None:
@@ -379,7 +391,7 @@ def test_session_chat_pages_until_it_finds_the_session_deployment() -> None:
     assert result.exit_code == 0, result.stderr
     assert [request.url.params["page"] for request in requests[-2:]] == ["1", "2"]
     assert run_chat.call_args.kwargs["deployment"].name == "fabric-deployment"
-    assert run_chat.call_args.kwargs["session_id"] == "session-id"
+    assert run_chat.call_args.kwargs["session_id"] == SESSION_UUID
 
 
 @pytest.mark.parametrize("status", [SessionStatus.CLOSED, SessionStatus.EXPIRED, SessionStatus.LOST])
@@ -406,7 +418,7 @@ def test_session_chat_reports_missing_session() -> None:
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         patch(
-            "nemo_agents_plugin.cli.httpx.Client",
+            "nemo_helix_plugin.client.client.Client",
             side_effect=lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
         ),
         patch("nemo_agents_plugin.cli._run_resolved_session_chat") as run_chat,
@@ -496,7 +508,7 @@ def test_resolved_session_chat_streams_each_current_turn_with_session_and_auth_h
 
     with (
         patch(
-            "nemo_agents_plugin.cli.httpx.Client",
+            "nemo_helix_plugin.client.client.Client",
             side_effect=lambda **kwargs: real_client(transport=transport, **kwargs),
         ),
         patch("nemo_agents_plugin.cli.run_chat_tui", side_effect=exercise_tui),
@@ -508,7 +520,7 @@ def test_resolved_session_chat_streams_each_current_turn_with_session_and_auth_h
                 workspace="team-a",
                 deployment=AgentDeployment.model_validate(_deployment_response()),
                 session=AgentSession.model_validate(_session_response(expires_at=expires_at)),
-                session_id="session-id",
+                session_id=SESSION_UUID,
                 input="first turn",
                 timeout=42,
             )
@@ -519,7 +531,7 @@ def test_resolved_session_chat_streams_each_current_turn_with_session_and_auth_h
         {"messages": [{"role": "user", "content": "first turn"}], "stream": True},
         {"messages": [{"role": "user", "content": "second turn"}], "stream": True},
     ]
-    assert all(request.headers[SESSION_ID_HEADER] == "session-id" for request in requests)
+    assert all(request.headers[SESSION_ID_HEADER] == SESSION_UUID for request in requests)
     assert all(request.headers["Authorization"] == "Bearer token" for request in requests)
 
 
@@ -529,7 +541,7 @@ def test_session_chat_interrupt_detaches_without_closing(exception: type[BaseExc
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt", **{"ask.side_effect": exception}),
     ):
         result = runner.invoke(AgentsCLI().get_cli(), ["chat", "--session", "debug-auth"])
 

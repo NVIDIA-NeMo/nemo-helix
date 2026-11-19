@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from subprocess import run
 from typing import Any, TypeVar, get_args, get_type_hints
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -74,7 +75,7 @@ def assert_exit_0(result: subprocess.CompletedProcess[str], msg: str) -> subproc
 
 def get_repo_root() -> Path:
     """Return the repository root using git."""
-    result = subprocess.run(
+    result = run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
@@ -118,7 +119,7 @@ def run_nemo_local(
         if env_extra:
             env.update(env_extra)
         cmd = [*_nemo_local_command(repo_root), *args]
-        return subprocess.run(
+        return run(
             cmd,
             cwd=cwd or repo_root,
             env=env,

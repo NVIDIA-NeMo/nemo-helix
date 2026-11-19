@@ -282,8 +282,8 @@ def _assert_redacted(result: AnonymizerPreviewResult) -> None:
     assert any("[REDACTED_FULL_NAME]" in text for text in texts)
 
 
-def _job_name(job: AnonymizerJobResource) -> str:
-    return job._job_name  # noqa: SLF001 - SDK does not expose a public name yet.
+def _job_id(job: AnonymizerJobResource) -> str:
+    return job._job_id  # noqa: SLF001 - SDK does not expose a public ID yet.
 
 
 def _wait_for_anonymizer_job(job: AnonymizerJobResource, *, timeout_seconds: float) -> None:
@@ -299,7 +299,7 @@ def _wait_for_anonymizer_job(job: AnonymizerJobResource, *, timeout_seconds: flo
             except Exception as exc:
                 tail = [f"<log retrieval failed: {exc!r}>"]
             raise TimeoutError(
-                f"Anonymizer job {_job_name(job)} timed out with status {status!r}; "
+                f"Anonymizer job {_job_id(job)} timed out with status {status!r}; "
                 f"last_poll_error={last_poll_error!r}; logs={tail!r}"
             )
         try:
@@ -317,12 +317,12 @@ def _wait_for_anonymizer_job(job: AnonymizerJobResource, *, timeout_seconds: flo
     assert status == "completed"
 
 
-def _cleanup_anonymizer_job(client: NemoClient, job_name: str) -> None:
+def _cleanup_anonymizer_job(client: NemoClient, job_id: str) -> None:
     jobs = JobsClient.from_client(client)
     with suppress(Exception):
-        jobs.cancel_job(name=job_name, workspace=client.workspace)
+        jobs.cancel_job(name=job_id, workspace=client.workspace)
     with suppress(Exception):
-        jobs.delete_job(name=job_name, workspace=client.workspace)
+        jobs.delete_job(name=job_id, workspace=client.workspace)
 
 
 @pytest.fixture(scope="module")
@@ -430,7 +430,7 @@ def completed_redact_job(
         _wait_for_anonymizer_job(job, timeout_seconds=ANONYMIZER_JOB_TIMEOUT_SECONDS)
         yield job
     finally:
-        _cleanup_anonymizer_job(anonymizer_client, _job_name(job))
+        _cleanup_anonymizer_job(anonymizer_client, _job_id(job))
 
 
 def test_health_check_through_minikube_ingress(client: NemoClient) -> None:

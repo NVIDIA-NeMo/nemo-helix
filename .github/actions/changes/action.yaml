@@ -79,6 +79,9 @@ outputs:
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
+  nightly-taskset-runs-report:
+    description: "'true' if the nightly taskset-runs e2e report helper or its tests changed"
+    value: ${{ steps.filter.outputs.nightly-taskset-runs-report }}
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
     value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
@@ -88,6 +91,9 @@ outputs:
   customization-auth:
     description: "'true' if anything a customization job step touches on an auth-enabled cluster changed"
     value: ${{ steps.filter.outputs.customization-auth == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.helm == 'true' }}
+  builder-e2e:
+    description: "'true' if the builder, its images, the chart, what a build step calls, or the root dependencies changed"
+    value: ${{ steps.filter.outputs.builder-e2e == 'true' || steps.filter.outputs.deps == 'true' }}
 
 runs:
   using: "composite"
@@ -173,6 +179,7 @@ runs:
             - 'packages/nhx_evals_sdk/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/**'  # shared contracts every service above is built on
+            - 'packages/nhx_testing/src/nhx/testing/**'  # test helpers the suite imports, supplied_platform among them
             - 'services/core/entities/**'
             - 'services/core/jobs/**'
             - 'services/core/files/**'
@@ -188,6 +195,7 @@ runs:
             - 'pyproject.toml'
             - 'uv.lock'
             - '.github/workflows/ci.yaml'  # the job definition itself
+            - '.github/scripts/run-taskset-run-controller-integration.sh'  # the job's controller step
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
@@ -258,6 +266,7 @@ runs:
             - 'services/**'
             - 'plugins/**'
           k8s-smoke:
+            - '.github/workflows/build-cpu-smoke-images.yaml'
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
             - 'e2e/test_evaluator_plugin.py'
@@ -283,6 +292,9 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/src/nhx/common/jobs/**'
             - 'packages/nhx_testing/src/nhx/testing/**'
+          nightly-taskset-runs-report:
+            - '.github/scripts/nightly_taskset_runs_report.py'
+            - '.github/scripts/tests/test_nightly_taskset_runs_report.py'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
@@ -310,6 +322,29 @@ runs:
             - '.github/actions/setup-kind-cluster/**'
             - '.github/actions/changes/**'
             - '.github/workflows/ci.yaml'
+          builder-e2e:
+            - 'plugins/nemo-builder/**'
+            - 'docker/builder/**'
+            - 'docker-bake.hcl'
+            - 'k8s/helm/**'
+            # What a build step calls: Jobs runs the steps and fetches the push step's secrets, and auth decides who
+            # may complete an image.
+            - 'services/core/jobs/**'
+            - 'services/core/secrets/**'
+            - 'services/core/auth/**'
+            - 'services/core/entities/**'
+            - 'services/core/files/**'
+            - 'packages/nhx_common/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_testing/**'
+            - 'e2e/test_builder.py'
+            - 'e2e/conftest.py'
+            - 'e2e/services_pool*.py'
+            - 'e2e/k8s/**'
+            - 'pytest.ini'
+            - '.github/actions/setup-kind-cluster/**'
+            - '.github/actions/finalize-kind-e2e/**'
+            - '.github/actions/changes/**'
           auth-idp:
             - 'conftest.py'
             - 'pytest.ini'

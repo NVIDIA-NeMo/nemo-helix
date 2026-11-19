@@ -6,7 +6,7 @@ import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import { NewCustomizationForm } from '@studio/components/NewCustomizationForm';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import {
-  CustomizationDatasetValidationResult,
+  type CustomizationDatasetValidationResult,
   useCustomizationDatasetValidation,
 } from '@studio/hooks/useCustomizationDatasetValidation';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -754,8 +754,10 @@ describe('NewCustomizationForm', () => {
       });
 
       await user.click(await screen.findByRole('button', { name: /Delete template/ }));
-      expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      expect(
+        await screen.findByRole('heading', { name: "Delete template 'my-sft-recipe'?" })
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Delete Template' }));
 
       expect(mockDeleteTemplate).toHaveBeenCalledWith({
         workspace: 'default',

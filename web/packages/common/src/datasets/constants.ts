@@ -9,11 +9,6 @@ import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
  */
 export const FILESET_NAME_REGEX = /^[\w\-.]+$/;
 
-/**
- * @deprecated Use FILESET_NAME_REGEX instead
- */
-export const DATASET_NAME_REGEX = FILESET_NAME_REGEX;
-
 export class FilesetFileUploadError extends Error {
   constructor(
     public fileset: FilesetOutput,
@@ -23,12 +18,3 @@ export class FilesetFileUploadError extends Error {
     super(`Error while uploading files: ${mappedFileNames.join(', ')}`);
   }
 }
-
-/**
- * Returns the name of the automatically created dataset for a workspace
- * @param workspace - The workspace the dataset belongs to
- * @returns The name of the automatically created dataset for the workspace
- */
-export const getWorkspaceDatasetName = (workspace: string): string => {
-  return `dataset-${workspace}`;
-};

@@ -3,5 +3,5 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type { BaseModelSearchFilterFieldProps } from './BaseModelSearchFilterField';
-export { BaseModelSearchFilterField } from './BaseModelSearchFilterField';
+export type { BaseModelSearchFilterFieldProps } from '@studio/components/FilterFields/BaseModelSearchFilterField';
+export { BaseModelSearchFilterField } from '@studio/components/FilterFields/BaseModelSearchFilterField';

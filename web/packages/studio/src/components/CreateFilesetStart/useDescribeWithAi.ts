@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { type ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
+import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { getErrorMessage } from '@nemo/common/src/utils/error';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';

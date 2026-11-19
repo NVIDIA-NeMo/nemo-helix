@@ -4,7 +4,7 @@
 import { ComposerPrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
 import type { AssistantChatThreadProps } from '@nemo/common/src/components/AssistantChat/types';
-import { ArrowUp, IconImage, Retry, ShapeSquare } from '@nemo/icons/icons';
+import { ArrowUp, ImportImage, Reset, ShapeSquare } from '@nemo/icons/icons';
 import { Button, Tooltip } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 
@@ -61,7 +61,7 @@ export const AssistantComposer = ({
                 type="button"
                 disabled={disabled}
               >
-                <IconImage />
+                <ImportImage />
               </Button>
             </ComposerPrimitive.AddAttachment>
           </Tooltip>
@@ -76,7 +76,7 @@ export const AssistantComposer = ({
               type="button"
               disabled={disabled}
             >
-              <Retry />
+              <Reset />
             </Button>
           </Tooltip>
         )}

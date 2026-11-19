@@ -113,7 +113,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Inference Providers',
     description: 'Studio has a UI for adding and managing inference providers.',
     getHref: getWorkspaceInferenceProvidersRoute,
-    requiredFeatureFlags: ['inferenceProviderEnabled'],
     patterns: [
       /\binference provider\b/i,
       /\bmodel provider\b/i,
@@ -139,7 +138,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Playground',
     description: 'Studio has a playground UI for chatting with and comparing models.',
     getHref: getModelCompareRoute,
-    requiredFeatureFlags: ['modelCompareEnabled'],
     patterns: [
       /\bmodel playground\b/i,
       /\bopen (the )?playground (for|with) (a )?model\b/i,

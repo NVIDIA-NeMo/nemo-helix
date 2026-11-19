@@ -9,7 +9,7 @@ import {
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import type { FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { type ReactElement, type ReactNode, useCallback, useMemo } from 'react';
-import { type FieldValues, type UseControllerProps } from 'react-hook-form';
+import type { FieldValues, UseControllerProps } from 'react-hook-form';
 
 export interface FilesetSearchableSelectFormFieldProps {
   slotLabel?: ReactNode;

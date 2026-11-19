@@ -4,7 +4,7 @@
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface StatusLogsContentProps {
   workspace: string;

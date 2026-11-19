@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart, ThreadMessageLike } from '@assistant-ui/react';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 
 type AssistantToolCallPart = Extract<ThreadAssistantMessagePart, { type: 'tool-call' }>;
 export type AssistantToolArgs = AssistantToolCallPart['args'];
@@ -30,9 +31,6 @@ export const isAssistantSubtleToolCallName = (toolName: string): boolean =>
   !FILE_CHANGE_TOOL_CALL_NAMES.has(toolName) &&
   !isAssistantJobProgressToolName(toolName);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const toAssistantToolArgValue = (value: unknown): AssistantToolArgValue | undefined => {
   if (value === null) return value;
   if (typeof value === 'string' || typeof value === 'boolean') return value;
@@ -44,13 +42,13 @@ const toAssistantToolArgValue = (value: unknown): AssistantToolArgValue | undefi
       .filter((item): item is AssistantToolArgValue => item !== undefined);
   }
 
-  if (isRecord(value)) return toAssistantToolArgs(value);
+  if (isPlainObject(value)) return toAssistantToolArgs(value);
 
   return undefined;
 };
 
 export const toAssistantToolArgs = (input: unknown): AssistantToolArgs => {
-  if (!isRecord(input)) return {};
+  if (!isPlainObject(input)) return {};
 
   const args: Record<string, AssistantToolArgValue> = {};
   for (const [key, value] of Object.entries(input)) {
@@ -132,6 +130,8 @@ interface SerializedAssistantTextPart {
 interface SerializedAssistantToolPart {
   readonly args: AssistantToolArgs;
   readonly argsText: string;
+  readonly isError?: boolean;
+  readonly result?: unknown;
   readonly toolCallId: string;
   readonly toolName: string;
   readonly type: 'tool-call';
@@ -163,6 +163,8 @@ const serializeAssistantPart = (
     type: 'tool-call',
     args: toAssistantToolArgs(part.args),
     argsText: part.argsText,
+    isError: part.isError,
+    result: part.result,
     toolCallId: part.toolCallId,
     toolName: part.toolName,
   };
@@ -208,14 +210,14 @@ const getGroupedSubtleToolActions = (
   if (!Array.isArray(actions)) return [];
 
   return actions
-    .filter(isRecord)
+    .filter(isPlainObject)
     .map((action): AssistantSubtleToolAction | undefined => {
       const toolCallId = typeof action.toolCallId === 'string' ? action.toolCallId : undefined;
       const toolName = typeof action.toolName === 'string' ? action.toolName : undefined;
       if (!toolCallId || !toolName || !isAssistantSubtleToolCallName(toolName)) return undefined;
 
       return {
-        args: isRecord(action.args) ? toAssistantToolArgs(action.args) : {},
+        args: isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {},
         toolCallId,
         toolName,
       };

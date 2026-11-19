@@ -140,3 +140,22 @@ def test_a_build_with_collection_disabled_fails(
 
     assert run(module, monkeypatch, tmp_path, COVERED, sources, policy) == 1
     assert "disabled" in capsys.readouterr().err
+
+
+def test_a_gap_in_an_archive_the_image_ships_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sources: Path, policy: Path, capsys
+) -> None:
+    module = load_module()
+    image, archive = tmp_path / "image.json", tmp_path / "archive.json"
+    image.write_text(json.dumps({"artifacts": COVERED}))
+    archive.write_text(
+        json.dumps({"artifacts": [artifact("python", "litellm", "1.106.6", f"{SITE}/litellm-1.106.6.dist-info")]})
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--sbom", str(image), "--sbom", str(archive), "--sources", str(sources), "--policy", str(policy)],
+    )
+
+    assert module.main() == 1
+    assert "litellm 1.106.6" in capsys.readouterr().out

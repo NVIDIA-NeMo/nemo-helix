@@ -6,11 +6,9 @@ import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import {
-  AutomodelTrainingSpecFinetuningType,
-  AutomodelTrainingSpecTrainingType,
-  UnslothTrainingSpecFinetuningType,
-} from '@nemo/sdk/generated/customizer/schema';
+import { AutomodelTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecFinetuningType';
+import { AutomodelTrainingSpecTrainingType } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecTrainingType';
+import { UnslothTrainingSpecFinetuningType } from '@nemo/sdk/generated/customizer/schema/UnslothTrainingSpecFinetuningType';
 import { RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
 import { TEACHER_PRECISION_ITEMS } from '@studio/components/NewCustomizationForm/constants';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
@@ -111,8 +109,8 @@ export const TrainingMethodSection = () => {
                 parallelism: current.parallelism,
                 batch_size: current.batch_size,
                 max_seq_length: current.max_seq_length,
-                // learning_rate is NOT carried over: the two methods now default two
-                // orders of magnitude apart, so each switch takes its own default.
+                // learning_rate is NOT carried over: the two methods default far apart,
+                // so each switch leaves it unset for the backend to pick.
               },
               { shouldValidate: true }
             );

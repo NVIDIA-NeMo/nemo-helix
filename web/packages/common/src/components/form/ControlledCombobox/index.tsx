@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
-import { UseControllerComponentProps } from '@nemo/common/src/types';
-import { Combobox, ComboboxProps, FormField } from '@nvidia/foundations-react-core';
-import { KeyboardEvent, ReactNode, useState } from 'react';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
+import { Combobox, type ComboboxProps, FormField } from '@nvidia/foundations-react-core';
+import { type KeyboardEvent, type ReactNode, useState } from 'react';
 import { useController } from 'react-hook-form';
 
 // Generic type to handle both single and multiple selection

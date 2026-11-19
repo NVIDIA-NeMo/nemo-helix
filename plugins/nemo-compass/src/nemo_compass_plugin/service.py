@@ -31,6 +31,7 @@ from nemo_compass_plugin.schema import (
     UpdateAnalysisRunStatusRequest,
     UpdateInsightRequest,
 )
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entities import (
     EntityValidationError as NemoEntityValidationError,
@@ -151,8 +152,7 @@ def _build_insights_router() -> APIRouter:
     async def list_insights(
         workspace: str,
         spans_service: SpansServiceDep,
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(
             default="-created_at",
             description="Sort field. Prefix with '-' for descending (e.g. '-created_at').",
@@ -172,8 +172,8 @@ def _build_insights_router() -> APIRouter:
             result = await entity_client.list(
                 Insight,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
                 filter_obj=filter_obj or None,
             )
@@ -293,13 +293,7 @@ def _build_insights_router() -> APIRouter:
         """Delete an Insight by its store-assigned id. Returns 204 on success."""
         insight = await _get_insight(entity_client, workspace=workspace, insight_id=insight_id)
         try:
-            await entity_client.delete(
-                Insight,
-                insight.name,
-                workspace=workspace,
-                parent=insight.parent,
-                expected_db_version=insight.db_version,
-            )
+            await entity_client.delete_by_id(Insight, insight.id, expected_db_version=insight.db_version)
         except NemoEntityNotFoundError as exc:
             raise _insight_not_found(insight_id, workspace) from exc
         except NemoEntityConflictError as exc:
@@ -476,8 +470,7 @@ def _build_analysis_configs_router() -> APIRouter:
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisConfigPerms.LIST])
     async def list_analysis_configs(
         workspace: str,
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(default="-created_at", description="Sort field."),
         enabled: bool | None = Query(default=None, description="Filter by enabled state."),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -491,8 +484,8 @@ def _build_analysis_configs_router() -> APIRouter:
             result = await entity_client.list(
                 AnalysisConfig,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
                 filter_obj=filter_obj or None,
             )
@@ -577,8 +570,7 @@ def _build_analysis_run_statuses_router() -> APIRouter:
     @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AnalysisRunStatusPerms.LIST])
     async def list_analysis_run_statuses(
         workspace: str,
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(default="-updated_at", description="Sort field."),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> AnalysisRunStatusPage:
@@ -587,8 +579,8 @@ def _build_analysis_run_statuses_router() -> APIRouter:
             result = await entity_client.list(
                 AnalysisRunStatus,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
             )
         except Exception as exc:

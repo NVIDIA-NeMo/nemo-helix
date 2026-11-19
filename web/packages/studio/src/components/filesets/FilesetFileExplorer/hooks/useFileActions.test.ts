@@ -3,7 +3,7 @@
 
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { useFileActions } from '@studio/components/filesets/FilesetFileExplorer/hooks/useFileActions';
-import { FileSystemFile, GITKEEP_FILENAME } from '@studio/components/FilesTable/utils';
+import { type FileSystemFile, GITKEEP_FILENAME } from '@studio/components/FilesTable/utils';
 import { act, renderHook } from '@testing-library/react';
 
 describe('useFileActions', () => {

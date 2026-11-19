@@ -123,6 +123,15 @@ def sample_page(sample_deployment_config):
     )
 
 
+def test_delete_missing_config_version_keeps_resource_not_found(client, mock_deployment_config_service):
+    mock_deployment_config_service.delete_deployment_config.return_value = False
+    with patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True):
+        response = client.delete("/v2/workspaces/default/deployment-configs/missing/versions/0")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Deployment config 'default/missing' version '0' not found"}
+
+
 def test_list_deployment_configs_default_parameters(client, mock_deployment_config_service, sample_page):
     """Test listing deployment configs with default parameters."""
     mock_deployment_config_service.list_deployment_configs.return_value = sample_page

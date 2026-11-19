@@ -3,7 +3,26 @@
 
 import { ChartSwatch } from '@nemo/common/src/components/charts/ChartSwatch';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import type { FC, ReactNode } from 'react';
+import type { CSSProperties, FC, ReactNode } from 'react';
+
+const TEXT_STYLE: CSSProperties = { color: 'var(--text-color-base)' };
+
+/**
+ * Spread onto a recharts `<Tooltip>` that uses the default content so it matches
+ * `ChartTooltipSurface`. Theme-aware tokens keep contrast in light and dark mode.
+ */
+export const chartTooltipProps = {
+  contentStyle: {
+    fontSize: 12,
+    backgroundColor: 'var(--background-color-surface-overlay)',
+    border: '1px solid var(--border-color-base)',
+    borderRadius: 8,
+    boxShadow: 'var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 0.1))',
+    ...TEXT_STYLE,
+  },
+  labelStyle: TEXT_STYLE,
+  itemStyle: TEXT_STYLE,
+} as const;
 
 /**
  * The shared hover-card surface. Each chart still builds its own rows — going from a recharts

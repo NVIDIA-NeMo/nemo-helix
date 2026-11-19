@@ -11,7 +11,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { INTAKE_FILTER_ACTION_TARGET_ID } from '@studio/routes/IntakeLayout/const';
 import { getIntakeSpansRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
 
 /**

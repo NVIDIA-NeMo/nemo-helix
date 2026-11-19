@@ -407,10 +407,8 @@ class ModelDeploymentConfigService:
                 logger.warning(f"Deployment config not found for deletion: {workspace}/{name} version {version}")
                 return False
 
-            await self.entity_client.delete(
-                ModelDeploymentConfigEntity,
-                entity.name,
-                workspace=workspace,
+            await self.entity_client.delete_by_id(
+                ModelDeploymentConfigEntity, entity.id, expected_db_version=entity.db_version
             )
             logger.info(f"Successfully deleted deployment config: {workspace}/{name} version {version}")
             return True
@@ -428,10 +426,8 @@ class ModelDeploymentConfigService:
                 return False
 
             for entity in result.data:
-                await self.entity_client.delete(
-                    ModelDeploymentConfigEntity,
-                    entity.name,
-                    workspace=workspace,
+                await self.entity_client.delete_by_id(
+                    ModelDeploymentConfigEntity, entity.id, expected_db_version=entity.db_version
                 )
 
             logger.info(f"Successfully deleted all versions of deployment config: {workspace}/{name}")

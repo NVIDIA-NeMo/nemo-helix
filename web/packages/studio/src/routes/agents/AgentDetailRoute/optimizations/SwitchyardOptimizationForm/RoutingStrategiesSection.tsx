@@ -20,7 +20,7 @@ import {
   type SwitchyardFormValues,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import cn from 'classnames';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 
 /** The plugin's own defaults, so leaving a knob alone submits what the CLI would. */

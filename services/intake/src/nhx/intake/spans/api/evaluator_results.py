@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
-from nhx.common.api.common import Page
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -115,16 +116,15 @@ async def list_evaluator_results(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: EvaluatorResultSortField = Query(default=EvaluatorResultSortField.CREATED_AT_DESC),
     parsed: ParsedFilter = Depends(make_filter_dep(EvaluatorResultFilter)),
 ) -> Page[EvaluatorResult]:
     validate_list_query_params(request)
     result = await service.list_evaluator_results(
         filters=_evaluator_result_filter(workspace, parsed),
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
     )
     rows = [EvaluatorResult.from_domain(item) for item in result.data]
@@ -138,6 +138,7 @@ async def list_evaluator_results(
 
 @router.get(
     "/v2/workspaces/{workspace}/evaluator-results/{evaluator_result_id}",
+    responses={404: {"model": ErrorResponse, "description": "Evaluator result not found"}},
     response_model=EvaluatorResult,
     response_model_exclude_none=True,
     tags=[API_TAG],

@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FileContentsWithPath } from '@nemo/common/src/data-store/types';
+import type { FileContentsWithPath } from '@nemo/common/src/data-store/types';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import {
-  FileSystemNode,
-  FileSystemFile,
+  type FileSystemNode,
+  type FileSystemFile,
   flattenFileTree,
   isGitkeepPath,
   mapFileListToFileTree,
   toFileEntry,
-  TreeRow,
+  type TreeRow,
 } from '@studio/components/FilesTable/utils';
 import { useCallback, useMemo, useState } from 'react';
 

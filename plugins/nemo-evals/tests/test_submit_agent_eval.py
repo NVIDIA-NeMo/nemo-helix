@@ -208,7 +208,7 @@ def test_a_taskset_submitted_with_a_non_runner_target_is_refused_by_type() -> No
     evaluator, _ = _evaluator()
 
     with pytest.raises(TypeError) as excinfo:
-        evaluator.submit(tasks=TasksetRef("ts"), target="gpt-5")  # ty: ignore[invalid-argument-type]
+        evaluator.submit(tasks=TasksetRef("ts"), target="gpt-5")  # ty: ignore[no-matching-overload]
 
     message = str(excinfo.value)
     assert "AgentTaskRunner" in message

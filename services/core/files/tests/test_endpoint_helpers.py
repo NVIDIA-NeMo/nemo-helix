@@ -5,6 +5,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -30,6 +31,68 @@ from nhx.core.files.app.backends.local import LocalStorageConfig
 from nhx.core.files.app.backends.ngc import NGCStorageConfig
 from nhx.core.files.app.cache import CacheStatus
 from nhx.core.files.exceptions import NotFoundError, StorageAccessError, StorageServerFault
+
+
+async def test_cache_status_lookups_have_bounded_concurrency():
+    """Cold listings bound requests without losing each file's status association."""
+    source = AsyncMock()
+    active = maximum = 0
+
+    async def key(path=None):
+        """Yield to other workers and record peak lookup concurrency."""
+        nonlocal active, maximum
+        if path is None:
+            return "cache/test"
+        active += 1
+        maximum = max(maximum, active)
+        await anyio.sleep(0)
+        active -= 1
+        if path == "gone":
+            raise NotFoundError("Deleted during listing")
+        return f"cache/test/{path}"
+
+    source.get_cache_path_key.side_effect = key
+    cache = AsyncMock()
+    cache.list_files.return_value = [FileInfo(path="cache/test/0", size=1)]
+    locks = AsyncMock()
+    locks.get_active_locks.return_value = {"cache/test/1"}
+    files = [FileInfo(path=str(i), size=1) for i in range(25)] + [FileInfo(path="gone", size=1)]
+    result = await get_cache_status_for_files(files, source, cache, locks)
+    assert 1 < maximum <= 8
+    assert result == {
+        str(i): CacheStatus.CACHED if i == 0 else CacheStatus.CACHING if i == 1 else CacheStatus.NOT_CACHED
+        for i in range(25)
+    }
+
+
+@pytest.mark.parametrize("file_count", [1, 9])
+async def test_cache_status_lookup_error_preserves_identity_and_cancels_siblings(file_count):
+    """Propagate the original error after cancelling and joining in-flight workers."""
+    error = StorageAccessError("Denied")
+    started, cancelled = [], []
+    ready = anyio.Event()
+
+    async def key(path=None):
+        if path is None:
+            return "cache/test"
+        started.append(path)
+        if len(started) == min(file_count, 8):
+            ready.set()
+        if path == str(min(2, file_count - 1)):
+            await ready.wait()
+            raise error
+        try:
+            await anyio.sleep_forever()
+        finally:
+            cancelled.append(path)
+
+    source = AsyncMock()
+    source.get_cache_path_key.side_effect = key
+    files = [FileInfo(path=str(i), size=1) for i in range(file_count)]
+    with anyio.fail_after(5), pytest.raises(StorageAccessError) as raised:
+        await get_cache_status_for_files(files, source, AsyncMock(), AsyncMock())
+    assert raised.value is error
+    assert len(cancelled) == min(file_count, 8) - 1
 
 
 @pytest.fixture

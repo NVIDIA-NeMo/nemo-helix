@@ -39,7 +39,7 @@ def mock_fs():
 @pytest.fixture
 def mock_fsspec(mock_fs):
     """Fixture to mock fsspec.filesystem."""
-    with patch("nhx.guardrails.app.utils.config_store.fsspec.filesystem", return_value=mock_fs):
+    with patch("nhx.guardrails.app.utils.config_store.filesystem", return_value=mock_fs):
         yield mock_fs
 
 

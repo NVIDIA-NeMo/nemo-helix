@@ -27,6 +27,7 @@ from nemo_evals.jobs.agent_spec import (
     GymAgentSource,
     ResolvedTask,
 )
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, frozen_tasks_digest
 from nemo_evals.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.kinds.types import LoadedTask, SubmitContext
@@ -137,7 +138,7 @@ async def test_harbor_direct_list_snapshots_selected_revision(entity_store):
     task.spec.source.fileset_ref = "default/files#v2/task/files"
     await entity_store.update(task)
     await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
-    await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+    await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     restored = AgentEvalSpec.model_validate_json(snapshot)
     assert all(task.spec.kind == "harbor" for task in restored.tasks)
     members = restored.tasks
@@ -270,7 +271,7 @@ async def test_submission_rejects_incompatible_suite_member_and_deleted_task(ent
             for item in loaded
         ]
         validate_execution_support(snapshots, target=HarborRunnerTarget(), adapters=KIND_ADAPTERS)
-    await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+    await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     with pytest.raises(ValueError, match="not found"):
         loaded = await load_tasks(
             TasksetRef("suite"),
@@ -894,7 +895,8 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
             async_sdk=_async_platform(),
         )
     )
-    assert compiled.steps[0].config["tasks"] == spec.model_dump(mode="json")["tasks"]
+    assert "tasks" not in compiled.steps[0].config
+    assert compiled.steps[0].config[TASKS_DIGEST_KEY] == frozen_tasks_digest(spec.model_dump(mode="json"))
     if kind in {"model", "agent"}:
         return  # These endpoints execute in the platform integration matrix.
 

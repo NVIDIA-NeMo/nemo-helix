@@ -86,6 +86,9 @@ def build_policy_model_yaml() -> dict[str, Any]:
                     "model": "${policy_model_name}",
                     "return_token_id_information": True,
                     "uses_reasoning_parser": True,
+                    # A tool body that is a data URL is an image. Training indexes
+                    # it that way; the model has to receive it as an image too.
+                    "inline_tool_output_images": True,
                 }
             }
         }

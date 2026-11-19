@@ -35,6 +35,7 @@ def _make_result_response(artifact_url: str = "fileset://default/fs/r") -> Magic
     """A jobs-client response whose .data() returns a result info with artifact_url."""
     result_info = MagicMock()
     result_info.artifact_url = artifact_url
+    result_info.job = "platform-job-original"
     resp = MagicMock()
     resp.data.return_value = result_info
     return resp
@@ -111,6 +112,11 @@ class TestDownloadAuditArtifacts:
         ):
             resp = client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
+        assert [call.kwargs["job"] for call in mock_jobs.get_job_result.await_args_list] == [
+            "job-1",
+            "platform-job-original",
+            "platform-job-original",
+        ]
         assert resp.status_code == 200
         assert "gzip" in resp.headers["content-type"]
         names = _tar_names(resp.content)

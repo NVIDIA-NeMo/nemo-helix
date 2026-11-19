@@ -70,7 +70,7 @@ class TestRunTask:
 
         monkeypatch.delenv(TASK_CONFIG_ENVVAR, raising=False)
         monkeypatch.delenv("NEMO_JOB_STEP_CONFIG", raising=False)
-        monkeypatch.setattr(platform_main.runpy, "run_module", fake_run_module)
+        monkeypatch.setattr(platform_main, "run_module", fake_run_module)
 
         try:
             result = run_task(

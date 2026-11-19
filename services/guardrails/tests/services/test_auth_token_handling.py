@@ -24,7 +24,7 @@ class TestAuthTokenHandlingChat(unittest.TestCase):
         self.patcher_env.start()
 
         # patch openai.OpenAI as it is used in ChatNIM
-        self.openai_patcher = patch("openai.OpenAI")
+        self.openai_patcher = patch("nhx.guardrails.app.llms.chat.nim.OpenAI")
         self.mock_openai_client_class = self.openai_patcher.start()
         self.mock_openai_client = MagicMock()
         self.mock_openai_client_class.return_value = self.mock_openai_client
@@ -92,12 +92,12 @@ class TestAuthTokenHandlingLLM:
         self.patcher_env.start()
 
         # patch httpx.Client we use it in NIM
-        self.httpx_client_patcher = patch("httpx.Client")
+        self.httpx_client_patcher = patch("nhx.guardrails.app.llms.completion.nim.Client")
         self.mock_httpx_client_class = self.httpx_client_patcher.start()
         self.mock_httpx_client = self.mock_httpx_client_class.return_value
 
         # patch httpx.AsyncClient we used it in NIM
-        self.httpx_async_client_patcher = patch("httpx.AsyncClient")
+        self.httpx_async_client_patcher = patch("nhx.guardrails.app.llms.completion.nim.AsyncClient")
         self.mock_httpx_async_client_class = self.httpx_async_client_patcher.start()
         self.mock_httpx_async_client = self.mock_httpx_async_client_class.return_value
 

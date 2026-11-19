@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   CUSTOMIZATION_DATASET_DISCOVERY,
   CustomizationFileType,

@@ -32,12 +32,14 @@ from nemo_example_plugin.types.payloads import (
     CreateExampleMiddlewareConfigRequest,
     UpdateExampleMiddlewareConfigRequest,
 )
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
+from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +122,7 @@ def build_middleware_config_router() -> APIRouter:
     )
     async def list_configs(
         workspace: str,
-        page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(default="-created_at"),
         entity_client: NemoEntitiesClient = Depends(_get_entity_client),
     ) -> list[ExampleMiddlewareConfig]:
@@ -130,8 +131,8 @@ def build_middleware_config_router() -> APIRouter:
             result = await entity_client.list(
                 ExampleMiddlewareConfig,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
             )
         except Exception:
@@ -230,7 +231,10 @@ def build_middleware_config_router() -> APIRouter:
         config or switch to inline config before deleting.
         """
         try:
-            await entity_client.delete(ExampleMiddlewareConfig, name=name, workspace=workspace)
+            _delete_target = await entity_client.get(ExampleMiddlewareConfig, name=name, workspace=workspace)
+            await entity_client.delete_by_id(
+                ExampleMiddlewareConfig, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -247,5 +251,42 @@ def build_middleware_config_router() -> APIRouter:
         except Exception:
             logger.exception("Failed to delete middleware config '%s'", name)
             raise HTTPException(status_code=500, detail="Failed to delete middleware config.")
+
+    @router.delete(
+        "/middleware-configs/by-id/{entity_id}",
+        status_code=204,
+        summary="Delete ExampleMiddlewareConfig by ID",
+        responses={
+            404: {"description": "Entity not found in this workspace."},
+            409: {"description": "Entity version conflict."},
+        },
+    )
+    @scope.write
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ExampleMiddlewareConfigPerms.DELETE])
+    async def delete_config_by_id(
+        workspace: str,
+        entity_id: str,
+        expected_db_version: int | None = Query(default=None, ge=1, description="Delete only this entity version."),
+        entity_client: NemoEntitiesClient = Depends(_get_entity_client),
+    ) -> None:
+        """Delete the selected ID in this workspace; never fall back to its name."""
+        try:
+            selected = await entity_client.get_by_id(ExampleMiddlewareConfig, entity_id)
+            if selected.workspace != workspace:
+                raise NemoEntityNotFoundError(entity_id)
+            await entity_client.delete_by_id(
+                ExampleMiddlewareConfig,
+                entity_id,
+                expected_db_version=selected.db_version if expected_db_version is None else expected_db_version,
+            )
+        except NemoEntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Middleware config not found in this workspace.") from exc
+        except NemoEntityConflictError as exc:
+            raise HTTPException(
+                status_code=409, detail="Middleware config was modified concurrently; refresh and retry."
+            ) from exc
+        except Exception as exc:
+            logger.exception("Failed to delete middleware config by ID '%s'", sanitize_for_log(entity_id))
+            raise HTTPException(status_code=500, detail="Failed to delete middleware config.") from exc
 
     return router

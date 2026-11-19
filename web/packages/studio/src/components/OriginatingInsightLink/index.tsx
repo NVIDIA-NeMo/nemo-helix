@@ -5,7 +5,7 @@ import { Anchor, Text } from '@nvidia/foundations-react-core';
 import voyagerArt from '@studio/assets/voyager.svg';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getOptimizerInsightRoute } from '@studio/routes/utils';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { Link } from 'react-router';
 
 interface OriginatingInsightLinkProps {

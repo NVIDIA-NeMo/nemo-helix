@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { TraceData } from '@nemo/common/src/utils/TraceQueue';
+import type { TraceData } from '@nemo/common/src/utils/TraceQueue';
 
 export const formatTimestamp = (timestamp: number) => {
   return new Date(timestamp).toLocaleString();

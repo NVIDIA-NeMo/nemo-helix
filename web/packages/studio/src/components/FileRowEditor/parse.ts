@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toCsv, toJsonl } from '@nemo/common/src/utils/download';
+import { parseJsonl as parseJsonlValues } from '@nemo/common/src/utils/parseRecords';
 import { ROW_ID_KEY, type DataFileRow } from '@studio/components/FileRowEditor/types';
+import Papa from 'papaparse';
 
 /** Data file formats recognized by {@link formatFromFileName}. */
 export type DataFileFormat = 'json' | 'jsonl' | 'csv' | 'parquet' | 'unknown';
@@ -44,66 +46,23 @@ const parseJson = (content: string): DataFileRow[] => {
   return list.map(normalizeRow);
 };
 
-const parseJsonl = (content: string): DataFileRow[] =>
-  content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => normalizeRow(JSON.parse(line)));
+const parseJsonl = (content: string): DataFileRow[] => parseJsonlValues(content).map(normalizeRow);
 
 /**
  * Parses CSV text into a grid of string cells, honoring RFC-4180 quoting: quoted
  * fields may contain commas and newlines, and `""` is an escaped quote.
  */
 export const parseCsvGrid = (content: string): string[][] => {
-  const rows: string[][] = [];
-  let field = '';
-  let row: string[] = [];
-  let inQuotes = false;
-
-  for (let i = 0; i < content.length; i++) {
-    const char = content[i];
-    if (inQuotes) {
-      if (char === '"') {
-        if (content[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += char;
-      }
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ',') {
-      row.push(field);
-      field = '';
-    } else if (char === '\n' || char === '\r') {
-      if (char === '\r' && content[i + 1] === '\n') {
-        i++;
-      }
-      row.push(field);
-      field = '';
-      rows.push(row);
-      row = [];
-    } else {
-      field += char;
-    }
-  }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
+  // Papa Parse honors a single detected line ending; unify CR/CRLF to LF outside quoted
+  // fields so mixed endings still split rows, while quoted cell text stays verbatim.
+  const normalized = content.replace(/"(?:[^"]|"")*"|\r\n?/g, (match) =>
+    match.startsWith('"') ? match : '\n'
+  );
+  const rows = Papa.parse<string[]>(normalized, { delimiter: ',', newline: '\n' }).data;
   // Drop only blank trailing lines (a final newline yields a single empty cell). Interior
   // empty rows are preserved — for a single-column file they are legitimate empty values.
-  while (rows.length > 0) {
-    const last = rows[rows.length - 1];
-    if (last.length <= 1 && (last[0] ?? '') === '') {
-      rows.pop();
-    } else {
-      break;
-    }
+  while (rows.length > 0 && rows[rows.length - 1].length <= 1 && !rows[rows.length - 1][0]) {
+    rows.pop();
   }
   return rows;
 };

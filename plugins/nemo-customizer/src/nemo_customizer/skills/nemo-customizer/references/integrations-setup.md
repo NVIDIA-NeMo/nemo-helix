@@ -39,10 +39,12 @@ echo "$DOCKER_HOST_IP"
 1. Use that IP with the **published** host port (`5001` in the command above):
 
 ```json
-"mlflow": {
-  "experiment_name": "customizer-integration",
-  "name": "my-run",
-  "tracking_uri": "http://${DOCKER_HOST_IP}:5001"
+"integrations": {
+  "mlflow": {
+    "experiment_name": "customizer-integration",
+    "name": "my-run",
+    "tracking_uri": "http://${DOCKER_HOST_IP}:5001"
+  }
 }
 ```
 
@@ -86,11 +88,13 @@ Successful injection appears in training logs:
 Job JSON references the secret by name:
 
 ```json
-"wandb": {
-  "project": "customizer-integration",
-  "name": "my-run",
-  "entity": "Nemo-automodel",
-  "api_key_secret": "default/wandb-api-key"
+"integrations": {
+  "wandb": {
+    "project": "customizer-integration",
+    "name": "my-run",
+    "entity": "Nemo-automodel",
+    "api_key_secret": "default/wandb-api-key"
+  }
 }
 ```
 

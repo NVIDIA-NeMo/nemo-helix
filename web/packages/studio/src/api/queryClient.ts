@@ -11,7 +11,7 @@
  */
 
 import { isLocalDevelopmentEnv } from '@studio/constants/environment';
-import { QueryClient, QueryClientConfig } from '@tanstack/react-query';
+import { QueryClient, type QueryClientConfig } from '@tanstack/react-query';
 
 declare global {
   interface Window {

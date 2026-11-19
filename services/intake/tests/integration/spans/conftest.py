@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from clickhouse_connect.driver.exceptions import OperationalError
 from fastapi.testclient import TestClient
 from nhx.intake.config import DEFAULT_CLICKHOUSE_IMAGE, ClickHouseConfig, IntakeConfig
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
@@ -100,11 +101,22 @@ def clean_clickhouse(clickhouse_client: ClickHouseSpanClient, run_async):
         ClickHouseTable.ANNOTATIONS,
         ClickHouseTable.TRACE_INDEX,
     )
-    for table in tables:
-        run_async(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
+    _truncate(clickhouse_client, run_async, tables)
     yield
+    _truncate(clickhouse_client, run_async, tables)
+
+
+def _truncate(
+    clickhouse_client: ClickHouseSpanClient, run_async: Callable[..., Any], tables: tuple[ClickHouseTable, ...]
+) -> None:
     for table in tables:
-        run_async(clickhouse_client.command(f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"))
+        statement = f"TRUNCATE TABLE {qualified_table(clickhouse_client.database, table)}"
+        try:
+            run_async(clickhouse_client.command(statement))
+        except OperationalError:
+            # A pooled connection can sit idle past ClickHouse's HTTP keep-alive timeout during a
+            # slow test; the server has closed it, and the retry opens a fresh one.
+            run_async(clickhouse_client.command(statement))
 
 
 @pytest.fixture

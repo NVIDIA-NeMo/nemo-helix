@@ -10,7 +10,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
-from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    InvalidEntityDataError,
+)
 from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
@@ -22,6 +26,27 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 
 MAX_GROUP_COUNT_ROWS = 1000
+
+
+def _validate_json_data(data: Any) -> None:
+    """Reject decoded NULs before PostgreSQL JSON text extraction can fail.
+
+    Validate keys as well as values without modifying the caller's data or
+    including potentially sensitive contents in the error message.
+    """
+    pending = [data]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            if "\x00" in value:
+                raise InvalidEntityDataError(
+                    "Entity data must not contain the NUL character (U+0000) in JSON strings or keys"
+                )
+        elif isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            pending.extend(value)
 
 
 class SQLAlchemyEntityRepository(EntityRepositoryInterface):
@@ -101,6 +126,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
 
         raise ValueError(f"Invalid sort field {sort_key}")
 
+    async def _commit_snapshot(self, session: AsyncSession, entity: DBEntity) -> Entity:
+        await session.flush()
+        # Read generated fields while this transaction still owns the write.
+        # A post-commit refresh could return another writer's version.
+        await session.refresh(entity)
+        snapshot = self.field_policy.project(entity.to_pydantic()).model_copy(deep=True)
+        await session.commit()
+        return snapshot
+
     async def create_entity(
         self,
         *,
@@ -117,6 +151,8 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         async with self._get_session(session, for_write=True) as sess:
             entity_id = generate_entity_id(entity_type)
 
+            stored_data = self.field_policy.create_data(data)
+            _validate_json_data(stored_data)
             db_entity = DBEntity(
                 id=entity_id,
                 workspace=workspace,
@@ -125,14 +161,11 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 parent=parent,
                 project=project,
                 created_by=created_by,
-                data=self.field_policy.create_data(data),
+                data=stored_data,
             )
 
             sess.add(db_entity)
-            await sess.commit()
-            await sess.refresh(db_entity)
-
-            return self.field_policy.project(db_entity.to_pydantic())
+            return await self._commit_snapshot(sess, db_entity)
 
     async def get_entity_by_id(
         self,
@@ -296,6 +329,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         name: str | None = None,
         project: str | None = None,
         updated_by: str | None = None,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> Entity:
         """Update an entity by ID, optionally changing its name."""
@@ -305,22 +339,27 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if existing_entity is None:
                 raise EntityNotFoundError(f"Entity with ID '{entity_id}' not found")
 
-            existing_entity.data = self.field_policy.update_data(data, existing_entity.data)
+            if expected_db_version is not None and existing_entity.db_version != expected_db_version:
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.")
+
+            stored_data = self.field_policy.update_data(data, existing_entity.data)
+            _validate_json_data(stored_data)
+            existing_entity.data = stored_data
             if name is not None:
                 existing_entity.name = name
             if project is not None:
                 existing_entity.project = project
             if updated_by is not None:
                 existing_entity.updated_by = updated_by
+            # Every successful update advances the conditional-write boundary,
+            # including an otherwise unchanged payload used as a fence.
+            existing_entity.db_version += 1
             try:
-                await sess.commit()
+                return await self._commit_snapshot(sess, existing_entity)
             except StaleDataError as err:
                 raise EntityVersionConflictError(
                     f"Entity with ID '{entity_id}' was modified by another request. Please refetch and retry."
                 ) from err
-            await sess.refresh(existing_entity)
-
-            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def update_entity_by_name(
         self,
@@ -362,27 +401,30 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                     f"Expected version {expected_db_version}, but current version is {existing_entity.db_version}. Please refetch and retry."
                 )
 
-            existing_entity.data = self.field_policy.update_data(data, existing_entity.data)
+            stored_data = self.field_policy.update_data(data, existing_entity.data)
+            _validate_json_data(stored_data)
+            existing_entity.data = stored_data
             if new_name is not None:
                 existing_entity.name = new_name
             if project is not None:
                 existing_entity.project = project
             if updated_by is not None:
                 existing_entity.updated_by = updated_by
+            # Every successful update advances the conditional-write boundary,
+            # including an otherwise unchanged payload used as a fence.
+            existing_entity.db_version += 1
             try:
-                await sess.commit()
+                return await self._commit_snapshot(sess, existing_entity)
             except StaleDataError as err:
                 raise EntityVersionConflictError(
                     f"Entity '{name}' of type '{entity_type}' in workspace '{workspace}' was modified by another request. Please refetch and retry."
                 ) from err
-            await sess.refresh(existing_entity)
-
-            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def delete_entity(
         self,
         *,
         entity_id: str,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by ID."""
@@ -392,8 +434,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if existing_entity is None:
                 return 0
 
-            await sess.delete(existing_entity)
-            await sess.commit()
+            if expected_db_version is not None and existing_entity.db_version != expected_db_version:
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.")
+
+            try:
+                await sess.delete(existing_entity)
+                await sess.commit()
+            except StaleDataError as err:
+                await sess.rollback()
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.") from err
             return 1
 
     async def delete_entity_by_name(

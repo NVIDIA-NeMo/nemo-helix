@@ -16,7 +16,7 @@ import {
   isValidationColumnStatistics,
   type ColumnStatistics,
 } from '@studio/routes/DataDesignerJobDetailsRoute/datasetProfilerTypes';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface StatProps {
   label: string;

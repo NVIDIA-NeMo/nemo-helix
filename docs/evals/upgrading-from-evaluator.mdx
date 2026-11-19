@@ -88,6 +88,21 @@ scopes, task-kind discriminators, and entity types. Python classes and types suc
 as `Evaluator`, `EvaluatorPluginService`, and `EvaluatorPerms` also retain their
 names for this change.
 
+## Remove installed agent skills from the old names
+
+If you previously ran `nemo skills install` or `nemo setup`, remove the old skill
+directories and reinstall:
+
+```bash
+rm -rf .claude/skills/nemo-evaluator .claude/skills/nemo-evaluator-plugin
+nemo skills install --agent claude
+```
+
+Repeat for each agent skills directory you installed into (for example
+`.cursor/skills/`, `.agents/skills/`, `.opencode/skills/`, and user-scope
+directories). Reinstalling alone does not remove them, because the older version
+that wrote them did not record what it installed.
+
 ## Existing job history
 
 Completed jobs remain stored in the core Jobs service. This rename does not migrate

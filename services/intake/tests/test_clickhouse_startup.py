@@ -16,6 +16,13 @@ from nhx.intake.service import IntakeService
 _RECONCILED_URL = "http://127.0.0.1:55123"
 
 
+def _close_atif_ingest_pool(service: IntakeService) -> None:
+    """Close the ATIF pool a test started; these tests do not run on_shutdown."""
+    executor = service.atif_ingest_executor
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _disable_reconcile_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     import nhx.intake.service as intake_service
 
@@ -100,6 +107,7 @@ def test_intake_readiness_surfaces_clickhouse_guidance(monkeypatch: pytest.Monke
 
     assert asyncio.run(check_readiness()) is False
     assert service.readiness_message == CLICKHOUSE_UNAVAILABLE_MESSAGE
+    _close_atif_ingest_pool(service)
 
 
 def test_intake_uses_reconciled_clickhouse_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -331,6 +339,7 @@ def test_intake_readiness_probes_spans_table_without_recovery(monkeypatch: pytes
         monkeypatch.setattr("nhx.intake.service.ClickHouseExecutor.fetch_scalar", fetch_scalar)
         ready = await service.is_ready()
         fetch_scalar.assert_awaited_once()
+        assert fetch_scalar.await_args is not None
         readiness_query = fetch_scalar.await_args.args[0]
         assert readiness_query.name == "intake_readiness"
         assert readiness_query.statement == "SELECT 1 AS ready FROM `intake_unavailable`.`spans` LIMIT 1"
@@ -341,6 +350,7 @@ def test_intake_readiness_probes_spans_table_without_recovery(monkeypatch: pytes
     reconcile.assert_not_awaited()
     stop.assert_not_awaited()
     check_data_directory.assert_not_awaited()
+    _close_atif_ingest_pool(service)
 
 
 def test_managed_clickhouse_readiness_checks_data_directory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -361,8 +371,11 @@ def test_managed_clickhouse_readiness_checks_data_directory(monkeypatch: pytest.
     assert asyncio.run(check_readiness()) is False
     reconcile.assert_awaited_once()
     assert check_data_directory.await_count == 2
-    check_data_directory.assert_awaited_with(data_dir=service.service_config.clickhouse_config.data_dir)
+    cfg = service.service_config
+    assert cfg is not None
+    check_data_directory.assert_awaited_with(data_dir=cfg.clickhouse_config.data_dir)
     assert service.readiness_message == CLICKHOUSE_UNAVAILABLE_MESSAGE
+    _close_atif_ingest_pool(service)
 
 
 def test_successful_probe_does_not_report_ready_after_shutdown_starts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,3 +399,4 @@ def test_successful_probe_does_not_report_ready_after_shutdown_starts(monkeypatc
         return await readiness
 
     assert asyncio.run(overlap_shutdown()) is False
+    _close_atif_ingest_pool(service)

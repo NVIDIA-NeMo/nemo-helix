@@ -216,7 +216,7 @@ async def test_benchmark_preflight_lists_missing(monkeypatch):
 async def test_benchmark_preflight_rejects_placeholder_model(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("OPENAI_API_BASE", "http://gw")
-    monkeypatch.setattr("evaluation.adapters.shutil.which", lambda _name: "/usr/bin/tau2")
+    monkeypatch.setattr("evaluation.adapters.which", lambda _name: "/usr/bin/tau2")
     # valid tau2 paths (via overrides) so ONLY the placeholder model is flagged
     cfg = {
         **_CFG,
@@ -234,7 +234,7 @@ async def test_benchmark_preflight_flags_missing_binary(monkeypatch, tmp_path):
     # tau2 paths resolve (data dir exists) but the binary isn't found -> flagged.
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("OPENAI_API_BASE", "http://gw")
-    monkeypatch.setattr("evaluation.adapters.shutil.which", lambda _name: None)
+    monkeypatch.setattr("evaluation.adapters.which", lambda _name: None)
     cfg = {**_CFG, "tau2_data_dir": str(tmp_path), "tau2_bin": "tau2"}
     adapter = BenchmarkAdapter(Subject("tau2-airline", "benchmark", cfg))
     with pytest.raises(SystemExit) as exc:
@@ -250,7 +250,7 @@ def test_benchmark_check_reports_missing_argv_keys(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("OPENAI_API_BASE", "http://gw")
-    monkeypatch.setattr("evaluation.adapters.shutil.which", lambda _name: "/usr/bin/tau2")
+    monkeypatch.setattr("evaluation.adapters.which", lambda _name: "/usr/bin/tau2")
     base = {
         "domain": "airline",
         "base_url": "http://localhost:8080",
@@ -271,7 +271,7 @@ async def test_benchmark_preflight_flags_repo_when_only_bin_set(monkeypatch, tmp
     # tau2_bin set but no tau2_repo/tau2_data_dir -> data dir unresolved -> tau2_repo flagged.
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("OPENAI_API_BASE", "http://gw")
-    monkeypatch.setattr("evaluation.adapters.shutil.which", lambda _name: "/usr/bin/tau2")
+    monkeypatch.setattr("evaluation.adapters.which", lambda _name: "/usr/bin/tau2")
     cfg = {**_CFG, "tau2_bin": "tau2"}  # no tau2_repo, no tau2_data_dir
     adapter = BenchmarkAdapter(Subject("tau2-airline", "benchmark", cfg))
     with pytest.raises(SystemExit) as exc:
@@ -293,7 +293,7 @@ def _patch_otlp(
     poll: bool = True,
 ) -> None:
     """Patch the OTLP ingest seam: capture export_spans / post_evaluator_results."""
-    monkeypatch.setattr("evaluation.adapters.shutil.which", lambda _name: "/usr/bin/tau2")
+    monkeypatch.setattr("evaluation.adapters.which", lambda _name: "/usr/bin/tau2")
     monkeypatch.setattr("evaluation.adapters.read_policy", lambda data_dir, domain: "POLICY")
     monkeypatch.setattr(
         "evaluation.adapters.ensure_workspace",

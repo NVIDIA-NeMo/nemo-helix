@@ -20,7 +20,7 @@ from scaled_evals.api.build.task_image_identity import (
     TaskImageIdentityError,
     validate_task_image_request,
 )
-from scaled_evals.api.db import Database
+from scaled_evals.api.db import Database, RequestDatabase
 from scaled_evals.api.framework_versions import (
     ResolvedFrameworkRunner,
     resolve_framework_runner,
@@ -579,7 +579,7 @@ def preflight_evaluation(
 
 
 def preflight_benchmark_run(
-    db: Database,
+    db: RequestDatabase,
     body: CreateBenchmarkRunRequest,
     current: CurrentPrincipal,
     *,

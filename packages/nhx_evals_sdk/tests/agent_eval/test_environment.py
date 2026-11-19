@@ -41,7 +41,7 @@ async def test_docker_handle_reports_timeout(monkeypatch: pytest.MonkeyPatch) ->
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
 
-    monkeypatch.setattr(env_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(env_mod, "run", fake_run)
     result = await DockerEnvironmentHandle("img").run(EnvRunSpec(command=["sleep"]), "agent")
     assert result.timed_out and result.exit_code == 124 and not result.ok
 

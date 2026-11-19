@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from nhx.common.api.common import Page
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
+from nhx.intake.repository.span import SpanAmbiguousError
 from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access, validate_list_query_params
 from nhx.intake.spans.api.query_filters import (
     filter_comparisons,
@@ -75,8 +77,7 @@ async def list_spans(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: SpanSortField = Query(default=SpanSortField.STARTED_AT_DESC),
     mode: SpanMode = Query(
         default="detailed",
@@ -91,8 +92,8 @@ async def list_spans(
     filters = _span_filter(workspace, parsed)
     result = await service.list_spans(
         filters=filters,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         mode=mode,
     )
@@ -140,8 +141,7 @@ async def list_span_groups(
         description="Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.",
         examples=["trace_id"],
     ),
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: SpanGroupSortField = Query(
         default=SpanGroupSortField.SPAN_COUNT_DESC,
         description=(
@@ -159,8 +159,8 @@ async def list_span_groups(
     result = await service.list_span_groups(
         filters=filters,
         group_by=[field.value for field in grouped_by],
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
     )
     groups = [SpanGroup.from_domain(group) for group in result.data]
@@ -175,6 +175,10 @@ async def list_span_groups(
 
 @router.get(
     "/v2/workspaces/{workspace}/spans/{span_id}",
+    responses={
+        404: {"model": ErrorResponse, "description": "Span not found"},
+        409: {"description": "Span ID belongs to multiple sessions; supply session_id."},
+    },
     response_model=Span,
     response_model_exclude_none=True,
     tags=[API_TAG],
@@ -183,9 +187,17 @@ async def get_span(
     workspace: str,
     span_id: str,
     service: SpansServiceDep,
+    session_id: str | None = Query(
+        default=None, description="Session containing the span. Required for ambiguous span IDs."
+    ),
 ) -> Span:
     try:
-        span = await service.get_span(workspace=workspace, span_id=span_id)
+        span = await service.get_span(workspace=workspace, span_id=span_id, session_id=session_id)
+    except SpanAmbiguousError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Span {workspace}/{span_id} belongs to multiple sessions; supply session_id",
+        ) from exc
     except SpanNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Span {workspace}/{span_id} not found")
     return Span.from_domain(span)

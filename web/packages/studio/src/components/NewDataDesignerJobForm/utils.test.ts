@@ -8,6 +8,7 @@ import type {
   CreateJobRequest as DataDesignerJobRequest,
 } from '@nemo/sdk/generated/data-designer/schema';
 import {
+  addMissingAliasConfigs,
   applyFormModelToJobRequest,
   buildClonedJobRequest,
   getCloneJobRequestFromState,
@@ -112,6 +113,11 @@ describe('sanitizeJobRequestName', () => {
     expect(sanitizeJobRequestName(req).name).toBe('edge');
   });
 
+  it('lowercases and drops characters the entity name pattern rejects', () => {
+    const req = { name: 'Product-Reviews_2024!' } as DataDesignerJobRequest;
+    expect(sanitizeJobRequestName(req).name).toBe('product-reviews_2024');
+  });
+
   it('returns request unchanged when name is empty', () => {
     const req = { name: '' } as DataDesignerJobRequest;
     expect(sanitizeJobRequestName(req)).toBe(req);
@@ -183,6 +189,22 @@ describe('applyFormModelToJobRequest', () => {
     expect(applyFormModelToJobRequest(req, 'ref', 'prov', 'served')).toBe(req);
   });
 
+  it('creates a model config when columns use an alias but model_configs is empty', () => {
+    const req = {
+      spec: {
+        config: { columns: [{ model_alias: 'review-model', name: 'col1' }], model_configs: [] },
+      },
+    } as unknown as DataDesignerJobRequest;
+
+    const result = applyFormModelToJobRequest(req, 'new-ref', 'new-prov', 'new-served');
+    expect(result.spec?.config?.model_configs).toEqual([
+      { alias: 'new-ref', model: 'new-served', provider: 'new-prov' },
+    ]);
+    expect(result.spec?.config?.columns[0]).toEqual(
+      expect.objectContaining({ model_alias: 'new-ref' })
+    );
+  });
+
   it('applies model to model_configs and columns with model_alias', () => {
     const req = {
       spec: {
@@ -207,6 +229,40 @@ describe('applyFormModelToJobRequest', () => {
     // col without model_alias stays unchanged
     expect(result.spec?.config?.columns[1]).toEqual(expect.objectContaining({ name: 'col2' }));
     expect(result.spec?.config?.columns[1]).not.toHaveProperty('model_alias');
+  });
+});
+
+describe('addMissingAliasConfigs', () => {
+  type Columns = Parameters<typeof addMissingAliasConfigs>[1];
+
+  it('copies the first config for every alias no config defines', () => {
+    const configs = [
+      {
+        alias: 'writer',
+        model: 'm',
+        provider: 'p',
+        inference_parameters: { generation_type: 'chat-completion' as const },
+      },
+    ];
+    const columns = [
+      { name: 'a', column_type: 'llm-text', model_alias: 'writer' },
+      { name: 'b', column_type: 'llm-judge', model_alias: 'judge' },
+      { name: 'c', column_type: 'llm-text', model_alias: 'judge' },
+    ] as unknown as Columns;
+
+    expect(addMissingAliasConfigs(configs, columns)).toEqual([
+      configs[0],
+      { ...configs[0], alias: 'judge' },
+    ]);
+  });
+
+  it('creates empty model fields when there is no config to copy', () => {
+    const columns = [
+      { name: 'a', column_type: 'llm-text', model_alias: 'writer' },
+    ] as unknown as Columns;
+    expect(addMissingAliasConfigs([], columns)).toEqual([
+      { alias: 'writer', model: '', provider: '' },
+    ]);
   });
 });
 

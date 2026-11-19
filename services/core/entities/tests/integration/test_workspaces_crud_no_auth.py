@@ -19,6 +19,7 @@ from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceRequest,
     ListWorkspacesQueryParams,
     UpdateWorkspaceRequest,
+    WorkspaceLimits,
 )
 from nhx.core.entities.service import EntitiesService
 from nhx.testing import ClientContext, create_test_client, short_unique_name
@@ -169,6 +170,38 @@ class TestWorkspaceCRUD:
         # Without auth, created_by/updated_by are empty string
         assert updated.created_by == ""
         assert updated.updated_by == ""
+
+    def test_limits_default_to_unset(self, client: WorkspacesClient):
+        """A workspace created without limits reports none (the default is applied by consumers)."""
+        name = short_unique_name("lim-unset")
+        created = client.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+        assert created.limits is None
+        assert client.get_workspace(name=name).data().limits is None
+
+    def test_create_and_update_limits(self, client: WorkspacesClient):
+        """Limits are accepted on create and update, and untouched by unrelated updates."""
+        name = short_unique_name("lim-set")
+        created = client.create_workspace(
+            body=CreateWorkspaceRequest(name=name, limits=WorkspaceLimits(max_concurrent_jobs=10))
+        ).data()
+        assert created.limits is not None
+        assert created.limits.max_concurrent_jobs == 10
+
+        updated = client.update_workspace(name=name, body=UpdateWorkspaceRequest(description="d")).data()
+        assert updated.limits is not None
+        assert updated.limits.max_concurrent_jobs == 10
+
+        updated = client.update_workspace(
+            name=name, body=UpdateWorkspaceRequest(limits=WorkspaceLimits(max_concurrent_jobs=25))
+        ).data()
+        assert updated.limits is not None
+        assert updated.limits.max_concurrent_jobs == 25
+        assert updated.description == "d"
+
+    def test_limits_reject_non_positive(self, client: WorkspacesClient):
+        """max_concurrent_jobs must be at least 1."""
+        with pytest.raises(ValueError):
+            WorkspaceLimits(max_concurrent_jobs=0)
 
     def test_update_nonexistent_workspace_fails(self, client: WorkspacesClient):
         """Test that updating a non-existent workspace returns 404."""

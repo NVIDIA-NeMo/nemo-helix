@@ -15,7 +15,7 @@ export const navItems = (workspaceId: string): PluginNavGroup[] => [
     items: [
       {
         id: 'agent-hardener',
-        iconName: 'swords',
+        iconName: 'sword',
         label: 'Agent Hardening',
         href: getAgentHardenerRunListRoute(workspaceId),
       },

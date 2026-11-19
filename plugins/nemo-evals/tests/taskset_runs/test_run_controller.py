@@ -13,8 +13,11 @@ from typing import Any
 import httpx
 import nemo_evals.taskset_runs.controller as controller_module
 import pytest
+from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, image_digest
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
+from nemo_evals.image_builds.models import BuildImage, BuildStatus
 from nemo_evals.taskset_runs.controller import (
     LIST_CHUNK,
     TERMINAL_JOB_STATUSES,
@@ -33,9 +36,15 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.run_evaluation import QUEUE_DURATION_KEY, RESULT_STATE_KEY, ensure_run_evaluation
-from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetBundleSpec, TasksetRunPlan
+from nemo_evals.taskset_runs.specs import (
+    PlannedAgentLayers,
+    RunIntakePublication,
+    TasksetBundleSpec,
+    TasksetRunPlan,
+)
 from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunStore
-from nemo_evals.taskset_runs.task_jobs import task_job_request
+from nemo_evals.taskset_runs.task_jobs import member_environment, task_job_request
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -83,7 +92,7 @@ class FakeRunJobs:
     """In-memory Jobs (and the run's records) with scripted failures.
 
     ``script(op, *outcomes)`` queues outcomes for the next calls of ``op`` ("create", "get", "cancel",
-    "has_steps", "result"): an exception to raise, or a callable run before the call.
+    "has_job_steps", "result"): an exception to raise, or a callable run before the call.
     Cancel moves a running Job to ``cancelling``; ``finish`` ends it, as Jobs does later. Every saved Job gets a
     new id, and a result names the id of the Job it was saved under.
     """
@@ -97,6 +106,7 @@ class FakeRunJobs:
         self.records: list[AgentEvalResultEntity] = []
         self.cancelled: list[str] = []
         self.stepless: set[str] = set()
+        self.stepless_attempts: set[str] = set()
         self.calls: list[str] = []
         self.scripted: dict[str, list[Any]] = {}
         self.broken: dict[str, Exception] = {}  # Job name -> what every get of it raises
@@ -163,11 +173,14 @@ class FakeRunJobs:
     def active(self, prefix: str = "") -> list[str]:
         return [n for n, j in self.jobs.items() if n.startswith(prefix) and j.status.value not in TERMINAL_JOB_STATUSES]
 
+    def _name(self, reference: str) -> str:
+        return next((job.name for job in self.jobs.values() if job.id == reference), reference)
+
     async def get(self, name):
         await self._scripted("get")
         if name in self.broken:
             raise self.broken[name]
-        return self.jobs.get(name)
+        return self.jobs.get(self._name(name))
 
     async def list_named(self, names):
         assert len(names) <= LIST_CHUNK, "GuardedRunJobs chunks the names"
@@ -179,7 +192,7 @@ class FakeRunJobs:
 
     async def result(self, job, name):
         await self._scripted("result")
-        return self.results.get((job, name))
+        return self.results.get((self._name(job), name))
 
     async def create(self, request):
         self.creates.append(request.name)
@@ -189,9 +202,12 @@ class FakeRunJobs:
         self.created.append(request)
         return self.put(request, "created")
 
-    async def has_steps(self, name):
-        await self._scripted("has_steps")
-        return name not in self.stepless
+    async def has_job_steps(self, job_id):
+        await self._scripted("has_job_steps")
+        return self._name(job_id) not in self.stepless
+
+    async def has_attempt_steps(self, job_id, attempt_id):
+        return attempt_id not in self.stepless_attempts and await self.has_job_steps(job_id)
 
     async def read_summary(self, bundle_ref):
         return SUMMARY
@@ -207,6 +223,7 @@ class FakeRunJobs:
 
     async def cancel(self, name):
         await self._scripted("cancel")
+        name = self._name(name)
         self.cancelled.append(name)
         if name in self.jobs and self.jobs[name].status.value not in TERMINAL_JOB_STATUSES:
             self.jobs[name] = self.jobs[name].model_copy(update={"status": HelixJobStatus.CANCELLING})
@@ -230,7 +247,12 @@ class Harness:
         self.clock = Clock(T0)
         self.plans: dict[str, TasksetRunPlan] = {}
         self.plan_errors: dict[str, Exception] = {}
-        self.reconciler = TasksetRunReconciler(store, self.jobs_for, config, clock=self.clock)
+        # Agent layers by (task entity name, revision digest); an Exception is raised by the read.
+        self.layers: dict[tuple[str, str], AgentLayerEntity | Exception] = {}
+        self.layer_reads: list[tuple[str, str, str]] = []
+        self.reconciler = TasksetRunReconciler(
+            store, self.jobs_for, config, clock=self.clock, agent_layers=self.agent_layer
+        )
 
         async def load_plan(run: TasksetRunEntity) -> TasksetRunPlan:
             if run.name in self.plan_errors:
@@ -242,6 +264,13 @@ class Harness:
     @asynccontextmanager
     async def jobs_for(self, workspace: str, run: TasksetRunEntity | None) -> AsyncGenerator[FakeRunJobs]:
         yield self.jobs
+
+    async def agent_layer(self, task: str, revision: str, key: str) -> AgentLayerEntity | None:
+        self.layer_reads.append((task, revision, key))
+        layer = self.layers.get((task, revision))
+        if isinstance(layer, Exception):
+            raise layer
+        return layer
 
     async def submit(
         self, plan: TasksetRunPlan, *, name: str, creator: str = "user:alice", workspace: str = "default", **run: Any
@@ -363,6 +392,86 @@ async def test_job_status_is_written_only_when_it_changes(harness, harbor_plan, 
     m0, m1 = await harness.members(run)
     assert m0.job_status is HelixJobStatus.ACTIVE and m0.db_version == versions[0] + 1
     assert m1.job_status is HelixJobStatus.CREATED and m1.phase is MemberPhase.REGISTERED  # last read kept
+
+
+async def test_members_carry_their_tasks_id_and_planned_trials_from_the_plan(harness, harbor_plan):
+    attempts = harbor_plan.spec.target.model_copy(update={"n_attempts": 3})
+    plan = harbor_plan.model_copy(update={"spec": harbor_plan.spec.model_copy(update={"target": attempts})})
+    run = await harness.submit(plan, name="run-a")
+
+    await harness.cycle()
+
+    members = await harness.members(run)
+    assert [m.task_name for m in members] == [t.id for t in harbor_plan.spec.tasks]
+    # Before any task Job reports, each task counts its planned trials as pending.
+    planned = TrialCounts(total=3, phases={TrialPhase.PENDING: 3})
+    assert [m.trial_counts for m in members] == [planned] * len(members)
+
+
+def reports_trials(jobs: FakeRunJobs, name: str, *phases: str, reward: float | None = None) -> None:
+    """Job ``name`` reports one trial per phase in its status details, as the task Job does while Harbor runs."""
+    trials = [{"trial": f"t{i}", "phase": phase, "reward": reward} for i, phase in enumerate(phases)]
+
+    details = {**(jobs.jobs[name].status_details or {}), "trials": trials}
+    jobs.jobs[name] = jobs.jobs[name].model_copy(update={"status_details": details})
+
+
+async def test_a_running_tasks_trial_counts_are_written_only_when_they_change(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running", "pending")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.AGENT_RUNNING: 1, TrialPhase.PENDING: 1}
+    version = member.db_version
+
+    await harness.cycle()
+
+    assert (await harness.members(run))[0].db_version == version  # same counts: no write
+
+    reports_trials(jobs, task(run, 0), "succeeded", "verifying", reward=1.0)
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.VERIFYING: 1}
+    assert member.trial_counts.reward == 1.0
+    assert member.db_version == version + 1
+
+
+async def test_a_settled_task_keeps_its_jobs_last_trial_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+
+    reports_trials(jobs, task(run, 0), "succeeded", "errored", reward=0.5)
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.SUCCEEDED
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.ERRORED: 1}
+
+
+async def test_a_job_that_stops_reporting_trials_keeps_the_last_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running")
+    await harness.cycle()
+
+    jobs.jobs[task(run, 0)] = jobs.jobs[task(run, 0)].model_copy(update={"status_details": {"trials": "unreadable"}})
+    jobs.finish(task(run, 0), "error")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.FAILED
+    assert member.trial_counts is not None and member.trial_counts.total == 1
 
 
 async def test_finished_tasks_get_one_bundle_then_a_ready_result(harness, harbor_plan, jobs):
@@ -1091,13 +1200,13 @@ async def test_a_result_saved_under_another_job_is_never_used(harness, harbor_pl
         jobs.finish(task(run, 0), "completed")
 
     jobs.script("result", replaced_and_finished)
-    (before,) = await harness.members(run)
     await harness.cycle()
     (member,) = await harness.members(run)
-    assert member.db_version == before.db_version and member.bundle_ref is None  # nothing written this cycle
+    assert member.phase is MemberPhase.FAILED and member.bundle_ref is None
+    assert member.error == "no_result"  # the retained ID cannot read the replacement's result
     await harness.cycle()
     (member,) = await harness.members(run)
-    assert (member.phase, member.error) == (MemberPhase.FAILED, "job_missing")  # the next read sees the new id
+    assert (member.phase, member.error) == (MemberPhase.FAILED, "no_result")
 
 
 async def test_spec_drift_keeps_registered_jobs_and_settles_them_by_their_end_state(harness, harbor_plan, jobs):
@@ -1920,3 +2029,256 @@ async def test_the_jobs_adapter_lists_up_to_100_names_in_one_request(harbor_plan
     assert request.url.path == "/apis/jobs/v2/workspaces/default/jobs"
     assert request.url.params["page_size"] == str(LIST_CHUNK)
     assert json.loads(request.url.params["filter"]) == {"name": {"$in": [*names, "run-gone-task-9"]}}
+
+
+# ---- agent layers ----------------------------------------------------------------------------------------
+
+LAYER_REF = "registry.invalid/default/harbor-agent-1/main@sha256:" + "c" * 64
+WAIT_UNTIL = T0 + timedelta(minutes=30)
+
+
+def layered(plan: TasksetRunPlan) -> TasksetRunPlan:
+    """``plan`` with its tasks waiting for agent layers of install key ``k`` until ``WAIT_UNTIL``."""
+    return plan.model_copy(update={"agent_layers": PlannedAgentLayers(key="k", wait_until=WAIT_UNTIL)})
+
+
+def revision(plan: TasksetRunPlan, index: int) -> tuple[str, str]:
+    provenance = plan.spec.tasks[index].spec.provenance
+    assert provenance is not None
+    return provenance.entity_name, provenance.revision_digest
+
+
+def agent_layer(
+    plan: TasksetRunPlan, index: int, status: BuildStatus = "ready", *, expires_at: datetime | None = None
+) -> AgentLayerEntity:
+    task, digest = revision(plan, index)
+    image = BuildImage(type="main", source="dockerfile", status="ready" if status == "ready" else "building")
+    if status == "ready":
+        image.image_ref = LAYER_REF
+        image.builder_image = "harbor-agent-1-1"
+    return AgentLayerEntity(
+        name=f"agent-layer.{index}",
+        workspace="default",
+        task=task,
+        revision_digest=digest,
+        agent_key="k",
+        agent=AgentLayerRequest(name="codex"),
+        attempt=1,
+        status=status,
+        job="agent-layer-build-1",
+        image=image,
+        error="install failed" if status == "failed" else None,
+        environment_digest=image_digest(plan.task_environments[index].agent.image_ref),
+        expires_at=expires_at,
+    )
+
+
+async def test_a_layer_on_another_environment_image_than_the_runs_isnt_used(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    moved = agent_layer(plan, 0).model_copy(update={"environment_digest": "sha256:" + "f" * 64})
+    harness.layers = {revision(plan, 0): moved, revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    members = await harness.members(run)
+    environments = [member_environment(harness.plans[run.name], member) for member in members]
+    assert [environment.agent_preinstalled for environment in environments] == [False, True]
+    assert environments[0].agent == plan.task_environments[0].agent
+
+
+def with_task_network(plan: TasksetRunPlan, index: int, environment: dict[str, Any]) -> TasksetRunPlan:
+    """``plan`` with task ``index``'s ``[environment]`` network settings set to ``environment``."""
+    tasks = list(plan.spec.tasks)
+    spec = tasks[index].spec
+    assert isinstance(spec, ResolvedHarborTaskDefinition)
+    config = {**spec.config, "environment": {**spec.config.get("environment", {}), **environment}}
+    tasks[index] = tasks[index].model_copy(update={"spec": spec.model_copy(update={"config": config})})
+    return plan.model_copy(update={"spec": plan.spec.model_copy(update={"tasks": tasks})})
+
+
+async def test_a_task_whose_setup_network_isnt_public_never_runs_on_a_layer(harness, harbor_plan, jobs):
+    """Not even a ready one built for its revision: a layer installs with more network than its setup gets."""
+    plan = with_task_network(layered(harbor_plan), 0, {"network_mode": "no-network"})
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0), revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    members = await harness.members(run)
+    environments = [member_environment(harness.plans[run.name], member) for member in members]
+    assert [environment.agent_preinstalled for environment in environments] == [False, True]
+    assert environments[0].agent == plan.task_environments[0].agent
+
+
+async def test_tasks_wait_for_their_agent_layers_then_run_on_them(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running"), revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    # Task 1's layer is ready: it runs on it. Task 0's is still building: it waits, holding no slot and no Job.
+    assert await harness.phases(run) == ["image_preparing", "registered"]
+    assert [r.name for r in jobs.created] == [task(run, 1)]
+    harness.layers[revision(plan, 0)] = agent_layer(plan, 0)
+    await harness.cycle()
+    assert await harness.phases(run) == ["registered", "registered"]
+    members = await harness.members(run)
+    for member, request in zip(members, sorted(jobs.created, key=lambda r: r.name or ""), strict=True):
+        environment = member_environment(harness.plans[run.name], member)
+        assert environment.agent.image_ref == LAYER_REF and environment.agent_preinstalled
+        assert environment.verifier == plan.task_environments[member.task_index].verifier
+        assert request == await task_job_request(harness.plans[run.name], run, member.task_index, environment)
+        assert request.spec["environment"]["agent_preinstalled"] is True
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, "failed", "expired"],
+    ids=["no-layer", "failed-layer", "expired-layer"],
+)
+async def test_a_task_without_a_usable_layer_runs_on_its_own_image(harness, harbor_plan, jobs, answer):
+    plan = layered(harbor_plan)
+    if answer == "failed":
+        harness.layers = {revision(plan, 0): agent_layer(plan, 0, "failed")}
+    elif answer == "expired":
+        harness.layers = {revision(plan, 0): agent_layer(plan, 0, expires_at=T0)}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.REGISTERED and member.agent_layer is None
+    assert jobs.created == [await harness.request(run, 0)]
+
+
+async def test_a_layer_still_building_at_the_wait_deadline_is_given_up(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running")}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    assert await harness.phases(run) == ["image_preparing"]
+    await harness.cycle(at=WAIT_UNTIL)
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.REGISTERED and member.agent_layer is None
+
+
+async def test_a_failed_layer_read_keeps_the_task_waiting_until_the_deadline(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): InternalServerError(httpx.Response(500, json={"detail": "entities down"}))}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    await harness.cycle()
+    assert await harness.phases(run) == ["image_preparing"] and jobs.created == []
+    await harness.cycle(at=WAIT_UNTIL)
+    assert await harness.phases(run) == ["registered"]
+
+
+async def test_tasks_of_one_revision_read_its_layer_once_a_cycle(harness, harbor_plan, jobs):
+    plan = layered(sized(harbor_plan, 3))
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running")}
+    await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    assert harness.layer_reads == [(*revision(plan, 0), "k")]
+
+
+async def test_a_run_stopped_while_its_tasks_wait_for_layers_settles_them(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, i): agent_layer(plan, i, "running") for i in range(2)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    await harness.cancel(run, at=harness.clock.now)
+    await harness.cycle()
+    members = await harness.members(run)
+    assert [m.phase for m in members] == [MemberPhase.CANCELLED, MemberPhase.CANCELLED]
+    assert all(m.error == "run cancelled before it started" for m in members)
+    assert jobs.created == []
+    assert (await harness.run(run)).phase is TasksetRunPhase.CANCELLED
+
+
+async def test_stalled_detection_uses_current_attempt_without_changing_job_wide_steps():
+    from datetime import timedelta
+
+    from nemo_evals.taskset_runs.controller import STALLED_CREATE_SECONDS, _stalled
+
+    jobs = FakeRunJobs()
+    request = CreateHelixJobRequest(
+        name="bundle-history",
+        source="test",
+        spec={},
+        platform_spec={"steps": [{"name": "run", "executor": {"provider": "cpu", "container": {"image": "test"}}}]},
+    )
+    job = jobs.put(request, "created")
+    assert job.attempt_id is not None
+    jobs.stepless_attempts.add(job.attempt_id)
+    assert await jobs.has_job_steps(job.id)
+    assert await _stalled(job, jobs, job.created_at + timedelta(seconds=STALLED_CREATE_SECONDS + 1))
+
+
+@pytest.mark.parametrize("outcome", ["history", "missing_job", "missing_attempt", "forbidden"])
+async def test_job_step_lookup_uses_only_id_and_preserves_attempt_history(harbor_plan, harbor_run, outcome):
+    fake = FakeRunJobs()
+    body = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    job = fake.put(body, "created")
+    from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobStepWithContext
+
+    seen: list[str] = []
+
+    def page(data):
+        return {
+            "data": data,
+            "pagination": {
+                "page": 1,
+                "page_size": 100,
+                "current_page_size": len(data),
+                "total_pages": 1,
+                "total_results": len(data),
+            },
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        root = f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/attempts"
+        assert request.url.path.startswith(root)
+        if request.url.path == root:
+            if outcome in {"missing_job", "forbidden"}:
+                return httpx.Response(404 if outcome == "missing_job" else 403, json={"detail": outcome})
+            attempts = [
+                HelixJobAttemptResponse(
+                    id=identifier,
+                    name=identifier,
+                    job=job.id,
+                    workspace="default",
+                    seq=seq,
+                    platform_spec=job.platform_spec,
+                    status=job.status,
+                    created_at=T0,
+                    updated_at=T0,
+                ).model_dump(mode="json")
+                for seq, identifier in enumerate(["current-attempt", "older-attempt"])
+            ]
+            return httpx.Response(200, json=page(attempts))
+        assert request.url.params["page_size"] == "1"
+        if outcome == "missing_attempt":
+            return httpx.Response(404, json={"detail": "Attempt disappeared"})
+        if request.url.path == root + "/current-attempt/steps":
+            return httpx.Response(200, json=page([]))
+        assert request.url.path == root + "/older-attempt/steps"
+        step = HelixJobStepWithContext(
+            id="step-original",
+            name="run",
+            job=job.name,
+            job_id=job.id,
+            fileset=job.fileset,
+            attempt_id="older-attempt",
+            workspace="default",
+            created_at=T0,
+            updated_at=T0,
+        )
+        return httpx.Response(200, json=page([step.model_dump(mode="json")]))
+
+    async with AsyncNemoClient(
+        base_url="http://platform.test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as client:
+        jobs = JobsServiceRunJobs(client, None, "default")
+        if outcome in {"missing_attempt", "forbidden"}:
+            with pytest.raises(NotFoundError if outcome == "missing_attempt" else PermissionDeniedError):
+                await jobs.has_job_steps(job.id)
+        else:
+            assert await jobs.has_job_steps(job.id) is (outcome == "history")
+    assert seen
+    assert all(f"/jobs/{job.id}/attempts" in path for path in seen)

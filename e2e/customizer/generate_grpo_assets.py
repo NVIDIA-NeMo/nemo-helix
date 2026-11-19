@@ -9,8 +9,10 @@ Writes these formats under ``<generation.output_dir>/``:
   Its config sets ``should_use_judge: false``, so the reward is ``math-verify`` alone.
 - ``grpo_math_env_native/``: the same server as a ``native-v1`` tree, installed from an index.
 - ``grpo_math_env_native_ref/``: ``native-v1`` reference-only, resolved to the image's built-in.
-- ``grpo_ascii_tree_env/`` and ``grpo_ascii_tree_smoke/``: Prime Intellect ``ascii-tree``
+- ``grpo_deepscaler_env/`` and ``grpo_deepscaler_smoke/``: Prime Intellect ``deepscaler-math``
   converted by ``pi-to-gym-conversion`` into an ``adapter-wheels-v1`` package and its dataset.
+  ``ascii-tree`` is not used: its current release requires Python <3.13, and resolving it
+  with ``verifiers`` 0.3.1 pulls a ``prime-sandboxes`` that rejects the lock's ``connectrpc``.
 - ``grpo_math_smoke/``: DAPO-Math-17k Gym rows, a few train and holdout prompts.
 - ``grpo_math_uplift/``: the same, with enough prompts for a measurable reward increase.
 
@@ -22,8 +24,8 @@ the training image runs. All three come from NeMo-RL at the ``NEMO_RL_REF`` that
     PYTHONPATH=. uv run --frozen python e2e/customizer/generate_grpo_assets.py
 
 Needs internet: it clones NeMo-RL at the pin, resolves the wheel closures, fetches the hub
-environment, and downloads the DAPO-Math datasets from Hugging Face. ``--rl-dir`` reuses a
-NeMo-RL checkout already at the pin.
+environment, and downloads the datasets from Hugging Face. ``--rl-dir`` reuses a NeMo-RL
+checkout already at the pin.
 
 The environments are not published to S3: CI builds them with ``--env-only`` from the checkout
 it tests, so a pin bump cannot leave them stale. The DAPO-Math datasets are published.
@@ -45,14 +47,15 @@ logger = logging.getLogger(__name__)
 ENV_FORMAT = "grpo_math_env"
 NATIVE_ENV_FORMAT = "grpo_math_env_native"
 NATIVE_REF_ENV_FORMAT = "grpo_math_env_native_ref"
-ADAPTER_ENV_FORMAT = "grpo_ascii_tree_env"
-ADAPTER_SMOKE_FORMAT = "grpo_ascii_tree_smoke"
+ADAPTER_ENV_FORMAT = "grpo_deepscaler_env"
+ADAPTER_SMOKE_FORMAT = "grpo_deepscaler_smoke"
 SMOKE_FORMAT = "grpo_math_smoke"
 UPLIFT_FORMAT = "grpo_math_uplift"
 GYM_SERVER = "resources_servers/math_with_judge"
 GYM_SUBMODULE = "3rdparty/Gym-workspace/Gym"
-ADAPTER_HUB_ID = "primeintellect/ascii-tree"
-# Pinned: a later release can narrow Requires-Python past the training image's.
+ADAPTER_HUB_ID = "primeintellect/deepscaler-math"
+# Pinned: a later release can narrow Requires-Python past the training image's, as
+# ascii-tree 0.1.6 and acereason-math 0.1.4 did. 0.1.5 declares none.
 ADAPTER_HUB_VERSION = "0.1.5"
 
 
@@ -87,8 +90,8 @@ def main() -> int:
         rl_dir = args.rl_dir.resolve() if args.rl_dir else _clone_rl(platform_dir, Path(tmp) / "RL")
         gym_root = rl_dir / GYM_SUBMODULE
         # The packagers pip-install into the interpreter that runs them, so they get their own
-        # environment instead of the platform venv the tests run in. It carries the conversion
-        # extra (verifiers) as well.
+        # environment instead of the platform venv the tests run in. The conversion extra
+        # supplies pip for the wheels build and verifiers for the hub dataset materialization.
         tools = Path(tmp) / "conversion-venv" / "bin"
         _run(["uv", "sync", "--frozen", "--package", "nhx-rl", "--extra", "conversion"], cwd=platform_dir,
              env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(tools.parent)})  # fmt: skip

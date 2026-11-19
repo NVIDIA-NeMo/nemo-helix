@@ -204,7 +204,7 @@ def _capture_without_thread(monkeypatch, chunks):
         calls.append(size)
         return next(chunks, b"")
 
-    monkeypatch.setattr(runtime.os, "read", read)
+    monkeypatch.setattr(runtime, "os_read", read)
     return capture, calls
 
 
@@ -258,9 +258,9 @@ def test_failed_reader_restores_host_fd_and_closes_pipe(monkeypatch):
     def broken_select(*args):
         raise OSError("reader unavailable")
 
-    monkeypatch.setattr(runtime.select, "select", broken_select)
-    monkeypatch.setattr(runtime.os, "dup2", lambda source, target: restored.append((source, target)))
-    monkeypatch.setattr(runtime.os, "close", closed.append)
+    monkeypatch.setattr(runtime, "select", broken_select)
+    monkeypatch.setattr(runtime, "os_dup2", lambda source, target: restored.append((source, target)))
+    monkeypatch.setattr(runtime, "os_close", closed.append)
 
     capture._run()
 

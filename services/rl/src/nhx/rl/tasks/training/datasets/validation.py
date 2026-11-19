@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # jsonschema.validate() recompiles the schema on every call. Compile once and reuse.
 _VALIDATE_PROGRESS_INTERVAL = 10_000
+_IMAGE_PART_TYPES = frozenset({"image_url", "image", "input_image"})
 
 
 def _compile_validator(schema: dict[str, Any]) -> Validator:
@@ -177,6 +178,7 @@ class DatasetValidator:
         finetuning_type: Optional[FinetuningType] = None,
         *,
         prompt_template: str | None = None,
+        reject_multimodal: bool = False,
     ):
         """Initialize validator with training configuration.
 
@@ -184,10 +186,16 @@ class DatasetValidator:
             training_type: The type of training (DPO, etc.)
             finetuning_type: Optional finetuning type (LoRA, all_weights, etc.)
             prompt_template: Optional prompt template for datasets
+            reject_multimodal: Reject a DPO row that contains an image part.
+                Set for a vision checkpoint. A chat-only preference file still passes.
         """
         self.training_type = training_type
         self.finetuning_type = finetuning_type
         self.prompt_template = prompt_template
+        self.reject_multimodal = reject_multimodal
+        # Widest image-part count across files this validator has read. Callers that
+        # need it (the vLLM per-prompt image limit) reuse this instead of scanning again.
+        self.max_images_per_prompt = 0
 
     def _validate_json_object(self, obj: dict, validator: Validator) -> None:
         """Validate a JSON object against a compiled JSON Schema validator.
@@ -313,6 +321,11 @@ class DatasetValidator:
             # Reject files that mix multiple DPO schemas: detect_dpo_schema_name()
             # later selects one concrete loader from the first row, so a mixed
             # file would silently be handed to the wrong NeMo-RL dataset class.
+            if is_dpo and self.reject_multimodal and _count_image_parts(obj) > 0:
+                raise DatasetFormatError(
+                    f"{source} line {line_number} contains an image. DPO on a vision "
+                    "checkpoint accepts a chat-only preference dataset."
+                )
             if is_dpo:
                 row_schema = get_preference_dataset_discriminator(obj)
                 if expected_dpo_schema is None:
@@ -322,13 +335,13 @@ class DatasetValidator:
                         f"{source} mixes DPO dataset schemas: expected {expected_dpo_schema}, "
                         f"got {row_schema} on line {line_number}"
                     )
-
             try:
                 self._validate_json_object(obj, validator)
             except Exception as e:
                 logger.debug(f"{source}:{line_number} does not conform to the expected schema: {e}")
                 raise DatasetFormatError(f"{source} line {line_number} does not conform to the expected schema: {e}")
             validated_rows += 1
+            self.max_images_per_prompt = max(self.max_images_per_prompt, _count_prompt_images(obj))
             if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
                 logger.info("Validated %s rows in %s", validated_rows, source)
 
@@ -337,6 +350,32 @@ class DatasetValidator:
             raise DatasetFormatError(f"{source} has no non-empty rows to validate")
         logger.info("Validated %s rows in %s", validated_rows, source)
         return validated_rows
+
+
+def _count_prompt_images(row: Any) -> int:
+    """Image parts in the Gym prompt. ``info`` and the rest of the row are metadata."""
+    if not isinstance(row, dict):
+        return 0
+    params = row.get("responses_create_params")
+    if not isinstance(params, dict):
+        return 0
+    prompt_images = _count_image_parts(params.get("input"))
+    # A tool can hand the model another image on a later turn. The prompt image
+    # is still in that turn's context, so the vLLM cap has to cover both.
+    tool_images = row.get("tool_images", 0)
+    if type(tool_images) is int and tool_images > 0:
+        return prompt_images + tool_images
+    return prompt_images
+
+
+def _count_image_parts(value: Any) -> int:
+    if isinstance(value, dict):
+        part_type = value.get("type")
+        here = 1 if isinstance(part_type, str) and part_type in _IMAGE_PART_TYPES else 0
+        return here + sum(_count_image_parts(child) for child in value.values())
+    if isinstance(value, list):
+        return sum(_count_image_parts(child) for child in value)
+    return 0
 
 
 def _first_nonempty_line(file_path: str | Path) -> str | None:

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 import httpx
+from httpx import AsyncClient, Client
 from nemo_helix_plugin.client.auth import AsyncClientTokenProvider, AsyncClientTokenProviderAdapter
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
@@ -259,7 +260,7 @@ def build_nemo_client(
         access_token=access_token,
         extra_headers=extra_headers,
     )
-    http_client = httpx.Client(
+    http_client = Client(
         timeout=resolved_timeout,
         follow_redirects=True,
         verify=bootstrap_context.client_verify,
@@ -302,7 +303,7 @@ def build_async_nemo_client(
         extra_headers=extra_headers,
     )
     if bootstrap_requires_discovery_client(bootstrap_context):
-        http_client = httpx.AsyncClient(
+        http_client = AsyncClient(
             timeout=resolved_timeout,
             follow_redirects=True,
             verify=bootstrap_context.client_verify,
@@ -315,7 +316,7 @@ def build_async_nemo_client(
         resolved_workspace = bootstrap_context.resolved.workspace
     else:
         bootstrap = resolve_bootstrap_without_discovery(bootstrap_context)
-        http_client = httpx.AsyncClient(
+        http_client = AsyncClient(
             timeout=resolved_timeout,
             follow_redirects=True,
             verify=bootstrap.client_verify,
@@ -353,7 +354,7 @@ def build_direct_nemo_client(
     saved cluster certificate authority.
     """
     resolved_timeout = resolve_timeout(timeout)
-    http_client = httpx.Client(
+    http_client = Client(
         timeout=resolved_timeout,
         follow_redirects=True,
         verify=client_verify_from_env(certificate_authority),
@@ -380,7 +381,7 @@ def build_direct_async_nemo_client(
 ) -> AsyncNemoClient:
     """Async twin of :func:`build_direct_nemo_client`."""
     resolved_timeout = resolve_timeout(timeout)
-    http_client = httpx.AsyncClient(
+    http_client = AsyncClient(
         timeout=resolved_timeout,
         follow_redirects=True,
         verify=client_verify_from_env(certificate_authority),

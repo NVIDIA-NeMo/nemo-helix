@@ -29,6 +29,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from collections.abc import Sequence
@@ -47,11 +48,13 @@ from nemo_helix_plugin.intake.types import (
     EvaluatorResultDataType,
 )
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from nhx_evals_sdk.values.otlp import (
     fill_missing_root_end_time,
     fill_missing_start_times,
+    root_span,
     root_span_id,
     set_root_span_attributes,
     set_root_span_error,
@@ -59,6 +62,7 @@ from nhx_evals_sdk.values.otlp import (
 )
 from nhx_evals_sdk.values.protocol import OUTPUT_DETAIL
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 from pydantic import RootModel
 
@@ -78,6 +82,14 @@ DEFAULT_AGENT_VERSION = "unknown"
 SESSION_ID_ATTRIBUTE = "gen_ai.conversation.id"
 EVALUATION_NAME_ATTRIBUTE = "nemo.evaluation.name"
 TEST_CASE_NAME_ATTRIBUTE = "nemo.test_case.name"
+
+# The GenAI attribute keys Intake's catalog reads an agent's identity back from: a trace's
+# agent comes from the root span's ``gen_ai.agent.name`` (``filter[agent_name]`` resolves through
+# it), its version from ``gen_ai.agent.version``, and its model from the request-model key that
+# the ATIF path already maps ``agent.model_name`` onto.
+AGENT_NAME_ATTRIBUTE = "gen_ai.agent.name"
+AGENT_VERSION_ATTRIBUTE = "gen_ai.agent.version"
+MODEL_NAME_ATTRIBUTE = "gen_ai.request.model"
 
 
 def session_id_for(run_id: str, trial_id: str) -> str:
@@ -173,6 +185,10 @@ async def otlp_ingest_for_trial(
     measurements: TrialMeasurements,
     started_at: datetime,
     usage_superseded: bool = False,
+    agent_name: str | None = None,
+    agent_version: str = DEFAULT_AGENT_VERSION,
+    model_name: str | None = None,
+    task: AgentEvalTask | None = None,
 ) -> tuple[bytes, str] | None:
     """Return the trial's OTLP payload stamped with evaluation identity, and its root span id.
 
@@ -186,10 +202,23 @@ async def otlp_ingest_for_trial(
     rollup does not read 0 for a run whose duration is known. ``usage_superseded`` marks the root as a trace whose
     model calls the Inference Gateway recorded in the session (``USAGE_SUPERSEDED_ATTRIBUTE``).
 
-    Identity is written onto spans rather than resource attributes because Intake merges the
+    Nested agents retain their own attribution. Explicit root payloads win over the recorded task instruction and retained
+    final answer. Descendant outputs are never promoted to a trial answer.
+
+    Evaluation identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
     would otherwise win, and the session id is what Intake's ``ReplacingMergeTree`` is keyed on,
     so a re-publish would insert duplicates instead of replacing.
+
+    The caller's agent and model identity (``agent_name``/``agent_version``/``model_name``) is
+    stamped onto the published root span alone, the same identity the ATIF path writes onto its
+    agent block. ``agent_name=None`` and an empty name both keep the producer's
+    ``gen_ai.agent.name``: an empty string is not a name, and Intake treats one as no agent at
+    all. A version left at ``DEFAULT_AGENT_VERSION`` keeps the producer's ``gen_ai.agent.version``,
+    so a trace that already knows who ran it is not relabelled with defaults. Child spans keep
+    whatever identity they recorded. The messages are stamped on the export envelope's copy: the
+    evidence handle caches what it parsed, and a later reader of that cache must see the trace as
+    the producer wrote it.
     """
     evidence = trial.evidence
     if evidence is None:
@@ -199,10 +228,14 @@ async def otlp_ingest_for_trial(
     except KeyError:
         return None
     try:
-        resource_spans = await handle.resource_spans()
+        cached = await handle.resource_spans()
     except (OSError, ValueError) as error:
         logger.warning("Ignoring unreadable OTLP trace for trial %s: %s", trial.id, error)
         return None
+    # The handle returns its cached messages. The export envelope copies that repeated field,
+    # so stamping the request's spans leaves the cached read untouched.
+    request = ExportTraceServiceRequest(resource_spans=cached)
+    resource_spans = list(request.resource_spans)
 
     span_id = root_span_id(resource_spans)
     if span_id is None:
@@ -211,6 +244,7 @@ async def otlp_ingest_for_trial(
         )
         return None
 
+    _enrich_trial_boundary(resource_spans, trial=trial, task=task)
     set_span_attributes(
         resource_spans,
         {
@@ -225,11 +259,15 @@ async def otlp_ingest_for_trial(
     )
     if trial.error is not None:
         set_root_span_error(resource_spans, message=trial.error.message)
+    set_root_span_attributes(
+        resource_spans,
+        _caller_identity(agent_name=agent_name, agent_version=agent_version, model_name=model_name),
+    )
     fill_missing_start_times(resource_spans, start_time_unix_nano=int(started_at.timestamp() * 1_000_000_000))
     if measurements.runtime_sec is not None:
         fill_missing_root_end_time(resource_spans, duration_unix_nano=int(measurements.runtime_sec * 1_000_000_000))
-    # The Export RPC envelope goes on only here, at the point these actually cross a wire.
-    return ExportTraceServiceRequest(resource_spans=resource_spans).SerializeToString(), span_id
+    # The envelope was built above, before the stamp, so this is the copy that crosses the wire.
+    return request.SerializeToString(), span_id
 
 
 class OtlpSpanTooLargeError(ValueError):
@@ -372,6 +410,228 @@ def _varint_size(value: int) -> int:
     return size
 
 
+def _caller_identity(*, agent_name: str | None, agent_version: str, model_name: str | None) -> dict[str, str]:
+    """The caller-supplied identity that overrides the producer's, stamped on the root span alone.
+
+    ``agent_name=None`` and ``model_name=None`` keep the producer's recorded values: the caller
+    passed nothing that should replace them. An empty string is not a name either. Stamping it
+    would publish a blank, and Intake reads a blank agent name as no agent at all. An explicit
+    name always overrides — including ``publish_to_intake``'s ``"agent"`` default, which is a
+    name, not an omission. A version left at ``DEFAULT_AGENT_VERSION`` keeps the producer's
+    version, matching the ATIF path's treatment of a trajectory's own ``agent.version``.
+    """
+    identity: dict[str, str] = {}
+    if agent_name:
+        identity[AGENT_NAME_ATTRIBUTE] = agent_name
+    if agent_version != DEFAULT_AGENT_VERSION:
+        identity[AGENT_VERSION_ATTRIBUTE] = agent_version
+    if model_name:
+        identity[MODEL_NAME_ATTRIBUTE] = model_name
+    return identity
+
+
+def _boundary_kind(attributes: dict[str, AnyValue]) -> str:
+    """Recognize payload-bearing kinds with the same standard-before-native precedence as Intake."""
+    recorded_kind = attributes.get("openinference.span.kind", AnyValue())
+    kind = recorded_kind.string_value.upper()
+    kind_missing = recorded_kind.WhichOneof("value") is None or (
+        (recorded_kind.WhichOneof("value") == "string_value" and not kind)
+        or (recorded_kind.WhichOneof("value") == "bytes_value" and not recorded_kind.bytes_value)
+    )
+    known = {"LLM", "AGENT", "TOOL", "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL", "EVALUATOR"}
+    if kind in known:
+        return kind
+    operation = attributes.get("gen_ai.operation.name", AnyValue()).string_value
+    operations = {
+        "chat": "LLM",
+        "generate_content": "LLM",
+        "text_completion": "LLM",
+        "embeddings": "EMBEDDING",
+        "invoke_agent": "AGENT",
+    }
+    if operation in operations:
+        return operations[operation]
+    if kind_missing and "gen_ai.operation.name" not in attributes:
+        scope = attributes.get("nemo_relay.scope_type", AnyValue()).string_value
+        return {
+            "agent": "AGENT",
+            "function": "CHAIN",
+            "tool": "TOOL",
+            "llm": "LLM",
+            "retriever": "RETRIEVER",
+            "embedder": "EMBEDDING",
+            "reranker": "RERANKER",
+            "guardrail": "GUARDRAIL",
+            "evaluator": "EVALUATOR",
+        }.get(scope, "UNKNOWN")
+    return "UNKNOWN"
+
+
+def _has_agent_ancestor(span: Span, *, root: Span, by_id: dict[bytes, tuple[Span, dict[str, AnyValue]]]) -> bool:
+    """Exclude internal agent layers below the invocation's topmost agent layer."""
+    parent = bytes(span.parent_span_id)
+    visited = {bytes(root.span_id)}
+    while parent and parent not in visited and parent in by_id:
+        visited.add(parent)
+        ancestor, resource_attrs = by_id[parent]
+        attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in ancestor.attributes}}
+        if _boundary_kind(attrs) == "AGENT":
+            return True
+        parent = bytes(ancestor.parent_span_id)
+    return False
+
+
+def _native_agent_input(attributes: dict[str, AnyValue]) -> AnyValue | None:
+    """Retain an exact native scalar or reconstruct its recorded top-level projection."""
+    prefix = "nemo_relay.start.input"
+    if prefix in attributes:
+        return attributes[prefix] if attributes[prefix].WhichOneof("value") is not None else None
+    payload: dict[str, object] = {}
+    for key, attribute in attributes.items():
+        if not key.startswith(prefix + "."):
+            continue
+        field = attribute.WhichOneof("value")
+        if field not in {"string_value", "bool_value", "int_value", "double_value"}:
+            return None
+        value = getattr(attribute, field)
+        if isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+            try:
+                value = json.loads(value)
+            except (ValueError, RecursionError):
+                pass
+        payload[key.removeprefix(prefix + ".")] = value
+    if not payload:
+        return None
+    try:
+        return AnyValue(string_value=json.dumps(payload, separators=(",", ":"), allow_nan=False, sort_keys=True))
+    except (ValueError, RecursionError):
+        return None
+
+
+def _has_boundary_payload(
+    attributes: dict[str, AnyValue], *, kind: str, direction: str, aliases: tuple[str, ...]
+) -> bool:
+    """Check one payload layer, as Intake does, without borrowing a native scope from another layer."""
+    if any(key in attributes and attributes[key].WhichOneof("value") is not None for key in aliases):
+        return True
+    if kind == "LLM" and any(
+        key.startswith(f"llm.{direction}_messages.")
+        and key.removeprefix(f"llm.{direction}_messages.").partition(".message.")[0].isdigit()
+        and ".message." in key
+        for key in attributes
+    ):
+        return True
+    if "nemo_relay.scope_type" not in attributes:
+        return False
+    prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+    if prefix in attributes:
+        return attributes[prefix].WhichOneof("value") is not None
+    return any(key.startswith(prefix + ".") for key in attributes)
+
+
+def _enrich_trial_boundary(
+    resource_spans: list[ResourceSpans],
+    *,
+    trial: AgentEvalTrial,
+    task: AgentEvalTask | None,
+) -> None:
+    """Preserve recorded roots, recover task input/final answer, otherwise diagnose unknown.
+
+    Descendant output is never a final-answer fallback. Input recovery from descendants
+    requires an explicitly recorded invoke_agent wrapper and agreeing topmost agent inputs;
+    internal nested agents are not task boundaries. Empty task/retained strings are missing,
+    but explicitly recorded root payloads (including empty strings) are preserved.
+    """
+    spans = [
+        (span, {attribute.key: attribute.value for attribute in resource.resource.attributes})
+        for resource in resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+    ]
+    root = root_span(resource_spans)
+    if root is None:
+        return
+    resource_attributes = next(attrs for span, attrs in spans if span is root)
+    root_span_attributes = {attribute.key: attribute.value for attribute in root.attributes}
+    root_attributes = {**resource_attributes, **root_span_attributes}
+    # Follow actual parent links, rather than treating unrelated spans as descendants.
+    connected = {bytes(root.span_id)}
+    while True:
+        children = {
+            bytes(span.span_id)
+            for span, _ in spans
+            if span.trace_id == root.trace_id and bytes(span.parent_span_id) in connected
+        }
+        if children <= connected:
+            break
+        connected.update(children)
+
+    by_id = {bytes(span.span_id): (span, attrs) for span, attrs in spans if span.trace_id == root.trace_id}
+    root_kind = _boundary_kind(root_attributes)
+    instruction = task.inputs.get("instruction") if task is not None else None
+    output = trial.output.output_text if trial.output is not None else None
+    for direction, authoritative, aliases in (
+        (
+            "input",
+            instruction,
+            ("input.value", "gen_ai.input.messages", "gen_ai.tool.call.arguments", "tool_arguments"),
+        ),
+        (
+            "output",
+            output,
+            ("output.value", "gen_ai.output.messages", "final_result", "gen_ai.tool.call.result", "tool_response"),
+        ),
+    ):
+        if any(
+            _has_boundary_payload(layer, kind=root_kind, direction=direction, aliases=aliases)
+            for layer in (root_span_attributes, resource_attributes)
+        ):
+            continue
+        value = AnyValue(string_value=authoritative) if isinstance(authoritative, str) and authoritative else None
+        source = "task.instruction" if direction == "input" else "trial.output"
+        if (
+            value is None
+            and direction == "input"
+            and root_attributes.get("gen_ai.operation.name", AnyValue()).string_value == "invoke_agent"
+        ):
+            candidates: dict[bytes, AnyValue] = {}
+            missing_candidate = False
+            for span, resource_attrs in spans:
+                if span is root or span.trace_id != root.trace_id or bytes(span.span_id) not in connected:
+                    continue
+                attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in span.attributes}}
+                if _boundary_kind(attrs) != "AGENT" or _has_agent_ancestor(span, root=root, by_id=by_id):
+                    continue
+                recorded = {attribute.key: attribute.value for attribute in span.attributes}
+                candidate = next(
+                    (
+                        recorded[key]
+                        for key in aliases
+                        if key in recorded and recorded[key].WhichOneof("value") is not None
+                    ),
+                    None,
+                )
+                if candidate is None and recorded.get("nemo_relay.scope_type", AnyValue()).string_value == "agent":
+                    candidate = _native_agent_input(recorded)
+                if candidate is not None:
+                    candidates[candidate.SerializeToString(deterministic=True)] = candidate
+                else:
+                    missing_candidate = True
+            if len(candidates) == 1 and not missing_candidate:
+                value = next(iter(candidates.values()))
+                source = "unambiguous_descendant"
+            else:
+                source = "unknown:ambiguous_descendants" if candidates else "unknown:not_recorded"
+        if value is None:
+            if not source.startswith("unknown:"):
+                source = "unknown:not_recorded"
+            logger.warning("Trial %s %s boundary %s", trial.id, direction, source)
+        if value is not None:
+            attribute = root.attributes.add(key=f"{direction}.value")
+            attribute.value.CopyFrom(value)
+        set_root_span_attributes(resource_spans, {f"nemo.evaluation.boundary.{direction}": source})
+
+
 def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dict[str, str | int | float]:
     """The trial-level totals and error that ATIF conveyed outside the step list."""
     # Read as numbers by Intake. ATIF carried these as ``final_metrics``; under OTLP they go on
@@ -380,6 +640,7 @@ def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dic
     for value, attribute in (
         (measurements.prompt_tokens, "gen_ai.usage.input_tokens"),
         (measurements.completion_tokens, "gen_ai.usage.output_tokens"),
+        (measurements.total_tokens, "gen_ai.usage.total_tokens"),
         (measurements.cache_read_tokens, "gen_ai.usage.cached_tokens"),
         (measurements.cost_usd, "gen_ai.usage.cost"),
     ):

@@ -3,10 +3,10 @@
 
 import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
-import { EntityIdentifier } from '@studio/api/common/types';
+import type { EntityIdentifier } from '@studio/api/common/types';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { GITKEEP_FILENAME } from '@studio/components/FilesTable/utils';
-import { UseMutationOptions, useMutation } from '@tanstack/react-query';
+import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 export interface CreateDirectoryParams extends Required<EntityIdentifier> {
   /** Folder name to create (should not contain slashes) */

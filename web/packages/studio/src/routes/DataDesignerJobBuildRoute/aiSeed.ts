@@ -6,9 +6,9 @@ import type {
   CreateJobRequest as DataDesignerJobRequest,
   ModelConfig,
 } from '@nemo/sdk/generated/data-designer/schema';
+import { addMissingAliasConfigs } from '@studio/components/NewDataDesignerJobForm/utils';
 import {
   buildColumnsFromConfig,
-  MODEL_ALIAS_KEY,
   validateColumns,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import {
@@ -126,16 +126,6 @@ const skippedColumnLabels = (
     .map((column) => `${column.name} (${column.column_type})`);
 };
 
-/** LLM columns pointing at a `model_alias` that no model config defines. */
-const danglingAliasErrors = (seed: JobBuilderSeed): string[] => {
-  const aliases = new Set(seed.models.map((model) => model.alias.trim()));
-  return seed.columns.flatMap((column) => {
-    const alias = column.values[MODEL_ALIAS_KEY]?.trim();
-    if (!alias || aliases.has(alias)) return [];
-    return [`${column.name}: no model is configured with alias "${alias}".`];
-  });
-};
-
 /**
  * Decides whether an LLM-generated job request can be loaded into the build route, by running
  * it through the exact conversion and validation the builder itself uses. Anything that would
@@ -167,7 +157,7 @@ export const validateGeneratedJobRequest = (
       config: {
         ...config,
         model_configs: normalizeModelConfigs(
-          config.model_configs ?? [],
+          addMissingAliasConfigs(config.model_configs ?? [], config.columns),
           modelGroups,
           warnings,
           generationModel
@@ -186,9 +176,7 @@ export const validateGeneratedJobRequest = (
   }
 
   const errors =
-    seed.columns.length === 0
-      ? [ERROR_NO_LOADABLE_COLUMNS]
-      : [...validateColumns(seed.columns), ...danglingAliasErrors(seed)];
+    seed.columns.length === 0 ? [ERROR_NO_LOADABLE_COLUMNS] : validateColumns(seed.columns);
   errors.push(...validateModels(seed.models));
 
   if (errors.length > 0) return { status: 'invalid', errors, warnings };

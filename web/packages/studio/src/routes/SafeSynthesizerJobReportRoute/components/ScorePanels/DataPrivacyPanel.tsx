@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { InfoCircle } from '@nemo/icons/icons';
-import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import {
   Badge,
   Flex,
@@ -25,7 +25,7 @@ import {
   isPassingGrade,
 } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
 import { tooltipClassName } from '@studio/styles/common';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface DataPrivacyPanelProps {
   reportSummary?: SafeSynthesizerSummary;

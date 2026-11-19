@@ -5,8 +5,10 @@ import logging
 import math
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.entities.base import ID_PATTERN
 from nhx.common.api.common import ErrorResponse, Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
@@ -69,7 +71,7 @@ def _require_default_ngc_api_key(platform_config: HelixConfig, workspace: str, n
     response_model=schemas.HelixSecretResponse,
 )
 async def create_secret(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=ID_PATTERN)],
     create_request: schemas.HelixSecretCreateRequest,
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
@@ -135,8 +137,7 @@ async def create_secret(
 )
 async def list_secrets(
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=10, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
 ) -> Page[schemas.HelixSecretResponse]:
@@ -145,8 +146,8 @@ async def list_secrets(
         result = await entity_store.list(
             entity_type=HelixSecret,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
         )
         total_results = result.pagination.total_results
         total_pages = result.pagination.total_pages
@@ -156,8 +157,8 @@ async def list_secrets(
         ) and is_default_ngc_api_key_configured(platform_config)
         if include_default_ngc_api_key:
             total_results = result.pagination.total_results + 1
-            total_pages = math.ceil(total_results / page_size) if page_size else 1
-            if page == total_pages:
+            total_pages = math.ceil(total_results / page_params.page_size) if page_params.page_size else 1
+            if page_params.page == total_pages:
                 result.data.append(get_default_ngc_api_key(platform_config))
 
         return Page(
@@ -200,6 +201,7 @@ async def get_secret(
 
 @router.patch(
     "/v2/workspaces/{workspace}/secrets/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
     status_code=status.HTTP_200_OK,
     response_model=schemas.HelixSecretResponse,
 )
@@ -249,7 +251,11 @@ async def update_secret(
         return schemas.HelixSecretResponse.from_entity(updated_secret)
 
 
-@router.delete("/v2/workspaces/{workspace}/secrets/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/v2/workspaces/{workspace}/secrets/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
+)
 async def delete_secret(
     name: str,
     workspace: str,
@@ -265,10 +271,18 @@ async def delete_secret(
                 detail="Cannot delete the default NGC API key secret",
             )
         try:
-            await entity_store.get(HelixSecret, workspace=workspace, name=name)
-        except EntityNotFoundError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Secret {workspace}/{name} not found")
-        await entity_store.delete(HelixSecret, name, workspace=workspace)
+            _delete_target = await entity_store.get(HelixSecret, workspace=workspace, name=name)
+            await entity_store.delete_by_id(
+                HelixSecret, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
+        except EntityNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Secret {workspace}/{name} not found"
+            ) from exc
+        except EntityConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Secret changed during deletion; refresh and retry."
+            ) from exc
 
 
 @router.get(

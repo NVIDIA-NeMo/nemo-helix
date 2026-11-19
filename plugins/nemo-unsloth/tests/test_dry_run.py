@@ -8,6 +8,7 @@ from typing import Any
 
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nhx.customization_common.dry_run import check_local_dataset_rows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 
 
 def _spec(*, apply_chat_template: bool) -> Any:
@@ -19,7 +20,7 @@ def _spec(*, apply_chat_template: bool) -> Any:
 def test_checks_the_training_and_validation_files_of_the_one_fileset(tmp_path: Path) -> None:
     (tmp_path / "train.jsonl").write_text(json.dumps({"text": "t"}) + "\n")
     (tmp_path / "validation.jsonl").write_text(json.dumps({"bad": "row"}) + "\n")
-    [dataset] = UnslothJob._dry_run_datasets(_spec(apply_chat_template=False), "ws")
+    [dataset] = UnslothJob._dry_run_datasets(_spec(apply_chat_template=False), "ws", CheckpointTraits())
 
     assert dataset.fileset == "ws/data"
     check = check_local_dataset_rows(dataset, tmp_path)
@@ -29,7 +30,7 @@ def test_checks_the_training_and_validation_files_of_the_one_fileset(tmp_path: P
 
 def test_chat_template_needs_messages_rows(tmp_path: Path) -> None:
     (tmp_path / "train.jsonl").write_text(json.dumps({"text": "rendered"}) + "\n")
-    [dataset] = UnslothJob._dry_run_datasets(_spec(apply_chat_template=True), "ws")
+    [dataset] = UnslothJob._dry_run_datasets(_spec(apply_chat_template=True), "ws", CheckpointTraits())
 
     check = check_local_dataset_rows(dataset, tmp_path)
     assert not check.passed

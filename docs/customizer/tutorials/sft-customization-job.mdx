@@ -50,7 +50,7 @@ Supervised Fine-Tuning (SFT) customizes model behavior, injects new knowledge, a
 
 **When to choose LoRA:** Refer to the [LoRA tutorial](/documentation/customizer-reference/tutorials/lora-customization-job) for most use cases, especially with large models (30B+) or limited GPU resources.
 
-This tutorial uses [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) so that full SFT fits on a single GPU. Full SFT of Nemotron 3.5 Lightning 30B-A3B needs 8× 80 GB GPUs; see the Automodel reference recipe [`customizer_nemotron_nano_full_sft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml).
+This tutorial uses [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) so that full SFT fits on a single GPU. Full SFT of Nemotron 3.5 Lightning 30B-A3B needs 8× 80 GB GPUs; see the Automodel reference recipe [`customizer_nemotron_nano_full_sft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml).
 
 ## Prerequisites
 
@@ -372,7 +372,7 @@ print(f"ModelSpec populated: {base_model.spec}")
 ```
 
 ### 6. Create SFT Fine-Tuning Job
-Create a customization job to fine-tune all model weights using the **Automodel** backend and `AutomodelJobInput`. The learning rate, weight decay, and micro batch come from the Automodel reference recipe [`qwen3_0p6b_hellaswag.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/qwen/qwen3_0p6b_hellaswag.yaml).
+Create a customization job to fine-tune all model weights using the **Automodel** backend and `AutomodelJobInput`. The learning rate, weight decay, and micro batch come from the Automodel reference recipe [`qwen3_0p6b_hellaswag.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.7.0/examples/llm_finetune/qwen/qwen3_0p6b_hellaswag.yaml).
 
 **GPU Requirements:**
 - 1B models: 1 GPU (24GB+ VRAM)
@@ -497,7 +497,7 @@ The deployment service automatically:
 
 **Multi-GPU Deployment:**
 
-For larger models requiring multiple GPUs, increase `gpu` in `deployment_config`. vLLM computes tensor parallelism from the GPU count and model architecture.
+For larger models requiring multiple GPUs, increase `gpu` in `deployment_config`. vLLM computes tensor parallelism from the GPU count and model architecture. On Kubernetes the model's files download into a `50Gi` volume by default; for a larger model, also set `disk_size` above its size (for example, `"disk_size": "300Gi"`).
 
 **Single-Node Constraint:** Model deployments are limited to a single node. The maximum `gpu` value depends on the total GPUs available on a single node in your cluster. Multi-node deployments are not supported.
 

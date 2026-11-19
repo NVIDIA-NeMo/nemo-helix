@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import TypeVar, cast
 
 import httpx
+from httpx import AsyncClient
 from nemo_evals.jobs.secret_env import JobSecretResolver
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.auth import AsyncClientTokenProvider, AsyncFromSyncTokenProvider
@@ -100,7 +101,7 @@ def async_client_from_sync_client(client: NemoClient) -> Generator[AsyncNemoClie
     Result persistence and Intake publication are async side effects, so they need an async client
     carrying the same platform identity.
     """
-    http_client = httpx.AsyncClient(timeout=client._client.timeout, event_hooks=_sync_event_hooks_as_async(client))
+    http_client = AsyncClient(timeout=client._client.timeout, event_hooks=_sync_event_hooks_as_async(client))
     async_client = AsyncNemoClient(
         base_url=client.base_url,
         workspace=client.workspace,
@@ -138,7 +139,7 @@ def run_with_isolated_async_client(
         event_hooks = {event: list(hooks) for event, hooks in async_client._client.event_hooks.items()}
         # Generated SDK auth refresh is implemented as request hooks; preserve it on the
         # loop-local transport so isolation does not turn authenticated clients anonymous.
-        async with httpx.AsyncClient(timeout=async_client._client.timeout, event_hooks=event_hooks) as http_client:
+        async with AsyncClient(timeout=async_client._client.timeout, event_hooks=event_hooks) as http_client:
             return await fn(async_client.with_http_client(http_client))
 
     return run_sync(_run)

@@ -128,3 +128,21 @@ def update_middleware_config(
 @delete(f"{_MIDDLEWARE_CONFIGS}/{{name}}")
 @abstractmethod
 def delete_middleware_config(*, workspace: str | None = None, name: str) -> None: ...
+
+
+class DeleteByIdQueryParams(TypedDict, total=False):
+    expected_db_version: int
+
+
+@delete("/apis/example/v2/workspaces/{workspace}/items/by-id/{entity_id}")
+@abstractmethod
+def delete_item_by_id(
+    *, workspace: str | None = None, entity_id: str, query_params: DeleteByIdQueryParams | None = None
+) -> None: ...
+
+
+@delete(f"{_MIDDLEWARE_CONFIGS}/by-id/{{entity_id}}")
+@abstractmethod
+def delete_middleware_config_by_id(
+    *, workspace: str | None = None, entity_id: str, query_params: DeleteByIdQueryParams | None = None
+) -> None: ...

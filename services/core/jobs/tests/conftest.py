@@ -273,7 +273,9 @@ def sample_job_dict():
 def mock_files_client():
     """Create a mock AsyncFilesClient for testing."""
     mock_files = AsyncMock()
+    mock_files.with_retry = MagicMock(return_value=mock_files)
     mock_fileset = MagicMock()
+    mock_fileset.id = "fileset-owned-allocation"
     mock_fileset.name = "test-fileset-id"
     mock_response = MagicMock()
     mock_response.data.return_value = mock_fileset

@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import yaml
 from nemoguardrails.colang import parse_colang_file, parse_flow_elements
 from nemoguardrails.exceptions import InvalidRailsConfigurationError
+from nemoguardrails.library.f5.rail_config import F5GuardrailsRailConfig
+from nemoguardrails.manifests import RailDirection, default_rail_catalog, parse_configured_surface
 from nemoguardrails.rails.llm.config import (
     JAILBREAK_FLOW_HEURISTICS,
     JAILBREAK_FLOW_MODEL,
@@ -306,6 +308,18 @@ class LLMCallInfo(LLMCallSummary):
         default="unknown",
         description="The name of the model use for the LLM call.",
     )
+    request_id: Optional[str] = Field(
+        default=None,
+        description="The unique identifier assigned to the request by the downstream model inference service.",
+    )
+    llm_provider_name: Optional[str] = Field(
+        default="unknown",
+        description="The provider of the model used for the LLM call, e.g. 'openai', 'nvidia'.",
+    )
+    from_cache: bool = Field(
+        default=False,
+        description="Whether this response was retrieved from cache.",
+    )
 
 
 class ExecutedAction(Value):
@@ -423,6 +437,16 @@ class GenerationRailsOptions(Value):
         default=True,
         description="Whether the dialog rails are enabled or not.",
     )
+    tool_output: Union[bool, List[str]] = Field(
+        default=True,
+        description="Whether the tool output rails are enabled or not. "
+        "If a list of names is specified, then only the specified tool output rails will be applied.",
+    )
+    tool_input: Union[bool, List[str]] = Field(
+        default=True,
+        description="Whether the tool input rails are enabled or not. "
+        "If a list of names is specified, then only the specified tool input rails will be applied.",
+    )
 
 
 class GenerationLogOptions(Value):
@@ -491,6 +515,8 @@ class GenerationOptions(Value):
                 "dialog": False,
                 "retrieval": False,
                 "output": False,
+                "tool_output": False,
+                "tool_input": False,
             }
             for rail_type in values["rails"]:
                 _rails[rail_type] = True
@@ -583,6 +609,27 @@ class InputRails(Value):
     )
 
 
+_LEGACY_CONTEXT_SIZE = 50
+"""The ``context_size`` default stored on every existing config."""
+
+
+def _output_flows_that_rewrite_response(flows: List[str]) -> List[str]:
+    """The configured output flows whose rail rewrites the response, using the library's own catalog."""
+    surfaces = default_rail_catalog().surfaces()
+    flows_that_rewrite_response = []
+
+    for flow in flows:
+        try:
+            name, _ = parse_configured_surface(flow)
+        except ValueError:
+            continue  # a custom or Colang-defined rail declares no rewrite target
+        surface = surfaces.get((RailDirection.OUTPUT, name))
+        if surface is not None and surface.transform_target is not None:
+            flows_that_rewrite_response.append(flow)
+
+    return flows_that_rewrite_response
+
+
 class OutputRailsStreamingConfig(Value):
     """Configuration for managing streaming output of LLM tokens."""
 
@@ -618,6 +665,55 @@ class OutputRails(Value):
         default_factory=OutputRailsStreamingConfig,
         description="Configuration for streaming output rails.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _relax_legacy_streaming_defaults(cls, values: Any) -> Any:
+        """Ensures configs with an output rail that rewrites the response loads using
+        nemoguardrails 0.24+.
+
+        Every stored config has the default values of ``OutputRailsStreamingConfig`` written into
+        ``rails.output.streaming``: ``enabled=True``, ``stream_first=True``, ``context_size=50``.
+        Entities are saved with their field defaults, so this holds even when the
+        user never manually configured these fields.
+
+        nemoguardrails 0.24 raises ``InvalidRailsConfigurationError`` for ``enabled=True`` together with
+        ``stream_first=True`` or a non-zero ``context_size`` when any output flow rewrites the response
+        (PII masking, injection detection, etc.), because text that was already streamed can't be
+        rewritten. So every stored config with such a flow would fail to load, for streaming and
+        non-streaming requests alike.
+
+        Fix: for a config with ``enabled=True`` and such a flow, set ``stream_first=False`` and change
+        ``context_size`` from 50 to 0, which are the values the library requires. Any other
+        ``context_size`` is kept, so the library still reports it. Stored data is not modified.
+        """
+        if not isinstance(values, dict):
+            return values
+
+        # An absent block means the defaults, which are the legacy ones, so it is repaired too.
+        existing_streaming_config = values.get("streaming") or {}
+        if not isinstance(existing_streaming_config, dict) or not existing_streaming_config.get("enabled", True):
+            return values
+
+        output_flows = _output_flows_that_rewrite_response(values.get("flows") or [])
+        if not output_flows:
+            return values
+
+        relaxed_streaming_config = dict(existing_streaming_config)
+        if relaxed_streaming_config.get("stream_first", True):
+            relaxed_streaming_config["stream_first"] = False
+        if relaxed_streaming_config.get("context_size", _LEGACY_CONTEXT_SIZE) == _LEGACY_CONTEXT_SIZE:
+            relaxed_streaming_config["context_size"] = 0
+        if relaxed_streaming_config == existing_streaming_config:
+            return values
+
+        log.warning(
+            "Output rails %s rewrite the response, so streaming runs with stream_first=false and context_size=0 "
+            "instead of the defaults saved with this config, which nemoguardrails no longer accepts",
+            output_flows,
+        )
+
+        return {**values, "streaming": relaxed_streaming_config}
 
     apply_to_reasoning_traces: Optional[bool] = Field(
         default=False,
@@ -1179,6 +1275,11 @@ class RailsConfigData(Value):
     clavata: Optional[ClavataRailConfig] = Field(
         default=None,
         description="Configuration for Clavata.",
+    )
+
+    f5: Optional[F5GuardrailsRailConfig] = Field(
+        default=None,
+        description="Configuration for F5 Guardrails.",
     )
 
     crowdstrike_aidr: Optional[CrowdStrikeAIDRRailConfig] = Field(

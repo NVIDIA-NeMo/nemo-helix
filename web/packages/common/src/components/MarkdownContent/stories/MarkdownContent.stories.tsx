@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import type { Meta, StoryObj } from '@storybook/react';
-
-import { MarkdownContent } from '..';
 
 const meta = {
   component: MarkdownContent,

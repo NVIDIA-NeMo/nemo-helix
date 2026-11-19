@@ -63,6 +63,10 @@ When a schema or validator changes, update the skill text from these sources. `n
 | Environment validation, converter, `build_policy_model_yaml` | `services/rl/src/nhx/rl/tasks/environment/validate.py`, `convert.py`, `package.py`, `__main__.py` |
 | GRPO example scripts | `scripts/grpo-examples/` |
 
+`tests/test_skill_job_examples.py` runs every job JSON example in both skills, fragments such as
+`"batch": {...}` included, through the backends' `--job-json` validators. When a schema change
+fails it, update the example in the skill.
+
 The JSON files under `plugins/nemo-*/tests/fixtures/` are smoke-test inputs. They set whatever
 makes a test cheap (`max_steps: 20`, a 0.6B model) and cover one path, so never take field sets,
 defaults or recommended values from them, and keep the skills from pointing agents at them.

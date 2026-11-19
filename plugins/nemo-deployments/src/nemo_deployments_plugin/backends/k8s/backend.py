@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
+from types import ModuleType
 from typing import Any
 
 from nemo_deployments_plugin.backends.base import (
@@ -32,6 +34,10 @@ _K8S_INSTALL_HINT = (
 )
 
 
+def _import_kubernetes() -> ModuleType:
+    return importlib.import_module("kubernetes")
+
+
 def _prefer_failed_delete_result(*results: BackendStatusUpdate) -> BackendStatusUpdate:
     for result in results:
         if result.status == "FAILED":
@@ -50,7 +56,7 @@ class K8sDeploymentBackend(DeploymentBackend):
 
     def init(self) -> None:
         try:
-            import kubernetes  # noqa: F401
+            _import_kubernetes()
         except ImportError as exc:
             raise RuntimeError(_K8S_INSTALL_HINT) from exc
 

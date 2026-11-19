@@ -19,6 +19,7 @@ from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.jobs.types import derive_job_fileset_name
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
@@ -148,6 +149,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path, monkey
                 workspace="default",
                 client=ctx.client,
                 attempt_id=job["attempt_id"],
+                fileset_name=derive_job_fileset_name(job["name"], "default"),
             ),
             job_id=job["id"],
             attempt_id=job["attempt_id"],
@@ -258,6 +260,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path, monk
                 workspace="default",
                 client=ctx.client,
                 attempt_id=job["attempt_id"],
+                fileset_name=derive_job_fileset_name(job["name"], "default"),
             ),
             job_id=job["id"],
             attempt_id=job["attempt_id"],

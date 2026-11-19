@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import errno
-import os
 from dataclasses import dataclass
+from os import O_CREAT, O_RDWR, close
+from os import open as os_open
 from pathlib import Path
 
 from ..base import SandboxCreateError
@@ -46,11 +47,11 @@ class _ComposeProjectLock:
             raise SandboxCreateError("DockerComposeSandboxProvider requires POSIX fcntl file locking") from exc
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        fd = os_open(path, O_CREAT | O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
-            os.close(fd)
+            close(fd)
             if exc.errno in {errno.EACCES, errno.EAGAIN}:
                 raise SandboxCreateError(f"Another Compose sandbox holds {path}") from exc
             raise
@@ -67,7 +68,7 @@ class _ComposeProjectLock:
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             try:
-                os.close(fd)
+                close(fd)
             finally:
                 self.fd = None
 

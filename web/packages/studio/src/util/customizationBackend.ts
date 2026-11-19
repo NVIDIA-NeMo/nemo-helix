@@ -74,11 +74,6 @@ export const isUnslothJob = (job: CustomizationJob): job is UnslothJob => isUnsl
 
 export const isRlJob = (job: CustomizationJob): job is RlJob => isRlSpec(job.spec);
 
-export const isDpoJob = (
-  job: CustomizationJob
-): job is RlJob & { spec: RlJobOutput & { training: RlDPOTraining } } =>
-  isRlJob(job) && job.spec.training.type === 'dpo';
-
 export const isGrpoJob = (
   job: CustomizationJob
 ): job is RlJob & { spec: RlJobOutput & { training: RlGRPOTraining } } =>

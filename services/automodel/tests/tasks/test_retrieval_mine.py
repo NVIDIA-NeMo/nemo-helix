@@ -71,6 +71,25 @@ def test_run_mine_launches_torchrun_then_unrolls(tmp_path: Path) -> None:
     ctx.results.save.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("job", "force_default"),
+    [
+        ({}, True),
+        ({"tokenizer_backend": "nemo_wrapped_auto"}, True),
+        ({"tokenizer_backend": "nemo_auto"}, False),
+    ],
+    ids=["default", "nemo-wrapped-auto", "nemo-auto"],
+)
+def test_mining_tokenizer_backend_sets_force_default(tmp_path: Path, job: dict[str, str], force_default: bool) -> None:
+    """The miner's only tokenizer switch: true loads the checkpoint's Hugging Face tokenizer."""
+    config = RetrievalMineJobConfig.model_validate(job).to_mining_config(
+        tmp_path / "model", False, tmp_path / "train.json", tmp_path / "out.json", tmp_path / "cache"
+    )
+
+    assert config["mining"]["tokenizer_force_default"] is force_default
+    assert "tokenizer_backend" not in config["mining"]
+
+
 def test_run_mine_selects_shallowest_train_file_deterministically(tmp_path: Path) -> None:
     output_dir = tmp_path / "stage1_data_prep"
     shallow = output_dir / "a" / "train.json"

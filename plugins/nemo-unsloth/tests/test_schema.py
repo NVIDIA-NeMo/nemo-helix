@@ -27,7 +27,9 @@ from nemo_unsloth_plugin.schema import (
     UnslothJobOutput,
 )
 from nemo_unsloth_plugin.transform import transform_input_to_output
+from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
+from nhx.unsloth.schemas import UNSLOTH_LEARNING_RATE_DEFAULTS
 from pydantic import ValidationError
 
 BASE_URL = "http://test"
@@ -251,6 +253,10 @@ class TestLearningRateDefaults:
         payload["training"] = {"finetuning_type": "all_weights"}
         payload["optimizer"] = {"learning_rate": 1e-4}
         assert UnslothJobInput.model_validate(payload).optimizer.learning_rate == 1e-4
+
+    def test_job_input_schema_publishes_the_defaults(self) -> None:
+        schema = UnslothJobInput.model_json_schema()
+        assert schema[LEARNING_RATE_DEFAULTS_KEY] == UNSLOTH_LEARNING_RATE_DEFAULTS
 
 
 class TestWarmupMutex:

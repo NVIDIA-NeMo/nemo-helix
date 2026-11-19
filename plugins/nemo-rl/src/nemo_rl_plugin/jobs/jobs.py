@@ -24,9 +24,11 @@ from nemo_rl_plugin.schema import RlJobInput
 from nemo_rl_plugin.transform import transform_input_to_output
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_distributed_runtime
 from nhx.customization_common.dry_run import DatasetRows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits, traits_from_model_spec
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
+    fetch_model_entity,
 )
 from nhx.rl.compile import platform_job_config_compiler
 from nhx.rl.entities.values import TrainingType
@@ -58,9 +60,20 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
         return RlJobInput
 
     @classmethod
-    def _dry_run_datasets(cls, spec: RlJobOutput, workspace: str) -> list[DatasetRows]:
+    async def _dry_run_traits(
+        cls, spec: RlJobOutput, workspace: str, async_client: AsyncNemoClient
+    ) -> CheckpointTraits:
+        platform = async_customization_platform_clients_from_platform(async_client)
+        return traits_from_model_spec((await fetch_model_entity(spec.model, workspace, platform)).spec)
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: RlJobOutput, workspace: str, traits: CheckpointTraits) -> list[DatasetRows]:
         del workspace
-        validator = DatasetValidator(training_type=TrainingType(spec.training.type))
+        # As in DPO training; GRPO training does not reject image rows.
+        validator = DatasetValidator(
+            training_type=TrainingType(spec.training.type),
+            reject_multimodal=traits.has_vision_tower,
+        )
         return [
             DatasetRows(
                 name="training dataset",

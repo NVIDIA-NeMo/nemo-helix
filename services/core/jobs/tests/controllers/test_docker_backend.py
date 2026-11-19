@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import httpx
 import pytest
 from docker.errors import APIError, NotFound
+from nemo_helix_plugin.capabilities import ProbeResult
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs.types import AuthContext as JobStepAuthContext
 from nhx.common.auth import (
@@ -145,7 +146,13 @@ def docker_client_mock(monkeypatch):
     mock_container = MagicMock()
     mock_container.attrs = {"NetworkSettings": {"Networks": {"mock_network": "network_settings"}}}
 
-    with patch("docker.from_env") as mock_docker_client:
+    with (
+        patch(
+            "nhx.core.jobs.controllers.backends.docker.probe_docker",
+            return_value=ProbeResult(available=True),
+        ),
+        patch("nhx.core.jobs.controllers.backends.docker.docker_from_env") as mock_docker_client,
+    ):
         client = MagicMock()
         mock_docker_client.return_value = client
 
@@ -1096,6 +1103,26 @@ def test_docker_job_rejects_reserved_step_auth_env_vars(docker_job, test_job_ste
     )
 
     with pytest.raises(ValueError, match=WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+
+@pytest.mark.parametrize(
+    ("name", "from_secret", "match"),
+    [
+        ("NHX_PRINCIPAL", None, "NHX_PRINCIPAL"),
+        ("NEMO_JOB_SECRETS", None, "NEMO_JOB_SECRETS"),
+        ('NHX_PRINCIPAL={"id":"service:jobs","x":"', None, "must not contain"),
+        ("X=default/a,NHX_PRINCIPAL", HelixJobSecretEnvironmentVariableRef(name="b"), "must match"),
+    ],
+)
+def test_docker_job_rejects_platform_injected_and_malformed_step_env_names(
+    docker_job, test_job_step, name, from_secret, match
+):
+    test_job_step.step_spec.environment.append(
+        HelixJobEnvironmentVariable(name=name, value=None if from_secret else "attacker", from_secret=from_secret)
+    )
+
+    with pytest.raises(ValueError, match=match):
         docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
 
 
@@ -2484,6 +2511,34 @@ def test_schedule_additional_volume_mounts(docker_job: CPUDockerJobBackend, dock
     # Verify that additional mounts are included
     mount_targets = {m["Target"] for m in mounts}
     assert "/container/path/custom" in mount_targets
+    # Writable unless the executor asks otherwise.
+    custom = next(m for m in mounts if m["Target"] == "/container/path/custom")
+    assert custom["ReadOnly"] is False
+
+
+def test_schedule_mounts_an_additional_volume_read_only_when_asked(
+    docker_job: CPUDockerJobBackend, docker_client_mock, test_job_step
+):
+    # A volume of shared trust material, such as a deployment's CA bundle, must not be changeable
+    # by the job code it is mounted into.
+    step_spec = test_job_step.step_spec
+    docker_job._execution_profile_config.storage = DockerJobStorageConfig(
+        volume_name="test_jobs_storage",
+        volume_permissions_image=DEFAULT_VOLUME_PERMISSIONS_IMAGE,
+        additional_volume_mounts=[
+            DockerVolumeMount(volume_name="gateway-ca", mount_path="/etc/nhx/gateway-ca", read_only=True),
+        ],
+    )
+
+    docker_job.schedule(step_spec.executor, test_job_step)
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()
+
+    create_call_args = docker_client_mock.containers.create.call_args
+    job_container_args = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
+    ca_mount = next(m for m in job_container_args["mounts"] if m["Target"] == "/etc/nhx/gateway-ca")
+    assert ca_mount["ReadOnly"] is True
+    assert ca_mount["Source"] == "gateway-ca"
 
 
 @pytest.mark.parametrize(

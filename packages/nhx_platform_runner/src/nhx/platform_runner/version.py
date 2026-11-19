@@ -6,15 +6,24 @@
 from __future__ import annotations
 
 import os
+import re
 from importlib.metadata import PackageNotFoundError, version
+
+_UNSTAMPED_VERSION = "0.0.0"
+_RELEASE_VERSION_PATTERN = re.compile(r"v?\d+(\.\d+)+\S*")
 
 
 def _resolve_version() -> str:
+    env_version = os.environ.get("NHX_PLATFORM_VERSION", "").strip()
+    if _RELEASE_VERSION_PATTERN.fullmatch(env_version) and env_version != _UNSTAMPED_VERSION:
+        return env_version
     try:
-        return version("nemo-helix").strip()
+        package_version = version("nemo-helix").strip()
     except PackageNotFoundError:
-        pass
-    return os.environ.get("NHX_PLATFORM_VERSION", "dev").strip() or "dev"
+        package_version = ""
+    if package_version and package_version != _UNSTAMPED_VERSION:
+        return package_version
+    return "dev"
 
 
 __version__ = _resolve_version()

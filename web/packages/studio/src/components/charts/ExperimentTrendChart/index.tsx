@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HourglassMid } from '@nemo/icons/icons';
+import { CircleTick } from '@nemo/icons/icons';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Text } from '@nvidia/foundations-react-core';
 import { TrendTooltip } from '@studio/components/charts/ExperimentTrendChart/TrendTooltip';
@@ -91,7 +91,7 @@ export const ExperimentTrendChart: FC<ExperimentTrendChartProps> = ({
     if (isLoading) {
       return (
         <div aria-busy className="flex h-[360px] items-center justify-center gap-2">
-          <HourglassMid width={20} height={20} className="animate-spin text-brand" />
+          <CircleTick width={20} height={20} className="animate-spin text-brand" />
           <Text kind="body/regular/sm" color="subtle">
             Loading evaluations…
           </Text>

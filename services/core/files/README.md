@@ -20,6 +20,74 @@ export ENVFILE="services/core/files/config/local.env" && \
 This will run `files` using entity store for persistence and a local storage backend.
 The combo of `config/local.yaml` and `config/local.env` will place all relevant storage in `services/core/files/devstorage/*`.
 
+## S3 fileset caching
+
+S3-backed filesets validate cached downloads using S3 object metadata. Metadata
+is reused for **10 seconds by default** in a bounded, per-process cache (up to
+4096 entries), scoped by bucket/object and resolved credentials. Configure
+`files.s3_metadata_cache_ttl_seconds` or
+`NHX_FILES_S3_METADATA_CACHE_TTL_SECONDS`; set it to `0` to HEAD every request.
+Unchanged objects continue to use cached content, and cache warming uses the
+same resolved object identity.
+
+Successful API uploads/deletes invalidate local metadata immediately. Direct
+bucket changes, credential permission changes, and writes through other API
+processes may remain invisible until the TTL expires. Failed refreshes do not
+fall back to expired metadata. Cache keys include the S3 endpoint, bucket/prefix,
+object key, and ETag/version identity; changed identities select new cache entries.
+
+Downloads use `If-Match` with the resolved ETag and prefer the resolved version
+ID for versioned objects. If version access is denied, the download retries the
+current object with the same ETag guard, preserving compatibility with
+`s3:GetObject`-only credentials. Without an ETag, this fallback is unsafe and
+version-read permission is required. If the object changes before GET, the API
+returns HTTP 409 and invalidates local metadata; retry to resolve the new object.
+Both the fileset and HF-compatible routes pin one snapshot for headers and bytes.
+Backends without an ETag or immutable version ID bypass caching.
+
+SSE-KMS and DSSE-KMS objects bypass both metadata reuse and local content caching:
+HEAD does not establish `kms:Decrypt` permission, so these reads always perform
+an authorized S3 content GET. With an ETag, KMS reads use a conditional current
+GET directly, avoiding a version-permission probe. SSE-S3 objects retain normal
+caching behavior.
+Cache-status listings use at most eight concurrent metadata lookups, with one
+HEAD per object in a cold listing. Use `include_cache_status` only when needed;
+upstream lookup failures return the standard HTTP 502 error rather than 500.
+
+Local S3 cache writes retain at most **two completed versions per object** by
+default. Configure `files.s3_cache_max_versions_per_object` or
+`NHX_FILES_S3_CACHE_MAX_VERSIONS_PER_OBJECT` (minimum 1). After a successful cache
+write, older siblings are pruned under an object-wide writer lock. Temporary
+uploads and other objects are excluded; already-open POSIX readers continue
+reading their file descriptors. An eviction before opening is handled as a cache
+miss. This bounds growth from repeated rewrites, not total storage across all
+objects or bytes held by active readers.
+
+Legacy entries under `cache/s3/` are ignored in favor of `cache/s3-v2/`; no manual
+cleanup is needed to restore fresh reads after upgrading. Legacy files are not
+automatically removed.
+
+### Opt-in S3 cache regression
+
+```bash
+RUN_EXTERNAL_STORAGE_TESTS=1 uv run --frozen pytest \
+  services/core/files/tests/integration/external_storage/test_s3_cache.py -v -n 0
+```
+
+The test runs the Files API in-process, with real S3 requests and disk caching.
+By default it starts a digest-pinned, disposable MinIO container on a random
+loopback port (Docker required; no cloud credentials). To use an existing S3
+server instead, set `S3_TEST_ENDPOINT`, `S3_TEST_ACCESS_KEY`,
+`S3_TEST_SECRET_KEY`, and optionally `S3_TEST_REGION` (default `us-east-1`).
+The credentials must allow bucket creation/deletion and versioning; each case
+cleans up its own bucket, including versions and delete markers.
+
+Cases cover unversioned/versioned buckets with retention limits of one/two,
+API overwrite/delete with the default metadata TTL, direct bucket mutations
+with strict revalidation, ranged reads and headers, signed `If-Match`, ignored
+legacy entries, and an unbuffered reader surviving eviction. No S3 or cache I/O
+is mocked. This is not a full deployed-platform or AWS IAM/KMS test.
+
 ## scripts
 `services/core/files/script` has a few e2e scripts for testing functionality.
 
@@ -34,3 +102,19 @@ The tests assume there's some data locally on your machine:
 uv run --frozen services/core/files/script/e2e_filesets_api.py
 uv run --frozen services/core/files/script/e2e_duckdb_httpfs.py
 ```
+
+## S3 uploads
+
+Uploads use boto3 managed transfers through an AnyIO worker, preserving the configured storage
+credentials and endpoint. Small files use PUT; large files use multipart with SDK retries and
+abort cleanup. Transfers use the classic serial implementation to bound buffering and keep
+async stream reads on the worker. Raw-body uploads need no whole-file buffer or disk spool.
+Multipart form uploads spool the parsed file to a temporary file so storage receives its
+exact length rather than the request length (which includes framing). Temporary files are
+closed after success or failure; provision enough local temporary disk space for these uploads.
+The multipart request length is validated separately from the parsed file length.
+Supported AWS SDK configuration applies in the Files process; AWS CLI S3 transfer settings do
+not configure TransferConfig. Storage authorization failures return HTTP 403.
+
+Cancellation during network I/O waits for the SDK call and retries to return. Configure storage
+lifecycle expiry for incomplete multipart uploads after abrupt process loss or failed cleanup.

@@ -1968,6 +1968,86 @@ class TestEvaluateMetricOnline:
         assert captured["timeout"] == 19
 
     @pytest.mark.asyncio
+    async def test_image_row_template_writes_a_fileset_reference(self, mocker: MockerFixture):
+        """An image row's fileset-relative path becomes a fileset:// reference the gateway resolves.
+
+        The row is shaped like the customizer's import_cord.py output, and the template is the one the
+        customizer skill documents for CORD-v2 (post-training-eval.md).
+        """
+        metric = _make_test_metric()
+        model = _make_model()
+        captured: dict[str, Any] = {}
+
+        async def _fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs) -> dict:
+            captured["request"] = request
+            return {"choices": [{"message": {"content": "<s_total>...</s_total>"}}]}
+
+        metric.compute_scores = mocker.AsyncMock(return_value=_make_metric_result(("score", 1.0)))
+        mocker.patch(
+            "nhx_evals_sdk.execution.metric_execution.inference.make_inference_request",
+            new_callable=AsyncMock,
+            side_effect=_fake_inference,
+        )
+        row = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "validation/images/00000.png"}},
+                        {"type": "text", "text": "Describe this image."},
+                    ],
+                },
+                {"role": "assistant", "content": "<s_total><s_total_price>45,500</s_total_price></s_total>"},
+            ]
+        }
+        image_url = "fileset://default/cord-v2#{{ item.messages[0].content[0].image_url.url }}"
+
+        await evaluate_metric(
+            metric,
+            rows=[row],
+            target=model,
+            prompt_template={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                            {"type": "text", "text": "{{ item.messages[0].content[1].text }}"},
+                        ],
+                    }
+                ]
+            },
+            params=RunConfigOnlineModel(
+                parallelism=1,
+                inference=InferenceParams(
+                    temperature=0,
+                    max_tokens=1024,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                ),
+            ),
+        )
+
+        assert captured["request"] == {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "fileset://default/cord-v2#validation/images/00000.png"},
+                        },
+                        {"type": "text", "text": "Describe this image."},
+                    ],
+                }
+            ],
+            "temperature": 0,
+            "max_tokens": 1024,
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+        }
+        # The row itself keeps the fileset-relative path that training reads.
+        assert row["messages"][0]["content"][0]["image_url"]["url"] == "validation/images/00000.png"
+
+    @pytest.mark.asyncio
     async def test_agent_evaluation_requires_prompt_template(self, mocker: MockerFixture):
         metric = _make_test_metric()
         mocker.patch(

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Check that a locally loaded image, built with NHX_COLLECT_SOURCES=1, carries the source of every
-# third-party component syft finds in it.
+# third-party component syft finds in it, and in each archive its com.nvidia.nemo-helix.source-scan-archives
+# label names (space-separated paths): code an image ships packed, which syft doesn't look inside.
 #
 # Usage: check-image-source-coverage.sh <image-ref> <image-name>
 #   image-name names /usr/share/nemo-helix/source-distributions/<image-name> inside the image, or
@@ -38,8 +39,23 @@ if [[ ! -d "${work_dir}/sources" ]]; then
     exit 1
 fi
 
+sboms=(--sbom "${work_dir}/sbom.json")
+archives="$(docker image inspect "${image_ref}" \
+    --format '{{ index .Config.Labels "com.nvidia.nemo-helix.source-scan-archives" }}')"
+index=0
+for archive in ${archives}; do
+    index=$((index + 1))
+    unpacked="${work_dir}/archive-${index}"
+    mkdir -p "${unpacked}"
+    docker cp -q "${container}:${archive}" "${work_dir}/archive-${index}.packed"
+    tar -xf "${work_dir}/archive-${index}.packed" -C "${unpacked}"
+    docker run --rm -v "${unpacked}:/scan:ro" "${syft_image}" dir:/scan -o syft-json -q \
+        > "${work_dir}/archive-${index}.json"
+    sboms+=(--sbom "${work_dir}/archive-${index}.json")
+done
+
 python3 "${repo_root}/docker/scripts/check-source-coverage.py" \
-    --sbom "${work_dir}/sbom.json" \
+    "${sboms[@]}" \
     --sources "${work_dir}/sources" \
     --policy "${repo_root}/docker/sources/source-coverage-policy.json"
 echo "${image_ref}: every component syft found has collected source"

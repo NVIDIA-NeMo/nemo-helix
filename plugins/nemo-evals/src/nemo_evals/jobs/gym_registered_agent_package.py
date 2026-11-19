@@ -22,6 +22,7 @@ import sys
 import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from subprocess import run
 from typing import Any
 
 import yaml
@@ -126,10 +127,10 @@ def download_wheels(
         constraints_file.write_text("\n".join(constraints) + "\n", encoding="utf-8")
     command = wheel_download_command(requirements, constraints_file, destination, python_version, architecture)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=WHEEL_DOWNLOAD_TIMEOUT_S)
+        result = run(command, capture_output=True, text=True, timeout=WHEEL_DOWNLOAD_TIMEOUT_S)
         if result.returncode != 0 and "No module named pip" in result.stderr:
             # The task image's interpreter has no pip; uv brings one for the invocation.
-            result = subprocess.run(
+            result = run(
                 ["uv", "run", "--no-project", "--with", "pip", "python", *command[1:]],
                 capture_output=True,
                 text=True,

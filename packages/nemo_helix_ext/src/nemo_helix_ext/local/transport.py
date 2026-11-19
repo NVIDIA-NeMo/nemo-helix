@@ -12,6 +12,7 @@ from typing import Any, TypeAlias
 
 import httpx
 from fastapi.testclient import TestClient
+from httpx import AsyncClient, Client
 from nhx.common.platform_endpoint import UDS_BASE_URL
 
 HttpxTimeout: TypeAlias = float | httpx.Timeout | None
@@ -43,7 +44,7 @@ def build_sync_asgi_http_client(app: Any, *, timeout: HttpxTimeout = _DEFAULT_TI
 
 
 def build_async_asgi_http_client(app: Any, *, timeout: HttpxTimeout = _DEFAULT_TIMEOUT) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    return AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url=EMBEDDED_BASE_URL,
         follow_redirects=True,
@@ -52,7 +53,7 @@ def build_async_asgi_http_client(app: Any, *, timeout: HttpxTimeout = _DEFAULT_T
 
 
 def build_sync_http_client(socket_path: Path, *, timeout: HttpxTimeout = _DEFAULT_TIMEOUT) -> httpx.Client:
-    return httpx.Client(
+    return Client(
         transport=httpx.HTTPTransport(uds=str(socket_path)),
         follow_redirects=True,
         timeout=timeout,
@@ -60,7 +61,7 @@ def build_sync_http_client(socket_path: Path, *, timeout: HttpxTimeout = _DEFAUL
 
 
 def build_async_http_client(socket_path: Path, *, timeout: HttpxTimeout = _DEFAULT_TIMEOUT) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    return AsyncClient(
         transport=httpx.AsyncHTTPTransport(uds=str(socket_path)),
         follow_redirects=True,
         timeout=timeout,
@@ -81,9 +82,7 @@ def probe_status(
     timeout: float = 2.0,
 ) -> bool:
     client = (
-        build_sync_http_client(socket_path, timeout=timeout)
-        if socket_path is not None
-        else httpx.Client(timeout=timeout)
+        build_sync_http_client(socket_path, timeout=timeout) if socket_path is not None else Client(timeout=timeout)
     )
     try:
         response = client.get(f"{base_url.rstrip('/')}/status")
@@ -103,7 +102,7 @@ async def probe_status_async(
     client = (
         build_async_http_client(socket_path, timeout=timeout)
         if socket_path is not None
-        else httpx.AsyncClient(timeout=timeout)
+        else AsyncClient(timeout=timeout)
     )
     try:
         response = await client.get(f"{base_url.rstrip('/')}/status")

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Text } from '@nvidia/foundations-react-core';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface MetricProps {
   title: string;

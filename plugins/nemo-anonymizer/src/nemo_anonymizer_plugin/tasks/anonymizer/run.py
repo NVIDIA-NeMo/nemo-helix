@@ -23,6 +23,7 @@ from nemo_anonymizer_plugin.app.gliner_detector import (
     build_gliner_anonymizer,
     caller_supplied_entity_detector,
     ensure_gliner_weights,
+    gliner_caches_under,
     stop_gliner_runtime,
 )
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
@@ -30,9 +31,9 @@ from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
-from nemo_helix_plugin.job_results import HelixJobResults
+from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
@@ -53,7 +54,7 @@ _TASK_LOG_HANDLER_MARKER = "_nemo_anonymizer_task_handler"
 
 def run(sdk: NemoClient | None = None) -> int:
     try:
-        service_sdk = sdk or get_nemo_client(as_service="anonymizer")
+        service_sdk = sdk or get_task_nemo_client("anonymizer")
         return run_step_config(_load_step_config(), ctx=_get_ctx(service_sdk), sdk=service_sdk)
     except Exception:
         logger.exception("Anonymizer task failed")
@@ -102,24 +103,25 @@ def _run_with_step_config(
 
     use_in_process_detector = not caller_supplied_entity_detector(request.selected_models)
     try:
-        if use_in_process_detector:
-            ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
-        with preserve_root_logging():
+        with gliner_caches_under(ctx.storage.ephemeral / "model-cache"):
             if use_in_process_detector:
-                anonymizer = build_gliner_anonymizer(
-                    model_configs_yaml=step_config.model_configs_yaml,
-                    dd_providers=dd_providers,
-                    artifact_path=storage_path / "anonymizer-artifacts",
-                )
-            else:
-                anonymizer = Anonymizer(
-                    model_configs=step_config.model_configs_yaml,
-                    model_providers=dd_providers,
-                    artifact_path=storage_path / "anonymizer-artifacts",
-                )
-        logger.info("Running anonymizer pipeline")
-        with capture_data_designer_token_usage(ctx.usage):
-            result = anonymizer.run(config=request.config, data=prepared_input.input)
+                ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
+            with preserve_root_logging():
+                if use_in_process_detector:
+                    anonymizer = build_gliner_anonymizer(
+                        model_configs_yaml=step_config.model_configs_yaml,
+                        dd_providers=dd_providers,
+                        artifact_path=storage_path / "anonymizer-artifacts",
+                    )
+                else:
+                    anonymizer = Anonymizer(
+                        model_configs=step_config.model_configs_yaml,
+                        model_providers=dd_providers,
+                        artifact_path=storage_path / "anonymizer-artifacts",
+                    )
+            logger.info("Running anonymizer pipeline")
+            with capture_data_designer_token_usage(ctx.usage):
+                result = anonymizer.run(config=request.config, data=prepared_input.input)
     finally:
         prepared_input.cleanup()
         if use_in_process_detector:
@@ -258,11 +260,14 @@ def _get_ctx(sdk: NemoClient) -> JobContext:
         ephemeral=Path(_get_required_env(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR)),
         persistent=Path(_get_required_env(PERSISTENT_JOB_STORAGE_PATH_ENVVAR)),
     )
+    fileset_name, artifact_base_path = job_storage_context_from_env()
     results = HelixJobResults(
         workspace=workspace,
         job_name=job_name,
         client=client,
         attempt_id=attempt_id,
+        fileset_name=fileset_name,
+        artifact_base_path=artifact_base_path,
     )
     return JobContext(
         workspace=workspace,

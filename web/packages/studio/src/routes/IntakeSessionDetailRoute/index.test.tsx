@@ -15,7 +15,6 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { IntakeSessionDetailRoute } from '@studio/routes/IntakeSessionDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { mockFeatureFlags } from '@studio/tests/util/mockFeatureFlags';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -356,7 +355,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('switches a selected trace between graph modes', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
 
@@ -384,7 +382,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('loads graph spans by trace when the session page does not contain them', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const traceId = 'trace-agent-run-003';
     const traceSpans = mockSpansPage.data.filter((span) => span.trace_id === traceId);
     server.use(
@@ -414,7 +411,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('warns when the trace span request fails and session spans are used', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     server.use(
       http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const traceId = new URL(request.url).searchParams.get('filter[trace_id]');
@@ -432,7 +428,6 @@ describe('IntakeSessionDetailRoute', () => {
   });
 
   it('restores graph mode separately for each trace', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-001', 'all');
     sessionStorage.setItem('nemo-studio:trace-graph-mode:default:trace-agent-run-003', 'grouped');
@@ -452,17 +447,6 @@ describe('IntakeSessionDetailRoute', () => {
     expect(screen.getByRole('radio', { name: 'Grouped' })).toBeChecked();
   });
 
-  it('hides graph mode when its feature flag is disabled', async () => {
-    mockFeatureFlags({ traceGraphEnabled: false });
-
-    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
-
-    expect(await screen.findByText('Trace Answer customer policy question')).toBeInTheDocument();
-    expect(screen.queryByText('Graph')).not.toBeInTheDocument();
-    expect(screen.getByText('Tree')).toBeInTheDocument();
-    expect(screen.getByText('List')).toBeInTheDocument();
-  });
-
   it('keeps the detail shell useful for a session with one trace', async () => {
     renderSessionDetail('session-agent-run-002');
 
@@ -479,6 +463,7 @@ describe('IntakeSessionDetailRoute', () => {
 
   it('restores a span deep link without first loading the root span detail', async () => {
     const detailSpanIds: string[] = [];
+    const detailRequests: URL[] = [];
     const spanListRequests: URL[] = [];
     server.use(
       http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
@@ -499,7 +484,8 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params, request }) => {
+        detailRequests.push(new URL(request.url));
         const spanId = String(params['spanId']);
         detailSpanIds.push(spanId);
         const span = mockSpanById(spanId);
@@ -523,15 +509,18 @@ describe('IntakeSessionDetailRoute', () => {
       )
     ).toBe(true);
     expect(detailSpanIds).not.toContain('span-root-001');
+    expect(
+      detailRequests.every((url) => url.searchParams.get('session_id') === 'session-agent-run-001')
+    ).toBe(true);
   });
 
   it('preserves a directly linked span outside the loaded summary page', async () => {
-    mockFeatureFlags({ traceGraphEnabled: true });
     const user = userEvent.setup();
     let resolveOutsidePageSpan!: () => void;
     const outsidePageSpanGate = new Promise<void>((resolve) => {
       resolveOutsidePageSpan = resolve;
     });
+    const detailRequests: URL[] = [];
     const outsidePageSpan = {
       ...mockSpanById('span-llm-001')!,
       span_id: 'span-outside-page-001',
@@ -551,14 +540,18 @@ describe('IntakeSessionDetailRoute', () => {
           pagination: { ...mockSpansPage.pagination, total_results: 1001, total_pages: 2 },
         });
       }),
-      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), async ({ params }) => {
-        if (params['spanId'] === outsidePageSpan.span_id) {
-          await outsidePageSpanGate;
-          return HttpResponse.json(outsidePageSpan);
+      http.get(
+        mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'),
+        async ({ params, request }) => {
+          detailRequests.push(new URL(request.url));
+          if (params['spanId'] === outsidePageSpan.span_id) {
+            await outsidePageSpanGate;
+            return HttpResponse.json(outsidePageSpan);
+          }
+          const span = mockSpanById(String(params['spanId']));
+          return span ? HttpResponse.json(span) : new HttpResponse(null, { status: 404 });
         }
-        const span = mockSpanById(String(params['spanId']));
-        return span ? HttpResponse.json(span) : new HttpResponse(null, { status: 404 });
-      })
+      )
     );
 
     renderSessionDetail(
@@ -570,6 +563,9 @@ describe('IntakeSessionDetailRoute', () => {
     expect(await screen.findByLabelText('Loading linked span')).toBeInTheDocument();
     resolveOutsidePageSpan();
     expect((await screen.findAllByText('Outside page span')).length).toBeGreaterThan(0);
+    expect(
+      detailRequests.every((url) => url.searchParams.get('session_id') === 'session-agent-run-001')
+    ).toBe(true);
 
     await user.click(screen.getByText('Graph'));
     await user.click(screen.getByText('Grouped'));

@@ -5,7 +5,7 @@ import { extractLanguage } from '@nemo/common/src/components/MarkdownContent/uti
 import { isCodeSnippetLanguage } from '@nemo/common/src/utils/codeSnippet';
 import { CodeSnippet } from '@nvidia/foundations-react-core';
 import type { ComponentProps, FC } from 'react';
-import { type ExtraProps } from 'react-markdown';
+import type { ExtraProps } from 'react-markdown';
 
 type CodeBlockProps = ComponentProps<'code'> & ExtraProps;
 

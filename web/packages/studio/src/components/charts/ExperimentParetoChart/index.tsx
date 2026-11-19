@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { HourglassMid, Floppy } from '@nemo/icons/icons';
+import { CircleTick, Floppy } from '@nemo/icons/icons';
 import {
   getGetExperimentQueryKey,
   useUpdateExperiment,
@@ -141,7 +141,7 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
     if (isLoading) {
       return (
         <div aria-busy className="flex h-[360px] items-center justify-center gap-2">
-          <HourglassMid width={20} height={20} className="animate-spin text-brand" />
+          <CircleTick width={20} height={20} className="animate-spin text-brand" />
           <Text kind="body/regular/sm" color="subtle">
             Loading evaluations…
           </Text>
@@ -223,7 +223,7 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
             onClick={() => xMetric && yMetric && persistAxes(xMetric.id, yMetric.id)}
           >
             {isSaving ? (
-              <HourglassMid width={16} height={16} className="animate-spin" />
+              <CircleTick width={16} height={16} className="animate-spin" />
             ) : (
               <Floppy width={16} height={16} />
             )}

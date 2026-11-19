@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import builtins
 import inspect
 import logging
 import os
@@ -24,6 +23,7 @@ from nhx.common.controller import ControllerManager
 from nhx.common.platform_endpoint import _SyncHelixEndpointRoutingTransport
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.core.auth.service import AuthService
 from nhx.platform_runner import config as runner_config
 from nhx.platform_runner import server
@@ -288,6 +288,7 @@ def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):
         spec = app.openapi()
         assert spec["info"]["title"] == "NeMo Helix API"
         assert spec["info"]["description"] == "API for NeMo Helix services"
+        assert spec["info"]["version"] == OPENAPI_SPEC_VERSION
         schemas = spec["components"]["schemas"]
         filter_param = next(
             param
@@ -499,7 +500,7 @@ def test_run_server_runs_embedded_auth_preflight():
         ),
         patch("nhx.platform_runner.server.create_app", return_value=FastAPI()) as create_app,
         patch("nhx.platform_runner.server.setup_fastapi_instrumentations"),
-        patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
+        patch("nhx.platform_runner.server.uvicorn_run") as uvicorn_run,
     ):
         server.run_server(services=[], host="127.0.0.1", port=9999, keep_alive_timeout_seconds=12)
 
@@ -541,9 +542,9 @@ def test_run_server_on_bound_sockets_sets_keep_alive_timeout():
 
     with (
         patch("nhx.platform_runner.server.tcp_listener_sockets") as bound_tcp,
-        patch("nhx.platform_runner.server.uvicorn.Config", side_effect=[tcp_config, uds_config]) as config_cls,
-        patch("nhx.platform_runner.server.uvicorn.Server") as server_cls,
-        patch("nhx.platform_runner.server.asyncio.run") as asyncio_run,
+        patch("nhx.platform_runner.server.UvicornConfig", side_effect=[tcp_config, uds_config]) as config_cls,
+        patch("nhx.platform_runner.server.UvicornServer") as server_cls,
+        patch("nhx.platform_runner.server.asyncio_run") as asyncio_run,
     ):
         bound_tcp.return_value.__enter__.return_value = [tcp_socket]
         server._run_server_on_bound_sockets(
@@ -568,7 +569,7 @@ def test_run_server_with_reload_sets_keep_alive_timeout():
     with (
         patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
         patch("nhx.platform_runner.server.preflight_embedded_auth_policy_wasm"),
-        patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
+        patch("nhx.platform_runner.server.uvicorn_run") as uvicorn_run,
     ):
         server.run_server_with_reload(
             "nhx.platform_runner.server:create_default_app",
@@ -727,14 +728,8 @@ def test_create_app_with_failed_seed_keeps_health_not_ready(monkeypatch):
 
 def test_create_app_with_missing_seed_package_keeps_health_not_ready(monkeypatch):
     _patch_platform_app_config(monkeypatch, seed_on_startup=True)
-    real_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "nhx.platform_seed":
-            raise ImportError("missing platform seed")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    # A None entry makes ``from nhx.platform_seed import ...`` raise ImportError, as when it isn't installed.
+    monkeypatch.setitem(sys.modules, "nhx.platform_seed", None)
 
     with TestClient(server.create_app(services=[])) as client:
         response = client.get("/health/ready")
@@ -800,7 +795,7 @@ def test_run_server_owns_docker_and_loopback_listener_together(monkeypatch):
         patch.object(server, "create_app", return_value=FastAPI()),
         patch.object(server, "setup_fastapi_instrumentations"),
         patch.object(server, "_run_server_on_bound_sockets") as serve,
-        patch.object(server.uvicorn, "run") as single_listener,
+        patch.object(server, "uvicorn_run") as single_listener,
     ):
         server.run_server(host="127.0.0.1", port=8080)
     assert serve.call_args.kwargs["host"] == "127.0.0.1"

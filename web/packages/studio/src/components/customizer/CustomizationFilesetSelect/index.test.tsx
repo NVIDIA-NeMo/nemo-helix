@@ -4,7 +4,7 @@
 import { CustomizationFilesetSelect } from '@studio/components/customizer/CustomizationFilesetSelect';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import {
-  CustomizationDatasetValidationResult,
+  type CustomizationDatasetValidationResult,
   useCustomizationDatasetValidation,
 } from '@studio/hooks/useCustomizationDatasetValidation';
 import { datasets } from '@studio/mocks/datasets';
@@ -13,8 +13,8 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import type { CustomizerSchemaVariant } from '@studio/util/customizerSchema';
 import { FORM_DEFAULTS, type CustomizationFormFields } from '@studio/util/forms/customization';
 import userEvent from '@testing-library/user-event';
-import { FC, ReactNode } from 'react';
-import { FieldPath, FormProvider, useForm, useWatch } from 'react-hook-form';
+import type { FC, ReactNode } from 'react';
+import { type FieldPath, FormProvider, useForm, useWatch } from 'react-hook-form';
 
 vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal) => {
   const actual =

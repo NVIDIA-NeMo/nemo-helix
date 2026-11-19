@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoTransportError
 from nemo_helix_plugin.client.retry import body_was_sent, is_retryable, retry_delay
-from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, PreparedRequest, RetryPolicy
 
 POLICY = PLATFORM_DEFAULT_RETRY_POLICY
 REQUEST = httpx.Request("PUT", "http://test/upload")
@@ -57,3 +59,48 @@ def test_retry_delay_prefers_retry_after() -> None:
 )
 def test_body_was_sent(error: httpx.TransportError, expected: bool) -> None:
     assert body_was_sent(error) is expected
+
+
+NO_RESEND = RetryPolicy(resend_after_body_sent=False)
+
+
+@pytest.mark.parametrize(
+    "error,policy,expected",
+    [
+        pytest.param(httpx.ReadTimeout("t", request=REQUEST), NO_RESEND, False, id="read-timeout-not-resent"),
+        pytest.param(httpx.RemoteProtocolError("drop", request=REQUEST), NO_RESEND, False, id="dropped-not-resent"),
+        pytest.param(httpx.ConnectError("refused", request=REQUEST), NO_RESEND, True, id="connect-error-resent"),
+        pytest.param(httpx.ConnectTimeout("t", request=REQUEST), NO_RESEND, True, id="connect-timeout-resent"),
+        pytest.param(httpx.ReadTimeout("t", request=REQUEST), RetryPolicy(), True, id="default-read-timeout"),
+        pytest.param(httpx.RemoteProtocolError("d", request=REQUEST), RetryPolicy(), True, id="default-dropped"),
+        pytest.param(httpx.ConnectError("refused", request=REQUEST), RetryPolicy(), True, id="default-connect"),
+    ],
+)
+def test_resend_after_body_sent(error: httpx.TransportError, policy: RetryPolicy, expected: bool) -> None:
+    assert is_retryable(policy, error) is expected
+
+
+def test_send_does_not_resend_a_sent_body_under_the_flag() -> None:
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = NemoClient(
+        base_url="http://test",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        retry=RetryPolicy(max_retries=3, backoff_base=0.0, resend_after_body_sent=False),
+    )
+    request = PreparedRequest(
+        path_template="/apis/test/v2/runs",
+        path_params={},
+        method="POST",
+        content=b"{}",
+        content_type="application/json",
+        response_type=None,
+    )
+
+    with pytest.raises(NemoTransportError):
+        client.send(request)
+    assert len(attempts) == 1

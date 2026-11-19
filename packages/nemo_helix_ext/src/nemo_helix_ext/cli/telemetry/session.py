@@ -8,11 +8,11 @@ import json
 import logging
 import os
 import stat
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _requires_rotation(state: _SessionState, now: datetime) -> bool:
 
 
 def _new_session_state(now: datetime) -> _SessionState:
-    return _SessionState(session_id=uuid.uuid4().hex, created_at=now)
+    return _SessionState(session_id=uuid4().hex, created_at=now)
 
 
 def _write_session_state(path: Path, state: _SessionState) -> None:

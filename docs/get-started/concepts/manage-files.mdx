@@ -16,15 +16,19 @@ The Files service supports multiple storage backends and can be used to store da
 
 - **Fileset**: A named container that holds files.
 
- Filesets are uniquely identified by a **name** within a given **workspace**.
+ Fileset names are unique within a workspace. Each fileset also has a permanent ID. Reusing a deleted fileset's name creates a new ID.
 
 - **Storage Backend**: Each fileset is backed by a storage backend where the files are actually persisted. Supported backends include:
  - `local`: Local filesystem storage (default, read/write)
  - `s3`: Amazon S3 or S3-compatible storage such as MinIO (read/write)
  - `ngc`: NVIDIA GPU Cloud storage (read-only)
  - `huggingface`: HuggingFace Hub repositories (read-only)
+ - `git`: Git repositories (read-only)
+ - `github`: GitHub repositories (read-only)
 
  Read-only backends allow you to create a fileset that acts as a handle to external resources. This provides a unified interface to access files from different sources using the same SDK methods, and allows other Helix services to reference external data through a fileset.
+
+ Uploading files or OTLP logs, or deleting individual files in a read-only fileset returns HTTP `409 Conflict` with a read-only storage message. Uploads are rejected before reading the request body, and none of these operations changes the external data. The read-only error takes precedence over checking whether an individual file exists; it does not require an upstream lookup. Uploads by non-service callers to service-created immutable filesets retain their HTTP `403 Forbidden` response. Use a `local` or `s3` fileset when you need to write files. Deleting the fileset itself removes its registration, not the external data.
 
 - **Purpose**: A fileset field that indicates the intended use. Each purpose enables specific **metadata** fields under the corresponding key. Select a tab below to see the available metadata fields for each purpose:
 
@@ -73,6 +77,8 @@ The Files service supports multiple storage backends and can be used to store da
 ## Managing Filesets
 
 Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK (`client.files`, for example `create_fileset`, `list_filesets`, `get_fileset`, `delete_fileset`).
+
+When retaining a reference across requests, use the fileset ID with the SDK's `get_fileset_by_id` and `delete_fileset_by_id` methods. A delayed request for a deleted ID cannot affect a new fileset with the same name. Deletion by ID performs the same reference checks and storage cleanup as deletion by name.
 
 <Tip>
 
@@ -564,9 +570,13 @@ The CLI displays progress bars automatically during uploads and downloads. This 
 Track progress during large file transfers using the `RichProgressCallback` context manager:
 
 ```python
+from pathlib import Path
+
 from filesets import FilesetFileSystem, RichProgressCallback
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 
+client = NemoClient.from_config()
 files = client.files
 assert isinstance(files, FilesClient)
 fs = FilesetFileSystem(client=files)

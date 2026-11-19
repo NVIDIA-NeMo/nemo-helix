@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import classnames from 'classnames';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface LeftOverflowProps {
   children: string;

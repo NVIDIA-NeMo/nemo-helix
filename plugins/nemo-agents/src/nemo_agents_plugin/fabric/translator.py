@@ -19,6 +19,7 @@ from nemo_agents_plugin.fabric.gateway_credentials import (
     platform_gateway_credential_env,
 )
 from nemo_helix_plugin.config import PLATFORM_BASE_URL_ENV_VARS
+from pydantic import ValidationError
 
 # Platform location forwarded into the agent process for SDK-backed child tools:
 # the platform base-URL vars (owned by nemo_helix_plugin as
@@ -299,7 +300,10 @@ def _mcp_config(config: AgentConfig) -> Any:
 def _tools_config(config: AgentConfig) -> Any:
     if config.tools is None:
         return None
-    return fabric.ToolsConfig(blocked=config.tools.blocked)
+    try:
+        return fabric.ToolsConfig(enabled=config.tools.enabled, blocked=config.tools.blocked)
+    except ValidationError as error:
+        raise FabricTranslationError(str(error)) from error
 
 
 def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig) -> None:
@@ -310,6 +314,16 @@ def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig
     provider = telemetry.provider or "relay"
     if provider != "relay":
         raise FabricTranslationError(f"Unsupported telemetry provider {provider!r}. Only 'relay' is supported.")
+
+    if (
+        fabric_config.harness is not None
+        and fabric_config.harness.adapter_id == HARNESS_ADAPTER_IDS["hermes"]
+        and telemetry.insecure_http_hosts is not None
+    ):
+        raise FabricTranslationError(
+            "telemetry.insecure_http_hosts requires Relay 0.11; the Hermes harness uses Relay 0.10. "
+            "Remove this setting and use an HTTPS or loopback collector for Hermes."
+        )
 
     _default_relay_extension_path(fabric_config)
 
@@ -362,6 +376,9 @@ def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
     observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
+    # None preserves omission across serialization; [] clears inherited allowances.
+    if telemetry.insecure_http_hosts is not None:
+        observability["insecure_http_hosts"] = list(telemetry.insecure_http_hosts)
 
     if telemetry.atif is not None:
         atif = dict(telemetry.atif)

@@ -7,7 +7,7 @@ import { TourTooltip } from '@studio/components/WelcomeTour/TourTooltip';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { TOUR_SEEN_KEY } from '@studio/util/localStorage';
 import { useTour } from 'modern-tour';
-import { FC, useCallback, useEffect } from 'react';
+import { type FC, useCallback, useEffect } from 'react';
 
 export const TourController: FC = () => {
   const [tourSeen, setTourSeen] = useLocalStorage<boolean>(TOUR_SEEN_KEY);

@@ -14,6 +14,7 @@ from scaled_evals.api.build.task_image_identity import (
     validate_task_image_request,
 )
 from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.evaluation_store import EvaluationGlobalQueries
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.schemas.common import (
     DeleteResponse,
@@ -626,7 +627,7 @@ def delete_task(task_id: str, db: Db) -> DeleteResponse:
     Errors: 404 if not found or already deleted; 409 if an active evaluation
     still references it.
     """
-    if db.evaluations.task_in_active_use(task_id):
+    if EvaluationGlobalQueries().task_in_active_use(task_id):
         raise _http_error(409, "task_in_use", "task is referenced by an active evaluation")
     if not db.tasks.soft_delete(task_id):
         raise _http_error(404, "not_found", "task not found")

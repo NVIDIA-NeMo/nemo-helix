@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Accept, ErrorCode, FileRejection } from 'react-dropzone';
+import { type Accept, ErrorCode, type FileRejection } from 'react-dropzone';
 
 /**
  * @returns true if any of the errors in any of the file rejections is for too many files

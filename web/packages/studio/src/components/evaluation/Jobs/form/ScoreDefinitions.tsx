@@ -9,8 +9,8 @@ import {
   type MetricPanelFormData,
   type PanelScoreFormData,
 } from '@studio/components/evaluation/Jobs/form/ScoreModal';
-import { FC, useState } from 'react';
-import { FieldError, useFormContext, useWatch } from 'react-hook-form';
+import { type FC, useState } from 'react';
+import { type FieldError, useFormContext, useWatch } from 'react-hook-form';
 
 type ModalState = { mode: 'closed' } | { mode: 'add' } | { mode: 'edit'; index: number };
 

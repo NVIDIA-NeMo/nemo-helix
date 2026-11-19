@@ -3,7 +3,7 @@
 
 import { ChevronLeft, ChevronRight } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 export interface DatasetRowPagerProps {
   fileName?: string | null;
