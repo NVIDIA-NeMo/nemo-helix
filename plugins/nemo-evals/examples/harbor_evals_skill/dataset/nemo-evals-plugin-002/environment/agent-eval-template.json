@@ -1,0 +1,13 @@
+{
+  "target": {
+    "kind": "agent",
+    "agent": {
+      "format": "generic",
+      "name": "loopback-echo",
+      "url": "http://127.0.0.1:8091/answer",
+      "body": {"instruction": "{{instruction}}"},
+      "response_path": "$.answer"
+    }
+  },
+  "labels": {"run_alias": "agent-smoke"}
+}

@@ -1,0 +1,57 @@
+#!/app/.venv/bin/python
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Launch the pinned harness and optionally check the effective smoke credential."""
+
+import json
+import os
+import sys
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+
+class NoRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def probe(env: Mapping[str, str]) -> dict[str, int | None]:
+    origin = urlsplit(env["OPENAI_BASE_URL"])
+    if origin.scheme not in {"https", "http"} or not origin.hostname or origin.username is not None:
+        raise ValueError("expected an HTTP(S) Helix origin")
+    opener = build_opener(ProxyHandler({}), NoRedirects())
+    headers = {"Authorization": "Bearer " + env["OPENAI_API_KEY"]}
+    statuses = {}
+    for name, prefix in (("SKILL", "/apis/agents/"), ("ARCHIVE", "/apis/files/")):
+        path = env[f"NHX_SCOPE_PROBE_{name}_PATH"]
+        if not path.startswith(prefix) or "?" in path or "#" in path:
+            raise ValueError("expected a Helix resource path")
+        request = Request(urlunsplit((origin.scheme, origin.netloc, path, "", "")), headers=headers, method="GET")
+        try:
+            with opener.open(request, timeout=5) as response:
+                status = response.status
+        except HTTPError as error:
+            status = error.code
+            error.close()
+        except (URLError, TimeoutError):
+            status = None
+        statuses[f"{name.lower()}_status"] = status
+    return statuses
+
+
+def run(args: list[str], env: Mapping[str, str], log: Path, *, launch: Callable = os.execv) -> None:
+    if args[:1] == ["exec"]:
+        enabled = env.get("NHX_SCOPE_PROBE") == "1"
+        statuses = probe(env) if enabled else {}
+        log.write_text(json.dumps({"enabled": enabled, **statuses}) + "\n")
+        if enabled and set(statuses.values()) != {403}:
+            raise SystemExit("Expected HTTP 403 for both Helix scope probe requests")
+    launch("/opt/codex/bin/codex", ["codex", *args])
+
+
+if __name__ == "__main__":
+    run(sys.argv[1:], os.environ, Path("/logs/agent/scope-probe.json"))
