@@ -306,7 +306,13 @@ async def test_each_candidate_trains_with_its_own_hyperparameters() -> None:
                 "optimizer": {"learning_rate": 0.0001, "lr_decay_style": "linear"},
             },
         },
-        {"name": "wide", "hyperparameters": {"lora": {"rank": 64, "alpha": 128}, "schedule": {"epochs": 1}}},
+        {
+            "name": "wide",
+            "hyperparameters": {
+                "lora": {"rank": 64, "alpha": 128, "exclude_modules": ["*.out_proj"]},
+                "schedule": {"epochs": 1},
+            },
+        },
         {"name": "plain"},
         {"name": "full", "finetuning_type": "all_weights", "hyperparameters": {"optimizer": {"learning_rate": 1e-5}}},
     ]
@@ -333,7 +339,7 @@ async def test_each_candidate_trains_with_its_own_hyperparameters() -> None:
     assert job["small"]["schedule"] == {"epochs": 3}
     assert job["small"]["batch"] == {"global_batch_size": 2, "micro_batch_size": 1}
     assert job["small"]["optimizer"] == {"learning_rate": 0.0001, "lr_decay_style": "linear"}
-    assert job["wide"]["training"]["lora"] == {"rank": 64, "alpha": 128}
+    assert job["wide"]["training"]["lora"] == {"rank": 64, "alpha": 128, "exclude_modules": ["*.out_proj"]}
     assert job["wide"]["schedule"] == {"epochs": 1}
     assert "batch" not in job["wide"] and "optimizer" not in job["wide"]
     # A candidate that sets nothing sends nothing, so every default stays the customizer's.
