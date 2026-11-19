@@ -323,6 +323,54 @@ describe('AgentEvaluationWizard run target', () => {
     expect(recordRunJob).toHaveBeenCalledWith(DEFAULT_WORKSPACE, name, 'job-1', metadata);
   });
 
+  it('reuses an existing default experiment instead of creating another', async () => {
+    vi.mocked(getExperiment).mockResolvedValue({ id: 'grp_existing_default' } as never);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await runWhenReady(user);
+
+    expect(createExperiment).not.toHaveBeenCalled();
+    expect(vi.mocked(createRunEvaluation).mock.calls[0][1].experimentIds).toEqual([
+      'grp_existing_default',
+    ]);
+  });
+
+  it('links the run to a picked experiment and names it as typed', async () => {
+    server.use(
+      http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: 'grp_primary',
+              name: 'primary-use-cases-benchmark',
+              workspace: DEFAULT_WORKSPACE,
+            },
+          ],
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await user.click(await screen.findByRole('combobox', { name: /^Experiment/ }));
+    await user.click(await screen.findByRole('option', { name: 'primary-use-cases-benchmark' }));
+    await user.type(screen.getByLabelText('Evaluation Name (Optional)'), 'run-1');
+    await runWhenReady(user);
+
+    expect(getExperiment).not.toHaveBeenCalled();
+    expect(createRunEvaluation).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({
+        experimentIds: ['grp_primary'],
+        name: 'run-1',
+        filesetName: 'run-1-data',
+      })
+    );
+  });
+
   it('submits the chosen parallelism', async () => {
     const user = userEvent.setup();
     renderWizard();
@@ -335,6 +383,16 @@ describe('AgentEvaluationWizard run target', () => {
 
     const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
     expect(request.spec?.params?.parallelism).toBe(2);
+  });
+
+  it('goes back to Configuration with the picks kept', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByText('Metrics')).toBeVisible();
   });
 });
 
