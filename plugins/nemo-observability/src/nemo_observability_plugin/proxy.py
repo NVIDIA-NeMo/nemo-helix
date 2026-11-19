@@ -98,11 +98,16 @@ async def proxy(
     except httpx.RequestError as exc:
         logger.warning("Observability connection unreachable", extra={"connection": connection.name, "error": str(exc)})
         raise HTTPException(status_code=502, detail=f"Trace explorer {connection.name!r} is unreachable.") from exc
-    headers = [
-        (key, _rewrite_location(value, connection, adapter) if key.lower() == "location" else value)
-        for key, value in upstream.headers.multi_items()
-        if key.lower() not in _RESPONSE_DROP
-    ]
+    headers: list[tuple[str, str]] = []
+    for key, value in upstream.headers.multi_items():
+        name = key.lower()
+        if name == "location":
+            headers.append((key, _rewrite_location(value, connection, adapter)))
+        elif name == "set-cookie":
+            if (cookie := _confine_set_cookie(value, connection)) is not None:
+                headers.append((key, cookie))
+        elif name not in _RESPONSE_DROP:
+            headers.append((key, value))
     response = StreamingResponse(
         upstream.aiter_raw(), status_code=upstream.status_code, background=BackgroundTask(upstream.aclose)
     )
@@ -125,6 +130,29 @@ def _upstream_cookies(cookie_header: str | None) -> str:
         for name, morsel in jar.items()
         if name != COOKIE_NAME and not name.startswith("nhx_")
     )
+
+
+def _confine_set_cookie(set_cookie: str, connection: ObservabilityConnection) -> str | None:
+    """Scope an upstream cookie to the connection's prefix on the Studio origin, or drop it.
+
+    The browser files upstream cookies under Studio's origin, so a broad ``Path`` or a
+    ``Domain`` would reach other Studio routes, and an ``nhx_*`` name could overwrite a platform cookie.
+    """
+    name_value, *attributes = (part.strip() for part in set_cookie.split(";"))
+    cookie_name = name_value.split("=", 1)[0].strip()
+    if not cookie_name or cookie_name == COOKIE_NAME or cookie_name.startswith("nhx_"):
+        return None
+    prefix = connection_prefix(connection)
+    path = prefix
+    kept = []
+    for attribute in attributes:
+        key, _, value = attribute.partition("=")
+        key = key.strip().lower()
+        if key == "path":
+            path = value.strip() if value.strip().startswith(prefix + "/") else prefix
+        elif key != "domain":
+            kept.append(attribute)
+    return "; ".join([name_value, *kept, f"Path={path}"])
 
 
 def _request_origin(request: Request) -> str:

@@ -175,6 +175,30 @@ def test_redirects_stay_under_the_connection_prefix(make_client, name, upstream_
     assert response.headers["location"] == expected
 
 
+def test_upstream_cookies_are_confined_to_the_connection_prefix(make_client):
+    upstream_cookies = [
+        "phx=1; Path=/; HttpOnly",
+        "deep=2; Path=/apis/observability/ui/phoenix/graphql; Secure",
+        "wide=3; Domain=studio.example; Path=/apis",
+        "sibling=4; Path=/apis/observability/ui/phoenix-other",
+        "bare=5",
+        "nhx_session=evil; Path=/",
+        f"{COOKIE_NAME}=evil",
+    ]
+    client = make_client(
+        lambda request: httpx.Response(200, headers=[("set-cookie", cookie) for cookie in upstream_cookies])
+    )
+    _open_session(client, "phoenix")
+    response = client.get("/apis/observability/ui/phoenix/")
+    assert response.headers.get_list("set-cookie") == [
+        "phx=1; HttpOnly; Path=/apis/observability/ui/phoenix",
+        "deep=2; Secure; Path=/apis/observability/ui/phoenix/graphql",
+        "wide=3; Path=/apis/observability/ui/phoenix",
+        "sibling=4; Path=/apis/observability/ui/phoenix",
+        "bare=5; Path=/apis/observability/ui/phoenix",
+    ]
+
+
 def test_unreachable_upstream_is_502(make_client):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=request)
