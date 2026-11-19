@@ -8,6 +8,7 @@ import json
 from collections.abc import Sequence
 from typing import cast
 
+import nhx_evals_sdk as evals
 import pytest
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.shared.metric_bundles.bundles import (
@@ -87,6 +88,66 @@ def _builtin_metric_cases() -> Sequence[tuple[str, Metric]]:
     """One configured instance of each built-in metric the inline packager must round-trip."""
     judge_model = _judge_model()
     return [
+        ("skill_static_correctness", evals.SkillStaticCorrectnessMetric()),
+        ("skill_description_quality", evals.SkillDescriptionQualityMetric(minimum_characters=30)),
+        ("skill_reliability_readiness", evals.SkillReliabilityReadinessMetric(requires_inputs=True)),
+        ("skill_script_quality", evals.SkillScriptQualityMetric(max_nesting=4)),
+        ("skill_unicode_safety", evals.SkillUnicodeSafetyMetric(scope="package", include_spaces=True)),
+        (
+            "skill_security_scan",
+            evals.SkillSecurityScanMetric(scan_key="review", failure_severities=["high", "medium"]),
+        ),
+        ("skill_sensitive_data", evals.SkillSensitiveDataMetric()),
+        ("skill_code_risk", evals.SkillCodeRiskMetric()),
+        ("skill_license", evals.SkillLicenseMetric()),
+        ("skill_dependency_compliance", evals.SkillDependencyComplianceMetric()),
+        ("skill_package_configuration_risk", evals.SkillPackageConfigurationRiskMetric()),
+        ("skill_bundled_test", evals.SkillBundledTestMetric(minimum_coverage=0.9)),
+        ("agent_safety", evals.AgentSafetyMetric()),
+        ("skill_overactivation", evals.SkillOveractivationMetric(skill_name="my-skill")),
+        ("skill_routing", evals.SkillRoutingMetric(expected_skill="Skill:search", acceptable_skills=["Skill:lookup"])),
+        ("expected_script_invocation", evals.ExpectedScriptInvocationMetric(expected_script="scripts/search.py")),
+        (
+            "workflow_compliance",
+            evals.WorkflowComplianceMetric(rules=[evals.SkillOrderRule(before="Skill:search", after="MCP:read")]),
+        ),
+        ("error_recovery", evals.ErrorRecoveryMetric()),
+        ("tool_productivity", evals.ToolProductivityMetric()),
+        (
+            "tool_selection",
+            evals.ToolSelectionMetric(
+                expected_tools=["MCP:read"], acceptable_tools=["MCP:search"], decoy_tools=["MCP:delete"]
+            ),
+        ),
+        (
+            "tool_argument_compliance",
+            evals.ToolArgumentComplianceMetric(
+                rules=[evals.SkillArgumentRule(tool="MCP:read", schema={"type": "object", "required": ["query"]})]
+            ),
+        ),
+        ("tool_execution_outcome", evals.ToolExecutionOutcomeMetric(tool_pattern="*")),
+        (
+            "component_coordination",
+            evals.ComponentCoordinationMetric(
+                order_rules=[evals.SkillOrderRule(before="Skill:search", after="MCP:read")],
+                handoffs=[
+                    evals.SkillHandoffRule(
+                        producer="MCP:read", consumer="Skill:summary", source_path="record", target_path="id"
+                    )
+                ],
+                conflicts=[evals.SkillConflictRule(first="Skill:summary", second="Skill:delete")],
+            ),
+        ),
+        (
+            "component_usage",
+            evals.ComponentUsageMetric(
+                declared_components=["Skill:search", "MCP:read"], unavailable_components=["MCP:read"]
+            ),
+        ),
+        ("skill_documentation_rubric", evals.skill_documentation_rubric_metric(judge_model)[0]),
+        ("skill_answer_accuracy", evals.answer_accuracy_metric(judge_model)[0]),
+        ("skill_task_success", evals.task_success_metric(judge_model)[0]),
+        ("skill_outcome", evals.skill_outcome_metric(judge_model, ["Reports the recovery action."])[0]),
         ("skill_structure", SkillStructureMetric()),
         ("skill_references", SkillReferenceIntegrityMetric()),
         ("skill_context", SkillContextEfficiencyMetric(token_budget=1200)),
