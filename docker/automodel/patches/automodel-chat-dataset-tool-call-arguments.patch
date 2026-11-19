@@ -1,0 +1,80 @@
+ChatDataset: pass tool-call ``arguments`` to the chat template as a mapping.
+
+Upstream json.dumps() dict arguments into strings before templating. Templates
+that iterate ``arguments|items`` (Qwen3.5) raise "Can only get item pairs from a
+mapping" on a string, and ``arguments | tojson`` templates (Nemotron) would
+double-encode it. vLLM json.loads() OpenAI-style string arguments before it
+applies the template, so training on mappings also matches serving. JSON object
+strings are decoded; invalid JSON and non-object JSON pass through unchanged.
+
+Drop this patch once the pinned Automodel commit includes the change.
+
+diff --git a/nemo_automodel/components/datasets/llm/chat_dataset.py b/nemo_automodel/components/datasets/llm/chat_dataset.py
+index 43cc3ca28..7bdbefd7e 100644
+--- a/nemo_automodel/components/datasets/llm/chat_dataset.py
++++ b/nemo_automodel/components/datasets/llm/chat_dataset.py
+@@ -235,9 +235,15 @@ def _normalize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+             if function_arguments is None:
+                 raise ValueError(f"assistant message `tool_calls[{idx}].function.arguments` is required")
+ 
++            if isinstance(function_arguments, str):
++                try:
++                    decoded = json.loads(function_arguments)
++                except json.JSONDecodeError:
++                    decoded = None
++                if isinstance(decoded, dict):
++                    function_arguments = decoded
+             normalized_function = dict(function)
+-            if not isinstance(function_arguments, str):
+-                normalized_function["arguments"] = json.dumps(function_arguments)
++            normalized_function["arguments"] = function_arguments
+ 
+             normalized_tool_call = dict(tool_call)
+             normalized_tool_call["id"] = tool_call_id
+diff --git a/tests/unit_tests/datasets/llm/test_chat_dataset.py b/tests/unit_tests/datasets/llm/test_chat_dataset.py
+index 424507b38..76f690152 100644
+--- a/tests/unit_tests/datasets/llm/test_chat_dataset.py
++++ b/tests/unit_tests/datasets/llm/test_chat_dataset.py
+@@ -68,7 +68,7 @@ def test_normalize_messages_supports_reasoning_and_tool_call_fields():
+     norm = tcd._normalize_messages(msgs)
+     assert norm[0]["content"] == ""
+     assert norm[0]["reasoning_content"] == "think step"
+-    assert norm[0]["tool_calls"][0]["function"]["arguments"] == '{"city": "Seattle"}'
++    assert norm[0]["tool_calls"][0]["function"]["arguments"] == {"city": "Seattle"}
+     assert norm[1]["content"] == ""
+ 
+     none_reasoning = tcd._normalize_messages([{"role": "assistant", "content": "", "reasoning_content": None}])
+@@ -90,9 +90,32 @@ def test_normalize_tool_calls_autofills_missing_id_and_type():
+     calls = norm[0]["tool_calls"]
+     assert calls[0]["id"] == "call_0"
+     assert calls[0]["type"] == "function"
+-    assert calls[0]["function"]["arguments"] == '{"x": 1}'
++    assert calls[0]["function"]["arguments"] == {"x": 1}
+     assert calls[1]["id"] == "call_1"
+     assert calls[1]["type"] == "function"
++    assert calls[1]["function"]["arguments"] == {}
++
++
++@pytest.mark.parametrize(
++    ("raw", "expected"),
++    [
++        ('{"command": "ls -la", "n": 2}', {"command": "ls -la", "n": 2}),
++        ({"command": "ls"}, {"command": "ls"}),
++        ("not json", "not json"),
++        ("[1, 2]", "[1, 2]"),
++        ('"just a string"', '"just a string"'),
++    ],
++)
++def test_normalize_tool_call_arguments_decodes_json_objects_only(raw, expected):
++    msgs = [
++        {
++            "role": "assistant",
++            "content": "",
++            "tool_calls": [{"id": "c", "type": "function", "function": {"name": "bash", "arguments": raw}}],
++        }
++    ]
++    norm = tcd._normalize_messages(msgs)
++    assert norm[0]["tool_calls"][0]["function"]["arguments"] == expected
+ 
+ 
+ @pytest.mark.parametrize(
