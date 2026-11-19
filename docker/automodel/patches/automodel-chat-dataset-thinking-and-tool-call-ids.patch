@@ -1,0 +1,236 @@
+ChatDataset: accept the NeMo Platform's SFT chat rows (separate ``thinking`` messages, tool results
+without ``tool_call_id``).
+
+The platform's SFT chat schema (``SFTChatMessage``, ``extra="forbid"``) keeps an assistant turn's reasoning
+in a message of its own, ``{"role": "assistant", "thinking": "..."}``, and its ``tool`` messages carry only
+``role`` and ``content``. ``ChatDataset._normalize_messages`` expects the OpenAI shape, so rows from the
+platform failed two ways:
+
+- A ``thinking`` message was not recognised. It rendered as an empty assistant turn
+  (``<think>\n\n</think>``) and its reasoning never reached the model.
+- A ``tool`` message without ``tool_call_id`` raised "tool message `tool_call_id` must be a non-empty
+  string", because ``__getitem__`` normalizes every row.
+
+Now a ``thinking`` message is folded into ``reasoning_content`` on the assistant message after it (or kept as
+its own assistant message when none follows), and a ``tool`` message without an id takes the id of the next
+unanswered tool call of the assistant message before it, in call order. Rows that already use
+``reasoning_content`` and ``tool_call_id`` are unchanged.
+
+Applies after automodel-chat-dataset-tool-call-arguments.patch (same function). Drop this patch once the
+pinned Automodel commit includes the change.
+
+diff --git a/nemo_automodel/components/datasets/llm/chat_dataset.py b/nemo_automodel/components/datasets/llm/chat_dataset.py
+index 7bdbefd7e..ec8a02f53 100644
+--- a/nemo_automodel/components/datasets/llm/chat_dataset.py
++++ b/nemo_automodel/components/datasets/llm/chat_dataset.py
+@@ -188,12 +188,62 @@ def _load_openai_messages(
+     return rows
+ 
+ 
++def _merge_thinking_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
++    """Fold ``thinking`` messages into the ``reasoning_content`` of the assistant message after them.
++
++    The NeMo Platform's SFT chat schema keeps an assistant turn's reasoning in a message of its own,
++    ``{"role": "assistant", "thinking": "..."}``, ahead of the message that carries the reply and tool
++    calls. Chat templates read ``reasoning_content`` on the reply instead, so an unmerged thinking message
++    renders as an empty assistant turn and its reasoning never reaches the model.
++
++    A thinking message stays an assistant message of its own (empty content, its reasoning as
++    ``reasoning_content``) when no assistant message follows it, or when the one that follows already has a
++    ``reasoning_content`` of its own.
++    """
++    merged: List[Dict[str, Any]] = []
++    pending: str | None = None  # reasoning waiting for the assistant message it belongs to
++    for m in messages:
++        if not isinstance(m, dict):
++            merged.append(m)
++            continue
++        if pending is not None:
++            if m.get("role") == "assistant" and "thinking" not in m and "reasoning_content" not in m:
++                m = {**m, "reasoning_content": pending}
++            else:
++                merged.append({"role": "assistant", "content": "", "reasoning_content": pending})
++            pending = None
++        if "thinking" not in m:
++            merged.append(m)
++            continue
++        rest = {k: v for k, v in m.items() if k != "thinking"}
++        thinking = m["thinking"]
++        if rest.get("role") != "assistant":
++            raise ValueError("`thinking` is only valid on assistant messages")
++        if thinking is None:
++            thinking = ""
++        if not isinstance(thinking, str):
++            raise ValueError("assistant message `thinking` must be a string when provided")
++        if "reasoning_content" in rest:
++            merged.append(rest)
++        elif rest.get("content") or rest.get("tool_calls"):
++            merged.append({**rest, "reasoning_content": thinking})
++        else:
++            pending = thinking
++    if pending is not None:
++        merged.append({"role": "assistant", "content": "", "reasoning_content": pending})
++    return merged
++
++
+ def _normalize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+     """Ensure messages list is valid and content fields are strings for system/user/assistant.
+ 
+     - Keeps tool_calling fields if present (e.g., tool calls in assistant messages, tool role messages).
+     - If content is a list of parts, only keep text parts.
++    - ``thinking`` messages are folded into ``reasoning_content`` (see ``_merge_thinking_messages``).
++    - A tool message without a ``tool_call_id`` takes the id of the next unanswered tool call of the
++      assistant message before it, in call order.
+     """
++    messages = _merge_thinking_messages(messages)
+ 
+     def _normalize_content(value: Any) -> str:
+         if isinstance(value, list):
+@@ -254,6 +304,7 @@ def _normalize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+         return normalized_tool_calls
+ 
+     norm: List[Dict[str, Any]] = []
++    unanswered_call_ids: List[str] = []  # tool calls of the latest assistant message, not yet matched
+     for m in messages:
+         role = m.get("role")
+         out = dict(m)
+@@ -273,11 +324,21 @@ def _normalize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                     out["reasoning_content"] = reasoning_content
+             if "tool_calls" in m:
+                 out["tool_calls"] = _normalize_tool_calls(m.get("tool_calls"))
++            unanswered_call_ids = [call["id"] for call in out.get("tool_calls", [])]
+ 
+         if role == "tool":
+             tool_call_id = m.get("tool_call_id")
+-            if not isinstance(tool_call_id, str) or not tool_call_id:
++            if tool_call_id is None or tool_call_id == "":
++                if not unanswered_call_ids:
++                    raise ValueError(
++                        "tool message `tool_call_id` must be a non-empty string "
++                        "(there is no earlier tool call without a result to pair it with)"
++                    )
++                out["tool_call_id"] = unanswered_call_ids.pop(0)
++            elif not isinstance(tool_call_id, str):
+                 raise ValueError("tool message `tool_call_id` must be a non-empty string")
++            elif tool_call_id in unanswered_call_ids:
++                unanswered_call_ids.remove(tool_call_id)
+ 
+         norm.append(out)
+     return norm
+diff --git a/tests/unit_tests/datasets/llm/test_chat_dataset.py b/tests/unit_tests/datasets/llm/test_chat_dataset.py
+index 76f690152..c56bdd66a 100644
+--- a/tests/unit_tests/datasets/llm/test_chat_dataset.py
++++ b/tests/unit_tests/datasets/llm/test_chat_dataset.py
+@@ -180,6 +180,112 @@ def test_normalize_messages_rejects_malformed_reasoning_and_tool_fields(message,
+         tcd._normalize_messages(message)
+ 
+ 
++def _bash_call(command, call_id=None):
++    call = {"type": "function", "function": {"name": "bash", "arguments": {"command": command}}}
++    if call_id is not None:
++        call["id"] = call_id
++    return call
++
++
++def test_normalize_messages_folds_thinking_messages_into_reasoning_content():
++    msgs = [
++        {"role": "system", "content": "sys"},
++        {"role": "user", "content": "task"},
++        {"role": "assistant", "thinking": "list the files first"},
++        {"role": "assistant", "content": "Looking.", "tool_calls": [_bash_call("ls")]},
++        {"role": "tool", "content": "a.py"},
++        {"role": "assistant", "thinking": "done"},
++        {"role": "assistant", "content": "All set."},
++    ]
++    norm = tcd._normalize_messages(msgs)
++
++    assert [m["role"] for m in norm] == ["system", "user", "assistant", "tool", "assistant"]
++    assert norm[2]["reasoning_content"] == "list the files first"
++    assert norm[2]["content"] == "Looking."
++    assert norm[4]["reasoning_content"] == "done"
++    assert all("thinking" not in m for m in norm)
++    # The caller's messages are not changed.
++    assert msgs[2] == {"role": "assistant", "thinking": "list the files first"}
++
++
++def test_normalize_messages_keeps_a_thinking_message_that_has_no_reply_to_join():
++    trailing = tcd._normalize_messages([{"role": "user", "content": "q"}, {"role": "assistant", "thinking": "hmm"}])
++    assert trailing[1] == {"role": "assistant", "content": "", "reasoning_content": "hmm"}
++
++    # A thinking message followed by something other than an assistant message stays its own turn.
++    separate = tcd._normalize_messages(
++        [{"role": "assistant", "thinking": "a"}, {"role": "user", "content": "u"}],
++    )
++    assert separate[0] == {"role": "assistant", "content": "", "reasoning_content": "a"}
++    assert separate[1]["role"] == "user"
++
++    wins = tcd._normalize_messages(
++        [
++            {"role": "assistant", "thinking": "from the thinking message"},
++            {"role": "assistant", "content": "x", "reasoning_content": "already on the reply"},
++        ]
++    )
++    assert len(wins) == 2
++    assert wins[1]["reasoning_content"] == "already on the reply"
++
++    # Thinking on a message that also has a reply is accepted too.
++    inline = tcd._normalize_messages([{"role": "assistant", "content": "x", "thinking": "inline"}])
++    assert inline[0]["reasoning_content"] == "inline"
++    assert "thinking" not in inline[0]
++
++
++@pytest.mark.parametrize(
++    ("message", "error_pattern"),
++    [
++        ([{"role": "user", "content": "x", "thinking": "no"}], "only valid on assistant"),
++        ([{"role": "assistant", "thinking": 3}], "thinking"),
++    ],
++)
++def test_normalize_messages_rejects_malformed_thinking(message, error_pattern):
++    with pytest.raises(ValueError, match=error_pattern):
++        tcd._normalize_messages(message)
++
++
++def test_normalize_messages_pairs_tool_results_with_the_calls_before_them():
++    msgs = [
++        {"role": "user", "content": "go"},
++        {"role": "assistant", "content": "", "tool_calls": [_bash_call("ls"), _bash_call("pwd")]},
++        {"role": "tool", "content": "a.py"},
++        {"role": "tool", "content": "/repo"},
++        {"role": "assistant", "content": "", "tool_calls": [_bash_call("cat a.py")]},
++        {"role": "tool", "content": "print(1)"},
++    ]
++    norm = tcd._normalize_messages(msgs)
++
++    # Calls without ids are named call_<index> within their message, so each turn starts again at call_0.
++    assert [c["id"] for c in norm[1]["tool_calls"]] == ["call_0", "call_1"]
++    assert [norm[2]["tool_call_id"], norm[3]["tool_call_id"]] == ["call_0", "call_1"]
++    assert norm[5]["tool_call_id"] == "call_0"
++    assert "tool_call_id" not in msgs[2]
++
++
++def test_normalize_messages_keeps_given_tool_call_ids_and_pairs_the_rest_in_order():
++    msgs = [
++        {"role": "assistant", "content": "", "tool_calls": [_bash_call("a", "x1"), _bash_call("b", "x2")]},
++        {"role": "tool", "tool_call_id": "x2", "content": "second"},
++        {"role": "tool", "content": "first"},
++    ]
++    norm = tcd._normalize_messages(msgs)
++    assert norm[1]["tool_call_id"] == "x2"
++    assert norm[2]["tool_call_id"] == "x1"
++
++
++def test_normalize_messages_rejects_a_tool_result_with_no_call_to_pair_with():
++    with pytest.raises(ValueError, match="tool_call_id"):
++        tcd._normalize_messages(
++            [
++                {"role": "assistant", "content": "", "tool_calls": [_bash_call("ls")]},
++                {"role": "tool", "content": "one"},
++                {"role": "tool", "content": "two, but only one call was made"},
++            ]
++        )
++
++
+ def test_load_openai_messages_local_and_errors(tmp_path, monkeypatch):
+     # Create local files: JSONL and JSON
+     jsonl = tmp_path / "data.jsonl"

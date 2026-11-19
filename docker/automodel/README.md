@@ -87,6 +87,7 @@ Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` 
 | Patch | Why |
 | --- | --- |
 | `automodel-chat-dataset-tool-call-arguments.patch` | `ChatDataset` stringified tool-call `arguments`, which Qwen3.5's chat template rejects. Arguments are now passed as a mapping, matching vLLM at serve time. |
+| `automodel-chat-dataset-thinking-and-tool-call-ids.patch` | The platform's SFT chat rows keep reasoning in separate `{"role": "assistant", "thinking": ...}` messages and send `tool` messages with no `tool_call_id`. `ChatDataset` rendered the first as an empty assistant turn (reasoning lost) and raised on the second. `thinking` is now folded into `reasoning_content` on the next assistant message, and an id-less tool result takes the id of the next unanswered tool call before it. Applies after the tool-call-arguments patch. |
 
 ## Tasks / training runtime (platform glue)
 

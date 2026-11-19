@@ -29,6 +29,7 @@ RUN --mount=type=bind,source=docker/automodel/patches,target=/tmp/patches,readon
     cd /opt/Automodel && \
     git checkout ${AUTOMODEL_COMMIT} && \
     git apply --verbose /tmp/patches/automodel-chat-dataset-tool-call-arguments.patch && \
+    git apply --verbose /tmp/patches/automodel-chat-dataset-thinking-and-tool-call-ids.patch && \
     rm -rf /opt/Automodel/.git
 
 FROM ${PYTORCH_BASE} AS nhx-automodel-base-builder
