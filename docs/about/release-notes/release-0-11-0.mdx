@@ -1,0 +1,123 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.11.0 - 2026-12-02"
+description: ""
+---
+<Note>
+These notes describe a proposed v0.11.0 cut. The release date is a planned date, and the content can change before the release ships.
+</Note>
+
+NeMo Helix v0.11.0 speeds up Harbor evaluations on Kubernetes with prebuilt agent layers and makes closed-book runs opt-in. You can now run Gym evaluations directly from a JSONL file in a fileset and score each reward component separately. Jobs get a durable creation and deletion lifecycle, per-type listing, and Builder limits that come from Jobs profiles. The Helm chart runs its services as non-root and generates the embedded PostgreSQL password.
+
+## Highlights
+
+- **Faster Harbor runs on Kubernetes.** Builder builds each task image with the run's agent already installed, so trials skip the agent install step. A run is closed-book only when the Harbor target asks for it.
+- **Gym evaluations from a fileset.** Submit a Gym JSONL file that is stored in a fileset as an agent evaluation, publish it as a versioned taskset, and see each reward component reported as its own score.
+- **Task outputs and run progress.** Harbor and Gym runs can keep the files that tasks write. Taskset runs report trial counts by phase, and the SDK adds a `taskset_runs` resource.
+- **Jobs lifecycle and Helm hardening.** Jobs report when creation and deletion are still pending. The Helm chart's API and controller run as non-root, and embedded PostgreSQL gets a generated password and an ingress NetworkPolicy.
+
+## What's included
+
+### Agents and Fabric
+
+- `nemo agents list-jobs --agent <ref>` filters execute jobs by agent, and you can repeat the option. A bare name resolves to the active workspace. In the SDK, use `agents.jobs.execute.list(agents=[...])`. See [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs).
+- Fabric reports the status and tools of each agent's MCP servers, and the Studio agent detail page shows them in an MCP Servers panel (documentation not yet available).
+- Fabric reads gateway models from agent configuration consistently, and harness model calls go through the jobs authentication proxy.
+
+### Agent Evaluation
+
+- Closed-book is now opt-in. Tasks with no network access no longer make a run closed-book. A run is closed-book only when the Harbor target sets `closed_book: true`, and otherwise submit prints one open-book warning for the run. See [Make a Run Closed-Book](/documentation/evaluate-models/agent-eval/harbor-kubernetes#optional-run-closed-book).
+- On Kubernetes, Builder builds an agent layer for each task image with the run's agent installed. If a layer fails or is not ready within `evals.runs.harbor.agent_layer_wait_seconds`, the task installs the agent at setup instead. Set `evals.runs.harbor.agent_layers: false` to turn layers off. See [Harbor Runner on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-runner#on-kubernetes).
+- To keep task outputs, list container paths in a Harbor target's `artifacts`. Files under `/logs/artifacts/` are collected automatically and saved under `evidence/harbor/` in the run's results. Gym resource servers can write files to `NHX_GYM_OUTPUT_DIR`. See [Keep Task Outputs](/documentation/evaluate-models/agent-eval/harbor-runner#keep-task-outputs) and [Gym Output Directories](/documentation/evaluate-models/agent-eval/gym-runner#output-directories).
+- `result_ignore_patterns` keeps matching files out of the `agent-eval-results` fileset. See [Choose What the Job Retains](/documentation/evaluate-models/agent-eval/reading-results#choose-what-the-job-retains).
+- Gym runs report each reward component as its own `gym_reward.<component>` score, with mean and pass@k. To rescore, use `GymRewardMetric(reward_components=(...))`. See [Several Scores per Row](/documentation/evaluate-models/agent-eval/gym-runner#several-scores-per-row).
+- `agent-evaluate` accepts a Gym JSONL file stored in a fileset as its tasks. Each row is checked, and a bad row returns 422 with its line number. A `snapshot` publishes the rows as tasks and a taskset revision. Set `id_field` so that an edited row becomes a new revision of the same task. See [Run from a Fileset](/documentation/evaluate-models/agent-eval/gym-runner#run-from-a-fileset).
+- A Gym rollout that fails now fails only its own trial, and the run's `error_count` counts it. See the [Gym runner caveats](/documentation/evaluate-models/agent-eval/gym-runner#caveats).
+- Taskset runs and their tasks report trial counts by phase, and Harbor trial progress updates live from each task's Job. `GET .../agent-evaluate/runs/{run_id}/tasks/{task_index}` returns one task. In `runs submit` and `tasksets create`, `--tasks` accepts ranges such as `0-4,7`. `nemo evals runs tasks --phase failed` lists only failed tasks. See [Track and Cancel Runs](/documentation/evaluate-models/agent-eval/harbor-kubernetes#track-and-cancel-runs).
+- The SDK adds `Evaluator.taskset_runs` to submit, retrieve, list, read results for, and cancel taskset runs. Submit generates an idempotency key, and if you interrupt it, it prints a command to recover the run (documentation not yet available).
+- `sequence-similarity` is a new metric that scores the difflib sequence ratio between a candidate and a reference. See [Sequence Similarity Metric](/documentation/evaluate-models/metrics/similarity-metrics#sequence-similarity-metric).
+- Prompts can reference images with `fileset://<workspace>/<fileset>#<path>`. The Inference Gateway downloads each image with the caller's permissions and sends it inline. Supported formats are PNG, JPEG, GIF, and WebP, up to 25 MiB per image. See [Images in the Prompt](/documentation/evaluate-models/metrics/model-configuration#images-in-the-prompt).
+- A full `nemo skills install` records which skills it installed and removes skills it no longer ships. See [Remove Installed Agent Skills from the Old Names](/documentation/evaluate-models/upgrading-from-evaluator#remove-installed-agent-skills-from-the-old-names).
+- Evaluation fixes: trace IDs are unique to each run; Gym token usage is kept through Intake; result bundles and summaries finalize independently; `nemo gym env start` reports why an environment exited early; standalone collection keeps the Gym configuration; and leftover evaluation sandboxes are cleaned up.
+
+### Customizer
+
+- Customizer uses NeMo Automodel 0.7.0. New options are `training.tokenizer_backend` and `training.mask_generation_prompt`. Full-weight distillation with Adam or AdamW keeps the student in fp32 when precision is unset. Qwen3 reranker models must set `pipeline_tag: text-ranking`. See [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) and [Embedding Models](/documentation/customizer-reference/models/embedding).
+- You can deploy and fine-tune Nemotron 3.5 Super VL. The default vLLM image is now v0.32.0, and deployments allow LoRA ranks up to 32 by default. See [Deploy Nemotron Super VL](/documentation/models-and-inference/deploy-models#deploy-nemotron-super-vl).
+- GRPO full-weight exports always write a transformers 5 `config.json`, which vLLM loads directly. The `v4_compatible` option is ignored. See [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments).
+- Studio fills in and checks `expert_parallel_size` for mixture-of-experts models.
+- Customization fixes: jobs wait for the LoRA adapter's ready marker, the job launcher handles long log lines, volume names no longer need dots, jobs fail early when the Gym environment does not match, GRPO works with the updated training image, and Safe Synthesizer can fetch model weights instead of returning 404.
+
+### Studio
+
+- When you evaluate an agent, the Configuration step accepts `.jsonl`, `.json`, `.csv`, or `.parquet` datasets, including every Parquet file in a fileset. You can build the evaluation config with a form, choose it from a fileset, or upload it. Studio blocks a re-run whose dataset no longer exists and warns you if the dataset changed. See [Evaluate an Agent](/documentation/studio/agents#evaluate-an-agent).
+- The Playground and its inference provider, agent overview, and trace graph are always on, and their feature flags are removed (documentation not yet available).
+- Studio changes (documentation not yet available):
+  - Datasets appear in the sidebar.
+  - Every fileset opens on its own detail page, and you can copy an external fileset to a new fileset.
+  - The person sampler can check for and register Nemotron Personas.
+  - You can import an agent from GitHub on the Dashboard.
+  - Chat shows failed replies with an inline error, and shows thinking and tool-call steps, including in NeMo Assistant.
+  - Workspace creation explains when a name is reserved.
+- Studio plugins can use the AgentSelect and ModelSelect components (documentation not yet available).
+- Studio fixes: Parquet schema inference, the Data Designer tool schema, scrolling through long traces, server-side evaluation job lookup, and chart tooltip themes.
+
+### Platform, CLI, and Deployment
+
+- Jobs show `creation_pending` until their setup is durable, then `created`. A delete records `deletion_pending` and returns 204, and the controller cleans up and removes the job afterward. `jobs.storage.creation_timeout_seconds` limits how long creation can take. See [Creation and Deletion Lifecycle](/documentation/kubernetes-deployment/setup/jobs#creation-and-deletion-lifecycle).
+- `nemo <plugin> list-jobs` lists one plugin's jobs, and `nemo jobs list --type <plugin>` or `--type <plugin>.<job>` filters jobs by type. You can repeat `--type`. See [Listing Jobs by Type](/documentation/kubernetes-deployment/setup/jobs#listing-jobs-by-type).
+- Builder limits concurrent builds through Jobs profiles. The Helm value `builder.maxConcurrentBuilds` sets `max_active_jobs` for the build profiles, and Builder no longer keeps its own queue. See [Config Reference](/documentation/kubernetes-deployment/config-reference).
+- Job changes (documentation not yet available):
+  - Step environments reject reserved variables such as `NHX_PRINCIPAL` and names that contain `=` or NUL, and the error names the variable.
+  - Docker `additional_volume_mounts` accept `read_only`.
+  - OpenShell job steps can request GPUs.
+  - Generated job submit commands expose `output_location`.
+  - Jobs report queue-length telemetry.
+- Sandboxes that are bound to a provider can save their results, and SDK response validation errors name the model and fields.
+- The Helm chart's API and controller run as non-root UID and GID 1000, with privilege escalation disabled, all capabilities dropped, and the RuntimeDefault seccomp profile. The Docker Compose stack reaches the Docker socket only through a proxy. See the [Helm Reference](/documentation/kubernetes-deployment/helm/helm-reference).
+- When `postgresql.auth.password` is empty, the default, the Helm chart generates a random password for embedded PostgreSQL on install and reuses its Secret on upgrade. A new NetworkPolicy limits ingress to embedded PostgreSQL. See the [Helm Reference](/documentation/kubernetes-deployment/helm/helm-reference).
+- Workload token exchange accepts ES256 subject tokens. Rejected service identities return 403 denials. See [Rejected Service Identities](/documentation/access-control/authorization/policy-engine#rejected-service-identities).
+- Authorization fixes: role bindings survive policy reloads, the garak audit task authenticates as its own service, Data Designer and Anonymizer jobs keep their creator's delegation, and harness workloads trust public roots and the gateway CA.
+- S3 filesets upload large files in multipart uploads and return 403 for storage authentication failures. Listing and deletion stay within each fileset's prefix.
+- Each fileset has a permanent ID, and the SDK adds `get_fileset_by_id` and `delete_fileset_by_id`. You can sort filesets by `storage_type`. See [Manage Files](/documentation/get-started/core-concepts/manage-files).
+- Intake scopes trace and span reads to their session and limits rollups to each evaluation's lifetime, so a recreated Evaluation does not inherit earlier runs. ATIF ingest runs in a process pool.
+- The Inference Gateway accepts typed System One decision-model requests at `POST /v1/systemone` (documentation not yet available).
+- The platform loads only the selected plugins' services and controllers, so it starts faster.
+
+## Upgrade from v0.10.x
+
+- Taskset runs with no-network tasks are no longer closed-book automatically. To keep closed-book behavior, set `closed_book: true` on the Harbor target. A closed-book run is refused with 422 `closed_book_required` unless every model it can reach ends its `request_middleware` with `nemo-evals-closed-book`. See [Make a Run Closed-Book](/documentation/evaluate-models/agent-eval/harbor-kubernetes#optional-run-closed-book).
+- Builder pushes agent layers to `<repository_prefix>/<workspace>/harbor-agent-<key>` and does not delete them. Add a registry lifecycle rule for `*/harbor-agent-*`. See [Harbor Sandbox Profiles](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles).
+- `builder.max_concurrent_builds` is deprecated and ignored. Set Helm `builder.maxConcurrentBuilds` or the build profiles' `max_active_jobs` instead. See [Config Reference](/documentation/kubernetes-deployment/config-reference).
+- Job deletion is asynchronous. A delete returns 204 while the job is still `deletion_pending`, so wait for the job to disappear before reusing its resources. See [Creation and Deletion Lifecycle](/documentation/kubernetes-deployment/setup/jobs#creation-and-deletion-lifecycle).
+- Helm API and controller pods run as UID and GID 1000. On OpenShift, set `runAsUser` and `runAsGroup` to null so that the platform assigns them. See the [Helm Reference](/documentation/kubernetes-deployment/helm/helm-reference).
+- `postgresql.auth.password` now defaults to empty instead of `nemo`. On upgrade, the chart reuses the existing Secret and does not rotate the password. The embedded PostgreSQL NetworkPolicy is on by default (`networkPolicy.postgresql.enabled: true`) and needs a CNI that enforces NetworkPolicies. Add other clients with `networkPolicy.postgresql.extraIngress`. See the [Helm Reference](/documentation/kubernetes-deployment/helm/helm-reference).
+- The default vLLM image is v0.32.0, and deployments allow LoRA rank 32 by default. Pin `default_vllm_image_tag` if you depend on the earlier version. See [Deploy Models](/documentation/models-and-inference/deploy-models).
+- GRPO ignores a stored or submitted `v4_compatible` option, and full-weight exports always use the transformers 5 format.
+- Remove the Studio feature flags `inference_provider_enabled`, `agent_overview_enabled`, and `trace_graph_enabled` from your configuration. The features they controlled are always on.
+- If you installed agent skills before skills install kept a record of them, remove the old `nemo-evaluator` skill directories by hand. See [Remove Installed Agent Skills from the Old Names](/documentation/evaluate-models/upgrading-from-evaluator#remove-installed-agent-skills-from-the-old-names).
+
+## Current constraints
+
+- The Studio Tasksets and Tasks library is behind `studio.feature_flags.tasksets_enabled`, which is off by default.
+- Agent layers are not built for no-network or allowlist tasks, which still install the agent at setup.
+- Sandboxed Gym runs do not return files from `NHX_GYM_OUTPUT_DIR`, and symbolic links in task outputs are skipped.
+- `agent-evaluate` fileset tasks are limited to 64 MiB and 50,000 rows per file.
+
+## Maintenance
+
+- Dependency and image updates: nemo-gym 0.7.0 images, a smaller RL image, Kaizen UI 1.21.0, and updated Vite and Fern tooling. The Gym host image is published for each commit.
+- The OpenSandbox server extension moved into the NeMo Helix sandbox package. OpenShell keeps its internal credentials in Helix Secrets, and its credential driver runs as a Docker Compose sidecar.
+- Reliability fixes cover the entities database engine across event loops and Builder revision numbers beyond 32 bits.
+- Continuous integration adds nightly taskset-run and Builder end-to-end tests and shards test suites.
+
+## Install
+
+See [Setup](/documentation/get-started/setup) for local installations and [Install](/documentation/kubernetes-deployment/setup/helm/install) for self-managed Kubernetes deployments.
+
+## Links
+
+- [Repository](https://github.com/NVIDIA-NeMo/nemo-helix)
+- [Issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)
