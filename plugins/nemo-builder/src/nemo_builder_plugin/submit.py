@@ -228,11 +228,15 @@ async def submit_build_set(
         except EntityConflictError:
             try:
                 images.append(await _adopt(entity_client, row, digest, build_set, workspace, backend.name))
-            except BuildConflict:
+            except BuildConflict as exc:
+                # What the answer says: the rows this request wrote are failed for the same reason.
+                why = (
+                    "was already built by another backend"
+                    if isinstance(exc, BackendChanged)
+                    else "belongs to a different request"
+                )
                 await fail_rows(
-                    entity_client,
-                    created,
-                    f"not built: {build_set.name} revision {build_set.revision} belongs to a different request",
+                    entity_client, created, f"not built: {build_set.name} revision {build_set.revision} {why}"
                 )
                 raise
 

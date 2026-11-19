@@ -334,7 +334,7 @@ class TestWhyAnEndedJobDidNotBuildIt:
         job = _job(log_tail=log_tail, message="Step build failed")
         job.steps[0].name = "build"
         assert ended_job(job) == EndedJob(HelixJobStatus.ERROR, {}, "Step build failed")
-        # Spelt out in settle, so that the API never loads the backend or a step's program: kept the same here.
+        # Spelt out in settle, not imported from the backend's module: kept the same here.
         assert (settle_module._REASON_STEP, settle_module._REASON_BACKEND) == (REMOTE_STEP_NAME, RemoteBackend.name)
 
     @pytest.mark.asyncio

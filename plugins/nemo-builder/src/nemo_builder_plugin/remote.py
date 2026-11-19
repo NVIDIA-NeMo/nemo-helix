@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
-from nemo_builder_plugin.schema import ImageSource
+from nemo_builder_plugin.schema import MAX_BUILD_SPECS, ImageSource
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, ROOT_DOCKERFILE, RemoteBuildImage, RemoteBuildStepConfig
 from nemo_helix_plugin.auth.workload_identity import (
     WorkloadIdentityConfigError,
@@ -31,10 +31,11 @@ from nemo_helix_plugin.jobs.spec import (
 )
 
 STEP_NAME = "remote-build"
-#: The Jobs backends a `cpu` profile can be on that can run the step. It is a container, it reads the job's ID
-#: from its environment, and with `credential_secret` it is given a platform secret there: the others lack one
-#: of the three.
-STEP_BACKENDS = ("docker", "kubernetes_job")
+#: The Jobs backends that can run the step, which is a container that reads the job's ID from its environment
+#: and, with `credential_secret`, a platform secret. Kubernetes alone for now, as for the in-cluster build: Jobs'
+#: Docker backend names a step's container for its job without the workspace, so one build set built in two
+#: workspaces would share a container.
+STEP_BACKENDS = ("kubernetes_job",)
 
 #: How long past its last build timeout a step needs, to cancel the build and say why.
 CANCEL_MARGIN_SECONDS = 120
@@ -49,8 +50,8 @@ def _token_exchange() -> bool:
     try:
         return is_workload_identity_token_exchange_enabled()
     except WorkloadIdentityConfigError:
-        # The auth config can't be read here, so exchange is taken for off. If it is on, the step starts with no
-        # credential, and says so on each image's line.
+        # The auth config can't be read here, so exchange is taken for off. If it is on, Jobs' launcher can't
+        # fetch the secret and the step never starts: the rows then say only what Jobs says of the job.
         return False
 
 
@@ -97,12 +98,15 @@ class RemoteBackend:
             )
         # Jobs ends a step at the profile's limit. It counts from when the job was created, so the time a build
         # waits for a slot is in it too; that part an operator sizes, and this checks only what can't be enough.
-        needed = remote.build_timeout_seconds * remote.max_specs_per_set + CANCEL_MARGIN_SECONDS
+        # As many images as one set can hold: what the deployment allows, and no more than any request may name.
+        images = min(remote.max_specs_per_set, MAX_BUILD_SPECS)
+        needed = remote.build_timeout_seconds * images + CANCEL_MARGIN_SECONDS
         if profile.config.ttl_seconds_active < needed:
             raise BackendRejectedError(
                 f"Jobs execution profile cpu/{name} ends a step after {profile.config.ttl_seconds_active}s "
                 f"(ttl_seconds_active), which is less than the {needed}s one build set may take "
-                "(builder.remote.build_timeout_seconds for each of max_specs_per_set images, and a margin)"
+                f"(builder.remote.build_timeout_seconds for each of the {images} images one set may hold, and a "
+                f"{CANCEL_MARGIN_SECONDS}s margin)"
             )
         if self._config.default_platform not in remote.platforms:
             raise BackendRejectedError(

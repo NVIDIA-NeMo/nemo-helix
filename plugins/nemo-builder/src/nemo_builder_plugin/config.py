@@ -20,6 +20,7 @@ from nemo_builder_plugin.identity import (
     validate_repository,
 )
 from nemo_helix_plugin.config import NemoConfig
+from nemo_helix_plugin.refs import parse_entity_ref
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -95,7 +96,8 @@ class RemoteConfig(BaseModel):
             "the builds in flight, so set it to what the service lets this deployment queue. Its "
             "`ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build "
             "was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for "
-            "each image. A profile whose limit is below the builds' own is refused. That check is a floor: it "
+            "each image. A profile whose limit is below the builds' own, plus two minutes, is refused. That check "
+            "is a floor: it "
             "leaves out the time to fetch each build context and, once an image is built, up to five minutes of "
             "reporting it to the builder."
         ),
@@ -167,6 +169,19 @@ class RemoteConfig(BaseModel):
     def _repository_is_a_path(cls, value: str | None) -> str | None:
         return None if value is None else validate_repository(value.strip("/"))
 
+    @field_validator("credential_secret")
+    @classmethod
+    def _credential_secret_is_a_reference(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                # As Jobs reads it when it creates the job, which is after the rows are written.
+                parse_entity_ref(value, default_workspace="any")
+            except ValueError as exc:
+                raise ValueError("remote.credential_secret must be `<name>` or `<workspace>/<name>`") from exc
+            # Without what Jobs trims: the builder's own check of the secret splits the reference as it is.
+            return value.strip()
+        return value
+
     @field_validator("platforms", mode="before")
     @classmethod
     def _platform_names(cls, value: Any) -> Any:
@@ -219,8 +234,8 @@ class BuilderConfig(NemoConfig):
     registry: str | None = Field(
         default=None,
         description=(
-            "Host of the registry every image is published to, with an optional port; prefix it with `http://` "
-            "for plain HTTP. Unset refuses every submit."
+            "Host of the registry the in-cluster build publishes every image to, with an optional port; prefix "
+            "it with `http://` for plain HTTP. Unset, with `backend: execution`, every submit is refused."
         ),
     )
     repository_prefix: str = Field(
@@ -240,9 +255,8 @@ class BuilderConfig(NemoConfig):
             scheme, separator, host = data["registry"].partition("://")
             if separator:
                 if scheme not in ("http", "https"):
-                    raise ValueError(
-                        f"registry must be a host, optionally prefixed with http:// or https://, got {scheme}://"
-                    )
+                    # Not what was given: a registry written with a login in it is a credential.
+                    raise ValueError("registry must be a host, optionally prefixed with http:// or https://")
                 plain_http = scheme == "http"
                 data = {**data, "registry": host}
         config = handler(data)

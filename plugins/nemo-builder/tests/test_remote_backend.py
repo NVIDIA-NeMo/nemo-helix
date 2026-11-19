@@ -21,7 +21,7 @@ from nemo_builder_plugin.entities import ContainerImage, ExternalImage, Provenan
 from nemo_builder_plugin.execution import ExecutionBackend
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.plan import BuildPlan
-from nemo_builder_plugin.remote import CANCEL_MARGIN_SECONDS, STEP_NAME, RemoteBackend
+from nemo_builder_plugin.remote import CANCEL_MARGIN_SECONDS, STEP_BACKENDS, STEP_NAME, RemoteBackend
 from nemo_builder_plugin.schema import BuildMount, BuildOutput, BuildSet, BuildSpec, FileSetSource, ImageSource
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildStepConfig
 from nemo_builder_plugin.submit import (
@@ -176,17 +176,46 @@ class TestADeploymentThatCannotBuild:
         with pytest.raises(BackendRejectedError, match="no execution profile cpu/build-remote"):
             RemoteBackend(_config(), [_profile("build-fetch")]).check(_plan())
 
-    @pytest.mark.parametrize("kind", [OpenShellJobExecutionProfile, SubprocessJobExecutionProfile])
+    @pytest.mark.parametrize(
+        "kind", [OpenShellJobExecutionProfile, SubprocessJobExecutionProfile, DockerJobExecutionProfile]
+    )
     def test_a_profile_on_a_backend_that_cant_run_the_step(self, kind: type[ExecutionProfile]) -> None:
-        """One that runs no container, gives a step no job ID, or can't put a secret in its environment. The
-        step would fail every time, after the rows were written."""
+        """One that runs no container, gives a step no job ID, can't put a secret in its environment, or names
+        its container without the workspace. The step would fail, or collide, after the rows were written."""
         profile = kind.model_validate({"provider": "cpu", "profile": "build-remote", "config": {}})
         with pytest.raises(BackendRejectedError, match=f"runs on {profile.backend}, which can't run the remote-build"):
             RemoteBackend(_config(), [profile]).check(_plan())
 
-    def test_a_docker_profile_can_run_the_step(self) -> None:
-        profile = DockerJobExecutionProfile.model_validate({"provider": "cpu", "profile": "build-remote", "config": {}})
-        RemoteBackend(_config(), [profile]).check(_plan())
+    def test_a_padded_credential_secret_is_kept_without_the_padding(self) -> None:
+        """Jobs trims the reference before it reads it. The builder's own check of the secret splits it as it
+        is, and would look for the secret in a workspace named with a space."""
+        assert _config(credential_secret=" platform/remote-credential ").remote.credential_secret == (
+            "platform/remote-credential"
+        )
+
+    def test_the_profiles_limit_is_checked_for_as_many_images_as_a_request_can_name(self) -> None:
+        """A deployment may allow more images in a set than any request can hold. No set is that large."""
+        config = _config(build_timeout_seconds=60, max_specs_per_set=1000)
+        enough = 60 * 100 + CANCEL_MARGIN_SECONDS
+        RemoteBackend(config, [_profile(ttl_seconds_active=enough)]).check(_plan())
+        # And for no fewer: a second less is refused, with the number of images it was checked for.
+        with pytest.raises(BackendRejectedError, match=f"less than the {enough}s .* each of the 100 images"):
+            RemoteBackend(config, [_profile(ttl_seconds_active=enough - 1)]).check(_plan())
+
+    def test_kubernetes_is_the_one_backend_the_step_runs_on(self) -> None:
+        """An allow-list: a backend Jobs gains later is refused until it is known to run the step."""
+        assert STEP_BACKENDS == (_profile().backend,) == ("kubernetes_job",)
+
+    @pytest.mark.parametrize("reference", ["/remote-credential", "team/", "team/build/credential", " "])
+    def test_a_credential_secret_that_is_no_reference_is_a_configuration_error(self, reference: str) -> None:
+        """Jobs reads it as `<name>` or `<workspace>/<name>` when it creates the job, after the rows are
+        written. Found here, it refuses the submit and writes none."""
+        with pytest.raises(ValidationError, match="remote.credential_secret must be `<name>` or `<workspace>/<name>`"):
+            _config(credential_secret=reference)
+
+    @pytest.mark.parametrize("reference", ["remote-credential", "platform/remote-credential", "team+ml/credential"])
+    def test_a_credential_secret_in_either_form_is_taken(self, reference: str) -> None:
+        assert _config(credential_secret=reference).remote.credential_secret == reference
 
     def test_no_image_that_holds_the_step(self) -> None:
         with pytest.raises(BackendRejectedError, match="no image that holds the remote-build step"):
@@ -452,8 +481,10 @@ class TestSubmitting:
             await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
         # A revision conflict to a caller that doesn't know the difference, as before.
         assert issubclass(BackendChanged, BuildConflict)
-        # The row the other backend built is left as it was.
-        assert client.rows["demo-1"].registry == "reg.example.com"
+        # The row the other backend built is left as it was: still waiting for its own build, and not written.
+        row = client.rows["demo-1"]
+        assert (row.registry, row.status, row.status_detail) == ("reg.example.com", "pending", None)
+        assert [event for event in client.events if event.startswith("update:")] == []
 
     async def test_a_credential_the_submitter_cannot_read_is_refused_before_anything_is_written(self) -> None:
         client = FakeEntityClient()
@@ -518,8 +549,7 @@ class TestTheRecord:
         assert client.rows["demo-1"].status == "pending"
 
     async def test_a_remote_row_is_not_completed_without_the_services_name_for_the_build(self) -> None:
-        """Ready with no handle, the row would stay that way: the step's own completion, at the same digest,
-        would be answered with the row as it stands."""
+        """A row a build service built is ready only with the name of the build that made it."""
         client = FakeEntityClient()
         await _submit(client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES))
         digest = "sha256:" + "c" * 64
@@ -538,10 +568,16 @@ class TestTheRecord:
         # The same completion again, as a retried call makes it, returns the row.
         again = await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
         assert again.external == first.external == external
-        # Another build's handle is not swallowed: the row keeps the first, and the caller is told.
-        other = ExternalImage(image_id="img-2", build_id="build-2")
-        with pytest.raises(CompletionConflict, match="another build's image"):
-            await complete(client, workspace="default", name="demo-1", digest=digest, external=other)
+        # Anything else is not swallowed, whichever of the three differs: the row keeps the first, and the
+        # caller is told.
+        for other in (
+            ExternalImage(image_id="img-2", build_id="build-1"),
+            ExternalImage(image_id="img-1", build_id="build-2"),
+            ExternalImage(image_id="img-1", build_id="build-1", attributes={"builder": "v2"}),
+            ExternalImage(build_id="build-1"),
+        ):
+            with pytest.raises(CompletionConflict, match="another build's image"):
+                await complete(client, workspace="default", name="demo-1", digest=digest, external=other)
         assert client.rows["demo-1"].external == external
 
     async def test_completing_writes_the_handle_with_the_digest(self) -> None:

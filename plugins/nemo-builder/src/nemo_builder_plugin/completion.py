@@ -164,8 +164,8 @@ async def complete(
         if external is not None and in_cluster:
             raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
         if not in_cluster and (external is None or external.build_id is None):
-            # Without it the row would be ready with no handle, and stay so: the step's own completion, at the
-            # same digest, would be answered with the row as it stands. Naming a build doesn't show who calls.
+            # A remote row is ready only with the name of the build that made it. It shows which build, not who
+            # is calling: any step acting for the submitter can name one.
             raise CompletionConflict(f"{name} is built by a build service; its completion must name the build")
         if settled(row, digest, external):
             return row

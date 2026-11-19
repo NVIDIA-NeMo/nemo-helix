@@ -124,7 +124,8 @@ async def ensure_build(
 
     A pending revision whose job has ended, or has none, counts as failed: Builder leaves it pending for good.
     So does one Builder refuses as another request's: the same name can mean another platform once the
-    deployment's default changes.
+    deployment's default changes. And so does one another backend built, after the deployment changed its
+    backend. A 409 by which Builder refuses the request itself, whatever its revision, is raised instead.
     """
     newest: ContainerImage | None = None
     revision = 1
@@ -167,8 +168,8 @@ async def adopt_or_build(
     ``name`` is keyed by content (:func:`builder_name`), so another task, run or user may already have built it:
     a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one, or one made
     before ``built_after``, gets the next revision. Builder refuses a revision another request holds, so a submit
-    that loses that race reads the winner's build instead. A refusal that leaves no row is Builder refusing the
-    request itself, and is raised.
+    that loses that race reads the winner's build instead. A 409 by which Builder refuses the request itself
+    is raised, whether it says so by its code or leaves no row at the revision.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)

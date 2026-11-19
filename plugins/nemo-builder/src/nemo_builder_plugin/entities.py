@@ -54,7 +54,7 @@ class Provenance(BaseModel):
         pattern=DIGEST_PATTERN,
         description=(
             "sha256 of the canonical JSON of the `BuildSet`. Tells a retry of the same request from a "
-            "different request that reuses its revision. Every signature carries it."
+            "different request that reuses its revision. Every signature the builder makes carries it."
         ),
     )
     upstream: UpstreamImage | None = Field(default=None, description="For a copy, the image it copies.")
@@ -69,32 +69,33 @@ class Provenance(BaseModel):
 
 
 #: A remote build service's own facts about an image: a few short strings, never a document.
-_MAX_EXTERNAL_ATTRIBUTES = 32
-_MAX_EXTERNAL_VALUE = 512
+MAX_EXTERNAL_ATTRIBUTES = 32
+MAX_EXTERNAL_VALUE = 512
+MAX_EXTERNAL_KEY = 128
 
 
 class ExternalImage(BaseModel):
     """What a remote build service calls the image it built, written when the row becomes ``ready``.
 
-    The builder stores these for a consumer that uses the same service. Of them it reads only ``build_id``,
-    which a completion must carry, and whether a second completion carries the same.
+    The builder stores these for a consumer that uses the same service. It reads none of them for itself. It
+    only requires that a completion carries a ``build_id``, and that a second completion carries the same three.
     """
 
     image_id: str | None = Field(
         default=None,
         min_length=1,
-        max_length=_MAX_EXTERNAL_VALUE,
+        max_length=MAX_EXTERNAL_VALUE,
         description="The service's own handle for the image, if it has one. Not necessarily unique to a row.",
     )
     build_id: str | None = Field(
         default=None,
         min_length=1,
-        max_length=_MAX_EXTERNAL_VALUE,
+        max_length=MAX_EXTERNAL_VALUE,
         description="The service's record of the build, for operators.",
     )
     attributes: dict[str, str] = Field(
         default_factory=dict,
-        max_length=_MAX_EXTERNAL_ATTRIBUTES,
+        max_length=MAX_EXTERNAL_ATTRIBUTES,
         description="A few facts the service reports about the build, such as its builder's version.",
     )
 
@@ -102,8 +103,11 @@ class ExternalImage(BaseModel):
     @classmethod
     def _attributes_are_short(cls, value: dict[str, str]) -> dict[str, str]:
         for key, item in value.items():
-            if len(key) > 128 or len(item) > _MAX_EXTERNAL_VALUE:
-                raise ValueError(f"attribute {key[:32]!r} is too long: a key holds 128 characters, a value 512")
+            if len(key) > MAX_EXTERNAL_KEY or len(item) > MAX_EXTERNAL_VALUE:
+                raise ValueError(
+                    f"attribute {key[:32]!r} is too long: a key holds {MAX_EXTERNAL_KEY} characters, "
+                    f"a value {MAX_EXTERNAL_VALUE}"
+                )
         return value
 
 

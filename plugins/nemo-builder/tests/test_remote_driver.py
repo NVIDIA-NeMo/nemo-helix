@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
+import pickle
+import shutil
 import signal
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -461,7 +465,7 @@ class TestRetrying:
         assert _run(service, FakeBuilder(), context, tmp_path, clock=clock) == 0
         assert clock.sleeps == [2.0, 4.0]
 
-    def test_a_budget_that_never_frees_fails_at_the_build_timeout(
+    def test_a_budget_that_never_frees_is_given_up_before_the_build_timeout(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         service = FakeService([DONE], start=[OverBudgetError("queue full")])
@@ -588,6 +592,14 @@ class TestABuildThatFails:
         assert builder.completed == []
         assert clock.now == 35
         assert "timed out after 35s, while building (step 2 of 5) [build build-1]" in caplog.text
+
+    def test_a_build_that_ends_on_its_last_poll_is_completed_not_cancelled(self, context: Path, tmp_path: Path) -> None:
+        """The read at the deadline is made before the deadline is judged to have passed."""
+        service = FakeService([BUILDING, BUILDING, DONE])
+        builder = FakeBuilder()
+        clock = FakeClock()
+        assert _run(service, builder, context, tmp_path, config=_config(timeout=20), clock=clock) == 0
+        assert (clock.now, service.cancelled, len(builder.completed)) == (20, [], 1)
 
     def test_a_job_told_to_stop_cancels_its_build(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -1049,6 +1061,69 @@ class TestSeveralImages:
         for name, line in zip(names, last, strict=True):
             assert line.endswith(f"started with key {idempotency_key(ATTEMPT, name)}]")
 
+    def test_an_image_whose_directory_cant_be_made_does_not_cost_the_next(
+        self, context: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Task storage that is full, say. It fails that image, with its line, not the step with a traceback."""
+        make = tempfile.mkdtemp
+        made: list[str] = []
+
+        def mkdtemp(*, dir: Path, prefix: str) -> str:
+            if prefix == "image-" and not made:
+                made.append("refused")
+                raise OSError(28, "No space left on device")
+            return make(dir=dir, prefix=prefix)
+
+        # The driver's own name for the module, not the module: the test suite shares that with everything else.
+        monkeypatch.setattr(driver, "tempfile", SimpleNamespace(mkdtemp=mkdtemp))
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 1
+        assert [image for image, _, _ in builder.completed] == ["b"]
+        assert f"{FAILURE_MARKER} a: cannot make a directory for its build context" in caplog.text
+
+    def test_a_directory_that_cant_be_removed_does_not_cost_the_next_image_either(
+        self, context: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A client that still holds a file open in it, on storage that then refuses to remove the directory."""
+        refused: list[str] = []
+
+        def rmtree(path: str, ignore_errors: bool = False) -> None:
+            refused.append(Path(path).name[:6])
+            if not ignore_errors:
+                raise OSError(39, "Directory not empty")
+
+        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree)
+        monkeypatch.setattr(driver, "shutil", kept)
+        builder = FakeBuilder()
+        assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 0
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+        # Asked to remove each image's directory, in a way that a refusal doesn't raise from.
+        assert refused == ["image-", "image-"]
+
+    def test_what_a_service_says_of_one_build_is_never_read_as_another_images_failure(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Settling reads a marked line as an image's reason, wherever in a line the marker is. A service's
+        account of a build can hold a build's own output, and so anything."""
+        forged = RemoteBuildStatus("building", f"step 3: {FAILURE_MARKER} b: an invented reason")
+        service = FakeService([forged, DONE])
+        with caplog.at_level(logging.INFO):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config("a", "b")) == 0
+        assert list(_marked_lines(caplog.text)) == []
+        assert "build build-1: building (step 3: NHX-BUILD-FAILED b: an invented reason)" in caplog.text
+
+    def test_what_a_service_says_of_a_call_that_failed_is_not_read_as_a_failure_line_either(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A start and a cancel that are tried again log why. Only the image's own line, last, is marked."""
+        said = f"busy; {FAILURE_MARKER} b: an invented reason"
+        service = FakeService([BUILDING], start=[OverBudgetError(said), "build-1"], cancel=RetryableError(said))
+        with caplog.at_level(logging.INFO):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=35)) == 1
+        assert [line.split(": ", 2)[0] for line in _marked_lines(caplog.text)] == [f"{FAILURE_MARKER} demo-1"]
+        assert caplog.text.count("NHX-BUILD-FAILED b: an invented reason") == 2
+
     def test_a_row_that_cant_be_read_does_not_cost_the_next(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1110,6 +1185,31 @@ class TestTheContext:
         assert not (context / "Dockerfile").is_symlink()
         assert (context / "Dockerfile").read_text() == "FROM busybox\n"
         assert (context / "services" / "feed" / "Dockerfile").read_text() == "FROM busybox\n"
+
+    @pytest.mark.parametrize(
+        ("leads_to", "named", "said"),
+        [
+            ("services/feed/Dockerfile", "Dockerfile", False),
+            ("services/feed/Dockerfile", "services/feed/Dockerfile", False),
+            ("docker/Dockerfile.prod", "services/feed/Dockerfile", True),
+            ("no-such-file", "services/feed/Dockerfile", True),
+        ],
+        ids=["named-itself", "a-way-to-the-named-file", "a-way-to-another", "a-way-to-nothing"],
+    )
+    def test_a_root_dockerfile_that_is_a_link_is_said_to_be_replaced_when_it_was_another_file(
+        self, context: Path, caplog: pytest.LogCaptureFixture, leads_to: str, named: str, said: bool
+    ) -> None:
+        """As a root Dockerfile that is a file is: a build that copies its own root Dockerfile copies the
+        named one instead."""
+        (context / "docker").mkdir()
+        (context / "docker" / "Dockerfile.prod").write_text("FROM prod\n")
+        (context / "Dockerfile").unlink()
+        (context / "Dockerfile").symlink_to(leads_to)
+        with caplog.at_level(logging.WARNING):
+            stage_context(context, named)
+        assert (context / "Dockerfile").read_text() == "FROM busybox\n"
+        assert not (context / "Dockerfile").is_symlink()
+        assert ("root Dockerfile is replaced by services/feed/Dockerfile" in caplog.text) is said
 
     def test_the_driver_hands_the_service_the_named_dockerfile(self, context: Path, tmp_path: Path) -> None:
         seen: list[str] = []
@@ -1244,8 +1344,66 @@ class TestTheContext:
             "by-an-absolute-path": str(tmp_path / "beside" / "answer.txt"),
         }[kind]
         (context / "services" / "fixture").symlink_to(target)
-        with pytest.raises(ImageFailed, match="a link that leads out of it: 'services/fixture'"):
+        with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'services/fixture'"):
             stage_context(context, "Dockerfile")
+
+    @pytest.mark.parametrize(
+        ("link", "target"),
+        [("round", "."), ("services/feed/up", ".."), ("services/feed/top", "../..")],
+        ids=["to-the-root", "to-its-parent", "to-the-root-from-below"],
+    )
+    def test_a_link_back_to_a_directory_it_is_in_is_refused(self, link: str, target: str, context: Path) -> None:
+        """A packager that follows links would go round it for ever."""
+        (context / link).symlink_to(target)
+        with pytest.raises(ImageFailed, match=f"back to a directory it is in: {link!r}"):
+            stage_context(context, "Dockerfile")
+
+    def test_a_way_round_by_two_links_is_refused(self, context: Path) -> None:
+        """Neither link leads to a directory it is in. Followed one after the other, they come back."""
+        (context / "a").mkdir()
+        (context / "b").mkdir()
+        (context / "a" / "x").symlink_to("../b")
+        (context / "b" / "y").symlink_to("../a")
+        with pytest.raises(ImageFailed, match="back to a directory it is in: '(a/x|b/y)'"):
+            stage_context(context, "Dockerfile")
+
+    @pytest.mark.parametrize("link_first", [True, False], ids=["the-link-listed-first", "the-directory-first"])
+    def test_a_way_round_that_closes_on_a_directory_names_the_link_taken_to_get_there(self, link_first: bool) -> None:
+        """`z -> a/sub` beside `a`, and `a/sub/back -> ..`. Walked by `z` first, the walk is back in `a/sub`
+        by the directory itself, not by a link: the way round is still one, in whichever order a directory
+        lists its entries."""
+        root, a, sub = Path("/c"), Path("/c/a"), Path("/c/a/sub")
+        entries: list[tuple[Path, str | None]] = [(sub, "z"), (a, None)]
+        ways: dict[Path, list[tuple[Path, str | None]]] = {
+            root: entries if link_first else entries[::-1],
+            sub: [(a, "a/sub/back")],
+            a: [(sub, None)],
+        }
+        assert driver._link_round(root, ways) == "a/sub/back"
+
+    def test_many_links_to_one_directory_are_no_way_round(self, context: Path) -> None:
+        (context / "shared").mkdir()
+        (context / "shared" / "lib.py").write_text("")
+        for name in ("one", "two", "three"):
+            (context / "services" / name).symlink_to("../shared")
+        (context / "services" / "feed" / "lib").symlink_to("../../shared")
+        assert stage_context(context, "Dockerfile") == context
+
+    def test_a_context_reached_by_a_link_is_handed_on_as_the_directory_itself(self, tmp_path: Path) -> None:
+        """An archive's `current -> v2`, named as the context. A packager that doesn't follow links would
+        otherwise be handed the link, and package nothing."""
+        (tmp_path / "v2").mkdir()
+        (tmp_path / "v2" / "Dockerfile").write_text("FROM scratch\n")
+        (tmp_path / "current").symlink_to("v2")
+        staged = stage_context(tmp_path / "current", "Dockerfile")
+        assert (staged, staged.is_symlink()) == ((tmp_path / "v2").resolve(), False)
+
+    def test_a_dockerfile_that_is_a_loop_of_links_is_refused_as_any_that_is_no_file(self, context: Path) -> None:
+        """Whatever the Python: some raise for a loop where others resolve it to nothing."""
+        (context / "Dockerfile.a").symlink_to("Dockerfile.b")
+        (context / "Dockerfile.b").symlink_to("Dockerfile.a")
+        with pytest.raises(ImageFailed, match="dockerfile 'Dockerfile.a' is not a file inside the build context"):
+            stage_context(context, "Dockerfile.a")
 
     def test_links_that_go_round_in_a_loop_lead_nowhere_and_are_left(self, context: Path) -> None:
         """They reach no file, inside the context or out of it."""
@@ -1446,7 +1604,7 @@ class TestTheImagesOfOneSet:
         with caplog.at_level(logging.ERROR):
             assert _run(service, FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 1
         assert service.started == []
-        assert caplog.text.count("the build context has a link that leads out of it: 'fixture'") >= 2
+        assert caplog.text.count("a link that leads out of it, or back to a directory it is in: 'fixture'") >= 2
 
     def test_a_directory_of_a_download_that_isnt_there_is_said_to_be_missing(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -1459,6 +1617,41 @@ class TestTheImagesOfOneSet:
             assert _run(FakeService([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
         assert [image for image, _, _ in builder.completed] == ["a"]
         assert f"{FAILURE_MARKER} b: context path 'no-such' is not a directory in its source" in caplog.text
+
+    @pytest.mark.parametrize("outside", ["../beside", "/etc", "environment/../.."], ids=["up", "absolute", "up-below"])
+    def test_a_directory_named_out_of_a_shared_download_is_refused(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, outside: str
+    ) -> None:
+        """A submit refuses such a path. A step config written some other way is not taken at its word."""
+        (tmp_path / "beside").mkdir()
+        (tmp_path / "beside" / "Dockerfile").write_text("FROM beside\n")
+        archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
+        fetch = self._sources(tmp_path, {"environment/Dockerfile": "FROM env\n"})
+        config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": outside})
+        builder, service = FakeBuilder(), FakeService([DONE])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        assert [image for image, _, _ in builder.completed] == ["a"]
+        assert len(service.started) == 1
+        assert f"{FAILURE_MARKER} b: context path {outside!r} is not a directory inside its source" in caplog.text
+
+    def test_a_download_only_one_image_names_is_fetched_where_it_is_built_and_removed_with_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Nothing shares it, so it is not kept for the rest of the set, nor copied: a set of large contexts
+        then holds one at a time."""
+        fetch = self._sources(tmp_path, {"Dockerfile": "FROM scratch\n"})
+        held: list[list[str]] = []
+
+        class Looking(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                held.append(sorted(path.name[:6] for path in (tmp_path / "scratch").iterdir()))
+                return super().start(build)
+
+        config = self._set({"fileset": "default/fs-a"}, {"fileset": "default/fs-b"})
+        assert _run(Looking([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        # One image's directory at a time, and no download kept beside it.
+        assert held == [["image-"], ["image-"]]
 
     def test_a_set_of_one_image_is_built_where_it_was_fetched(self, context: Path, tmp_path: Path) -> None:
         """Nothing to share, so no second copy of what may be a large context."""
@@ -1499,10 +1692,13 @@ def signals() -> Iterator[None]:
     put the test runner's handlers and its way of making records back."""
     saved = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)}
     make_record = logging.getLogRecordFactory()
+    secrets = driver._REDACTION._redactors[:]
     yield
     for number, handler in saved.items():
         signal.signal(number, handler)
     logging.setLogRecordFactory(make_record)
+    # The process's redaction outlives a step in a test run, as it never does in a step.
+    driver._REDACTION._redactors[:] = secrets
 
 
 class TestTheStepProgram:
@@ -1617,8 +1813,181 @@ class TestTheStepProgram:
         assert (
             f"{FAILURE_MARKER} demo-1: the step could not start: ValueError: no endpoint is configured for [credential]"
         ) in caplog.text
+        # Where it failed is said first: the lines settling reads stay last, in the end of the log Jobs keeps.
+        said = [record.getMessage() for record in caplog.records if record.name == driver.logger.name]
+        assert said[0].startswith("the step could not start, at:\n") and "in make_service" in said[0]
+        assert [line.split(" ", 1)[0] for line in said[1:]] == [FAILURE_MARKER]
         # The step's own directory is made last, so a step that fails before it leaves nothing on task storage.
         assert list((tmp_path / "task-storage").iterdir()) == []
+
+    def test_the_credential_is_taken_out_of_what_reaches_the_row_too(self, step: dict[str, list]) -> None:
+        """What the step hands the driver to cut reasons with is what the driver takes to the service's handle."""
+        reported = RemoteImage(
+            reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", attributes={"console": "https://x/?key=token-value"}
+        )
+        assert step_main(lambda config, credential: FakeService([RemoteBuildStatus("done", image=reported)])) == 0
+        (builder,) = step["builder"]
+        ((_, _, external),) = builder.completed
+        assert external.attributes == {"console": "https://x/?key=[credential]"}
+
+    def test_a_secret_given_after_a_library_took_over_the_log_is_still_known_to_the_driver(
+        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A tracing library installs a record factory of its own. A token the client then trades the credential
+        for must still be cut out of a reason before the reason is cut to length, and out of the row."""
+        token = "eyJ" + "t0k" * 300
+
+        def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
+            under = logging.getLogRecordFactory()
+            logging.setLogRecordFactory(lambda *args, **kwargs: under(*args, **kwargs))
+            driver.redact_log(token)
+            return FakeService([DONE], start=[PermanentError(f"401: {token} was refused")])
+
+        with caplog.at_level(logging.INFO):
+            assert step_main(make_service) == 1
+        assert "t0k" not in caplog.text
+        assert f"{FAILURE_MARKER} demo-1: starting the build: 401: [credential] was refused" in caplog.text
+        # Back on top, so that what the library's factory makes is redacted as well.
+        assert isinstance(logging.getLogRecordFactory(), driver._RedactingFactory)
+
+    def test_a_client_that_replaces_the_record_factory_does_not_end_the_redaction(
+        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A library that sets the factory back to the plain one, and gives nothing to `redact_log`. The step
+        puts its own back once the client is made, so what the driver logs of the service is still redacted."""
+        echoing = RemoteBuildStatus("building", "authorised as token-value")
+
+        def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
+            logging.setLogRecordFactory(logging.LogRecord)
+            return FakeService([echoing, DONE])
+
+        with caplog.at_level(logging.INFO):
+            assert step_main(make_service) == 0
+        assert "token-value" not in caplog.text
+        assert "build build-1: building (authorised as [credential])" in caplog.text
+
+    def test_what_a_library_logs_under_the_step_is_never_read_as_a_failure_line(
+        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Such as the fetch, which logs the path it is given: an archive may be named anything."""
+
+        def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
+            logging.getLogger("nemo_builder_plugin.run.fetch").info(
+                "fetching archive %s", f"{FAILURE_MARKER} demo-1: built and published.tar"
+            )
+            return FakeService([DONE])
+
+        with caplog.at_level(logging.INFO):
+            assert step_main(make_service) == 0
+        assert list(_marked_lines(caplog.text)) == []
+        assert "fetching archive NHX-BUILD-FAILED demo-1: built and published.tar" in caplog.text
+
+    def test_an_exception_a_library_logs_is_never_read_as_a_failure_line_either(
+        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A client that logs a call that failed, with what the service said: a line of a submitter's Dockerfile."""
+
+        def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
+            try:
+                raise RuntimeError(f"RUN echo {FAILURE_MARKER} demo-1: built and published")
+            except RuntimeError:
+                logging.getLogger("some.build.client").exception("the first call failed", stack_info=True)
+            return FakeService([DONE])
+
+        with caplog.at_level(logging.INFO):
+            assert step_main(make_service) == 0
+        assert list(_marked_lines(caplog.text)) == []
+        assert "RuntimeError: RUN echo NHX-BUILD-FAILED demo-1: built and published" in caplog.text
+        (logged,) = [record for record in caplog.records if record.name == "some.build.client"]
+        # The exception itself still holds the marker, and some handlers print it themselves.
+        assert logged.exc_info is None and FAILURE_MARKER not in (logged.stack_info or "")
+
+    def test_a_reason_that_quotes_the_marker_holds_it_only_at_the_start_of_its_line(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Jobs keeps the end of the log, cut by length. A line cut before a marker that its reason quotes
+        would be read from that marker on, as another image's reason."""
+        quoting = f"dockerfile 'x {FAILURE_MARKER} b: built and published/Dockerfile' is not a file"
+        with caplog.at_level(logging.ERROR):
+            driver._report("a", quoting, f" [build {FAILURE_MARKER}-1]")
+        (line,) = _marked_lines(caplog.text)
+        assert line == (
+            f"{FAILURE_MARKER} a: dockerfile 'x NHX-BUILD-FAILED b: built and published/Dockerfile' is not a file"
+            " [build NHX-BUILD-FAILED-1]"
+        )
+        # Cut inside the line, as the end of a log may be: nothing of it is read.
+        assert list(_marked_lines(line[len(FAILURE_MARKER) :])) == []
+
+    @pytest.mark.parametrize("wrapped", [True, False], ids=["a-stream-that-can-be-told", "one-that-cant"])
+    def test_standard_output_is_line_buffered_where_it_can_be(
+        self, step: dict[str, list], monkeypatch: pytest.MonkeyPatch, wrapped: bool
+    ) -> None:
+        """What a step program prints is then in the log before the driver's last lines, not after them."""
+        stream = io.TextIOWrapper(io.BytesIO()) if wrapped else io.StringIO()
+        monkeypatch.setattr(driver, "sys", SimpleNamespace(stdout=stream))
+        assert step_main(lambda config, credential: FakeService([DONE])) == 0
+        assert getattr(stream, "line_buffering", False) is wrapped
+
+    def test_a_step_with_no_credential_of_its_own_leaves_it_to_the_client(
+        self, step: dict[str, list], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not in a platform secret, and no function to read it: the client finds it itself."""
+        (tmp_path / "job_step_config.json").write_text(json.dumps(_config().model_dump(mode="json")))
+        monkeypatch.delenv(REMOTE_CREDENTIAL_ENV)
+        made: list[str | None] = []
+
+        def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
+            made.append(credential)
+            return FakeService([DONE])
+
+        assert step_main(make_service) == 0
+        assert made == [None]
+
+    def test_a_mounted_credential_that_isnt_there_fails_every_image_and_says_so(
+        self,
+        context: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        signals: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A profile that doesn't mount the Secret it should. Handed on as no credential, the client would
+        report whatever its service says to a request with none."""
+        path = tmp_path / "job_step_config.json"
+        path.write_text(json.dumps(_config("a", "b").model_dump(mode="json")))
+        monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(path))
+        made: list[object] = []
+        with caplog.at_level(logging.ERROR):
+            assert step_main(lambda config, credential: made.append(credential), read_credential=lambda: " \n") == 1  # ty: ignore[invalid-argument-type]
+        assert made == []
+        for image in ("a", "b"):
+            assert (
+                f"{FAILURE_MARKER} {image}: the step could not start: RuntimeError: the build service's credential "
+                "is empty: the step's Jobs profile did not mount it"
+            ) in caplog.text
+
+    def test_a_set_that_cant_start_says_why_on_every_images_line(
+        self,
+        context: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        signals: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Every image gets a line, and none is cut to less than says why. With this many, the first lines fall
+        outside what Jobs keeps of the log, and those rows say only what Jobs says of the job."""
+        names = [f"image-{n:02}" for n in range(30)]
+        config = _config(*names).model_copy(update={"credential_in_environment": True})
+        path = tmp_path / "job_step_config.json"
+        path.write_text(json.dumps(config.model_dump(mode="json")))
+        monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(path))
+        monkeypatch.delenv(REMOTE_CREDENTIAL_ENV, raising=False)
+        with caplog.at_level(logging.ERROR):
+            assert step_main(lambda config, credential: FakeService([DONE])) == 1
+        lines = [record.getMessage() for record in caplog.records if record.getMessage().startswith(FAILURE_MARKER)]
+        why = f"the step could not start: RuntimeError: {REMOTE_CREDENTIAL_ENV} not set"
+        assert [line.split(": ", 1)[0] for line in lines] == [f"{FAILURE_MARKER} {name}" for name in names]
+        assert all(why in line for line in lines)
 
     def test_a_step_that_cant_start_says_why_on_each_images_line(
         self, step: dict[str, list], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -1777,17 +2146,41 @@ class TestTheStepProgram:
             ("QUJD+REVG/R0hJ==", "GET /builds?key=QUJD%2BREVG/R0hJ%3D%3D failed"),
             ("QUJD+REVG/R0hJ==", "GET /builds?key=QUJD%2bREVG%2fR0hJ== failed"),
             ("two words", "GET /builds?key=two+words failed"),
+            ("QUJD~REVG", "GET /builds?key=QUJD%7EREVG failed"),
             ("pa'ss-w0rd-123", repr(("401", 'reply: {"error": "bad password pa\'ss-w0rd-123"}'))),
             ("C:\\keys\\build", repr(repr("refused C:\\keys\\build"))),
             ('say "hi" twice', json.dumps({"error": json.dumps('refused say "hi" twice')})),
         ],
-        ids=["url-slash-left", "url-lowercase-hex", "url-plus", "apostrophe-in-a-repr", "escaped-twice", "json-twice"],
+        ids=[
+            "url-slash-left",
+            "url-lowercase-hex",
+            "url-plus",
+            "url-tilde",
+            "apostrophe-in-a-repr",
+            "escaped-twice",
+            "json-twice",
+        ],
     )
     def test_a_credential_is_taken_out_however_what_holds_it_wrote_it(self, secret: str, text: str) -> None:
         redacted = driver._redactor(secret)(text)
         assert "[credential]" in redacted
         for part in ("REVG", "words", "w0rd", "keys", "hi"):
             assert part not in redacted or part not in secret
+
+    def test_a_credential_of_several_lines_in_a_url_is_taken_out_whole_not_one_line_of_it(self) -> None:
+        """Its first line is long enough to be taken out on its own. Tried before the whole, it would be, and
+        the rest of the credential left behind it."""
+        redact = driver._redactor("dXNlcjpw\nYXNz")
+        assert redact("GET /builds?key=dXNlcjpw%0aYXNz failed") == "GET /builds?key=[credential] failed"
+
+    def test_a_record_the_step_made_can_be_sent_to_another_process(self, signals: None) -> None:
+        """A handler that hands the record itself to a queue between processes pickles it."""
+        driver.redact_log("token-value")
+        record = logging.getLogger("some.build.client.queue").makeRecord(
+            "x", logging.ERROR, __file__, 1, "401 for %s", ("token-value",), None, extra={"attempt": 2}
+        )
+        sent = pickle.loads(pickle.dumps(record))
+        assert (sent.getMessage(), sent.attempt) == ("401 for [credential]", 2)
 
     def test_a_secret_a_client_adds_is_taken_out_with_the_credential(self, signals: None) -> None:
         """A client that trades the credential for a token gives the token to `redact_log`. Both stay out of
@@ -1911,6 +2304,27 @@ class TestTheStepProgram:
         for _ in range(10):
             nested = [nested]
         assert "token-value" not in repr(driver._redact_value(nested, redact))
+
+    def test_a_logged_object_is_checked_as_a_formatter_would_print_it(self) -> None:
+        """`%(field)s` prints what `str` gives, which can say more than `repr`: a URL that masks its key in one
+        and not the other."""
+
+        class Url:
+            def __repr__(self) -> str:
+                return "URL('https://build.example.com/builds?key=********')"
+
+            def __str__(self) -> str:
+                return "https://build.example.com/builds?key=token-value"
+
+        redact = driver._redactor("token-value")
+        assert driver._redact_value(Url(), redact) == "https://build.example.com/builds?key=[credential]"
+
+    def test_a_record_made_from_a_mapping_is_redacted_too(self, signals: None) -> None:
+        """As a record relayed from another process is made: its fields are set all at once, after the factory
+        has returned it."""
+        driver.redact_log("token-value")
+        record = logging.makeLogRecord({"msg": "401 for %s", "args": ("token-value",), "levelno": logging.ERROR})
+        assert record.getMessage() == "401 for [credential]"
 
     def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(
         self, signals: None, caplog: pytest.LogCaptureFixture

@@ -101,12 +101,13 @@ def _message(details: object) -> str | None:
 def _marked_lines(log_tail: str) -> Iterator[str]:
     """Each marked line in ``log_tail``, from the marker on, as the step wrote it.
 
-    The executors a remote-build step runs on, Kubernetes and Docker, hand back the end of its log as text. The
-    tail is cut by length, so its first line may be the end of one; what follows the marker is whole all the
-    same.
+    Kubernetes, which a remote-build step runs on, hands back the end of its log as text. The tail is cut by
+    length, so its first line may be the end of one. The step writes the marker once in a line, at the start of
+    what it says of an image, so a line that lost its start holds none and what follows a marker is whole.
 
-    A line ends at a newline and nowhere else. ``str.splitlines`` also breaks on a form feed and six more
-    characters, which a reason may hold, and what followed one would read as a line of its own.
+    A line ends at a newline and nowhere else. ``str.splitlines`` also breaks on a form feed, a line separator
+    and several other characters, which a reason may hold, and what followed one would read as a line of its
+    own.
     """
     for line in log_tail.split("\n"):
         line = line.removesuffix("\r")
@@ -217,7 +218,12 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | EndedJob | None, 
 
 
 def _own_job(image: ContainerImage) -> bool:
-    """Whether the job ``image`` names is the one a submit creates for it: in its workspace, named for its set."""
+    """Whether the job ``image`` names has the name, in the row's own workspace, that a submit gives its job.
+
+    The name is all there is to go by: Jobs doesn't say who created a job. So this keeps a row from naming
+    another workspace's job, or another build's, and no more. The workspace is the one the entity client
+    reports for the row, which a row written past the builder can set in its own data.
+    """
     provenance = image.provenance
     return provenance.job == f"{image.workspace}/{JOB_NAME_PREFIX}{provenance.build_set}-{provenance.revision}"
 

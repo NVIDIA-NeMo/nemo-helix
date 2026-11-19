@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Iterator
 from typing import ClassVar, Literal
 
@@ -79,8 +80,8 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
 class Refused(Exception):
     """A submit the builder refuses with a 409 that says which kind it is.
 
-    ``detail`` is the sentence it always was. ``code`` is for a caller that must tell a refusal, which the same
-    request meets every time, from a revision another request holds, which the next revision gets past.
+    ``detail`` is a sentence, as a 409's always is. ``code`` is for a caller that must tell a refusal, which the
+    same request meets every time, from a revision another request holds, which the next revision gets past.
     """
 
     def __init__(self, code: str, detail: str) -> None:
@@ -117,23 +118,26 @@ def _refused_values(refused: object, depth: int = 0) -> Iterator[str]:
         for item in refused:
             yield from _refused_values(item, depth + 1)
     elif depth < 4 and isinstance(refused, dict):
-        for key, item in refused.items():
-            yield from _refused_values(key, depth + 1)
+        # Its values, not its keys: a check on a whole section is given the section, and names its settings.
+        for item in refused.values():
             yield from _refused_values(item, depth + 1)
 
 
 def _without_input(error: ErrorDetails) -> str:
     """A validation error's message, for the log, without the value it refused.
 
-    Only a validator of the builder's own writes a sentence that could repeat what it was given, and those are
-    written not to. This is for one that does all the same: a setting may hold a credential.
+    Only a validator's own sentence could repeat what it was given. The builder's validators of a registry,
+    the settings most likely to be written with a login in them, are written not to. This is for any that does:
+    a setting may hold a credential.
     """
     message = error["msg"]
     if error["type"] not in ("value_error", "assertion_error"):
         # Pydantic's own sentence, which doesn't quote the value. Left as it is.
         return message
     for form in sorted(set(_refused_values(error.get("input"))), key=len, reverse=True):
-        message = message.replace(form, "<the value>")
+        # As a word of its own: a check on a whole section is given every value in it, and one of them may be
+        # part of a setting's name, which the sentence is there to give.
+        message = re.sub(rf"(?<![\w-]){re.escape(form)}(?![\w-])", "<the value>", message)
     return message
 
 

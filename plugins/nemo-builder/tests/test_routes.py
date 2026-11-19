@@ -27,7 +27,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 
 def _app(
@@ -503,14 +503,14 @@ class TestSubmitting:
         assert service._without_input(error) == logged
 
     def test_pydantics_own_sentence_is_logged_as_it_is(self) -> None:
-        """It doesn't quote the value, and a value's digits may be in it by chance."""
+        """It doesn't quote the value, and the value may be in it by chance: here it is the limit itself."""
         error: Any = {
-            "type": "greater_than_equal",
+            "type": "less_than",
             "loc": ("remote", "build_timeout_seconds"),
-            "msg": "Input should be greater than or equal to 60",
-            "input": "6000",
+            "msg": "Input should be less than 3600",
+            "input": "3600",
         }
-        assert service._without_input(error) == "Input should be greater than or equal to 60"
+        assert service._without_input(error) == "Input should be less than 3600"
 
     def test_a_registry_to_copy_from_that_is_refused_is_not_logged(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -524,7 +524,9 @@ class TestSubmitting:
         assert "import_registries must be registry hosts" in caplog.text
         assert "t0ken" not in caplog.text and "t0ken" not in response.text
 
-    def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Such a check has no one setting to name. An answer of `(: invalid value)` would name nothing."""
 
         def get(cls: type[BuilderConfig]) -> BuilderConfig:
@@ -536,6 +538,33 @@ class TestSubmitting:
         assert response.json()["detail"] == (
             "the builder's configuration is invalid (builder: invalid value); the API log says more"
         )
+        # And the log does: the check is given the whole section, whose keys are the settings its sentence names.
+        assert "registry_username_secret and registry_password_secret are set together, or both null" in caplog.text
+
+    def test_a_validator_that_repeats_what_it_refused_does_not_put_it_in_the_log(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """None of the builder's own does. One added later, or one of a library's, may: through the route."""
+
+        class Careless(BaseModel):
+            registry: str
+
+            @field_validator("registry")
+            @classmethod
+            def _quotes_it(cls, value: str) -> str:
+                raise ValueError(f"{value!r} is not a registry host")
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            Careless.model_validate({"registry": "bot:t0ken@registry.example.com"})
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert response.json()["detail"] == (
+            "the builder's configuration is invalid (registry: invalid value); the API log says more"
+        )
+        assert "registry: Value error, <the value> is not a registry host" in caplog.text
+        assert "t0ken" not in caplog.text
 
     def test_a_config_that_cant_be_read_at_all_is_a_refusal_too(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture

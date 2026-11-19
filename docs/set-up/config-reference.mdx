@@ -927,7 +927,7 @@ builder:
     registry:
     # The one repository the service publishes to, in every workspace's name: an image is told apart by its digest. Unset, with `backend: remote`, every submit is refused.
     repository:
-    # The Jobs execution profile, provider `cpu`, the remote-build step runs on. Its `max_active_jobs` caps the builds in flight, so set it to what the service lets this deployment queue. Its `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for each image. A profile whose limit is below the builds' own is refused. That check is a floor: it leaves out the time to fetch each build context and, once an image is built, up to five minutes of reporting it to the builder. | default: 'build-remote'
+    # The Jobs execution profile, provider `cpu`, the remote-build step runs on. Its `max_active_jobs` caps the builds in flight, so set it to what the service lets this deployment queue. Its `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for each image. A profile whose limit is below the builds' own, plus two minutes, is refused. That check is a floor: it leaves out the time to fetch each build context and, once an image is built, up to five minutes of reporting it to the builder. | default: 'build-remote'
     profile: build-remote
     # The image the remote-build step runs: one that holds the service's step program. Unset, the profile's `default_task_image`, which must then be set.
     image:
@@ -966,7 +966,7 @@ builder:
   push_profile: build-push
   # Deprecated and ignored since 0.11: Jobs caps builds now. Set the build profiles' `max_active_jobs` instead, which the Helm chart's `builder.maxConcurrentBuilds` does.
   max_concurrent_builds:
-  # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
+  # Host of the registry the in-cluster build publishes every image to, with an optional port; prefix it with `http://` for plain HTTP. Unset, with `backend: execution`, every submit is refused.
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
   repository_prefix: ''

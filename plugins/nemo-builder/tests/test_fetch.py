@@ -15,14 +15,25 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, cast
 
 import pytest
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage
 from nemo_builder_plugin.run import fetch
 from nemo_builder_plugin.run.fetch import ArchiveRefused, clear_earlier_attempts, fetch_source
-from nemo_builder_plugin.run.remote import ImageFailed, fetch_context, stage_context
+from nemo_builder_plugin.run.remote import (
+    ImageFailed,
+    JobAttempt,
+    RemoteBuild,
+    RemoteBuildStatus,
+    RemoteImage,
+    fetch_context,
+    run_remote_build,
+    stage_context,
+)
 from nemo_builder_plugin.run.supervise import _volume_mounts
 from nemo_builder_plugin.steps import (
     ContextSource,
     FetchImport,
     RemoteBuildImage,
+    RemoteBuildStepConfig,
     SandboxGroup,
     SandboxImage,
     WorkLayout,
@@ -275,8 +286,90 @@ class TestWhatARemoteBuildHandsItsService:
             tar.addfile(link)
         source = ContextSource(fileset="default/fs-a", archive="task.tar", context_path="app")
 
-        with pytest.raises(ImageFailed, match="a link that leads out of it: 'fixture'"):
+        with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'fixture'"):
             self._context({"task.tar": buffer.getvalue()}, source, "Dockerfile", tmp_path)
+
+    def test_two_directories_of_one_fileset_are_each_fetched_as_a_whole_context(self, tmp_path: Path) -> None:
+        """No image of the set builds the whole fileset, so nothing is shared: each directory is downloaded for
+        itself, and is all there is in its image's context. Through the driver, with the real fetch."""
+        files = {"api/Dockerfile": b"FROM api", "api/app.py": b"", "web/Dockerfile": b"FROM web", "README": b"hi"}
+        digest = "sha256:" + "d" * 64
+        handed: list[tuple[str, list[str], bytes]] = []
+
+        class Service:
+            def start(self, build: RemoteBuild) -> str:
+                dockerfile = (build.context / "Dockerfile").read_bytes()
+                handed.append(
+                    (build.labels["image"], TestWhatARemoteBuildHandsItsService._files(build.context), dockerfile)
+                )
+                return f"build-{build.labels['image']}"
+
+            def status(self, build_id: str) -> RemoteBuildStatus:
+                return RemoteBuildStatus(
+                    "done", image=RemoteImage(reference=f"registry.example.com/team/images@{digest}")
+                )
+
+            def cancel(self, build_id: str) -> None:
+                raise AssertionError("nothing to cancel")
+
+        class Rows:
+            @staticmethod
+            def _row(image: str, status: str, at: str | None) -> ContainerImage:
+                provenance = {
+                    "build_set": "demo",
+                    "revision": 1,
+                    "job": "default/builder-demo-1",
+                    "request_digest": "sha256:" + "a" * 64,
+                    "backend": "remote",
+                }
+                return ContainerImage.model_validate(
+                    {
+                        "name": image,
+                        "workspace": "default",
+                        "status": status,
+                        "registry": "registry.example.com",
+                        "repository": "team/images",
+                        "digest": at,
+                        "provenance": provenance,
+                    }
+                )
+
+            def row(self, image: str) -> ContainerImage:
+                return self._row(image, "pending", None)
+
+            def complete(
+                self, image: str, digest: str, runtime_config: object, external: ExternalImage | None = None
+            ) -> ContainerImage:
+                return self._row(image, "ready", digest)
+
+        config = RemoteBuildStepConfig.model_validate(
+            {
+                "images": [
+                    {
+                        "image": name,
+                        "source": {"fileset": "default/fs-a", "context_path": directory},
+                        "dockerfile": "Dockerfile",
+                        "platform": "linux/amd64",
+                    }
+                    for name, directory in (("a", "api"), ("b", "web"))
+                ],
+                "registry": "registry.example.com",
+                "repository": "team/images",
+                "build_timeout_seconds": 600,
+            }
+        )
+        failed = run_remote_build(
+            config,
+            service=Service(),
+            builder=Rows(),
+            fetch=lambda image, directory: fetch_context(
+                _client(files), image, workspace="default", root=directory / "fetched"
+            ),
+            attempt=JobAttempt(workspace="default", job_uid="job-uid-1", attempt_id="attempt-1"),
+            scratch=tmp_path,
+        )
+        assert failed == 0
+        assert handed == [("a", ["Dockerfile", "app.py"], b"FROM api"), ("b", ["Dockerfile"], b"FROM web")]
 
 
 class TestHostileListings:
