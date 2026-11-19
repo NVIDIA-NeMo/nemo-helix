@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { NvidiaGuiIconProps } from '@nemo/icons';
-import { Upload, Puzzle, Route, Sliders } from '@nemo/icons/icons';
+import { Upload, Puzzle, Route, Sliders, Wrench } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import { STUDIO_OPTIMIZE_STRATEGY } from '@studio/api/agents/useLaunchOptimizeStudy';
 import type { StartOption } from '@studio/components/StartOptions/types';
@@ -11,10 +11,14 @@ import type { FC } from 'react';
 /** The `run-strategy` name the Switchyard plugin registers its strategy under. */
 export const SWITCHYARD_STRATEGY = 'switchyard';
 
-/** Icons for the strategies Studio has a form for; every other strategy gets {@link Puzzle}. */
+/** The `run-strategy` name the nemo-tool-calling plugin registers its strategy under. */
+export const TOOL_CALLING_STRATEGY = 'tool-calling';
+
+/** Icons for the strategies Studio knows by name; every other strategy gets {@link Puzzle}. */
 const STRATEGY_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
   [STUDIO_OPTIMIZE_STRATEGY]: Sliders,
   [SWITCHYARD_STRATEGY]: Route,
+  [TOOL_CALLING_STRATEGY]: Wrench,
 };
 
 /** Tile id for uploading a `config-tuning` bundle; not a valid strategy name, so it cannot collide. */

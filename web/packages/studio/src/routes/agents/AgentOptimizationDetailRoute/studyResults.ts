@@ -248,6 +248,15 @@ export const locateJobResultFiles = async (
   return null;
 };
 
+/** A file an index names relative to its own directory, as a fileset path. */
+export const siblingPath = (indexPath: string, fileName: string): string => {
+  const slash = indexPath.lastIndexOf('/');
+  if (slash === -1) {
+    return fileName;
+  }
+  return `${indexPath.slice(0, slash + 1)}${fileName}`;
+};
+
 export const downloadText = async (
   workspace: string,
   fileset: string,

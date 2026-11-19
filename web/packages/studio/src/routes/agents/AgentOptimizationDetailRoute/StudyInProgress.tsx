@@ -10,7 +10,10 @@ import { useAgentOptimizationGetRunStrategyJobStatus } from '@nemo/sdk/generated
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
 import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { routingStrategyTitle } from '@studio/components/dataViews/SwitchyardRoutesDataView/useRouteColumns';
-import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
+import {
+  SWITCHYARD_STRATEGY,
+  TOOL_CALLING_STRATEGY,
+} from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import type { FC } from 'react';
 
 /** A spec list field — strategy-specific, so untyped on `RunStrategySpec` — as one line. */
@@ -38,7 +41,11 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
   });
   const steps = jobStatus?.steps ?? [];
   const isSwitchyard = spec.strategy === SWITCHYARD_STRATEGY;
-  const resultNoun = isSwitchyard ? 'Virtual models' : 'Trials';
+  const resultNoun = isSwitchyard
+    ? 'Virtual models'
+    : spec.strategy === TOOL_CALLING_STRATEGY
+      ? 'Results'
+      : 'Trials';
 
   const strategyItems = isSwitchyard
     ? [

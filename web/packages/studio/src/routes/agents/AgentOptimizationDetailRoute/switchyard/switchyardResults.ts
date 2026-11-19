@@ -7,6 +7,7 @@ import type { RoutingStrategyId } from '@studio/routes/agents/AgentDetailRoute/o
 import {
   downloadText,
   locateJobResultFiles,
+  siblingPath,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import YAML from 'yaml';
 
@@ -35,12 +36,6 @@ export interface SwitchyardResults {
   /** Where the result files live, for fetching each route's agent config. */
   location: { workspace: string; fileset: string };
 }
-
-/** The index's `agent_config` is a file name beside the index itself. */
-const siblingPath = (indexPath: string, fileName: string): string => {
-  const slash = indexPath.lastIndexOf('/');
-  return slash === -1 ? fileName : `${indexPath.slice(0, slash + 1)}${fileName}`;
-};
 
 export const parseSwitchyardIndex = (
   text: string,

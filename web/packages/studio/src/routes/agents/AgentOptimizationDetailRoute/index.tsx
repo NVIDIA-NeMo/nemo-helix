@@ -29,7 +29,10 @@ import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDat
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
+import {
+  SWITCHYARD_STRATEGY,
+  TOOL_CALLING_STRATEGY,
+} from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
 import { StudyInProgress } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyInProgress';
 import {
@@ -39,6 +42,11 @@ import {
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
 import { fetchSwitchyardResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
 import { SwitchyardResultsView } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/SwitchyardResultsView';
+import {
+  fetchToolCallingResults,
+  TOOL_CALLING_RESULT_FILE,
+} from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/toolCallingResults';
+import { ToolCallingResultsView } from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/ToolCallingResultsView';
 import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
 import {
   getAgentDetailRoute,
@@ -82,6 +90,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const isQueued = status ? QUEUED_STATUSES.has(status) : false;
   const agentName = job?.spec?.agent?.split('/').pop() ?? undefined;
   const isSwitchyard = job?.spec?.strategy === SWITCHYARD_STRATEGY;
+  const isToolCalling = job?.spec?.strategy === TOOL_CALLING_STRATEGY;
   const loadResults = !!workspace && !!jobName && isTerminal && !hasFailed;
 
   const { setBreadcrumbs } = useBreadcrumbs();
@@ -111,7 +120,19 @@ export const AgentOptimizationDetailRoute: FC = () => {
   } = useQuery({
     queryKey: ['optimize-study-results', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchStudyResults(workspace, jobName, signal),
-    enabled: loadResults && !isSwitchyard,
+    enabled: loadResults && !isSwitchyard && !isToolCalling,
+    refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
+  });
+
+  const {
+    data: toolCallingResults,
+    isLoading: isLoadingToolCalling,
+    isError: isToolCallingError,
+    error: toolCallingError,
+  } = useQuery({
+    queryKey: ['tool-calling-results', workspace, jobName] as const,
+    queryFn: ({ signal }) => fetchToolCallingResults(workspace, jobName, signal),
+    enabled: loadResults && isToolCalling,
     refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
   });
 
@@ -227,6 +248,26 @@ export const AgentOptimizationDetailRoute: FC = () => {
             </Text>
           ) : (
             <SwitchyardResultsView workspace={workspace} job={job} results={switchyardResults} />
+          )
+        ) : isToolCalling ? (
+          isToolCallingError ? (
+            <ErrorMessage
+              header="Could not load tool-calling results"
+              message={toolCallingError.message}
+              height="auto"
+            />
+          ) : isLoadingToolCalling ? (
+            <Flex align="center" justify="center" className="min-h-[200px] w-full">
+              <Spinner size="medium" aria-label="Loading tool-calling results..." />
+            </Flex>
+          ) : !toolCallingResults ? (
+            <ErrorMessage
+              header="No tool-calling results"
+              message={`This run did not write ${TOOL_CALLING_RESULT_FILE}. Check the logs and artifacts below.`}
+              height="auto"
+            />
+          ) : (
+            <ToolCallingResultsView results={toolCallingResults} />
           )
         ) : isResultsError ? (
           <ErrorMessage
