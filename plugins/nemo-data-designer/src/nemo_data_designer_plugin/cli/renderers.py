@@ -134,7 +134,7 @@ class PreviewRenderer(CLIRenderer):
             self._render_to_terminal(results, df, total, ctx)
 
         console.print()
-        self._print_final_status(total)
+        self._print_final_status(total, len(df.columns))
 
     def _build_preview_results(self, df: pd.DataFrame) -> PreviewResults | None:
         """Assemble a PreviewResults from the stashed builder, if available.
@@ -181,13 +181,13 @@ class PreviewRenderer(CLIRenderer):
             except Exception as exc:  # pragma: no cover - defensive
                 console.print(f"[yellow]Could not render analysis report: {exc}[/yellow]")
 
-    def _print_final_status(self, total: int) -> None:
+    def _print_final_status(self, total: int, columns: int) -> None:
         if "error" in self._log_levels_seen:
             print_error("Preview completed with errors. See the log lines above.")
         elif "warning" in self._log_levels_seen or "warn" in self._log_levels_seen:
             console.print("[yellow]⚠ Preview completed with warnings.[/yellow]")
         else:
-            print_success(f"Preview complete — {total} record(s) generated")
+            print_success(f"Preview complete — {total} record(s) generated, {columns} column(s)")
 
     def _save_results(
         self,
