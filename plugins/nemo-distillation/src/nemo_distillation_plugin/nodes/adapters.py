@@ -151,18 +151,24 @@ class CustomizationAdapter(_Adapter):
     async def start(self, workflow: Workflow, node_key: str) -> None:
         external = workflow.nodes[node_key].external
         inputs = resolve(workflow.graph[node_key].inputs, workflow)
-        training: dict[str, Any] = {
-            "type": "sft",
-            "parallelism": {"num_gpus_per_node": int(inputs.get("gpu") or 1)},
-        }
-        if inputs["finetuning_type"] == "lora":
-            training["peft"] = {"type": "lora"}
-        spec = {
+        # Shape of the automodel job spec (AutomodelJobInput): the dataset is an object, LoRA is a
+        # finetuning_type, and parallelism, schedule, batch and optimizer are siblings of training.
+        # The candidate's hyperparameters carry only what it set; the rest stays the customizer's default.
+        hyperparameters = dict(inputs.get("hyperparameters") or {})
+        training: dict[str, Any] = {"training_type": "sft", "finetuning_type": inputs["finetuning_type"]}
+        for key in ("max_seq_length", "lora"):
+            if key in hyperparameters:
+                training[key] = hyperparameters[key]
+        spec: dict[str, Any] = {
             "model": inputs["student_model"],
-            "dataset": str(inputs["dataset"]),
+            "dataset": {"training": str(inputs["dataset"])},
             "training": training,
+            "parallelism": {"num_gpus_per_node": int(inputs.get("gpu") or 1)},
             "output": {"name": external["model"]},
         }
+        for section in ("schedule", "batch", "optimizer"):
+            if hyperparameters.get(section):
+                spec[section] = hyperparameters[section]
         await self.platform.submit_customization(workspace=workflow.workspace, name=external["job"], spec=spec)
 
     async def poll(self, workflow: Workflow, node_key: str) -> Poll:

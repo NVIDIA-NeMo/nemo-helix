@@ -65,14 +65,95 @@ class DeploymentInput(BaseModel):
         return self
 
 
+class LoraHyperparameters(BaseModel):
+    """LoRA settings. Unset fields keep the customizer's default (rank 16, alpha 32)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rank: int | None = Field(default=None, gt=0)
+    alpha: int | None = Field(default=None, gt=0)
+    dropout: float | None = Field(default=None, ge=0, le=1)
+    target_modules: list[str] | None = None
+
+
+class ScheduleHyperparameters(BaseModel):
+    """How long to train and how the checkpoint is chosen."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    epochs: int | None = Field(default=None, gt=0)
+    max_steps: int | None = Field(default=None, gt=0)
+    validation_split: float | None = Field(default=None, ge=0, lt=1)
+    checkpoint_selection: Literal["best", "last", "both"] | None = None
+    seed: int | None = None
+
+
+class BatchHyperparameters(BaseModel):
+    """Batch sizes and sequence packing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    global_batch_size: int | None = Field(default=None, gt=0)
+    micro_batch_size: int | None = Field(default=None, gt=0)
+    sequence_packing: bool | None = None
+
+
+class OptimizerHyperparameters(BaseModel):
+    """Optimizer and learning-rate schedule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    learning_rate: float | None = Field(default=None, gt=0)
+    min_learning_rate: float | None = Field(default=None, ge=0)
+    weight_decay: float | None = Field(default=None, ge=0)
+    warmup_steps: int | None = Field(default=None, ge=0)
+    lr_decay_style: Literal["cosine", "linear", "constant"] | None = None
+
+
+class Hyperparameters(BaseModel):
+    """Training settings for one candidate, in the shape of the customizer's automodel job spec.
+
+    Every field is optional and an unset one is left out of the job, so the customizer's own default
+    applies. The sections and names match ``AutomodelJobInput`` so a candidate reads like the job it
+    becomes, and a typo fails when the workflow is created, not when the job is submitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_seq_length: int | None = Field(default=None, gt=0)
+    lora: LoraHyperparameters | None = None
+    schedule: ScheduleHyperparameters | None = None
+    batch: BatchHyperparameters | None = None
+    optimizer: OptimizerHyperparameters | None = None
+
+    def to_job(self) -> dict[str, Any]:
+        """The set fields only, sections that end up empty dropped."""
+        dumped = self.model_dump(mode="json", exclude_none=True)
+        return {key: value for key, value in dumped.items() if value != {}}
+
+
 class CandidateSpec(BaseModel):
-    """One training candidate. The default graph has a single LoRA candidate named ``lora``."""
+    """One training candidate. The default graph has a single LoRA candidate named ``lora``.
+
+    A candidate is one point in the training sweep: its own fine-tuning type, GPUs and hyperparameters,
+    trained on the same generated dataset, then deployed and evaluated on its own.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     finetuning_type: Literal["lora", "all_weights"] = "lora"
     gpu: int = Field(default=1, gt=0, description="GPUs one training job for this candidate needs.")
+    hyperparameters: Hyperparameters = Field(
+        default_factory=Hyperparameters,
+        description="Training settings for this candidate. Unset fields use the customizer defaults.",
+    )
+
+    @model_validator(mode="after")
+    def _lora_settings_need_lora(self) -> CandidateSpec:
+        if self.hyperparameters.lora is not None and self.finetuning_type != "lora":
+            raise ValueError(f"candidate {self.name!r} sets lora hyperparameters but finetuning_type is not 'lora'")
+        return self
 
 
 class EvalInput(BaseModel):
