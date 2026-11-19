@@ -60,6 +60,9 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
             "restartPolicy": "Never",
             "backoffLimit": 3,
             "shmSize": "32Gi",
+            "authProxySidecar": True,
+            "authProxySidecarIdentity": "models",
+            "authProxySidecarOnBehalfOf": "user:alice",
         },
     )
 
@@ -68,6 +71,9 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
     assert created_config.restart_policy == "Never"
     assert created_config.backoff_limit == 3
     assert created_config.shm_size == "32Gi"
+    assert created_config.auth_proxy_sidecar is True
+    assert created_config.auth_proxy_sidecar_identity == "models"
+    assert created_config.auth_proxy_sidecar_on_behalf_of == "user:alice"
 
 
 def test_create_deployment_config_accepts_snake_case_top_level_fields(
@@ -88,6 +94,9 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
             "backoff_limit": 3,
             "drift_recovery": {"max_attempts": 2},
             "shm_size": "16Gi",
+            "auth_proxy_sidecar": True,
+            "auth_proxy_sidecar_identity": "models",
+            "auth_proxy_sidecar_on_behalf_of": "user:alice",
             "backend_config": {"k8s": {"namespace": "dep-ns", "serviceAccount": "dep-sa"}},
             "workload_identity": {
                 "enabled": True,
@@ -107,6 +116,9 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
     assert created_config.backoff_limit == 3
     assert created_config.drift_recovery.max_attempts == 2
     assert created_config.shm_size == "16Gi"
+    assert created_config.auth_proxy_sidecar is True
+    assert created_config.auth_proxy_sidecar_identity == "models"
+    assert created_config.auth_proxy_sidecar_on_behalf_of == "user:alice"
     assert created_config.backend_config.k8s is not None
     assert created_config.backend_config.k8s.namespace == "dep-ns"
     assert created_config.backend_config.k8s.service_account == "dep-sa"

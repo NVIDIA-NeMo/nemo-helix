@@ -738,6 +738,16 @@ components:
             default.
           default: 8Gi
           type: string
+        authProxySidecar:
+          type: boolean
+          title: Authproxysidecar
+          default: false
+        authProxySidecarIdentity:
+          title: Authproxysidecaridentity
+          type: string
+        authProxySidecarOnBehalfOf:
+          title: Authproxysidecaronbehalfof
+          type: string
         workloadIdentity:
           $ref: '#/components/schemas/WorkloadIdentitySpec'
       type: object

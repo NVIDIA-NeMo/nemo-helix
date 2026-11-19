@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Bind TokenReview to an existing API ServiceAccount, without creating it.
+api:
+  serviceAccount:
+    create: false
+    name: existing-helix-api
+
+platformConfig:
+  platform:
+    base_url: https://helix.example.com
+  auth:
+    enabled: true
+    oidc:
+      workload:
+        client_id: helix-workload
+        kubernetes_token_review_enabled: true

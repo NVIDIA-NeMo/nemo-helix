@@ -1772,6 +1772,7 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
         "*sound*",
         "*mlp1*",
         "*lm_head*",
+        "*mtp*",
     ]
     assert "image_url" in (dataset / "training.jsonl").read_text(encoding="utf-8")
 

@@ -17,7 +17,7 @@ from typing import Any
 
 from kubernetes.client.models import V1EnvVar, V1Volume
 from kubernetes.client.rest import ApiException
-from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container
+from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container, is_auth_proxy_container
 from nemo_deployments_plugin.backends.k8s.client import k8s_client_module
 from nemo_deployments_plugin.backends.k8s.status import resource_labels_match
 from nemo_deployments_plugin.backends.k8s.workload_identity import service_account_name as workload_service_account_name
@@ -430,6 +430,10 @@ def build_container(
     if include_probes:
         kwargs["liveness_probe"] = _build_probe(container.liveness_probe)
         kwargs["readiness_probe"] = _build_probe(container.readiness_probe)
+        if is_auth_proxy_container(container):
+            # Native sidecar readiness does not delay the main container. Wait
+            # for the loopback proxy to listen before starting its clients.
+            kwargs["startup_probe"] = _build_probe(container.readiness_probe)
     if container.restart_policy == NATIVE_SIDECAR_RESTART_POLICY:
         kwargs["restart_policy"] = NATIVE_SIDECAR_RESTART_POLICY
     return k8s.client.V1Container(**{key: value for key, value in kwargs.items() if value is not None})
