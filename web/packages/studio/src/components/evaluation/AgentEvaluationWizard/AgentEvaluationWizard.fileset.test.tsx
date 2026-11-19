@@ -56,6 +56,7 @@ vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   createRunEvaluation: vi.fn(),
+  recordRunJob: vi.fn(),
 }));
 
 vi.mock('@nemo/common/src/components/form/VariableTextArea', async (importOriginal) => {
