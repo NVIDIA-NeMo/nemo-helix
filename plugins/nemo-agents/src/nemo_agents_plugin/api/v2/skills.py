@@ -212,7 +212,7 @@ async def publish_skill(
     responses={status.HTTP_404_NOT_FOUND: {"description": "Skill not found"}},
 )
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SkillPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[SkillPerms.READ])
 async def list_skill_revisions(
     workspace: str,
     name: SkillName,
@@ -237,7 +237,7 @@ async def list_skill_revisions(
     responses=_NOT_FOUND,
 )
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SkillPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[SkillPerms.READ])
 async def get_skill_revision(
     workspace: str,
     name: SkillName,
@@ -285,7 +285,7 @@ async def tag_skill_revision(
     responses={status.HTTP_404_NOT_FOUND: {"description": "Skill not found"}},
 )
 @scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SkillPerms.READ])
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[SkillPerms.READ])
 async def get_skill(
     workspace: str,
     name: SkillName,

@@ -181,6 +181,23 @@ def test_skill_lifecycle_and_permissions() -> None:
         with pytest.raises(PermissionDeniedError):
             outsider_skills.get_skill(workspace=workspace, name=SKILL)
 
+        # A service acting for the viewer (evals submission resolving a run's skills) may read,
+        # but the write routes stay principal-only.
+        service_skills = AgentsClient.from_client(
+            ctx.client.with_headers(_build_headers(as_service="evals", on_behalf_of=viewer_email))
+        )
+        assert service_skills.get_skill(workspace=workspace, name=SKILL).data().revision == 2
+        pinned = service_skills.get_skill_revision(workspace=workspace, name=SKILL, revision="v1").data()
+        assert pinned.content_hash == first.content_hash
+        assert [
+            r.revision for r in service_skills.list_skill_revisions(workspace=workspace, name=SKILL).page().items
+        ] == [
+            2,
+            1,
+        ]
+        with pytest.raises(PermissionDeniedError):
+            service_skills.publish_skill(workspace=workspace, name=SKILL, body=_input(source))
+
         revisions = viewer_skills.list_skill_revisions(workspace=workspace, name=SKILL).page().items
         assert [r.revision for r in revisions] == [2, 1]
 

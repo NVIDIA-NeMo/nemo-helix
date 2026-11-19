@@ -178,7 +178,12 @@ def test_skill_bindings() -> None:
         binding = contrib.endpoints[path][method]
         assert binding.permissions == [permission], (path, method)
         assert binding.scopes == [f"agents:{access}", f"platform:{access}"], (path, method)
-        assert binding.callers == ["principal"], (path, method)
+        # Reads admit service principals: evals submission resolves skills on behalf of the
+        # caller after authorizing the caller's read itself. Writes stay principal-only.
+        callers = (
+            ["principal", "service_principal"] if access == "read" and path != f"{_BASE}/skills" else ["principal"]
+        )
+        assert binding.callers == callers, (path, method)
         assert not binding.deny, (path, method)
 
 
