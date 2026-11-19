@@ -31,6 +31,7 @@ from prompt_toolkit.output import Output
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
+from nemo_helix_ext.cli.core.job_watch_graph import BOX_WIDTH, DagLayout, Direction, phase_label, state_style
 from nemo_helix_ext.cli.core.job_watch_model import DagWatchModel, Pane, phase
 from nemo_helix_ext.cli.core.job_watch_renderer import JobWatchRenderResult
 
@@ -55,6 +56,12 @@ def _fit(value: str, width: int) -> str:
     return result + ("…" if width else "")
 
 
+def _transition_summary(description: str) -> str:
+    first = description.split("; ", 1)[0]
+    before, arrow, after = first.partition(" → ")
+    return f"{phase_label(before)} → {phase_label(after)}" if arrow else first
+
+
 class DagWatchApp:
     def __init__(self, model: DagWatchModel, *, input: Input | None = None, output: Output | None = None) -> None:
         self.model = model
@@ -66,6 +73,13 @@ class DagWatchApp:
         self.log_horizontal = 0
         self.page_nodes = 1
         self.page_lines = 1
+        self.graph_layout: DagLayout | None = None
+        self.graph_selected = ""
+        self.graph_x = self.graph_y = 0
+        self.graph_follow = True
+        self.graph_width, self.graph_height = 80, 20
+        self.body_fragments: dict[int, FormattedText] = {}
+        self.pane_styles: dict[Pane, dict[int, str]] = {}
         self.status_finished = False
         self.logs_finished = False
         self.result = JobWatchRenderResult.INTERRUPTED
@@ -77,7 +91,22 @@ class DagWatchApp:
             refresh_interval=1,
             input=input,
             output=output,
-            style=Style.from_dict({"header": "bold ansicyan", "selected": "reverse", "footer": "ansiyellow"}),
+            style=Style.from_dict(
+                {
+                    "header": "bold ansicyan",
+                    "selected": "bg:#284b63 #ffffff bold",
+                    "footer": "ansiyellow",
+                    "running": "ansicyan bold",
+                    "completed": "ansigreen",
+                    "failed": "ansired bold",
+                    "waiting": "ansiyellow",
+                    "ready": "ansiblue bold",
+                    "reused": "ansimagenta",
+                    "muted": "ansibrightblack",
+                    "edge": "ansibrightblack",
+                    "edge-focus": "ansicyan bold",
+                }
+            ),
         )
 
     def _bindings(self) -> KeyBindings:
@@ -107,6 +136,8 @@ class DagWatchApp:
             delta = -1 if event.key_sequence[0].key == Keys.Left else 1
             if self.mode == "logs":
                 self.log_horizontal = max(0, min(4200, self.log_horizontal + delta * 8))
+            elif self.mode == "overview":
+                self._graph_move("left" if delta < 0 else "right")
             else:
                 self.model.choose_pane(delta)
 
@@ -120,14 +151,10 @@ class DagWatchApp:
             if self.mode == "logs":
                 self.model.scroll_logs(amount * (self.page_lines if key in (Keys.PageUp, Keys.PageDown) else 1))
             elif self.mode == "overview":
-                names = self.model.search(self.query)
-                self.overview_index = max(
-                    0,
-                    min(
-                        len(names) - 1,
-                        self.overview_index + amount * (self.page_nodes if key in (Keys.PageUp, Keys.PageDown) else 1),
-                    ),
-                )
+                if key in (Keys.PageUp, Keys.PageDown):
+                    self._graph_pan(0, amount * self.graph_height)
+                else:
+                    self._graph_move("up" if amount < 0 else "down")
             elif self.model.pane == Pane.NODE:
                 self.node_scroll = max(0, self.node_scroll + amount)
             else:
@@ -135,7 +162,11 @@ class DagWatchApp:
 
         @bindings.add("enter")
         def enter(event: KeyPressEvent) -> None:
-            if self.searching or self.mode == "overview":
+            if self.mode == "overview" and not self.searching:
+                self.node_scroll = 0
+                self.model.focus_node(self.graph_selected)
+                self.mode = "status"
+            elif self.searching:
                 names = self.model.search(self.query)
                 exact = self.query if self.query in names else None
                 if names:
@@ -163,8 +194,30 @@ class DagWatchApp:
         @bindings.add("o", filter=browsing)
         def overview(event: KeyPressEvent) -> None:
             self.mode = "status" if self.mode == "overview" else "overview"
+            self.graph_selected = self.model.focus
+            self.graph_follow = True
             self.query = ""
             self.overview_index = 0
+
+        @bindings.add("h", filter=browsing)
+        @bindings.add("j", filter=browsing)
+        @bindings.add("k", filter=browsing)
+        @bindings.add("l", filter=browsing)
+        def pan_graph(event: KeyPressEvent) -> None:
+            if self.mode == "overview":
+                dx, dy = {"h": (-8, 0), "j": (0, 4), "k": (0, -4), "l": (8, 0)}[event.data]
+                self._graph_pan(dx, dy)
+
+        @bindings.add("home", filter=browsing)
+        def center_graph(event: KeyPressEvent) -> None:
+            self.graph_follow = True
+            self.node_scroll = 0
+
+        @bindings.add("up", filter=Condition(lambda: self.searching))
+        @bindings.add("down", filter=Condition(lambda: self.searching))
+        def search_move(event: KeyPressEvent) -> None:
+            delta = -1 if event.key_sequence[0].key == Keys.Up else 1
+            self.overview_index = max(0, min(len(self.model.search(self.query)) - 1, self.overview_index + delta))
 
         @bindings.add("escape")
         def escape(event: KeyPressEvent) -> None:
@@ -208,11 +261,18 @@ class DagWatchApp:
             style = "class:header" if index < 3 else "class:footer" if index >= len(lines) - 2 else ""
             if line.startswith("> "):
                 style = "class:selected"
-            result.append((style, _fit(line, size.columns) + ("\n" if index < len(lines) - 1 else "")))
+            fragments = self.body_fragments.get(index - 4)
+            if fragments is not None:
+                result.extend(fragments)
+                if index < len(lines) - 1:
+                    result.append(("", "\n"))
+            else:
+                result.append((style, _fit(line, size.columns) + ("\n" if index < len(lines) - 1 else "")))
         return result
 
     def screen(self, size: Size) -> list[str]:
         model = self.model
+        self.body_fragments = {}
         width, height = max(1, size.columns), max(1, size.rows)
         workflow = model.workflow
         if height < 8:
@@ -237,7 +297,7 @@ class DagWatchApp:
         if self.mode == "logs":
             body = self._logs(body_height)
         elif self.mode == "overview":
-            body = self._overview(body_height)
+            body = self._overview(width, body_height)
         else:
             body = self._status(width, body_height)
         body = (body + [""] * body_height)[:body_height]
@@ -246,9 +306,11 @@ class DagWatchApp:
             ("Find node: " + self.query + "_ · Enter jump · Esc cancel")
             if self.searching
             else (
-                "↑↓ scroll · ←→ pan · a all/focused · e execution · f follow · Tab status · q quit"
+                "q quit · Tab status · ↑↓ scroll · ←→ pan · a all · e run · f follow"
                 if self.mode == "logs"
-                else "←→ pane · ↑↓/PgUp/PgDn select · Enter focus · Backspace back · / search · a reorder · Tab logs · q quit"
+                else "q quit · o status · arrows select · hjkl pan · Home center · Enter focus · / find"
+                if self.mode == "overview"
+                else "q quit · Tab logs · ←→ pane · ↑↓ select · Enter focus · / find · o DAG · a sort"
             ),
         ]
         return (header + [""] + body + footer)[:height]
@@ -256,16 +318,29 @@ class DagWatchApp:
     def _status(self, width: int, height: int) -> list[str]:
         if width < 100:
             title = f"Compact view · ←→ choose pane · {self.model.pane.name.lower()}"
-            return [title] + self._pane(self.model.pane, width, max(1, height - 1))[: max(0, height - 1)]
+            lines = self._pane(self.model.pane, width, max(1, height - 1))[: max(0, height - 1)]
+            for index, line in enumerate(lines):
+                self.body_fragments[index + 1] = FormattedText(
+                    [(self.pane_styles[self.model.pane].get(index, ""), _fit(line, width))]
+                )
+            return [title] + lines
         column = max(1, (width - 6) // 3)
         panes = [self._pane(pane, column, height) for pane in Pane]
-        return [
-            " │ ".join(_fit(lines[index] if index < len(lines) else "", column) for lines in panes)
-            for index in range(height)
-        ]
+        result: list[str] = []
+        for index in range(height):
+            fragments = FormattedText()
+            for pane in Pane:
+                if pane != Pane.INPUTS:
+                    fragments.append(("class:edge", " │ "))
+                line = panes[int(pane)][index] if index < len(panes[int(pane)]) else ""
+                fragments.append((self.pane_styles[pane].get(index, ""), _fit(line, column)))
+            self.body_fragments[index] = fragments
+            result.append("".join(fragment[1] for fragment in fragments))
+        return result
 
     def _pane(self, pane: Pane, width: int, height: int) -> list[str]:
         model = self.model
+        self.pane_styles[pane] = {0: "class:selected" if model.pane == pane else "class:header"}
         active = "> " if model.pane == pane else "  "
         title = (
             {Pane.INPUTS: "📥 INPUTS", Pane.NODE: "🎯 FOCUSED NODE", Pane.OUTPUTS: "📤 OUTPUTS"}[pane]
@@ -279,7 +354,7 @@ class DagWatchApp:
             lines = [
                 active + title,
                 model.focus,
-                f"{model.icon(phase(node))} {phase(node)}",
+                f"{model.icon(phase(node))} {phase_label(phase(node))}",
                 f"Freshness: {node.freshness}",
                 f"Latest outcome: {node.last_outcome or 'none'}",
                 f"Pending rerun: {'yes' if node.has_pending_run else 'no'}",
@@ -301,6 +376,14 @@ class DagWatchApp:
             if not recent:
                 lines.append("No observed changes yet")
             self.node_scroll = min(self.node_scroll, max(0, len(lines) - height))
+            styles = {
+                0: "class:selected" if model.pane == pane else "class:header",
+                1: "bold",
+                2: state_style(phase(node)),
+            }
+            self.pane_styles[pane] = {
+                index - self.node_scroll: style for index, style in styles.items() if index >= self.node_scroll
+            }
             return lines[self.node_scroll : self.node_scroll + height]
         names = model.orders[pane]
         self.page_nodes = max(1, (height - 3) // 4)
@@ -316,16 +399,19 @@ class DagWatchApp:
             node = model.nodes[name]
             marker = "> " if name == model.selected[pane] else "  "
             latest = model.latest.get(name)
+            row = len(lines)
+            selected = name == model.selected[pane] and model.pane == pane
+            style = state_style(phase(node)) + (" reverse bold" if selected else "")
+            self.pane_styles[pane].update(
+                {row: style, row + 1: state_style(phase(node)), row + 2: "class:muted", row + 3: "class:muted"}
+            )
+            age = max(0, int((datetime.now(timezone.utc) - latest.observed_at).total_seconds())) if latest else 0
+            ago = f"{age}s ago" if age < 60 else f"{age // 60}m ago" if age < 3600 else f"{age // 3600}h ago"
             lines += [
                 marker + model.icon(phase(node)) + " " + name,
-                "  " + (latest.description if latest else phase(node)),
-                "  "
-                + (
-                    latest.observed_at.astimezone().strftime("%H:%M:%S") + " observed"
-                    if latest
-                    else "Activity time unknown"
-                ),
-                "",
+                "  " + phase_label(phase(node)) + (" · rerun pending" if node.has_pending_run else ""),
+                "  " + (_transition_summary(latest.description) if latest else "No changes observed this session"),
+                "  Observed " + ago if latest else "",
             ]
         if start + len(visible) < len(names):
             if len(lines) >= height:
@@ -335,7 +421,46 @@ class DagWatchApp:
             lines.append("No upstream nodes" if pane == Pane.INPUTS else "No downstream nodes")
         return lines[:height]
 
-    def _overview(self, height: int) -> list[str]:
+    def _layout(self) -> DagLayout:
+        dependencies = {node.name: tuple(sorted(node.depends_on)) for node in self.model.nodes.values()}
+        if self.graph_layout is None or self.graph_layout.dependencies != dependencies:
+            self.graph_layout = DagLayout(dependencies)
+        if self.graph_selected not in self.graph_layout.boxes:
+            self.graph_selected = self.model.focus
+        return self.graph_layout
+
+    def _graph_move(self, direction: Direction) -> None:
+        self.graph_selected = self._layout().neighbor(self.graph_selected, direction)
+        self.graph_follow = True
+
+    def _graph_pan(self, dx: int, dy: int) -> None:
+        layout = self._layout()
+        self.graph_x = max(0, min(max(0, layout.width - self.graph_width), self.graph_x + dx))
+        self.graph_y = max(0, min(max(0, layout.height - self.graph_height), self.graph_y + dy))
+        self.graph_follow = False
+
+    def _overview(self, width: int, height: int) -> list[str]:
+        if self.searching:
+            return self._search_results(height)
+        layout = self._layout()
+        self.graph_width, self.graph_height = width, max(1, height - 2)
+        box = layout.boxes.get(self.graph_selected)
+        if self.graph_follow and box:
+            self.graph_x = max(0, min(max(0, layout.width - width), box.x - max(0, (width - BOX_WIDTH) // 2)))
+            self.graph_y = max(0, min(max(0, layout.height - self.graph_height), box.y - self.graph_height // 2))
+        rows = layout.viewport(
+            self.model.nodes, self.graph_selected, self.graph_x, self.graph_y, width, self.graph_height
+        )
+        lines = [
+            f"DAG · {len(layout.boxes)} nodes · arrows follow selection · ╳ crossing (no connection)",
+            f"Selected: {self.graph_selected} · viewport x={self.graph_x}/{max(0, layout.width - width)} y={self.graph_y}/{max(0, layout.height - self.graph_height)} · hjkl pan · Home center",
+        ]
+        for index, row in enumerate(rows):
+            self.body_fragments[index + 2] = row
+            lines.append("".join(fragment[1] for fragment in row))
+        return lines[:height]
+
+    def _search_results(self, height: int) -> list[str]:
         names = self.model.search(self.query)
         self.overview_index = min(self.overview_index, max(0, len(names) - 1))
         self.page_nodes = max(1, (height - 2) // 2)

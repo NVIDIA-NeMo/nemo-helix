@@ -180,14 +180,20 @@ connected DAG nodes. Use Left/Right to choose a pane, Up/Down or PageUp/PageDown
 to browse its nodes, and Enter to focus the selected neighbor. Backspace retraces
 your path. Lists scroll to keep the selected node visible; narrow terminals show
 one pane at a time. Press `/` to search any node, including disconnected branches,
-or `o` to browse the complete dependency list.
+or `o` to open the drawn DAG overview. In that overview, arrow keys select
+nodes, `h`/`j`/`k`/`l` pan the canvas, PageUp/PageDown scroll vertically, Home
+centers the selected node, and Enter returns to its Status view. The layout
+stays fixed during state changes. Selected edges are highlighted; `╳` marks a
+crossing without a connection.
 
 Neighbors sort by their most recent observed state change. Their order stays
 fixed while you browse that pane; press `a` to reorder without changing the
 selection. Routine input-check timestamps do not count as activity. Transition
 times describe observations during this watch session; polling can miss
 intermediate states. Freshness, pending reruns and execution outcomes appear
-separately from scheduling state.
+separately from scheduling state. Each node card keeps its current phase visible
+alongside the last observed change. State colors reinforce the text and emoji;
+the selected node is highlighted in every pane.
 
 Tab or `1`/`2` switches between Status and Logs. Logs default to the focused
 node's active or latest execution. Press `e` to select another execution known

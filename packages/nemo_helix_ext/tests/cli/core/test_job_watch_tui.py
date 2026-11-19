@@ -382,3 +382,84 @@ def test_log_text_is_literal_and_long_lines_can_be_panned() -> None:
     assert "\x1b" not in screen
     app.log_horizontal = 30
     assert "long" in "\n".join(app.screen(Size(rows=24, columns=120)))
+
+
+async def test_drawn_overview_keyboard_pan_select_and_focus() -> None:
+    state = model()
+    with create_pipe_input() as pipe:
+        app = DagWatchApp(state, input=pipe, output=DummyOutput())
+        ready = asyncio.Event()
+        task = asyncio.create_task(app.application.run_async(pre_run=ready.set))
+        await wait_for(ready)
+        try:
+            await key(app, pipe, "o")
+            assert app.mode == "overview"
+            assert app.graph_selected == "train"
+            await key(app, pipe, "j")
+            assert app.graph_y > 0
+            assert not app.graph_follow
+            await key(app, pipe, "\x1b[H")
+            assert app.graph_follow
+            await key(app, pipe, "\x1b[C")
+            assert app.graph_selected.startswith("output-")
+            selected = app.graph_selected
+            await key(app, pipe, "\r")
+            assert state.focus == selected
+            assert app.mode == "status"
+            await key(app, pipe, "\x7f")
+            assert state.focus == "train"
+            await key(app, pipe, "/output-0")
+            await key(app, pipe, "\x1b[B\r")
+            assert state.focus == "output-001"
+            await key(app, pipe, "q")
+            await asyncio.wait_for(task, 3)
+        finally:
+            if not task.done():
+                app.application.exit()
+                await task
+
+
+def test_right_pane_selection_and_current_phase_have_state_styles() -> None:
+    state = model()
+    state.choose_pane(1)
+    state.nodes["output-000"].scheduling_state = "idle"
+    state.nodes["output-000"].last_outcome = "error"
+    app = DagWatchApp(state, output=DummyOutput())
+    lines = app.screen(Size(rows=30, columns=150))
+    fragments = [fragment for row in app.body_fragments.values() for fragment in row]
+    assert any(
+        "class:failed" in fragment[0] and "reverse" in fragment[0] and "output-000" in fragment[1]
+        for fragment in fragments
+    )
+    assert any("class:failed" in fragment[0] and "Failed" in fragment[1] for fragment in fragments)
+    assert "No changes observed this session" in "\n".join(lines)
+
+
+def test_overview_layout_does_not_move_on_status_updates() -> None:
+    state = model()
+    app = DagWatchApp(state, output=DummyOutput())
+    app.mode = "overview"
+    app.screen(Size(rows=30, columns=150))
+    layout = app.graph_layout
+    assert layout is not None
+    boxes = dict(layout.boxes)
+    update = event(graph())
+    update.workflow.nodes[0].scheduling_state = "running"
+    state.apply_workflow(update, NOW + timedelta(seconds=1))
+    app.screen(Size(rows=30, columns=150))
+    assert app.graph_layout is layout
+    assert app.graph_layout.boxes == boxes
+
+
+def test_neighbor_card_shows_current_phase_and_concise_transition() -> None:
+    state = model()
+    update = event(graph())
+    changed = update.workflow.nodes[99]
+    changed.scheduling_state = "running"
+    changed.active_execution_id = "long-execution-identifier-for-input-099"
+    state.apply_workflow(update, NOW + timedelta(seconds=1))
+    app = DagWatchApp(state, output=DummyOutput())
+    screen = "\n".join(app.screen(Size(rows=30, columns=150)))
+    assert "input-099" in screen
+    assert "Waiting on dependencies → Running" in screen
+    assert "Observed" in screen
