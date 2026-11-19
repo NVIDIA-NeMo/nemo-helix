@@ -225,7 +225,7 @@ def test_path_traversal_rejected(make_client, upstream_requests):
 def test_mlflow_otlp_snippet(make_client):
     body = make_client().get(f"{BASE}/connections/mlflow/otlp-snippet").json()
     endpoint = {
-        "type": "gen_ai",
+        "type": "full",
         "transport": "http_binary",
         "endpoint": "http://mlflow.test:5000/apis/observability/ui/mlflow/v1/traces",
         "headers": {"x-mlflow-experiment-id": "7"},

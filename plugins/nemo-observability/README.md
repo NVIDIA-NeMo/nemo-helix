@@ -90,9 +90,10 @@ mlflow server --host 127.0.0.1 --port 5000 \
   forwards `Content-Length`.
 - MLflow sends `X-Frame-Options: SAMEORIGIN`, which is fine because the frame is
   same-origin through the proxy.
-- OTLP: `type: gen_ai`, `transport: http_binary`, header
-  `x-mlflow-experiment-id: <id>`. MLflow derives token usage from the
-  `gen_ai.usage.*` attributes.
+- OTLP: `type: full`, `transport: http_binary`, header
+  `x-mlflow-experiment-id: <id>`. Do not use `type: gen_ai`: Relay sends that type
+  as GenAI logs and metrics with no spans, and MLflow ingests only spans (it answers
+  404 on `/v1/logs` and `/v1/metrics`). Verified with a deployed deepagents agent.
 
 ### Phoenix (Elastic License 2.0), verified
 

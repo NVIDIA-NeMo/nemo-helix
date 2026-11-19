@@ -31,8 +31,9 @@ class MLflowAdapter(ProviderAdapter):
         return {"Authorization": "Basic " + base64.b64encode(credential.encode()).decode()}
 
     def otlp_endpoint(self, connection: ObservabilityConnection, prefix: str) -> dict[str, Any]:
+        # Relay's gen_ai type exports GenAI logs and metrics but no spans; MLflow only ingests spans.
         return {
-            "type": "gen_ai",
+            "type": "full",
             "transport": "http_binary",
             "endpoint": connection.otlp_endpoint or f"{connection.base_url}{prefix}/v1/traces",
             "headers": {"x-mlflow-experiment-id": connection.default_project or _DEFAULT_EXPERIMENT_ID},
