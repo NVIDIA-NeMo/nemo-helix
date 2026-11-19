@@ -561,7 +561,7 @@ Poll every two seconds until the job completes or reaches an unsuccessful termin
 ```bash
 JOB_NAME=$(jq -er '.name' harbor-job.json)
 while true; do
-  STATUS=$(uv run nemo jobs get-status "$JOB_NAME" --workspace default -f json | jq -er '.status') || break
+  STATUS=$(uv run nemo --base-url http://localhost:8080 jobs get-status "$JOB_NAME" --workspace default -f json | jq -er '.status') || break
   printf '%s\n' "$STATUS"
   case "$STATUS" in
     completed|error|cancelled) break ;;
