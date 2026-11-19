@@ -38,6 +38,7 @@ class FakePlatform:
         self.dataset_evals: dict[str, dict[str, Any]] = {}
         self.agent_deployments: dict[str, str] = {}
         self.config_reads: list[str] = []
+        self.convert_requests: list[dict[str, Any]] = []
 
     async def submit_convert(
         self,
@@ -48,8 +49,12 @@ class FakePlatform:
         node_key: str,
         trajectory_filesets: list[str],
         pass_filter: dict[str, Any],
+        student_model: str | None,
+        max_tokens: dict[str, Any] | None,
     ) -> None:
-        del pass_filter
+        self.convert_requests.append(
+            {"pass_filter": pass_filter, "student_model": student_model, "max_tokens": max_tokens}
+        )
         self.events.append(("convert", name))
         self.trajectory_filesets = list(trajectory_filesets)
         self.jobs[name] = "completed"
@@ -406,6 +411,40 @@ async def test_existing_trajectories_start_at_conversion() -> None:
     assert workflow.results["original"] is None
     assert [stage["id"] for stage in workflow.stages][:2] == ["prepare", "customization"]
     assert "eval-original" not in [stage["id"] for stage in workflow.stages]
+
+
+async def test_the_convert_step_receives_the_student_and_the_length_limit() -> None:
+    limit = {"enabled": True, "behavior": "truncate-earlier-turns", "tokens": "32k"}
+    workflow = assemble(
+        "distill",
+        "default",
+        inputs(teacher=None, trajectory_filesets=["default/runs-a"], max_tokens=limit),
+    )
+    harness = Harness()
+
+    for _ in range(80):
+        await _apply(workflow, harness)
+        if workflow.status in {"completed", "failed", "cancelled"}:
+            break
+
+    assert workflow.status == "completed", _stuck(workflow)
+    [request] = harness.platform.convert_requests
+    assert request["student_model"] == workflow.graph["train[lora]"].inputs["student_model"]
+    assert request["max_tokens"] == {"enabled": True, "behavior": "truncate-earlier-turns", "tokens": 32768}
+
+
+async def test_the_convert_step_has_no_limit_unless_one_is_set() -> None:
+    workflow = assemble("distill", "default", inputs(teacher=None, trajectory_filesets=["default/runs-a"]))
+    harness = Harness()
+
+    for _ in range(80):
+        await _apply(workflow, harness)
+        if workflow.status in {"completed", "failed", "cancelled"}:
+            break
+
+    [request] = harness.platform.convert_requests
+    assert request["max_tokens"] is None
+    assert request["student_model"]
 
 
 async def test_cancel_leaves_no_deployments() -> None:

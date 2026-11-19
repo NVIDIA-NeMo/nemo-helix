@@ -100,7 +100,12 @@ def render_graph(inputs: DistillInputs) -> dict[str, GraphNode]:
     nodes["prepare"] = GraphNode(
         kind="convert_atif",
         depends_on=list(original),
-        inputs={"trajectory_filesets": trajectories, "pass_filter": dict(inputs.pass_filter)},
+        inputs={
+            "trajectory_filesets": trajectories,
+            "pass_filter": dict(inputs.pass_filter),
+            "student_model": inputs.student_model,
+            "max_tokens": inputs.max_tokens.model_dump(mode="json") if inputs.max_tokens is not None else None,
+        },
     )
     after_teacher: list[str] = []
     if teacher is not None:
