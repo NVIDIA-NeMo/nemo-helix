@@ -82,15 +82,21 @@ def test_mlflow_proxy_keeps_prefix_and_strips_platform_credentials(make_client, 
     client.cookies.set("mlflow_ui", "keep")
     response = client.get(
         "/apis/observability/ui/mlflow/ajax-api/2.0/mlflow/experiments/get?experiment_id=7",
-        headers={"authorization": "Bearer platform-token", "x-nhx-principal-id": "spoof"},
+        headers={
+            "authorization": "Bearer platform-token",
+            "x-nhx-principal-id": "spoof",
+            "x-forwarded-host": "spoof.example",
+            "x-forwarded-for": "10.0.0.1",
+            "forwarded": "host=spoof.example",
+        },
     )
     assert response.status_code == 200
     sent = upstream_requests[-1]
     assert str(sent.url) == (
         "http://mlflow.test:5000/apis/observability/ui/mlflow/ajax-api/2.0/mlflow/experiments/get?experiment_id=7"
     )
-    assert "authorization" not in sent.headers
-    assert "x-nhx-principal-id" not in sent.headers
+    for dropped in ("authorization", "x-nhx-principal-id", "x-forwarded-host", "x-forwarded-for", "forwarded"):
+        assert dropped not in sent.headers
     assert sent.headers["cookie"] == "mlflow_ui=keep"
     assert sent.headers["host"] == "mlflow.test:5000"
 

@@ -32,9 +32,21 @@ _HOP_BY_HOP = {
     "transfer-encoding",
     "upgrade",
 }
-# The caller's platform credentials must never reach a third-party service. Content-Length is
+# The caller's platform credentials must never reach a third-party service, and forwarding headers
+# are caller-controlled, so upstream host or origin checks must not see them. Content-Length is
 # kept: without it the streamed body goes out chunked, which WSGI upstreams (MLflow) read as empty.
-_REQUEST_DROP = _HOP_BY_HOP | {"host", "authorization", "cookie", "x-api-key"}
+_REQUEST_DROP = _HOP_BY_HOP | {
+    "host",
+    "authorization",
+    "cookie",
+    "x-api-key",
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "x-real-ip",
+}
 _RESPONSE_DROP = _HOP_BY_HOP | {"content-length"}
 
 
