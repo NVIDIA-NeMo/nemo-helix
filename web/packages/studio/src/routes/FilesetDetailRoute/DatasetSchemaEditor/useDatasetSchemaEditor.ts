@@ -134,6 +134,14 @@ export function useDatasetSchemaEditor({
   // Per-selection unsaved edits: switching selections preserves what the user
   // had been typing. Saving or Resetting clears the entry for that selection.
   const [editsBySelection, setEditsBySelection] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Bumped on every edit, reset, and selection change so a save that fails
+  // after the user moved on doesn't surface an error for superseded text.
+  const editRevision = useRef(0);
+  useEffect(() => {
+    editRevision.current += 1;
+    setSaveError(null);
+  }, [selectedSchema]);
 
   const derivedText = useMemo(
     () => deriveSelectionText(savedMetadata, selectedSchema),
@@ -145,6 +153,7 @@ export function useDatasetSchemaEditor({
   const handleEditorChange = useCallback(
     (next: string) => {
       setEditsBySelection((prev) => ({ ...prev, [selectedSchema]: next }));
+      editRevision.current += 1;
       setSaveError(null);
     },
     [selectedSchema]
@@ -158,6 +167,7 @@ export function useDatasetSchemaEditor({
       return next;
     });
     setInferError(null);
+    editRevision.current += 1;
     setSaveError(null);
   }, [selectedSchema]);
 
@@ -227,6 +237,7 @@ export function useDatasetSchemaEditor({
         ...prev,
         [SHOW_ALL_VALUE]: JSON.stringify(inferred, null, 2),
       }));
+      editRevision.current += 1;
       setSelectedSchema(SHOW_ALL_VALUE);
     } finally {
       setIsInferring(false);
@@ -235,10 +246,10 @@ export function useDatasetSchemaEditor({
 
   const { mutateAsync: updateMetadata, isPending: isSaving } = useFilesUpdateFilesetMetadata();
   const queryClient = useQueryClient();
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   const saveDataset = useCallback(
     async (dataset: DatasetMetadataContent | null): Promise<boolean> => {
+      const submittedRevision = editRevision.current;
       setSaveError(null);
       try {
         await updateMetadata({
@@ -247,7 +258,9 @@ export function useDatasetSchemaEditor({
           data: { metadata: { dataset: dataset as DatasetMetadataContent } },
         });
       } catch (err) {
-        setSaveError(getErrorMessage(err as Error, 'Failed to save schema'));
+        if (editRevision.current === submittedRevision) {
+          setSaveError(getErrorMessage(err as Error, 'Failed to save schema'));
+        }
         return false;
       }
       await queryClient.invalidateQueries({

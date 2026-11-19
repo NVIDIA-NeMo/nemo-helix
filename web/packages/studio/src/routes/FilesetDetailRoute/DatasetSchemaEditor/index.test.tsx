@@ -525,4 +525,37 @@ describe('DatasetSchemaEditor', () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
     expect(screen.getByTestId('code-editor')).toHaveValue('{"schema": {"type": "foobar"}}');
   });
+
+  it('ignores a save failure for an edit the user has since changed', async () => {
+    const user = userEvent.setup();
+    let rejectSave: (err: unknown) => void = () => {};
+    mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectSave = reject;
+        })
+    );
+    render(
+      <DatasetSchemaEditor
+        {...propsBase}
+        fileset={buildFileset({ schema_defs: { schema_1: { type: 'object' } } })}
+      />
+    );
+    await user.click(screen.getByRole('combobox', { name: /selected schema/i }));
+    await user.click(await screen.findByRole('option', { name: 'Show All' }));
+
+    const editor = screen.getByTestId('code-editor');
+    fireEvent.change(editor, { target: { value: '{"schema": {"type": "foobar"}}' } });
+    const saveButton = screen.getByTestId('dataset-schema-save-button');
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    await user.click(saveButton);
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(editor, { target: { value: '{"schema": {"type": "object"}}' } });
+    rejectSave(new Error('stale failure'));
+
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    expect(screen.queryByTestId('dataset-schema-save-error')).not.toBeInTheDocument();
+    expect(editor).toHaveValue('{"schema": {"type": "object"}}');
+  });
 });
