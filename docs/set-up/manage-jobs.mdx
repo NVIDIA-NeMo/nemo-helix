@@ -79,7 +79,9 @@ The controller compares each node's input Filesets' opaque `commit_revision`
 values. Uploading files alone does not request another execution: explicitly
 commit the Fileset after updating its inputs. Outputs do not affect scheduling.
 Dependencies order execution; each node's own inputs determine whether it needs
-to run again.
+to run again. The controller evaluates dependencies from roots to leaves. A
+blocked node cannot release its children using an earlier success. Once its
+ancestors recover, its unchanged inputs can reuse that success.
 
 An Attempt keeps the definition and original execution context it started with.
 Editing the Job takes effect in a new Attempt through the existing start/rerun

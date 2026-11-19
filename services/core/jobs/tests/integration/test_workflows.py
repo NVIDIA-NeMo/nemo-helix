@@ -1149,3 +1149,79 @@ def test_cancelled_parent_keeps_dirty_descendant_pending_without_empty_passes(
     clean = h.tick(job)
     assert clean.workflow is not None and not clean.workflow.degraded
     assert clean.workflow.waiting_for_changes
+
+
+@pytest.mark.parametrize("outcome", [HelixJobStatus.ERROR, HelixJobStatus.CANCELLED])
+@pytest.mark.parametrize("shape", ["chain", "deep_chain", "join"])
+def test_unsuccessful_ancestor_blocks_cached_descendants(
+    workflow_harness: WorkflowHarness, outcome: HelixJobStatus, shape: str
+) -> None:
+    h = workflow_harness
+    graph = {"root": [], "middle": ["root"], "leaf": ["middle"], "independent": []}
+    initial_order = ["root", "middle", "leaf", "independent"]
+    if shape == "deep_chain":
+        graph["bridge"] = ["middle"]
+        graph["leaf"] = ["bridge"]
+        initial_order.insert(2, "bridge")
+    elif shape == "join":
+        graph["other"] = []
+        graph["middle"] = ["root", "other"]
+        initial_order.insert(0, "other")
+    job = h.create(dict(reversed(list(graph.items()))))
+    h.tick(job)
+    for name in initial_order:
+        h.finish(job, name)
+        h.tick(job)
+    initial_count = len(h.status(job).steps)
+    middle_success = h.node_state(job, "middle").successful_step_id
+    h.invalidate(job, ["root", "leaf", "independent"])
+    h.tick(job)
+    h.finish(job, "root", outcome)
+    blocked = h.tick(job)
+    assert blocked.workflow is not None and blocked.workflow.pass_number == 2
+    assert h.node_state(job, "leaf").active_step_id is None
+    assert h.node_state(job, "leaf").blocked_by == graph["leaf"]
+    assert len(blocked.steps) == initial_count + 2
+    h.finish(job, "independent")
+    for _ in range(3):
+        waiting = h.tick(job)
+        assert waiting.workflow is not None and waiting.workflow.waiting_for_changes
+        assert waiting.workflow.pass_number == 2
+        assert len(waiting.steps) == initial_count + 2
+    h.invalidate(job, ["root"])
+    h.tick(job)
+    h.finish(job, "root")
+    recovered = h.tick(job)
+    assert recovered.workflow is not None and recovered.workflow.pass_number == 3
+    assert h.node_state(job, "middle").successful_step_id == middle_success
+    assert h.node_state(job, "leaf").active_step_id is not None
+    assert len(recovered.steps) == initial_count + 4
+    h.finish(job, "leaf")
+    clean = h.tick(job)
+    assert clean.workflow is not None and clean.workflow.waiting_for_changes
+    assert not clean.workflow.degraded
+
+
+def test_current_pass_success_releases_children_with_newer_inputs_pending(workflow_harness: WorkflowHarness) -> None:
+    h = workflow_harness
+    job = h.create({"leaf": ["middle"], "middle": ["root"], "root": [], "independent": []})
+    h.tick(job)
+    h.finish(job, "root")
+    h.invalidate(job, ["root"])
+    released = h.tick(job)
+    assert released.workflow is not None and released.workflow.pass_number == 1
+    assert h.node_state(job, "root").freshness == "dirty"
+    assert h.node_state(job, "middle").active_step_id is not None
+    h.finish(job, "middle")
+    assert len(h.tick(job).steps) == 4
+    h.finish(job, "leaf")
+    h.finish(job, "independent")
+    drained = h.tick(job)
+    assert drained.workflow is not None and drained.workflow.pass_number == 1
+    next_pass = h.tick(job)
+    assert next_pass.workflow is not None and next_pass.workflow.pass_number == 2
+    assert len(next_pass.steps) == 5
+    h.finish(job, "root")
+    clean = h.tick(job)
+    assert clean.workflow is not None and clean.workflow.waiting_for_changes
+    assert len(clean.steps) == 5

@@ -31,16 +31,31 @@ def _execution_key(attempt_id: str, name: str, revision: str) -> str:
     return "wf-" + hashlib.sha256(f"{attempt_id}/{name}/{revision}".encode()).hexdigest()[:24]
 
 
+def _workflow_blockers(attempt: HelixJobAttempt, state: WorkflowState) -> dict[str, list[str]]:
+    """Walk from roots so only satisfied nodes can release their children."""
+    dependencies = {step.name: step.depends_on or [] for step in attempt.platform_spec.steps}
+    satisfied: set[str] = set()
+    blocked: dict[str, list[str]] = {}
+    for name in workflow_order(dependencies):
+        node = state.nodes[name]
+        blocked[name] = [parent for parent in dependencies[name] if parent not in satisfied]
+        if blocked[name] or node.active_run_revision is not None:
+            continue
+        if state.pass_open and node.decision_pass == state.pass_number:
+            # A success in this pass remains usable while newer inputs wait for the next pass.
+            successful = node.last_outcome == "completed"
+        else:
+            successful = node.freshness == "clean"
+        if successful:
+            satisfied.add(name)
+    return blocked
+
+
 def _has_eligible_pending(attempt: HelixJobAttempt, state: WorkflowState) -> bool:
     return any(
-        node.last_poll_error is None
-        and node.requested_run_revision != node.last_attempted_revision
-        and all(
-            state.nodes[parent].freshness == "clean" and state.nodes[parent].last_outcome != "cancelled"
-            for parent in spec.depends_on or []
-        )
-        for spec in attempt.platform_spec.steps
-        for node in [state.nodes[spec.name]]
+        not blocked and node.last_poll_error is None and node.requested_run_revision != node.last_attempted_revision
+        for name, blocked in _workflow_blockers(attempt, state).items()
+        for node in [state.nodes[name]]
     )
 
 
@@ -252,9 +267,9 @@ async def reconcile_workflow(
     assert attempt.workflow_state is not None
     state = attempt.workflow_state
 
-    order = workflow_order({step.name: step.depends_on or [] for step in attempt.platform_spec.steps})
+    blockers = _workflow_blockers(attempt, state)
     specs = {step.name: step for step in attempt.platform_spec.steps}
-    for name in order:
+    for name, blocked in blockers.items():
         if state.control == "failing":
             break
         spec = specs[name]
@@ -310,11 +325,7 @@ async def reconcile_workflow(
         if node.decision_pass == state.pass_number:
             continue
         parents = [state.nodes[parent] for parent in spec.depends_on or []]
-        node.blocked_by = [
-            parent
-            for parent in spec.depends_on or []
-            if state.nodes[parent].decision_pass != state.pass_number or state.nodes[parent].last_outcome != "completed"
-        ]
+        node.blocked_by = blocked
         if node.blocked_by:
             node.scheduling_state = "waiting_dependencies"
             node.reason = "dependencies"

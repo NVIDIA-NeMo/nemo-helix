@@ -777,3 +777,38 @@ def test_docker_node_cancel_prunes_branch_and_continuous_inputs_retry(
         assert recovered.workflow is not None and not recovered.workflow.degraded
         assert all(node.freshness == "clean" for node in recovered.workflow.nodes)
     assert all(container.status != "running" for container in h.containers(job))
+
+
+def test_docker_failed_ancestor_blocks_cached_middle_and_dirty_leaf(docker_workflow: DockerWorkflowHarness) -> None:
+    h = docker_workflow
+    job = h.create(
+        {"leaf": ["middle"], "middle": ["root"], "root": [], "independent": []},
+        commands={
+            "root": (
+                "if test -f /workflow/fail-next; then rm /workflow/fail-next; exit 7; "
+                "else touch /workflow/fail-next; echo success; fi"
+            ),
+        },
+    )
+    first = h.settled(job)
+    assert len(first.steps) == 4
+    assert first.workflow is not None
+    middle_id = next(node.successful_execution_id for node in first.workflow.nodes if node.name == "middle")
+    for name in ("root", "leaf", "independent"):
+        h.invalidate(job, name)
+    failed = h.settled(job)
+    assert failed.workflow is not None and failed.workflow.degraded and failed.workflow.pass_number == 2
+    assert len(failed.steps) == 6
+    leaf = next(node for node in failed.workflow.nodes if node.name == "leaf")
+    assert leaf.has_pending_run and leaf.blocked_by == ["middle"]
+    for _ in range(3):
+        waiting = h.tick(job)
+        assert waiting.workflow is not None and waiting.workflow.pass_number == 2
+        assert waiting.workflow.waiting_for_changes and len(waiting.steps) == 6
+    h.invalidate(job, "root")
+    recovered = h.settled(job)
+    assert recovered.attempt_id == first.attempt_id
+    assert len(recovered.steps) == 8
+    assert recovered.workflow is not None and not recovered.workflow.degraded
+    assert next(node.successful_execution_id for node in recovered.workflow.nodes if node.name == "middle") == middle_id
+    assert sum(container_state(container).exit_code == 7 for container in h.containers(job)) == 1
