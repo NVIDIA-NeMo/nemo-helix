@@ -53,6 +53,8 @@ const DOCS_TOOLS: ReadonlySet<string> = new Set([
   'ls',
   'read',
   'readfile',
+  // The NeMo Studio Assistant's own documentation search (its MCP tool, not a harness built-in).
+  'searchdocs',
   'skill',
   'toolsearch',
   'webfetch',

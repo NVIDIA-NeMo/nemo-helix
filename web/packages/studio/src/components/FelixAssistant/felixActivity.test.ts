@@ -89,6 +89,8 @@ describe('getFelixActivityForTool', () => {
     'WebSearch',
     'Skill',
     'check_status',
+    'search_docs',
+    'mcp__nemo_studio__search_docs',
   ])('treats %s as docs', (toolName) => {
     expect(getFelixActivityForTool(toolName, {})).toBe('docs');
   });
