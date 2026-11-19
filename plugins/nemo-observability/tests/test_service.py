@@ -94,6 +94,15 @@ def test_mlflow_proxy_keeps_prefix_and_strips_platform_credentials(make_client, 
     assert sent.headers["host"] == "mlflow.test:5000"
 
 
+def test_upstream_only_offered_encodings_the_caller_accepts(make_client, upstream_requests):
+    client = make_client()
+    _open_session(client)
+    client.get("/apis/observability/ui/mlflow/", headers={"accept-encoding": "gzip"})
+    assert upstream_requests[-1].headers["accept-encoding"] == "gzip"
+    client.get("/apis/observability/ui/mlflow/", headers={"accept-encoding": ""})
+    assert upstream_requests[-1].headers["accept-encoding"] == "identity"
+
+
 def test_phoenix_proxy_strips_prefix_and_streams_post_body(make_client, upstream_requests):
     client = make_client(lambda request: httpx.Response(200, content=request.content))
     _open_session(client, "phoenix")
@@ -107,6 +116,9 @@ def test_phoenix_proxy_strips_prefix_and_streams_post_body(make_client, upstream
     sent = upstream_requests[-1]
     assert str(sent.url) == "http://phoenix.test:6006/graphql"
     assert sent.headers["origin"] == "http://phoenix.test:6006"
+    # WSGI upstreams read a chunked body as empty, so the length must survive streaming.
+    assert sent.headers["content-length"] == str(len(response.content))
+    assert "transfer-encoding" not in sent.headers
 
 
 def test_upstream_credential_injected_from_secret_env(config, make_client, upstream_requests, monkeypatch):
@@ -164,7 +176,7 @@ def test_mlflow_otlp_snippet(make_client):
     endpoint = {
         "type": "gen_ai",
         "transport": "http_binary",
-        "endpoint": "http://mlflow.test:5000/v1/traces",
+        "endpoint": "http://mlflow.test:5000/apis/observability/ui/mlflow/v1/traces",
         "headers": {"x-mlflow-experiment-id": "7"},
     }
     assert body["telemetry"] == {

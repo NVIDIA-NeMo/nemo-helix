@@ -18,7 +18,6 @@ class PhoenixAdapter(ProviderAdapter):
     display_name = "Phoenix"
     # With PHOENIX_HOST_ROOT_PATH set, Phoenix still serves at its root and only prefixes the URLs it emits.
     strip_prefix = True
-    health_path = "/healthz"
 
     def landing_path(self, connection: ObservabilityConnection) -> str:
         return "/projects"
@@ -26,7 +25,7 @@ class PhoenixAdapter(ProviderAdapter):
     def upstream_headers(self, credential: str | None) -> dict[str, str]:
         return {"Authorization": f"Bearer {credential}"} if credential else {}
 
-    def otlp_endpoint(self, connection: ObservabilityConnection) -> dict[str, Any]:
+    def otlp_endpoint(self, connection: ObservabilityConnection, prefix: str) -> dict[str, Any]:
         return {
             "type": "openinference",
             "transport": "http_binary",

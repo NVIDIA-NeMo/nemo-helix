@@ -17,9 +17,8 @@ _DEFAULT_EXPERIMENT_ID = "0"
 class MLflowAdapter(ProviderAdapter):
     provider = "mlflow"
     display_name = "MLflow"
-    # `mlflow server --static-prefix` registers every route, UI and API, under the prefix.
+    # `mlflow server --static-prefix` registers every route under the prefix: UI, REST API and OTLP.
     strip_prefix = False
-    health_path = "/health"
 
     def landing_path(self, connection: ObservabilityConnection) -> str:
         experiment = connection.default_project or _DEFAULT_EXPERIMENT_ID
@@ -31,11 +30,11 @@ class MLflowAdapter(ProviderAdapter):
         # MLflow basic-auth app: the secret is "user:password".
         return {"Authorization": "Basic " + base64.b64encode(credential.encode()).decode()}
 
-    def otlp_endpoint(self, connection: ObservabilityConnection) -> dict[str, Any]:
+    def otlp_endpoint(self, connection: ObservabilityConnection, prefix: str) -> dict[str, Any]:
         return {
             "type": "gen_ai",
             "transport": "http_binary",
-            "endpoint": connection.otlp_endpoint or f"{connection.base_url}/v1/traces",
+            "endpoint": connection.otlp_endpoint or f"{connection.base_url}{prefix}/v1/traces",
             "headers": {"x-mlflow-experiment-id": connection.default_project or _DEFAULT_EXPERIMENT_ID},
         }
 

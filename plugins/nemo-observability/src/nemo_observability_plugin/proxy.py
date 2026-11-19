@@ -32,8 +32,9 @@ _HOP_BY_HOP = {
     "transfer-encoding",
     "upgrade",
 }
-# The caller's platform credentials must never reach a third-party service.
-_REQUEST_DROP = _HOP_BY_HOP | {"host", "authorization", "cookie", "content-length", "x-api-key"}
+# The caller's platform credentials must never reach a third-party service. Content-Length is
+# kept: without it the streamed body goes out chunked, which WSGI upstreams (MLflow) read as empty.
+_REQUEST_DROP = _HOP_BY_HOP | {"host", "authorization", "cookie", "x-api-key"}
 _RESPONSE_DROP = _HOP_BY_HOP | {"content-length"}
 
 
@@ -67,6 +68,10 @@ def forward_headers(
     }
     if cookie := _upstream_cookies(request.headers.get("cookie")):
         headers["cookie"] = cookie
+    # Bodies pass through still encoded, so only offer the encodings the caller accepts;
+    # otherwise httpx's default Accept-Encoding gets a gzip body to a client that can't read it.
+    if not headers.get("accept-encoding"):
+        headers["accept-encoding"] = "identity"
     # Upstream CSRF checks compare Origin to their own origin; the browser saw Studio's.
     if headers.get("origin") == _request_origin(request):
         headers["origin"] = connection.base_url

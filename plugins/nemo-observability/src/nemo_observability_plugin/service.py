@@ -151,14 +151,15 @@ class ObservabilityService(NemoService):
             """``telemetry`` stanza that exports an agent's traces straight to this connection."""
             connection = _connection_or_404(name)
             adapter = adapter_for(connection.provider)
-            endpoint = adapter.otlp_endpoint(connection)
+            prefix = proxy.connection_prefix(connection)
+            endpoint = adapter.otlp_endpoint(connection, prefix)
             telemetry: dict[str, Any] = {"enabled": True, "opentelemetry": {"enabled": True, "endpoints": [endpoint]}}
             if insecure_host := _insecure_http_host(endpoint["endpoint"]):
                 telemetry["insecure_http_hosts"] = [insecure_host]
             return OTLPSnippet(
                 yaml=yaml.safe_dump({"telemetry": telemetry}, sort_keys=False),
                 telemetry=telemetry,
-                upstream_setup=adapter.upstream_setup(connection, proxy.connection_prefix(connection)),
+                upstream_setup=adapter.upstream_setup(connection, prefix),
             )
 
         return router

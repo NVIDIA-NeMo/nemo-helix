@@ -21,8 +21,6 @@ class ProviderAdapter(ABC):
     #: Whether the upstream expects the proxy prefix removed (it serves at its root and only
     #: *generates* prefixed URLs) or kept (it registers its routes under the prefix).
     strip_prefix: ClassVar[bool]
-    #: Upstream path, relative to where it is served, that answers 2xx when the UI is up.
-    health_path: ClassVar[str]
 
     @abstractmethod
     def landing_path(self, connection: ObservabilityConnection) -> str:
@@ -33,8 +31,11 @@ class ProviderAdapter(ABC):
         """Headers the proxy adds to every upstream request; *credential* comes from ``secret_env``."""
 
     @abstractmethod
-    def otlp_endpoint(self, connection: ObservabilityConnection) -> dict[str, Any]:
-        """One ``telemetry.opentelemetry.endpoints`` entry for an agent's ``agent.yaml``."""
+    def otlp_endpoint(self, connection: ObservabilityConnection, prefix: str) -> dict[str, Any]:
+        """One ``telemetry.opentelemetry.endpoints`` entry for an agent's ``agent.yaml``.
+
+        *prefix* is the proxy prefix the upstream is configured to serve under.
+        """
 
     @abstractmethod
     def upstream_setup(self, connection: ObservabilityConnection, prefix: str) -> list[str]:
