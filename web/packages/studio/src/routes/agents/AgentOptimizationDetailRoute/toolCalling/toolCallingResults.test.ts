@@ -6,7 +6,11 @@ import {
   deltaDirection,
   formatDelta,
   formatMetric,
+  METRIC_DESCRIPTIONS,
+  METRIC_ROWS,
   parseToolCallingResult,
+  SIGNAL_DESCRIPTIONS,
+  SIGNAL_ROWS,
   rejectionReasonRows,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/toolCallingResults';
 
@@ -88,6 +92,23 @@ describe('metric formatting', () => {
     expect(deltaDirection(-0.7, true)).toBe('better');
     expect(deltaDirection(-0.7, false)).toBe('worse');
     expect(deltaDirection(0, true)).toBe('same');
+  });
+});
+
+describe('row descriptions', () => {
+  it('explain every metric and signal row, and nothing else', () => {
+    expect(Object.keys(METRIC_DESCRIPTIONS).sort()).toEqual(
+      METRIC_ROWS.map((row) => row.key).sort()
+    );
+    expect(Object.keys(SIGNAL_DESCRIPTIONS).sort()).toEqual(
+      SIGNAL_ROWS.map((row) => row.key).sort()
+    );
+    for (const text of [
+      ...Object.values(METRIC_DESCRIPTIONS),
+      ...Object.values(SIGNAL_DESCRIPTIONS),
+    ]) {
+      expect(text.trim()).not.toBe('');
+    }
   });
 });
 

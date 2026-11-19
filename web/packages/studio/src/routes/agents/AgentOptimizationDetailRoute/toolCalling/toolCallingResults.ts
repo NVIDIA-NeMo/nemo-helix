@@ -188,8 +188,17 @@ export const fetchArtifactBlob = async (
 
 export type MetricFormat = 'rate' | 'decimal' | 'count';
 
+export type ComparedMetric = keyof Pick<
+  VariantMetrics,
+  | 'tool_error_rate'
+  | 'first_call_accepted_rate'
+  | 'task_success_rate'
+  | 'avg_calls_per_run'
+  | 'runs_with_errors'
+>;
+
 export interface MetricRow {
-  key: Exclude<keyof VariantMetrics, 'signals'>;
+  key: ComparedMetric;
   label: string;
   format: MetricFormat;
   lowerIsBetter: boolean;
@@ -208,6 +217,17 @@ export const METRIC_ROWS: readonly MetricRow[] = [
   { key: 'runs_with_errors', label: 'Runs with errors', format: 'count', lowerIsBetter: true },
 ];
 
+export const METRIC_DESCRIPTIONS: Record<MetricRow['key'], string> = {
+  tool_error_rate:
+    'Share of tool calls that were bad: rejected by the tool, invalid against its schema, or error-shaped. Lower is better.',
+  first_call_accepted_rate:
+    'Share of runs whose very first tool call was accepted, with no retry needed.',
+  task_success_rate:
+    'Share of runs whose last tool call was accepted, meaning the agent got there eventually.',
+  avg_calls_per_run: 'Tool calls per run. Far above 1 means the agent is retrying.',
+  runs_with_errors: 'Runs that ended in a step-limit, timeout or transport error.',
+};
+
 export const HEADLINE_METRIC = METRIC_ROWS[0];
 
 export const CALL_SIGNAL_LABEL: Record<CallSignal, string> = {
@@ -225,6 +245,15 @@ export const SIGNAL_ROWS: readonly SignalRow[] = [
   ...callSignalSchema.options.map((key) => ({ key, label: CALL_SIGNAL_LABEL[key] })),
   { key: 'retry_loop_runs', label: 'Runs with a retry loop' },
 ];
+
+export const SIGNAL_DESCRIPTIONS: Record<SignalRow['key'], string> = {
+  tool_error: 'The tool rejected the call.',
+  schema_invalid:
+    "The arguments don't match the tool's published schema. The platform checks this itself.",
+  error_text: "The result looks like an error, but the tool didn't say so explicitly.",
+  retry_loop_runs:
+    'A run called the same tool again right after a bad call, or used more calls than the budget.',
+};
 
 export const formatMetric = (value: number, format: MetricFormat): string => {
   if (format === 'rate') {

@@ -44,7 +44,7 @@ export const TOOL_CALLING_RESULT_FIXTURE: ToolCallingResult = {
     {
       id: 'baseline',
       label: 'Current agent',
-      description: 'The agent as registered.',
+      description: 'The agent exactly as registered, with no changes.',
       metrics: metrics(48, 60, 0.13, 0.4, 1, [45, 40, 2, 9]),
       rejection_reasons: { 'corrupted or unknown key': 22, 'model/provider not on platform': 12 },
       examples: [
@@ -62,14 +62,17 @@ export const TOOL_CALLING_RESULT_FIXTURE: ToolCallingResult = {
     },
     {
       id: 'config-fix',
-      label: 'Config fix',
+      label: 'Prompt fix',
+      description: 'The current agent with the suggested change to its prompt and config.',
       metrics: metrics(14, 30, 0.47, 0.73, 0, [13, 12, 1, 4]),
       rejection_reasons: { 'corrupted or unknown key': 14 },
       examples: [],
     },
     {
       id: 'schema-fix',
-      label: 'Config + schema fix',
+      label: 'Schema fix',
+      description:
+        "The prompt fix, plus the suggested tool schema served in place of the tool's own.",
       metrics: metrics(1, 17, 0.93, 1, 0, [1, 0, 0, 0]),
       rejection_reasons: { 'corrupted or unknown key': 1 },
       examples: [],
@@ -119,7 +122,7 @@ export const TOOL_CALLING_RESULT_FIXTURE: ToolCallingResult = {
   ],
   recommended_variant: 'config-fix',
   recommendation:
-    "Apply the config fix now: it cuts the tool error rate from 80% to 47%. The schema patch would help further but needs the tool's owner.",
+    "Apply the prompt fix now: it cuts the tool error rate from 80% to 47%. The schema patch would help further but needs the tool's owner.",
 };
 
 export const CANDIDATE_AGENT_DIFF = `--- agent.yaml

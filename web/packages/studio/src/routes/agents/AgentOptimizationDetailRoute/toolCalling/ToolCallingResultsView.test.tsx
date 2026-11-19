@@ -9,8 +9,14 @@ import {
 } from '@studio/mocks/handlers/toolCallingRun';
 import { server } from '@studio/mocks/node';
 import { AgentOptimizationDetailRoute } from '@studio/routes/agents/AgentOptimizationDetailRoute';
+import {
+  METRIC_DESCRIPTIONS,
+  SIGNAL_DESCRIPTIONS,
+  SIGNAL_ROWS,
+} from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/toolCallingResults';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen, within } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 
 const workspace = workspace1.workspace;
 const jobName = 'fix-tool-calls';
@@ -41,14 +47,15 @@ describe('AgentOptimizationDetailRoute — tool-calling', () => {
     renderRun();
 
     expect(await screen.findByText('Before and after')).toBeInTheDocument();
-    expect(screen.getAllByRole('columnheader', { name: 'Current agent' }).length).toBeGreaterThan(
-      0
-    );
-    expect(screen.getAllByRole('columnheader', { name: 'Config fix' }).length).toBeGreaterThan(0);
     expect(
-      screen.getAllByRole('columnheader', { name: 'Config + schema fix' }).length
-    ).toBeGreaterThan(0);
-    expect(screen.getByRole('cell', { name: 'Tool error rate' })).toBeInTheDocument();
+      screen.getByText('Each column runs the same prompts; each fix builds on the one before it.')
+    ).toBeInTheDocument();
+    for (const label of ['Current agent', 'Prompt fix', 'Schema fix']) {
+      expect(screen.getAllByRole('columnheader', { name: new RegExp(`^${label} `) }).length).toBe(
+        3
+      );
+    }
+    expect(screen.getByRole('img', { name: 'About Tool error rate' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '80%' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '6% −74 pts' })).toBeInTheDocument();
     expect(screen.queryByText('80% → 6%')).not.toBeInTheDocument();
@@ -59,7 +66,7 @@ describe('AgentOptimizationDetailRoute — tool-calling', () => {
     renderRun();
 
     expect(
-      await screen.findByRole('columnheader', { name: 'Config fix Recommended' })
+      await screen.findByRole('columnheader', { name: /^Prompt fix .*Recommended/ })
     ).toBeInTheDocument();
     expect(screen.getAllByText('Recommended')).toHaveLength(2);
     expect(
@@ -84,18 +91,60 @@ describe('AgentOptimizationDetailRoute — tool-calling', () => {
     renderRun();
 
     expect(await screen.findByText('How bad calls were detected')).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Schema invalid' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Error text (heuristic)' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Runs with a retry loop' })).toBeInTheDocument();
+    for (const row of SIGNAL_ROWS) {
+      expect(screen.getByRole('img', { name: `About ${row.label}` })).toBeInTheDocument();
+    }
+    expect(screen.getByText('Error text (heuristic)')).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '40' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['a metric', 'About Tool error rate', METRIC_DESCRIPTIONS.tool_error_rate],
+    ['a signal', 'About Schema invalid', SIGNAL_DESCRIPTIONS.schema_invalid],
+    [
+      'the recommended badge',
+      'About Recommended',
+      'The variant the recommendation above tells you to adopt.',
+    ],
+    [
+      'a suggestion kind',
+      'About Tool schema',
+      "Changes the tool's input schema. Send it to the tool's owner.",
+    ],
+  ])('explains %s in a tooltip on hover', async (_subject, trigger, content) => {
+    renderRun();
+
+    const [icon] = await screen.findAllByRole('img', { name: trigger });
+    await userEvent.hover(icon);
+    await waitFor(() => expect(icon).toHaveAccessibleDescription(content));
+  });
+
+  it('explains each variant from its own description and skips the icon when there is none', async () => {
+    const [baseline, configFix, schemaFix] = TOOL_CALLING_RESULT_FIXTURE.variants;
+    renderRun({
+      resultBody: JSON.stringify({
+        ...TOOL_CALLING_RESULT_FIXTURE,
+        variants: [
+          { ...baseline, label: 'As shipped' },
+          { ...configFix, label: 'Tweaked prompt', description: 'Prompt changed by the run.' },
+          { ...schemaFix, description: '' },
+        ],
+      }),
+    });
+
+    const [icon] = await screen.findAllByRole('img', { name: 'About Tweaked prompt' });
+    expect(screen.getAllByRole('columnheader', { name: /^As shipped/ })).toHaveLength(3);
+    expect(
+      screen.queryByRole('img', { name: `About ${schemaFix?.label}` })
+    ).not.toBeInTheDocument();
+    await userEvent.hover(icon);
+    await waitFor(() => expect(icon).toHaveAccessibleDescription('Prompt changed by the run.'));
   });
 
   it('shows signal chips and schema errors on a rejected call', async () => {
     renderRun();
 
-    const row = (await screen.findByText('product-reviews')).closest('tr');
-    expect(row).not.toBeNull();
-    const cells = within(row as HTMLElement);
+    const cells = within(await screen.findByRole('row', { name: /^product-reviews/ }));
     expect(cells.getByText('Tool error')).toBeInTheDocument();
     expect(cells.getByText('Schema invalid')).toBeInTheDocument();
     expect(cells.getByText(/'model_configs' was unexpected/)).toBeInTheDocument();
@@ -141,14 +190,15 @@ describe('AgentOptimizationDetailRoute — tool-calling', () => {
     const configFix = await screen.findByTestId('suggestion-config-fix');
     expect(within(configFix).getByText('Applies automatically')).toBeInTheDocument();
     expect(
-      within(configFix).getByText('Verified by Config fix · Tool error rate 80% → 47%')
+      within(configFix).getByText('Verified by Prompt fix · Tool error rate 80% → 47%')
     ).toBeInTheDocument();
     const diff = await within(configFix).findByLabelText('candidate-agent.diff');
-    expect(diff.querySelector('[data-diff-line="added"]')).toHaveTextContent(
-      'system_prompt: Build a Data Designer job with model default/nemotron-3-5-super.'
-    );
-    expect(diff.querySelector('[data-diff-line="removed"]')).toHaveTextContent(
-      'system_prompt: Build a Data Designer job.'
+    expect(
+      within(diff).getByText(/system_prompt: Build a Data Designer job with model/)
+    ).toHaveAttribute('data-diff-line', 'added');
+    expect(within(diff).getByText(/system_prompt: Build a Data Designer job\.$/)).toHaveAttribute(
+      'data-diff-line',
+      'removed'
     );
     expect(
       within(configFix).getByRole('button', { name: /Download candidate-agent.yaml/ })

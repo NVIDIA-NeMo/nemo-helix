@@ -6,7 +6,14 @@ import {
   type TableExpandableCellState,
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { triggerDownload } from '@nemo/common/src/utils/file';
-import { ChartBar, Download, Lightbulb, ListCheckmark, Warning } from '@nemo/icons/icons';
+import {
+  ChartBar,
+  Download,
+  InfoCircle,
+  Lightbulb,
+  ListCheckmark,
+  Warning,
+} from '@nemo/icons/icons';
 import {
   Badge,
   Banner,
@@ -17,6 +24,7 @@ import {
   Spinner,
   Stack,
   Text,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import {
   StaticDataView,
@@ -30,7 +38,9 @@ import {
   formatMetric,
   HEADLINE_METRIC,
   CALL_SIGNAL_LABEL,
+  METRIC_DESCRIPTIONS,
   METRIC_ROWS,
+  SIGNAL_DESCRIPTIONS,
   SIGNAL_ROWS,
   type SignalRow,
   rejectionReasonRows,
@@ -46,8 +56,17 @@ import {
   type VariantId,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/toolCallingResults';
 import { UnifiedDiff } from '@studio/routes/agents/AgentOptimizationDetailRoute/toolCalling/UnifiedDiff';
+import { tooltipClassName } from '@studio/styles/common';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { type ComponentProps, type FC, memo, useCallback, useMemo, useState } from 'react';
+import {
+  type ComponentProps,
+  type FC,
+  memo,
+  type ReactNode,
+  useCallback,
+  useMemo,
+  useState,
+} from 'react';
 
 type BadgeColor = ComponentProps<typeof Badge>['color'];
 type OnExpand = (state: TableExpandableCellState) => void;
@@ -71,11 +90,72 @@ const SOURCE_LABEL: Record<ToolCallingFinding['source'], string> = {
 
 const SUGGESTION_KIND: Record<
   ToolCallingSuggestion['kind'],
-  { label: string; action: string; color: BadgeColor }
+  { label: string; action: string; description: string; color: BadgeColor }
 > = {
-  'agent-config': { label: 'Agent config', action: 'Applies automatically', color: 'green' },
-  'tool-schema': { label: 'Tool schema', action: "Send to the tool's owner", color: 'blue' },
+  'agent-config': {
+    label: 'Agent config',
+    action: 'Applies automatically',
+    description: "Changes only the agent's own config. The platform can apply it.",
+    color: 'green',
+  },
+  'tool-schema': {
+    label: 'Tool schema',
+    action: "Send to the tool's owner",
+    description: "Changes the tool's input schema. Send it to the tool's owner.",
+    color: 'blue',
+  },
 };
+
+const RECOMMENDED_DESCRIPTION = 'The variant the recommendation above tells you to adopt.';
+
+const InfoTip: FC<{ subject: string; content: string }> = ({ subject, content }) => (
+  <Tooltip slotContent={content} side="bottom" className={tooltipClassName}>
+    <span
+      role="img"
+      aria-label={`About ${subject}`}
+      tabIndex={0}
+      className="inline-flex shrink-0 cursor-help"
+    >
+      <InfoCircle />
+    </span>
+  </Tooltip>
+);
+
+const LabelWithInfo: FC<{ label: string; info?: string | null; children?: ReactNode }> = ({
+  label,
+  info,
+  children,
+}) => (
+  <Flex align="center" gap="density-xs" wrap="wrap">
+    {label}
+    {info ? <InfoTip subject={label} content={info} /> : null}
+    {children}
+  </Flex>
+);
+
+const RecommendedBadge: FC = () => (
+  <Flex align="center" gap="density-xs">
+    <Badge kind="solid" color="green">
+      Recommended
+    </Badge>
+    <InfoTip subject="Recommended" content={RECOMMENDED_DESCRIPTION} />
+  </Flex>
+);
+
+const variantHeader = (variant: ToolCallingVariant, isRecommended = false) => {
+  const VariantHeader = () => (
+    <LabelWithInfo label={variant.label} info={variant.description}>
+      {isRecommended ? <RecommendedBadge /> : null}
+    </LabelWithInfo>
+  );
+  return VariantHeader;
+};
+
+const RowLabel: FC<{ label: string; info: string }> = ({ label, info }) => (
+  <Text kind="body/semibold/sm">
+    <LabelWithInfo label={label} info={info} />
+  </Text>
+);
 
 const EMPTY_CELL = (
   <Text kind="body/regular/sm" className="text-secondary">
@@ -115,12 +195,6 @@ const DeltaBadge: FC<{ row: MetricRow; baseline: number; value: number }> = ({
   );
 };
 
-const RecommendedBadge: FC = () => (
-  <Badge kind="solid" color="green">
-    Recommended
-  </Badge>
-);
-
 const MetricsTable: FC<{
   variants: readonly ToolCallingVariant[];
   recommended: ToolCallingResult['recommended_variant'];
@@ -132,20 +206,14 @@ const MetricsTable: FC<{
         id: 'metric',
         header: 'Metric',
         size: 180,
-        cell: ({ row }) => <Text kind="body/semibold/sm">{row.original.label}</Text>,
+        cell: ({ row }) => (
+          <RowLabel label={row.original.label} info={METRIC_DESCRIPTIONS[row.original.key]} />
+        ),
       }),
       ...variants.map((variant) =>
         col.display({
           id: variant.id,
-          header:
-            variant.id === recommended
-              ? () => (
-                  <Flex align="center" gap="density-sm" wrap="wrap">
-                    {variant.label}
-                    <RecommendedBadge />
-                  </Flex>
-                )
-              : variant.label,
+          header: variantHeader(variant, variant.id === recommended),
           size: 180,
           cell: ({ row }) => {
             const value = variant.metrics[row.original.key];
@@ -186,7 +254,7 @@ const RejectionReasonsTable: FC<{ variants: readonly ToolCallingVariant[] }> = m
         ...variants.map((variant) =>
           col.display({
             id: variant.id,
-            header: variant.label,
+            header: variantHeader(variant),
             size: 140,
             cell: ({ row }) => {
               const count = row.original.counts[variant.id];
@@ -220,12 +288,14 @@ const SignalsTable: FC<{ variants: readonly ToolCallingVariant[] }> = memo(({ va
         id: 'signal',
         header: 'Signal',
         size: 180,
-        cell: ({ row }) => <Text kind="body/semibold/sm">{row.original.label}</Text>,
+        cell: ({ row }) => (
+          <RowLabel label={row.original.label} info={SIGNAL_DESCRIPTIONS[row.original.key]} />
+        ),
       }),
       ...variants.map((variant) =>
         col.display({
           id: variant.id,
-          header: variant.label,
+          header: variantHeader(variant),
           size: 180,
           cell: ({ row }) => {
             const count = variant.metrics.signals?.[row.original.key];
@@ -461,6 +531,7 @@ const SuggestionCard: FC<{
           <Badge kind="outline" color={kind.color}>
             {kind.label}
           </Badge>
+          <InfoTip subject={kind.label} content={kind.description} />
           <Text kind="body/regular/sm" className="text-secondary">
             {kind.action}
           </Text>
@@ -533,6 +604,9 @@ export const ToolCallingResultsView: FC<{ results: ToolCallingResults }> = ({ re
         density="compact"
       >
         <Stack gap="density-xl">
+          <Text kind="body/regular/sm" className="text-secondary">
+            Each column runs the same prompts; each fix builds on the one before it.
+          </Text>
           <MetricsTable variants={result.variants} recommended={result.recommended_variant} />
           {hasSignals ? (
             <Stack gap="density-md">
