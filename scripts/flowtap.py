@@ -16,7 +16,7 @@ In a terminal it draws a live flow diagram (one box per plugin, edges light up a
 traffic moves) above a rolling request log. Piped or with --plain it prints a
 scrolling log instead. Keys: r = reset, q = quit, 1-7 = run a sample `nemo` call through the tap (a spinner
 shows it running, then its output appears under the diagram), ? = list the samples
-(also: --list-samples to print them).
+(also: --list-samples to print them). Up/Down, PgUp/PgDn, Home/End (or j/k) scroll long output.
 
     # Python plugin that logs requests (Phoenix on :6007)
     python scripts/flowtap.py --adapter-log phoenix=/path/to/phoenix-adapter.log
@@ -115,6 +115,8 @@ class Stats:
         self.running: dict[int, tuple[str, float]] = {}
         self.last_run: tuple[str, int, float, list[str]] | None = None  # cmd, exit code, seconds, output
         self._run_ids = itertools.count(1)
+        self.scroll = 0  # first visible line of the last command's output
+        self.visible = 0  # how many output lines the panel showed last frame
 
     def reset(self) -> None:
         with self.lock:
@@ -122,6 +124,7 @@ class Stats:
             self.edges.clear()
             self.events.clear()
             self.last_run = None
+            self.scroll = 0
 
     def start_run(self, cmd: str) -> int:
         with self.lock:
@@ -133,6 +136,21 @@ class Stats:
         with self.lock:
             self.running.pop(run_id, None)
             self.last_run = (cmd, code, seconds, output)
+            self.scroll = 0
+
+    def scroll_output(self, key: str) -> None:
+        """Move the CLI output panel's window. ``key`` is up/down/pgup/pgdn/home/end."""
+        with self.lock:
+            total = len(self.last_run[3]) if self.last_run else 0
+            visible = max(self.visible, 1)
+            top = max(total - visible, 0)
+            step = {"up": -1, "down": 1, "pgup": -(visible - 1), "pgdn": visible - 1}.get(key)
+            if key == "home":
+                self.scroll = 0
+            elif key == "end":
+                self.scroll = top
+            elif step is not None:
+                self.scroll = min(max(self.scroll + step, 0), top)
 
     def note(self, event: str) -> None:
         with self.lock:
@@ -275,6 +293,26 @@ def find_nemo(explicit: str | None) -> str | None:
     return local if os.path.exists(local) else None
 
 
+SCROLL_KEYS = {"A": "up", "B": "down", "H": "home", "F": "end", "5~": "pgup", "6~": "pgdn", "1~": "home", "4~": "end"}
+
+
+def parse_keys(data: bytes) -> list[str]:
+    """Split raw terminal input into keys: plain characters, or up/down/pgup/pgdn/home/end."""
+    keys: list[str] = []
+    i = 0
+    while i < len(data):
+        if data[i : i + 1] == b"\x1b" and data[i + 1 : i + 2] in (b"[", b"O"):
+            j = i + 2
+            while j < len(data) and not 0x40 <= data[j] <= 0x7E:  # parameter bytes, then the final byte
+                j += 1
+            keys.append(SCROLL_KEYS.get(data[i + 2 : j + 1].decode(errors="ignore"), "?"))
+            i = j + 1
+        else:
+            keys.append(data[i : i + 1].decode(errors="ignore").lower())
+            i += 1
+    return keys
+
+
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
@@ -365,12 +403,18 @@ def render_run_panel(stats: Stats, width: int, budget: int) -> list[str]:
     if stats.last_run is not None:
         cmd, code, seconds, output = stats.last_run
         mark = c("green", "✓") if code == 0 else c("red", "✗")
-        lines.append(f" {mark} $ {cmd}  {c('dim', f'{seconds:.1f}s · exit {code}')}")
-        room = max(budget - len(lines), 2)
-        shown = output[:room]
+        header_at = len(lines)
+        lines.append("")  # status line, filled in once we know how much fits
+        visible = max(budget - len(lines), 2)
+        stats.visible = visible
+        total = len(output)
+        start = min(stats.scroll, max(total - visible, 0))
+        shown = output[start : start + visible]
+        status = f"{seconds:.1f}s · exit {code}"
+        if total > visible:
+            status += f" · lines {start + 1}-{start + len(shown)} of {total} · ↑/↓ PgUp/PgDn scroll"
+        lines[header_at] = f" {mark} $ {cmd}  {c('dim', status)}"
         lines += [c("dim", " │ ") + ln[: width - 6] for ln in shown]
-        if len(output) > len(shown):
-            lines.append(c("dim", f" │ … {len(output) - len(shown)} more lines"))
     if not lines:
         return []
     return [c("dim", " ── cli output " + "─" * max(width - 16, 0)), *lines, ""]
@@ -387,7 +431,10 @@ def render(stats: Stats) -> str:
                 "dim",
                 f"  point curl / NHX_BASE_URL / browser at http://127.0.0.1:{stats.tap_port}   r = reset   q = quit",
             ),
-            c("dim", f" 1-{len(stats.samples)} run a sample nemo call through the tap   ? list them")
+            c(
+                "dim",
+                f" 1-{len(stats.samples)} run a sample nemo call through the tap   ? list them   ↑/↓ scroll output",
+            )
             if stats.samples
             else "",
         ]
@@ -635,15 +682,22 @@ def main() -> None:
                 continue
             ready, _, _ = select.select([fd], [], [], 0.1)
             if ready:
-                key = os.read(fd, 1).decode(errors="ignore").lower()
-                if key == "q":
+                quit_requested = False
+                for key in parse_keys(os.read(fd, 64)):
+                    if key == "q":
+                        quit_requested = True
+                    elif key == "r":
+                        stats.reset()
+                    elif key == "?":
+                        stats.show_samples = not stats.show_samples
+                    elif key in ("up", "down", "pgup", "pgdn", "home", "end"):
+                        stats.scroll_output(key)
+                    elif key in ("k", "j"):
+                        stats.scroll_output("up" if key == "k" else "down")
+                    elif key.isdigit() and 1 <= int(key) <= len(stats.samples):
+                        run_sample(stats, int(key) - 1, nemo_bin, args.nemo_config)
+                if quit_requested:
                     break
-                if key == "r":
-                    stats.reset()
-                elif key == "?":
-                    stats.show_samples = not stats.show_samples
-                elif key.isdigit() and 1 <= int(key) <= len(stats.samples):
-                    run_sample(stats, int(key) - 1, nemo_bin, args.nemo_config)
     except KeyboardInterrupt:
         pass
     finally:
