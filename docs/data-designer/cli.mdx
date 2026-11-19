@@ -48,6 +48,8 @@ nemo data-designer preview product_reviews.py --workspace default
 nemo data-designer create product_reviews.py --workspace default
 ```
 
+Add `--save-results` to `preview` to write the previewed records and their HTML pages to a timestamped `preview_results_<timestamp>` directory. The directory is created under `./artifacts`, or under the path you pass with `--artifact-path`.
+
 ## Validate
 
 The `validate` command checks a configuration before you spend time on a preview or a create job. It accepts the same configuration sources as `preview` and `create`.
