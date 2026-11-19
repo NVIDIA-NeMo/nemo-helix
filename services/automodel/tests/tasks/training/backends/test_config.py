@@ -1361,6 +1361,7 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
         "*sound*",
         "*mlp1*",
         "*lm_head*",
+        "*mtp*",
     ]
     assert "target_modules" not in compiled["peft"]
     assert "collate_fn" not in compiled["dataloader"]

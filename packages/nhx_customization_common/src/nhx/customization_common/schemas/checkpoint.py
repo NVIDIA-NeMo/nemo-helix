@@ -18,6 +18,7 @@ from typing import Any
 # ``*proj`` is the API backfill for that same unset case, so it is not a caller filter.
 # ``*vision_projector*``, ``*audio*``, and ``*sound*`` match the Nemotron 3.5 Super VL
 # PEFT example. The other vision names cover towers that do not use those module names.
+# ``*mtp*``: vLLM does not load MTP heads and rejects adapters that carry them.
 VLM_LORA_EXCLUDE_MODULES = [
     "*vision_tower*",
     "*vision_model*",
@@ -29,6 +30,7 @@ VLM_LORA_EXCLUDE_MODULES = [
     "*sound*",
     "*mlp1*",
     "*lm_head*",
+    "*mtp*",
 ]
 
 
