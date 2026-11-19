@@ -19,7 +19,7 @@ class DataDesignerClientError(DataDesignerError):
 
     def __init__(self, *args: object, status_code: int | None = None) -> None:
         super().__init__(*args)
-        self.status_code = status_code
+        self.status_code: int | None = status_code
 
 
 class DataDesignerConfigValidationError(DataDesignerClientError):
