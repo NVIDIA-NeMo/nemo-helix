@@ -16,7 +16,8 @@ def render_dockerfile(base_image: str, revision: str) -> str:
     # packages the base doesn't install are copied but never imported. Fixing both needs a diff against the base.
     return (
         f"FROM {base_image}\n"
-        "COPY --chown=1000:1000 services/*/src/ packages/*/src/ plugins/*/src/ /app/.venv/lib/python3.13/site-packages/\n"
+        "COPY --chown=1000:1000 services/*/src/ services/*/*/src/ packages/*/src/ plugins/*/src/ "
+        "/app/.venv/lib/python3.13/site-packages/\n"
         "RUN python -m compileall -q /app/.venv/lib/python3.13/site-packages\n"
         f"ENV NHX_CODE_REVISION={revision}\n"
     )

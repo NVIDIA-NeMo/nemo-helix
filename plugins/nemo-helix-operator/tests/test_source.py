@@ -58,7 +58,7 @@ def test_pack(tmp_path: Path) -> None:
     }
     assert re.fullmatch(r"[0-9a-f]{12}", str(metadata["commit"])) and metadata["dirty"] is True
     assert dockerfile.startswith("FROM ghcr.io/x/nhx-api:t\n")
-    assert "COPY --chown=1000:1000 services/*/src/ packages/*/src/ plugins/*/src/ " in dockerfile
+    assert "COPY --chown=1000:1000 services/*/src/ services/*/*/src/ packages/*/src/ plugins/*/src/ " in dockerfile
     assert f"ENV NHX_CODE_REVISION={metadata['commit']}-dirty\n" in dockerfile
 
 
