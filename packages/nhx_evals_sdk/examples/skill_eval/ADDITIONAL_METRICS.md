@@ -122,20 +122,24 @@ Important scoring details:
   mean. No calls yields zero for a complete trace, and no ratio for a partial one.
 - Argument rules use self-contained JSON Schema (required fields, types,
   constants, patterns, etc.). External references and `$id` changes are rejected;
-  no schema resources are fetched. All matching call/rule pairs are scored. No
-  matching calls means no ratio. An unmatched rule remains visible and is covered
-  by selection expectations rather than being counted as a compliant call.
+  no schema resources are fetched. The ratio requires a complete trace, at least
+  one matching call, and captured arguments for every matching call. Missing
+  payloads contribute to `unknown_arguments`. Unmatched rules remain visible
+  for diagnosis alongside tool selection.
 - Outcome success rate includes known outcomes only, and can describe a partial
   trace. Interpret it with `unknown` and `complete` beside it.
 - Value handoffs require a successful producer, a strictly later consumer, and
   a string of at least eight characters present in the producer observation and
   consumer arguments. The value must be absent from the task instruction and
-  the producer-supplied initial context. Missing initial-context coverage or
-  unknown producer outcomes/observations make that probe unmeasured. Artifact probes require an observed successful write
-  followed by a matching observed read. These are evidence of transfer, not a
-  causal proof that coordination improved task quality.
-- Conflicts are authored pairs that must not both activate. Coordination's
-  aggregate requires a complete trace and all probe inputs. Component usage
+  the producer-supplied initial context, including object keys. Missing
+  initial context, producer outcomes or observations, or consumer arguments can
+  leave a probe unmeasured. Artifact probes require a complete trace and a read
+  whose last unambiguous writer was a successful producer. Intervening writes
+  supersede earlier ones. Concurrent writes can make attribution unmeasured.
+- Conflicts are authored pairs that must not both activate. A trace with
+  unattributed calls can confirm an observed conflict, but cannot rule out a
+  conflict. Coordination's aggregate requires a complete trace and conclusive
+  probes. Component usage
   excludes declared unavailable components from coverage while reporting them;
   unknown attribution prevents negative coverage conclusions. Multi-component
   use can be established positively in a partial trace.
@@ -176,7 +180,8 @@ optional component, arguments, observation, tri-state outcome, script path,
 artifact reads/writes, retry correlation, explicit fault owner, and optional
 productivity label. IDs are unique and steps nondecreasing. Retries must point
 to a known failed call in an earlier step. Calls at the same step have no
-causal order. `SkillToolTrace.initial_context` is null when coverage is unknown;
+causal order. `SkillToolCall.arguments` is null when unavailable. An empty
+object records a call with no arguments. `SkillToolTrace.initial_context` is null when coverage is unknown;
 an explicit empty list asserts that there is no additional preexisting context
 relevant to the handoff. Producers must include relevant prior messages,
 initial files, and other context there when assessing value transfer.

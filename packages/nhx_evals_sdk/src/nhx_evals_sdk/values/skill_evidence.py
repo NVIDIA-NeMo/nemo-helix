@@ -40,11 +40,7 @@ class SkillFinding(BaseModel):
 
 
 class SkillScanReport(BaseModel):
-    """A scanner's completed or incomplete analysis of an artifact or trial.
-
-    subject_id is the original artifact digest for artifact scans and the trial
-    ID for runtime safety scans. A completed report may legitimately have findings.
-    """
+    """Scan evidence for an artifact digest or trial ID."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -80,7 +76,7 @@ class SkillTestReport(BaseModel):
 
 
 class SkillToolCall(BaseModel):
-    """One normalized, correlated tool invocation. Calls sharing a step are unordered."""
+    """A tool invocation. Calls at the same step are unordered."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -88,7 +84,9 @@ class SkillToolCall(BaseModel):
     step: int = Field(ge=0)
     tool: str = Field(min_length=1)
     component: str | None = Field(default=None, description="Canonical identity such as Skill:search or MCP:docs/read.")
-    arguments: dict[str, JsonValue] = Field(default_factory=dict)
+    arguments: dict[str, JsonValue] | None = Field(
+        default=None, description="Null means unavailable. An empty object records a call with no arguments."
+    )
     observation: JsonValue | None = None
     succeeded: bool | None = None
     script: str | None = None
@@ -100,16 +98,12 @@ class SkillToolCall(BaseModel):
 
 
 class SkillToolTrace(BaseModel):
-    """Runner observations with an explicit statement of trace completeness.
-
-    A producer sets complete only when it captured all relevant tool events.
-    Unknown outcomes stay null even in a complete event trace.
-    """
+    """Ordered tool evidence with explicit event coverage."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
     trial_id: str = Field(min_length=1)
-    complete: bool
+    complete: bool = Field(description="True when all relevant events were captured. Individual fields may be unknown.")
     calls: list[SkillToolCall]
     initial_context: list[JsonValue] | None = Field(
         default=None, description="All preexisting context relevant to value handoffs; null means coverage is unknown."

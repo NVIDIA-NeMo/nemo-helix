@@ -37,11 +37,7 @@ _DOCUMENTATION = [
 def skill_documentation_rubric_metric(
     model: Model | ModelRef,
 ) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Return nine 0–10 documentation scores and their importance-weighted mean.
-
-    Requires reference.skill_snapshot.document. This is a documentation review,
-    including simulated routing; it does not establish live activation behavior.
-    """
+    """Score the snapshot document on nine criteria and report a weighted mean."""
     judge = LLMJudgeMetric(
         model=model,
         scores=[
@@ -112,7 +108,7 @@ def _outcome_judge(
 
 
 def answer_accuracy_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Five binary accuracy criteria; separate from the existing RAGAS AnswerAccuracyMetric."""
+    """Judge five binary answer accuracy criteria."""
     return _outcome_judge(
         model,
         [
@@ -127,7 +123,7 @@ def answer_accuracy_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dic
 
 
 def task_success_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Judge answer-level goal achievement; use verifier rewards for external state success."""
+    """Judge goal achievement from the final answer."""
     return _outcome_judge(
         model,
         [
@@ -143,11 +139,7 @@ def task_success_metric(model: Model | ModelRef) -> tuple[LLMJudgeMetric, dict[s
 def skill_outcome_metric(
     model: Model | ModelRef, assertions: Sequence[str] = ()
 ) -> tuple[LLMJudgeMetric, dict[str, SemanticView]]:
-    """Combine accuracy, goal, and optional shared assertions in one judge per task.
-
-    AgentEvalTask requires unique metric types, so individual LLM judge factories
-    cannot be attached to the same task. This factory preserves their separate views.
-    """
+    """Combine accuracy, goal success, and assertions in one judge with separate views."""
     judge, views = answer_accuracy_metric(model)
     goal, goal_views = task_success_metric(model)
     scores = [*judge.scores, *goal.scores]

@@ -133,7 +133,7 @@ class SkillReliabilityReadinessMetric(_ReadinessMetric):
 
 
 class SkillScriptQualityMetric(MetricBase):
-    """Inspect Python ASTs without executing scripts. Findings remain advisory."""
+    """Report advisory findings from Python source."""
 
     type: Literal[MetricType.SKILL_SCRIPT_QUALITY] = MetricType.SKILL_SCRIPT_QUALITY
     max_nesting: int = Field(default=6, ge=1, strict=True)
@@ -176,7 +176,8 @@ def _script_findings(source: str, max_nesting: int) -> list[str]:
     findings = []
     if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in nodes):
         findings.append("flat_script")
-    if not source.startswith("#!/usr/bin/env python3"):
+    first_line = source.partition("\n")[0]
+    if not first_line.startswith("#!") or not first_line[2:].strip():
         findings.append("missing_shebang")
     imports = {alias.name.split(".")[0] for node in nodes if isinstance(node, ast.Import) for alias in node.names} | {
         node.module.split(".")[0] for node in nodes if isinstance(node, ast.ImportFrom) and node.module

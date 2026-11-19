@@ -166,6 +166,14 @@ async def test_script_checks_are_advisory_and_require_all_original_sources() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("shebang", ["#!/usr/bin/python3", "#!/usr/bin/env -S python3 -u", "#!/opt/venv/bin/python"])
+async def test_script_checks_accept_alternate_shebangs(shebang: str) -> None:
+    row = _artifact({"SKILL.md": _DOC, "scripts/a.py": f"{shebang}\ndef main():\n    return 0\n"})
+    result = await _result(sdk.SkillScriptQualityMetric(), row)
+    assert "missing_shebang" not in {(finding.details or {}).get("rule") for finding in result.diagnostics}
+
+
+@pytest.mark.asyncio
 async def test_unicode_scope_detects_controls_without_logging_contents() -> None:
     row = _artifact({"SKILL.md": "\ufeff" + _DOC, "refs/text.txt": "secret-excerpt\u202e\U000e0061"})
     assert (await _score(sdk.SkillUnicodeSafetyMetric(), row))["clean"] == 1
@@ -412,6 +420,23 @@ async def test_arguments_check_required_fields_values_and_uncalled_rules() -> No
 
 
 @pytest.mark.asyncio
+async def test_argument_checks_distinguish_unavailable_and_empty_payloads() -> None:
+    metric = sdk.ToolArgumentComplianceMetric(
+        rules=[
+            sdk.SkillArgumentRule(tool="MCP:read", schema={"type": "object", "properties": {"query": {"const": "id"}}})
+        ]
+    )
+    empty = _call("empty", 0, "MCP:read", arguments={})
+    missing = _call("missing", 1, "MCP:read")
+    for calls, checked in (([missing], 0), ([empty, missing], 1)):
+        scores = await _score(metric, _trace(calls))
+        assert scores["checked"] == scores["passed"] == checked
+        assert scores["unknown_arguments"] == 1 and scores["unmatched_rules"] == 0
+        assert "score" not in scores
+    assert (await _score(metric, _trace([empty])))["score"] == 1
+
+
+@pytest.mark.asyncio
 async def test_execution_outcomes_keep_unknown_outside_known_denominator() -> None:
     calls = [_call("a", 0, succeeded=True), _call("b", 1, succeeded=False), _call("c", 2)]
     scores = await _score(sdk.ToolExecutionOutcomeMetric(), _trace(calls))
@@ -422,7 +447,15 @@ async def test_execution_outcomes_keep_unknown_outside_known_denominator() -> No
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("mode", "observed"),
-    [("normal", 1), ("same_step", 0), ("backwards", 0), ("initial", 0), ("prompt", 0), ("failed", 0)],
+    [
+        ("normal", 1),
+        ("same_step", 0),
+        ("backwards", 0),
+        ("initial", 0),
+        ("initial_key", 0),
+        ("prompt", 0),
+        ("failed", 0),
+    ],
 )
 async def test_value_handoffs_need_new_successful_producer_evidence(mode: str, observed: int) -> None:
     value = "incident-record-123"
@@ -430,10 +463,8 @@ async def test_value_handoffs_need_new_successful_producer_evidence(mode: str, o
     consumer = _call(
         "b", 1 if mode == "same_step" else 0 if mode == "backwards" else 2, "Skill:summary", arguments={"id": value}
     )
-    row = _trace(
-        sorted([producer, consumer], key=lambda call: call["step"]),
-        initial_context=[value] if mode == "initial" else [],
-    )
+    initial_context = {"initial": [value], "initial_key": [{"records": {value: {"known": True}}}]}
+    row = _trace(sorted([producer, consumer], key=lambda call: call["step"]), initial_context=initial_context.get(mode))
     if mode == "prompt":
         row["inputs"]["instruction"] += " " + value
     metric = sdk.ComponentCoordinationMetric(
@@ -459,6 +490,41 @@ async def test_artifact_handoffs_and_conflicts_are_separate_probes() -> None:
     scores = await _score(metric, _trace(calls))
     assert scores["handoffs_observed"] == scores["conflicts_observed"] == 1 and scores["score"] == 0.5
     assert "score" not in await _score(metric, _trace(calls, complete=False))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("overwrite_step", "expected_score"), [(0, None), (1, 0), (2, None), (3, 1)])
+async def test_artifact_handoffs_require_the_last_unambiguous_writer(
+    overwrite_step: int, expected_score: int | None
+) -> None:
+    metric = sdk.ComponentCoordinationMetric(
+        handoffs=[sdk.SkillHandoffRule(producer="Skill:write", consumer="Skill:read", kind="artifact")]
+    )
+    path = "out/report.json"
+    calls = [
+        _call("writer", 0, "Skill:write", writes=[path], succeeded=True),
+        _call("overwrite", overwrite_step, "Skill:other", writes=[path], succeeded=True),
+        _call("reader", 2, "Skill:read", reads=[path]),
+    ]
+    scores = await _score(metric, _trace(sorted(calls, key=lambda call: call["step"])))
+    assert scores["handoffs_observed"] == int(expected_score == 1)
+    assert scores["handoffs_unmeasured"] == int(expected_score is None)
+    assert scores.get("score") == expected_score
+
+
+@pytest.mark.asyncio
+async def test_conflict_checks_require_attribution_to_rule_out_a_conflict() -> None:
+    metric = sdk.ComponentCoordinationMetric(
+        conflicts=[sdk.SkillConflictRule(first="Skill:read", second="Skill:delete")]
+    )
+    read = _call("read", 0, "Skill:read")
+    unattributed = _call("unknown", 1, component=None)
+    scores = await _score(metric, _trace([read, unattributed]))
+    assert scores["conflicts_observed"] == 0 and scores["conflicts_unmeasured"] == 1
+    assert "score" not in scores
+    scores = await _score(metric, _trace([read, unattributed, _call("delete", 2, "Skill:delete")]))
+    assert scores["conflicts_observed"] == 1 and scores["conflicts_unmeasured"] == scores["score"] == 0
+    assert (await _score(metric, _trace([read])))["score"] == 1
 
 
 @pytest.mark.asyncio
@@ -495,6 +561,10 @@ async def test_value_handoff_without_initial_context_coverage_is_unmeasured() ->
     assert scores["handoffs_unmeasured"] == 1 and "score" not in scores
     evidence["calls"][0]["succeeded"] = True
     evidence["calls"][0]["observation"] = None
+    scores = await _score(metric, row)
+    assert scores["handoffs_unmeasured"] == 1 and "score" not in scores
+    evidence["calls"][0]["observation"] = "record-123456"
+    del evidence["calls"][1]["arguments"]
     scores = await _score(metric, row)
     assert scores["handoffs_unmeasured"] == 1 and "score" not in scores
 

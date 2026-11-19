@@ -5,6 +5,7 @@
 
 from collections.abc import Iterable
 from fnmatch import fnmatchcase
+from itertools import groupby
 from typing import Literal, Self
 
 from jsonschema import validators
@@ -43,7 +44,7 @@ def _spec(counts: Iterable[str] = (), scores: Iterable[str] = ()) -> list[Metric
 
 
 class SkillOrderRule(BaseModel):
-    """Every matching 'after' event needs an earlier 'before' event; both are required."""
+    """Require both events and a predecessor for every 'after' event."""
 
     model_config = ConfigDict(extra="forbid")
     before: str = Field(min_length=1)
@@ -57,7 +58,7 @@ def _ordered(trace: SkillToolTrace, rule: SkillOrderRule) -> bool:
 
 
 class SkillOveractivationMetric(MetricBase):
-    """Report activation on an authored negative case, using the first PR's activation contract."""
+    """Report skill activation on a negative case."""
 
     type: Literal[MetricType.SKILL_OVERACTIVATION] = MetricType.SKILL_OVERACTIVATION
     skill_name: str = Field(min_length=1)
@@ -202,7 +203,7 @@ class ErrorRecoveryMetric(MetricBase):
 
 
 class ToolProductivityMetric(MetricBase):
-    """Aggregate explicit producer/judge labels rather than guessing waste from repeated calls."""
+    """Aggregate observed productivity labels."""
 
     type: Literal[MetricType.TOOL_PRODUCTIVITY] = MetricType.TOOL_PRODUCTIVITY
 
@@ -225,7 +226,7 @@ class ToolProductivityMetric(MetricBase):
 
 
 class ToolSelectionMetric(MetricBase):
-    """Set precision/recall/F1 for expected component/tool patterns, with optional alternatives and decoys."""
+    """Measure tool selection precision, recall, and F1."""
 
     type: Literal[MetricType.TOOL_SELECTION] = MetricType.TOOL_SELECTION
     expected_tools: list[str] = Field(min_length=1)
@@ -298,38 +299,43 @@ class SkillArgumentRule(BaseModel):
 
 
 class ToolArgumentComplianceMetric(MetricBase):
-    """Check all matching call/rule pairs; an uncalled tool has no argument-compliance score."""
+    """Validate captured tool arguments against authored schemas."""
 
     type: Literal[MetricType.TOOL_ARGUMENT_COMPLIANCE] = MetricType.TOOL_ARGUMENT_COMPLIANCE
     rules: list[SkillArgumentRule] = Field(min_length=1)
 
     def output_spec(self) -> list[MetricOutputSpec]:
-        return _spec(("checked", "passed", "failed", "unmatched_rules"), ("score",))
+        return _spec(("checked", "passed", "failed", "unknown_arguments", "unmatched_rules"), ("score",))
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:
         trace = trial_trace(input)
         if trace is None:
             return _unmeasured("missing_trace", "Argument checks require normalized tool inputs.")
-        checked = passed = unmatched = 0
+        checked = passed = unknown = unmatched = 0
         for rule in self.rules:
             calls = [call for call in trace.calls if _matches(call, rule.tool)]
             unmatched += not calls
             validator = validators.validator_for(rule.schema_)(rule.schema_)
-            checked += len(calls)
-            passed += sum(validator.is_valid(call.arguments) for call in calls)
+            for call in calls:
+                if call.arguments is None:
+                    unknown += 1
+                else:
+                    checked += 1
+                    passed += validator.is_valid(call.arguments)
         values: dict[str, int | float] = {
             "checked": checked,
             "passed": passed,
             "failed": checked - passed,
+            "unknown_arguments": unknown,
             "unmatched_rules": unmatched,
         }
-        if checked and trace.complete:
+        if checked and trace.complete and not unknown:
             values["score"] = passed / checked
         return _result(trace, values)
 
 
 class ToolExecutionOutcomeMetric(MetricBase):
-    """Known-outcome success rate; unknown outcomes remain visible and outside its denominator."""
+    """Measure success among calls with known outcomes."""
 
     type: Literal[MetricType.TOOL_EXECUTION_OUTCOME] = MetricType.TOOL_EXECUTION_OUTCOME
     tool_pattern: str = Field(default="MCP:*", min_length=1)
@@ -368,20 +374,53 @@ class SkillHandoffRule(BaseModel):
     minimum_value_characters: int = Field(default=8, ge=1, strict=True)
 
 
-def _contains(value: object, context: object) -> bool:
-    if value == context:
-        return True
-    if isinstance(value, str) and isinstance(context, str):
+def _contains(value: str, context: object, *, include_keys: bool = False) -> bool:
+    if isinstance(context, str):
         return value in context
     if isinstance(context, dict):
-        return any(_contains(value, item) for item in context.values())
+        return any(
+            (include_keys and value in key) or _contains(value, item, include_keys=include_keys)
+            for key, item in context.items()
+        )
     if isinstance(context, list):
-        return any(_contains(value, item) for item in context)
+        return any(_contains(value, item, include_keys=include_keys) for item in context)
     return False
 
 
+def _artifact_handoff(trace: SkillToolTrace, rule: SkillHandoffRule) -> bool | None:
+    if not trace.complete:
+        return None
+    latest_writers: dict[str, list[SkillToolCall]] = {}
+    uncertain = False
+    for _, step_calls in groupby(trace.calls, key=lambda call: call.step):
+        calls = list(step_calls)
+        step_writers: dict[str, list[SkillToolCall]] = {}
+        for call in calls:
+            for path in set(call.writes):
+                step_writers.setdefault(path, []).append(call)
+        for consumer in calls:
+            if not _matches(consumer, rule.consumer):
+                continue
+            for path in consumer.reads:
+                prior = latest_writers.get(path, [])
+                for writer in prior:
+                    if writer.succeeded is False:
+                        continue
+                    if _matches(writer, rule.producer):
+                        if len(prior) == 1 and path not in step_writers and writer.succeeded is True:
+                            return True
+                        uncertain = True
+                    elif writer.component is None:
+                        uncertain = True
+        # Any observed write can supersede the previous version, even on a failed call.
+        latest_writers.update(step_writers)
+    return None if uncertain else False
+
+
 def _handoff(trace: SkillToolTrace, rule: SkillHandoffRule, instruction: object) -> bool | None:
-    if rule.kind == "value" and trace.initial_context is None:
+    if rule.kind == "artifact":
+        return _artifact_handoff(trace, rule)
+    if trace.initial_context is None:
         return None
     uncertain = False
     for producer in trace.calls:
@@ -392,10 +431,6 @@ def _handoff(trace: SkillToolTrace, rule: SkillHandoffRule, instruction: object)
                 continue
             if producer.succeeded is None:
                 uncertain = True
-                continue
-            if rule.kind == "artifact":
-                if set(producer.writes) & set(consumer.reads):
-                    return True
                 continue
             observed = producer.observation
             if observed is None:
@@ -410,9 +445,13 @@ def _handoff(trace: SkillToolTrace, rule: SkillHandoffRule, instruction: object)
             )
             if not isinstance(value, str) or len(value.strip()) < rule.minimum_value_characters:
                 continue
-            if _contains(value, trace.initial_context) or _contains(value, instruction):
+            if _contains(value, trace.initial_context, include_keys=True) or _contains(value, instruction):
                 continue
-            target = mapping_at_path(consumer.arguments, rule.target_path) if rule.target_path else consumer.arguments
+            arguments = consumer.arguments
+            if arguments is None:
+                uncertain = True
+                continue
+            target = mapping_at_path(arguments, rule.target_path) if rule.target_path else arguments
             if _contains(value, target):
                 return True
     return None if uncertain else False
@@ -427,7 +466,7 @@ class SkillConflictRule(BaseModel):
 
 
 class ComponentCoordinationMetric(MetricBase):
-    """Report authored order, handoff, and conflict probes separately and as an equal-weight score."""
+    """Score ordering, handoffs, and conflicts."""
 
     type: Literal[MetricType.COMPONENT_COORDINATION] = MetricType.COMPONENT_COORDINATION
     order_rules: list[SkillOrderRule] = Field(default_factory=list)
@@ -450,6 +489,7 @@ class ComponentCoordinationMetric(MetricBase):
                 "handoffs_unmeasured",
                 "conflict_checks",
                 "conflicts_observed",
+                "conflicts_unmeasured",
             ),
             ("score",),
         )
@@ -469,18 +509,22 @@ class ComponentCoordinationMetric(MetricBase):
             and any(_matches(call, rule.second) for call in trace.calls)
             for rule in self.conflicts
         )
+        conflict_checks = len(self.conflicts)
+        unknown_components = any(call.component is None for call in trace.calls)
+        unknown_conflicts = conflict_checks - conflicts if unknown_components or not trace.complete else 0
         values: dict[str, int | float] = {
             "order_checks": len(self.order_rules),
             "order_passed": ordered,
             "handoff_checks": len(self.handoffs),
             "handoffs_observed": handoffs,
             "handoffs_unmeasured": unmeasured,
-            "conflict_checks": len(self.conflicts),
+            "conflict_checks": conflict_checks,
             "conflicts_observed": conflicts,
+            "conflicts_unmeasured": unknown_conflicts,
         }
-        if trace.complete and not unmeasured:
-            values["score"] = (ordered + handoffs + len(self.conflicts) - conflicts) / (
-                len(self.order_rules) + len(self.handoffs) + len(self.conflicts)
+        if trace.complete and not (unmeasured or unknown_conflicts):
+            values["score"] = (ordered + handoffs + conflict_checks - conflicts) / (
+                len(self.order_rules) + len(self.handoffs) + conflict_checks
             )
         return _result(trace, values)
 
