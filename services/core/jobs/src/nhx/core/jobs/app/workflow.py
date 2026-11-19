@@ -177,7 +177,9 @@ async def reconcile_workflow(
             node.successful_inputs = node.active_inputs
             node.successful_revision = node.active_run_revision
             node.successful_step_id = step.id
-        elif config.mode == "run_to_completion" and step.status == HelixJobStatus.ERROR:
+        elif (
+            config.mode == "run_to_completion" and step.status == HelixJobStatus.ERROR and state.control != "cancelling"
+        ):
             state.control = "failing"
         node.active_run_revision = None
         node.active_inputs = None

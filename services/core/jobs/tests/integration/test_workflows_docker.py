@@ -30,7 +30,7 @@ from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatusUpdateRequest
 from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowMode, WorkflowSpec
 from nhx.common.config import HelixConfig
 from nhx.core.files.service import FilesService
@@ -820,3 +820,51 @@ def test_docker_failed_ancestor_blocks_cached_middle_and_dirty_leaf(docker_workf
     assert recovered.workflow is not None and not recovered.workflow.degraded
     assert next(node.successful_execution_id for node in recovered.workflow.nodes if node.name == "middle") == middle_id
     assert sum(container_state(container).exit_code == 7 for container in h.containers(job)) == 1
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_docker_failure_during_workflow_cancellation(
+    docker_workflow: DockerWorkflowHarness, mode: WorkflowMode
+) -> None:
+    h = docker_workflow
+    job = h.create(
+        {"failure": [], "other": [], "child": ["failure", "other"]},
+        mode=mode,
+        commands={"failure": GATED_WORK + "; echo failed-before-cancel >&2; exit 7", "other": GATED_WORK},
+    )
+    running = h.wait_for(
+        job, lambda state: len(state.steps) == 2 and all(step.status == HelixJobStatus.ACTIVE for step in state.steps)
+    )
+    assert running.workflow is not None
+    failure_id = next(node.active_execution_id for node in running.workflow.nodes if node.name == "failure")
+    other_id = next(node.active_execution_id for node in running.workflow.nodes if node.name == "other")
+    assert failure_id is not None and other_id is not None
+    failure_name = next(step.name for step in running.steps if step.id == failure_id)
+    container = next(c for c in h.containers(job) if c.labels[JOB_STEP_NAME_LABEL] == failure_name)
+    h.release(job, failure_id)
+    assert container.wait(timeout=15)["StatusCode"] == 7
+    # Publish the real backend error before the DAG harvest, then accept cancel.
+    context = next(
+        step for step in h.jobs.list_steps(name=job.name, workspace="default").items() if step.id == failure_id
+    )
+    update = h.registry.get_backend(provider=h.profile.provider, profile=h.profile.profile).sync(context)
+    assert update.status == HelixJobStatus.ERROR and job.attempt_id is not None
+    h.jobs.update_attempt_step_status(
+        workspace="default",
+        job=job.id,
+        attempt=job.attempt_id,
+        name=failure_id,
+        body=HelixJobStatusUpdateRequest(
+            status=update.status, status_details=update.status_details, error_details=update.error_details
+        ),
+    )
+    h.jobs.cancel_job(workspace="default", name=job.id)
+    ended = h.wait_for(job, lambda state: state.status.is_terminal())
+    assert ended.status == HelixJobStatus.CANCELLED and len(ended.steps) == 2
+    assert next(step.status for step in ended.steps if step.id == failure_id) == HelixJobStatus.ERROR
+    assert next(step.status for step in ended.steps if step.id == other_id) == HelixJobStatus.CANCELLED
+    assert ended.workflow is not None
+    assert next(node.last_outcome for node in ended.workflow.nodes if node.name == "failure") == "error"
+    assert "failed-before-cancel" in {row.message for row in h.logs(job)}
+    assert all(c.status != "running" for c in h.containers(job))
+    assert h.tick(job).status == HelixJobStatus.CANCELLED

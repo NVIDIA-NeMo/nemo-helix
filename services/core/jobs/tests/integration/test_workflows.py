@@ -20,7 +20,7 @@ from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowNodeState, W
 from nhx.common.entities.client import SyncEntityClient
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.app.test_helpers import TestConstants
-from nhx.core.jobs.entities import HelixJobAttempt
+from nhx.core.jobs.entities import HelixJobAttempt, HelixJobStep
 from nhx.core.jobs.service import JobsService
 from nhx.testing import ClientContext, create_test_client
 
@@ -1274,3 +1274,73 @@ def test_pause_cannot_override_workflow_cancellation(workflow_harness: WorkflowH
     assert len(ended.steps) == (0 if phase == "before_first_tick" else 1)
     assert h.tick(job).status == HelixJobStatus.CANCELLED
     assert h.context.test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/resume").status_code == 409
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+@pytest.mark.parametrize("reverse_roots", [False, True])
+@pytest.mark.parametrize(
+    "phase", ["error_then_cancel", "cancel_then_error", "cancelling_then_error", "failing_then_cancel", "all_finished"]
+)
+def test_step_failure_cannot_override_workflow_cancellation(
+    workflow_harness: WorkflowHarness, mode: str, reverse_roots: bool, phase: str
+) -> None:
+    h = workflow_harness
+    roots: dict[str, list[str]] = {"failure": [], "other": []}
+    if reverse_roots:
+        roots = dict(reversed(list(roots.items())))
+    job = h.create({**roots, "child": ["failure", "other"]}, mode=mode)
+    assert job.attempt_id is not None
+    h.tick(job)
+    failure_id = h.node_state(job, "failure").active_step_id
+    other_id = h.node_state(job, "other").active_step_id
+    assert failure_id is not None and other_id is not None
+    for execution_id in (failure_id, other_id):
+        h.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=execution_id,
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+        )
+    if phase in ("cancel_then_error", "cancelling_then_error"):
+        h.jobs.cancel_job(workspace="default", name=job.id)
+        if phase == "cancelling_then_error":
+            assert h.tick(job).status == HelixJobStatus.CANCELLING
+    diagnostics = {"message": "synthetic step failure", "code": "test_failure"}
+    h.jobs.update_attempt_step_status(
+        workspace="default",
+        job=job.id,
+        attempt=job.attempt_id,
+        name=failure_id,
+        body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ERROR, error_details=diagnostics),
+    )
+    if phase == "failing_then_cancel":
+        failed = h.tick(job)
+        assert failed.workflow is not None
+        assert failed.workflow.control == ("failing" if mode == "run_to_completion" else "running")
+    if phase == "all_finished":
+        h.finish(job, "other")
+    if phase not in ("cancel_then_error", "cancelling_then_error"):
+        h.jobs.cancel_job(workspace="default", name=job.id)
+    draining = h.tick(job)
+    assert draining.workflow is not None and draining.workflow.control == "cancelling"
+    assert h.node_state(job, "failure").last_outcome == "error"
+    assert h.node_state(job, "child").active_step_id is None
+    store = SyncEntityClient(EntitiesClient.from_client(h.context.client))
+    error_step = store.get_by_id(HelixJobStep, failure_id)
+    assert error_step.status == HelixJobStatus.ERROR and error_step.error_details == diagnostics
+    if phase != "all_finished":
+        assert draining.status == HelixJobStatus.CANCELLING
+        assert store.get_by_id(HelixJobStep, other_id).status == HelixJobStatus.CANCELLING
+        h.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=other_id,
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.CANCELLED),
+        )
+    ended = h.tick(job)
+    assert ended.status == HelixJobStatus.CANCELLED and len(ended.steps) == 2
+    assert h.tick(job).status == HelixJobStatus.CANCELLED
+    preserved = store.get_by_id(HelixJobStep, failure_id)
+    assert preserved.status == HelixJobStatus.ERROR and preserved.error_details == diagnostics
