@@ -49,6 +49,7 @@ def state_style(state: str) -> str:
         "waiting_capacity": "waiting",
         "held": "waiting",
         "ready": "ready",
+        "admitted": "ready",
         "idle": "muted",
     }.get(state, "muted")
 

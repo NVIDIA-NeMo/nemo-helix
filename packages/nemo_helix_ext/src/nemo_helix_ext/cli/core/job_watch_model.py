@@ -9,7 +9,13 @@ from datetime import datetime
 from enum import IntEnum
 
 from nemo_helix_plugin.jobs.watch_types import JobLogEvent, JobWorkflowEvent
-from nemo_helix_plugin.jobs.workflows import WorkflowNodeView, WorkflowView
+from nemo_helix_plugin.jobs.workflows import (
+    WorkflowCondition,
+    WorkflowFilesetCommit,
+    WorkflowNodeView,
+    WorkflowStepSuccess,
+    WorkflowView,
+)
 
 
 class Pane(IntEnum):
@@ -29,6 +35,25 @@ class Transition:
 class BufferedLog:
     sequence: int
     event: JobLogEvent
+
+
+def node_parents(node: WorkflowNodeView) -> list[str]:
+    parents: list[str] = []
+    for condition in node.depends_on:
+        if isinstance(condition, str):
+            parents.append(condition)
+        elif isinstance(condition, WorkflowStepSuccess):
+            parents.append(condition.step_success)
+    parents.extend(condition.step_success for condition in node.trigger if isinstance(condition, WorkflowStepSuccess))
+    return list(dict.fromkeys(parents))
+
+
+def condition_label(condition: str | WorkflowCondition) -> str:
+    if isinstance(condition, str):
+        return "Step " + condition
+    if isinstance(condition, WorkflowFilesetCommit):
+        return "Fileset " + condition.fileset_commit + " committed"
+    return "Step " + condition.step_success + " succeeded"
 
 
 def phase(node: WorkflowNodeView) -> str:
@@ -126,7 +151,7 @@ class DagWatchModel:
         self.nodes = {node.name: node for node in self.workflow.nodes}
         self.outputs = {name: [] for name in self.nodes}
         for node in self.nodes.values():
-            for parent in node.depends_on:
+            for parent in node_parents(node):
                 if parent in self.outputs:
                     self.outputs[parent].append(node.name)
         if self.focus not in self.nodes:
@@ -156,7 +181,7 @@ class DagWatchModel:
     def _update_orders(self, *, force: bool = False) -> None:
         if not self.focus:
             return
-        neighbors = {Pane.INPUTS: self.nodes[self.focus].depends_on, Pane.OUTPUTS: self.outputs[self.focus]}
+        neighbors = {Pane.INPUTS: node_parents(self.nodes[self.focus]), Pane.OUTPUTS: self.outputs[self.focus]}
         for pane, names in neighbors.items():
             available = set(names) & self.nodes.keys()
             ordered = sorted(
@@ -267,6 +292,7 @@ class DagWatchModel:
             "error": ("❌", "!"),
             "cancelled": ("🛑", "x"),
             "ready": ("🚦", ">"),
+            "admitted": ("📬", ">"),
             "waiting_dependencies": ("⏳", "."),
             "waiting_capacity": ("🚧", "."),
             "held": ("⏸️", "|"),

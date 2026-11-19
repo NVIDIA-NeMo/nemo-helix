@@ -176,7 +176,10 @@ sequential jobs retain the line-oriented watcher.
 
 Status shows the number of steps running in parallel and three panes: upstream
 inputs, the focused node, and downstream outputs. Inputs and outputs are
-connected DAG nodes. Use Left/Right to choose a pane, Up/Down or PageUp/PageDown
+connected DAG nodes, including Step readiness and Step-trigger links. Fileset
+conditions and trigger events appear separately in focused-node details.
+`Admitted` means an execution has been accepted and may still be waiting for
+capacity; it does not count as a running step. Use Left/Right to choose a pane, Up/Down or PageUp/PageDown
 to browse its nodes, and Enter to focus the selected neighbor. Backspace retraces
 your path. Lists scroll to keep the selected node visible; narrow terminals show
 one pane at a time. Press `/` to search any node, including disconnected branches,

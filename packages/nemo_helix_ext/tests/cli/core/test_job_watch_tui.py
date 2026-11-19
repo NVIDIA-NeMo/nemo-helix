@@ -12,7 +12,13 @@ from nemo_helix_ext.cli.core.job_watch_renderer import JobWatchRenderResult
 from nemo_helix_ext.cli.core.job_watch_tui import DagWatchApp, _fit
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.watch_types import JobLogEvent, JobStatusEvent, JobWatchEvent, JobWorkflowEvent
-from nemo_helix_plugin.jobs.workflows import WorkflowNodeView, WorkflowScheduling, WorkflowView
+from nemo_helix_plugin.jobs.workflows import (
+    WorkflowFilesetCommit,
+    WorkflowNodeView,
+    WorkflowScheduling,
+    WorkflowStepSuccess,
+    WorkflowView,
+)
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import PipeInput
 from prompt_toolkit.input.defaults import create_pipe_input
@@ -463,3 +469,64 @@ def test_neighbor_card_shows_current_phase_and_concise_transition() -> None:
     assert "input-099" in screen
     assert "Waiting on dependencies → Running" in screen
     assert "Observed" in screen
+
+
+def test_typed_conditions_and_trigger_edges_render_without_fileset_nodes() -> None:
+    prepare, refresh, train = node("prepare"), node("refresh"), node("train", state="admitted", execution="train-1")
+    train.depends_on = [
+        "prepare",
+        WorkflowStepSuccess(step_success="prepare"),
+        WorkflowFilesetCommit(fileset_commit="config"),
+    ]
+    train.trigger = [WorkflowStepSuccess(step_success="refresh"), WorkflowFilesetCommit(fileset_commit="input")]
+    state = DagWatchModel()
+    state.apply_workflow(event([prepare, refresh, train]), NOW)
+    state.focus_node("train")
+    assert state.orders[Pane.INPUTS] == ["prepare", "refresh"]
+    assert state.outputs["prepare"] == ["train"]
+    assert state.outputs["refresh"] == ["train"]
+    assert state.running == 0
+    app = DagWatchApp(state, output=DummyOutput())
+    screen = "\n".join(app.screen(Size(rows=40, columns=210)))
+    assert "Admitted" in screen
+    assert "Ready when (all):" in screen
+    assert "Triggered by (any):" in screen
+    assert "Fileset config committed" in screen
+    assert "Fileset input committed" in screen
+    app.mode = "overview"
+    app.screen(Size(rows=40, columns=140))
+    assert app.graph_layout is not None
+    assert app.graph_layout.dependencies["train"] == ("prepare", "refresh")
+    assert set(app.graph_layout.boxes) == {"prepare", "refresh", "train"}
+
+
+async def test_typed_conditions_survive_wire_status_watch() -> None:
+    train = node("train", state="admitted", execution="train-1")
+    train.depends_on = [WorkflowStepSuccess(step_success="prepare"), WorkflowFilesetCommit(fileset_commit="config")]
+    train.trigger = [WorkflowStepSuccess(step_success="refresh")]
+    workflow = event([node("prepare"), node("refresh"), train]).workflow
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "job-1",
+                "name": "pipeline",
+                "status": "completed",
+                "status_details": {},
+                "error_details": None,
+                "steps": [],
+                "created_at": NOW.isoformat(),
+                "updated_at": NOW.isoformat(),
+                "attempt_id": "attempt-1",
+                "workflow": workflow.model_dump(mode="json"),
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as transport:
+        client = AsyncJobsClient(base_url="http://test", http_client=transport)
+        app = DagWatchApp(DagWatchModel(), output=DummyOutput())
+        await app._consume_status(client.watch_job("job-1", workspace="ws", attempt_id="attempt-1", include_logs=False))
+    assert app.result == JobWatchRenderResult.SUCCEEDED
+    assert app.model.outputs["refresh"] == ["train"]
+    assert app.model.running == 0

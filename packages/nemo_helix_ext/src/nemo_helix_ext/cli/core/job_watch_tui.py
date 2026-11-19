@@ -32,7 +32,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
 from nemo_helix_ext.cli.core.job_watch_graph import BOX_WIDTH, DagLayout, Direction, phase_label, state_style
-from nemo_helix_ext.cli.core.job_watch_model import DagWatchModel, Pane, phase
+from nemo_helix_ext.cli.core.job_watch_model import DagWatchModel, Pane, condition_label, node_parents, phase
 from nemo_helix_ext.cli.core.job_watch_renderer import JobWatchRenderResult
 
 
@@ -365,7 +365,7 @@ class DagWatchApp:
             if node.blocked_by:
                 blockers = ", ".join(node.blocked_by[:2])
                 if len(node.blocked_by) > 2:
-                    blockers += f" (+{len(node.blocked_by) - 2} more upstream)"
+                    blockers += f" (+{len(node.blocked_by) - 2} more)"
                 lines.extend(textwrap.wrap("Blocked by: " + blockers, max(1, width)))
             lines += ["", "Observed transitions (session)"]
             recent = [
@@ -375,6 +375,18 @@ class DagWatchApp:
                 lines.append(transition.observed_at.astimezone().strftime("%H:%M:%S") + " " + transition.description)
             if not recent:
                 lines.append("No observed changes yet")
+            if node.depends_on:
+                lines.append("Ready when (all):")
+                for item in node.depends_on:
+                    lines.extend(
+                        textwrap.wrap("  " + _literal(condition_label(item)), max(1, width), subsequent_indent="  ")
+                    )
+            if node.trigger:
+                lines.append("Triggered by (any):")
+                for item in node.trigger:
+                    lines.extend(
+                        textwrap.wrap("  " + _literal(condition_label(item)), max(1, width), subsequent_indent="  ")
+                    )
             self.node_scroll = min(self.node_scroll, max(0, len(lines) - height))
             styles = {
                 0: "class:selected" if model.pane == pane else "class:header",
@@ -422,7 +434,7 @@ class DagWatchApp:
         return lines[:height]
 
     def _layout(self) -> DagLayout:
-        dependencies = {node.name: tuple(sorted(node.depends_on)) for node in self.model.nodes.values()}
+        dependencies = {node.name: tuple(sorted(node_parents(node))) for node in self.model.nodes.values()}
         if self.graph_layout is None or self.graph_layout.dependencies != dependencies:
             self.graph_layout = DagLayout(dependencies)
         if self.graph_selected not in self.graph_layout.boxes:
@@ -475,7 +487,7 @@ class DagWatchApp:
             lines += [
                 ("> " if index == self.overview_index else "  ")
                 + f"{self.model.icon(phase(node))} {name} · {phase(node)}",
-                "   ← " + (", ".join(node.depends_on) or "root"),
+                "   ← " + (", ".join(node_parents(node)) or "root"),
             ]
         return lines[:height]
 
