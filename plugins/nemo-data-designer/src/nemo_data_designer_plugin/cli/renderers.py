@@ -197,17 +197,35 @@ class PreviewRenderer(CLIRenderer):
         ctx: RendererContext,
     ) -> None:
         """Write preview artifacts to disk, mirroring upstream's --save-results layout."""
+        results_dir = self._new_results_dir(ctx)
+        csv_path = self._save_dataset(df, results_dir)
+        self._save_analysis_report(results_dir)
+        pager_path = self._save_sample_records(results, total, num_columns=len(df.columns), results_dir=results_dir)
+
+        console.print(f"  [bold]Results path:[/bold] {results_dir}")
+        console.print(f"  [bold]CSV path:[/bold] {csv_path}")
+        console.print(f"  [bold]Browser path:[/bold] {pager_path}")
+
+    @staticmethod
+    def _new_results_dir(ctx: RendererContext) -> Path:
+        """Create and return a timestamped directory under the requested artifact path."""
         artifact_path_raw = ctx.cli_kwargs.get("artifact_path")
         artifact_path = Path(artifact_path_raw) if artifact_path_raw else Path.cwd() / "artifacts"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_dir = artifact_path / f"preview_results_{timestamp}"
-        sample_records_dir = results_dir / "sample_records"
-        sample_records_dir.mkdir(parents=True, exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
+        return results_dir
 
+    @staticmethod
+    def _save_dataset(df: pd.DataFrame, results_dir: Path) -> Path:
+        """Write the dataset as Parquet and as CSV; return the CSV path."""
         df.to_parquet(results_dir / "dataset.parquet")
         # A CSV copy opens in a spreadsheet without extra tooling.
-        df.to_csv(results_dir / "dataset.csv", index=False)
+        csv_path = results_dir / "dataset.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
 
+    def _save_analysis_report(self, results_dir: Path) -> None:
         analysis = self._analysis
         if analysis is not None and hasattr(analysis, "to_report"):
             try:
@@ -215,6 +233,11 @@ class PreviewRenderer(CLIRenderer):
             except Exception as exc:  # pragma: no cover - defensive
                 console.print(f"[yellow]Could not save analysis report: {exc}[/yellow]")
 
+    @staticmethod
+    def _save_sample_records(results: PreviewResults, total: int, *, num_columns: int, results_dir: Path) -> Path:
+        """Write one HTML page per record plus the pager; return the pager path."""
+        sample_records_dir = results_dir / "sample_records"
+        sample_records_dir.mkdir(parents=True, exist_ok=True)
         for i in range(total):
             results.display_sample_record(
                 index=i,
@@ -223,12 +246,9 @@ class PreviewRenderer(CLIRenderer):
         create_sample_records_pager(
             sample_records_dir=sample_records_dir,
             num_records=total,
-            num_columns=len(df.columns),
+            num_columns=num_columns,
         )
-
-        console.print(f"  [bold]Results path:[/bold] {results_dir}")
-        console.print(f"  [bold]CSV path:[/bold] {results_dir / 'dataset.csv'}")
-        console.print(f"  [bold]Browser path:[/bold] {sample_records_dir / PAGER_FILENAME}")
+        return sample_records_dir / PAGER_FILENAME
 
     @staticmethod
     def _browse_interactively(results: PreviewResults, total: int) -> None:
