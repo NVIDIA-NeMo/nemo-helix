@@ -4,8 +4,8 @@
 """Deterministic, bounded archives of agent skill bundles.
 
 One module owns the archive format so every boundary applies the same rules: the agents plugin
-builds an archive when it publishes a skill revision, and verifies it on read-back and before
-reusing an object already stored at the same digest.
+builds an archive when it publishes a skill revision, and the evals worker verifies and extracts
+it before injecting the skill into a Harbor trial.
 
 Format contract (``files_hash`` covers exactly these bytes, so changing any rule changes digests):
 
@@ -33,6 +33,7 @@ import io
 import math
 import os
 import re
+import shutil
 import stat
 import tarfile
 import unicodedata
@@ -56,6 +57,7 @@ MAX_FRONTMATTER_BYTES = 64 * 1024
 _DIR_MODE = 0o755
 _EXEC_FILE_MODE = 0o755
 _FILE_MODE = 0o644
+_CHUNK_BYTES = 1024 * 1024
 #: Largest single PAX extended header accepted; canonical archives only carry a ``path`` record.
 _MAX_PAX_HEADER_BYTES = 64 * 1024
 _FRONTMATTER_DELIMITER = "---"
@@ -64,7 +66,7 @@ _SKILL_NAME_RE = re.compile(SKILL_NAME_PATTERN)
 
 @dataclass(frozen=True)
 class SkillArchiveLimits:
-    """Bounds applied when building, downloading and verifying an archive."""
+    """Bounds applied when building, downloading and extracting an archive."""
 
     max_archive_bytes: int = 32 * 1024 * 1024
     max_total_payload_bytes: int = 128 * 1024 * 1024
@@ -211,6 +213,44 @@ def verify_skill_archive(
     data = _read_archive_bytes(archive_path, limits)
     _check_hash(data, expected_files_hash)
     return _inspect_archive(data, limits)
+
+
+def extract_skill_archive(
+    archive_path: Path,
+    dest_parent: Path,
+    *,
+    expected_files_hash: str,
+    limits: SkillArchiveLimits = DEFAULT_LIMITS,
+) -> Path:
+    """Verify, then extract into a fresh ``dest_parent / <skill_name>`` and return that path.
+
+    Verification happens before any byte is written. ``dest_parent`` must exist; the skill
+    directory must not. Writes are exclusive (``O_EXCL``), modes come from the archive's normalised
+    values, and the running payload total is enforced while streaming.
+
+    Raises:
+        SkillArchiveHashMismatchError: The bytes do not hash to ``expected_files_hash``.
+        SkillArchiveError: Any other contract violation; a partial extraction is removed.
+    """
+    # Both passes read the same in-memory bytes, so what is extracted is exactly what was hashed.
+    data = _read_archive_bytes(archive_path, limits)
+    _check_hash(data, expected_files_hash)
+    info = _inspect_archive(data, limits)
+
+    if not dest_parent.is_dir():
+        raise SkillArchivePathError(f"Extraction parent {dest_parent} is not an existing directory")
+    skill_dir = dest_parent / info.skill_name
+    try:
+        # Private until complete; the final directory modes are applied last.
+        skill_dir.mkdir(mode=0o700)
+    except FileExistsError:
+        raise SkillArchivePathError(f"Extraction target {skill_dir} already exists") from None
+    try:
+        _extract_members(data, skill_dir, limits)
+    except BaseException:
+        shutil.rmtree(skill_dir, ignore_errors=True)
+        raise
+    return skill_dir
 
 
 # --------------------------------------------------------------------------------------------------
@@ -635,3 +675,57 @@ def _inspect_archive(data: bytes, limits: SkillArchiveLimits) -> SkillArchiveInf
         payload_bytes=payload,
         entry_count=entry_count,
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Extraction
+# --------------------------------------------------------------------------------------------------
+
+
+def _write_member(fd: int, source: IO[bytes], size: int) -> int:
+    """Copy exactly ``size`` bytes from ``source`` to ``fd`` and return how many were written."""
+    written = 0
+    while written < size:
+        chunk = source.read(min(_CHUNK_BYTES, size - written))
+        if not chunk:
+            raise SkillArchiveError("Archive member is truncated")
+        view = memoryview(chunk)
+        while view:
+            view = view[os.write(fd, view) :]
+        written += len(chunk)
+    return written
+
+
+def _extract_members(data: bytes, skill_dir: Path, limits: SkillArchiveLimits) -> None:
+    """Write the already-verified members of ``data`` under ``skill_dir``, which the caller created."""
+    parent = skill_dir.parent
+    directories: list[Path] = [skill_dir]
+    total = 0
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    for archive, member in _iter_members(data):
+        name = _member_name(member)
+        if name == skill_dir.name:
+            continue
+        path = parent / name
+        try:
+            if member.isdir():
+                path.mkdir(mode=0o700)
+                directories.append(path)
+                continue
+            fd = os.open(path, flags, 0o600)
+        except FileExistsError:
+            # For example two names differing only in case on a case-insensitive filesystem.
+            raise SkillArchivePathError(f"Extraction path {name!r} already exists") from None
+        try:
+            source = archive.extractfile(member)
+            if source is None:
+                raise SkillArchivePathError(f"Member {name!r} has no readable payload")
+            with source:
+                total += _write_member(fd, source, member.size)
+            if total > limits.max_total_payload_bytes:
+                raise SkillArchiveLimitError(f"Archive payload exceeds {limits.max_total_payload_bytes} bytes")
+            os.fchmod(fd, member.mode)
+        finally:
+            os.close(fd)
+    for directory in directories:
+        directory.chmod(_DIR_MODE)
