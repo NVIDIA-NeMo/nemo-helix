@@ -36,6 +36,18 @@ describe('parseToolCallingResult', () => {
     expect(result.variants[0]?.examples).toEqual([]);
     expect(result.findings).toEqual([]);
     expect(result.suggestions).toEqual([]);
+    expect(result.recommended_variant).toBeUndefined();
+  });
+
+  it('reads the recommended variant, including an explicit null', () => {
+    expect(
+      parseToolCallingResult(JSON.stringify(TOOL_CALLING_RESULT_FIXTURE)).recommended_variant
+    ).toBe('config-fix');
+    expect(
+      parseToolCallingResult(
+        JSON.stringify({ ...TOOL_CALLING_RESULT_FIXTURE, recommended_variant: null })
+      ).recommended_variant
+    ).toBeNull();
   });
 
   it('rejects text that is not JSON', () => {

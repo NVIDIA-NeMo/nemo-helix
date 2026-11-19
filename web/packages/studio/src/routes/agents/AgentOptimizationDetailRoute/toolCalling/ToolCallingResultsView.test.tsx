@@ -51,7 +51,33 @@ describe('AgentOptimizationDetailRoute — tool-calling', () => {
     expect(screen.getByRole('cell', { name: 'Tool error rate' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '80%' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '6% −74 pts' })).toBeInTheDocument();
-    expect(screen.getByText('80% → 6%')).toBeInTheDocument();
+    expect(screen.queryByText('80% → 6%')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stat-tile-surface')).not.toBeInTheDocument();
+  });
+
+  it('marks the recommended variant column and its suggestion, and nothing else', async () => {
+    renderRun();
+
+    expect(
+      await screen.findByRole('columnheader', { name: 'Config fix Recommended' })
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('Recommended')).toHaveLength(2);
+    expect(
+      within(screen.getByTestId('suggestion-config-fix')).getByText('Recommended')
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('suggestion-schema-fix')).queryByText('Recommended')
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['null', { ...TOOL_CALLING_RESULT_FIXTURE, recommended_variant: null }],
+    ['missing', { ...TOOL_CALLING_RESULT_FIXTURE, recommended_variant: undefined }],
+  ])('marks nothing when the recommended variant is %s', async (_case, result) => {
+    renderRun({ resultBody: JSON.stringify(result) });
+
+    expect(await screen.findByTestId('suggestion-config-fix')).toBeInTheDocument();
+    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
   });
 
   it('breaks down how bad calls were detected per variant, marking error text as heuristic', async () => {

@@ -117,8 +117,9 @@ export const TOOL_CALLING_RESULT_FIXTURE: ToolCallingResult = {
       verified_by_variant: 'schema-fix',
     },
   ],
+  recommended_variant: 'config-fix',
   recommendation:
-    "Apply the config fix now and send the schema patch to the tool's owner: together they cut the tool error rate from 80% to 6%.",
+    "Apply the config fix now: it cuts the tool error rate from 80% to 47%. The schema patch would help further but needs the tool's owner.",
 };
 
 export const CANDIDATE_AGENT_DIFF = `--- agent.yaml

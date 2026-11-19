@@ -5,7 +5,6 @@ import {
   TableExpandableCell,
   type TableExpandableCellState,
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
-import { StatTile } from '@nemo/common/src/components/StatTile';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { ChartBar, Download, Lightbulb, ListCheckmark, Warning } from '@nemo/icons/icons';
 import {
@@ -13,7 +12,6 @@ import {
   Banner,
   Button,
   Flex,
-  Grid,
   Modal,
   Panel,
   Spinner,
@@ -41,6 +39,7 @@ import {
   type RejectedCallExample,
   type ResultLocation,
   type ToolCallingFinding,
+  type ToolCallingResult,
   type ToolCallingResults,
   type ToolCallingSuggestion,
   type ToolCallingVariant,
@@ -116,7 +115,16 @@ const DeltaBadge: FC<{ row: MetricRow; baseline: number; value: number }> = ({
   );
 };
 
-const MetricsTable: FC<{ variants: readonly ToolCallingVariant[] }> = memo(({ variants }) => {
+const RecommendedBadge: FC = () => (
+  <Badge kind="solid" color="green">
+    Recommended
+  </Badge>
+);
+
+const MetricsTable: FC<{
+  variants: readonly ToolCallingVariant[];
+  recommended: ToolCallingResult['recommended_variant'];
+}> = memo(({ variants, recommended }) => {
   const baseline = variants.find((variant) => variant.id === 'baseline');
   const makeColumns = useCallback<MakeColumns<MetricRow>>(
     (col) => [
@@ -129,7 +137,15 @@ const MetricsTable: FC<{ variants: readonly ToolCallingVariant[] }> = memo(({ va
       ...variants.map((variant) =>
         col.display({
           id: variant.id,
-          header: variant.label,
+          header:
+            variant.id === recommended
+              ? () => (
+                  <Flex align="center" gap="density-sm" wrap="wrap">
+                    {variant.label}
+                    <RecommendedBadge />
+                  </Flex>
+                )
+              : variant.label,
           size: 180,
           cell: ({ row }) => {
             const value = variant.metrics[row.original.key];
@@ -149,7 +165,7 @@ const MetricsTable: FC<{ variants: readonly ToolCallingVariant[] }> = memo(({ va
         })
       ),
     ],
-    [variants, baseline]
+    [variants, baseline, recommended]
   );
 
   return <StaticDataView rows={METRIC_ROWS} makeColumns={makeColumns} getRowId={metricRowId} />;
@@ -419,7 +435,8 @@ const SuggestionCard: FC<{
   suggestion: ToolCallingSuggestion;
   variants: readonly ToolCallingVariant[];
   location: ResultLocation;
-}> = ({ suggestion, variants, location }) => {
+  isRecommended: boolean;
+}> = ({ suggestion, variants, location, isRecommended }) => {
   const kind = SUGGESTION_KIND[suggestion.kind];
   const baseline = variants.find((variant) => variant.id === 'baseline');
   const verifiedBy = variants.find((variant) => variant.id === suggestion.verified_by_variant);
@@ -440,6 +457,7 @@ const SuggestionCard: FC<{
     >
       <Stack gap="density-lg">
         <Flex align="center" gap="density-sm" wrap="wrap">
+          {isRecommended ? <RecommendedBadge /> : null}
           <Badge kind="outline" color={kind.color}>
             {kind.label}
           </Badge>
@@ -489,41 +507,6 @@ const SuggestionCard: FC<{
   );
 };
 
-const HeadlineTiles: FC<{ variants: readonly ToolCallingVariant[] }> = ({ variants }) => {
-  const baseline = variants.find((variant) => variant.id === 'baseline');
-  const final = variants[variants.length - 1];
-  if (!baseline || final === baseline) {
-    return null;
-  }
-  const tiles = METRIC_ROWS.slice(0, 3).map((row) => {
-    const before = baseline.metrics[row.key];
-    const after = final.metrics[row.key];
-    const delta = after - before;
-    const direction = deltaDirection(delta, row.lowerIsBetter);
-    return {
-      row,
-      value: `${formatMetric(before, row.format)} → ${formatMetric(after, row.format)}`,
-      delta: formatDelta(delta, row.format),
-      status: direction === 'better' ? 'success' : direction === 'worse' ? 'error' : 'neutral',
-    } as const;
-  });
-
-  return (
-    <Grid cols={{ base: 1, md: 3 }} gap="density-xl" className="shrink-0">
-      {tiles.map(({ row, value, delta, status }) => (
-        <StatTile
-          key={row.key}
-          variant="metric"
-          label={`${row.label} (${final.label})`}
-          value={value}
-          trailingLabel={delta}
-          trailingLabelStatus={status}
-        />
-      ))}
-    </Grid>
-  );
-};
-
 /**
  * A finished tool-calling run: how often the agent's tool calls were rejected before and after
  * each suggested fix, why they were rejected, what the analysis found, and the fixes themselves.
@@ -543,7 +526,6 @@ export const ToolCallingResultsView: FC<{ results: ToolCallingResults }> = ({ re
           {result.recommendation}
         </Banner>
       ) : null}
-      <HeadlineTiles variants={result.variants} />
       <Panel
         slotHeading="Before and after"
         slotIcon={<ChartBar />}
@@ -551,7 +533,7 @@ export const ToolCallingResultsView: FC<{ results: ToolCallingResults }> = ({ re
         density="compact"
       >
         <Stack gap="density-xl">
-          <MetricsTable variants={result.variants} />
+          <MetricsTable variants={result.variants} recommended={result.recommended_variant} />
           {hasSignals ? (
             <Stack gap="density-md">
               <Text kind="body/semibold/md">How bad calls were detected</Text>
@@ -588,6 +570,10 @@ export const ToolCallingResultsView: FC<{ results: ToolCallingResults }> = ({ re
               suggestion={suggestion}
               variants={result.variants}
               location={location}
+              isRecommended={
+                !!result.recommended_variant &&
+                suggestion.verified_by_variant === result.recommended_variant
+              }
             />
           ))}
         </Stack>

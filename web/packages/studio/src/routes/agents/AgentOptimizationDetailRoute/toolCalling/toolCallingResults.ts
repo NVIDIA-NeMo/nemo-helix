@@ -87,6 +87,7 @@ export const toolCallingResultSchema = z.object({
   variants: z.array(variantSchema).min(1),
   findings: z.array(findingSchema).default([]),
   suggestions: z.array(suggestionSchema).default([]),
+  recommended_variant: variantIdSchema.exclude(['baseline']).nullish(),
   recommendation: z.string().nullish(),
 });
 
