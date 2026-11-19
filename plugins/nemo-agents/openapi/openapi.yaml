@@ -3147,6 +3147,236 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/pipeline-configs:
+    post:
+      tags:
+      - Agent Pipeline Configs
+      summary: Create Pipeline Config
+      description: Create a pipeline config from a complete pipeline.yaml. Agent references
+        are not resolved here.
+      operationId: create_pipeline_config_apis_agents_v2_workspaces__workspace__pipeline_configs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePipelineConfigRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPipelineConfig'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Pipeline Configs
+      summary: List Pipeline Configs
+      description: List pipeline configs in the workspace.
+      operationId: list_pipeline_configs_apis_agents_v2_workspaces__workspace__pipeline_configs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Page size.
+          default: 20
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NemoListResponse_AgentPipelineConfig_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/pipeline-configs/validate:
+    post:
+      tags:
+      - Agent Pipeline Configs
+      summary: Validate Pipeline Config
+      description: 'Check a pipeline.yaml without saving it: static checks, then its
+        agents and context in this workspace.
+
+
+        Problems with the config, including agents that are missing or cannot be read,
+        are reported in
+
+        ``issues`` with status 200.'
+      operationId: validate_pipeline_config_apis_agents_v2_workspaces__workspace__pipeline_configs_validate_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidatePipelineConfigRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineValidationResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/pipeline-configs/{name}:
+    get:
+      tags:
+      - Agent Pipeline Configs
+      summary: Get Pipeline Config
+      description: Get a pipeline config by name.
+      operationId: get_pipeline_config_apis_agents_v2_workspaces__workspace__pipeline_configs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPipelineConfig'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Agent Pipeline Configs
+      summary: Update Pipeline Config
+      description: Replace a pipeline config. The name and workspace cannot change;
+        no revisions are kept.
+      operationId: update_pipeline_config_apis_agents_v2_workspaces__workspace__pipeline_configs__name__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePipelineConfigRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPipelineConfig'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Pipeline Configs
+      summary: Delete Pipeline Config
+      description: Delete a pipeline config by name.
+      operationId: delete_pipeline_config_apis_agents_v2_workspaces__workspace__pipeline_configs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/sessions:
     post:
       tags:
@@ -4079,6 +4309,107 @@ components:
         \ than this model narrowing them for everyone. The\n``agents.execute`` job,\
         \ for example, accepts only ``nemo-agents-spec-v1``\nand rejects a config\
         \ that is not a valid agent spec."
+    AgentPipelineConfig:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Pipeline format version (1).
+        description:
+          type: string
+          title: Description
+          description: What the pipeline does.
+          default: ''
+        inputs:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineInputParam'
+          type: object
+          title: Inputs
+          description: Named inputs a run supplies, referenced as {{ inputs.<name>
+            }}.
+        steps:
+          items:
+            $ref: '#/components/schemas/PipelineStepConfig'
+          type: array
+          title: Steps
+          description: Steps to run, in order.
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - version
+      - steps
+      - workspace
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AgentPipelineConfig
+      description: 'A pipeline config: an ordered list of steps, each running one
+        registered Agent.
+
+
+        Entity type: ``agent_pipeline_config``
+
+        Updating a pipeline replaces the stored config; no revisions are kept. Agent
+        references in
+
+        its steps are not resolved when it is stored, only by ``POST .../pipeline-configs/validate``.'
     AgentSession:
       properties:
         name:
@@ -4310,6 +4641,56 @@ components:
       type: object
       title: ComputeSpecInline
       description: Inline compute spec - the resources an invocation runs with.
+    ConditionEquals:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: A placeholder path without braces, e.g. 'steps.triage.response.verdict'.
+        equals:
+          title: Equals
+          description: Run when the value equals this.
+      additionalProperties: true
+      type: object
+      required:
+      - path
+      - equals
+      title: ConditionEquals
+      description: Run the step when the value at ``path`` equals ``equals``.
+    ConditionIn:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: A placeholder path without braces, e.g. 'steps.triage.response.verdict'.
+        in:
+          items: {}
+          type: array
+          title: In
+          description: Run when the value is one of these.
+      additionalProperties: true
+      type: object
+      required:
+      - path
+      - in
+      title: ConditionIn
+      description: Run the step when the value at ``path`` is one of ``in``.
+    ConditionNotEquals:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: A placeholder path without braces, e.g. 'steps.triage.response.verdict'.
+        not_equals:
+          title: Not Equals
+          description: Run when the value differs from this.
+      additionalProperties: true
+      type: object
+      required:
+      - path
+      - not_equals
+      title: ConditionNotEquals
+      description: Run the step when the value at ``path`` differs from ``not_equals``.
     CreateComputeSpecRequest:
       properties:
         description:
@@ -4489,6 +4870,46 @@ components:
       - name
       title: CreateEnvironmentSpecRequest
       description: Request body for ``POST /v2/workspaces/{workspace}/environment-specs``.
+    CreatePipelineConfigRequest:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Pipeline format version (1).
+        description:
+          type: string
+          title: Description
+          description: What the pipeline does.
+          default: ''
+        inputs:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineInputParam'
+          type: object
+          title: Inputs
+          description: Named inputs a run supplies, referenced as {{ inputs.<name>
+            }}.
+        steps:
+          items:
+            $ref: '#/components/schemas/PipelineStepConfig'
+          type: array
+          title: Steps
+          description: Steps to run, in order.
+        name:
+          type: string
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: Pipeline name. Name must start with a lowercase letter, be
+            2-63 characters, and use lowercase letters, digits, hyphens, and dots
+            (no consecutive hyphens, cannot end with a hyphen).
+      additionalProperties: true
+      type: object
+      required:
+      - version
+      - steps
+      - name
+      title: CreatePipelineConfigRequest
+      description: 'Request body for ``POST /v2/workspaces/{workspace}/pipeline-configs``:
+        a complete pipeline.yaml.'
     CreateSampleAgentRequest:
       properties:
         model:
@@ -5684,6 +6105,16 @@ components:
       - created_at
       - updated_at
       title: HelixJobTaskStatusResponse
+    InputType:
+      type: string
+      enum:
+      - string
+      - number
+      - boolean
+      - object
+      - array
+      title: InputType
+      description: Value type of a pipeline input.
     JobControl:
       properties:
         pause_ttl_seconds:
@@ -5892,6 +6323,29 @@ components:
       required:
       - data
       title: NemoListResponse_AgentEnvironment_
+    NemoListResponse_AgentPipelineConfig_:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AgentPipelineConfig'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: "Pagination metadata \u2014 page, page_size, total_results,\
+            \ etc."
+        sort:
+          title: Sort
+          description: Sort field applied to this result set (e.g. '-created_at').
+          type: string
+        filter:
+          title: Filter
+          description: Filter criteria echoed back from the request.
+      type: object
+      required:
+      - data
+      title: NemoListResponse_AgentPipelineConfig_
     NemoListResponse_AgentSession_:
       properties:
         data:
@@ -6393,6 +6847,45 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PipelineInputParam:
+      properties:
+        type:
+          allOf:
+          - $ref: '#/components/schemas/InputType'
+          description: Value type of the input.
+          default: string
+        description:
+          type: string
+          title: Description
+          description: What the input is.
+          default: ''
+        required:
+          title: Required
+          description: 'Whether a run must supply it. Default: true.'
+          type: boolean
+        default:
+          title: Default
+          description: Value used when a run omits the input.
+      additionalProperties: true
+      type: object
+      title: PipelineInputParam
+      description: A named, typed pipeline input.
+    PipelineIssue:
+      properties:
+        location:
+          type: string
+          title: Location
+          description: Where the problem is, e.g. 'steps[reply].input'.
+        message:
+          type: string
+          title: Message
+          description: What is wrong and how to fix it.
+      type: object
+      required:
+      - location
+      - message
+      title: PipelineIssue
+      description: One problem found while checking a pipeline config.
     PipelineJob:
       properties:
         id:
@@ -6661,6 +7154,66 @@ components:
       - updated_at
       - -updated_at
       title: PipelineJobsSortField
+    PipelineStepConfig:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Step name, unique within the pipeline.
+        agent:
+          type: string
+          title: Agent
+          description: 'The registered Agent to run: ''name'' or ''workspace/name''.'
+        input:
+          title: Input
+          description: Template for the agent's input.
+          type: string
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+          description: Per-run data for the agent; may hold templates.
+        response_format:
+          allOf:
+          - $ref: '#/components/schemas/ResponseFormat'
+          description: '''json'' lets later steps read fields of the response.'
+          default: text
+        when:
+          title: When
+          description: Run the step only when this condition holds.
+          oneOf:
+          - $ref: '#/components/schemas/ConditionEquals'
+          - $ref: '#/components/schemas/ConditionNotEquals'
+          - $ref: '#/components/schemas/ConditionIn'
+        retries:
+          type: integer
+          title: Retries
+          description: Retries after a failure.
+          default: 0
+      additionalProperties: true
+      type: object
+      required:
+      - name
+      - agent
+      title: PipelineStepConfig
+      description: One agent run in a pipeline.
+    PipelineValidationResult:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+          description: True when there are no issues.
+        issues:
+          items:
+            $ref: '#/components/schemas/PipelineIssue'
+          type: array
+          title: Issues
+          description: Problems found, in config order.
+      type: object
+      required:
+      - valid
+      title: PipelineValidationResult
+      description: Response of ``POST .../pipeline-configs/validate``.
     PostRunActionConfig:
       properties:
         kind:
@@ -6818,6 +7371,13 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
+    ResponseFormat:
+      type: string
+      enum:
+      - text
+      - json
+      title: ResponseFormat
+      description: How a pipeline reads a step's ``response``.
     SampleAgentResponse:
       properties:
         status:
@@ -6952,6 +7512,48 @@ components:
           type: array
       title: StringFilter
       type: object
+    UpdatePipelineConfigRequest:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Pipeline format version (1).
+        description:
+          type: string
+          title: Description
+          description: What the pipeline does.
+          default: ''
+        inputs:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineInputParam'
+          type: object
+          title: Inputs
+          description: Named inputs a run supplies, referenced as {{ inputs.<name>
+            }}.
+        steps:
+          items:
+            $ref: '#/components/schemas/PipelineStepConfig'
+          type: array
+          title: Steps
+          description: Steps to run, in order.
+        name:
+          title: Name
+          description: Must equal the pipeline name in the path when set.
+          type: string
+      additionalProperties: true
+      type: object
+      required:
+      - version
+      - steps
+      title: UpdatePipelineConfigRequest
+      description: 'Request body for ``PUT /v2/workspaces/{workspace}/pipeline-configs/{name}``:
+        replaces the stored config.'
+    ValidatePipelineConfigRequest:
+      additionalProperties: true
+      type: object
+      title: ValidatePipelineConfigRequest
+      description: 'Request body for ``POST .../pipeline-configs/validate``: a pipeline.yaml
+        as a JSON object.'
     ValidationError:
       properties:
         loc:

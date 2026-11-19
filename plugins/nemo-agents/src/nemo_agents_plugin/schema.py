@@ -26,6 +26,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     AgentEnvironment,
     AgentEnvironmentSpec,
+    AgentPipelineConfig,
     AgentSession,
     DeploymentStatus,
 )
@@ -42,6 +43,9 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentSpecRequest as CreateEnvironmentSpecRequest,
 )
 from nemo_helix_plugin.agents.types import (
+    CreatePipelineConfigRequest as CreatePipelineConfigRequest,
+)
+from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
 )
 from nemo_helix_plugin.agents.types import (
@@ -52,6 +56,9 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.agents.types import (
     RegisterAgentRequest as RegisterAgentRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    UpdatePipelineConfigRequest as UpdatePipelineConfigRequest,
 )
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
@@ -141,6 +148,10 @@ class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
 
 
+class PipelineConfigFilter(NemoFilter):
+    """Query filter for ``GET /v2/workspaces/{workspace}/pipeline-configs``."""
+
+
 # ---------------------------------------------------------------------------
 # List response type aliases
 # ---------------------------------------------------------------------------
@@ -151,3 +162,4 @@ SessionPage = NemoListResponse[AgentSession]
 EnvironmentPage = NemoListResponse[AgentEnvironment]
 EnvironmentSpecPage = NemoListResponse[AgentEnvironmentSpec]
 ComputeSpecPage = NemoListResponse[AgentComputeSpec]
+PipelineConfigPage = NemoListResponse[AgentPipelineConfig]

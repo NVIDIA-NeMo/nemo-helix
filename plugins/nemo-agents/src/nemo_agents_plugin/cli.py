@@ -92,12 +92,15 @@ from nemo_helix_plugin.agents.types import (
     CreateDeploymentRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
+    CreatePipelineConfigRequest,
     CreateSessionRequest,
     DeploymentModeList,
     Labels,
     ListAgentsQueryParams,
     ListSessionsQueryParams,
     RegisterAgentRequest,
+    UpdatePipelineConfigRequest,
+    ValidatePipelineConfigRequest,
 )
 from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_codegen import handle_code_generation
@@ -214,6 +217,13 @@ _COMPUTE_SPEC_LIST_COLUMNS = [
     Column("description"),
     Column("created_at"),
 ]
+_PIPELINE_LIST_COLUMNS = [
+    Column("name"),
+    Column("workspace"),
+    Column("version"),
+    Column("description"),
+    Column("updated_at"),
+]
 
 
 _AGENT_CLI_PANEL = "Additional commands from plugins"
@@ -327,6 +337,7 @@ class AgentsCLI(NemoCLI):
         _register_local_commands(app)
         _register_platform_commands(app)
         _register_environment_commands(app)
+        _register_pipeline_commands(app)
         _register_post_run_action_commands(app)
         _register_job_commands(app)
         return app
@@ -1891,6 +1902,174 @@ def _spec_body_from_inputs(
         body = loaded
 
     return {**body, "name": name}
+
+
+def _register_pipeline_commands(app: typer.Typer) -> None:
+    """Register the ``pipeline-configs`` sub-group (pipeline.yaml configs that run agents in sequence)."""
+    from nemo_agents_plugin.pipeline_validation import static_issues, strip_entity_metadata
+    from nemo_helix_plugin.agents.pipelines import PipelineConfig, PipelineIssue
+
+    pipelines_app = typer.Typer(
+        name="pipeline-configs", help="Manage pipeline configs that run agents in sequence.", no_args_is_help=True
+    )
+    app.add_typer(pipelines_app, rich_help_panel="Agent Resources")
+
+    def load_pipeline_file(spec_file: Path) -> dict[str, Any]:
+        try:
+            loaded = _load_yaml(spec_file)
+        except OSError as exc:
+            typer.echo(f"Error: could not read pipeline file {spec_file}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        if not isinstance(loaded, dict):
+            typer.echo(f"Error: pipeline file {spec_file} must contain a mapping.", err=True)
+            raise typer.Exit(code=2)
+        return loaded
+
+    def print_issues(issues: list[PipelineIssue]) -> None:
+        for issue in issues:
+            typer.echo(f"{issue.location}: {issue.message}", err=True)
+
+    def require_static_valid(body: dict[str, Any]) -> None:
+        issues = static_issues(body)
+        if issues:
+            print_issues(issues)
+            raise typer.Exit(code=1)
+
+    @pipelines_app.command(name="create")
+    def pipeline_create(
+        typer_ctx: typer.Context,
+        spec_file: Path = typer.Option(..., "--spec-file", "-f", help="Path to a pipeline.yaml (JSON also works)."),
+        workspace: WorkspaceOption = None,
+    ) -> None:
+        """Create a pipeline config from a pipeline.yaml. Run 'validate' first to check its agents."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        body = strip_entity_metadata(load_pipeline_file(spec_file))
+        require_static_valid(body)
+        client = _agents_client(_resolve_base_url(), workspace)
+        resp = _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(
+                client.create_pipeline_config(
+                    workspace=workspace, body=CreatePipelineConfigRequest.model_validate(body)
+                )
+            ),
+        )
+        typer.echo(json.dumps(resp, indent=2))
+
+    @pipelines_app.command(name="update")
+    def pipeline_update(
+        typer_ctx: typer.Context,
+        name: str = typer.Argument(..., help="Pipeline name."),
+        spec_file: Path = typer.Option(..., "--spec-file", "-f", help="Path to the new pipeline.yaml."),
+        workspace: WorkspaceOption = None,
+    ) -> None:
+        """Replace a pipeline config with a pipeline.yaml. The old config is not kept."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        body = strip_entity_metadata(load_pipeline_file(spec_file))
+        file_name = body.get("name", name)
+        if file_name != name:
+            typer.echo(
+                f"Error: the file names pipeline '{file_name}', not '{name}'; renaming is not supported.", err=True
+            )
+            raise typer.Exit(code=2)
+        require_static_valid({**body, "name": name})
+        client = _agents_client(_resolve_base_url(), workspace)
+        resp = _run_sdk(
+            "PUT agent API",
+            lambda: _json_from_response(
+                client.update_pipeline_config(
+                    workspace=workspace,
+                    name=name,
+                    body=UpdatePipelineConfigRequest.model_validate({**body, "name": name}),
+                )
+            ),
+        )
+        typer.echo(json.dumps(resp, indent=2))
+
+    @pipelines_app.command(name="validate")
+    def pipeline_validate(
+        typer_ctx: typer.Context,
+        spec_file: Path = typer.Option(..., "--spec-file", "-f", help="Path to a pipeline.yaml."),
+        local: bool = typer.Option(
+            False, "--local", help="Run only the checks that need no platform (agents and context are not checked)."
+        ),
+        workspace: WorkspaceOption = None,
+    ) -> None:
+        """Check a pipeline.yaml without saving it. Exits 1 when there are errors."""
+        body = load_pipeline_file(spec_file)
+        if local:
+            issues = static_issues(body)
+            valid = not issues
+        else:
+            workspace = resolve_cli_workspace(typer_ctx, workspace)
+            client = _agents_client(_resolve_base_url(), workspace)
+            result = _run_sdk(
+                "POST agent API",
+                lambda: client.validate_pipeline_config(
+                    workspace=workspace, body=ValidatePipelineConfigRequest(body)
+                ).data(),
+            )
+            issues, valid = result.issues, result.valid
+        print_issues(issues)
+        if not valid:
+            raise typer.Exit(code=1)
+        typer.echo(f"Pipeline {body.get('name', spec_file.name)!r} is valid.")
+
+    @pipelines_app.command(name="explain")
+    def pipeline_explain() -> None:
+        """Print the JSON Schema of pipeline.yaml (usable for editor autocompletion)."""
+        typer.echo(json.dumps(PipelineConfig.model_json_schema(by_alias=True), indent=2))
+
+    @pipelines_app.command(name="list")
+    @collect_warnings
+    def pipeline_list(
+        ctx: typer.Context,
+        workspace: WorkspaceOption = None,
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+        all_pages: AllPagesOption = False,
+    ) -> None:
+        """List pipeline configs."""
+        workspace = resolve_cli_workspace(ctx, workspace)
+        client = _agents_client(_resolve_base_url(), workspace)
+        _print_list(
+            ctx,
+            client,
+            "list_pipeline_configs",
+            {"workspace": workspace},
+            default_columns=_PIPELINE_LIST_COLUMNS,
+            output_format=output_format,
+            no_truncate=no_truncate,
+            columns=columns,
+            all_pages=all_pages,
+        )
+
+    @pipelines_app.command(name="get")
+    def pipeline_get(
+        typer_ctx: typer.Context,
+        name: str = typer.Argument(..., help="Pipeline name."),
+        workspace: WorkspaceOption = None,
+        output_format: EntityOutputFormatOption = None,
+    ) -> None:
+        """Get a pipeline config by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        client = _agents_client(_resolve_base_url(), workspace)
+        _print_entity(typer_ctx, client, "get_pipeline_config", {"workspace": workspace, "name": name}, output_format)
+
+    @pipelines_app.command(name="delete")
+    def pipeline_delete(
+        typer_ctx: typer.Context,
+        name: str = typer.Argument(..., help="Pipeline name."),
+        workspace: WorkspaceOption = None,
+        yes: YesOption = False,
+    ) -> None:
+        """Delete a pipeline config by name."""
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        confirm_destructive(f"Delete pipeline config '{name}'?", yes=yes)
+        client = _agents_client(_resolve_base_url(), workspace)
+        _run_sdk("DELETE agent API", lambda: client.delete_pipeline_config(workspace=workspace, name=name).data())
+        typer.echo(f"Pipeline config '{name}' deleted.")
 
 
 def _register_post_run_action_commands(app: typer.Typer) -> None:

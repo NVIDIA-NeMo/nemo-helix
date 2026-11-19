@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Plan, implement and review a pull request. Uses the agents in examples/pr-pipeline/;
+# register them first, then: nemo agents pipeline-configs validate -f pr-pipeline.yaml
+
+version: 1
+name: pr-pipeline
+description: Plan, implement and review a pull request for a programming task.
+
+inputs:
+  task:
+    description: The programming task to implement.
+  review:
+    type: boolean
+    default: true
+    description: Set to false to skip the review step.
+
+steps:
+  - name: plan
+    agent: pr-planner              # gets the task (the only text input)
+
+  - name: write
+    agent: pr-writer
+    input: |
+      Implement the following plan for this programming task.
+
+      Task:
+      {{ inputs.task }}
+
+      Plan:
+      {{ steps.plan.response }}
+    retries: 1
+
+  - name: review
+    agent: pr-reviewer
+    when:
+      path: inputs.review
+      equals: true
+    input: |
+      Review the following change for this programming task.
+      {% raw %}Flag any template placeholders such as {{ name }} left in the change.{% endraw %}
+
+      Task:
+      {{ inputs.task }}
+
+      Change:
+      {{ previous.response }}

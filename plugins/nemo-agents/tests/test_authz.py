@@ -183,3 +183,20 @@ def test_job_factory_binding() -> None:
         for verb in ("create", "list", "read", "delete", "cancel")
     }
     assert expected_job_perms <= set(contrib.permissions)
+
+
+def test_pipeline_bindings() -> None:
+    contrib = _contribution()
+    expected = {
+        (f"{_BASE}/pipeline-configs", "post"): "agents.pipeline-configs.create",
+        (f"{_BASE}/pipeline-configs/validate", "post"): "agents.pipeline-configs.create",
+        (f"{_BASE}/pipeline-configs", "get"): "agents.pipeline-configs.list",
+        (f"{_BASE}/pipeline-configs/{{name}}", "get"): "agents.pipeline-configs.read",
+        (f"{_BASE}/pipeline-configs/{{name}}", "put"): "agents.pipeline-configs.update",
+        (f"{_BASE}/pipeline-configs/{{name}}", "delete"): "agents.pipeline-configs.delete",
+    }
+    for (path, method), permission in expected.items():
+        binding = contrib.endpoints[path][method]
+        assert binding.permissions == [permission], (path, method)
+        assert binding.callers == ["principal"]
+        assert permission in contrib.permissions

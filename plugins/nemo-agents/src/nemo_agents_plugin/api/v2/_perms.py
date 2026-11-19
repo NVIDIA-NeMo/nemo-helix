@@ -60,3 +60,11 @@ class ComputeSpecPerms(PermissionSet, namespace="agents.compute-specs"):
     LIST = perm("List agent compute specs")
     READ = perm("Read an agent compute spec")
     DELETE = perm("Delete an agent compute spec")
+
+
+class PipelineConfigPerms(PermissionSet, namespace="agents.pipeline-configs"):
+    CREATE = perm("Create and validate agent pipeline configs")
+    LIST = perm("List agent pipeline configs")
+    READ = perm("Read an agent pipeline config")
+    UPDATE = perm("Replace an agent pipeline config")
+    DELETE = perm("Delete an agent pipeline config")

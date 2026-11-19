@@ -103,6 +103,49 @@ the underlying invocation, bounded stream/collector cleanup, and regression
 tests for stalled invocations and cancellation during cleanup. Until that
 contract exists, jobs retain their non-streaming invocation.
 
+### Pipeline configs
+
+A pipeline config (`pipeline.yaml`) runs registered agents one after another.
+Each step names an agent and the data it gets; the agent's own settings stay
+in its `agent.yaml`, and run settings (image, environment, timeout) are given
+when the pipeline runs. The `agents.pipeline` job does not read these configs
+yet. Full example: [examples/pipeline-configs/pr-pipeline.yaml](examples/pipeline-configs/pr-pipeline.yaml).
+
+```yaml
+version: 1
+name: email-triage
+inputs:
+  email:
+    description: The raw email to triage.
+steps:
+  - name: triage
+    agent: email-security-triage     # gets the only text input
+    response_format: json            # answers {"verdict": "...", "indicators": [...]}
+  - name: reply
+    agent: reply-drafter
+    input: |
+      Verdict: {{ previous.response.verdict }}
+      Email: {{ inputs.email }}
+    context:
+      indicators: "{{ steps.triage.response.indicators }}"   # keeps the JSON list
+```
+
+- Placeholders are `{{ path }}` only: `inputs.<name>`, `previous.response`, or
+  `steps.<earlier step>.response` / `.output`, then `.key`, `[0]` or `["key"]`.
+  Use `{% raw %}...{% endraw %}` for literal braces.
+- A step without `input` gets the pipeline's single text input (first step) or
+  `{{ previous.response }}`.
+- A step with `when` may be skipped, so later steps cannot reference it.
+- `context` is stored in plain text; do not put secrets in it.
+
+```bash
+nemo agents pipeline-configs explain                     # every field, as JSON Schema
+nemo agents pipeline-configs validate -f pipeline.yaml   # add --local to skip the workspace checks
+nemo agents pipeline-configs create -f pipeline.yaml
+nemo agents pipeline-configs update email-triage -f pipeline.yaml   # replaces the stored config
+nemo agents pipeline-configs list | get <name> | delete <name>
+```
+
 ### Prerequisites
 
 | Requirement | Notes |

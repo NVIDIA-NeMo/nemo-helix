@@ -88,6 +88,7 @@ class AgentsService(NemoService):
             deployments,
             environments,
             gateway,
+            pipeline_configs,
             post_run_actions,
             sample_agent,
             sessions,
@@ -114,6 +115,12 @@ class AgentsService(NemoService):
                 environments.router,
                 tag="Agent Environments",
                 description="AgentEnvironment, EnvironmentSpec, and ComputeSpec CRUD",
+                prefix=_prefix,
+            ),
+            RouterSpec(
+                pipeline_configs.router,
+                tag="Agent Pipeline Configs",
+                description="Agent pipeline config CRUD and validation",
                 prefix=_prefix,
             ),
             RouterSpec(

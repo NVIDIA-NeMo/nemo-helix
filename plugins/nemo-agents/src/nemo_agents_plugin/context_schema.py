@@ -96,13 +96,19 @@ def _reference_locations(node: object, location: str) -> list[str]:
 
 def validate_context(context: dict[str, Any], schema: dict[str, Any]) -> None:
     """Raise ``ValueError`` listing every way *context* violates *schema*."""
+    errors = context_errors(context, schema)
+    if not errors:
+        return
+    messages = "; ".join(f"{_location(path)}: {message}" for path, message in errors)
+    raise ValueError(f"context does not match the agent's context_schema: {messages}")
+
+
+def context_errors(context: dict[str, Any], schema: dict[str, Any]) -> list[tuple[tuple[str | int, ...], str]]:
+    """Every way *context* violates *schema*, as ``(path inside context, message)`` pairs."""
     validator_cls = validator_for(schema, default=Draft202012Validator)
     validator = validator_cls(schema, format_checker=_FORMAT_CHECKER, registry=_NO_REMOTE_REFS)
     errors = sorted(validator.iter_errors(context), key=lambda error: [str(part) for part in error.absolute_path])
-    if not errors:
-        return
-    messages = "; ".join(f"{_location(error.absolute_path)}: {error.message}" for error in errors)
-    raise ValueError(f"context does not match the agent's context_schema: {messages}")
+    return [(tuple(error.absolute_path), error.message) for error in errors]
 
 
 def _location(path: Any) -> str:
