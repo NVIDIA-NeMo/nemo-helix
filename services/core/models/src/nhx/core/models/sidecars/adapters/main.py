@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 ADAPTER_META_FILENAME = "nhx_adapter_meta.json"
 
+# vLLM's adapter errors name the modules it expected and the ones it received, which is
+# well over 300 characters for a large model. Warnings keep enough of it to diagnose from.
+VLLM_ERROR_LOG_LIMIT = 2000
+
 
 class AdaptersController(HeartbeatMixin, Controller):
     def __init__(self, stop_signal: threading.Event | None = None):
@@ -362,7 +366,9 @@ class AdaptersController(HeartbeatMixin, Controller):
         if status == 400 and "already" in body.lower():
             logger.debug(f"LoRA adapter {lora_name!r} already loaded in vLLM")
             return True
-        logger.warning(f"vLLM load_lora_adapter failed for {lora_name!r} (status={status}): {body[:300]}")
+        logger.warning(
+            f"vLLM load_lora_adapter failed for {lora_name!r} (status={status}): {body[:VLLM_ERROR_LOG_LIMIT]}"
+        )
         return False
 
     def _unload_vllm_adapter(self, lora_name: str) -> bool:
@@ -394,7 +400,7 @@ class AdaptersController(HeartbeatMixin, Controller):
             # deleting it and orphaning the adapter in vLLM until a restart.
             logger.warning(
                 f"vLLM unload_lora_adapter for {lora_name!r} returned server error "
-                f"(status={status}), will retry: {body[:200]}"
+                f"(status={status}), will retry: {body[:VLLM_ERROR_LOG_LIMIT]}"
             )
             return False
         # Non-2xx, non-5xx (e.g. 404 "not loaded"): vLLM answered and the adapter

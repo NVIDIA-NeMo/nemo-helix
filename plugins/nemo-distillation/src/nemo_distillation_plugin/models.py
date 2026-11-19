@@ -66,7 +66,13 @@ class DeploymentInput(BaseModel):
 
 
 class LoraHyperparameters(BaseModel):
-    """LoRA settings. Unset fields keep the customizer's default (rank 16, alpha 32)."""
+    """LoRA settings. Unset fields keep the customizer's default (rank 16, alpha 32).
+
+    With neither module list set the adapter covers every linear layer, which can include modules the
+    serving engine cannot load an adapter for. ``target_modules`` names what to adapt and
+    ``exclude_modules`` (patterns such as ``*.out_proj``) names what to skip. The customizer accepts
+    only one of the two.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -74,6 +80,13 @@ class LoraHyperparameters(BaseModel):
     alpha: int | None = Field(default=None, gt=0)
     dropout: float | None = Field(default=None, ge=0, le=1)
     target_modules: list[str] | None = None
+    exclude_modules: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _one_module_list(self) -> LoraHyperparameters:
+        if self.target_modules and self.exclude_modules:
+            raise ValueError("set target_modules or exclude_modules, not both")
+        return self
 
 
 class ScheduleHyperparameters(BaseModel):

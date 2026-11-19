@@ -18,6 +18,7 @@ from samples import inputs
         {"name": "a", "hyperparameters": {"optimizer": {"learning_rate": 0}}},
         {"name": "a", "hyperparameters": {"optimizer": {"lr_decay_style": "step"}}},
         {"name": "a", "hyperparameters": {"lora": {"rank": 0}}},
+        {"name": "a", "hyperparameters": {"lora": {"target_modules": ["q_proj"], "exclude_modules": ["*.out_proj"]}}},
         {"name": "a", "hyperparameters": {"batch": {"global_batch_size": -1}}},
         {"name": "a", "finetuning_type": "all_weights", "hyperparameters": {"lora": {"rank": 8}}},
     ],
