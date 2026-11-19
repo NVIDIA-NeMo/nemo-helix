@@ -158,7 +158,8 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
         default=None,
         description=(
             "How the image starts by default, read from its config when it became `ready`. None for an image "
-            "completed before Builder recorded it, or whose config couldn't be read."
+            "completed before Builder recorded it, one whose config couldn't be read, or one a remote build "
+            "service built."
         ),
     )
     external: ExternalImage | None = Field(

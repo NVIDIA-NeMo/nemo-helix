@@ -233,6 +233,10 @@ class TestWhatARemoteBuildHandsItsService:
     """``fetch_context`` then ``stage_context``, as the remote-build step runs them for each image."""
 
     @staticmethod
+    def _files(context: Path) -> list[str]:
+        return sorted(path.relative_to(context).as_posix() for path in context.rglob("*") if path.is_file())
+
+    @staticmethod
     def _context(files: dict[str, bytes], source: ContextSource, dockerfile: str, root: Path) -> Path:
         image = RemoteBuildImage(image="demo-1", source=source, dockerfile=dockerfile, platform="linux/amd64")
         return stage_context(fetch_context(_client(files), image, workspace="default", root=root), image.dockerfile)
@@ -245,9 +249,8 @@ class TestWhatARemoteBuildHandsItsService:
 
         assert tmp_path in context.parents
         assert (context / "Dockerfile").read_bytes() == b"FROM app"
-        assert (context / "main.py").read_bytes() == b"print()"
-        # The subtree is the whole context: nothing above it came along.
-        assert not (context / "README").exists()
+        # The subtree is the whole context, with the named Dockerfile also at its root.
+        assert self._files(context) == ["Dockerfile", "docker/Dockerfile", "main.py"]
 
     def test_a_directory_of_an_archive_with_its_dockerfile_moved_to_the_root(self, tmp_path: Path) -> None:
         task = TASK | {"environment/docker/Dockerfile": b"FROM elsewhere"}
@@ -257,8 +260,7 @@ class TestWhatARemoteBuildHandsItsService:
 
         # The directory's own root Dockerfile gives way to the one the spec names.
         assert (context / "Dockerfile").read_bytes() == b"FROM elsewhere"
-        assert (context / "run.sh").read_bytes() == b"#!/bin/sh"
-        assert not (context / "tests").exists()
+        assert self._files(context) == ["Dockerfile", "docker/Dockerfile", "run.sh"]
 
 
 class TestHostileListings:

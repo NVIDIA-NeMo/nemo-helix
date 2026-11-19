@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The remote backend: a build service outside this cluster builds, signs and publishes each image.
+"""The remote backend: a build service outside this cluster builds and publishes each image.
 
 It names no service. It compiles one job step, which runs the image the deployment names; that image holds the
 service's client (see ``run/remote.py`` for the driver such a step program runs).

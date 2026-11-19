@@ -66,7 +66,7 @@ class SandboxConfig(BaseModel):
 
 
 class RemoteConfig(BaseModel):
-    """The `remote` backend: a build service outside this cluster builds, signs and publishes each image.
+    """The `remote` backend: a build service outside this cluster builds and publishes each image.
 
     Nothing here names a service. The step image holds the service's client; its Jobs profile holds whatever that
     client reads from its environment. From the environment, the section is one JSON value, ``NEMO_BUILDER_REMOTE``.

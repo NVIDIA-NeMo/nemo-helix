@@ -22,6 +22,7 @@ from nemo_builder_plugin.run import remote as driver
 from nemo_builder_plugin.run.fetch import ArchiveRefused
 from nemo_builder_plugin.run.remote import (
     CANCEL_PAUSE_SECONDS,
+    CANCEL_SECONDS,
     CANCEL_TRIES,
     COMPLETION_SECONDS,
     FAILURE_MARKER,
@@ -54,6 +55,8 @@ from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildImage, R
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
 
 DESTINATION = "registry.example.com/team/images"
+#: What follows a reason when the build was to be cancelled and the service couldn't be told.
+UNCANCELLED = "[build build-1; the service could not be told to stop it, it may still be running]"
 DIGEST = "sha256:" + "d" * 64
 ATTEMPT = JobAttempt(workspace="default", job_uid="job-uid-1", attempt_id="attempt-1")
 
@@ -399,8 +402,11 @@ class TestRetrying:
         lost: list[str | Exception] = [RetryableError("connection reset")] * 9
         service = FakeService([DONE], start=[*lost, OverBudgetError("busy"), *lost, "build-1"])
         builder = FakeBuilder()
-        assert _run(service, builder, context, tmp_path, config=_config(timeout=3600)) == 0
+        clock = FakeClock()
+        assert _run(service, builder, context, tmp_path, config=_config(timeout=3600), clock=clock) == 0
         assert (len(service.started), len(builder.completed)) == (20, 1)
+        # After the busy answer, the waits for lost responses start from the shortest again.
+        assert clock.sleeps[8:12] == [MAX_BACKOFF_SECONDS, 2.0, 2.0, 4.0]
 
     def test_a_start_rides_out_a_service_that_is_down_for_a_few_minutes(self, context: Path, tmp_path: Path) -> None:
         """Queued builds reach their slot one after another: a short outage must not fail each in turn."""
@@ -434,6 +440,8 @@ class TestRetrying:
         assert clock.now < 300
         assert max(clock.sleeps) == MAX_BACKOFF_SECONDS
         assert "queue full; still failing at the build timeout" in caplog.text
+        # The service answered every time, and never that it had started anything.
+        assert "a build may be running" not in caplog.text
 
     def test_one_lost_response_after_a_long_wait_for_budget_is_still_repeated(
         self, context: Path, tmp_path: Path
@@ -545,6 +553,7 @@ class TestABuildThatFails:
             assert _run(service, FakeBuilder(), context, tmp_path, cancelled=lambda: True, fetch=fetch) == 1
         assert (fetched, service.started) == ([], [])
         assert f"{FAILURE_MARKER} demo-1: {STOPPED}" in caplog.text
+        assert "a build may be running" not in caplog.text
 
     def test_a_stop_while_the_context_is_fetched_starts_nothing(self, context: Path, tmp_path: Path) -> None:
         """Jobs ends a step seconds after it starts when its time is already up: the signal lands mid-fetch."""
@@ -614,10 +623,7 @@ class TestABuildThatFails:
         with caplog.at_level(logging.ERROR):
             assert _run(service, FakeBuilder(), context, tmp_path) == 1
         # The reason stands, and what follows it says the build this step started may still be running.
-        assert (
-            f"{FAILURE_MARKER} demo-1: reading the build: 404: no such build "
-            "[build build-1; not cancelled, it may still be running]"
-        ) in caplog.text
+        assert f"{FAILURE_MARKER} demo-1: reading the build: 404: no such build {UNCANCELLED}" in caplog.text
         # Not an error that says "try again": one try.
         assert service.cancelled == ["build-1"]
 
@@ -645,20 +651,72 @@ class TestABuildThatFails:
         # Waited between the tries although the job was told to stop: the step's own sleep would not have. The one
         # sleep is the poll before the stop was seen.
         assert (clock.pauses, clock.sleeps) == ([CANCEL_PAUSE_SECONDS] * (CANCEL_TRIES - 1), [POLL_SECONDS])
-        assert f"{STOPPED} [build build-1; not cancelled, it may still be running]" in caplog.text
+        assert f"{STOPPED} {UNCANCELLED}" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("statuses", "timeout", "reason"),
+        [
+            ([BUILDING], 35, "timed out after 35s, while building (submitting)"),
+            ([RemoteBuildStatus("succeeded")], 600, "a stage the driver doesn't know: 'succeeded'"),  # ty: ignore[invalid-argument-type]
+            ([KeyError("state")], 600, "reading the build: unexpected KeyError: 'state'"),
+        ],
+        ids=["timed-out", "unknown-stage", "a-bug-in-the-client"],
+    )
+    def test_whyever_a_build_is_cancelled_a_cancel_that_fails_is_said_on_the_row(
+        self,
+        statuses: list[RemoteBuildStatus | Exception],
+        timeout: int,
+        reason: str,
+        context: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A service that is busy is asked again too, as one that didn't answer is."""
+        service = FakeService(statuses, cancel=OverBudgetError("429"))
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=timeout)) == 1
+        assert service.cancelled == ["build-1"] * CANCEL_TRIES
+        assert f"{reason} {UNCANCELLED}" in caplog.text
+
+    def test_a_driver_that_breaks_while_the_build_runs_says_when_it_could_not_cancel(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class Shapeless(FakeService):
+            def status(self, build_id: str) -> RemoteBuildStatus:
+                self.polled.append(build_id)
+                return object()  # ty: ignore[invalid-return-type]
+
+        service = Shapeless([DONE], cancel=ConnectionError("reset"))
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path) == 1
+        assert service.cancelled == ["build-1"]
+        assert "unexpected AttributeError" in caplog.text
+        assert UNCANCELLED in caplog.text
 
     def test_cancelling_does_not_outlast_the_time_a_stopped_pod_has(self, context: Path, tmp_path: Path) -> None:
-        """Each call is bounded by the client's own timeouts, not by the driver. Slow ones are not repeated."""
-        clock = FakeClock()
+        """Each call is bounded by the client's own timeouts, not by the driver. One is repeated only if another
+        as slow would still end in time."""
 
-        class Slow(FakeService):
-            def cancel(self, build_id: str) -> None:
-                clock.now += 15.0
-                super().cancel(build_id)
+        def cancelling(seconds: float) -> tuple[int, float]:
+            clock = FakeClock()
+            began: list[float] = []
 
-        service = Slow([BUILDING], cancel=RetryableError("timed out"))
-        assert _run(service, FakeBuilder(), context, tmp_path, stop_after_polls=1, clock=clock) == 1
-        assert service.cancelled == ["build-1"] * 2
+            class Slow(FakeService):
+                def cancel(self, build_id: str) -> None:
+                    began.append(clock.now)
+                    clock.now += seconds
+                    super().cancel(build_id)
+
+            service = Slow([BUILDING], cancel=RetryableError("timed out"))
+            assert _run(service, FakeBuilder(), context, tmp_path, stop_after_polls=1, clock=clock) == 1
+            return len(service.cancelled), clock.now - began[0]
+
+        # How many tries, and how long they took in all.
+        assert cancelling(0.0) == (3, 2 * CANCEL_PAUSE_SECONDS)
+        assert cancelling(5.0) == (3, 19.0)
+        assert cancelling(9.0) == (1, 9.0)
+        assert cancelling(15.0) == (1, 15.0)
+        assert all(cancelling(seconds)[1] < CANCEL_SECONDS for seconds in (0.0, 1.0, 3.0, 5.0, 6.0, 8.0, 9.0, 12.0))
 
     def test_a_stage_the_driver_doesnt_know_fails_at_once_and_cancels_the_build(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -1043,14 +1101,14 @@ class TestIdentity:
 
 @pytest.fixture
 def signals() -> Iterator[None]:
-    """``step_main`` installs signal handlers and puts a filter on each log handler; put the test runner's back."""
+    """``step_main`` installs signal handlers, and takes the credential out of every record logged from then on;
+    put the test runner's handlers and its way of making records back."""
     saved = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)}
-    filters = [(handler, handler.filters[:]) for handler in logging.getLogger().handlers]
+    make_record = logging.getLogRecordFactory()
     yield
     for number, handler in saved.items():
         signal.signal(number, handler)
-    for log_handler, kept in filters:
-        log_handler.filters[:] = kept
+    logging.setLogRecordFactory(make_record)
 
 
 class TestTheStepProgram:
@@ -1154,7 +1212,7 @@ class TestTheStepProgram:
         assert "build build-1: building (authorised as [credential])" in caplog.text
 
     def test_a_client_that_cant_be_set_up_fails_every_image_and_says_why(
-        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+        self, step: dict[str, list], tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         def make_service(config: RemoteBuildStepConfig, credential: str | None) -> FakeService:
             raise ValueError(f"no endpoint is configured for {credential}")
@@ -1165,6 +1223,8 @@ class TestTheStepProgram:
         assert (
             f"{FAILURE_MARKER} demo-1: the step could not start: ValueError: no endpoint is configured for [credential]"
         ) in caplog.text
+        # The step's own directory is made last, so a step that fails before it leaves nothing on task storage.
+        assert list((tmp_path / "task-storage").iterdir()) == []
 
     def test_a_step_that_cant_start_says_why_on_each_images_line(
         self, step: dict[str, list], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -1278,7 +1338,7 @@ class TestTheStepProgram:
         except ValueError:
             record = logging.LogRecord("x", logging.ERROR, __file__, 1, "the call failed", None, sys.exc_info())
         record.stack_info = "Stack (most recent call last):\n  authorise('token-value')"
-        assert driver._Redacted("token-value").filter(record) is True
+        driver._redact_record(record, driver._redactor("token-value"))
         printed = logging.Formatter().format(record)
         assert "token-value" not in printed
         assert "ValueError: refused: Bearer [credential]" in printed
@@ -1286,5 +1346,63 @@ class TestTheStepProgram:
 
     def test_the_credential_never_reaches_the_log(self, caplog: pytest.LogCaptureFixture) -> None:
         record = logging.LogRecord("x", logging.ERROR, __file__, 1, "refused: %s", ("Bearer token-value",), None)
-        assert driver._Redacted("token-value").filter(record) is True
+        driver._redact_record(record, driver._redactor("token-value"))
         assert record.getMessage() == "refused: Bearer [credential]"
+
+    def test_a_record_with_nothing_to_take_out_is_left_as_it_was_logged(self) -> None:
+        record = logging.LogRecord("x", logging.INFO, __file__, 1, "build %s: %s", ("build-1", "queued"), None)
+        driver._redact_record(record, driver._redactor("token-value"))
+        assert (record.msg, record.args) == ("build %s: %s", ("build-1", "queued"))
+
+    def test_a_log_call_that_doesnt_fit_its_message_neither_raises_nor_prints_the_credential(self) -> None:
+        """Logging never raises into the code that logs. A handler would report such a call by printing its
+        message and arguments as they are."""
+        record = logging.LogRecord("x", logging.WARNING, __file__, 1, "try %d of %d", ("token-value",), None)
+        driver._redact_record(record, driver._redactor("token-value"))
+        assert logging.Formatter().format(record) == "try %d of %d (logged with ('[credential]',))"
+
+    @pytest.mark.parametrize(
+        "quoted",
+        [
+            "Invalid header value b'Bearer dXNlcjpw\\nYXNz'",
+            'body was {"token": "dXNlcjpw\\nYXNz"}',
+            "GET /builds?key=dXNlcjpw%0AYXNz failed",
+            "line 2 of the key is malformed: YXNzd29yZA==",
+        ],
+        ids=["repr", "json", "url", "one-line-of-it"],
+    )
+    def test_a_credential_an_error_quotes_or_escapes_is_taken_out_too(self, quoted: str) -> None:
+        """An HTTP client that refuses a header prints it with its line break escaped."""
+        redact = driver._redactor("dXNlcjpw\nYXNz" if "YXNzd29yZA" not in quoted else "dXNlcjpw\nYXNzd29yZA==")
+        assert "YXNz" not in redact(quoted)
+        assert "[credential]" in redact(quoted)
+
+    def test_taking_a_credential_out_twice_changes_nothing_more(self) -> None:
+        """A reason is redacted before and after it is made one line, and a short credential may be part of the
+        mark that takes its place."""
+        redact = driver._redactor("cred")
+        once = redact("refused: cred is not known")
+        assert once == "refused: [credential] is not known"
+        assert redact(once) == once
+
+    def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(
+        self, signals: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A client may log through a logger that doesn't pass its records up, to a handler of its own."""
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        client_log = logging.getLogger("some.build.client")
+        client_log.propagate = False
+        driver.redact_log("token-value")
+        handler = Own()
+        client_log.addHandler(handler)
+        try:
+            client_log.warning("sent Authorization: Bearer %s", "token-value")
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == ["sent Authorization: Bearer [credential]"]

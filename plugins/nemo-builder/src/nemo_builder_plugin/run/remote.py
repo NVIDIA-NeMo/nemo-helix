@@ -18,6 +18,7 @@ driver logs for an image, and nothing a submitter chooses is logged with a line 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -29,7 +30,8 @@ import traceback
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Literal, Protocol, TypeVar, get_args
+from typing import Any, Literal, Protocol, TypeVar, get_args
+from urllib.parse import quote, quote_plus
 
 from nemo_builder_plugin.client import BuilderClient
 from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
@@ -70,10 +72,15 @@ START_PATIENCE_SECONDS = 600.0
 #: How long it keeps trying to complete a row whose image is built, when the builder can't be reached.
 COMPLETION_SECONDS = 300.0
 #: How many times it asks a service to cancel one build, how long it waits between two tries, and how long it
-#: spends on it in all. Short: a pod has about 30 seconds from the stop signal.
+#: means to spend on it in all: a try is repeated only if one as slow would still end within that. A call the
+#: driver has made can't be cut short. Short: a pod has about 30 seconds from the stop signal.
 CANCEL_TRIES = 3
 CANCEL_PAUSE_SECONDS = 2.0
 CANCEL_SECONDS = 20.0
+#: What takes a credential's place in a text.
+REDACTED = "[credential]"
+#: The shortest part of a credential that is taken out on its own: one line of a credential of several.
+_MIN_PART_CHARS = 8
 
 #: Marks the one line that says why an image wasn't built: ``NHX_BUILD_FAILED <row name>: <reason>``.
 FAILURE_MARKER = "NHX_BUILD_FAILED"
@@ -170,7 +177,12 @@ class RemoteBuildService(Protocol):
     def status(self, build_id: str) -> RemoteBuildStatus: ...
 
     def cancel(self, build_id: str) -> None:
-        """Ask the service to stop. It may finish anyway."""
+        """Ask the service to stop. It may finish anyway.
+
+        Safe to repeat: the driver asks again, a few times, when this raises :class:`RetryableError` or
+        :class:`OverBudgetError`. It returns normally for a build that has already ended or been cancelled: any
+        error is taken to mean the build may still be running, and the image's row then says so.
+        """
         ...
 
 
@@ -339,11 +351,15 @@ def _cancel(service: RemoteBuildService, build_id: str, *, clock: Clock) -> bool
     tries = 0
     while True:
         tries += 1
+        asked = clock.monotonic()
         try:
             service.cancel(build_id)
         except (RetryableError, OverBudgetError) as exc:
             failure: Exception = exc
-            if tries < CANCEL_TRIES and clock.monotonic() - began + CANCEL_PAUSE_SECONDS < CANCEL_SECONDS:
+            now = clock.monotonic()
+            # Another try may take as long as this one did, and must still end within the time there is.
+            ends = (now - began) + CANCEL_PAUSE_SECONDS + (now - asked)
+            if tries < CANCEL_TRIES and ends < CANCEL_SECONDS:
                 clock.pause(CANCEL_PAUSE_SECONDS)
                 continue
         except Exception as exc:
@@ -363,7 +379,7 @@ def _cancel(service: RemoteBuildService, build_id: str, *, clock: Clock) -> bool
 def _ending(build_id: str, *, uncancelled: bool = False) -> str:
     """What follows an image's reason: the service's name for its build, and whether that build may live on."""
     if uncancelled:
-        return f" [build {build_id}; not cancelled, it may still be running]"
+        return f" [build {build_id}; the service could not be told to stop it, it may still be running]"
     return f" [build {build_id}]"
 
 
@@ -376,7 +392,12 @@ def _wait(
     timeout_seconds: int,
     cancelled: Callable[[], bool],
 ) -> RemoteBuildStatus:
-    """Poll until the build ends. Cancels it, and raises, if the deadline passes or the job is told to stop."""
+    """Poll until the build ends.
+
+    Cancels it, and raises, if the deadline passes, the job is told to stop, its status can't be read, or the
+    service's client reports a stage the driver doesn't know. The :class:`ImageFailed` says whether the service
+    could be told (``uncancelled``).
+    """
     last: str | None = None
     while True:
         try:
@@ -556,20 +577,35 @@ def _report(image: str, reason: str, ending: str = "", *, room: int = MAX_REASON
 
 
 def _redactor(secret: str | None) -> Callable[[str], str]:
-    """Takes ``secret`` out of a text: as it is, as a log line would hold it, and as a one-line reason would.
+    """Takes ``secret`` out of a text, in each form a text may hold it.
 
-    The three differ for a secret of more than one line, such as a key file: a log line drops its line breaks, and
-    a reason turns them into spaces.
+    As it is. As a log line holds it, without its line breaks, and as a one-line reason does, with a space for
+    each: the two differ for a secret of more than one line, such as a key file. As an error that quotes it
+    holds it: escaped, as ``repr`` or JSON write it, or as a URL does. And for a secret of several lines, each
+    line long enough to be worth taking out on its own.
     """
     if not secret:
         return lambda text: text
+    forms = {
+        secret,
+        sanitize_for_log(secret),
+        _one_line(secret),
+        repr(secret)[1:-1],
+        json.dumps(secret)[1:-1],
+        json.dumps(secret, ensure_ascii=False)[1:-1],
+        secret.encode("unicode_escape").decode("ascii"),
+        quote(secret, safe=""),
+        quote_plus(secret),
+    }
+    lines = [line.strip() for line in secret.splitlines()]
+    if len(lines) > 1:
+        forms.update(line for line in lines if len(line) >= _MIN_PART_CHARS)
     # The longest first, so that one form is never left as the remains of another.
-    forms = sorted({secret, sanitize_for_log(secret), _one_line(secret)}, key=len, reverse=True)
+    found = re.compile("|".join(re.escape(form) for form in sorted(forms - {""}, key=len, reverse=True)))
 
     def redact(text: str) -> str:
-        for form in forms:
-            text = text.replace(form, "[credential]")
-        return text
+        # What is already taken out is not read again: a short credential may be part of the mark itself.
+        return REDACTED.join(found.sub(REDACTED, part) for part in text.split(REDACTED))
 
     return redact
 
@@ -664,26 +700,40 @@ def take_credential(environ: MutableMapping[str, str]) -> str:
     return value
 
 
-class _Redacted(logging.Filter):
-    """Keeps the credential out of the step's log, should a service's error message repeat it."""
+def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> logging.LogRecord:
+    """``record``, with the credential out of everything a handler prints of it."""
+    try:
+        message, formatted = record.getMessage(), True
+    except Exception:
+        # A log call whose arguments don't fit its message. A handler would report that by printing both as
+        # they are, so they are put together here, where the credential can be taken out of them.
+        message, formatted = f"{record.msg} (logged with {record.args!r})", False
+    if (redacted := redact(message)) != message or not formatted:
+        record.msg, record.args = redacted, None
+    # A formatter prints the exception and the stack after the message, and an exception's own text with it.
+    # It prints `exc_text` as it finds it, so the redacted text is put there first.
+    if record.exc_info and not record.exc_text:
+        record.exc_text = logging.Formatter().formatException(record.exc_info)
+    if record.exc_text:
+        record.exc_text = redact(record.exc_text)
+    if record.stack_info:
+        record.stack_info = redact(record.stack_info)
+    return record
 
-    def __init__(self, secret: str) -> None:
-        super().__init__()
-        self._redact = _redactor(secret)
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        if (redacted := self._redact(message)) != message:
-            record.msg, record.args = redacted, None
-        # A formatter prints the exception and the stack after the message, and an exception's own text with it.
-        # It prints `exc_text` as it finds it, so the redacted text is put there first.
-        if record.exc_info and not record.exc_text:
-            record.exc_text = logging.Formatter().formatException(record.exc_info)
-        if record.exc_text:
-            record.exc_text = self._redact(record.exc_text)
-        if record.stack_info:
-            record.stack_info = self._redact(record.stack_info)
-        return True
+def redact_log(secret: str) -> None:
+    """From here on, every record this process logs has ``secret`` taken out of it.
+
+    Where records are made, not on the handlers there are now: a service's client may log through a logger that
+    doesn't pass its records up, or add a handler of its own later.
+    """
+    redact = _redactor(secret)
+    make = logging.getLogRecordFactory()
+
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        return _redact_record(make(*args, **kwargs), redact)
+
+    logging.setLogRecordFactory(factory)
 
 
 def stop_requested() -> Callable[[], bool]:
@@ -740,8 +790,7 @@ def step_main(
             credential = (read_credential() if read_credential is not None else "").strip() or None
         if credential is not None:
             redact = _redactor(credential)
-            for handler in logging.getLogger().handlers:
-                handler.addFilter(_Redacted(credential))
+            redact_log(credential)
         attempt = JobAttempt.from_environment(os.environ)
         # As `service:builder`, acting for the submitter through the job's delegation.
         client = get_task_nemo_client("builder")

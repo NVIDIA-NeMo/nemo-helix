@@ -394,7 +394,7 @@ status is `queued` and the rows stay `pending`.
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
 | `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail five minutes on. Or you're a service that isn't acting for a person. |
-| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. A `409` that refuses the request itself carries a `code` beside its `detail`: `backend_rejected` (the deployment or its backend can't build this), `missing_secrets`, or `backend_changed` (another backend built this revision). A revision another request holds has none. |
+| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. Some `409`s carry a `code` beside their `detail`. `backend_rejected` (the deployment or its backend can't build this) and `missing_secrets` refuse the request itself, whatever its revision. `backend_changed` refuses only this revision, which another backend built: submit the next. A revision another request holds has no `code`. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
@@ -417,7 +417,7 @@ service on its own permissions, so the service checks its user may read images h
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the image is published at, set when the row becomes `ready`: the one the push step pushed and signed, or the one a remote build service published. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
-| `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or whose config couldn't be read. |
+| `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, one whose config couldn't be read, or one the `remote` backend built. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). |
 | `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and reads none of them. |
 
@@ -570,7 +570,7 @@ images still build, push and complete. The failed image's row fails once the job
 
 Unless it says otherwise, the rest of this README describes the default backend, `execution`, which
 builds in this cluster. A deployment can instead set `builder.backend: remote`, and a build service outside the cluster then
-builds, signs and publishes every image. The API, the rows and the caller's requests stay the same.
+builds and publishes every image. The API, the rows and the caller's requests stay the same.
 The plugin names no service: the deployment names a step image that holds the service's client.
 
 ```yaml
@@ -585,7 +585,7 @@ builder:
     credential_secret: null              # or <workspace>/<name> of a platform secret holding the credential
     platforms: [linux/amd64]
     max_specs_per_set: 1
-    allow_dockerfile_path: true          # false refuses a Dockerfile that isn't at the context root
+    allow_dockerfile_path: true          # false refuses any Dockerfile but `Dockerfile` at the context root
     build_timeout_seconds: 3600          # for one image, from when the service is asked to start
 ```
 
@@ -601,8 +601,8 @@ What differs for a caller:
 - A spec with `output`, `mounts` or an image to copy is refused with `409`, as is a platform outside
   `platforms` and a set of more than `max_specs_per_set` images. The answer's `code` is
   `backend_rejected`; a revision another request holds is a `409` with no `code`. Evals asks for
-  both of the first two: it builds agent layers with `mounts` and copies prebuilt task images, so
-  this backend refuses those builds.
+  two of these: it builds agent layers with `mounts` and copies prebuilt task images, so this
+  backend refuses those builds.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. An ignore file named for it (`<its path>.dockerignore`)
   isn't moved with it. With `allow_dockerfile_path: false`, such a spec is refused instead, with
@@ -627,7 +627,9 @@ What an operator sets up:
   types that tell the driver whether to repeat a call, wait, or fail the image. The driver does the
   rest: the context, the deadline, polling, cancelling when the job is told to stop, and completing
   rows. Each of the three calls must bound its own time: the driver can't interrupt one, and a pod
-  has about 30 seconds from the stop signal to cancel its build.
+  has about 30 seconds from the stop signal to cancel its build. `cancel` must be safe to repeat,
+  and must return normally for a build that has already ended: the driver asks up to three times,
+  and takes any error to mean the build may still be running.
 - The Jobs profile, written in full: a profile added under `jobs.executors` inherits nothing from
   `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
   security context, as the chart does for the in-cluster build profiles. Its `max_active_jobs` caps
@@ -860,7 +862,9 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 
 ## Limitations
 
-These describe the default `execution` backend. What differs with `backend: remote` is in
+Unless a bullet says otherwise, these describe the default `execution` backend. Those about
+submitting, completing, platform auth and fetching a context hold for `backend: remote` too. What
+differs with it is in
 [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster).
 
 ### Deployment
