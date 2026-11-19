@@ -295,7 +295,7 @@ path_under_denied_prefix(path, prefix) if {
 
 # Deny direct secret value access for non-service principals (including HelixAdmin).
 # Secret values must only be accessed through the service delegation pattern, where a
-# service principal reads the value on behalf of a user with secrets.access permission.
+# service principal or verified delegated workload reads for a creator with secrets.read.
 # Matches: /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access
 deny_request if {
 	path := extract_path
@@ -307,6 +307,7 @@ deny_request if {
 	path_parts[8] == "access"
 
 	request_caller_kind != "service_principal"
+	not data.common.verified_delegated_secret_request
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
