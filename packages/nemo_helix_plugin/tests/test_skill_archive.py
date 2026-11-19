@@ -9,12 +9,15 @@ import hashlib
 import io
 import os
 import shutil
+import stat
 import tarfile
 import unicodedata
 from dataclasses import replace
 from pathlib import Path
+from typing import IO
 
 import pytest
+from nemo_helix_plugin import skill_archive
 from nemo_helix_plugin.skill_archive import (
     DEFAULT_LIMITS,
     MAX_FRONTMATTER_BYTES,
@@ -25,6 +28,7 @@ from nemo_helix_plugin.skill_archive import (
     SkillArchivePathError,
     SkillFrontmatterError,
     build_skill_archive,
+    extract_skill_archive,
     parse_skill_frontmatter,
     verify_skill_archive,
 )
@@ -179,12 +183,13 @@ def test_top_level_evals_is_excluded_but_nested_evals_is_kept(tmp_path: Path) ->
 def test_root_is_renamed_to_frontmatter_name(tmp_path: Path) -> None:
     source = make_skill(tmp_path / "some-checkout-dir")
     archive, files_hash = build(source, tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
 
-    info = verify_skill_archive(archive, expected_files_hash=files_hash)
+    extracted = extract_skill_archive(archive, dest, expected_files_hash=files_hash)
 
-    assert info.skill_name == "pdf-tools"
-    with tarfile.open(archive) as tar:
-        assert {name.split("/", 1)[0] for name in tar.getnames()} == {"pdf-tools"}
+    assert extracted == dest / "pdf-tools"
+    assert sorted(p.name for p in dest.iterdir()) == ["pdf-tools"]
 
 
 def test_build_info_describes_archive(tmp_path: Path) -> None:
@@ -205,13 +210,12 @@ def test_long_and_non_ascii_paths_round_trip(tmp_path: Path) -> None:
     deep.mkdir(parents=True)
     (deep / "résumé.txt").write_text("long")
     archive, files_hash = build(source, tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
 
-    verify_skill_archive(archive, expected_files_hash=files_hash)
+    extracted = extract_skill_archive(archive, dest, expected_files_hash=files_hash)
 
-    with tarfile.open(archive) as tar:
-        stored = tar.extractfile(f"pdf-tools/{'d' * 60}/{'e' * 60}/résumé.txt")
-        assert stored is not None
-        assert stored.read() == b"long"
+    assert (extracted / ("d" * 60) / ("e" * 60) / "résumé.txt").read_text() == "long"
 
 
 def test_build_refuses_existing_archive_path(tmp_path: Path) -> None:
@@ -419,6 +423,11 @@ def test_verify_rejects_malicious_members(
     files_hash = craft(archive, [*members, *extra])
     with pytest.raises(error, match=match):
         verify_skill_archive(archive, expected_files_hash=files_hash)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with pytest.raises(error):
+        extract_skill_archive(archive, dest, expected_files_hash=files_hash)
+    assert list(dest.iterdir()) == []
 
 
 def test_verify_rejects_non_normalised_ownership(tmp_path: Path) -> None:
@@ -472,6 +481,88 @@ def test_verify_rejects_gzip_and_garbage(tmp_path: Path) -> None:
     garbage.write_bytes(b"not a tar" * 100)
     with pytest.raises(SkillArchiveError):
         verify_skill_archive(garbage, expected_files_hash=sha256(garbage))
+
+
+# ---------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------
+
+
+def test_extract_round_trips_content_and_modes(tmp_path: Path) -> None:
+    source = make_skill(tmp_path / "src")
+    archive, files_hash = build(source, tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    extracted = extract_skill_archive(archive, dest, expected_files_hash=files_hash)
+
+    assert (extracted / "SKILL.md").read_text() == SKILL_MD
+    assert (extracted / "scripts" / "run.sh").read_text() == "#!/bin/sh\necho hi\n"
+    assert stat.S_IMODE((extracted / "scripts" / "run.sh").stat().st_mode) == 0o755
+    assert stat.S_IMODE((extracted / "reference.md").stat().st_mode) == 0o644
+    assert stat.S_IMODE((extracted / "scripts").stat().st_mode) == 0o755
+    assert stat.S_IMODE(extracted.stat().st_mode) == 0o755
+    # Rebuilding the extracted tree reproduces the same archive.
+    _, rebuilt = build(extracted, tmp_path, "rebuilt.tar")
+    assert rebuilt == files_hash
+
+
+def test_extract_rejects_hash_mismatch_without_writing(tmp_path: Path) -> None:
+    archive, _ = build(make_skill(tmp_path / "src"), tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with pytest.raises(SkillArchiveHashMismatchError):
+        extract_skill_archive(archive, dest, expected_files_hash="f" * 64)
+    assert list(dest.iterdir()) == []
+
+
+def test_extract_refuses_existing_skill_dir(tmp_path: Path) -> None:
+    archive, files_hash = build(make_skill(tmp_path / "src"), tmp_path)
+    dest = tmp_path / "dest"
+    (dest / "pdf-tools").mkdir(parents=True)
+    (dest / "pdf-tools" / "keep").write_text("mine")
+    with pytest.raises(SkillArchivePathError, match="already exists"):
+        extract_skill_archive(archive, dest, expected_files_hash=files_hash)
+    assert (dest / "pdf-tools" / "keep").read_text() == "mine"
+
+
+def test_extract_requires_existing_parent(tmp_path: Path) -> None:
+    archive, files_hash = build(make_skill(tmp_path / "src"), tmp_path)
+    with pytest.raises(SkillArchivePathError, match="not an existing directory"):
+        extract_skill_archive(archive, tmp_path / "missing", expected_files_hash=files_hash)
+
+
+def test_extract_removes_partial_tree_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    archive, files_hash = build(make_skill(tmp_path / "src"), tmp_path)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    real_write = skill_archive._write_member
+    calls = 0
+
+    def failing_write(fd: int, source: IO[bytes], size: int) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("disk full")
+        return real_write(fd, source, size)
+
+    monkeypatch.setattr(skill_archive, "_write_member", failing_write)
+    with pytest.raises(OSError, match="disk full"):
+        extract_skill_archive(archive, dest, expected_files_hash=files_hash)
+    assert calls == 2
+    assert list(dest.iterdir()) == []
+
+
+def test_extract_does_not_write_when_verification_fails(tmp_path: Path) -> None:
+    archive = tmp_path / "evil.tar"
+    # A valid first file followed by an escape: nothing may be written for the valid part either.
+    files_hash = craft(archive, [*valid_members(), member("pdf-tools/z/../../../escape", data=b"x")])
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with pytest.raises(SkillArchivePathError):
+        extract_skill_archive(archive, dest, expected_files_hash=files_hash)
+    assert list(dest.iterdir()) == []
+    assert not (tmp_path / "escape").exists()
 
 
 # ---------------------------------------------------------------------------
