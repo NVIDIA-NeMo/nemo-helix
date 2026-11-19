@@ -16,6 +16,7 @@ import felixBookReadingImage from '@studio/assets/felix-book-reading.png';
 import felixDoneImage from '@studio/assets/felix-done.png';
 import felixHammerDownImage from '@studio/assets/felix-hammer-down.png';
 import felixHammerUpImage from '@studio/assets/felix-hammer-up.png';
+import felixThinkingImage from '@studio/assets/felix-thinking.png';
 import felixWinkImage from '@studio/assets/felix-wink.png';
 import felixImage from '@studio/assets/felix.png';
 import {
@@ -64,6 +65,7 @@ type FelixFrame =
   | 'hammer-up'
   | 'book-reading'
   | 'book-glance'
+  | 'thinking'
   | 'done';
 
 const FRAME_SOURCES: Record<FelixFrame, string> = {
@@ -73,6 +75,7 @@ const FRAME_SOURCES: Record<FelixFrame, string> = {
   'hammer-up': felixHammerUpImage,
   'book-reading': felixBookReadingImage,
   'book-glance': felixBookGlanceImage,
+  thinking: felixThinkingImage,
   done: felixDoneImage,
 };
 
@@ -83,30 +86,34 @@ const OVERLAY_FRAMES: readonly Exclude<FelixFrame, 'base'>[] = [
   'hammer-up',
   'book-reading',
   'book-glance',
+  'thinking',
   'done',
 ];
 
 /**
- * Which frame to show. Celebrating a finished run wins over everything; then a work pose; then a
- * wink; then the resting pose.
+ * Which frame to show. Celebrating a finished run wins over everything; then a work pose; then
+ * thinking (a run is going but no tool pose applies); then a wink; then the resting pose.
  */
 const getFelixFrame = ({
   isCelebrating,
   pose,
   hammerUp,
   glancingUp,
+  isThinking,
   isWinking,
 }: {
   isCelebrating: boolean;
   pose: 'building' | 'docs' | null;
   hammerUp: boolean;
   glancingUp: boolean;
+  isThinking: boolean;
   isWinking: boolean;
 }): FelixFrame => {
   if (isCelebrating) return 'done';
   if (pose === 'building') return hammerUp ? 'hammer-up' : 'hammer-down';
   // Eyes on the page, with an occasional glance up.
   if (pose === 'docs') return glancingUp ? 'book-glance' : 'book-reading';
+  if (isThinking) return 'thinking';
   return isWinking ? 'wink' : 'base';
 };
 
@@ -158,14 +165,22 @@ export const FelixAssistant: FC = () => {
   // looks things up. The pose follows the work even with the chat open.
   const activity = useMemo(() => getFelixActivity(chat.messages), [chat.messages]);
   const { pose, hammerUp, glancingUp } = useFelixPose({ activity, isRunning });
-  const frame = getFelixFrame({ isCelebrating, pose, hammerUp, glancingUp, isWinking });
-
-  const retryChatThread = useCallback(() => setChatThread(() => createChatThread()), []);
 
   // While the agent is blocked on a permission/input request the stream stays
   // open (isRunning is still true), but it is waiting on the user rather than
   // thinking — surface the attention badge instead of the loading dots.
   const isAwaitingUserInput = !!decisionRequest || !!inputRequest;
+  const isThinking = isRunning && !isAwaitingUserInput;
+  const frame = getFelixFrame({
+    isCelebrating,
+    pose,
+    hammerUp,
+    glancingUp,
+    isThinking,
+    isWinking,
+  });
+
+  const retryChatThread = useCallback(() => setChatThread(() => createChatThread()), []);
 
   // Surface an unread badge when the agent finishes responding while the
   // panel is closed, and clear it the moment the user opens the chat.

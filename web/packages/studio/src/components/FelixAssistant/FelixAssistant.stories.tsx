@@ -200,6 +200,7 @@ type Story = StoryObj<typeof FelixStage>;
 
 export const Closed: Story = {};
 
+/** A run is going but no tool pose applies: Felix strokes his chin, with the loading dots. */
 export const Thinking: Story = {
   args: { isRunning: true },
 };

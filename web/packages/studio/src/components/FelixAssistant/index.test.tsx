@@ -409,6 +409,7 @@ describe('FelixAssistant', () => {
         'felix-frame-hammer-up',
         'felix-frame-book-reading',
         'felix-frame-book-glance',
+        'felix-frame-thinking',
         'felix-frame-done',
       ]) {
         expect(screen.getByTestId(testId)).toHaveAttribute('aria-hidden', 'true');
@@ -541,8 +542,48 @@ describe('FelixAssistant', () => {
       mocks.chat.messages = assistantCalling('studio_link');
       renderFelix();
 
-      expect(getFrame()).toBe('base');
+      expect(getFrame()).toBe('thinking');
       expect(screen.getAllByTestId('assistant-thinking-dot')).toHaveLength(3);
+    });
+
+    it('shows the thinking frame while a run has no tool pose', () => {
+      mocks.chat.isRunning = true;
+      renderFelix();
+
+      expect(getFrame()).toBe('thinking');
+      expect(screen.getByTestId('felix-frame-thinking')).not.toHaveClass('opacity-0');
+      expect(screen.getByTestId('felix-image')).toHaveClass('opacity-0');
+    });
+
+    it('keeps the idle bob while thinking', () => {
+      mocks.chat.isRunning = true;
+      renderFelix();
+
+      expect(screen.getByTestId('felix-frames').className).toContain('felix-bob');
+    });
+
+    it('lets a tool pose win over the thinking frame', () => {
+      mocks.chat.isRunning = true;
+      mocks.chat.messages = assistantCalling('Read');
+      renderFelix();
+
+      expect(getFrame()).toBe('book-reading');
+      expect(screen.getByTestId('felix-frame-thinking')).toHaveClass('opacity-0');
+    });
+
+    it('is not thinking while the assistant waits on the user', () => {
+      mocks.chat.isRunning = true;
+      mocks.chat.inputRequest = { requestId: 'request-1', kind: 'dataset_file', input: {} };
+      renderFelix();
+
+      expect(getFrame()).toBe('base');
+    });
+
+    it('leaves the thinking frame once the run ends', () => {
+      mocks.chat.isRunning = false;
+      renderFelix();
+
+      expect(getFrame()).toBe('base');
     });
 
     it('does not pose for a stale tool call once the run has ended', () => {
