@@ -141,8 +141,9 @@ nemo agent-hardener init --project-dir ./my-agent --name my-agent --harness lang
 - Verify: `init` writes the manifest and echoes the derived facts; read them back to the user and
   confirm they match the agent before continuing.
 - A name is used once: `init` with an existing `--name` fails with `HTTP 409 … already exists`, and
-  there is no `manifest delete`. Change an existing manifest with `manifest set` (or `refresh` after
-  the agent's files change); start over under a new `--name`, then run `synth-benign` for it before
+  there is no `manifest delete`. Change an existing manifest's settings with `manifest set`.
+  `refresh` re-reads a registered agent (Route A) only; it does not upload edited project files. After
+  editing the project, `init` it again under a new `--name`, then run `synth-benign` for it before
   `run`, since a new name has no benign suite.
 
 **Worked example — the bundled `langgraph-victim`, with an NVIDIA Build key.** Its Dockerfile states

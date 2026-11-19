@@ -128,11 +128,15 @@ const attackBadge = (row: ValidationAttackRow) => {
   return <Badge color={outcome === 'blocked' ? 'green' : 'yellow'}>{text}</Badge>;
 };
 
+// The row's own label, else one from its outcome (results written before the labels carry none).
+export const benignLabel = (row: ValidationBenignRow, outcome: BenignOutcome): string =>
+  BENIGN_LABELS[row.status ?? ''] ??
+  (outcome === 'served' ? 'Passed' : outcome === 'refused' ? 'Wrongly blocked' : 'Not counted');
+
 const benignBadge = (row: ValidationBenignRow) => {
   const outcome = benignOutcome(row);
   if (outcome === 'error') return <Badge color="gray">Error</Badge>;
-  const text =
-    BENIGN_LABELS[row.status ?? ''] ?? (outcome === 'served' ? 'Passed' : 'Wrongly blocked');
+  const text = benignLabel(row, outcome);
   const color = outcome === 'served' ? 'green' : outcome === 'refused' ? 'yellow' : 'gray';
   return <Badge color={color}>{text}</Badge>;
 };
