@@ -5,6 +5,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getAgentOptimizationListRunStrategyJobsQueryKey } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import { agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import { launchOptimizeStudy } from '@studio/api/agents/useLaunchOptimizeStudy';
+import { celebrate } from '@studio/components/CelebrationOverlay/celebrationStore';
 import type { OptimizationFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import {
@@ -76,6 +77,7 @@ export const useSubmitOptimization = ({
       void queryClient.invalidateQueries({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
+      celebrate();
       navigate(getAgentOptimizationsTabRoute(workspace, agentName));
     },
     [workspace, agentName, evals, toast, navigate, queryClient]

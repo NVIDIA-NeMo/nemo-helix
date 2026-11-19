@@ -11,6 +11,7 @@ import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { useLaunchOptimizeStudy } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { BundleSourcePicker } from '@studio/components/BundleSourcePicker';
 import { useBundleSource } from '@studio/components/BundleSourcePicker/useBundleSource';
+import { celebrate } from '@studio/components/CelebrationOverlay/celebrationStore';
 import {
   optimizeConfigSpec,
   STRATEGY_CONFIG_SPEC,
@@ -79,6 +80,7 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
       onClose();
+      celebrate();
       navigate(getAgentOptimizationsTabRoute(workspace, agentName));
     },
   });

@@ -7,6 +7,7 @@ import {
   getAgentOptimizationListRunStrategyJobsQueryKey,
 } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategySubmitSpec } from '@nemo/sdk/generated/agent-optimization/schema';
+import { celebrate } from '@studio/components/CelebrationOverlay/celebrationStore';
 import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
 import type { SwitchyardFormOutput } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import { getAgentOptimizationsTabRoute } from '@studio/routes/utils';
@@ -73,6 +74,7 @@ export const useSubmitSwitchyardOptimization = ({
       void queryClient.invalidateQueries({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
+      celebrate();
       navigate(getAgentOptimizationsTabRoute(workspace, agentName));
     },
     [workspace, agentName, toast, navigate, queryClient]

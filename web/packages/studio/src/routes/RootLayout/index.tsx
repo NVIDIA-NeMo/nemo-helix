@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
+import { CelebrationHost } from '@studio/components/CelebrationOverlay';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { isLocalDevelopmentEnv, REACT_QUERY_DEVTOOLS_ENABLED } from '@studio/constants/environment';
 import { BreadcrumbsProvider } from '@studio/providers/breadcrumbs/BreadcrumbsProvider';
@@ -30,6 +31,7 @@ export const RootLayout = () => {
             <BreadcrumbsProvider>
               <Suspense fallback={<Loading />}>
                 <Outlet />
+                <CelebrationHost />
                 <ReactQueryDevtools initialIsOpen={false} />
               </Suspense>
             </BreadcrumbsProvider>
