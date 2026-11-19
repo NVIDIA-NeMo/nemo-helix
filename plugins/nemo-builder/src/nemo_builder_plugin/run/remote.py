@@ -274,8 +274,8 @@ def idempotency_key(attempt: JobAttempt, image: str) -> str:
 def stage_context(context: Path, dockerfile: str) -> Path:
     """``context``, once ``dockerfile`` is a regular file named ``Dockerfile`` at its root, where a service builds it.
 
-    Done in place, in the step's own copy of the context. A copy of the tree made elsewhere would move its relative
-    links, which were only checked to stay inside the context where they were unpacked.
+    Done in place, in the step's own copy of the context: a second copy would change where its relative links
+    lead, and they are checked below where the context is.
 
     Docker resolves ``COPY`` against the context, not the Dockerfile's directory, so moving the file changes what a
     build reads in one case: a context with a root ``Dockerfile`` of its own loses it to the one the spec names.
@@ -760,12 +760,13 @@ def _in_a_url(secret: str) -> str:
 
 
 def _redactor(secret: str | None) -> Callable[[str], str]:
-    """Takes ``secret`` out of a text, in each form a text may hold it.
+    """Takes ``secret`` out of a text, in each form the driver knows a text to hold it.
 
     As it is. As a log line holds it, without its line breaks, and as a one-line reason does, with a space for
     each: the two differ for a secret of more than one line, such as a key file. As an error that quotes it
-    holds it: escaped, as ``repr`` or JSON write it, or as a URL does. And for a secret of several lines, each
-    line long enough to be worth taking out on its own.
+    holds it: escaped, as Python's ``repr`` and ``json.dumps`` write it, or as any URL encoder does. And for a
+    secret of several lines, each line long enough to be worth taking out on its own. Another JSON encoder's
+    escapes are not known: a client parses a service's reply before it puts any of it in an error.
     """
     if not secret:
         return lambda text: text
@@ -863,7 +864,7 @@ def run_remote_build(
                 fetched[key] = fetch(image.model_copy(update={"source": download}), into)
             except BaseException:
                 # Not kept: the next image that names it tries again, in a directory of its own.
-                shutil.rmtree(into, ignore_errors=True)
+                _remove(into)
                 raise
         context = fetched[key]
         if whole and source.context_path:
@@ -941,7 +942,7 @@ def run_remote_build(
         finally:
             # What can't be removed now, a file a client still holds open say, goes with `scratch` when the step
             # ends. It must not cost the next image its turn.
-            shutil.rmtree(directory, ignore_errors=True)
+            _remove(directory)
     logger.info("%d image(s), %d failure(s)", len(config.images), failures)
     if failed and len(config.images) > 1:
         # Jobs keeps only the end of a failed step's log, and whatever a later image logged came after an earlier
@@ -953,6 +954,19 @@ def run_remote_build(
             if room - len(ending) >= MIN_REASON_ROOM:
                 _report(image, reason, ending, room=room)
     return 1 if failures else 0
+
+
+def _remove(directory: str | Path) -> None:
+    """Remove ``directory`` and what is in it, as far as that can be done. It never raises.
+
+    ``ignore_errors`` covers what the file system refuses. Before Python 3.13 a tree nested deeper than the
+    interpreter's recursion limit can't be walked at all, and that is not one of those errors.
+    """
+    try:
+        shutil.rmtree(directory, ignore_errors=True)
+    except RecursionError:
+        # What is left goes with the step's storage.
+        pass
 
 
 def _room(lines: int, image: str) -> int:
@@ -992,7 +1006,9 @@ def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> l
 
 
 def _unmark_record(record: logging.LogRecord) -> logging.LogRecord:
-    """``record``, which the driver did not log, without the failure marker in what a handler prints of it.
+    """``record``, which the driver did not log, without the failure marker in its message, exception and stack.
+
+    Its ``extra`` fields are left as they are: the step's own log format prints none of them.
 
     A failure line is the driver's to write. Anything else that logs the marker, a library given a path a
     submitter chose, or an exception that quotes a line of a Dockerfile, would have settling read its line as
@@ -1258,4 +1274,4 @@ def step_main(
             redact=redact,
         )
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        _remove(scratch)

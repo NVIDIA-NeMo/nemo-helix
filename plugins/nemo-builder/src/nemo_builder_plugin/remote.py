@@ -105,8 +105,9 @@ class RemoteBackend:
             raise BackendRejectedError(
                 f"Jobs execution profile cpu/{name} ends a step after {profile.config.ttl_seconds_active}s "
                 f"(ttl_seconds_active), which is less than the {needed}s one build set may take "
-                f"(builder.remote.build_timeout_seconds for each of the {images} images one set may hold, and a "
-                f"{CANCEL_MARGIN_SECONDS}s margin)"
+                f"(builder.remote.build_timeout_seconds times {images}, the images one set may hold "
+                f"(builder.remote.max_specs_per_set, at most {MAX_BUILD_SPECS}), plus a {CANCEL_MARGIN_SECONDS}s "
+                "margin)"
             )
         if self._config.default_platform not in remote.platforms:
             raise BackendRejectedError(

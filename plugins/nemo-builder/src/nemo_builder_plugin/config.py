@@ -241,8 +241,8 @@ class BuilderConfig(NemoConfig):
     repository_prefix: str = Field(
         default="",
         description=(
-            "Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; "
-            "for Artifactory, the repository key."
+            "Path the in-cluster build publishes every image under, before `<workspace>/`. For GAR, "
+            "`<project>/<repository>`; for Artifactory, the repository key. Not used with `backend: remote`."
         ),
     )
     _registry_plain_http: bool = PrivateAttr(default=False)
@@ -313,7 +313,8 @@ class BuilderConfig(NemoConfig):
             return sorted({normalize_registry(host) for host in value})
         except ImageIdentityError as exc:
             # Not the host it refused: a registry given with a login in it is a credential, and this is logged.
-            raise ValueError("import_registries must be registry hosts, such as `ghcr.io`") from exc
+            # Nor an example of one: the log takes every entry of the list out of this sentence.
+            raise ValueError("import_registries must be registry hosts, with no scheme, login or path") from exc
 
     # The push step's credentials: platform secrets in the submitting workspace, which Jobs reads as the
     # submitter and gives the push step as environment variables. A workspace without them can't build.

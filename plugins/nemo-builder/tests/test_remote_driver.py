@@ -1006,19 +1006,22 @@ class TestSeveralImages:
     ) -> None:
         """Jobs keeps the end of a failed step's log. What a later image logs comes after an earlier one's line."""
         failed = RemoteBuildStatus("failed", "x" * 5000)
+        names = ["a", "b", "c", "d", "one-with-a-longer-name"]
         service = FakeService(
-            [failed, QUEUED, BUILDING, VERIFYING, failed, failed], start=["build-1", "build-2", "build-3"]
+            [failed, QUEUED, BUILDING, VERIFYING, failed, failed, failed, failed],
+            start=[f"build-{number}" for number in range(1, 6)],
         )
         with caplog.at_level(logging.INFO):
-            assert _run(service, FakeBuilder(), context, tmp_path, config=_config("a", "b", "c")) == 1
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(*names)) == 1
         messages = [record.getMessage() for record in caplog.records]
-        last = messages[messages.index("3 image(s), 3 failure(s)") + 1 :]
-        assert [line.split(": ")[0] for line in last] == [f"{FAILURE_MARKER} {name}" for name in "abc"]
-        assert [line.rpartition(" [")[2] for line in last] == ["build build-1]", "build build-2]", "build build-3]"]
-        # All three fit in the 1,800 characters Jobs is taken to keep, with the 100 a logger puts around each
-        # line, each reason cut to its 400.
-        assert (LINE_OVERHEAD, TAIL_CHARS) == (100, 1800)
-        assert sum(len(line) - len(f"{FAILURE_MARKER} a: ") + LINE_OVERHEAD for line in last) <= TAIL_CHARS
+        last = messages[messages.index("5 image(s), 5 failure(s)") + 1 :]
+        assert [line.split(": ")[0] for line in last] == [f"{FAILURE_MARKER} {name}" for name in names]
+        assert [line.rpartition(" [")[2] for line in last] == [f"build build-{number}]" for number in range(1, 6)]
+        # As first logged, each reason cut to its 400, the five would not fit in the 1,800 characters Jobs is
+        # taken to keep. Logged again they do, to the character: each line with its image's name and the 100 a
+        # logger puts around it.
+        assert (LINE_OVERHEAD, TAIL_CHARS, MAX_REASON_CHARS) == (100, 1800, 400)
+        assert sum(len(line) - len(f"{FAILURE_MARKER} : ") + LINE_OVERHEAD for line in last) == TAIL_CHARS
 
     def test_a_line_with_no_room_left_for_its_reason_is_not_logged_again(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -1101,6 +1104,21 @@ class TestSeveralImages:
         # Asked to remove each image's directory, in a way that a refusal doesn't raise from.
         assert refused == ["image-", "image-"]
 
+    def test_a_directory_too_deep_to_remove_does_not_cost_the_next_image_either(
+        self, context: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before Python 3.13 a tree nested deeper than the interpreter's limit can't be walked, whatever
+        errors the removal is told to ignore."""
+
+        def rmtree(path: str, ignore_errors: bool = False) -> None:
+            raise RecursionError("maximum recursion depth exceeded")
+
+        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree)
+        monkeypatch.setattr(driver, "shutil", kept)
+        builder = FakeBuilder()
+        assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 0
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+
     def test_what_a_service_says_of_one_build_is_never_read_as_another_images_failure(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1172,7 +1190,8 @@ class TestTheContext:
         assert (context / "Dockerfile").read_text() == "FROM busybox\n"
 
     def test_a_link_in_the_context_resolves_where_it_did_when_it_was_unpacked(self, context: Path) -> None:
-        """Unpacking only checks that a link stays inside the context where it is. Moving the tree would move it."""
+        """Unpacking only checks that a link stays inside the archive's directory. A second copy of the tree
+        would change where it leads."""
         (context / "services" / "feed" / "up").symlink_to("../../app.py")
         staged = stage_context(context, "services/feed/Dockerfile")
         assert (staged / "services" / "feed" / "up").resolve() == (context / "app.py").resolve()
@@ -1623,8 +1642,10 @@ class TestTheImagesOfOneSet:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture, outside: str
     ) -> None:
         """A submit refuses such a path. A step config written some other way is not taken at its word."""
-        (tmp_path / "beside").mkdir()
-        (tmp_path / "beside" / "Dockerfile").write_text("FROM beside\n")
+        # Where `../beside` leads from the download, which is made in the step's scratch directory: a directory
+        # that could be built from, were the path taken at its word.
+        (tmp_path / "scratch" / "beside").mkdir(parents=True)
+        (tmp_path / "scratch" / "beside" / "Dockerfile").write_text("FROM beside\n")
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
         fetch = self._sources(tmp_path, {"environment/Dockerfile": "FROM env\n"})
         config = self._set(archive | {"context_path": "environment"}, archive | {"context_path": outside})
@@ -1900,7 +1921,14 @@ class TestTheStepProgram:
         assert "RuntimeError: RUN echo NHX-BUILD-FAILED demo-1: built and published" in caplog.text
         (logged,) = [record for record in caplog.records if record.name == "some.build.client"]
         # The exception itself still holds the marker, and some handlers print it themselves.
-        assert logged.exc_info is None and FAILURE_MARKER not in (logged.stack_info or "")
+        assert logged.exc_info is None
+
+    def test_the_marker_is_taken_out_of_a_stack_a_library_logs_too(self) -> None:
+        """A stack shows lines of source. One of them may spell the marker out."""
+        record = logging.LogRecord("some.build.client", logging.ERROR, __file__, 1, "the call failed", None, None)
+        record.stack_info = f'Stack (most recent call last):\n    print("{FAILURE_MARKER} demo-1: built")'
+        driver._unmark_record(record)
+        assert record.stack_info == 'Stack (most recent call last):\n    print("NHX-BUILD-FAILED demo-1: built")'
 
     def test_a_reason_that_quotes_the_marker_holds_it_only_at_the_start_of_its_line(
         self, caplog: pytest.LogCaptureFixture

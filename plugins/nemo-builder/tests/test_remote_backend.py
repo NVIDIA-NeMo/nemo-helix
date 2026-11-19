@@ -7,7 +7,7 @@ submit path with it."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -199,12 +199,21 @@ class TestADeploymentThatCannotBuild:
         enough = 60 * 100 + CANCEL_MARGIN_SECONDS
         RemoteBackend(config, [_profile(ttl_seconds_active=enough)]).check(_plan())
         # And for no fewer: a second less is refused, with the number of images it was checked for.
-        with pytest.raises(BackendRejectedError, match=f"less than the {enough}s .* each of the 100 images"):
+        with pytest.raises(BackendRejectedError, match=f"less than the {enough}s .* times 100, the images one set"):
             RemoteBackend(config, [_profile(ttl_seconds_active=enough - 1)]).check(_plan())
 
     def test_kubernetes_is_the_one_backend_the_step_runs_on(self) -> None:
         """An allow-list: a backend Jobs gains later is refused until it is known to run the step."""
         assert STEP_BACKENDS == (_profile().backend,) == ("kubernetes_job",)
+        new = _profile().model_copy(update={"backend": "a_new_backend"})
+        with pytest.raises(BackendRejectedError, match="runs on a_new_backend, which can't run the remote-build"):
+            RemoteBackend(_config(), [new]).check(_plan())
+
+    def test_the_profile_looked_up_is_the_one_the_deployment_names(self) -> None:
+        config = _config(profile="builds-elsewhere")
+        RemoteBackend(config, [_profile("builds-elsewhere")]).check(_plan())
+        with pytest.raises(BackendRejectedError, match="no execution profile cpu/builds-elsewhere"):
+            RemoteBackend(config, PROFILES).check(_plan())
 
     @pytest.mark.parametrize("reference", ["/remote-credential", "team/", "team/build/credential", " "])
     def test_a_credential_secret_that_is_no_reference_is_a_configuration_error(self, reference: str) -> None:
@@ -283,11 +292,11 @@ class TestTheJob:
         return backend.compile(_plan(*specs).with_destinations(backend.destination))
 
     def test_it_is_one_step_on_the_deployments_profile_image_and_command(self) -> None:
-        spec = self._compile(_config(command=["my-step", "--verbose"]))
+        spec = self._compile(_config(profile="builds-elsewhere", command=["my-step", "--verbose"]))
         assert [step.name for step in spec.steps] == [STEP_NAME]
         executor = spec.steps[0].executor
         assert isinstance(executor, CPUExecutionProvider)
-        assert executor.profile == "build-remote"
+        assert executor.profile == "builds-elsewhere"
         assert executor.container.image == STEP_IMAGE
         assert executor.container.command == ["my-step", "--verbose"]
 
@@ -403,6 +412,7 @@ async def _submit(
     *,
     unreadable: frozenset[str] = frozenset(),
     workspace: str = "default",
+    specs: Sequence[BuildSpec] = (),
 ) -> SubmitResult:
     async def secret_readable(workspace: str, name: str) -> bool:
         return f"{workspace}/{name}" not in unreadable
@@ -411,7 +421,7 @@ async def _submit(
         raise AssertionError("the remote backend refuses copies before anything is resolved")
 
     return await submit_build_set(
-        BuildSet(name="demo", revision=1, build_specs=[_spec()]),
+        BuildSet(name="demo", revision=1, build_specs=list(specs) or [_spec()]),
         backend=backend,
         workspace=workspace,
         entity_client=entity_client,
@@ -424,7 +434,7 @@ async def _submit(
 
 
 class TestSubmitting:
-    """The generic submit path, unchanged, with the remote backend behind it."""
+    """The generic submit path, with the remote backend behind it."""
 
     async def test_a_workspace_whose_name_no_repository_could_hold_builds(self) -> None:
         client = FakeEntityClient()
@@ -485,6 +495,30 @@ class TestSubmitting:
         row = client.rows["demo-1"]
         assert (row.registry, row.status, row.status_detail) == ("reg.example.com", "pending", None)
         assert [event for event in client.events if event.startswith("update:")] == []
+
+    async def test_a_row_written_before_another_backends_row_is_met_says_why_it_was_not_built(self) -> None:
+        """A set of two, built in the cluster. One row is later removed, and the set is asked for again from a
+        deployment that builds remotely: the row is written anew, then the other backend's row is met."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        in_cluster_profiles: list[ExecutionProfile] = [
+            _profile(name, storage={"pvc_name": "work"}) for name in ("build-fetch", "build-control", "build-push")
+        ]
+        in_cluster = BuilderConfig.model_validate(
+            {"registry": "reg.example.com", "sandbox": {"image": "kaniko.example.com/executor:debug"}}
+        )
+        specs = [_spec(name="a"), _spec(name="b")]
+        await _submit(client, jobs, ExecutionBackend(in_cluster, in_cluster_profiles), specs=specs)
+        del client.rows["demo-1.a"]
+
+        with pytest.raises(BackendChanged):
+            await _submit(client, jobs, RemoteBackend(_config(max_specs_per_set=2), PROFILES), specs=specs)
+        written, met = client.rows["demo-1.a"], client.rows["demo-1.b"]
+        assert (written.status, written.status_detail) == (
+            "failed",
+            "not built: demo revision 1 was already built by another backend",
+        )
+        assert (met.status, met.status_detail, met.provenance.backend) == ("pending", None, "execution")
 
     async def test_a_credential_the_submitter_cannot_read_is_refused_before_anything_is_written(self) -> None:
         client = FakeEntityClient()

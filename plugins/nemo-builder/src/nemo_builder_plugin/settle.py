@@ -61,7 +61,8 @@ JOB_READS = 8
 #: as ``run/remote.py``'s ``FAILURE_MARKER``, spelt here so the API doesn't load a step's program.
 _MARKER = "NHX_BUILD_FAILED "
 _FAILURE_LINE = re.compile(r"NHX_BUILD_FAILED (\S+): (.+)")
-#: The longest reason a row records.
+#: The longest reason a row records. Never less than ``run/remote.py``'s ``MAX_REASON_CHARS``: a step's reason
+#: ends with the name of its build, and a reason is cut from its end.
 _MAX_REASON_CHARS = 500
 #: The one step whose log a reason is read from, and the backend whose rows take it: ``remote.py``'s ``STEP_NAME``
 #: and backend name, spelt here as the marker is. A remote-build step's driver writes each marked line itself,

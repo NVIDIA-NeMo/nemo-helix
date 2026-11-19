@@ -687,7 +687,8 @@ registry or repository, the profile, a step image, a profile whose limit is belo
 build timeouts plus two minutes, or a `default_platform` the service doesn't build.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision the other backend
-built is refused (`code` `backend_changed`); submit the next revision. Evals goes on using the
+built is refused: with `code` `backend_changed` when the new backend can build the request (submit
+the next revision), or with `backend_rejected` when it can't build it under any revision. Evals goes on using the
 task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.
 On `remote`, a task that names a prebuilt image keeps the build it has but can't be built again, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
@@ -792,8 +793,9 @@ then delete the volume yourself.
 Operator settings live under `builder:` in the platform config, which with the chart is
 `platformConfig.builder`, or in `NEMO_BUILDER_*` environment variables. Callers can't set any of them.
 They are checked at the first submit, not when the platform starts: an invalid setting, or an unknown
-key under `remote` or `sandbox`, refuses every submit with `409` `backend_rejected`, and the answer
-names the setting.
+key under `remote` or `sandbox`, refuses every submit with `409` `backend_rejected`. The answer
+names the setting, or `builder` for a check that spans settings; the API log has the check's own
+sentence.
 
 ```yaml
 builder:

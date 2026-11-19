@@ -521,7 +521,8 @@ class TestSubmitting:
         monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
         response = self._post(monkeypatch)
         assert (response.status_code, response.json()["code"]) == (409, "backend_rejected")
-        assert "import_registries must be registry hosts" in caplog.text
+        # The whole sentence: none of it is an entry of the list, which the log takes out.
+        assert "import_registries must be registry hosts, with no scheme, login or path" in caplog.text
         assert "t0ken" not in caplog.text and "t0ken" not in response.text
 
     def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(
