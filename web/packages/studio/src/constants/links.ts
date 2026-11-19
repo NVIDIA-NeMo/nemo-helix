@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const DOCS_BASE_URL = 'https://docs.nvidia.com/nemo-helix/latest/documentation/';
+/** Root of the published NeMo docs site. The assistant may link to anything beneath it. */
+export const DOCS_SITE_URL = 'https://docs.nvidia.com/nemo-helix';
+const DOCS_BASE_URL = `${DOCS_SITE_URL}/latest/documentation/`;
 const GITHUB_REPO_URL = 'https://github.com/NVIDIA-NeMo/nemo-helix';
 
 // Studio documentation links

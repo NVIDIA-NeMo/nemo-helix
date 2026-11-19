@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ArrowRight } from '@nemo/icons/icons';
+import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
+import { ArrowRight, ArrowUpRight } from '@nemo/icons/icons';
 import { Anchor } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
-import { getStudioInternalLinkTarget } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLinkTarget';
+import {
+  getAssistantDocsLinkTarget,
+  getStudioInternalLinkTarget,
+} from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLinkTarget';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
@@ -21,6 +25,17 @@ export const AssistantStudioLink = ({ href, children }: AssistantStudioLinkProps
   const target = getStudioInternalLinkTarget(href, window.location.origin, workspace);
 
   if (!target) {
+    // The one external destination the assistant may link to is the NeMo docs, shown as a small
+    // inline link that opens in a new tab. Every other external URL stays plain text.
+    const docsTarget = getAssistantDocsLinkTarget(href);
+    if (docsTarget) {
+      return (
+        <ExternalLink href={docsTarget} textKind="body/regular/sm">
+          {children}
+          <ArrowUpRight aria-hidden="true" className="ml-0.5 inline size-3 align-baseline" />
+        </ExternalLink>
+      );
+    }
     return <span>{children}</span>;
   }
 

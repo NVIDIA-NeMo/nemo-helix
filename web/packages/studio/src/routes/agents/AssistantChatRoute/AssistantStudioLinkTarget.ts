@@ -2,8 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BASE_URL } from '@studio/constants/environment';
+import { DOCS_SITE_URL } from '@studio/constants/links';
 
 const LEGACY_STUDIO_BASE_PATH = '/studio';
+const DOCS_SITE = new URL(DOCS_SITE_URL);
+
+/**
+ * Returns the URL to open for a link into the NeMo docs site, or `undefined` for anything else.
+ * Only https links on the docs site qualify, so URLs the model writes to other sites are never
+ * made clickable.
+ */
+export const getAssistantDocsLinkTarget = (href: string | undefined): string | undefined => {
+  if (!href) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return undefined;
+  }
+
+  const isDocsSite =
+    url.protocol === 'https:' &&
+    url.origin === DOCS_SITE.origin &&
+    !url.username &&
+    !url.password &&
+    (url.pathname === DOCS_SITE.pathname || url.pathname.startsWith(`${DOCS_SITE.pathname}/`));
+  return isDocsSite ? url.href : undefined;
+};
 
 const getNormalizedBaseUrl = (): string => {
   const normalized = BASE_URL.replace(/\/+$/, '');
