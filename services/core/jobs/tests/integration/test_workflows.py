@@ -1225,3 +1225,52 @@ def test_current_pass_success_releases_children_with_newer_inputs_pending(workfl
     clean = h.tick(job)
     assert clean.workflow is not None and clean.workflow.waiting_for_changes
     assert len(clean.steps) == 5
+
+
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+@pytest.mark.parametrize("phase", ["before_first_tick", "queued", "active_pending", "active_draining"])
+def test_pause_cannot_override_workflow_cancellation(workflow_harness: WorkflowHarness, mode: str, phase: str) -> None:
+    h = workflow_harness
+    job = h.create({"root": [], "child": ["root"]}, mode=mode)
+    assert job.attempt_id is not None
+    execution_id = None
+    if phase != "before_first_tick":
+        initial = h.tick(job)
+        execution_id = initial.steps[0].id
+        h.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=execution_id,
+            body=HelixJobStatusUpdateRequest(
+                status=HelixJobStatus.QUEUED if phase == "queued" else HelixJobStatus.ACTIVE
+            ),
+        )
+    h.jobs.cancel_job(workspace="default", name=job.id)
+    if phase == "active_draining":
+        assert h.tick(job).status == HelixJobStatus.CANCELLING
+    store = SyncEntityClient(EntitiesClient.from_client(h.context.client))
+    before = store.get_by_id(HelixJobAttempt, job.attempt_id)
+    response = h.context.test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/pause")
+    assert response.status_code == 409
+    after = store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert after.model_dump() == before.model_dump()
+    assert h.status(job).status == HelixJobStatus.CANCELLING
+    assert h.context.test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/resume").status_code == 409
+    # Another cancel remains valid while cancellation is draining.
+    h.jobs.cancel_job(workspace="default", name=job.id)
+    draining = h.tick(job)
+    if phase.startswith("active"):
+        assert draining.status == HelixJobStatus.CANCELLING and execution_id is not None
+        h.jobs.update_attempt_step_status(
+            workspace="default",
+            job=job.id,
+            attempt=job.attempt_id,
+            name=execution_id,
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.CANCELLED),
+        )
+    ended = h.tick(job)
+    assert ended.status == HelixJobStatus.CANCELLED
+    assert len(ended.steps) == (0 if phase == "before_first_tick" else 1)
+    assert h.tick(job).status == HelixJobStatus.CANCELLED
+    assert h.context.test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/resume").status_code == 409

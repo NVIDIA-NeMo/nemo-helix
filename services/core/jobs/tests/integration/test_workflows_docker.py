@@ -22,6 +22,7 @@ from uuid import uuid4
 import pytest
 from docker.models.containers import Container
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -450,11 +451,18 @@ report completed
         server.stop()
 
 
-def test_docker_cancel_stops_running_node_without_starting_child(docker_workflow: DockerWorkflowHarness) -> None:
+@pytest.mark.parametrize("mode", ["continuous", "run_to_completion"])
+def test_docker_cancel_stops_running_node_without_starting_child(
+    docker_workflow: DockerWorkflowHarness, mode: WorkflowMode
+) -> None:
     h = docker_workflow
-    job = h.create({"root": [], "child": ["root"]}, commands={"root": "trap 'exit 0' TERM; sleep 30 & wait"})
+    job = h.create({"root": [], "child": ["root"]}, mode=mode, commands={"root": "trap 'exit 0' TERM; sleep 30 & wait"})
     h.wait_for(job, lambda state: any(step.status == HelixJobStatus.ACTIVE for step in state.steps))
     h.jobs.cancel_job(workspace="default", name=job.id)
+    with pytest.raises(NemoHTTPError) as conflict:
+        h.jobs.pause_job(workspace="default", name=job.id)
+    assert conflict.value.status_code == 409
+    assert h.status(job).status == HelixJobStatus.CANCELLING
     cancelled = h.wait_for(job, lambda state: state.status.is_terminal())
     assert cancelled.status == HelixJobStatus.CANCELLED
     assert len(cancelled.steps) == 1

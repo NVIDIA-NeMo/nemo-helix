@@ -94,8 +94,10 @@ invalidation; backend retries are unchanged. Cancelling a node cancels its
 dependent branch while independent runnable branches finish the pass. A
 run-to-completion Attempt then ends `CANCELLED`; a continuous Attempt stays open
 and can retry cancelled nodes in a later pass. Cancelling the whole workflow
-ends its Attempt `CANCELLED` in either mode. Internal retirement of an obsolete
-queued execution for replacement does not cancel the logical node.
+ends its Attempt `CANCELLED` in either mode. Once workflow cancellation has been
+accepted, pause returns `409 Conflict` and cancellation continues. Internal
+retirement of an obsolete queued execution for replacement does not cancel the
+logical node.
 
 To invalidate selected nodes, PATCH the existing
 `/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details`

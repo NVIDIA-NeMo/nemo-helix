@@ -1722,6 +1722,8 @@ class JobDispatcher:
                 return None
             if attempt.status.is_terminal():
                 raise JobOperationConflictError("Terminal workflow attempts cannot be controlled")
+            if action == "pause" and attempt.status == HelixJobStatus.CANCELLING:
+                raise JobOperationConflictError("Cancelling workflow attempts cannot be paused")
             if action == "resume" and attempt.status != HelixJobStatus.PAUSED:
                 raise JobOperationConflictError("Only a paused workflow can resume")
             if action == "resume" and attempt.status_details.get(STORAGE_RECLAIMED_AT):
