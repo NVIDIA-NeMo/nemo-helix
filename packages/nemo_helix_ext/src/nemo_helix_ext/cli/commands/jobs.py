@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
@@ -12,7 +13,7 @@ import typer
 from nemo_helix_plugin.cli_list_jobs import JobsSort, job_status_filter, resolve_job_types, run_list_jobs
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import (
@@ -1329,12 +1330,82 @@ def watch_platform_job(
         bool,
         typer.Option("--history/--no-history", help="Include logs already present before watching"),
     ] = True,
+    tui: Annotated[
+        bool | None,
+        typer.Option("--tui/--no-tui", help="Interactive DAG view (automatic for workflow jobs in a terminal)"),
+    ] = None,
+    emoji: Annotated[bool, typer.Option("--emoji/--no-emoji", help="Use emoji in the interactive DAG view")] = True,
 ) -> None:
     """Watch a platform job until it reaches a terminal status."""
     state: CLIContext = ctx.obj
     platform_client, jobs_client = _jobs_client_from_state(state)
     if workspace is None:
         workspace = platform_client.require_workspace()
+
+    from datetime import datetime, timezone
+
+    from nemo_helix_plugin.jobs.watch_types import JobWorkflowEvent
+
+    from nemo_helix_ext.cli.core.job_watch_model import DagWatchModel
+    from nemo_helix_ext.cli.core.job_watch_tui import DagWatchApp, interactive_watch_available
+
+    interactive = interactive_watch_available()
+    if tui is True and not interactive:
+        raise typer.BadParameter("--tui requires interactive stdin/stdout; use --no-tui for redirected output")
+    if tui is not False and interactive:
+        initial = jobs_client.get_job_status(workspace=workspace, name=name, attempt_id=attempt_id).data()
+        if initial.workflow is not None and initial.attempt_id is not None:
+            model = DagWatchModel(emoji=emoji, step_id=step_id)
+            model.job_name = name
+            model.status = str(initial.status.value)
+            model.apply_workflow(
+                JobWorkflowEvent(
+                    kind="workflow",
+                    job_name=name,
+                    job_id=initial.id,
+                    attempt_id=initial.attempt_id,
+                    workflow=initial.workflow,
+                ),
+                datetime.now(timezone.utc),
+            )
+            if step_id or task_id:
+                model.notice = "Log collection restricted by --step-id/--task-id; other nodes may have no buffered logs"
+            tui_app = DagWatchApp(model)
+            async_platform_client = state.get_async_client()
+            async_jobs_client = AsyncJobsClient.from_client(async_platform_client)
+
+            async def run_tui() -> JobWatchRenderResult:
+                async with async_platform_client:
+                    return await tui_app.run(
+                        async_jobs_client.watch_job(
+                            initial.id,
+                            workspace=workspace,
+                            attempt_id=initial.attempt_id,
+                            include_logs=False,
+                            timeout=timeout,
+                            poll_interval=poll_interval,
+                        ),
+                        async_jobs_client.watch_job(
+                            initial.id,
+                            workspace=workspace,
+                            attempt_id=initial.attempt_id,
+                            step_id=step_id,
+                            task_id=task_id,
+                            limit=limit,
+                            include_history=include_history,
+                            timeout=timeout,
+                            poll_interval=poll_interval,
+                        ),
+                    )
+
+            watch_result = asyncio.run(run_tui())
+            if watch_result is JobWatchRenderResult.INTERRUPTED:
+                raise typer.Exit(130)
+            if watch_result is not JobWatchRenderResult.SUCCEEDED:
+                raise typer.Exit(1)
+            return
+        if tui is True:
+            raise typer.BadParameter("--tui requires a job with a workflow DAG and an Attempt")
 
     events = jobs_client.watch_job(
         name,

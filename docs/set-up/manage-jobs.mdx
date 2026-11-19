@@ -172,6 +172,55 @@ workflow pause uses the time the Attempt reached paused, even when no individual
 Step is paused. A failed node does not expire shared storage while a continuous
 Attempt remains active.
 
+### Explore a DAG in the terminal
+
+Run `nemo jobs watch JOB_NAME` in an interactive terminal to open the DAG
+watcher for a workflow job. Use `--tui` to require it, `--no-tui` for ordinary
+line output, and `--no-emoji` for plain state symbols. Redirected output and
+sequential jobs retain the line-oriented watcher.
+
+Status shows the number of steps running in parallel and three panes: upstream
+inputs, the focused node, and downstream outputs. Inputs and outputs are
+connected DAG nodes, including Step readiness and Step-trigger links. Fileset
+conditions and trigger events appear separately in focused-node details.
+`Admitted` means an execution has been accepted and may still be waiting for
+capacity; it does not count as a running step. Use Left/Right to choose a pane, Up/Down or PageUp/PageDown
+to browse its nodes, and Enter to focus the selected neighbor. Backspace retraces
+your path. Lists scroll to keep the selected node visible; narrow terminals show
+one pane at a time. Press `/` to search any node, including disconnected branches,
+or `o` to open the drawn DAG overview. In that overview, arrow keys select
+nodes, `h`/`j`/`k`/`l` pan the canvas, PageUp/PageDown scroll vertically, Home
+centers the selected node, and Enter returns to its Status view. The layout
+stays fixed during state changes. Selected edges are highlighted; `╳` marks a
+crossing without a connection.
+
+Neighbors sort by their most recent observed state change. Their order stays
+fixed while you browse that pane; press `a` to reorder without changing the
+selection. Routine input-check timestamps do not count as activity. Transition
+times describe observations during this watch session; polling can miss
+intermediate states. Freshness, pending reruns and execution outcomes appear
+separately from scheduling state. Each node card keeps its current phase visible
+alongside the last observed change. State colors reinforce the text and emoji;
+the selected node is highlighted in every pane.
+
+Tab or `1`/`2` switches between Status and Logs. Logs default to the focused
+node's active or latest execution. Press `e` to select another execution known
+to this session, `a` to toggle all collected executions, and `f` to follow the
+latest lines. Up/Down and PageUp/PageDown scroll logs; Left/Right pans long
+lines. Explicit execution
+selection stays fixed when a newer execution starts. The session retains up to
+5,000 log records and truncates messages longer than 4,096 characters; the Logs
+view reports discarded records. Existing attempt, step, task, history and page
+limit options still constrain collection.
+
+The watcher pins the selected Attempt, keeps updating status independently of
+log retrieval, and leaves the final result open for inspection. Press `q` to
+close it. Closing a live watch detaches without cancelling the Job and returns
+exit status 130; closing a completed watch returns its success/failure status.
+The display reports when the last workflow update was received. Status and log
+consumers reuse SDK polling/retry behavior independently, so interactive watch
+performs an additional status polling sequence alongside log collection.
+
 The status API and `jobs watch` expose each logical node's freshness
 (`unknown`, `dirty`, or `clean`), scheduling state (including `admitted` before
 backend launch), blockers, requested revision,
