@@ -39,7 +39,9 @@ class HelixOperatorConfig(NemoConfig):
         default="nemo-helix", description="The Helix Helm release deploy upgrades, in the operator pod's namespace."
     )
     chart_path: str = Field(default="k8s/helm", description="Where the Helix chart is in the uploaded checkout.")
-    deploy_timeout: str = Field(default="10m", description="`helm upgrade --timeout` for a deploy.")
+    deploy_timeout: str = Field(
+        default="10m", description="`helm upgrade --timeout` for a deploy, and `helm rollback --timeout`."
+    )
     api_url: str = Field(
         default="http://nemo-helix-api:8080", description="The Helix API Service that test runs call, in-cluster."
     )

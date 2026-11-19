@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""helix-operator's deploy routes: ``helm upgrade`` the Helix release with the chart from an uploaded checkout."""
+"""helix-operator's deploy routes: ``helm upgrade`` the Helix release with an uploaded chart, or ``helm rollback`` it."""
 
 import asyncio
 import io
@@ -33,6 +33,7 @@ _upgrades: dict[int, asyncio.Task[tuple[int, str]]] = {}
 class DeployPerms(PermissionSet, namespace="helix-operator.deployments"):
     CREATE = perm("Upgrade the Helix release with new images")
     READ = perm("Read a Helix release revision")
+    ROLLBACK = perm("Roll the Helix release back to an earlier revision")
 
 
 def split_image(ref: str) -> tuple[str, str]:
@@ -57,6 +58,14 @@ class CreateDeploymentRequest(BaseModel):
         if ref is not None:
             split_image(ref)
         return ref
+
+
+class CreateRollbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int | None = Field(
+        default=None, description="The revision to restore; defaults to the newest earlier revision that deployed."
+    )
 
 
 class HelixDeployment(BaseModel):
@@ -114,6 +123,30 @@ def _image_refs(values: dict) -> tuple[str | None, str | None]:
     return ref("api"), ref("core")
 
 
+async def _idle_release(release: str, namespace: str) -> int:
+    """Return the release's current revision, or raise 409 while it or this operator is upgrading it."""
+    code, output = await _helm("status", release, "-n", namespace, "-o", "json")
+    if code:
+        raise HTTPException(status_code=502, detail=f"helm status failed: {output.strip()}")
+    current = json.loads(output)
+    status = current["info"]["status"]
+    if status.startswith("pending") or any(not task.done() for task in _upgrades.values()):
+        raise HTTPException(status_code=409, detail=f"{release} is already being upgraded ({status})")
+    return current["version"]
+
+
+async def _history(release: str, namespace: str) -> list[dict]:
+    code, output = await _helm("history", release, "-n", namespace, "-o", "json", "--max", "256")
+    if code:
+        raise HTTPException(status_code=502, detail=f"helm history failed: {output.strip()}")
+    return json.loads(output)
+
+
+async def _revision_images(release: str, namespace: str, revision: int) -> tuple[str | None, str | None]:
+    code, values = await _helm("get", "values", release, "-n", namespace, "--revision", str(revision), "-o", "json")
+    return _image_refs(json.loads(values)) if not code else (None, None)
+
+
 def deploy_router() -> APIRouter:
     router = APIRouter()
 
@@ -126,13 +159,7 @@ def deploy_router() -> APIRouter:
         """Start ``helm upgrade`` of the Helix release with the uploaded chart and these images."""
         release, namespace = _target()
         config = HelixOperatorConfig.get()
-        code, output = await _helm("status", release, "-n", namespace, "-o", "json")
-        if code:
-            raise HTTPException(status_code=502, detail=f"helm status failed: {output.strip()}")
-        current = json.loads(output)
-        status = current["info"]["status"]
-        if status.startswith("pending") or any(not task.done() for task in _upgrades.values()):
-            raise HTTPException(status_code=409, detail=f"{release} is already being upgraded ({status})")
+        current = await _idle_release(release, namespace)
         try:
             download = await AsyncFilesClient.from_client(client).download_file(
                 workspace=workspace, name=body.source.fileset, path=body.source.archive
@@ -158,7 +185,7 @@ def deploy_router() -> APIRouter:
         args += ["--wait", "--timeout", config.deploy_timeout]
         if body.rollback_on_failure:
             args.append("--atomic")
-        revision = current["version"] + 1
+        revision = current + 1
         _upgrades[revision] = asyncio.create_task(_upgrade(work, args))
         return HelixDeployment(
             release=release,
@@ -174,10 +201,7 @@ def deploy_router() -> APIRouter:
     async def get_deployment(workspace: str, revision: int) -> HelixDeployment:
         """Read a revision of the Helix release from Helm."""
         release, namespace = _target()
-        code, output = await _helm("history", release, "-n", namespace, "-o", "json", "--max", "256")
-        if code:
-            raise HTTPException(status_code=502, detail=f"helm history failed: {output.strip()}")
-        row = next((row for row in json.loads(output) if row["revision"] == revision), None)
+        row = next((row for row in await _history(release, namespace) if row["revision"] == revision), None)
         if row is None:
             task = _upgrades.get(revision)
             if task is None:
@@ -187,8 +211,7 @@ def deploy_router() -> APIRouter:
             # Helm failed before recording the revision, for example because the chart didn't render.
             detail = task.result()[1][-2000:]
             return HelixDeployment(release=release, revision=revision, status="failed", detail=detail)
-        code, values = await _helm("get", "values", release, "-n", namespace, "--revision", str(revision), "-o", "json")
-        api_image, core_image = _image_refs(json.loads(values)) if not code else (None, None)
+        api_image, core_image = await _revision_images(release, namespace, revision)
         return HelixDeployment(
             release=release,
             revision=revision,
@@ -196,6 +219,41 @@ def deploy_router() -> APIRouter:
             api_image=api_image,
             core_image=core_image,
             detail=row.get("description"),
+        )
+
+    @router.post("/rollbacks", response_model=HelixDeployment, status_code=202)
+    @scope.write
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[DeployPerms.ROLLBACK])
+    async def create_rollback(workspace: str, body: CreateRollbackRequest) -> HelixDeployment:
+        """Start ``helm rollback`` of the Helix release; read its progress with ``GET /deployments/{revision}``."""
+        release, namespace = _target()
+        current = await _idle_release(release, namespace)
+        revisions = {row["revision"]: row["status"] for row in await _history(release, namespace)}
+        if body.revision is None:
+            # ponytail: Helm doesn't know test results, so "superseded" means "deployed once", not "passed its tests".
+            # A rollback from a rollback can land on the failed revision; pass `revision` then, or record test results.
+            target = max((r for r, s in revisions.items() if r < current and s == "superseded"), default=None)
+            if target is None:
+                raise HTTPException(status_code=422, detail=f"{release} has no earlier revision that deployed")
+        else:
+            target = body.revision
+            if target not in revisions:
+                raise HTTPException(status_code=404, detail=f"{release} has no revision {target}")
+            if target == current:
+                raise HTTPException(status_code=422, detail=f"{release} is already at revision {target}")
+        api_image, core_image = await _revision_images(release, namespace, target)
+        timeout = HelixOperatorConfig.get().deploy_timeout
+        revision = current + 1
+        _upgrades[revision] = asyncio.create_task(
+            _helm("rollback", release, str(target), "-n", namespace, "--wait", "--timeout", timeout)
+        )
+        return HelixDeployment(
+            release=release,
+            revision=revision,
+            status="pending-rollback",
+            api_image=api_image,
+            core_image=core_image,
+            detail=f"Rollback to {target}",
         )
 
     return router

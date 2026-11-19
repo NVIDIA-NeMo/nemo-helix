@@ -31,5 +31,14 @@ nemo helix-operator test --wait                       # {"id": ..., "status": "p
 nemo helix-operator test-run <id>
 ```
 
+Rollback runs `helm rollback`, which restores an earlier revision's chart and values. Without a revision it picks the
+newest earlier one that deployed (Helm's `superseded`); Helm doesn't record test results, so name the revision when a
+deployed one failed its tests. Tests never roll back on their own; compose the two:
+
+```bash
+nemo helix-operator rollback [<revision>] --wait      # read it later with `deployment <revision>`
+nemo helix-operator test --wait || nemo helix-operator rollback --wait
+```
+
 The service runs in its own pod (`Dockerfile`, `chart/`), with `NHX_BASE_URL` pointing at the Helix API. It is not in
 `enabled-plugins`, so no platform image loads it. Configuration is `HelixOperatorConfig` (`NEMO_HELIX_OPERATOR_*`).

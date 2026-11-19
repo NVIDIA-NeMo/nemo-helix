@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CLI commands: ``nemo helix-operator upload | build | status``."""
+"""CLI commands: ``nemo helix-operator upload | build | status | deploy | rollback | test``."""
 
 import json
 import time
@@ -11,7 +11,7 @@ from typing import TypeVar
 import httpx
 import typer
 from nemo_helix_operator.config import HelixOperatorConfig
-from nemo_helix_operator.deploy import CreateDeploymentRequest, HelixDeployment
+from nemo_helix_operator.deploy import CreateDeploymentRequest, CreateRollbackRequest, HelixDeployment
 from nemo_helix_operator.schemas import BuildSource, CreateBuildRequest, HelixBuild
 from nemo_helix_operator.source import pack
 from nemo_helix_operator.testrun import CreateTestRunRequest, HelixTestRun
@@ -38,6 +38,16 @@ def _call(ctx: typer.Context, model: type[T], method: str, workspace: str | None
         typer.echo(f"HTTP {response.status_code}: {response.text}", err=True)
         raise typer.Exit(1)
     return model.model_validate_json(response.content)
+
+
+def _finish_deployment(ctx: typer.Context, result: HelixDeployment, wait: bool, workspace: str | None) -> None:
+    deadline = time.monotonic() + _WAIT_SECONDS
+    while wait and result.status.startswith("pending") and time.monotonic() < deadline:
+        time.sleep(10)
+        result = _call(ctx, HelixDeployment, "GET", workspace, f"/deployments/{result.revision}")
+    typer.echo(result.model_dump_json(indent=2))
+    if wait and result.status != "deployed":
+        raise typer.Exit(1)
 
 
 class HelixOperatorCLI(NemoCLI):
@@ -118,14 +128,23 @@ class HelixOperatorCLI(NemoCLI):
                 core_image=core_image,
                 rollback_on_failure=rollback_on_failure,
             ).model_dump()
-            result = _call(ctx, HelixDeployment, "POST", workspace, "/deployments", body)
-            deadline = time.monotonic() + _WAIT_SECONDS
-            while wait and result.status.startswith("pending") and time.monotonic() < deadline:
-                time.sleep(10)
-                result = _call(ctx, HelixDeployment, "GET", workspace, f"/deployments/{result.revision}")
-            typer.echo(result.model_dump_json(indent=2))
-            if wait and result.status != "deployed":
-                raise typer.Exit(1)
+            _finish_deployment(
+                ctx, _call(ctx, HelixDeployment, "POST", workspace, "/deployments", body), wait, workspace
+            )
+
+        @app.command()
+        @handle_errors
+        def rollback(
+            ctx: typer.Context,
+            revision: int | None = typer.Argument(
+                None, help="The revision to restore; defaults to the newest earlier revision that deployed."
+            ),
+            wait: bool = typer.Option(False, "--wait", help="Poll until the rollback finishes (20 minutes)."),
+            workspace: WorkspaceOption = None,
+        ) -> None:
+            """Roll the Helix release back to an earlier revision."""
+            body = CreateRollbackRequest(revision=revision).model_dump()
+            _finish_deployment(ctx, _call(ctx, HelixDeployment, "POST", workspace, "/rollbacks", body), wait, workspace)
 
         @app.command()
         @handle_errors

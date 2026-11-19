@@ -85,3 +85,49 @@ def test_create_deployment(monkeypatch: pytest.MonkeyPatch) -> None:
         assert len(upgrades) == 1
         release["status"] = "pending-upgrade"
         assert client.post("/v2/workspaces/default/deployments", json=body).status_code == 409
+
+
+def test_create_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POD_NAMESPACE", "ns")
+    monkeypatch.setattr(deploy, "_upgrades", {})
+    release = {"status": "deployed"}
+    history = [{"revision": 7, "status": "superseded"}, {"revision": 8, "status": "failed"}]
+    history.append({"revision": 9, "status": "deployed"})
+    rollbacks: list[tuple[str, ...]] = []
+
+    async def helm(*args: str) -> tuple[int, str]:
+        if args[0] == "status":
+            return 0, json.dumps({"version": 9, "info": release})
+        if args[0] == "history":
+            return 0, json.dumps(history)
+        if args[0] == "get":
+            return 0, json.dumps({"api": {"image": {"repository": "reg/nhx-api", "tag": f"r{args[6]}"}}})
+        rollbacks.append(args)
+        return 0, "Rollback was a success!"
+
+    app = FastAPI()
+    for spec in HelixOperatorService().get_routers():
+        app.include_router(spec.router, prefix=spec.prefix)
+
+    with patch.object(deploy, "_helm", side_effect=helm), TestClient(app) as client:
+        response = client.post("/v2/workspaces/default/rollbacks", json={})
+        deadline = time.monotonic() + 5
+        while not all(task.done() for task in deploy._upgrades.values()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        assert response.status_code == 202, response.text
+        assert response.json() == {
+            "release": "nemo-helix",
+            "revision": 10,
+            "status": "pending-rollback",
+            "api_image": "reg/nhx-api:r7",
+            "core_image": None,
+            "detail": "Rollback to 7",
+        }
+        assert rollbacks == [("rollback", "nemo-helix", "7", "-n", "ns", "--wait", "--timeout", "10m")]
+
+        assert client.post("/v2/workspaces/default/rollbacks", json={"revision": 99}).status_code == 404
+        assert client.post("/v2/workspaces/default/rollbacks", json={"revision": 9}).status_code == 422
+        assert client.post("/v2/workspaces/default/rollbacks", json={"revision": 8}).json()["detail"] == "Rollback to 8"
+        release["status"] = "pending-rollback"
+        assert client.post("/v2/workspaces/default/rollbacks", json={}).status_code == 409
