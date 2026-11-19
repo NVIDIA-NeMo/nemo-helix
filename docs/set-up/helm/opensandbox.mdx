@@ -136,6 +136,21 @@ opensandbox:
 - In ingress gateway mode, add the gateway to `extraIngress` before upgrading, or it can't reach sandboxes.
 - The CNI must enforce NetworkPolicy. One that doesn't, such as flannel, stores the policy and ignores it.
 
+### Admit the kubelet's readiness probe
+
+OpenSandbox adds an egress sidecar to every sandbox created with a network policy, which Harbor trials always set, and gives it a readiness probe on `GET :18080/healthz`. The kubelet sends that probe from the node. Most CNIs let node traffic through, but some, such as kube-router, apply NetworkPolicy to it too. On those clusters the policy blocks the probe, so sandbox pods never become Ready and every trial fails with `Environment start timed out`. The pod events show `Readiness probe failed: ... context deadline exceeded` from `kubelet`.
+
+Admit the nodes' address range to the probe port only:
+
+```yaml
+opensandbox:
+  sandboxNetworkPolicy:
+    probeSourceCIDRs:
+      - 10.54.0.0/16  # Replace with your node range.
+```
+
+Find the range in the `INTERNAL-IP` column of `kubectl get nodes -o wide`, or ask your cluster administrator for the node subnet. The rule admits these CIDRs to `probePort` (default `18080`, the port the OpenSandbox server hard-codes) and nothing else. Leave `probeSourceCIDRs` empty on clusters where sandbox pods already become Ready.
+
 ## Verify
 
 ```sh

@@ -59,6 +59,17 @@ spec:
           podSelector:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+    {{- with $sandboxes.probeSourceCIDRs }}
+    # The kubelet's readiness probe, for CNIs such as kube-router that police traffic from the node itself.
+    - from:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ int $sandboxes.probePort }}
+    {{- end }}
     {{- with $sandboxes.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

@@ -120,6 +120,14 @@ opensandbox:
     serverPodSelector: {}
     # -- Extra NetworkPolicy ingress rules appended to the sandbox policy, such as a gateway in ingress gateway mode. `[{}]` admits all ingress.
     extraIngress: []
+    # -- CIDRs the kubelet probes sandbox pods from, admitted to `probePort` only. Leave empty unless sandbox pods never
+    # become Ready. Some CNIs, such as kube-router, apply NetworkPolicy to traffic from the node itself, so the policy
+    # blocks the readiness probe on the egress sidecar OpenSandbox adds to sandboxes with a network policy, which Harbor
+    # trials have. Set it to the nodes' address range, from the `INTERNAL-IP` column of `kubectl get nodes -o wide`.
+    probeSourceCIDRs: []
+    # -- Port of the readiness probe `probeSourceCIDRs` admits: the egress sidecar's `/healthz`, which the OpenSandbox
+    # server hard-codes as 18080. Change it only if the server you run probes another port.
+    probePort: 18080
 
 # -- RBAC configuration settings for optional dependencies
 rbac:
