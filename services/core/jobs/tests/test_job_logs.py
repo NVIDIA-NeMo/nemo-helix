@@ -7,14 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
+from nhx.common.entities import DEFAULT_WORKSPACE
 from nhx.common.jobs.log_client import dep_job_logs_client
 from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, HelixJobStatus, InvalidPageCursorError
 from nhx.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
 from nhx.core.jobs.app.dispatcher import JobDispatcher
-from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.entities import HelixJob
-from nhx.testing import create_test_client
+from nhx.testing import ClientContext, create_test_client
 
 
 @pytest.fixture
@@ -56,10 +55,11 @@ class TestJobLogsAPI:
         return client
 
     @pytest.fixture
-    def dispatcher(self):
+    def dispatcher(self, creation_controller):
         """Create a real dispatcher with test entity store and mock clients."""
         projects = ["default/test-project"]
-        with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+        with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+            mock_store = ctx.entity_client
             mock_files = AsyncMock()
             mock_files.with_retry = MagicMock(return_value=mock_files)
             mock_fileset_obj = MagicMock()
@@ -69,9 +69,7 @@ class TestJobLogsAPI:
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
 
-            dispatcher = JobDispatcher(
-                events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
-            )
+            dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
             yield dispatcher
 
     @pytest.fixture
@@ -95,7 +93,7 @@ class TestJobLogsAPI:
 
         response = test_client.get(f"/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job.id}/logs{attempt_query}")
 
-        assert response.status_code == 409
+        assert response.status_code == (404 if pending_status == HelixJobStatus.CREATION_PENDING else 409)
         mock_logs_client.query_logs.assert_not_called()
 
     async def test_get_job_logs_success(

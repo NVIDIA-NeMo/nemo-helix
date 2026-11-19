@@ -31,7 +31,7 @@ from nhx.core.jobs.app.constants import (
     STORAGE_SWEPT_AT,
 )
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
-from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
+from nhx.core.jobs.app.event_publisher import JobEventPublisher
 from nhx.core.jobs.app.event_stream import SyncJobEventStream
 from nhx.core.jobs.app.lifecycle import (
     effective_pause_ttl_seconds,
@@ -64,7 +64,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         self,
         backend_registry: BackendRegistry,
         nemo_client: NemoClient,
-        events: SyncJobEventRecorder,
+        events: JobEventPublisher,
         stop_signal: threading.Event | None = None,
         storage_config: JobsStorageConfig | None = None,
         system_entity_client: SyncEntityClient | None = None,
@@ -103,7 +103,7 @@ class JobReconciler(HeartbeatMixin, Controller):
 
     @property
     def is_healthy(self) -> bool:
-        return self._is_healthy
+        return bool(self._is_healthy and self._events.is_healthy)
 
     def step(self):
         # Check stop signal before making any API calls
@@ -113,7 +113,11 @@ class JobReconciler(HeartbeatMixin, Controller):
 
         # Keep fetch, per-step reconciliation, cleanup, and their logs in one trace.
         with tracer.start_as_current_span("jobs_reconciler/step"):
-            self._reconcile()
+            self._events.publish_observations(self.emit_heartbeat, self._stop_signal)
+            try:
+                self._reconcile()
+            finally:
+                self._events.publish_observations(self.emit_heartbeat, self._stop_signal)
 
     def _reconcile(self) -> None:
         fetch_started_at = time.monotonic()
@@ -151,7 +155,7 @@ class JobReconciler(HeartbeatMixin, Controller):
             ):
                 try:
                     provider, profile = extract_provider_profile(step)
-                    if step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
+                    if step.status.is_terminal():
                         self._update_step_status_with_timing(
                             step=step, provider=provider, profile=profile, status=step.status
                         )
@@ -333,7 +337,6 @@ class JobReconciler(HeartbeatMixin, Controller):
                         error_details={"message": "Rerun did not publish its first Step before the creation deadline"},
                     )
                 )
-                self._events.created(step)
                 # Parent-scoped Step uniqueness prevents a paused starter from
                 # creating runnable work after recovery. The existing terminal
                 # cleanup scan retries this update if the request fails.
@@ -389,16 +392,16 @@ class JobReconciler(HeartbeatMixin, Controller):
             try:
                 if job.status == HelixJobStatus.CREATION_PENDING:
                     # Claim abandoned setup before cleanup; stale publication loses its version.
-                    before = self._events.before(job)
                     job.status = HelixJobStatus.DELETION_PENDING
                     job = self._system_entities.update(job)
-                    self._events.updated(before, job)
                 if not self._settle_pending_storage(job):
                     continue
                 job = self._settle_pending_artifacts(job)
+                if not self._events.flush_job(job, self.emit_heartbeat, self._stop_signal):
+                    continue
                 deleted_images = self._events.deletion_images(job, self._stop_signal)
                 self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
-                self._events.deleted(deleted_images)
+                self._events.deleted(deleted_images, self.emit_heartbeat)
                 if job.output_location is None and job.fileset_id is None and job.current_attempt_id is not None:
                     logger.warning(
                         "Retaining unverified artifact Fileset after deleting Job without allocation receipt",
@@ -717,7 +720,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         cleanup_query = cast(
             ListStepsQueryParams,
             {
-                "filter[status]": "cancelled,error",
+                "filter[status]": "completed,cancelled,error",
                 "filter[" + JOB_TASK_CLEANUP_PENDING_KEY + "]": "true",
                 "sort": "updated_at",
             },

@@ -47,7 +47,6 @@ from nhx.core.jobs.app.dispatcher import (
     JobStatusUpdateSkippedError,
     StateTransitionConflictError,
 )
-from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import (
     HelixJobSecret,
@@ -1917,16 +1916,18 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
 
 
 @pytest.mark.asyncio
-async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: CreateHelixJobRequest):
+async def test_job_steps_list_global_vs_workspaced(
+    sample_platform_job_request: CreateHelixJobRequest, creation_controller
+):
     """Test that global step listing returns steps from all workspaces while workspaced calls are filtered."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from nhx.common.entities.client import EntityClient
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
-    with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -1937,9 +1938,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         mock_files.create_fileset.return_value = mock_resp
 
         # Create dispatcher with the multi-workspace store
-        mock_dispatcher = JobDispatcher(
-            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
-        )
+        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
 
         # Create jobs in "default" workspace
         job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)

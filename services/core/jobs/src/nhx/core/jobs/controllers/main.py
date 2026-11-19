@@ -15,7 +15,7 @@ from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
 from nhx.common.entities import SyncEntityClient
 from nhx.common.service.api.health import wait_for_service_ready
-from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
+from nhx.core.jobs.app.event_publisher import JobEventPublisher
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
@@ -98,7 +98,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     job_reconciler = JobReconciler(
         backend_registry,
         nemo_client,
-        events=SyncJobEventRecorder(event_store, WorkspacesClient.from_client(event_client)),
+        events=JobEventPublisher(event_store, WorkspacesClient.from_client(event_client)),
         stop_signal=local_stop_signal,
     )
     job_reconciler_monitored = TrackLastExecutionTime(job_reconciler)

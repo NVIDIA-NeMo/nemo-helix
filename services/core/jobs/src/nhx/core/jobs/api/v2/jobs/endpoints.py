@@ -78,6 +78,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobHasNoAttemptError,
     JobOperationConflictError,
     JobOutputLocationError,
+    JobPublicationTimeoutError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
     JobStorageReclaimPendingError,
@@ -401,6 +402,8 @@ async def create_job(
             workspace,
             auth_context=AuthContext.from_principal(auth_client.principal),
         )
+    except JobPublicationTimeoutError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except PauseTTLLimitError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.detail) from exc
     except JobEnvironmentValidationError as exc:

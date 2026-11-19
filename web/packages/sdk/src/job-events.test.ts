@@ -10,7 +10,7 @@ vi.mock('@nemo/sdk/generated/fetchers/platform.ts', () => ({ customFetch: fetch 
 const page: JobEventPage = {
   data: [
     {
-      id: '9007199254740993',
+      id: '1267650600228229401496703205376',
       event_type: 'job.created',
       workspace_id: 'workspace-id',
       job_id: 'job-id',
@@ -45,7 +45,7 @@ it('generated event clients retain nullable fields, large IDs and opaque cursors
   );
   const continuation = { cursor: page.next_cursor, limit: 25, wait_seconds: 10 };
   const result = await readJobEvents(continuation);
-  expect(result.data[0]?.id).toBe('9007199254740993');
+  expect(result.data[0]?.id).toBe('1267650600228229401496703205376');
   expect(result.prev_cursor).toBeNull();
   expect(fetch).toHaveBeenLastCalledWith(
     expect.objectContaining({

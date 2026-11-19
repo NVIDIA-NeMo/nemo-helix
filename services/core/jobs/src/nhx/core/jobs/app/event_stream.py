@@ -3,8 +3,6 @@
 
 """Jobs-owned event publication and paging through the generic EntityClient API."""
 
-import asyncio
-import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from time import time as wall_time
@@ -32,7 +30,7 @@ from nhx.common.entities import (
 from pydantic import BaseModel, JsonValue
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60
-PUBLICATION_LEASE_SECONDS = 30
+MAX_EVENT_ID = 2**128 - 2
 STREAM_NAME = "lifecycle-events"
 
 
@@ -41,7 +39,6 @@ class JobEventSequence(EntityBase):
     position: int = 0
     expired_through: int = 0
     recorded_at_epoch: float = 0
-    pending_until: float | None = None
 
 
 class StoredJobEvent(EntityBase):
@@ -64,8 +61,7 @@ class LifecycleChange(BaseModel):
     occurred_at: datetime
     snapshot: dict[str, JsonValue]
 
-    def stored(self, state: JobEventSequence) -> StoredJobEvent:
-        number = state.position + 1
+    def stored(self, number: int, recorded_at_epoch: float) -> StoredJobEvent:
         event = JobLifecycleEvent(
             id=str(number),
             event_type=self.event_type,
@@ -76,14 +72,14 @@ class LifecycleChange(BaseModel):
             previous_state=self.previous_state,
             new_state=self.new_state,
             occurred_at=self.occurred_at,
-            recorded_at=datetime.fromtimestamp(state.recorded_at_epoch, timezone.utc),
+            recorded_at=datetime.fromtimestamp(recorded_at_epoch, timezone.utc),
             snapshot=self.snapshot,
         )
         return StoredJobEvent(
             name=slot_name(number),
             workspace=SYSTEM_WORKSPACE,
             number=number,
-            recorded_at_epoch=state.recorded_at_epoch,
+            recorded_at_epoch=recorded_at_epoch,
             event_type=self.event_type.value,
             workspace_identity=self.workspace_id,
             event=event,
@@ -91,7 +87,8 @@ class LifecycleChange(BaseModel):
 
 
 def slot_name(number: int) -> str:
-    return f"e{number:019d}"
+    # Preserve existing keys; wider IDs sort after every 19-digit key.
+    return f"e{number:019d}" if number < 10**19 else f"f{number:039d}"
 
 
 def condition(field: str, operator: FilterOperator, value: str | int | float | list[str]) -> ComparisonOperation:
@@ -105,27 +102,6 @@ def conjunction(*operations: FilterOperation) -> LogicalOperation:
     return LogicalOperation(operator=FilterOperator.AND, operations=list(operations))
 
 
-def reservation(state: JobEventSequence) -> JobEventSequence:
-    if state.position >= 2**63 - 2:
-        raise RuntimeError("Lifecycle event ID space exhausted")
-    now = wall_time()
-    return state.model_copy(
-        update={
-            "pending_until": now + PUBLICATION_LEASE_SECONDS,
-            "recorded_at_epoch": max(now, state.recorded_at_epoch),
-        }
-    )
-
-
-def abandoned_slot(state: JobEventSequence) -> StoredJobEvent:
-    return StoredJobEvent(
-        name=slot_name(state.position + 1),
-        workspace=SYSTEM_WORKSPACE,
-        number=state.position + 1,
-        recorded_at_epoch=state.recorded_at_epoch,
-    )
-
-
 class JobEventStream:
     def __init__(self, store: EntityClient):
         self.store = store
@@ -134,50 +110,7 @@ class JobEventStream:
         try:
             return await self.store.get(JobEventSequence, STREAM_NAME, workspace=SYSTEM_WORKSPACE)
         except EntityNotFoundError:
-            try:
-                return await self.store.create(JobEventSequence(name=STREAM_NAME, workspace=SYSTEM_WORKSPACE))
-            except EntityConflictError:
-                return await self.store.get(JobEventSequence, STREAM_NAME, workspace=SYSTEM_WORKSPACE)
-
-    async def complete(self, state: JobEventSequence, record: StoredJobEvent) -> StoredJobEvent:
-        # Closing an abandoned slot creates a tombstone with the same unique name.
-        # A delayed writer then conflicts instead of appearing behind an advanced cursor.
-        try:
-            saved = await self.store.create(record)
-        except EntityConflictError:
-            saved = await self.store.get(StoredJobEvent, record.name, workspace=SYSTEM_WORKSPACE)
-        for _ in range(32):
-            if state.position >= record.number:
-                return saved
-            try:
-                await self.store.update(state.model_copy(update={"position": record.number, "pending_until": None}))
-                return saved
-            except EntityConflictError:
-                state = await self.state()
-        raise RuntimeError("Lifecycle publication contention")
-
-    async def advance_pending(self, state: JobEventSequence) -> bool:
-        try:
-            record = await self.store.get(StoredJobEvent, slot_name(state.position + 1), workspace=SYSTEM_WORKSPACE)
-        except EntityNotFoundError:
-            if state.pending_until is None or state.pending_until > wall_time():
-                return False
-            record = abandoned_slot(state)
-        await self.complete(state, record)
-        return True
-
-    async def append(self, change: LifecycleChange) -> JobLifecycleEvent | None:
-        while True:
-            state = await self.state()
-            if state.pending_until is not None:
-                if not await self.advance_pending(state):
-                    await asyncio.sleep(0.01)
-                continue
-            try:
-                claimed = await self.store.update(reservation(state))
-            except EntityConflictError:
-                continue
-            return (await self.complete(claimed, change.stored(claimed))).event
+            return JobEventSequence(name=STREAM_NAME, workspace=SYSTEM_WORKSPACE)
 
     async def floor(self, state: JobEventSequence, cutoff: float) -> int:
         expired = await self.store.list(
@@ -194,8 +127,6 @@ class JobEventStream:
 
     async def read(self, request: JobEventRequest) -> JobEventPage:
         state = await self.state()
-        if state.pending_until is not None and await self.advance_pending(state):
-            state = await self.state()
         highwater = state.position
         cutoff = wall_time() - RETENTION_SECONDS
         floor = await self.floor(state, cutoff)
@@ -279,45 +210,46 @@ class SyncJobEventStream:
             except EntityConflictError:
                 return self.store.get(JobEventSequence, STREAM_NAME, workspace=SYSTEM_WORKSPACE)
 
-    def complete(self, state: JobEventSequence, record: StoredJobEvent) -> StoredJobEvent:
-        try:
-            saved = self.store.create(record)
-        except EntityConflictError:
-            saved = self.store.get(StoredJobEvent, record.name, workspace=SYSTEM_WORKSPACE)
-        for _ in range(32):
-            if state.position >= record.number:
-                return saved
-            try:
-                self.store.update(state.model_copy(update={"position": record.number, "pending_until": None}))
-                return saved
-            except EntityConflictError:
-                state = self.state()
-        raise RuntimeError("Lifecycle publication contention")
+    def recover(self, on_progress: Callable[[], None] | None = None) -> JobEventSequence:
+        state = self.state()
+        if on_progress is not None:
+            on_progress()
+        last = self.store.list(StoredJobEvent, workspace=SYSTEM_WORKSPACE, sort="-name", page_size=1).data
+        if on_progress is not None:
+            on_progress()
+        if last and last[0].number > state.position:
+            state = self.store.update(
+                state.model_copy(
+                    update={
+                        "position": last[0].number,
+                        "recorded_at_epoch": max(state.recorded_at_epoch, last[0].recorded_at_epoch),
+                    }
+                )
+            )
+            if on_progress is not None:
+                on_progress()
+        return state
 
-    def advance_pending(self, state: JobEventSequence) -> bool:
-        try:
-            record = self.store.get(StoredJobEvent, slot_name(state.position + 1), workspace=SYSTEM_WORKSPACE)
-        except EntityNotFoundError:
-            if state.pending_until is None or state.pending_until > wall_time():
-                return False
-            record = abandoned_slot(state)
-        self.complete(state, record)
-        return True
-
-    def append(self, change: LifecycleChange) -> JobLifecycleEvent | None:
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            state = self.state()
-            if state.pending_until is not None:
-                if not self.advance_pending(state):
-                    time.sleep(0.01)
-                continue
+    def append(self, change: LifecycleChange, on_progress: Callable[[], None] | None = None) -> JobLifecycleEvent:
+        for _ in range(3):
+            state = self.recover(on_progress)
+            if state.position >= MAX_EVENT_ID:
+                raise RuntimeError("Lifecycle sequence exceeds the supported 128-bit cursor range")
+            number = state.position + 1
+            recorded_at = max(wall_time(), state.recorded_at_epoch)
+            record = change.stored(number, recorded_at)
             try:
-                claimed = self.store.update(reservation(state))
+                saved = self.store.create(record)
             except EntityConflictError:
                 continue
-            return self.complete(claimed, change.stored(claimed)).event
-        raise TimeoutError("Lifecycle publication busy")
+            if on_progress is not None:
+                on_progress()
+            self.store.update(state.model_copy(update={"position": number, "recorded_at_epoch": recorded_at}))
+            if on_progress is not None:
+                on_progress()
+            assert saved.event is not None
+            return saved.event
+        raise RuntimeError("Lifecycle sequence changed; retry publication")
 
     def cleanup(self, batch_size: int = 100, on_progress: Callable[[], None] | None = None) -> int:
         for _ in range(32):

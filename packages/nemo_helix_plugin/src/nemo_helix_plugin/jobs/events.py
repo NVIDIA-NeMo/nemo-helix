@@ -86,13 +86,13 @@ class ExpiredJobEventCursor(ValueError):
 class JobEventCursor(BaseModel):
     model_config = ConfigDict(extra="forbid")
     v: Literal[1] = 1
-    position: str = Field(pattern=r"^(0|[1-9][0-9]*)$", max_length=19)
+    position: str = Field(pattern=r"^(0|[1-9][0-9]*)$", max_length=39)
     direction: Literal["forward", "backward"] = "forward"
     filters: JobEventFilters = Field(default_factory=JobEventFilters)
 
     @model_validator(mode="after")
     def validate_bound(self) -> Self:
-        if int(self.position) > 2**63 - 1:
+        if int(self.position) > 2**128 - 1:
             raise ValueError("cursor position exceeds supported range")
         return self
 

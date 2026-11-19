@@ -3,7 +3,8 @@
 
 import datetime
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -40,7 +41,6 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobStepWithContext,
 )
 from nhx.core.jobs.app.dispatcher import JobDispatcher
-from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
 from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
@@ -61,8 +61,9 @@ from nhx.core.jobs.entities import (
     HelixJobAttempt,
     HelixJobResult,
 )
-from nhx.testing import create_test_client, subprocess_job_executor_patch
+from nhx.testing import ClientContext, create_test_client, subprocess_job_executor_patch
 from nhx.testing.blockbuster import blockbuster_fixture
+from nhx.testing.jobs import job_creation_controller
 from pydantic import BaseModel
 from pytest import fixture
 
@@ -128,24 +129,23 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.unit)
 
 
-@pytest.fixture(scope="function")
-def mock_store():
-    """Create an EntityClient for testing backed by in-memory storage.
+@pytest.fixture
+def creation_controller() -> Callable[[ClientContext], AbstractContextManager[None]]:
+    return lambda ctx: job_creation_controller(ctx.client)
 
-    Uses create_test_client with EntitiesService in-memory backend
-    to avoid issues with nested ASGITransport contexts.
-    """
-    # Include projects used in tests (proj-1234 used by test_hello_world_jobs_list)
+
+@pytest.fixture(scope="function")
+def mock_store(creation_controller):
+    """Use the real Entity Store and a controller that completes creation handoffs."""
     projects = ["default/test-project", "default/proj-1234"]
-    with create_test_client(client_type=EntityClient, projects=projects) as client:
-        yield client
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        yield ctx.entity_client
 
 
 @pytest_asyncio.fixture()
 async def mock_dispatcher(mock_store, mock_files_client, mock_secrets_client) -> JobDispatcher:
     """Create a JobDispatcher instance for testing with mock EntityStore and typed clients."""
     return JobDispatcher(
-        events=AsyncMock(spec=JobEventRecorder),
         store=mock_store,
         files=mock_files_client,
         secrets=mock_secrets_client,

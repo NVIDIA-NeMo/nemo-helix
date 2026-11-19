@@ -6,9 +6,7 @@
 import logging
 from typing import ClassVar, List
 
-from fastapi import FastAPI
 from nhx.common.service import RouterConfig, Service
-from nhx.common.service.dependencies import service_instance_dependency
 from nhx.core.jobs.config import JobsServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -30,10 +28,6 @@ class JobsService(Service[JobsServiceConfig]):
     @property
     def description(self) -> str:
         return "Service for job scheduling and execution management."
-
-    def _setup_dependencies(self, app: FastAPI) -> None:
-        super()._setup_dependencies(app)
-        service_instance_dependency(self.name, JobsService).bind(app, self)
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the jobs service."""
