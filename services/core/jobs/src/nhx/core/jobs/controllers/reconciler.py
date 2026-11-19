@@ -110,7 +110,30 @@ class JobReconciler(HeartbeatMixin, Controller):
         with tracer.start_as_current_span("jobs_reconciler/step"):
             self._reconcile()
 
+    def _reconcile_workflows(self) -> None:
+        try:
+            jobs = self._jobs.list_jobs(workspace="-").items()
+            for job in jobs:
+                if job.attempt_id is None:
+                    continue
+                try:
+                    attempt = self._jobs.get_job_attempt(
+                        job=job.id, attempt=job.attempt_id, workspace=job.workspace
+                    ).data()
+                    if attempt.platform_spec.workflow is None:
+                        continue
+                    self._jobs.update_attempt_status_details(
+                        job.id, job.attempt_id, workspace=job.workspace, body={"workflow_reconcile": True}
+                    )
+                except NemoClientError:
+                    logger.exception("Could not reconcile workflow", extra={"job": job.id})
+                finally:
+                    self.emit_heartbeat()
+        except NemoClientError:
+            logger.exception("Could not list workflows")
+
     def _reconcile(self) -> None:
+        self._reconcile_workflows()
         fetch_started_at = time.monotonic()
         with tracer.start_as_current_span("jobs_reconciler/fetch_steps_for_reconciliation"):
             try:
@@ -277,6 +300,8 @@ class JobReconciler(HeartbeatMixin, Controller):
         for attempt in response.data:
             if self._stop_signal and self._stop_signal.is_set():
                 return
+            if attempt.platform_spec.workflow is not None:
+                continue
             if attempt.seq == 0 or attempt.created_at is None:
                 continue
             created_at = attempt.created_at
@@ -531,6 +556,8 @@ class JobReconciler(HeartbeatMixin, Controller):
 
     def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
         job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
+        if step.step_spec is not None and step.step_spec.depends_on is not None:
+            return  # Workflow retention uses the attempt clock, including a pause with no paused step.
         # An older attempt's stopped step must not reclaim storage from under a rerun. It is not
         # marked either: step names repeat across attempts, so the update could land on the rerun's.
         current_attempt_id = getattr(job, "attempt_id", None)

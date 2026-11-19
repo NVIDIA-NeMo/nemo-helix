@@ -10,12 +10,14 @@ OTLP query endpoint using the typed FilesClient.
 
 import logging
 
+from fastapi import Depends
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import OtlpLogQueryRequest
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.jobs.schemas import HelixJobLogPage, InvalidPageCursorError
+from nhx.common.service.dependencies import get_nemo_client
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,6 @@ class JobLogsClient:
             raise
 
 
-def dep_job_logs_client() -> JobLogsClient:
-    """FastAPI dependency for JobLogsClient."""
-    return JobLogsClient()
+def dep_job_logs_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> JobLogsClient:
+    """Use the request's authenticated client and shared transport for log queries."""
+    return JobLogsClient(client)

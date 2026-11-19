@@ -66,6 +66,112 @@ nemo jobs update <job-name> \
 
 Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
 
+## DAG workflows (prototype)
+
+Opt a platform job into DAG scheduling with `platform_spec.workflow`. Set its
+`mode` to `run_to_completion` (the default) or `continuous`. Every workflow step
+must declare `depends_on`, including an empty list for roots. Optional `inputs`
+contains objects with a `fileset_id`. Job create and update reject cycles,
+unknown dependencies, duplicate input references, and workflow-only fields on
+sequential jobs.
+
+The controller compares each node's input Filesets' opaque `commit_revision`
+values. Uploading files alone does not request another execution: explicitly
+commit the Fileset after updating its inputs. Outputs do not affect scheduling.
+Dependencies order execution; each node's own inputs determine whether it needs
+to run again. The controller evaluates dependencies from roots to leaves. A
+blocked node cannot release its children using an earlier success. Once its
+ancestors recover, its unchanged inputs can reuse that success.
+
+An Attempt keeps the definition and original execution context it started with.
+Editing the Job takes effect in a new Attempt through the existing start/rerun
+operation. Terminal Attempts stay terminal. Sequential jobs retain their current
+behavior when `workflow` is omitted.
+
+A continuous Attempt stays active when its nodes are clean, failed or cancelled.
+Unchanged failed or cancelled inputs wait for an input commit or manual
+invalidation; backend retries are unchanged. Cancelling a node cancels its
+dependent branch while independent runnable branches finish the pass. A
+run-to-completion Attempt then ends `CANCELLED`; a continuous Attempt stays open
+and can retry cancelled nodes in a later pass. Cancelling the whole workflow
+ends its Attempt `CANCELLED` in either mode. Internal retirement of an obsolete
+queued execution for replacement does not cancel the logical node.
+
+To invalidate selected nodes, PATCH the existing
+`/apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details`
+route with this body:
+
+```json
+{
+  "workflow_invalidation": {
+    "request_id": "manual-run-1",
+    "steps": ["prepare", "evaluate"]
+  }
+}
+```
+
+Use another request ID for another invalidation. Repeating the current signal
+for a node does not request extra work. Invalidations can remain pending while
+paused and cannot bypass failed dependencies. Input changes and invalidations
+received during execution coalesce into a later pass after the current pass
+drains. The same logical node never has overlapping executions.
+
+Pause drains dispatched work and holds unscheduled nodes. Resume continues the
+same Attempt. Existing storage-retention TTLs and expiry actions apply; a
+workflow pause uses the time the Attempt reached paused, even when no individual
+Step is paused. A failed node does not expire shared storage while a continuous
+Attempt remains active.
+
+The status API and `jobs watch` expose each logical node's freshness
+(`unknown`, `dirty`, or `clean`), scheduling state, blockers, requested revision,
+execution IDs, latest outcome and input-observation timestamps/errors. The
+controller alone writes `workflow_state`; ordinary progress details are separate.
+Each node keeps its active execution ID, captured run revision and input commit
+values there; Step records contain ordinary execution status, Tasks and logs.
+Status reads do not poll inputs or schedule work. Use `attempt_id` on status
+reads or `--attempt-id` on watch to select an Attempt. The sync and async typed
+clients accept `get_job_status(..., attempt_id=...)`. Execution history remains
+available through the existing paginated Attempt step routes. Results keep their
+existing Job-wide names and overwrite behavior.
+
+The initial prototype is verified with real services and controllers in one
+process. Run its edge-case suite from the repository root:
+
+```bash
+uv run --frozen pytest services/core/jobs/tests/integration/test_workflows.py
+```
+
+Local Docker CPU execution is covered by an opt-in integration suite. It uses
+in-process services and the production Docker scheduler/reconciler/backend with
+real `busybox:stable` containers. The Docker daemon must be running and the image
+must be available locally:
+
+```bash
+NHX_TEST_WORKFLOW_DOCKER=1 uv run --frozen pytest services/core/jobs/tests/integration/test_workflows_docker.py
+```
+
+The suite requires Go and builds a static Linux `jobs-launcher` from this
+checkout using the toolchain selected by its `go.mod`. Each workload runs through
+that binary. To use a binary you have already built, set
+`NHX_TEST_WORKFLOW_LAUNCHER` to its absolute path.
+
+The tests cover dependency ordering, changes during execution, coalesced reruns,
+controller replacement while running/paused, immutable Attempt configuration,
+late task callbacks, draining pause, cancellation, launch failures, active
+execution timeouts and real storage-retention cleanup. They also check launcher
+stdout/stderr flushing, exit-code propagation and log attribution across node
+executions. A continuous workflow reports `waiting_for_changes` only when the
+recorded state has no eligible pending run; a completed once-mode Attempt does
+not report that it is waiting.
+
+Temporary containers and volumes are removed after each case. Container callbacks
+and launcher OTLP exports use a temporary local HTTP bridge via Docker Desktop's
+`host.docker.internal`. Log ingestion and queries use the real Files service.
+The tests leave the daemon's default log driver unchanged. Full packaged platform
+images and live workload-token exchange remain outside this suite.
+GPU/Kubernetes execution, live token exchange and mixed-controller upgrades
+remain unvalidated. Use controllers from the same workflow-capable build.
+
 ## Viewing Job Logs
 
 Use `nemo jobs get-logs` to inspect paginated job logs:

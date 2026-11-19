@@ -168,6 +168,28 @@ def test_filesets_get_without_any_workspace_is_usage_error() -> None:
     assert recorder.requests == []
 
 
+def test_filesets_commit_posts_and_returns_revision() -> None:
+    recorder = Recorder([httpx.Response(200, json={**FILESET, "commit_revision": "new-revision"})])
+    runner, state = make_runner(recorder)
+    result = runner.invoke(app, ["files", "filesets", "commit", "my-fileset", "--workspace", "other"], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert recorder.calls() == [("POST", "/apis/files/v2/workspaces/other/filesets/my-fileset/commit")]
+    assert not recorder.last.url.query
+    assert not recorder.last.content
+    assert json.loads(result.stdout)["commit_revision"] == "new-revision"
+
+
+def test_filesets_commit_code_does_not_commit() -> None:
+    recorder = Recorder()
+    runner, state = make_runner(recorder)
+    result = runner.invoke(app, ["files", "filesets", "commit", "my-fileset", "-f", "code"], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert ".commit_fileset(" in result.stdout
+    assert not recorder.requests
+
+
 def test_filesets_refresh_posts_to_the_refresh_route() -> None:
     recorder = Recorder([httpx.Response(200, json=FILESET)])
     runner, state = make_runner(recorder)

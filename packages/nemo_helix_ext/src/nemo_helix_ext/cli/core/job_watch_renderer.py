@@ -15,6 +15,7 @@ from nemo_helix_plugin.jobs.watch_types import (
     JobWarningEvent,
     JobWatchEvent,
     JobWatchTimeoutError,
+    JobWorkflowEvent,
 )
 from rich.console import Console
 from rich.text import Text
@@ -79,6 +80,11 @@ def _render_event(console: Console, event: JobWatchEvent) -> JobStatusEvent | No
     if isinstance(event, JobStatusEvent):
         _render_status(console, event)
         return event
+    if isinstance(event, JobWorkflowEvent):
+        for node in event.workflow.nodes:
+            detail = node.reason or node.scheduling_state
+            console.print(f"  {node.name}: {node.freshness} / {node.scheduling_state} ({detail})", markup=False)
+        return None
     if isinstance(event, JobLogEvent):
         _render_log(console, event)
         return None

@@ -115,7 +115,13 @@ class _StatusOnlyClient:
         self._results = list(results)
         self.calls = 0
 
-    def get_job_status(self, *, workspace: str | None = None, name: str) -> NemoResponse[HelixJobStatusResponse]:
+    def get_job_status(
+        self,
+        *,
+        workspace: str | None = None,
+        name: str,
+        attempt_id: str | None = None,
+    ) -> NemoResponse[HelixJobStatusResponse]:
         self.calls += 1
         result = self._results.pop(0)
         if isinstance(result, Exception):
@@ -234,3 +240,100 @@ async def test_watch_retains_status_id_for_logs_and_next_poll_after_name_reuse(
             with pytest.raises(NotFoundError):
                 list(watch_job(JobsClient.from_client(client), "training", poll_interval=0))
     assert [path.rsplit("/", 2)[-2] for path in paths] == ["training", "platform-job-original", "platform-job-original"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_watch_pins_status_to_selected_attempt(asynchronous: bool) -> None:
+    from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+    from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
+    from nemo_helix_plugin.jobs.watch import async_watch_job
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.params["attempt_id"] == "selected-attempt"
+        return httpx.Response(200, json=_completed().model_dump(mode="json"))
+
+    if asynchronous:
+        async with AsyncNemoClient(
+            base_url="http://test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ) as client:
+            events = [
+                event
+                async for event in async_watch_job(
+                    AsyncJobsClient.from_client(client),
+                    "job-a",
+                    workspace="default",
+                    attempt_id="selected-attempt",
+                    include_logs=False,
+                )
+            ]
+    else:
+        with NemoClient(
+            base_url="http://test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+        ) as client:
+            events = list(
+                watch_job(
+                    JobsClient.from_client(client),
+                    "job-a",
+                    workspace="default",
+                    attempt_id="selected-attempt",
+                    include_logs=False,
+                )
+            )
+    assert len(requests) == 1
+    assert events[-1].kind == "status"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_watch_current_selector_pins_the_first_resolved_attempt(asynchronous: bool) -> None:
+    from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+    from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
+    from nemo_helix_plugin.jobs.watch import async_watch_job
+
+    selections: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        selections.append(request.url.params["attempt_id"])
+        body = _completed().model_copy(
+            update={
+                "attempt_id": "original-attempt",
+                "status": HelixJobStatus.ACTIVE if len(selections) == 1 else HelixJobStatus.COMPLETED,
+            }
+        )
+        return httpx.Response(200, json=body.model_dump(mode="json"))
+
+    if asynchronous:
+        async with AsyncNemoClient(
+            base_url="http://test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        ) as client:
+            events = [
+                event
+                async for event in async_watch_job(
+                    AsyncJobsClient.from_client(client),
+                    "job-a",
+                    workspace="default",
+                    attempt_id="current",
+                    include_logs=False,
+                    poll_interval=0,
+                )
+            ]
+    else:
+        with NemoClient(
+            base_url="http://test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+        ) as client:
+            events = list(
+                watch_job(
+                    JobsClient.from_client(client),
+                    "job-a",
+                    workspace="default",
+                    attempt_id="current",
+                    include_logs=False,
+                    poll_interval=0,
+                )
+            )
+    assert selections == ["current", "original-attempt"]
+    assert events[-1].kind == "status"

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
 from nemo_helix_plugin.jobs.types import JobControl
+from nemo_helix_plugin.jobs.workflows import WorkflowState
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
 from nhx.common.jobs.schemas import FileStorageType, HelixJobResultResponse, HelixJobStatus
@@ -101,6 +102,17 @@ class HelixJobAttempt(EntityBase):
     status: HelixJobStatus = Field(default=HelixJobStatus.CREATED, description="Attempt status")
     status_details: Dict[str, Any] = Field(default_factory=dict, description="Details about the job status")
     error_details: Optional[Dict[str, Any]] = Field(default=None, description="Error details if applicable")
+    workflow_state: WorkflowState | None = None
+    _auth_context: AuthContext | None = PrivateAttr(default=None)
+
+    @computed_field
+    @property
+    def auth_context(self) -> AuthContext | None:
+        return self._auth_context
+
+    def with_auth_context(self, auth_context: AuthContext | None) -> Self:
+        self._auth_context = auth_context
+        return self
 
     @model_validator(mode="after")
     def set_parent_from_job(self):

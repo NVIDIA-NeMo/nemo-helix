@@ -31,6 +31,7 @@ ResponseT = TypeVar("ResponseT")
 class _StatusCall(TypedDict):
     workspace: str | None
     name: str
+    attempt_id: str | None
 
 
 class _LogCall(TypedDict):
@@ -114,8 +115,8 @@ class _JobsClientState:
         self.status_calls: list[_StatusCall] = []
         self.log_calls: list[_LogCall] = []
 
-    def _next_status(self, *, workspace: str | None, name: str) -> HelixJobStatusResponse:
-        self.status_calls.append({"workspace": workspace, "name": name})
+    def _next_status(self, *, workspace: str | None, name: str, attempt_id: str | None) -> HelixJobStatusResponse:
+        self.status_calls.append({"workspace": workspace, "name": name, "attempt_id": attempt_id})
         if self._statuses:
             result = self._statuses.popleft()
             if isinstance(result, Exception):
@@ -142,8 +143,10 @@ class _JobsClientState:
 
 
 class _SyncJobsClient(_JobsClientState):
-    def get_job_status(self, *, workspace: str | None = None, name: str) -> NemoResponse[HelixJobStatusResponse]:
-        return _status_response(self._next_status(workspace=workspace, name=name))
+    def get_job_status(
+        self, *, workspace: str | None = None, name: str, attempt_id: str | None = None
+    ) -> NemoResponse[HelixJobStatusResponse]:
+        return _status_response(self._next_status(workspace=workspace, name=name, attempt_id=attempt_id))
 
     def list_job_logs(
         self,
@@ -161,8 +164,9 @@ class _AsyncJobsClient(_JobsClientState):
         *,
         workspace: str | None = None,
         name: str,
+        attempt_id: str | None = None,
     ) -> NemoResponse[HelixJobStatusResponse]:
-        return _status_response(self._next_status(workspace=workspace, name=name))
+        return _status_response(self._next_status(workspace=workspace, name=name, attempt_id=attempt_id))
 
     async def list_job_logs(
         self,
@@ -294,7 +298,7 @@ def test_watch_job_yields_status_logs_terminal_and_passes_log_query_params() -> 
             "job-a",
             workspace="default",
             poll_interval=0,
-            attempt_id=1,
+            attempt_id="1",
             step_id="step-1",
             task_id="task-1",
             limit=2,
@@ -318,15 +322,15 @@ def test_watch_job_yields_status_logs_terminal_and_passes_log_query_params() -> 
     assert events[3].successful is True
 
     assert client.status_calls == [
-        {"workspace": "default", "name": "job-a"},
-        {"workspace": "default", "name": "job-a"},
+        {"workspace": "default", "name": "job-a", "attempt_id": "1"},
+        {"workspace": "default", "name": "job-a", "attempt_id": "1"},
     ]
     assert client.log_calls == [
         {
             "workspace": "default",
             "name": "job-a",
             "query_params": {
-                "attempt_id": 1,
+                "attempt_id": "1",
                 "step_id": "step-1",
                 "task_id": "task-1",
                 "limit": 2,
@@ -337,7 +341,7 @@ def test_watch_job_yields_status_logs_terminal_and_passes_log_query_params() -> 
             "workspace": "default",
             "name": "job-a",
             "query_params": {
-                "attempt_id": 1,
+                "attempt_id": "1",
                 "step_id": "step-1",
                 "task_id": "task-1",
                 "limit": 2,
@@ -348,7 +352,7 @@ def test_watch_job_yields_status_logs_terminal_and_passes_log_query_params() -> 
             "workspace": "default",
             "name": "job-a",
             "query_params": {
-                "attempt_id": 1,
+                "attempt_id": "1",
                 "step_id": "step-1",
                 "task_id": "task-1",
                 "limit": 2,
@@ -387,7 +391,7 @@ def test_jobs_client_watch_job_delegates_to_source_owned_watcher(monkeypatch: py
                 timeout=5,
                 include_history=False,
                 include_logs=False,
-                attempt_id=1,
+                attempt_id="1",
                 step_id="step-1",
                 task_id="task-1",
                 limit=2,
@@ -406,7 +410,7 @@ def test_jobs_client_watch_job_delegates_to_source_owned_watcher(monkeypatch: py
             "timeout": 5,
             "include_history": False,
             "include_logs": False,
-            "attempt_id": 1,
+            "attempt_id": "1",
             "step_id": "step-1",
             "task_id": "task-1",
             "limit": 2,
@@ -933,8 +937,8 @@ async def test_async_watch_job_is_async_iterator_and_uses_async_jobs_client() ->
         ("log", None, "done"),
     ]
     assert client.status_calls == [
-        {"workspace": "default", "name": "job-a"},
-        {"workspace": "default", "name": "job-a"},
+        {"workspace": "default", "name": "job-a", "attempt_id": None},
+        {"workspace": "default", "name": "job-a", "attempt_id": None},
     ]
 
 
@@ -973,7 +977,7 @@ async def test_async_jobs_client_watch_job_delegates_to_source_owned_watcher(
                 timeout=5,
                 include_history=False,
                 include_logs=False,
-                attempt_id=1,
+                attempt_id="1",
                 step_id="step-1",
                 task_id="task-1",
                 limit=2,
@@ -992,7 +996,7 @@ async def test_async_jobs_client_watch_job_delegates_to_source_owned_watcher(
             "timeout": 5,
             "include_history": False,
             "include_logs": False,
-            "attempt_id": 1,
+            "attempt_id": "1",
             "step_id": "step-1",
             "task_id": "task-1",
             "limit": 2,

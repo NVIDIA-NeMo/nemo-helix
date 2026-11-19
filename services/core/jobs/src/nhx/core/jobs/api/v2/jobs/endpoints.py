@@ -691,11 +691,12 @@ async def delete_job(
 async def get_job_status(
     name: str,
     workspace: str,
+    attempt_id: str | None = Query(default=None),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobStatusResponse:
     """Get the status of a platform job."""
     with scoped_app_ctx(JobContext(id=name)):
-        job_status = await dispatcher.get_job_status(name, workspace)
+        job_status = await dispatcher.get_job_status(name, workspace, attempt_id=attempt_id)
         if not job_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -793,6 +794,7 @@ async def update_job_attempt_status_details(
     attempt: str,
     request: HelixJobStatusDetailsUpdateRequest,
     workspace: str,
+    auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
     expected_step_id: str | None = Query(
         default=None,
@@ -803,7 +805,11 @@ async def update_job_attempt_status_details(
         description="With expected_step_id, update only while the step has this status.",
     ),
 ) -> None:
-    """Update status details for one resolved attempt."""
+    """Update progress or submit a typed workflow runtime request."""
+    if "workflow_reconcile" in request and auth_client.auth_enabled:
+        principal = auth_client.principal
+        if principal.id != "service:jobs" or principal.is_delegated:
+            raise HTTPException(403, "Only the Jobs controller can reconcile workflows")
     with scoped_app_ctx(JobContext(id=job)), job_operation_errors("update the status details of", job, workspace):
         try:
             result = await dispatcher.update_attempt_status_details(
@@ -816,6 +822,8 @@ async def update_job_attempt_status_details(
             )
         except (JobHasNoAttemptError, JobOperationConflictError) as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if result is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
