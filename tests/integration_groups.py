@@ -5,9 +5,14 @@
 
 Select after normal collection/marker filtering so pytest.ini remains the source
 of discovery paths. Default/local integration runs still execute the whole suite.
+
+Under ``-m integration`` this plugin also skips importing test files that cannot hold
+integration tests (or belong to the other group), so each xdist worker no longer imports
+the ~35k unit tests only to deselect them.
 """
 
 from collections.abc import Generator
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -18,6 +23,22 @@ def integration_group(path: Path) -> str:
     if path.parts[:1] == ("services",) and path.parts[:3] != ("services", "core", "secrets"):
         return "services"
     return "platform"
+
+
+def may_hold_integration_tests(path: Path) -> bool:
+    """Integration tests are auto-marked under an ``integration/`` dir or name the marker in source."""
+    return "integration" in path.parts[:-1] or "integration" in path.read_text(errors="ignore")
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    if config.getoption("markexpr") != "integration" or not any(
+        fnmatch(collection_path.name, pattern) for pattern in config.getini("python_files")
+    ):
+        return None
+    group = config.getoption("integration_group")
+    if group is not None and integration_group(collection_path.relative_to(config.rootpath)) != group:
+        return True
+    return None if may_hold_integration_tests(collection_path) else True
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
