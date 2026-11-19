@@ -6246,6 +6246,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `environment-specs`: Manage agent environment specs.
 * `environments`: Manage agent environments.
 * `compute-specs`: Manage agent compute specs.
+* `pipeline-configs`: Manage pipeline configs that run agents in sequence.
 * `post-run-actions`: Discover the post-run actions an execute-agent job can...
 
 *Deployed agent interaction:*
@@ -7180,6 +7181,183 @@ nemo agents compute-specs delete [OPTIONS] NAME
 **Arguments:**
 
 * `<NAME>`: Compute-spec name.
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents pipeline-configs
+
+Manage pipeline configs that run agents in sequence.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Create a pipeline config from a pipeline.yaml.
+* `update`: Replace a pipeline config with a pipeline.yaml.
+* `validate`: Check a pipeline.yaml without saving it.
+* `explain`: Print the JSON Schema of pipeline.yaml (usable for editor...
+* `list`: List pipeline configs.
+* `get`: Get a pipeline config by name.
+* `delete`: Delete a pipeline config by name.
+
+##### nemo agents pipeline-configs create
+
+Create a pipeline config from a pipeline.yaml. Run 'validate' first to check its agents.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs create [OPTIONS]
+```
+
+**Options:**
+
+* `--spec-file, -f <PATH>`: Path to a pipeline.yaml (JSON also works).
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents pipeline-configs update
+
+Replace a pipeline config with a pipeline.yaml. The old config is not kept.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs update [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Pipeline name.
+
+**Options:**
+
+* `--spec-file, -f <PATH>`: Path to the new pipeline.yaml.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents pipeline-configs validate
+
+Check a pipeline.yaml without saving it. Exits 1 when there are errors.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs validate [OPTIONS]
+```
+
+**Options:**
+
+* `--spec-file, -f <PATH>`: Path to a pipeline.yaml.
+* `--local`: Run only the checks that need no platform (agents and context are not checked).
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents pipeline-configs explain
+
+Print the JSON Schema of pipeline.yaml (usable for editor autocompletion).
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs explain [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo agents pipeline-configs list
+
+List pipeline configs.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs list [OPTIONS]
+```
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
+
+##### nemo agents pipeline-configs get
+
+Get a pipeline config by name.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs get [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Pipeline name.
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo agents pipeline-configs delete
+
+Delete a pipeline config by name.
+
+**Usage:**
+
+```shell
+nemo agents pipeline-configs delete [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Pipeline name.
 
 **Options:**
 

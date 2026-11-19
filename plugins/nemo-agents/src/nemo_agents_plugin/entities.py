@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.session_protocol import session_id_to_uuid
+from nemo_helix_plugin.agents.pipelines import PipelineInline
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
@@ -244,6 +245,17 @@ class AgentEnvironment(NemoEntity, AgentEnvironmentInline, entity_type="agent_en
     The single thing an AgentDeployment references. Each part is a
     ``ref | inline | None`` union so specs can be authored once and reused.
     """
+
+
+class AgentPipelineConfig(NemoEntity, PipelineInline, entity_type="agent_pipeline_config"):
+    """A pipeline config: an ordered list of steps, each running one registered Agent.
+
+    Entity type: ``agent_pipeline_config``
+    Updating a pipeline replaces the stored config; no revisions are kept. Agent references in
+    its steps are not resolved when it is stored, only by ``POST .../pipeline-configs/validate``.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
 
 class AgentInline(BaseModel):

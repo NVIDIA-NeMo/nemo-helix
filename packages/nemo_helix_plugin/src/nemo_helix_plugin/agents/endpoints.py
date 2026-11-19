@@ -21,12 +21,14 @@ from nemo_helix_plugin.agents.types import (
     AgentJobResult,
     AgentJobResultListResponse,
     AgentJobStatusResponse,
+    AgentPipelineConfig,
     AgentSession,
     CreateAgentDeploymentRequest,
     CreateComputeSpecRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateExecuteJobRequest,
+    CreatePipelineConfigRequest,
     CreateSampleAgentRequest,
     CreateSessionRequest,
     DeploymentLogsQueryParams,
@@ -42,11 +44,14 @@ from nemo_helix_plugin.agents.types import (
     ListEnvironmentResourcesQueryParams,
     ListSessionsQueryParams,
     LogLine,
+    PipelineValidationResult,
     PostRunActionInfo,
     RegisterAgentRequest,
     SampleAgentStreamEvent,
+    UpdatePipelineConfigRequest,
+    ValidatePipelineConfigRequest,
 )
-from nemo_helix_plugin.client.endpoint import delete, get, post
+from nemo_helix_plugin.client.endpoint import delete, get, post, put
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest, Stream
 
 _PREFIX = "/apis/agents/v2/workspaces/{workspace}"
@@ -56,6 +61,7 @@ _SESSIONS = f"{_PREFIX}/sessions"
 _ENVIRONMENT_SPECS = f"{_PREFIX}/environment-specs"
 _ENVIRONMENTS = f"{_PREFIX}/environments"
 _COMPUTE_SPECS = f"{_PREFIX}/compute-specs"
+_PIPELINE_CONFIGS = f"{_PREFIX}/pipeline-configs"
 _EXECUTE_JOBS = f"{_PREFIX}/jobs/execute"
 _JOBS = f"{_PREFIX}/jobs/{{collection}}"
 _SAMPLE_AGENT = "/apis/agents/v2/sample-agent"
@@ -251,6 +257,49 @@ def get_compute_spec(*, workspace: str | None = None, name: str) -> AgentCompute
 @delete(f"{_COMPUTE_SPECS}/{{name}}")
 @abstractmethod
 def delete_compute_spec(*, workspace: str | None = None, name: str) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Pipeline config CRUD
+# ---------------------------------------------------------------------------
+
+
+@post(_PIPELINE_CONFIGS)
+@abstractmethod
+def create_pipeline_config(
+    *, workspace: str | None = None, body: CreatePipelineConfigRequest
+) -> AgentPipelineConfig: ...
+
+
+@get(_PIPELINE_CONFIGS)
+@abstractmethod
+def list_pipeline_configs(
+    *, workspace: str | None = None, query_params: ListEnvironmentResourcesQueryParams | None = None
+) -> Paginated[AgentPipelineConfig]: ...
+
+
+@get(f"{_PIPELINE_CONFIGS}/{{name}}")
+@abstractmethod
+def get_pipeline_config(*, workspace: str | None = None, name: str) -> AgentPipelineConfig: ...
+
+
+@put(f"{_PIPELINE_CONFIGS}/{{name}}")
+@abstractmethod
+def update_pipeline_config(
+    *, workspace: str | None = None, name: str, body: UpdatePipelineConfigRequest
+) -> AgentPipelineConfig: ...
+
+
+@delete(f"{_PIPELINE_CONFIGS}/{{name}}")
+@abstractmethod
+def delete_pipeline_config(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@post(f"{_PIPELINE_CONFIGS}/validate")
+@abstractmethod
+def validate_pipeline_config(
+    *, workspace: str | None = None, body: ValidatePipelineConfigRequest
+) -> PipelineValidationResult: ...
 
 
 # ---------------------------------------------------------------------------

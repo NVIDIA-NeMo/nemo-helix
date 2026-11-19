@@ -9,6 +9,20 @@ import re
 from datetime import datetime
 from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
+from nemo_helix_plugin.agents.pipelines import (
+    PipelineConfig,
+    PipelineConfigUpdate,
+    PipelineInline,
+)
+from nemo_helix_plugin.agents.pipelines import (
+    PipelineIssue as PipelineIssue,
+)
+from nemo_helix_plugin.agents.pipelines import (
+    PipelineValidationResult as PipelineValidationResult,
+)
+from nemo_helix_plugin.agents.pipelines import (
+    ValidatePipelineConfigRequest as ValidatePipelineConfigRequest,
+)
 from nemo_helix_plugin.images import normalize_reference
 from nemo_helix_plugin.jobs.schemas import (
     HelixJobListResultResponse,
@@ -354,6 +368,12 @@ class AgentEnvironment(EntityMetadata, AgentEnvironmentInline):
     """A reusable composition of environment and compute specs."""
 
 
+class AgentPipelineConfig(EntityMetadata, PipelineInline):
+    """A stored pipeline config: an ordered list of steps, each running one registered agent."""
+
+    model_config = ConfigDict(extra="allow")
+
+
 class AgentDeployment(EntityMetadata):
     """A running, pending, failed, or deleting deployment of an Agent."""
 
@@ -599,6 +619,14 @@ class CreateComputeSpecRequest(ComputeSpecInline):
     name: str = Field(description="Unique compute-spec name within the workspace.")
 
 
+class CreatePipelineConfigRequest(PipelineConfig):
+    """Request body for ``POST /v2/workspaces/{workspace}/pipeline-configs``: a complete pipeline.yaml."""
+
+
+class UpdatePipelineConfigRequest(PipelineConfigUpdate):
+    """Request body for ``PUT /v2/workspaces/{workspace}/pipeline-configs/{name}``: replaces the stored config."""
+
+
 class InvokeAgentRequest(BaseModel):
     """OpenAI chat-completions request body for agent invocation."""
 
@@ -680,6 +708,7 @@ SessionPage = Page[AgentSession]
 EnvironmentPage = Page[AgentEnvironment]
 EnvironmentSpecPage = Page[AgentEnvironmentSpec]
 ComputeSpecPage = Page[AgentComputeSpec]
+PipelineConfigPage = Page[AgentPipelineConfig]
 AgentJobPage = Page[AgentJob]
 AgentJobResultListResponse = HelixJobListResultResponse
 AgentJobResult = HelixJobResultResponse

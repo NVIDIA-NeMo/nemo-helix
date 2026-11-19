@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Triage a suspicious email, list its indicators, and draft a staff warning, using the
+# email-security-triage example agent (examples/nemo-agent-config/email-security-triage).
+# Register it first, then: nemo agents pipeline-configs validate -f email-incident.yaml
+
+version: 1
+name: email-incident
+description: Verdict, indicators and a staff warning for one suspicious email.
+
+inputs:
+  email:
+    type: object
+    description: 'The email to check, e.g. {"from": "...", "subject": "...", "body": "..."}.'
+
+steps:
+  # Each step asks the agent a different question about the same email. The agent reads a JSON
+  # object; {{ inputs.email }} is inserted as JSON, so the input stays valid.
+  - name: verdict
+    agent: email-security-triage     # first line of the response: phishing or benign
+    input: '{"user_message": "Is this email phishing?", "emails": [{{ inputs.email }}]}'
+
+  - name: indicators
+    agent: email-security-triage     # an empty question gives the full review: IOCs and action
+    input: '{"user_message": "", "emails": [{{ inputs.email }}]}'
+
+  - name: warning
+    agent: email-security-triage
+    input: '{"user_message": "Draft a warning to staff about this email.", "emails": [{{ inputs.email }}]}'
+    retries: 1
