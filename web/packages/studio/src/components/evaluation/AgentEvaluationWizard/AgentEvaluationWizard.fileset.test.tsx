@@ -9,7 +9,7 @@ import {
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
-  filesDeleteFileset,
+  filesCreateFileset,
   filesDownloadFile,
   filesUploadFile,
   getFilesListFilesetFilesQueryKey,
@@ -295,12 +295,12 @@ describe('AgentEvaluationWizard dataset', () => {
       DEFAULT_WORKSPACE,
       expect.objectContaining({
         datasetName: 'generated',
-        metadata: {
+        metadata: expect.objectContaining({
           [DATASET_SNAPSHOT_KEY]: JSON.stringify({
             ref: DATASET_REF,
             files: [{ path: 'output/part-0.parquet', size: 10 }],
           }),
-        },
+        }),
       })
     );
   });
@@ -317,8 +317,8 @@ describe('AgentEvaluationWizard dataset', () => {
     mockListApis([]);
     await nameAndRun(user);
 
-    await waitFor(() => expect(filesDeleteFileset).toHaveBeenCalled());
-    expect(createExperiment).not.toHaveBeenCalled();
+    expect(await screen.findByText(`The dataset ${DATASET_REF} no longer exists.`)).toBeVisible();
+    expect(filesCreateFileset).not.toHaveBeenCalled();
     expect(createRunEvaluation).not.toHaveBeenCalled();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });

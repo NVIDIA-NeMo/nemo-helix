@@ -4,10 +4,7 @@
 import { createEvaluation, patchEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
-import {
-  buildEvalJobName,
-  type EvalConfigFormat,
-} from '@studio/components/evaluation/submitEvaluationJob';
+import type { EvalConfigFormat } from '@studio/components/evaluation/submitEvaluationJob';
 
 /** Evaluation metadata key holding the name of the fileset that stores its eval config.
  *  Lives on the Evaluation, not its ExperimentGroup: the config is a property of a single
@@ -97,17 +94,15 @@ export const createRunEvaluation = async (
   workspace: string,
   {
     experimentIds,
-    name: explicitName,
-    nameStem,
+    name,
     filesetName,
-    datasetName,
+    datasetName = filesetName ?? name,
     parentEvaluationId,
     metadata,
     signal,
   }: {
     experimentIds: string[];
     name: string;
-    nameStem?: string;
     filesetName?: string;
     datasetName?: string;
     parentEvaluationId?: string;
@@ -115,13 +110,12 @@ export const createRunEvaluation = async (
     signal?: AbortSignal;
   }
 ): Promise<string> => {
-  const name = explicitName || buildEvalJobName(nameStem ?? 'evaluation');
   await createEvaluation(
     workspace,
     {
       name,
       experiment_ids: experimentIds,
-      dataset_name: datasetName ?? filesetName ?? name,
+      dataset_name: datasetName,
       metadata: runMetadata(filesetName, metadata),
       ...(parentEvaluationId ? { parent_evaluation_id: parentEvaluationId } : {}),
     },
