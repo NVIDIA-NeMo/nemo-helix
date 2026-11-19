@@ -101,6 +101,9 @@ class TasksetRunEntity(EntityBase):
             "but a different digest is rejected as a conflict."
         )
     )
+    baseline_run_id: str | None = Field(
+        default=None, description="Explicit baseline run ID in this workspace, fixed at acceptance."
+    )
     taskset_ref: str = Field(
         description="Pinned taskset revision this run evaluates (for example default/sort-suite#3); filterable."
     )

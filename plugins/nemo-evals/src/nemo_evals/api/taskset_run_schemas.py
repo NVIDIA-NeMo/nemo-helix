@@ -150,6 +150,14 @@ class TasksetRunInput(BaseModel):
         description="Optional key, scoped to workspace and caller, so retries of the same request return the "
         "accepted run. When omitted, submit generates one and returns it as the run's idempotency_key.",
     )
+    baseline_run_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description="Optional existing baseline run ID in this workspace. Both runs must evaluate the same pinned "
+        "taskset revision. Records a comparison relationship; it does not launch or wait for the baseline.",
+    )
     publication: TasksetRunPublicationInput | None = Field(
         default=None,
         description="Publish the run's trials to an Intake Experiment. Omit to publish nowhere.",
@@ -252,10 +260,13 @@ def request_digest(req: TasksetRunInput) -> str:
     Returns:
         SHA-256 of compact JSON with sorted keys, excluding idempotency_key. An omitted
         ``publication``, a Harbor target's unset ``closed_book`` and ``skills``, and empty result-retention
-        settings are left out too, so requests from before those fields existed keep their digest.
+        settings and an unset ``baseline_run_id`` are left out too, so requests from before those
+        fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
     body = req.model_dump(mode="json", exclude=exclude)
+    if req.baseline_run_id is None:
+        body.pop("baseline_run_id", None)
     spec = body["spec"]
     if not req.spec.result_ignore_patterns:
         spec.pop("result_ignore_patterns", None)
@@ -280,6 +291,9 @@ class TasksetRunStatus(BaseModel):
 
     run_id: str = Field(description="Run name used to address the accepted run in API routes.")
     workspace: str = Field(description="Workspace containing the run.")
+    baseline_run_id: str | None = Field(
+        default=None, description="Explicit baseline run ID in this workspace; None for unlinked runs."
+    )
     taskset_ref: str = Field(
         description="Pinned taskset revision this run evaluates, for example default/sort-suite#<64-hex digest>."
     )

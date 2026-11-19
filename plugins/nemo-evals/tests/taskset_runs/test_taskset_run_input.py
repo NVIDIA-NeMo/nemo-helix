@@ -72,6 +72,9 @@ def test_run_preserves_scoring_options_and_explicit_budgets(run_body):
         {"idempotency_key": "x" * 257},
         {"timeout_seconds": 0},
         {"timeout_seconds": -1},
+        {"baseline_run_id": ""},
+        {"baseline_run_id": "other/run"},
+        {"baseline_run_id": "run#revision"},
     ],
 )
 def test_run_rejects_invalid_top_level_fields(run_body, overrides):
@@ -230,9 +233,16 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     )
 
 
-def test_run_schema_has_only_the_five_request_fields():
+def test_run_schema_has_only_the_six_request_fields():
     schema = TasksetRunInput.model_json_schema()
-    assert set(schema["properties"]) == {"spec", "execution", "publication", "idempotency_key", "timeout_seconds"}
+    assert set(schema["properties"]) == {
+        "spec",
+        "execution",
+        "publication",
+        "idempotency_key",
+        "timeout_seconds",
+        "baseline_run_id",
+    }
     assert set(schema["required"]) == {"spec", "execution"}
     assert schema["additionalProperties"] is False
 
@@ -241,6 +251,7 @@ def test_run_schema_has_only_the_five_request_fields():
     "overrides",
     [
         {"idempotency_key": "retry-1"},
+        {"baseline_run_id": None},
         {"idempotency_key": "retry-2", "timeout_seconds": None},
         {
             "spec": {
@@ -282,6 +293,8 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("spec", "tasks"), "default/sort-suite", "sort-suite"),
         (("spec", "target", "source"), {"name": "oracle"}, {"name": "codex"}),
         (("timeout_seconds",), None, 3600),
+        (("baseline_run_id",), None, "run-baseline"),
+        (("baseline_run_id",), "run-baseline", "run-another"),
         (("execution", "sandbox"), {"profile": "harbor-standard"}, {"profile": "another-profile"}),
         (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
@@ -396,6 +409,7 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
         execution_deadline_at=execution,
         finalization_deadline_at=finalization,
         idempotency_key="retry-1" if populated else None,
+        baseline_run_id="run-baseline" if populated else None,
         cancel_requested_at=execution if populated else None,
         error="failed task" if populated else None,
     )
@@ -418,6 +432,7 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
         "execution_deadline_at": execution,
         "finalization_deadline_at": finalization,
         "idempotency_key": "retry-1" if populated else None,
+        "baseline_run_id": "run-baseline" if populated else None,
         "cancel_requested_at": execution if populated else None,
         "error": "failed task" if populated else None,
         "created_by": "user:alice" if populated else None,
