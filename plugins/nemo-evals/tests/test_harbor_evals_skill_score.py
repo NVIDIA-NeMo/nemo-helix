@@ -24,6 +24,7 @@ from nhx_evals_sdk.agent_eval.trials import (
     standard_evidence_descriptors,
 )
 from nhx_evals_sdk.metrics.runner_rewards import HarborRewardMetric
+from nhx_evals_sdk.metrics.skill_traces import ToolExecutionOutcomeMetric
 from nhx_evals_sdk.metrics.skills import SkillActivationMetric, TokenEfficiencyMetric, expected_behavior_metric
 from nhx_evals_sdk.structured_output import StructuredOutputMode
 from nhx_evals_sdk.values.evidence import CandidateEvidence
@@ -239,6 +240,37 @@ def test_compound_command_counts_a_proven_leading_skill_read(
     assert evidence.observe_codex(events, SKILL, DOCUMENT).activated is activated
 
 
+def test_command_outcomes_require_a_matching_codex_exit_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    evidence = _load_example(monkeypatch, "codex_evidence")
+
+    def call(call_id: str, namespace: str = "functions") -> dict:
+        return _event("response_item", type="function_call", name="exec_command", namespace=namespace, call_id=call_id)
+
+    def result(call_id: str, output: object) -> dict:
+        return _event("response_item", type="function_call_output", call_id=call_id, output=output)
+
+    success = "Chunk ID: abc123\nWall time: 0.02 seconds\nProcess exited with code 0\nOutput:\nDone"
+    events = [
+        _catalog(None),
+        call("success"),
+        call("failure"),
+        result("failure", [{"type": "input_text", "text": "Process exited with code 2\nOutput:\nFailed"}]),
+        result("success", success),
+        call("stdout"),
+        result("stdout", "Output:\nProcess exited with code 0"),
+        call("running"),
+        result("running", "Process running with session ID 42"),
+        call("missing"),
+        call("duplicate"),
+        result("duplicate", success),
+        result("duplicate", "Process exited with code 1"),
+        call("external", namespace="mcp__example"),
+        result("external", success),
+        result("unpaired", success),
+    ]
+    assert evidence.observe_codex(events, SKILL, DOCUMENT).command_outcomes == (True, False, None, None, None, None)
+
+
 def test_replay_payload_preserves_zero_reward_and_omits_inaccessible_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     scoring = _load_example(monkeypatch, "score")
     trial = AgentEvalTrial(
@@ -307,6 +339,7 @@ async def test_replay_reads_native_views_and_keeps_metric_failure_diagnostics(
             HarborRewardMetric(output_name="reward"),
             SkillActivationMetric(skill_name=SKILL, should_activate=True),
             TokenEfficiencyMetric(),
+            ToolExecutionOutcomeMetric(tool_pattern="exec_command"),
             judge,
         ],
         views=views,
@@ -318,6 +351,14 @@ async def test_replay_reads_native_views_and_keeps_metric_failure_diagnostics(
         output=AgentOutput(output_text=answer),
         metadata={"harbor_primary_reward_key": "reward", "reward": 1.0, "reward_details": {"reward": 1.0}},
     )
+    outcomes = (True, False, None) if answer is not None else ()
+    trial = scoring.replay_trial(trial, 1.0, TrialMeasurements(), None, outcomes)
+    trace = trial.metadata.get("skill_tool_trace")
+    if outcomes:
+        assert trace is not None and trace["trial_id"] == trial.id and trace["complete"] is False
+        assert all("arguments" not in call and "observation" not in call for call in trace["calls"])
+    else:
+        assert trace is None
     result = await AgentEvaluator().run(tasks=[task], trials=[trial])
     source = tmp_path / "fixture"
     persist_run(result, source, write_html_dashboard=False)
@@ -339,6 +380,8 @@ async def test_replay_reads_native_views_and_keeps_metric_failure_diagnostics(
     assert errors == reported_errors
     aggregates = {entry["name"]: entry["mean"] for entry in replay["summary"]["scores"]["scores"]}
     assert aggregates["view.expected_behavior"] == aggregates["view.all_assertions_met"] == view_mean
+    assert aggregates.get("tool_execution_outcome.success_rate") == (0.5 if outcomes else None)
+    assert aggregates.get("tool_execution_outcome.unknown") == (1 if outcomes else None)
     judge_score = next(score for score in replay["scores"] if score["metric_type"] == "llm-judge")
     if answer is None:
         inference.assert_not_awaited()
@@ -420,6 +463,14 @@ async def test_package_metrics_use_original_archive_document_and_files(monkeypat
         files=["SKILL.md", "references/guide.md"],
     )
     report = await scoring._package_metrics(snapshot)
-    assert set(report) == {"skill_structure", "skill_reference_integrity", "skill_context_efficiency"}
+    assert set(report) == {
+        "skill_structure",
+        "skill_reference_integrity",
+        "skill_context_efficiency",
+        "skill_static_correctness",
+        "skill_description_quality",
+        "skill_reliability_readiness",
+        "skill_unicode_safety",
+    }
     integrity = {output["name"]: output["value"] for output in report["skill_reference_integrity"]["outputs"]}
     assert integrity == {"checked": 2, "broken": 1}
