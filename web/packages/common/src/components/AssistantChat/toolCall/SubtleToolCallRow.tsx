@@ -9,7 +9,15 @@ import { Stack, Text } from '@nvidia/foundations-react-core';
 
 interface SubtleToolCallRowProps {
   readonly actions: readonly SubtleToolAction[];
+  /**
+   * `quiet` drops the box, border and tint, so the row reads as a muted line of text. Used on
+   * small surfaces (e.g. the pop-out) where the boxed look is too busy. Defaults to `boxed`.
+   */
+  readonly variant?: 'boxed' | 'quiet';
 }
+
+const BOXED_ROW_CLASS =
+  'rounded border border-base border-l-2 border-l-[var(--border-color-accent-blue)] bg-[color-mix(in_srgb,var(--background-color-accent-blue-subtle)_38%,var(--background-color-surface-base))] px-density-sm py-density-xs';
 
 interface InvocationPanelProps {
   readonly invocation: string;
@@ -54,10 +62,12 @@ const InvocationPanel = ({
   </Stack>
 );
 
-export const SubtleToolCallRow = ({ actions }: SubtleToolCallRowProps) => (
+export const SubtleToolCallRow = ({ actions, variant = 'boxed' }: SubtleToolCallRowProps) => (
   <Text asChild kind="body/regular/sm">
     <div
-      className="my-density-xs flex w-full max-w-full flex-wrap items-center gap-x-density-sm gap-y-density-xs overflow-hidden rounded border border-base border-l-2 border-l-[var(--border-color-accent-blue)] bg-[color-mix(in_srgb,var(--background-color-accent-blue-subtle)_38%,var(--background-color-surface-base))] px-density-sm py-density-xs text-secondary"
+      className={`my-density-xs flex w-full max-w-full flex-wrap items-center gap-x-density-sm gap-y-density-xs overflow-hidden text-secondary ${
+        variant === 'boxed' ? BOXED_ROW_CLASS : ''
+      }`}
       data-testid="assistant-tool-call-subtle"
       title={actions.map((action) => action.title ?? action.message).join(' | ')}
     >

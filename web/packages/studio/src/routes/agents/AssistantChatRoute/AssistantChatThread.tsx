@@ -10,7 +10,10 @@ import {
 } from '@studio/components/agents/AgentDecisionInput';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
-import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
+import {
+  AssistantToolCallPart,
+  CompactAssistantToolCallPart,
+} from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
 import { BlockingInputComposer } from '@studio/routes/agents/AssistantChatRoute/BlockingInputComposer';
 import type { AssistantChatRuntime } from '@studio/routes/agents/AssistantChatRoute/useAssistantChatRuntime';
 import { type FC, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
@@ -22,6 +25,16 @@ const EMPTY_STATE = {
   slotHeading: 'Start a NeMo Assistant session',
   slotSubheading: 'Ask NeMo Assistant to work in this workspace.',
 };
+
+// Felix's pop-out is a small surface, so it gets a quiet greeting instead of the full empty state.
+const COMPACT_EMPTY_STATE = {
+  slotHeading: "Hi, I'm Felix",
+  slotSubheading: 'What can I help you with?',
+  variant: 'compact' as const,
+};
+
+const PLACEHOLDER = 'Ask NeMo Assistant to work in this workspace';
+const COMPACT_PLACEHOLDER = 'Ask Felix…';
 
 const CHAT_VIEWPORT_SCROLLBAR_CLASS = [
   '[scrollbar-width:thin]',
@@ -49,6 +62,7 @@ export const AssistantChatThread: FC<AssistantChatThreadProps> = ({
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
+  const isCompact = mode === 'compact';
   const chatViewportRef = useRef<HTMLDivElement>(null);
   const {
     decisionChoices,
@@ -157,18 +171,20 @@ export const AssistantChatThread: FC<AssistantChatThreadProps> = ({
         }
         viewportClassName={CHAT_VIEWPORT_SCROLLBAR_CLASS}
         hideAssistantMessageActions
-        toolCallPartComponent={AssistantToolCallPart}
+        toolCallPartComponent={isCompact ? CompactAssistantToolCallPart : AssistantToolCallPart}
         attributes={{
           ThreadViewport: {
             ref: chatViewportRef,
           },
         }}
-        placeholder="Ask NeMo Assistant to work in this workspace"
-        minInputRows={3}
+        placeholder={isCompact ? COMPACT_PLACEHOLDER : PLACEHOLDER}
+        minInputRows={isCompact ? 2 : 3}
+        // The compact surface (Felix) already has a "New chat" button in its header.
+        hideResetButton={isCompact}
         onReset={handleChatReset}
         showRunningIndicator={!studioNavigationRequest && !decisionRequest && !inputRequest}
         messageContentProps={MESSAGE_CONTENT_PROPS}
-        emptyState={EMPTY_STATE}
+        emptyState={isCompact ? COMPACT_EMPTY_STATE : EMPTY_STATE}
         composerOverride={
           studioNavigationRequest ? (
             <AgentDecisionInput

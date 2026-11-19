@@ -35,12 +35,14 @@ describe('buildJobNotification', () => {
     expect(buildJobNotification(job('a', HelixJobStatus.completed))).toMatchObject({
       title: 'Job completed',
       tag: 'a',
+      sound: 'success',
     });
   });
 
   it('announces a failed job', () => {
     expect(buildJobNotification(job('a', HelixJobStatus.error))).toMatchObject({
       title: 'Job failed',
+      sound: 'failure',
     });
   });
 
@@ -53,39 +55,87 @@ describe('buildJobNotification', () => {
 });
 
 describe('findJobTransitions', () => {
-  it('does not report a job first seen already finished', () => {
+  const SESSION_START = '2026-11-10T12:00:00Z';
+  const BEFORE_SESSION = '2026-11-10T11:00:00Z';
+  const DURING_SESSION = '2026-11-10T12:05:00Z';
+
+  const options = (alreadyNotified: string[] = []) => ({
+    startedSince: SESSION_START,
+    alreadyNotified: new Set(alreadyNotified),
+  });
+  const jobAt = (name: string, status: HelixJobStatus, created_at: string): NotifiableJob => ({
+    ...job(name, status),
+    created_at,
+  });
+
+  it('does not report a job from before the session that is first seen finished', () => {
     const { finished, watched } = findJobTransitions(
-      [job('old', HelixJobStatus.completed)],
-      new Set()
+      [jobAt('old', HelixJobStatus.completed, BEFORE_SESSION)],
+      new Set(),
+      options()
     );
     expect(finished).toEqual([]);
     expect(watched.size).toBe(0);
   });
 
+  it('does not report a finished job whose creation time is unknown', () => {
+    const { finished } = findJobTransitions(
+      [job('no-date', HelixJobStatus.completed)],
+      new Set(),
+      options()
+    );
+    expect(finished).toEqual([]);
+  });
+
+  it('reports a job started this session even if it was never seen running', () => {
+    const { finished } = findJobTransitions(
+      [jobAt('fast-fail', HelixJobStatus.error, DURING_SESSION)],
+      new Set(),
+      options()
+    );
+    expect(finished.map((j) => j.name)).toEqual(['fast-fail']);
+  });
+
   it('watches a running job, then reports it once it completes', () => {
-    const first = findJobTransitions([job('a', HelixJobStatus.active)], new Set());
+    const first = findJobTransitions(
+      [jobAt('a', HelixJobStatus.active, BEFORE_SESSION)],
+      new Set(),
+      options()
+    );
     expect(first.watched.has('a')).toBe(true);
     expect(first.finished).toEqual([]);
 
-    const second = findJobTransitions([job('a', HelixJobStatus.completed)], first.watched);
+    // Created before the session, but it was seen running, so it is still announced.
+    const second = findJobTransitions(
+      [jobAt('a', HelixJobStatus.completed, BEFORE_SESSION)],
+      first.watched,
+      options()
+    );
     expect(second.finished.map((j) => j.name)).toEqual(['a']);
     expect(second.watched.has('a')).toBe(false);
   });
 
   it('reports a watched job that fails', () => {
-    const { finished } = findJobTransitions([job('a', HelixJobStatus.error)], new Set(['a']));
+    const { finished } = findJobTransitions(
+      [job('a', HelixJobStatus.error)],
+      new Set(['a']),
+      options()
+    );
     expect(finished.map((j) => j.status)).toEqual([HelixJobStatus.error]);
   });
 
-  it('reports a finished job only once', () => {
-    const first = findJobTransitions([job('a', HelixJobStatus.completed)], new Set(['a']));
-    const again = findJobTransitions([job('a', HelixJobStatus.completed)], first.watched);
-    expect(again.finished).toEqual([]);
+  it('does not report a job that has already been announced', () => {
+    const { finished } = findJobTransitions(
+      [jobAt('a', HelixJobStatus.error, DURING_SESSION)],
+      new Set(['a']),
+      options(['a'])
+    );
+    expect(finished).toEqual([]);
   });
 
   it('does not mutate the previous set', () => {
     const previous = new Set(['a']);
-    findJobTransitions([job('a', HelixJobStatus.completed)], previous);
+    findJobTransitions([job('a', HelixJobStatus.completed)], previous, options());
     expect(previous.has('a')).toBe(true);
   });
 });

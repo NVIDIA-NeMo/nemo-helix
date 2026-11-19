@@ -1108,11 +1108,21 @@ def test_mcp_tools_list_includes_feature_flag_enabled_destinations(monkeypatch: 
     assert "chat with or try a model" in studio_link_tool["description"]
 
 
-def test_assistant_studio_flag_enables_assistant_and_dashboard_destinations():
+def test_assistant_studio_flag_enables_dashboard_destination():
     enabled_destinations = studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
-    assert "assistant" in enabled_destinations
     assert "dashboard" in enabled_destinations
+
+
+def test_assistant_has_no_link_destination():
+    """The assistant is a top-bar pop-out with no page of its own, so there is nothing to link to."""
+    assert "assistant" not in studio_links.STUDIO_LINK_DESTINATIONS
+    assert not any(
+        alias in {"claude_code", "claude_code_chat", "assistant_chat"}
+        for destination in studio_links.STUDIO_LINK_DESTINATIONS.values()
+        for alias in destination.aliases
+    )
+    assert "assistant" not in studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
 
 def test_evals_feature_flags_gate_assistant_destinations():
@@ -1128,7 +1138,6 @@ def test_dashboard_destination_follows_the_sandbox_dashboard_flag():
     enabled_destinations = studio_links.enabled_destinations({"dashboard_sandbox_enabled": True})
 
     assert "dashboard" in enabled_destinations
-    assert "assistant" not in enabled_destinations
 
 
 def test_build_studio_system_prompt_preserves_empty_enabled_destinations():
@@ -1242,7 +1251,6 @@ def test_studio_link_destinations_cover_registered_workspace_routes():
         "agentsList": "agents",
         "baseModels": "base_models",
         "baseModelsModel": "base_model",
-        "claudeCodeChat": "assistant",
         "customizationJobDetails": "customization",
         "customizationJobList": "customizations",
         "dashboard": "dashboard",

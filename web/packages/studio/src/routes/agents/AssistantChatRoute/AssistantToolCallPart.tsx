@@ -37,6 +37,8 @@ interface AssistantToolCallPartContentProps {
   readonly args: AssistantToolArgs;
   readonly argsText: string;
   readonly toolName: string;
+  /** Quieter rendering for small surfaces: no "View work" block, unboxed tool rows. */
+  readonly compact?: boolean;
 }
 
 interface CollapsedStudioDetailsTextPart {
@@ -172,9 +174,13 @@ const AssistantToolCallPartContent = ({
   args,
   argsText,
   toolName,
+  compact = false,
 }: AssistantToolCallPartContentProps) => {
+  const toolRowVariant = compact ? 'quiet' : 'boxed';
+
   if (toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME) {
-    return <CollapsedStudioDetailsToolCall args={args} />;
+    // The "View work · worked for …" block is hidden on small surfaces; the answer stays visible.
+    return compact ? null : <CollapsedStudioDetailsToolCall args={args} />;
   }
 
   if (toolName === ASSISTANT_COLLAPSED_THINKING_TOOL_NAME) {
@@ -193,13 +199,16 @@ const AssistantToolCallPartContent = ({
 
   if (toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME) {
     const subtleActions = getSubtleToolGroupActions(args);
-    return subtleActions.length ? <SubtleToolCallRow actions={subtleActions} /> : null;
+    return subtleActions.length ? (
+      <SubtleToolCallRow actions={subtleActions} variant={toolRowVariant} />
+    ) : null;
   }
 
   const subtleMessage = getSubtleToolMessage(toolName, args);
   if (subtleMessage) {
     return (
       <SubtleToolCallRow
+        variant={toolRowVariant}
         actions={[
           {
             detail: getSubtleToolDetail(toolName, args, subtleMessage),
@@ -229,6 +238,7 @@ const AssistantToolCallPartContent = ({
   );
   return (
     <SubtleToolCallRow
+      variant={toolRowVariant}
       actions={[
         {
           detail: getSubtleToolDetail(toolName, args, fallbackMessage),
@@ -248,3 +258,11 @@ export const AssistantToolCallPart: ToolCallMessagePartComponent<AssistantToolAr
   argsText,
   toolName,
 }) => <AssistantToolCallPartContent args={args} argsText={argsText} toolName={toolName} />;
+
+/** The quieter variant used by Felix's pop-out: no "View work" block, unboxed tool rows. */
+export const CompactAssistantToolCallPart: ToolCallMessagePartComponent<
+  AssistantToolArgs,
+  unknown
+> = ({ args, argsText, toolName }) => (
+  <AssistantToolCallPartContent compact args={args} argsText={argsText} toolName={toolName} />
+);

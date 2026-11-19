@@ -71,6 +71,36 @@ body {
   overflow: hidden;
 }
 
+/* Felix (the assistant mascot) idles with a gentle bob. Applied behind Tailwind's `motion-safe:`
+   variant in FelixAssistant, so it is off for prefers-reduced-motion users. */
+@keyframes felix-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Felix hops for joy when the assistant finishes. Applied behind Tailwind's `motion-safe:` variant
+   in FelixAssistant, so users who prefer reduced motion get the pose without the bounce. */
+@keyframes felix-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-10px);
+  }
+  70% {
+    transform: translateY(0);
+  }
+  85% {
+    transform: translateY(-3px);
+  }
+}
+
 /* hack fix - Switch component has incorrect outline color */
 .nv-switch-track {
   &[data-state='checked'] {

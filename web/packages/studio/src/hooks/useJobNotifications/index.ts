@@ -20,6 +20,7 @@ import {
   getJobNotificationPath,
   type NotifiableJob,
 } from '@studio/util/jobNotifications';
+import { playJobSound } from '@studio/util/jobSound';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -42,10 +43,11 @@ export const useJobNotifications = (workspace: string | undefined): void => {
   const navigate = useNavigate();
   const { requestIfNeeded } = useNotificationPermission();
   const [since] = useState(() => new Date(Date.now() - LOOKBACK_MS).toISOString());
-  const watched = useRef<{ workspace: string; names: ReadonlySet<string> }>({
-    workspace: '',
-    names: new Set(),
-  });
+  const seen = useRef<{
+    workspace: string;
+    watched: ReadonlySet<string>;
+    notified: ReadonlySet<string>;
+  }>({ workspace: '', watched: new Set(), notified: new Set() });
 
   const { data, dataUpdatedAt } = useJobsListJobs(
     workspace ?? '',
@@ -78,11 +80,21 @@ export const useJobNotifications = (workspace: string | undefined): void => {
   useEffect(() => {
     if (!workspace || !data) return;
     // Another workspace's jobs are a fresh slate, not "finished" ones.
-    const previous =
-      watched.current.workspace === workspace ? watched.current.names : new Set<string>();
+    const sameWorkspace = seen.current.workspace === workspace;
+    const previous = sameWorkspace ? seen.current.watched : new Set<string>();
+    const alreadyNotified = sameWorkspace ? seen.current.notified : new Set<string>();
     const jobs: NotifiableJob[] = data.data;
-    const { finished, watched: names } = findJobTransitions(jobs, previous);
-    watched.current = { workspace, names };
+    const { finished, watched: names } = findJobTransitions(jobs, previous, {
+      startedSince: since,
+      alreadyNotified,
+    });
+    // Recorded whether or not a notification is shown below: a job that finished while the
+    // user was looking at Studio has been seen, and must not fire later when they leave.
+    seen.current = {
+      workspace,
+      watched: names,
+      notified: new Set([...alreadyNotified, ...finished.map((job) => job.name)]),
+    };
 
     // First running job seen: ask now, while the user has just started something long.
     if (previous.size === 0 && names.size > 0) void requestIfNeeded();
@@ -107,7 +119,9 @@ export const useJobNotifications = (workspace: string | undefined): void => {
       } catch {
         // Constructing a notification can throw on platforms that only allow service workers.
       }
+      // The OS may play no sound for a web notification, so the page makes its own.
+      playJobSound(content.sound);
     }
     // `dataUpdatedAt` is the trigger: an identical poll result is still a new poll.
-  }, [dataUpdatedAt, data, navigate, requestIfNeeded, workspace]);
+  }, [dataUpdatedAt, data, navigate, requestIfNeeded, since, workspace]);
 };

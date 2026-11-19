@@ -3,26 +3,13 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { LayoutGrid } from '@nemo/icons/icons';
-import {
-  ASSISTANT_STUDIO_ENABLED,
-  DASHBOARD_ROUTE_ENABLED,
-  DASHBOARD_SANDBOX_ENABLED,
-} from '@studio/constants/environment';
+import { DASHBOARD_ROUTE_ENABLED, DASHBOARD_SANDBOX_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import {
-  gateAssistantStudioRoutes,
-  gateDashboardRoutes,
-  getWorkspaceDashboardRoute,
-} from '@studio/routes/utils';
+import { gateDashboardRoutes, getWorkspaceDashboardRoute } from '@studio/routes/utils';
 import { lazy, type ReactNode } from 'react';
 import type { RouteObject } from 'react-router';
 
-const DashboardLandingRoute = lazy(() =>
-  import('@studio/routes/DashboardLandingRoute').then((module) => ({
-    default: module.DashboardLandingRoute,
-  }))
-);
 const WorkspaceDashboardRoute = lazy(() =>
   import('@studio/routes/WorkspaceDashboardRoute').then((module) => ({
     default: module.WorkspaceDashboardRoute,
@@ -33,19 +20,14 @@ const WorkspaceDashboardHomeRoute = lazy(() =>
     default: module.WorkspaceDashboardHomeRoute,
   }))
 );
-const AssistantChatRoute = lazy(() =>
-  import('@studio/routes/agents/AssistantChatRoute').then((module) => ({
-    default: module.AssistantChatRoute,
-  }))
-);
 
 /**
- * Picks which page renders at `/workspaces/:workspace/dashboard`; DASHBOARD_SANDBOX_ENABLED wins
- * over ASSISTANT_STUDIO_ENABLED since the new dashboard replaces every prior landing.
+ * Picks which page renders at `/workspaces/:workspace/dashboard`. The assistant is the top-bar
+ * pop-out only (there is no full-page assistant route), so ASSISTANT_STUDIO_ENABLED does not
+ * change the dashboard page.
  */
 const getDashboardElement = (): ReactNode => {
   if (DASHBOARD_SANDBOX_ENABLED) return <WorkspaceDashboardHomeRoute />;
-  if (ASSISTANT_STUDIO_ENABLED) return <DashboardLandingRoute />;
   return <WorkspaceDashboardRoute />;
 };
 
@@ -55,13 +37,6 @@ export const dashboardRoutes: RouteObject[] = gateDashboardRoutes([
     element: getDashboardElement(),
     errorElement: <RouteErrorPanel title="Workspace" />,
   },
-  ...gateAssistantStudioRoutes([
-    {
-      path: ROUTES.workspace.assistantChat,
-      element: <AssistantChatRoute />,
-      errorElement: <RouteErrorPanel title="NeMo Assistant" />,
-    },
-  ]),
 ]);
 
 export const getDashboardSideNavItems = (workspace: string) =>

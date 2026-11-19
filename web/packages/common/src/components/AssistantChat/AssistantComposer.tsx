@@ -16,6 +16,7 @@ type AssistantComposerProps = Pick<
   | 'slotComposerStart'
   | 'enableImageAttachments'
   | 'minInputRows'
+  | 'hideResetButton'
 > & {
   className?: string;
 };
@@ -28,6 +29,7 @@ export const AssistantComposer = ({
   className,
   enableImageAttachments = true,
   minInputRows,
+  hideResetButton = false,
 }: AssistantComposerProps) => (
   <div className="flex w-full flex-col gap-2">
     {slotComposerStart && <div className="shrink-0">{slotComposerStart}</div>}
@@ -64,18 +66,20 @@ export const AssistantComposer = ({
             </ComposerPrimitive.AddAttachment>
           </Tooltip>
         )}
-        <Tooltip slotContent="Clear chat thread">
-          <Button
-            aria-label="Reset"
-            kind="tertiary"
-            size="small"
-            onClick={onReset}
-            type="button"
-            disabled={disabled}
-          >
-            <Retry />
-          </Button>
-        </Tooltip>
+        {!hideResetButton && (
+          <Tooltip slotContent="Clear chat thread">
+            <Button
+              aria-label="Reset"
+              kind="tertiary"
+              size="small"
+              onClick={onReset}
+              type="button"
+              disabled={disabled}
+            >
+              <Retry />
+            </Button>
+          </Tooltip>
+        )}
         <ThreadPrimitive.If running>
           <ComposerPrimitive.Cancel asChild>
             <Button

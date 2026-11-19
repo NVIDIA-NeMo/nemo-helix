@@ -31,11 +31,6 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
         aliases=("workspace_home", "workspace_index"),
     ),
     "dashboard": StudioLinkDestination("Workspace dashboard", "/workspaces/{workspace}/dashboard"),
-    "assistant": StudioLinkDestination(
-        "NeMo Assistant",
-        "/workspaces/{workspace}/dashboard/assistant",
-        aliases=("claude_code", "claude_code_chat", "assistant_chat"),
-    ),
     "agents": StudioLinkDestination(
         "Agents",
         "/workspaces/{workspace}/agents",
@@ -398,7 +393,6 @@ _STUDIO_LINK_DESTINATION_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
     "intake_span": ("intake_enabled",),
     "members": ("members_enabled",),
     "experiment": ("experiment",),
-    "assistant": ("assistant_studio_enabled",),
     "experiment_group": ("experiment",),
     "experiment_detail": ("experiment",),
 }

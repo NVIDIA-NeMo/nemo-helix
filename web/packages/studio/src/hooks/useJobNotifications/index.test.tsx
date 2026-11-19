@@ -13,7 +13,7 @@ import { MemoryRouter } from 'react-router';
 
 const JOBS_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`;
 
-const jobsResponse = (status: string) => ({
+const jobsResponse = (status: string, createdAt = '2026-10-13T00:00:00Z') => ({
   data: [
     {
       id: 'j1',
@@ -21,7 +21,7 @@ const jobsResponse = (status: string) => ({
       workspace: DEFAULT_WORKSPACE,
       source: 'customization',
       status,
-      created_at: '2026-10-13T00:00:00Z',
+      created_at: createdAt,
     },
   ],
   pagination: { page: 1, page_size: 50, total_results: 1, total_pages: 1 },
@@ -51,8 +51,8 @@ const setup = () => {
   return queryClient;
 };
 
-const serveStatus = (status: string) =>
-  server.use(http.get(JOBS_URL, () => HttpResponse.json(jobsResponse(status))));
+const serveStatus = (status: string, createdAt?: string) =>
+  server.use(http.get(JOBS_URL, () => HttpResponse.json(jobsResponse(status, createdAt))));
 
 describe('useJobNotifications', () => {
   beforeEach(() => {
@@ -84,6 +84,46 @@ describe('useJobNotifications', () => {
     );
   });
 
+  it('plays the failure chime alongside the notification', async () => {
+    const oscillatorFrequencies: number[] = [];
+    class FakeAudioContext {
+      currentTime = 0;
+      destination = {};
+      resume = vi.fn().mockResolvedValue(undefined);
+      createGain = () => ({
+        gain: {
+          setValueAtTime: vi.fn(),
+          linearRampToValueAtTime: vi.fn(),
+          exponentialRampToValueAtTime: vi.fn(),
+        },
+        connect: vi.fn(),
+      });
+      createOscillator = () => ({
+        frequency: {
+          set value(hz: number) {
+            oscillatorFrequencies.push(hz);
+          },
+        },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      });
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+
+    serveStatus('active');
+    const queryClient = setup();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    serveStatus('error');
+    await act(() => queryClient.invalidateQueries());
+
+    await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(1));
+    // Failure is the lower, falling pair.
+    expect(oscillatorFrequencies).toHaveLength(2);
+    expect(oscillatorFrequencies[1]).toBeLessThan(oscillatorFrequencies[0]);
+  });
+
   it('notifies when a running job fails', async () => {
     serveStatus('active');
     const queryClient = setup();
@@ -95,6 +135,20 @@ describe('useJobNotifications', () => {
     await waitFor(() =>
       expect(notificationCtor).toHaveBeenCalledWith('Job failed', expect.anything())
     );
+  });
+
+  it('notifies, once, for a job started this session that fails before it is ever seen running', async () => {
+    serveStatus('error', new Date().toISOString());
+    const queryClient = setup();
+
+    await waitFor(() =>
+      expect(notificationCtor).toHaveBeenCalledWith('Job failed', expect.anything())
+    );
+
+    // The finished job stays in the list; later polls must not announce it again.
+    await act(() => queryClient.invalidateQueries());
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notificationCtor).toHaveBeenCalledTimes(1);
   });
 
   it('does not notify for a job first seen already finished', async () => {

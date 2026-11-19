@@ -14,6 +14,11 @@ export interface ChatEmptyStateProps extends StackProps {
    * resolves whatever the empty state is describing.
    */
   slotAction?: ReactNode;
+  /**
+   * `compact` is a quiet greeting for small surfaces (e.g. a pop-out): smaller text and no
+   * decorative nebula. Defaults to the full-size empty state.
+   */
+  variant?: 'default' | 'compact';
 }
 
 export const ChatEmptyState: FC<ChatEmptyStateProps> = ({
@@ -21,9 +26,31 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({
   slotHeading = 'Ready',
   slotSubheading = 'Prompt your model to get started.',
   slotAction,
+  variant = 'default',
   ...stackProps
 }) => {
   const passedClasses = className?.split(' ') || [];
+
+  if (variant === 'compact') {
+    return (
+      <Stack
+        {...stackProps}
+        className={passedClasses.join(' ')}
+        gap="density-xs"
+        align="center"
+        justify="center"
+      >
+        <Text kind="label/bold/lg" className="text-center">
+          {slotHeading}
+        </Text>
+        <Text kind="body/regular/md" color="secondary" className="text-center">
+          {slotSubheading}
+        </Text>
+        {slotAction ? <div>{slotAction}</div> : null}
+      </Stack>
+    );
+  }
+
   return (
     <Stack
       {...stackProps}

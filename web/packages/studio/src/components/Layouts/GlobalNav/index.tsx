@@ -8,13 +8,11 @@ import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/componen
 import { ThemeSwitch } from '@studio/components/Layouts/GlobalNav/components/ThemeSwitch';
 import { UserPopover } from '@studio/components/UserPopover';
 import { FLAG_OVERRIDES_ENABLED } from '@studio/constants/environment';
-import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
-import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useSidebarState } from '@studio/util/hooks/useSidebarState';
 import { lazy, Suspense, type FC, type ReactNode } from 'react';
-import { Link, matchPath, useLocation } from 'react-router';
+import { Link } from 'react-router';
 
 const WelcomeTour = lazy(() =>
   import('@studio/components/WelcomeTour').then((m) => ({ default: m.WelcomeTour }))
@@ -30,22 +28,9 @@ interface Props {
   sideNav?: (collapsed: boolean) => ReactNode;
 }
 
-interface GlobalNavContentProps extends Props {
-  isDashboardRoute: boolean;
-  isAssistantChatRoute: boolean;
-}
-
-const GlobalNavContent: FC<GlobalNavContentProps> = ({
-  sideNav,
-  isDashboardRoute,
-  isAssistantChatRoute,
-}) => {
+export const GlobalNav: FC<Props> = ({ sideNav }) => {
   const workspace = useWorkspaceFromPathIfExists();
-  const { expanded, toggle } = useSidebarState(!isAssistantChatRoute);
-  const shouldMountAssistantTopBarChat = !isDashboardRoute && !isAssistantChatRoute;
-  const sidebarBackground = isAssistantChatRoute
-    ? 'bg-surface-sunken dark:bg-surface-base'
-    : 'bg-surface-navigation';
+  const { expanded, toggle } = useSidebarState(true);
 
   const toggleLabel = expanded ? 'Collapse sidebar' : 'Expand sidebar';
   const ToggleSidebarButton = (
@@ -65,7 +50,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
   return (
     <>
       <Flex
-        className={`[grid-area:logobar] ${sidebarBackground} transition-colors border-r border-b border-base ${expanded ? 'pl-4 pr-2' : ''}`}
+        className={`[grid-area:logobar] bg-surface-navigation transition-colors border-r border-b border-base ${expanded ? 'pl-4 pr-2' : ''}`}
         align="center"
         gap="density-md"
         justify={expanded ? 'between' : 'center'}
@@ -91,7 +76,6 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
             <Suspense>
               <WelcomeTour />
             </Suspense>
-            {shouldMountAssistantTopBarChat && <AssistantTopBarChat />}
             {FLAG_OVERRIDES_ENABLED && (
               <Suspense>
                 <FeatureFlagPanel />
@@ -105,29 +89,12 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
       />
       {sideNav && (
         <div
-          className={`h-full max-h-[calc(100vh-var(--nv-app-bar-height))] overflow-y-auto [grid-area:sidebar] ${isAssistantChatRoute ? `${sidebarBackground} [&_.nv-vertical-nav-root]:bg-transparent!` : ''}`}
+          className="h-full max-h-[calc(100vh-var(--nv-app-bar-height))] overflow-y-auto [grid-area:sidebar]"
           data-tour="sidebar"
         >
           {sideNav(!expanded)}
         </div>
       )}
     </>
-  );
-};
-
-export const GlobalNav: FC<Props> = ({ sideNav }) => {
-  const location = useLocation();
-  const isDashboardRoute =
-    matchPath({ path: ROUTES.workspace.dashboard, end: true }, location.pathname) !== null;
-  const isAssistantChatRoute =
-    matchPath({ path: ROUTES.workspace.assistantChat, end: true }, location.pathname) !== null;
-
-  return (
-    <GlobalNavContent
-      key={isAssistantChatRoute ? 'assistant' : 'default'}
-      sideNav={sideNav}
-      isDashboardRoute={isDashboardRoute}
-      isAssistantChatRoute={isAssistantChatRoute}
-    />
   );
 };

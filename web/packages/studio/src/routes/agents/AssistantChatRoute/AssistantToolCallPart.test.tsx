@@ -7,7 +7,10 @@ import {
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
   ASSISTANT_THINKING_TOOL_NAME,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
-import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
+import {
+  AssistantToolCallPart,
+  CompactAssistantToolCallPart,
+} from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
 import {
   ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME,
   ASSISTANT_JOB_PROGRESS_TOOL_NAME,
@@ -688,4 +691,114 @@ describe('AssistantToolCallPart', () => {
       expect(screen.queryByTestId('assistant-tool-call-subtle')).not.toBeInTheDocument();
     }
   );
+});
+
+describe('CompactAssistantToolCallPart', () => {
+  it('hides the "View work · worked for" block, leaving the answer to speak for itself', () => {
+    render(
+      <CompactAssistantToolCallPart
+        addResult={vi.fn()}
+        args={{
+          label: 'worked for 42s',
+          parts: [
+            {
+              type: 'tool-call',
+              args: { command: 'pwd' },
+              argsText: '{"command":"pwd"}',
+              toolCallId: 'toolu_bash',
+              toolName: 'Bash',
+            },
+          ],
+        }}
+        argsText=""
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="assistant-collapsed-studio-details"
+        toolName={ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME}
+        type="tool-call"
+      />
+    );
+
+    expect(screen.queryByTestId('assistant-collapsed-studio-details')).not.toBeInTheDocument();
+    expect(screen.queryByText(/worked for/i)).not.toBeInTheDocument();
+  });
+
+  it('renders tool calls as quiet text without the box, border or tint', () => {
+    render(
+      <CompactAssistantToolCallPart
+        addResult={vi.fn()}
+        args={{ pattern: '**/*.tsx' }}
+        argsText='{"pattern":"**/*.tsx"}'
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="toolu_3"
+        toolName="Glob"
+        type="tool-call"
+      />
+    );
+
+    const row = screen.getByTestId('assistant-tool-call-subtle');
+    expect(row).toHaveTextContent('Found files **/*.tsx');
+    expect(row).not.toHaveClass('border');
+    expect(row).not.toHaveClass('rounded');
+    expect(row.className).not.toContain('bg-[');
+  });
+
+  it('keeps the boxed tool row in the full-size chat', () => {
+    render(
+      <AssistantToolCallPart
+        addResult={vi.fn()}
+        args={{ pattern: '**/*.tsx' }}
+        argsText='{"pattern":"**/*.tsx"}'
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="toolu_3"
+        toolName="Glob"
+        type="tool-call"
+      />
+    );
+
+    const row = screen.getByTestId('assistant-tool-call-subtle');
+    expect(row).toHaveClass('border', 'rounded');
+  });
+
+  it('keeps tool-call details collapsed and expandable', async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactAssistantToolCallPart
+        addResult={vi.fn()}
+        args={{ command: 'pwd', description: 'check the working directory' }}
+        argsText='{"command":"pwd"}'
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="toolu_bash"
+        toolName="Bash"
+        type="tool-call"
+      />
+    );
+
+    const details = screen.getByTestId('assistant-tool-call-subtle-details');
+    expect(details).not.toHaveAttribute('open');
+
+    await user.click(screen.getByTestId('assistant-tool-call-subtle-action'));
+
+    expect(details).toHaveAttribute('open');
+  });
+
+  it('still shows job progress, which is useful rather than noisy', () => {
+    render(
+      <CompactAssistantToolCallPart
+        addResult={vi.fn()}
+        args={{ job_name: 'studio-job-1' }}
+        argsText='{"job_name":"studio-job-1"}'
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="toolu_job"
+        toolName={ASSISTANT_JOB_PROGRESS_TOOL_NAME}
+        type="tool-call"
+      />
+    );
+
+    expect(screen.getByTestId('mock-job-progress')).toHaveTextContent('studio-job-1');
+  });
 });

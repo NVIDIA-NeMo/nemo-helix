@@ -6,6 +6,7 @@ import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 import { ROUTES } from '@studio/constants/routes';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import type { JobSound } from '@studio/util/jobSound';
 import { generatePath } from 'react-router';
 
 /** The slice of a job the notification logic reads. */
@@ -13,6 +14,7 @@ export interface NotifiableJob {
   name: string;
   source: string;
   status: HelixJobStatus;
+  created_at?: string;
 }
 
 export interface JobNotificationContent {
@@ -20,6 +22,7 @@ export interface JobNotificationContent {
   body: string;
   /** Same job, same tag: the browser replaces rather than stacks a repeat. */
   tag: string;
+  sound: JobSound;
 }
 
 const isTerminal = (status: HelixJobStatus) => HelixJobTerminalStatuses.includes(status);
@@ -57,39 +60,62 @@ export const getJobNotificationPath = (job: NotifiableJob, workspace: string): s
  */
 export const buildJobNotification = (job: NotifiableJob): JobNotificationContent | null => {
   if (job.status === HelixJobStatus.completed) {
-    return { title: 'Job completed', body: `${job.name} finished successfully.`, tag: job.name };
+    return {
+      title: 'Job completed',
+      body: `${job.name} finished successfully.`,
+      tag: job.name,
+      sound: 'success',
+    };
   }
   if (job.status === HelixJobStatus.error) {
-    return { title: 'Job failed', body: `${job.name} failed.`, tag: job.name };
+    return { title: 'Job failed', body: `${job.name} failed.`, tag: job.name, sound: 'failure' };
   }
   return null;
 };
 
 export interface JobTransitions {
-  /** Jobs that were being watched and have now finished, in list order. */
+  /** Jobs to announce: finished, and either watched while running or started this session. */
   finished: NotifiableJob[];
   /** Names to watch on the next poll: still-running jobs seen now, minus those that finished. */
   watched: Set<string>;
 }
 
+export interface JobTransitionOptions {
+  /** Jobs created at or after this ISO time count as started in this session. */
+  startedSince: string;
+  /** Jobs already announced; a finished job stays in the list, so it must not repeat. */
+  alreadyNotified: ReadonlySet<string>;
+}
+
+const wasStartedSince = (job: NotifiableJob, since: string): boolean => {
+  if (!job.created_at) return false;
+  const created = Date.parse(job.created_at);
+  return !Number.isNaN(created) && created >= Date.parse(since);
+};
+
 /**
  * Compares a poll against the jobs already being watched.
  *
- * A job is only ever notified about if it was first seen unfinished. That is what keeps a
- * freshly opened tab from announcing every job that had already finished.
+ * A finished job is announced when it was seen running, or when it was started during this
+ * session. The second case covers a job that fails between two polls and so is never seen
+ * running. A job created before the session began is old history and stays quiet, which is
+ * what keeps a freshly opened tab from announcing everything that had already finished.
  */
 export const findJobTransitions = (
   jobs: readonly NotifiableJob[],
-  previouslyWatched: ReadonlySet<string>
+  previouslyWatched: ReadonlySet<string>,
+  { startedSince: since, alreadyNotified }: JobTransitionOptions
 ): JobTransitions => {
   const watched = new Set(previouslyWatched);
   const finished: NotifiableJob[] = [];
   for (const job of jobs) {
     if (!isTerminal(job.status)) {
       watched.add(job.name);
-    } else if (watched.delete(job.name)) {
-      finished.push(job);
+      continue;
     }
+    const wasWatched = watched.delete(job.name);
+    if (alreadyNotified.has(job.name)) continue;
+    if (wasWatched || wasStartedSince(job, since)) finished.push(job);
   }
   return { finished, watched };
 };
