@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "anthropic>=0.88.0",
     "certifi>=2026.10.19",
+    "dulwich>=1.2.20",
     "fastapi>=0.121.1",
     "filesets",
     "httpx>=0.27.0,<1",

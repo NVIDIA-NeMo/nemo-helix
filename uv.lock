@@ -4605,6 +4605,7 @@ data-designer-nemo = [
 nemo-helix-plugin = [
     { name = "anthropic" },
     { name = "certifi" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -4639,6 +4640,7 @@ requires-dist = [
     { name = "data-designer-retrieval-sdg", marker = "extra == 'retrieval-sdg'", specifier = "==0.2.1", index = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/" },
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
     { name = "duckdb", marker = "extra == 'test'" },
+    { name = "dulwich", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.2.20" },
     { name = "fastapi" },
     { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
@@ -5743,6 +5745,7 @@ nemo-helix-ext = [
 nemo-helix-plugin = [
     { name = "anthropic" },
     { name = "certifi" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "httpx" },
@@ -6219,6 +6222,7 @@ requires-dist = [
     { name = "dulwich", marker = "extra == 'all'", specifier = ">=1.2.20" },
     { name = "dulwich", marker = "extra == 'core-service'", specifier = ">=1.2.20" },
     { name = "dulwich", marker = "extra == 'files-service'", specifier = ">=1.2.20" },
+    { name = "dulwich", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.2.20" },
     { name = "dulwich", marker = "extra == 'services'", specifier = ">=1.2.20" },
     { name = "fastapi", marker = "extra == 'all'" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.100.0" },
@@ -7174,6 +7178,7 @@ source = { editable = "packages/nemo_helix_plugin" }
 dependencies = [
     { name = "anthropic" },
     { name = "certifi" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "httpx" },
@@ -7232,6 +7237,7 @@ requires-dist = [
     { name = "anyio", marker = "extra == 'filesets'", specifier = ">=4.0.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "docker", marker = "extra == 'nemo-helix-ext'", specifier = ">=7.0.0" },
+    { name = "dulwich", specifier = ">=1.2.20" },
     { name = "fastapi", specifier = ">=0.121.1" },
     { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'filesets'", specifier = ">=2023.1.0" },
@@ -7518,6 +7524,7 @@ dependencies = [
 nemo-helix-plugin = [
     { name = "anthropic" },
     { name = "certifi" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -7541,6 +7548,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
+    { name = "dulwich", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.2.20" },
     { name = "fastapi", specifier = ">=0.115.8" },
     { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },

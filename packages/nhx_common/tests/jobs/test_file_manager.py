@@ -135,6 +135,11 @@ class TestFilterFilesByPatterns:
         result = _filter_files_by_patterns(files, patterns)
         assert result == ["aggregate-scores.json", "metrics.json"]
 
+    def test_name_pattern_excludes_matching_directories_at_any_depth(self):
+        """Like .gitignore, a pattern without a trailing slash also excludes matching directories."""
+        files = ["plugins/catalog.json", "nested/plugins-clone/catalog.json", "plugins.sha", "other/keep.txt"]
+        assert _filter_files_by_patterns(files, "plugins*") == ["other/keep.txt"]
+
     def test_empty_file_list(self):
         result = _filter_files_by_patterns([], ["*.pyc"])
         assert result == []
