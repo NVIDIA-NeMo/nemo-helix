@@ -82,6 +82,30 @@ nemo jobs tail <job-name> --workspace default -n 500
 
 Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID or `current`.
 
+## Follow a Job to Completion
+
+Use `nemo jobs watch` to follow a job until it finishes. It prints status changes and logs while the job runs, and stops when the job reaches a terminal status:
+
+```bash
+nemo jobs watch <job-name> --workspace default
+```
+
+The command exits with status 0 when the job completes successfully. It exits non-zero when the job ends in any other terminal status (`error`, `cancelled`, or `paused`) or when `--timeout` expires first, so a script can stop before it fetches results.
+
+When the job is done, list the results it produced. `results list` takes the job name as its positional argument:
+
+```bash
+nemo jobs results list <job-name> --workspace default
+```
+
+Then download one of the listed results. `results download` takes the result name as its positional argument and the job through `--job`. `-o/--output-file` is required and sets the file to write:
+
+```bash
+nemo jobs results download <result-name> --job <job-name> --workspace default -o <file>
+```
+
+`nemo jobs results get <result-name> --job <job-name> --workspace default` takes the same arguments and shows the result record without downloading it.
+
 ## Concurrency Limits and Queueing
 
 The Jobs service bounds how much work runs at once. Before it starts a job step, the scheduler checks the number of jobs currently running against three limits. A step starts only when it is under all of them:

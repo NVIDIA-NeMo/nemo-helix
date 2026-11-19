@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+import typer
 from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
     app,
@@ -29,10 +30,12 @@ from nemo_helix_ext.cli.commands.jobs import (
     tail_platform_job,
     update_jobs,
     update_status_steps,
+    watch_platform_job,
 )
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.jobs.watch_types import JobStatusEvent
 from typer.testing import CliRunner
 
 
@@ -431,6 +434,51 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
         },
     )
     render_job_logs.assert_called_once_with([log])
+
+
+def _terminal_status_event(status: str, *, successful: bool) -> JobStatusEvent:
+    return JobStatusEvent(
+        kind="status",
+        job_name="job-a",
+        status=status,
+        status_details={},
+        terminal=True,
+        successful=successful,
+    )
+
+
+def test_watch_platform_job_returns_normally_when_job_completes() -> None:
+    jobs_client = MagicMock()
+    jobs_client.watch_job.return_value = iter([_terminal_status_event("completed", successful=True)])
+
+    with patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client):
+        watch_platform_job(_ctx(SimpleNamespace()), name="job-a", workspace="test-workspace")
+
+    jobs_client.watch_job.assert_called_once_with(
+        "job-a",
+        workspace="test-workspace",
+        attempt_id=None,
+        step_id=None,
+        task_id=None,
+        limit=None,
+        timeout=None,
+        poll_interval=3,
+        include_history=True,
+    )
+
+
+@pytest.mark.parametrize("status", ["error", "cancelled"])
+def test_watch_platform_job_exits_non_zero_when_job_does_not_succeed(status: str) -> None:
+    jobs_client = MagicMock()
+    jobs_client.watch_job.return_value = iter([_terminal_status_event(status, successful=False)])
+
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
+        pytest.raises(typer.Exit) as exc_info,
+    ):
+        watch_platform_job(_ctx(SimpleNamespace()), name="job-a", workspace="test-workspace")
+
+    assert exc_info.value.exit_code == 1
 
 
 def test_update_status_steps_maps_body_to_source_owned_request() -> None:
