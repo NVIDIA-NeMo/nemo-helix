@@ -33,7 +33,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     AgentHardenerRunError,
 )
 from nemo_agent_hardener_plugin.jobs.openshell_gateway import register_openshell_gateway
-from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
+from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels, effective_safety
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.base import parse_qualified_name
@@ -230,6 +230,9 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
     group's ``api_key_secret`` is resolved to its plaintext value and bound to that group's key env var,
     so a custom provider's credential reaches garak (NIM_API_KEY) / the llm factory (INFERENCE_API_KEY) /
     the guardrail judge (AGENT_HARDENER_SAFETY_API_KEY).
+
+    Resolve Safety's per-field Analysis fallback here, as model preflight does. The victim can have
+    its own INFERENCE_API_KEY, so the host's inherited Analysis key needs the dedicated Safety binding.
     """
     if models is None:
         return {}
@@ -246,7 +249,15 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
         sdk,
         workspace,
     )
-    _apply_group(env, models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR, sdk, workspace)
+    _apply_group(
+        env,
+        effective_safety(models.safety, models.analysis),
+        (),
+        (_SAFETY_BASE_URL_ENVVAR,),
+        _SAFETY_KEY_ENVVAR,
+        sdk,
+        workspace,
+    )
     return env
 
 

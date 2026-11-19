@@ -54,6 +54,7 @@ def test_build_model_env_maps_attack_and_analysis_groups() -> None:
     assert env["AGENT_HARDENER_MODEL"] == "ana/model"
     assert env["AGENT_HARDENER_BASE_URL"] == "https://ana/v1"
     assert env["INFERENCE_API_KEY"] == "NK"
+    assert "AGENT_HARDENER_SAFETY_API_KEY" not in env
 
 
 def test_build_model_env_skips_unset_fields_and_safety_model() -> None:
@@ -70,6 +71,44 @@ def test_build_model_env_maps_the_safety_endpoint_and_key() -> None:
     )
     env = _common.build_model_env(models, sdk=_sdk({"safety-key": "SK"}), workspace="default")
     assert env == {"AGENT_HARDENER_SAFETY_BASE_URL": "http://10.0.0.5:8000/v1", "AGENT_HARDENER_SAFETY_API_KEY": "SK"}
+
+
+@pytest.mark.parametrize(
+    ("safety_fields", "endpoint", "key"),
+    [
+        ({}, "https://analysis/v1", "ANALYSIS"),
+        ({"base_url": "https://safety/v1"}, "https://safety/v1", "ANALYSIS"),
+        ({"api_key_secret": "safety-key"}, "https://analysis/v1", "SAFETY"),
+        ({"base_url": "https://safety/v1", "api_key_secret": "safety-key"}, "https://safety/v1", "SAFETY"),
+    ],
+)
+def test_build_model_env_hands_effective_safety_fields_to_the_victim(
+    safety_fields: dict[str, str], endpoint: str, key: str
+) -> None:
+    models = WarGameModels(
+        attack=ModelChoice(base_url="https://attack/v1", api_key_secret="attack-key"),
+        analysis=ModelChoice(base_url="https://analysis/v1", api_key_secret="analysis-key"),
+        safety=ModelChoice(model="safety/model", **safety_fields),
+    )
+    env = _common.build_model_env(
+        models,
+        sdk=_sdk({"attack-key": "ATTACK", "analysis-key": "ANALYSIS", "safety-key": "SAFETY"}),
+        workspace="default",
+    )
+
+    assert env["AGENT_HARDENER_SAFETY_BASE_URL"] == endpoint
+    assert env["AGENT_HARDENER_SAFETY_API_KEY"] == key
+    assert env["INFERENCE_API_KEY"] == "ANALYSIS"
+    assert env["NIM_API_KEY"] == "ATTACK"
+
+
+@pytest.mark.parametrize("secrets", [{"analysis-key": "ANALYSIS"}, {"analysis-key": "ANALYSIS", "safety-key": ""}])
+def test_build_model_env_does_not_fall_back_from_an_invalid_explicit_safety_secret(secrets: dict[str, str]) -> None:
+    models = WarGameModels(
+        analysis=ModelChoice(api_key_secret="analysis-key"), safety=ModelChoice(api_key_secret="safety-key")
+    )
+    with pytest.raises(_common.AgentHardenerRunError, match="default/safety-key"):
+        _common.build_model_env(models, sdk=_sdk(secrets), workspace="default")
 
 
 @pytest.mark.parametrize("secrets", [{}, {"ana-key": ""}])
