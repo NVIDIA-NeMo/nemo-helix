@@ -540,8 +540,7 @@ Submit it from your NeMo Helix source checkout. Save the response so polling can
 generated job name (`jq` is required):
 
 ```bash
-uv run nemo evals agent-evaluate \
-  --base-url http://localhost:8080 \
+uv run nemo --base-url http://localhost:8080 evals agent-evaluate \
   --workspace default \
   --profile default \
   --spec-file harbor-eval.json > harbor-job.json
