@@ -137,6 +137,8 @@ def job_operation_errors(operation: str, name: str, workspace: str) -> Iterator[
     """
     try:
         yield
+    except EntityValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except (JobOperationConflictError, JobHasNoAttemptError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (StateTransitionConflictError, EntityConflictError) as exc:

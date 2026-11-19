@@ -93,8 +93,13 @@ async def get_fileset(
     name: str,
     entity_store: EntityClient,
 ) -> Fileset:
-    """Get a fileset by workspace and name, or raise 404."""
+    """Resolve a name or explicit id:<ID> reference without name fallback for IDs."""
     try:
+        if name.startswith("id:"):
+            fileset = await entity_store.get_by_id(Fileset, name[3:])
+            if fileset.workspace != workspace_id:
+                raise EntityNotFoundError("Fileset does not belong to the selected workspace")
+            return fileset
         return await entity_store.get(Fileset, workspace=workspace_id, name=name)
     except EntityNotFoundError as e:
         raise HTTPException(

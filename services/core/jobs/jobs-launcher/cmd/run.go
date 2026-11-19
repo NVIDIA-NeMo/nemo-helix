@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -27,12 +26,11 @@ import (
 
 const secretFetchTimeout = 30 * time.Second
 
-const stepConfigFetchTimeout = 30 * time.Second
-
 // fetchStepConfig makes the launcher download the step config from the jobs API
 // before starting the workload. Runtimes with no way to place a file in the
 // container before it starts (OpenShell) set it instead of pre-writing the file.
 var fetchStepConfig bool
+var requireFilesetTransfers bool
 
 var runCmd = &cobra.Command{
 	Use:   "run <command> [args...]",
@@ -56,6 +54,7 @@ var runCmd = &cobra.Command{
 var launcherExitCode int
 
 func init() {
+	runCmd.Flags().BoolVar(&requireFilesetTransfers, "require-fileset-transfers", false, "Require the Task Fileset transfer protocol before running the command")
 	runCmd.Flags().BoolVar(
 		&fetchStepConfig,
 		"fetch-step-config",
@@ -82,13 +81,16 @@ func writeStepConfigFromAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("jobs endpoint is not configured (NHX_JOBS_URL or NHX_BASE_URL): %w", err)
 	}
-	httpClient := *endpoint.HTTPClient()
-	httpClient.Timeout = stepConfigFetchTimeout
-	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), &httpClient)
+	client := launcherSession(ctx).JobStepClient(endpoint, nhxclient.PrincipalFromEnv())
 
 	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
 	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
-	config, err := client.GetJobStepConfig(ctx, workspace, job, step)
+	var config []byte
+	if attempt := os.Getenv("NEMO_JOB_ATTEMPT_ID"); attempt != "" {
+		config, err = client.GetAttemptStepConfig(ctx, workspace, job, attempt, step)
+	} else {
+		config, err = client.GetJobStepConfig(ctx, workspace, job, step)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to fetch step config for %s/%s/%s: %w", workspace, job, step, err)
 	}
@@ -187,25 +189,7 @@ func parseSecretReferences(secretsEnv string) ([]secretReference, error) {
 	return result, nil
 }
 
-// fetchSecrets retrieves secrets using the NeMo Helix API client and returns them as environment variables
-func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
-}
-
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
-		secretRefs,
-	)
-}
-
-func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
-	httpClient := *endpoint.HTTPClient()
-	httpClient.Timeout = secretFetchTimeout
-	return &httpClient
-}
-
-func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithContext(ctx context.Context, client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
 	if len(secretRefs) == 0 {
 		return nil, nil
 	}
@@ -214,7 +198,7 @@ func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretRe
 
 	for _, ref := range secretRefs {
 		logger.Printf("Fetching secret %s from workspace %s...\n", ref.secretName, ref.workspace)
-		secret, err := client.GetSecret(ref.workspace, ref.secretName)
+		secret, err := client.GetSecret(ctx, ref.workspace, ref.secretName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch secret %s/%s: %w", ref.workspace, ref.secretName, err)
 		}
@@ -233,7 +217,7 @@ func workloadEnvFromParent() []string {
 	filtered := make([]string, 0, len(env))
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(key, "NHX_JOB_LAUNCHER_") {
+		if strings.HasPrefix(key, "NHX_JOB_LAUNCHER_") || key == nhxclient.TransfersEnv || key == "NEMO_JOB_TRANSFER_LEADER" {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -244,6 +228,7 @@ func workloadEnvFromParent() []string {
 // runExecWithStdin sets up OTEL and runs the specified command with stdin
 func runExecWithStdin(args []string) (exitCode int, err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx = withLauncherSession(ctx)
 	defer stop()
 
 	otelShutdown, _, err := setupOTELSDK(ctx)
@@ -259,7 +244,8 @@ func runExecWithStdin(args []string) (exitCode int, err error) {
 }
 
 // runExec runs the specified command with arguments, injecting secrets as environment variables if specified
-func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, error) {
+func runCommand(ctx context.Context, args []string, stdinReader io.Reader, started func(*exec.Cmd)) (int, error) {
+	ctx = withLauncherSession(ctx)
 	// Command and arguments
 	cmdName := args[0]
 	cmdArgs := []string{}
@@ -299,7 +285,13 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			session := launcherSession(ctx)
+			if !session.BearerMode() && (principal == nil || principal.ID == "") {
+				return 1, fmt.Errorf("NHX_PRINCIPAL with a creator is required for trusted Secret injection")
+			}
+			fetchCtx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
+			secretEnvVars, err := fetchSecretsWithContext(fetchCtx, session.SecretClient(secretEndpoint, principal), secretRefs)
+			cancel()
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err
@@ -345,6 +337,8 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 		return 1, err
 	}
 
+	started(cmd)
+
 	// WaitGroup to ensure all output is processed before returning
 	var wg sync.WaitGroup
 
@@ -371,11 +365,19 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 	// Forward signals
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(signals)
+	forwardDone := make(chan struct{})
+	defer close(forwardDone)
 
 	go func() {
-		for sig := range signals {
-			logger.Printf("Received signal: %s, forwarding to subprocess...\n", sig)
-			syscall.Kill(-cmd.Process.Pid, sig.(syscall.Signal)) // nolint:errcheck
+		for {
+			select {
+			case <-forwardDone:
+				return
+			case sig := <-signals:
+				logger.Printf("Received signal: %s, forwarding to subprocess...\n", sig)
+				syscall.Kill(-cmd.Process.Pid, sig.(syscall.Signal)) // nolint:errcheck
+			}
 		}
 	}()
 

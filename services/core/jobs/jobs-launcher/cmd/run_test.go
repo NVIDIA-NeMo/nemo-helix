@@ -327,37 +327,6 @@ func TestRunExecWithSecretsNotFound(t *testing.T) {
 	}
 }
 
-func TestSecretEndpointHTTPClientSetsBoundedTimeout(t *testing.T) {
-	originalDefaultTimeout := http.DefaultClient.Timeout
-
-	tcpEndpoint, err := nhxclient.ParseEndpoint("http://127.0.0.1:8080")
-	if err != nil {
-		t.Fatalf("ParseEndpoint returned error: %v", err)
-	}
-	tcpClient := secretEndpointHTTPClient(tcpEndpoint)
-	if tcpClient == http.DefaultClient {
-		t.Fatal("expected bounded TCP client to avoid mutating http.DefaultClient")
-	}
-	if tcpClient.Timeout != secretFetchTimeout {
-		t.Fatalf("expected TCP client timeout %s, got %s", secretFetchTimeout, tcpClient.Timeout)
-	}
-	if http.DefaultClient.Timeout != originalDefaultTimeout {
-		t.Fatalf("expected http.DefaultClient timeout to remain %s, got %s", originalDefaultTimeout, http.DefaultClient.Timeout)
-	}
-
-	udsEndpoint, err := nhxclient.ParseEndpoint("unix:///tmp/nemo-helix.sock")
-	if err != nil {
-		t.Fatalf("ParseEndpoint returned error: %v", err)
-	}
-	udsClient := secretEndpointHTTPClient(udsEndpoint)
-	if udsClient.Timeout != secretFetchTimeout {
-		t.Fatalf("expected UDS client timeout %s, got %s", secretFetchTimeout, udsClient.Timeout)
-	}
-	if udsClient.Transport == nil {
-		t.Fatal("expected UDS client to preserve custom transport")
-	}
-}
-
 func TestRunExecWithoutSecrets(t *testing.T) {
 	// Ensure no secrets environment variables are set
 	origSecretsEnv, wasSet := os.LookupEnv("NEMO_JOB_SECRETS")
@@ -572,7 +541,7 @@ func TestFetchSecrets(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			principal := &nhxclient.Principal{ID: "test-principal"}
-			result, err := fetchSecrets(mockServer.URL, principal, tc.secretRefs)
+			result, err := fetchSecretsWithContext(context.Background(), nhxclient.NewSecretClient(mockServer.URL, principal), tc.secretRefs)
 
 			if tc.expectError {
 				if err == nil {
@@ -604,7 +573,7 @@ func TestFetchSecrets_Error(t *testing.T) {
 		{envVarName: "NONEXISTENT", workspace: "default", secretName: "nonexistent"},
 	}
 	principal := &nhxclient.Principal{ID: "test-principal"}
-	_, err := fetchSecrets(mockServer.URL, principal, secretRefs)
+	_, err := fetchSecretsWithContext(context.Background(), nhxclient.NewSecretClient(mockServer.URL, principal), secretRefs)
 
 	if err == nil {
 		t.Fatal("Expected error for non-existent secret, got nil")

@@ -78,6 +78,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobBackend,
     JobUpdate,
     get_job_runtime_shared_envvars,
+    get_job_transfer_envvars,
     get_logs_endpoint_from_fileset,
     step_ttl_seconds_active,
     validate_step_environment,
@@ -386,6 +387,7 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
 
         # Thread through shared platform envvars (NHX_*_URL etc.).
         env.update(get_job_runtime_shared_envvars(platform_config, loopback_address=loopback_address))
+        env.update(get_job_transfer_envvars(step))
 
         # The sandbox reaches the platform only at the egress host: the policy
         # allows exactly that host:port, and the controller's own base URL is
@@ -413,7 +415,10 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
         # The launcher is the canonical main process: it fetches the step config,
         # injects secrets, then execs the task command.
         launcher = self._executor_config.launcher_tool_path
-        sandbox_command = [launcher, "run", "--fetch-step-config", "--"] + entrypoint + command
+        sandbox_command = [launcher, "run", "--fetch-step-config"]
+        if step_spec.filesets.enabled:
+            sandbox_command.append("--require-fileset-transfers")
+        sandbox_command += ["--"] + entrypoint + command
 
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
         labels = {

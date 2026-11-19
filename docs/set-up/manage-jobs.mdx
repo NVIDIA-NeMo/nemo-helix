@@ -279,6 +279,78 @@ A per-workspace override is not available yet. Every workspace uses `max_active_
 
 </Note>
 
+## Pulling inputs and publishing Task output
+
+Set `filesets` on a platform Step to copy Fileset contents into each Task before
+its script runs and upload directories after the Step's workload finishes:
+
+```yaml
+platform_spec:
+  steps:
+    - name: transform
+      executor:
+        provider: cpu
+        container:
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - mkdir -p /work/output /work/diagnostics; cp /work/input/data.txt /work/output/result.txt
+      filesets:
+        pull:
+          - fileset_id: fileset-input-id
+            directory: /work/input
+        push:
+          - fileset_id: fileset-output-id
+            directory: /work/output
+            path: results
+            when: success
+          - fileset_id: fileset-diagnostics-id
+            directory: /work/diagnostics
+            when: always
+```
+
+Use immutable IDs for existing Filesets in the Job's workspace. Choose directories
+that are writable and accessible in the selected execution profile. `path` is a
+relative prefix inside the Fileset and defaults to its root. The example produces
+`results/result.txt`; it does not add the local directory name or a Task ID.
+
+Each parallel Task uploads its own configured directories. Tasks may use private
+scratch or separate RWO volumes; publishing their output does not require one
+filesystem shared across nodes. Explicit shared workload mounts still follow
+their storage driver's access and scheduling rules. The local subprocess profile
+needs `launcher_tool_path` pointing to an executable host `jobs-launcher`.
+
+| `when` | Publication condition |
+| --- | --- |
+| `always` (default) | Successful or failed aggregate Step workload |
+| `success` | Successful aggregate Step workload |
+| `failure` | Failed aggregate Step workload |
+
+The controller waits for required pulls before starting the workload. Pull failure
+fails the Step. After its workload processes stop, the Step supplies the same
+aggregate outcome to its uploaders. Required uploads finish before the controller
+explicitly commits each destination and finalizes the Step. A successful script
+with failed publication makes the Step fail; diagnostic publication cannot turn
+a failed script into success. Cancellation stops normal publication, and pause
+does not count as workload completion.
+
+Transfers preserve relative filenames and overwrite matching files. The Step/Task
+author owns filename collisions and coordination between concurrent writers. The
+platform adds no prefixes, conflict checks or cross-writer locks, and it does not
+delete destination-only files. Directory entries run in declaration order within
+a Task; Tasks can upload concurrently. Symlinks and paths escaping a selected
+directory are rejected. A missing local upload directory fails that publication;
+an existing empty directory succeeds.
+
+Transient transfer/commit failures receive up to three attempts. A surviving Task
+retries from its existing directories. Node loss can destroy Task-local output,
+so another Task cannot recover it without retained storage. An uncertain commit
+response may cause a repeated commit and another downstream notification. Commits
+are change markers, not snapshots or transactions across concurrent writers.
+The current phase and commit results appear in Step status details under
+`fileset_transfers`.
+
 ## Execution Profiles
 
 You can configure jobs to run on different hardware by specifying an execution profile. This allows you to define different compute resources and job execution backends for different job types and use cases.

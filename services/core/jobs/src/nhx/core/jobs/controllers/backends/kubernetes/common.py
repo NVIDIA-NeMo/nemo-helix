@@ -99,6 +99,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_NAME,
     WORKLOAD_IDENTITY_VOLUME_PATH,
     get_job_runtime_shared_envvars,
+    get_job_transfer_envvars,
     get_logs_endpoint_from_fileset,
     get_workload_identity_token_audience,
     is_workload_identity_token_exchange_enabled,
@@ -1586,6 +1587,7 @@ def create_pod_template_spec(
 
     # Thread through shared platform envvars to the job
     shared_envvars = get_job_runtime_shared_envvars(platform_config)
+    shared_envvars.update(get_job_transfer_envvars(step))
     env.extend([client.V1EnvVar(name=name, value=value) for name, value in shared_envvars.items()])
 
     job_storage_mount = ""
@@ -1742,6 +1744,8 @@ def create_pod_template_spec(
     # See also: https://unix.stackexchange.com/questions/11376/what-does-double-dash-double-hyphen-mean
     # The launcher will pass these args directly to the container as-is, which may interpret them as either
     # positional or flags depending on the container design.
+    if step.step_spec is not None and step.step_spec.filesets.enabled:
+        command.append("--require-fileset-transfers")
     command.append("--")
 
     # Now insert the container entrypoint commands.

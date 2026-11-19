@@ -16331,6 +16331,26 @@ components:
       required:
       - data
       title: FilesetOutputsPage
+    FilesetPull:
+      properties:
+        fileset_id:
+          type: string
+          minLength: 1
+          title: Fileset Id
+        directory:
+          type: string
+          minLength: 1
+          title: Directory
+        path:
+          type: string
+          title: Path
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_id
+      - directory
+      title: FilesetPull
     FilesetPurpose:
       type: string
       enum:
@@ -16339,6 +16359,34 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FilesetPush:
+      properties:
+        fileset_id:
+          type: string
+          minLength: 1
+          title: Fileset Id
+        directory:
+          type: string
+          minLength: 1
+          title: Directory
+        path:
+          type: string
+          title: Path
+          default: ''
+        when:
+          type: string
+          enum:
+          - success
+          - failure
+          - always
+          title: When
+          default: always
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_id
+      - directory
+      title: FilesetPush
     FilesetSortField:
       type: string
       enum:
@@ -16359,6 +16407,24 @@ components:
         storage backend recorded on the fileset. Prefix a field with ``-`` for
 
         descending order.'
+    FilesetUploadResult:
+      properties:
+        fileset_id:
+          type: string
+          title: Fileset Id
+        success:
+          type: boolean
+          title: Success
+        error:
+          type: string
+          title: Error
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_id
+      - success
+      title: FilesetUploadResult
     FinetuningType:
       type: string
       enum:
@@ -18071,6 +18137,8 @@ components:
           type: string
           title: Attempt Id
           description: Parent attempt ID
+        transfer_state:
+          $ref: '#/components/schemas/StepTransferState'
         config:
           additionalProperties: true
           type: object
@@ -18212,6 +18280,10 @@ components:
           type: object
           title: Config
           description: Configuration for the step
+        filesets:
+          allOf:
+          - $ref: '#/components/schemas/StepFilesets'
+          description: Task-local Fileset pulls and conditional uploads
         gateway_providers:
           additionalProperties:
             $ref: '#/components/schemas/GatewayProviderBinding'
@@ -18420,6 +18492,25 @@ components:
           type: string
           title: Step Id
           description: Parent step ID
+        retired_transfer_runtimes:
+          items:
+            type: string
+          type: array
+          title: Retired Transfer Runtimes
+        transfer:
+          $ref: '#/components/schemas/TaskTransferProgress'
+        transfer_action:
+          type: string
+          enum:
+          - wait
+          - run
+          - stop
+          - upload_success
+          - upload_failure
+          - done
+          - abort
+          title: Transfer Action
+          default: wait
         status:
           allOf:
           - $ref: '#/components/schemas/HelixJobStatus'
@@ -18537,6 +18628,8 @@ components:
       title: HelixJobTaskStatusResponse
     HelixJobTaskUpdate:
       properties:
+        transfer:
+          $ref: '#/components/schemas/TaskTransferProgress'
         status:
           allOf:
           - $ref: '#/components/schemas/HelixJobStatus'
@@ -23555,6 +23648,21 @@ components:
       - success
       - unknown
       title: StatusEnum
+    StepFilesets:
+      properties:
+        pull:
+          items:
+            $ref: '#/components/schemas/FilesetPull'
+          type: array
+          title: Pull
+        push:
+          items:
+            $ref: '#/components/schemas/FilesetPush'
+          type: array
+          title: Push
+      additionalProperties: false
+      type: object
+      title: StepFilesets
     StepIngressRule:
       properties:
         job_id_label:
@@ -23630,6 +23738,51 @@ components:
 
         accept ingress from other pods of the same job plus the listed rules, and
         nothing else.'
+    StepTransferState:
+      properties:
+        phase:
+          type: string
+          enum:
+          - staging
+          - workload
+          - publishing
+          - done
+          - aborted
+          title: Phase
+          default: staging
+        outcome:
+          title: Outcome
+          type: string
+          enum:
+          - success
+          - failure
+        lost:
+          type: boolean
+          title: Lost
+          default: false
+        commit_attempts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Commit Attempts
+        retry_at:
+          additionalProperties:
+            type: string
+            format: date-time
+          type: object
+          title: Retry At
+        commits:
+          additionalProperties:
+            type: string
+          type: object
+          title: Commits
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+      type: object
+      title: StepTransferState
     StorageConfigType:
       enum:
       - local
@@ -23832,6 +23985,53 @@ components:
       - task
       title: TaskPrompt
       description: Configuration for prompts that will be used for a specific task.
+    TaskTransferProgress:
+      properties:
+        phase:
+          type: string
+          enum:
+          - pulling
+          - ready
+          - running
+          - finished
+          - uploaded
+          - pull_failed
+          - upload_failed
+          title: Phase
+        runtime_id:
+          type: string
+          title: Runtime Id
+          default: ''
+        attempts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Attempts
+        exit_code:
+          title: Exit Code
+          type: integer
+        stopped:
+          type: boolean
+          title: Stopped
+          default: false
+        leader:
+          type: boolean
+          title: Leader
+          default: false
+        error:
+          type: string
+          title: Error
+          default: ''
+        uploads:
+          items:
+            $ref: '#/components/schemas/FilesetUploadResult'
+          type: array
+          title: Uploads
+      additionalProperties: false
+      type: object
+      required:
+      - phase
+      title: TaskTransferProgress
     TokenAuthorizationStart:
       properties:
         redirect_uri:

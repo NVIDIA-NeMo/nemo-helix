@@ -2329,3 +2329,24 @@ def test_cleanup_unfinished_volcano_job_only_for_cancelled_step(
     ):
         volcano_job.cleanup_steps()
     assert terminate.call_count == (1 if platform_status == HelixJobStatus.CANCELLED else 0)
+
+
+@pytest.mark.parametrize("nodes", [1, 3])
+def test_fileset_transfers_keep_each_task_as_an_uploader(
+    volcano_job, distributed_gpu_execution_provider, test_step_pending, nodes
+):
+    from nemo_helix_plugin.jobs.transfers import FilesetPush, StepFilesets
+
+    test_step_pending.step_spec.filesets = StepFilesets(
+        push=[FilesetPush(fileset_id="destination", directory="/output")]
+    )
+    distributed_gpu_execution_provider.resources.num_nodes = nodes
+    volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
+    body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]
+    assert sum(task["replicas"] for task in body["spec"]["tasks"]) == nodes
+    for task in body["spec"]["tasks"]:
+        container = task["template"]["spec"]["containers"][0]
+        assert "--require-fileset-transfers" in container["command"]
+        env = {entry["name"]: entry.get("value") for entry in container["env"]}
+        assert '"fileset_id":"destination"' in env["NEMO_JOB_FILESET_TRANSFERS"]
+        assert env["NEMO_JOB_TRANSFER_LEADER"] == ("true" if task["name"] == "leader" else "false")
