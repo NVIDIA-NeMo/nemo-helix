@@ -142,6 +142,17 @@ describe('SkillComparisonRoute', () => {
     expect(screen.getByText('check-permissions')).toBeInTheDocument();
   });
 
+  it('shows an unmeasured reward for a retained trial that failed before scoring', async () => {
+    renderComparison();
+    const report = makeSkillComparisonReport();
+    report.arms['with-skill'].reward = null;
+    report.arms['with-skill'].evidence_error = 'No reward file found.';
+    await importReport(report);
+    expect(screen.getByText('Needs Review')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    expect(screen.getByText('No reward file found.')).toBeInTheDocument();
+  });
+
   it('selects a linked baseline outside the recent run list', async () => {
     const baseline: TasksetRunStatus = {
       run_id: 'run-baseline',

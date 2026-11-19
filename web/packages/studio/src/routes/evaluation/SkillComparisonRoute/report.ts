@@ -62,7 +62,7 @@ const armSchema = z
   .object({
     run_id: text,
     job_name: text,
-    reward: z.union([z.literal(0), z.literal(1)]),
+    reward: number.nullable(),
     agent_image_ref: image,
     verifier_image_ref: image.nullable(),
     bundle: text,

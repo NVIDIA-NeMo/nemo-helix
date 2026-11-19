@@ -215,7 +215,8 @@ function toArm(
   return {
     run_id: execution.run.run_id,
     job_name: execution.jobName,
-    reward: execution.trial.reward,
+    reward: execution.trial.reward ?? null,
+    evidence_error: execution.trial.error,
     agent_image_ref: execution.agentImage,
     verifier_image_ref: execution.verifierImage,
     skill_refs: execution.skills,
