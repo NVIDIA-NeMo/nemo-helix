@@ -240,10 +240,6 @@ export async function loadSavedComparison(
     loadExecution(workspace, treatment),
     evalsListAgentEvaluateJobs(workspace, { page_size: 100, sort: '-created_at' }),
   ]);
-  if (before.skills.length || !after.skills.length)
-    throw new Error(
-      'Choose a control without skills and a variant with at least one pinned skill.'
-    );
 
   const beforeReplay = findReplay(before, scoring.data);
   const afterReplay = findReplay(after, scoring.data);

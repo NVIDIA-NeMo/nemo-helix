@@ -158,7 +158,8 @@ and scores with up to two decimal places. **Package Checks** shows scan findings
 and other diagnostics when the report includes them.
 
 **Load Saved Runs** can open a completed variant and select its linked control.
-Older runs can be paired manually using the same pinned taskset. The loader
+Runs can be paired manually using the same pinned taskset, including two versions
+of a skill. Either arm can contain pinned skills. The loader
 supports one task and one trial per arm. It uses scoring replays when both
 runs have one and uses saved run results otherwise. **Evidence** lists the
 source jobs and pinned skills. Use the exported report to include verified

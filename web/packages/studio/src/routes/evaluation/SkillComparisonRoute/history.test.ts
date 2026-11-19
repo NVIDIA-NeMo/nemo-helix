@@ -231,6 +231,37 @@ describe('loadSavedComparison', () => {
     expect(customFetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: 'two pinned skill versions',
+      controlSkills: [`default/skill#${'f'.repeat(64)}`],
+      variantSkills: skills,
+    },
+    {
+      name: 'a skill-equipped control and a skill-free variant',
+      controlSkills: skills,
+      variantSkills: [],
+    },
+  ])('loads $name', async ({ controlSkills, variantSkills }) => {
+    vi.mocked(evalsListAgentEvaluateJobs).mockResolvedValue({ data: [] });
+    const getJob = vi.mocked(jobsGetJob).getMockImplementation()!;
+    vi.mocked(jobsGetJob).mockImplementation(async (...args) => {
+      const job = await getJob(...args);
+      return {
+        ...job,
+        spec: {
+          ...job.spec,
+          spec: { target: { skills: args[1] === 'job-control' ? controlSkills : variantSkills } },
+        },
+      };
+    });
+    const result = await loadSavedComparison('default', control, variant);
+    expect(result.arms.baseline.skill_refs).toEqual(controlSkills);
+    expect(result.arms['with-skill'].skill_refs).toEqual(variantSkills);
+    expect(result.arms.baseline.replay?.source).toBe('run');
+    expect(result.arms['with-skill'].replay?.source).toBe('run');
+  });
+
   it('keeps matching scoring replays when both runs retain one', async () => {
     vi.mocked(evalsListAgentEvaluateJobs).mockResolvedValue({
       data: [replay('control'), replay('variant')],

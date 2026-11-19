@@ -107,10 +107,11 @@ const reportSchema = z
     error: z.string().optional(),
   })
   .passthrough()
-  .refine((report) => !!report.skill_ref || !!report.arms['with-skill'].skill_refs?.length, {
-    path: ['skill_ref'],
-    message: 'A pinned variant skill is required.',
-  });
+  .refine(
+    (report) =>
+      !!report.skill_ref || ARM_NAMES.some((name) => !!report.arms[name].skill_refs?.length),
+    { path: ['skill_ref'], message: 'At least one pinned skill is required.' }
+  );
 
 export type MetricResult = z.infer<typeof metricResultSchema>;
 export type ComparisonReport = z.infer<typeof reportSchema>;
@@ -168,10 +169,14 @@ export function comparisonWarnings(report: ComparisonReport): string[] {
   ) {
     warnings.push('The pinned resources do not belong to the reported workspace.');
   }
-  if (baseline.discovery !== false || treatment.discovery !== true) {
-    warnings.push(
-      'Skill discovery has not been confirmed as absent in the control and present in the variant.'
-    );
+  for (const name of ARM_NAMES) {
+    const arm = report.arms[name];
+    const expectsSkills = arm.skill_refs ? arm.skill_refs.length > 0 : name === 'with-skill';
+    if (arm.discovery !== expectsSkills) {
+      warnings.push(
+        `Runtime skill discovery has not been confirmed for the ${name === 'baseline' ? 'control' : 'variant'}.`
+      );
+    }
   }
   return warnings;
 }
