@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 import pytest
-from nemo_customizer.token_budget import Behavior, ChatTemplateCounter, MaxTokens, apply_budget
+from nemo_customizer.token_budget import Behavior, ChatTemplateCounter, MaxTokens, apply_budget, fold_thinking
 
 
 class CharCounter:
@@ -256,3 +256,63 @@ def test_the_chat_template_counter_renders_without_a_generation_prompt_and_count
     assert tokenizer.rendered == [{"tools": tools, "tokenize": False, "add_generation_prompt": False}]
     counter.count([{"role": "user", "content": "x"}], None)
     assert tokenizer.rendered[-1]["tools"] is None
+
+
+def test_thinking_messages_fold_into_the_reasoning_of_the_reply_after_them() -> None:
+    messages = [
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "thinking": "plan"},
+        {"role": "assistant", "content": "ok", "tool_calls": [{"type": "function", "function": {"name": "bash"}}]},
+        {"role": "tool", "content": "out"},
+        {"role": "assistant", "thinking": "done"},
+        {"role": "assistant", "content": "all set"},
+    ]
+    folded = fold_thinking(messages)
+
+    assert [m["role"] for m in folded] == ["user", "assistant", "tool", "assistant"]
+    assert folded[1]["reasoning_content"] == "plan" and folded[1]["content"] == "ok"
+    assert folded[3] == {"role": "assistant", "content": "all set", "reasoning_content": "done"}
+    assert all("thinking" not in m for m in folded)
+    assert "reasoning_content" not in messages[2]  # the row itself is not changed
+
+
+def test_a_thinking_message_with_no_reply_to_join_stays_its_own_turn() -> None:
+    assert fold_thinking([{"role": "user", "content": "q"}, {"role": "assistant", "thinking": "hmm"}])[1] == {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "hmm",
+    }
+    folded = fold_thinking(
+        [
+            {"role": "assistant", "thinking": "a"},
+            {"role": "assistant", "content": "x", "reasoning_content": "its own"},
+        ]
+    )
+    assert [m.get("reasoning_content") for m in folded] == ["a", "its own"]
+    # Rows with no thinking come back as they were.
+    plain = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+    assert fold_thinking(plain) == plain
+
+
+def test_the_counter_renders_thinking_as_reasoning_content_like_the_trainer() -> None:
+    seen: list[Any] = []
+
+    class Recording(FakeTokenizer):
+        def apply_chat_template(self, messages: Any, **kwargs: Any) -> str:
+            seen.append(messages)
+            return super().apply_chat_template(messages, **kwargs)
+
+    counter = ChatTemplateCounter(Recording())
+    row = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "thinking": "think"},
+        {"role": "assistant", "content": "a"},
+    ]
+    counter.count(row, None)
+
+    assert seen == [
+        [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a", "reasoning_content": "think"},
+        ]
+    ]
