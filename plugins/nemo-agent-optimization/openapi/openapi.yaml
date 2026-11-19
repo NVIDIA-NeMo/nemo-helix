@@ -566,6 +566,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -744,6 +750,11 @@ components:
         ``PENDING`` means the backend resource exists and is waiting to start.'
     HelixJobStatusResponse:
       properties:
+        attempt_id:
+          title: Attempt Id
+          type: string
+        workflow:
+          $ref: '#/components/schemas/WorkflowView'
         id:
           type: string
           title: Id
@@ -1377,3 +1388,129 @@ components:
       - msg
       - type
       title: ValidationError
+    WorkflowNodeView:
+      properties:
+        name:
+          type: string
+          title: Name
+        depends_on:
+          items:
+            type: string
+          type: array
+          title: Depends On
+        freshness:
+          type: string
+          enum:
+          - clean
+          - dirty
+          - unknown
+          title: Freshness
+        scheduling_state:
+          type: string
+          enum:
+          - ready
+          - waiting_dependencies
+          - waiting_capacity
+          - held
+          - running
+          - idle
+          title: Scheduling State
+        reason:
+          title: Reason
+          type: string
+        blocked_by:
+          items:
+            type: string
+          type: array
+          title: Blocked By
+        requested_run_revision:
+          type: string
+          title: Requested Run Revision
+        active_execution_id:
+          title: Active Execution Id
+          type: string
+        latest_execution_id:
+          title: Latest Execution Id
+          type: string
+        successful_execution_id:
+          title: Successful Execution Id
+          type: string
+        last_outcome:
+          title: Last Outcome
+          type: string
+          enum:
+          - completed
+          - error
+          - cancelled
+        has_pending_run:
+          type: boolean
+          title: Has Pending Run
+        last_inputs_checked_at:
+          title: Last Inputs Checked At
+          type: string
+          format: date-time
+        last_poll_attempt_at:
+          title: Last Poll Attempt At
+          type: string
+          format: date-time
+        last_poll_error:
+          title: Last Poll Error
+          type: string
+      type: object
+      required:
+      - name
+      - depends_on
+      - freshness
+      - scheduling_state
+      - reason
+      - blocked_by
+      - requested_run_revision
+      - active_execution_id
+      - latest_execution_id
+      - successful_execution_id
+      - last_outcome
+      - has_pending_run
+      - last_inputs_checked_at
+      - last_poll_attempt_at
+      - last_poll_error
+      title: WorkflowNodeView
+    WorkflowView:
+      properties:
+        mode:
+          type: string
+          enum:
+          - run_to_completion
+          - continuous
+          title: Mode
+        pass_number:
+          type: integer
+          title: Pass Number
+        control:
+          type: string
+          enum:
+          - running
+          - pausing
+          - paused
+          - cancelling
+          - failing
+          title: Control
+        waiting_for_changes:
+          type: boolean
+          title: Waiting For Changes
+        degraded:
+          type: boolean
+          title: Degraded
+        nodes:
+          items:
+            $ref: '#/components/schemas/WorkflowNodeView'
+          type: array
+          title: Nodes
+      type: object
+      required:
+      - mode
+      - pass_number
+      - control
+      - waiting_for_changes
+      - degraded
+      - nodes
+      title: WorkflowView

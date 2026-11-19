@@ -4301,3 +4301,55 @@ async def test_attempt_status_projection_preserves_pending_job(
         HelixJobStepsListFilter(), HelixJobSortField.CREATED_AT_ASC, 100, 0, DEFAULT_WORKSPACE
     )
     assert steps == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_steps_keep_the_attempts_execution_context_after_job_edit(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    from nemo_helix_plugin.jobs.spec import HelixJobSpec
+    from nemo_helix_plugin.jobs.workflows import WorkflowSpec
+    from nhx.core.jobs.entities import STEP_SPEC_NAME_CONFIG_KEY
+
+    owner = AuthContext(principal_id="owner@example.com")
+    editor = AuthContext(principal_id="editor@example.com")
+    request = sample_platform_job_request.model_copy(deep=True)
+    request.platform_spec = HelixJobSpec(
+        workflow=WorkflowSpec(mode="continuous"),
+        steps=[definition.model_copy(update={"depends_on": []}) for definition in request.platform_spec.steps],
+    )
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE, auth_context=owner)
+    changed = request.platform_spec.model_copy(deep=True)
+    changed.steps[0].config["edited"] = True
+    await mock_dispatcher.update_job(
+        job.id,
+        DEFAULT_WORKSPACE,
+        UpdateHelixJobRequest(
+            spec={"edited": True},
+            platform_spec=changed,
+        ),
+        auth_context=editor,
+    )
+    assert job.attempt_id is not None
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt.auth_context == owner
+    logical_name = attempt.platform_spec.steps[0].name
+    await mock_store.create(
+        HelixJobStep(
+            name="wf-execution",
+            workspace=DEFAULT_WORKSPACE,
+            attempt_id=attempt.id,
+            config={STEP_SPEC_NAME_CONFIG_KEY: logical_name},
+        )
+    )
+    contexts, _ = await mock_dispatcher.list_steps(
+        HelixJobStepsListFilter(),
+        HelixJobSortField.CREATED_AT_ASC,
+        100,
+        0,
+        DEFAULT_WORKSPACE,
+    )
+    assert len(contexts) == 1 and contexts[0].auth_context == owner
+    assert contexts[0].step_spec is not None and "edited" not in contexts[0].step_spec.config

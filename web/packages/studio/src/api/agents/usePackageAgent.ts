@@ -73,7 +73,8 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
 
   const status = useQuery({
     queryKey: ['agents', 'package-job', workspace, activeJobName, 'status'],
-    queryFn: ({ signal }) => agentsGetPackageJobStatus(workspace, activeJobName ?? '', signal),
+    queryFn: ({ signal }) =>
+      agentsGetPackageJobStatus(workspace, activeJobName ?? '', undefined, signal),
     enabled: Boolean(activeJobName),
     refetchInterval: (query) =>
       isTerminalPackageStatus(query.state.data?.status) ? false : JOB_POLLING_INTERVAL_MS,

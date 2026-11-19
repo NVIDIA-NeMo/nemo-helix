@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 
 import click
 import typer
+from nemo_helix_plugin.cli_options import WorkspaceOption
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.endpoints import upload_otlp_logs
 from nemo_helix_plugin.files.types import (
@@ -559,6 +560,31 @@ def list_filesets(
     )
     if not all_pages:
         warn_if_more_pages(items, pagination_type)
+
+
+@filesets_app.command("commit")
+@collect_warnings
+@handle_errors
+def commit_fileset(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument()],
+    workspace: WorkspaceOption = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Assign a new commit revision to a FileSet and return the updated FileSet."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(FilesClient, "commit_fileset", kwargs, resolved_output_format, state):
+        return
+
+    result = state.typed_client(FilesClient).commit_fileset(name=name, workspace=workspace)
+    format_output(
+        result,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
 
 
 @filesets_app.command("refresh")

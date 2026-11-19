@@ -33,9 +33,14 @@ export interface StudyInProgressProps {
 export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQueued }) => {
   const { name: jobName, spec } = job;
 
-  const { data: jobStatus } = useAgentOptimizationGetRunStrategyJobStatus(workspace, jobName, {
-    query: { enabled: !!workspace && !!jobName, refetchInterval: JOB_POLLING_INTERVAL_MS },
-  });
+  const { data: jobStatus } = useAgentOptimizationGetRunStrategyJobStatus(
+    workspace,
+    jobName,
+    undefined,
+    {
+      query: { enabled: !!workspace && !!jobName, refetchInterval: JOB_POLLING_INTERVAL_MS },
+    }
+  );
   const steps = jobStatus?.steps ?? [];
   const isSwitchyard = spec.strategy === SWITCHYARD_STRATEGY;
   const resultNoun = isSwitchyard ? 'Virtual models' : 'Trials';

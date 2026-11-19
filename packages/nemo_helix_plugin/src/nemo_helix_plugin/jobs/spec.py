@@ -21,6 +21,7 @@ from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTI
 from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
+from nemo_helix_plugin.jobs.workflows import WorkflowInput, WorkflowSpec, validate_workflow_dependencies
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -142,6 +143,8 @@ class HelixJobStepSpec(JobSpecModel):
     environment: Optional[list[HelixJobEnvironmentVariable]] = Field(
         default=None, description="Environment variables for the step"
     )
+    depends_on: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+    inputs: list[WorkflowInput] | None = Field(default=None, exclude_if=lambda value: value is None)
     executor: Provider = Field(description="The executor for the step")
     config: dict = Field(default_factory=dict, description="Configuration for the step")
     gateway_providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
@@ -182,6 +185,7 @@ class HelixJobStepSpec(JobSpecModel):
 class HelixJobSpec(JobSpecModel):
     """Specification for a platform job, containing steps and secrets."""
 
+    workflow: WorkflowSpec | None = Field(default=None, exclude_if=lambda value: value is None)
     steps: list[HelixJobStepSpec] = Field(description="List of steps to be executed in the job")
     secrets: Optional[list[HelixJobSecret]] = Field(default=None, description="Secrets referenced by the job")
 
@@ -195,6 +199,20 @@ class HelixJobSpec(JobSpecModel):
         step_names = [step.name for step in self.steps]
         if len(step_names) != len(set(step_names)):
             raise ValueError("Each step must have a unique name.")
+        for step in self.steps:
+            supplied = step.model_fields_set & {"depends_on", "inputs"}
+            if self.workflow is None and supplied:
+                raise ValueError(f"Step {step.name}: {', '.join(sorted(supplied))} requires workflow configuration")
+            if self.workflow is not None:
+                if step.depends_on is None:
+                    raise ValueError(f"Workflow step {step.name} requires explicit depends_on")
+                if "inputs" in step.model_fields_set and step.inputs is None:
+                    raise ValueError(f"Workflow step {step.name}: inputs cannot be null")
+                ids = [item.fileset_id for item in step.inputs or []]
+                if len(ids) != len(set(ids)):
+                    raise ValueError(f"Duplicate input Fileset for step {step.name}")
+        if self.workflow is not None:
+            validate_workflow_dependencies({step.name: step.depends_on or [] for step in self.steps})
         return self
 
 

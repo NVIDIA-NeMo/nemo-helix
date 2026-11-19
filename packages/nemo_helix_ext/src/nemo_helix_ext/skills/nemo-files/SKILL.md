@@ -32,6 +32,9 @@ nemo files filesets create <name> --description "<description>"
 # Create a fileset in a specific workspace
 nemo files filesets create <name> --description "<description>" --workspace <workspace>
 
+# Assign a new commit revision
+nemo files filesets commit <name> --workspace <workspace>
+
 # Get fileset details
 nemo files filesets get <name>
 

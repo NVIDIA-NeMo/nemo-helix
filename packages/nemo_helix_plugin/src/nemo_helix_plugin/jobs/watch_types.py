@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from nemo_helix_plugin.jobs.workflows import WorkflowView
+
 
 @dataclass(frozen=True, slots=True)
 class JobStatusEvent:
@@ -37,7 +39,16 @@ class JobWarningEvent:
     message: str
 
 
-JobWatchEvent = JobStatusEvent | JobLogEvent | JobWarningEvent
+@dataclass(frozen=True, slots=True)
+class JobWorkflowEvent:
+    kind: Literal["workflow"]
+    job_name: str
+    job_id: str
+    attempt_id: str
+    workflow: WorkflowView
+
+
+JobWatchEvent = JobStatusEvent | JobLogEvent | JobWarningEvent | JobWorkflowEvent
 
 
 class JobWatchTimeoutError(TimeoutError):

@@ -1329,3 +1329,31 @@ def test_rerun_recovery_excludes_initial_attempts_before_pagination(backend_regi
             controller._recover_unstarted_reruns()
         assert store.get_by_id(HelixJobAttempt, rerun.id).status == HelixJobStatus.ERROR
         assert all(store.get_by_id(HelixJobAttempt, attempt.id).status == HelixJobStatus.CREATED for attempt in initial)
+
+
+def test_unstarted_workflow_attempt_is_not_recovered_as_a_sequential_failure(
+    backend_registry,
+    mock_nemo_client,
+):
+    from nemo_helix_plugin.jobs.workflows import WorkflowSpec
+    from nhx.core.jobs.app.test_helpers import TestConstants
+    from nhx.core.jobs.entities import HelixJobAttempt
+
+    reconciler, entities = _reconciler(backend_registry, mock_nemo_client)
+    attempt = HelixJobAttempt(
+        name="attempt-1",
+        job="job-id",
+        workspace="default",
+        seq=1,
+        created_at=datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc),
+        platform_spec=HelixJobSpec(
+            workflow=WorkflowSpec(),
+            steps=[
+                HelixJobStepSpec(name="work", depends_on=[], executor=TestConstants.TEST_EXECUTOR),
+            ],
+        ),
+    )
+    entities.list.return_value = SimpleNamespace(data=[attempt])
+    reconciler._recover_unstarted_reruns()
+    entities.create.assert_not_called()
+    entities.update.assert_not_called()

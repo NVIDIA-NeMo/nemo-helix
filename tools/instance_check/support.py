@@ -329,7 +329,7 @@ def wait_for_job(client: NemoClient, workspace: str, name: str, timeout: float) 
             print(f"job {name}: {event.status}", flush=True)
         elif event.kind == "warning":
             print(f"job {name} warning: {event.message}", flush=True)
-        elif event.message:
+        elif event.kind == "log" and event.message:
             print(f"job {name} log: {event.message}", flush=True)
     return jobs.get_job(name=name, workspace=workspace).data()
 

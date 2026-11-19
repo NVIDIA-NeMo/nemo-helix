@@ -88,3 +88,29 @@ class BoundEntityFieldPolicy:
         for field in (sort, group_by):
             if field is not None and self._protected_field(field.removeprefix("-")):
                 raise ValueError(f"Field '{self.path}' is not queryable")
+
+
+@dataclass(frozen=True)
+class EntityFieldPolicies:
+    policies: tuple[BoundEntityFieldPolicy, ...]
+
+    def create_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        for policy in self.policies:
+            data = policy.create_data(data)
+        return data
+
+    def update_data(self, data: dict[str, Any], stored_data: dict[str, Any]) -> dict[str, Any]:
+        for policy in self.policies:
+            data = policy.update_data(data, stored_data)
+        return data
+
+    def project(self, entity: Entity) -> Entity:
+        for policy in self.policies:
+            entity = policy.project(entity)
+        return entity
+
+    def validate_query(
+        self, filter_op: FilterOperation | None, sort: str | None = None, group_by: str | None = None
+    ) -> None:
+        for policy in self.policies:
+            policy.validate_query(filter_op, sort, group_by)

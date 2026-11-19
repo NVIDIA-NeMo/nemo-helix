@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.jobs.watch_types import JobLogEvent, JobStatusEvent, JobWarningEvent
+from nemo_helix_plugin.jobs.watch_types import JobLogEvent, JobStatusEvent, JobWarningEvent, JobWorkflowEvent
+from nemo_helix_plugin.jobs.workflows import WorkflowView
 from support import (
     accept_report,
     chat_target,
@@ -88,6 +89,20 @@ def test_wait_for_job_prints_watch_events(monkeypatch: pytest.MonkeyPatch, capsy
         ),
         JobLogEvent(kind="log", job_name="job-1", timestamp=None, step_id=None, task_id=None, message="probe line"),
         JobWarningEvent(kind="warning", job_name="job-1", message="log page retried"),
+        JobWorkflowEvent(
+            kind="workflow",
+            job_name="job-1",
+            job_id="job-id",
+            attempt_id="attempt-id",
+            workflow=WorkflowView(
+                mode="continuous",
+                pass_number=1,
+                control="running",
+                waiting_for_changes=False,
+                degraded=False,
+                nodes=[],
+            ),
+        ),
         JobStatusEvent(
             kind="status",
             job_name="job-1",
@@ -102,7 +117,9 @@ def test_wait_for_job_prints_watch_events(monkeypatch: pytest.MonkeyPatch, capsy
         def get_job(self, **kwargs: object) -> SimpleNamespace:
             return SimpleNamespace(data=lambda: job)
 
-        def watch_job(self, name: str, **kwargs: object) -> list[JobStatusEvent | JobLogEvent | JobWarningEvent]:
+        def watch_job(
+            self, name: str, **kwargs: object
+        ) -> list[JobStatusEvent | JobLogEvent | JobWarningEvent | JobWorkflowEvent]:
             assert name == "job-1"
             assert kwargs["workspace"] == "ws"
             return events
