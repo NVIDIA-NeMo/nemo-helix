@@ -26,8 +26,58 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 Severity = Literal["high", "medium", "low"]
 
 
+AnalysisStep = Literal["config-fix", "schema-fix"]
+STEP_LABELS: dict[AnalysisStep, str] = {"config-fix": "prompt fix", "schema-fix": "schema patch"}
+MAX_REASON_CHARS = 80
+MAX_DETAIL_CHARS = 300
+_NO_VIRTUAL_MODEL = re.compile(r"No VirtualModel named", re.IGNORECASE)
+
+
 class AnalyzerError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, status: int | None = None, reason: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class AnalyzerFailure:
+    step: AnalysisStep
+    model: str
+    message: str
+    status: int | None = None
+    reason: str = ""
+
+    def cause(self) -> str:
+        detail = ", ".join(part for part in (f"HTTP {self.status}" if self.status else "", self.reason) if part)
+        verb = "is unavailable" if self.status == 404 else "failed"
+        return f"analyzer model `{self.model}` {verb}" + (f" ({detail})" if detail else "")
+
+    def remedy(self) -> str:
+        if self.status == 404:
+            return "Register the model in the inference gateway or set `analyzer_model`, then re-run."
+        if self.status in (401, 403):
+            return "Give the job access to the model or set `analyzer_model`, then re-run."
+        return "Check the analyzer model or set `analyzer_model`, then re-run."
+
+
+def short_reason(body: str) -> str:
+    """A few words on why a gateway call failed, from its error body."""
+    text = body
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, Mapping):
+        detail = parsed.get("detail") or parsed.get("message") or parsed.get("error")
+        if isinstance(detail, Mapping):
+            detail = detail.get("message") or detail.get("detail")
+        if isinstance(detail, str):
+            text = detail
+    if _NO_VIRTUAL_MODEL.search(text):
+        return "no VirtualModel"
+    first = text.strip().splitlines()[0] if text.strip() else ""
+    return first if len(first) <= MAX_REASON_CHARS else f"{first[: MAX_REASON_CHARS - 1]}…"
 
 
 @dataclass(frozen=True)
@@ -82,7 +132,7 @@ class Analysis:
     findings: list[AnalyzerFinding] = field(default_factory=list)
     config_fix: ConfigFix | None = None
     schema_fix: SchemaFix | None = None
-    errors: list[str] = field(default_factory=list)
+    errors: list[AnalyzerFailure] = field(default_factory=list)
 
 
 class Analyzer(Protocol):
@@ -100,7 +150,7 @@ def extract_json(message: Mapping[str, Any]) -> dict[str, Any]:
         parsed = _json_object_in(text)
         if parsed is not None:
             return parsed
-    raise AnalyzerError("The analyzer reply holds no JSON object.")
+    raise AnalyzerError("The analyzer reply holds no JSON object.", reason="no JSON in the reply")
 
 
 def _json_object_in(text: str) -> dict[str, Any] | None:
@@ -305,11 +355,22 @@ class GatewayAnalyzer:
         with httpx.Client(timeout=self._timeout_seconds) as client:
             response = client.post(f"{self._base_url}/chat/completions", json=body)
         if response.status_code >= 400:
-            raise AnalyzerError(f"Analyzer model {self.model!r} returned HTTP {response.status_code}: {response.text}")
+            body = response.text if len(response.text) <= MAX_DETAIL_CHARS else f"{response.text[:MAX_DETAIL_CHARS]}…"
+            raise AnalyzerError(
+                f"Analyzer model {self.model!r} returned HTTP {response.status_code}: {body}",
+                status=response.status_code,
+                reason=short_reason(response.text),
+            )
         choices = response.json().get("choices") or []
         if not choices:
-            raise AnalyzerError(f"Analyzer model {self.model!r} returned no choices.")
+            raise AnalyzerError(f"Analyzer model {self.model!r} returned no choices.", reason="no choices in the reply")
         return extract_json(choices[0].get("message") or {})
+
+    def _failure(self, step: AnalysisStep, error: AnalyzerError | httpx.HTTPError) -> AnalyzerFailure:
+        logger.warning("%s analysis failed: %s", step, error)
+        if isinstance(error, AnalyzerError):
+            return AnalyzerFailure(step, self.model, str(error), status=error.status, reason=error.reason)
+        return AnalyzerFailure(step, self.model, f"{type(error).__name__}: {error}", reason=type(error).__name__)
 
     def analyze(self, context: AnalysisContext) -> Analysis:
         analysis = Analysis()
@@ -318,12 +379,10 @@ class GatewayAnalyzer:
             analysis.findings.extend(parse_findings(payload))
             analysis.config_fix = parse_config_fix(payload, context.system_prompt)
         except (AnalyzerError, httpx.HTTPError) as error:
-            logger.warning("Config-fix analysis failed: %s", error)
-            analysis.errors.append(f"Config-fix analysis failed: {error}")
+            analysis.errors.append(self._failure("config-fix", error))
         try:
             payload = self._complete(schema_fix_messages(context))
             analysis.schema_fix = parse_schema_fix(payload, context.tools)
         except (AnalyzerError, httpx.HTTPError) as error:
-            logger.warning("Schema-fix analysis failed: %s", error)
-            analysis.errors.append(f"Schema-fix analysis failed: {error}")
+            analysis.errors.append(self._failure("schema-fix", error))
         return analysis

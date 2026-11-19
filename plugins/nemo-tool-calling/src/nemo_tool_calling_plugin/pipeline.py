@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from nemo_tool_calling_plugin.analyzer import (
+    STEP_LABELS,
     Analysis,
     AnalysisContext,
+    AnalysisStep,
     Analyzer,
     ConfigFix,
     SchemaFix,
@@ -63,6 +65,14 @@ class PipelineInputs:
     providers: list[str] = field(default_factory=list)
     verify: tuple[VariantId, ...] = VERIFY_VARIANTS
     call_budget: int = DEFAULT_CALL_BUDGET
+    traced_baseline: list[RunRecord] | None = None
+    trace_window: dict[str, str] | None = None
+
+    def dataset(self) -> dict[str, Any]:
+        replay = {"prompts": len(self.prompts), "runs_per_prompt": self.runs_per_prompt}
+        if self.traced_baseline is None:
+            return {"source": "dataset", **replay}
+        return {"source": "traces", "sessions": len(self.traced_baseline), "window": self.trace_window, **replay}
 
 
 def system_prompt(config: dict[str, Any]) -> str:
@@ -141,19 +151,63 @@ def _analysis_findings(analysis: Analysis) -> list[dict[str, Any]]:
         }
         for index, finding in enumerate(analysis.findings)
     ]
-    findings.extend(
-        {
-            "id": f"analysis-error-{index + 1}",
-            "source": "failure-analysis",
-            "severity": "low",
-            "tool": None,
-            "title": "Analyzer call failed",
-            "detail": error,
-            "evidence": [],
-        }
-        for index, error in enumerate(analysis.errors)
-    )
     return findings
+
+
+def _analyzer_error_findings(analysis: Analysis) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": f"analysis-error-{failure.step}",
+            "source": "failure-analysis",
+            "severity": "high",
+            "tool": None,
+            "title": f"Analyzer failed, so no {STEP_LABELS[failure.step]} was proposed",
+            "detail": f"{failure.cause()[0].upper()}{failure.cause()[1:]}. {failure.remedy()}",
+            "evidence": [failure.message],
+        }
+        for failure in analysis.errors
+    ]
+
+
+NO_REPLAY_PROMPTS = "no user prompt could be recovered from the traced sessions; pass a prompt dataset to verify it"
+
+
+def _gap_notes(
+    analysis: Analysis,
+    *,
+    schema_fix: SchemaFix | None,
+    ran: set[str],
+    unverified_reasons: dict[str, str],
+) -> list[str]:
+    """Why a suggestion is missing or was not verified, one sentence each."""
+    failed = {failure.step: failure for failure in analysis.errors}
+    notes: list[str] = []
+    if len(failed) == len(STEP_LABELS) and len({failure.cause() for failure in failed.values()}) == 1:
+        failure = failed["config-fix"]
+        notes.append(f"No fix was proposed: {failure.cause()}. {failure.remedy()}")
+    else:
+        notes.extend(
+            f"No {STEP_LABELS[step]} was proposed: {failure.cause()}. {failure.remedy()}"
+            for step, failure in failed.items()
+        )
+    if not failed and analysis.config_fix is None and analysis.schema_fix is None:
+        notes.append("The analyzer proposed no fix; see the findings.")
+    if analysis.schema_fix is not None and schema_fix is None:
+        notes.append("The schema patch was dropped because it is not valid JSON Schema; see the findings.")
+    proposed: dict[AnalysisStep, bool] = {
+        "config-fix": analysis.config_fix is not None,
+        "schema-fix": schema_fix is not None,
+    }
+    unverified = [step for step, made in proposed.items() if made and step not in ran]
+    reasons = {unverified_reasons.get(step, "") for step in unverified}
+    if len(unverified) == 2 and len(reasons) == 1:
+        notes.append(f"The prompt fix and schema patch were proposed but not verified: {reasons.pop()}.")
+    else:
+        notes.extend(
+            f"The {STEP_LABELS[step]} was proposed but not verified: {unverified_reasons.get(step, 'see the findings')}."
+            for step in unverified
+        )
+    return notes
 
 
 def _suggestions(
@@ -193,15 +247,16 @@ def run_pipeline(
     inputs: PipelineInputs, *, runner: VariantRunner, analyzer: Analyzer, results_dir: Path
 ) -> dict[str, Any]:
     base = inputs.agent_config
-    logger.info("Baseline: %d prompt(s) x %d run(s)", len(inputs.prompts), inputs.runs_per_prompt)
-    baseline = runner.run("baseline", base, inputs.prompts)
+    if inputs.traced_baseline is None:
+        logger.info("Baseline: %d prompt(s) x %d run(s)", len(inputs.prompts), inputs.runs_per_prompt)
+        baseline = runner.run("baseline", base, inputs.prompts)
+        description = "The agent as registered."
+    else:
+        baseline = inputs.traced_baseline
+        description = f"The agent as registered, scored from {len(baseline)} traced session(s) in Intake."
     published = _advertised_schemas(inputs.tools)
     budget = inputs.call_budget
-    variants = [
-        _variant(
-            "baseline", "Current agent", "The agent as registered.", baseline, schemas=published, call_budget=budget
-        )
-    ]
+    variants = [_variant("baseline", "Current agent", description, baseline, schemas=published, call_budget=budget)]
 
     lint = [finding.to_finding() for tool in inputs.tools for finding in lint_tool(tool.to_mcp())]
     lint = [*loose_schema_findings(baseline), *lint]
@@ -219,7 +274,26 @@ def run_pipeline(
             providers=inputs.providers,
         )
     )
-    findings = [*lint, *_analysis_findings(analysis)]
+    findings = [*_analyzer_error_findings(analysis), *lint, *_analysis_findings(analysis)]
+    verify = inputs.verify if inputs.prompts else ()
+    unverified_reasons: dict[str, str] = {
+        step: NO_REPLAY_PROMPTS if not inputs.prompts else "`verify` leaves it out"
+        for step in VERIFY_VARIANTS
+        if step not in verify
+    }
+    if not inputs.prompts and inputs.verify:
+        findings.append(
+            {
+                "id": "no-replay-prompts",
+                "source": "failure-analysis",
+                "severity": "low",
+                "tool": None,
+                "title": "Suggestions were not verified",
+                "detail": "No user prompt could be recovered from the traced sessions, so nothing was replayed. "
+                "Pass a prompt dataset to verify the suggestions.",
+                "evidence": [],
+            }
+        )
 
     schema_fix = analysis.schema_fix
     if schema_fix is not None:
@@ -229,16 +303,18 @@ def run_pipeline(
 
     candidate = with_system_prompt(base, analysis.config_fix.system_prompt) if analysis.config_fix else base
     ran: set[str] = {"baseline"}
-    if analysis.config_fix is not None and "config-fix" in inputs.verify:
+    if analysis.config_fix is not None and "config-fix" in verify:
         logger.info("Verifying the config fix")
         runs = runner.run("config-fix", candidate, inputs.prompts)
         description = "The agent with the suggested prompt edit."
         variants.append(_variant("config-fix", "Config fix", description, runs, schemas=published, call_budget=budget))
         ran.add("config-fix")
-    if schema_fix is not None and "schema-fix" in inputs.verify:
+    if schema_fix is not None and "schema-fix" in verify:
         overlaid, overlay_findings = with_schema_overlay(candidate, schema_fix, inputs.overlay_dir)
         findings.extend(overlay_findings)
-        if not overlay_findings:
+        if overlay_findings:
+            unverified_reasons["schema-fix"] = "the schema-overlay proxy can only serve stdio MCP servers"
+        else:
             logger.info("Verifying the schema patch through the schema-overlay proxy")
             runs = runner.run("schema-fix", overlaid, inputs.prompts)
             description = (
@@ -259,15 +335,21 @@ def run_pipeline(
         tools=inputs.tools,
         schema_fix=schema_fix,
     )
+    advice = recommendation(
+        variants,
+        has_config_fix=analysis.config_fix is not None,
+        notes=_gap_notes(analysis, schema_fix=schema_fix, ran=ran, unverified_reasons=unverified_reasons),
+    )
     result: dict[str, Any] = {
         "version": RESULT_VERSION,
         "agent": inputs.agent,
         "analyzer_model": analyzer.model,
-        "dataset": {"prompts": len(inputs.prompts), "runs_per_prompt": inputs.runs_per_prompt},
+        "dataset": inputs.dataset(),
         "variants": variants,
         "findings": findings,
         "suggestions": _suggestions(analysis.config_fix, schema_fix, ran, files),
-        "recommendation": recommendation(variants, has_config_fix=analysis.config_fix is not None),
+        "recommended_variant": advice.variant,
+        "recommendation": advice.text,
     }
     files.write_summary(result)
     return result

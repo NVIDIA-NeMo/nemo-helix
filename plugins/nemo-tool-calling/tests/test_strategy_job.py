@@ -34,19 +34,34 @@ def test_spec_takes_the_dataset_from_the_router_bundle_fields() -> None:
     assert spec.verify == ["config-fix", "schema-fix"]
 
 
+def test_spec_with_only_an_agent_reads_traces() -> None:
+    spec = ToolCallingOptimizeSpec.model_validate({"agent": "default/data-designer-toolcall"})
+
+    assert spec.uses_traces
+    assert spec.trace_window_hours == 24
+    assert spec.max_sessions == 50
+    assert spec.max_replay_prompts == 5
+
+
+def test_strategy_does_not_require_a_config() -> None:
+    assert ToolCallingOptimizeJob.nemo_agent_optimization_strategy.requires_config is False
+
+
 def test_spec_accepts_inline_prompts() -> None:
     spec = ToolCallingOptimizeSpec.model_validate({"agent": "a", "prompts": [{"id": "p", "prompt": "x"}]})
 
     assert spec.prompts is not None and spec.prompts[0].id == "p"
+    assert not spec.uses_traces
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"agent": "a"},
+        {"agent": "a", "optimize_config_fileset": "default/prompts"},
         {"agent": "a", "optimize_config": "prompts.jsonl"},
         {"agent": "a", "prompts": [{"id": "p", "prompt": "x"}], "optimize_config": "p.jsonl"},
         {"agent": "a", "prompts": [{"id": "p", "prompt": "x"}], "output": "./out"},
+        {"agent": "a", "since": "2026-11-19T00:00:00Z", "until": "2026-11-18T00:00:00Z"},
     ],
 )
 def test_spec_rejects_missing_or_ambiguous_datasets(payload: dict) -> None:

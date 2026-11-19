@@ -36,6 +36,7 @@ from nemo_helix_plugin.client.errors import (
 )
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -55,6 +56,7 @@ from nemo_tool_calling_plugin.analyzer import GatewayAnalyzer
 from nemo_tool_calling_plugin.pipeline import PipelineInputs, Prompt, run_pipeline
 from nemo_tool_calling_plugin.runner import FabricVariantRunner, fetch_tool_definitions
 from nemo_tool_calling_plugin.schemas.optimize import ToolCallingOptimizeSpec
+from nemo_tool_calling_plugin.traces import IntakeSpanSource, TracedBaseline, TraceWindow, load_traced_baseline
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -76,8 +78,8 @@ class ToolCallingOptimizeJob(NemoJob):
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name=STRATEGY_NAME,
         title="Tool-call repair",
-        description="Score every tool call the agent makes over a prompt set, lint its MCP tool schemas, and "
-        "verify an LLM-suggested prompt fix and tool-schema patch (served through a schema-overlay proxy).",
+        description="Score the tool calls in the agent's recent traces, lint its MCP tool schemas, and verify an "
+        "LLM-suggested prompt fix and tool-schema patch by replaying the traced prompts.",
     )
     description: ClassVar[str] = "Score a platform agent's tool calls and verify a prompt fix and schema patch."
     generate_legacy_verbs: ClassVar[bool] = False
@@ -110,7 +112,6 @@ class ToolCallingOptimizeJob(NemoJob):
 
     def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict[str, Any]:
         spec = ToolCallingOptimizeSpec.model_validate(config)
-        prompts = _load_prompts(spec, ctx=ctx, sdk=sdk)[: spec.max_prompts]
         agent_ref = parse_entity_ref(spec.agent, default_workspace=spec.workspace)
         agent_label = f"{agent_ref.workspace}/{agent_ref.name}"
         stored = fetch_agent_config(sdk, workspace=agent_ref.workspace, name=agent_ref.name)
@@ -128,6 +129,23 @@ class ToolCallingOptimizeJob(NemoJob):
         for problem in problems:
             logger.warning(problem)
         logger.info("Agent %s publishes %d tool(s): %s", agent_label, len(tools), [tool.name for tool in tools])
+
+        traced: TracedBaseline | None = None
+        if spec.uses_traces:
+            traced = load_traced_baseline(
+                IntakeSpanSource(client_from_platform(sdk, IntakeClient), workspace=agent_ref.workspace),
+                agent_name=agent_config.telemetry.agent_name or agent_config.name,
+                tool_names=[tool.name for tool in tools],
+                window=TraceWindow.resolve(since=spec.since, until=spec.until, hours=spec.trace_window_hours),
+                max_sessions=spec.max_sessions,
+                max_replay_prompts=spec.max_replay_prompts,
+            )
+            prompts = traced.prompts
+            logger.info(
+                "Scored %d traced session(s); replaying %d distinct prompt(s)", len(traced.sessions), len(prompts)
+            )
+        else:
+            prompts = _load_prompts(spec, ctx=ctx, sdk=sdk)[: spec.max_prompts]
 
         results_dir = root / "results"
         with platform_auth_proxy() as origin:
@@ -157,6 +175,8 @@ class ToolCallingOptimizeJob(NemoJob):
                     providers=providers,
                     verify=tuple(spec.verify),
                     call_budget=spec.call_budget,
+                    traced_baseline=traced.runs if traced is not None else None,
+                    trace_window=traced.window.to_json() if traced is not None else None,
                 ),
                 runner=runner,
                 analyzer=GatewayAnalyzer(base_url=gateway_url, model=spec.analyzer_model),
@@ -192,7 +212,8 @@ def parse_prompts(lines: list[str]) -> list[Prompt]:
 def _load_prompts(spec: ToolCallingOptimizeSpec, *, ctx: JobContext, sdk: NemoClient) -> list[Prompt]:
     if spec.prompts is not None:
         return [Prompt(id=row.id, prompt=row.prompt) for row in spec.prompts]
-    assert spec.optimize_config is not None
+    if spec.optimize_config is None:
+        raise LocalRunError("No prompt dataset was given.")
     with resolve_staged_config(
         spec.optimize_config,
         spec.optimize_config_fileset,

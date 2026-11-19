@@ -14,6 +14,8 @@ import yaml
 from nemo_tool_calling_plugin.analyzer import (
     Analysis,
     AnalysisContext,
+    AnalysisStep,
+    AnalyzerFailure,
     AnalyzerFinding,
     ConfigFix,
     SchemaFix,
@@ -107,6 +109,7 @@ RESULT_SCHEMA = {
         "variants",
         "findings",
         "suggestions",
+        "recommended_variant",
         "recommendation",
     ],
     "properties": {
@@ -116,8 +119,21 @@ RESULT_SCHEMA = {
         "dataset": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["prompts", "runs_per_prompt"],
-            "properties": {"prompts": {"type": "integer"}, "runs_per_prompt": {"type": "integer"}},
+            "required": ["source", "prompts", "runs_per_prompt"],
+            "properties": {
+                "source": {"enum": ["traces", "dataset"]},
+                "sessions": {"type": "integer"},
+                "window": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["since", "until"],
+                    "properties": {"since": {"type": "string"}, "until": {"type": "string"}},
+                },
+                "prompts": {"type": "integer"},
+                "runs_per_prompt": {"type": "integer"},
+            },
+            "if": {"properties": {"source": {"const": "traces"}}},
+            "then": {"required": ["sessions", "window"]},
         },
         "variants": {
             "type": "array",
@@ -190,6 +206,7 @@ RESULT_SCHEMA = {
                 },
             },
         },
+        "recommended_variant": {"enum": ["config-fix", "schema-fix", None]},
         "recommendation": {"type": "string"},
     },
 }
@@ -285,8 +302,10 @@ def test_pipeline_writes_every_contract_file(
     rates = [variant["metrics"]["tool_error_rate"] for variant in result["variants"]]
     assert rates == [0.75, 0.5, 0.0]
     assert result["analyzer_model"] == "default/fake-analyzer"
-    assert result["dataset"] == {"prompts": 2, "runs_per_prompt": 2}
+    assert result["dataset"] == {"source": "dataset", "prompts": 2, "runs_per_prompt": 2}
     assert "75%" in result["recommendation"] and "0%" in result["recommendation"]
+    assert result["recommended_variant"] == "schema-fix"
+    assert "Recommended variant: **Config + schema fix** (`schema-fix`)." in (results / "report.md").read_text()
     assert {path.relative_to(results).as_posix() for path in results.rglob("*") if path.is_file()} == {
         "tool-calling-result.json",
         "report.md",
@@ -354,7 +373,7 @@ def test_pipeline_without_suggestions_runs_only_the_baseline(
     tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any]
 ) -> None:
     runner = FakeRunner({"baseline": 2}, runs_per_prompt=1)
-    analyzer = FakeAnalyzer(Analysis(errors=["Config-fix analysis failed: down"]))
+    analyzer = FakeAnalyzer(Analysis(errors=[_missing_model("config-fix"), _missing_model("schema-fix")]))
 
     result = run_pipeline(
         _inputs(agent_config, pre_fix_tool, tmp_path), runner=runner, analyzer=analyzer, results_dir=tmp_path / "r"
@@ -363,6 +382,218 @@ def test_pipeline_without_suggestions_runs_only_the_baseline(
     jsonschema.validate(result, RESULT_SCHEMA)
     assert [variant["id"] for variant in result["variants"]] == ["baseline"]
     assert result["suggestions"] == []
-    assert any(finding["title"] == "Analyzer call failed" for finding in result["findings"])
+    error_ids = [finding["id"] for finding in result["findings"][:2]]
+    assert error_ids == ["analysis-error-config-fix", "analysis-error-schema-fix"]
+    assert {finding["severity"] for finding in result["findings"][:2]} == {"high"}
+    assert result["recommendation"] == (
+        "The baseline rejects 67% of tool calls. No fix was proposed: analyzer model `default/fake-analyzer` is "
+        "unavailable (HTTP 404, no VirtualModel). Register the model in the inference gateway or set "
+        "`analyzer_model`, then re-run."
+    )
+    report = (tmp_path / "r" / "report.md").read_text()
+    assert result["recommendation"] in report
+    assert report.index("Analyzer failed") < report.index("(schema-lint)")
     assert sorted(path.name for path in (tmp_path / "r").iterdir()) == ["report.md", "tool-calling-result.json"]
     assert analyzer.context is not None and analyzer.context.models == ["default/nemotron3-5-lightning"]
+
+
+def test_traced_baseline_is_scored_without_rerunning_it(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    runner = FakeRunner({"config-fix": 1, "schema-fix": 0}, runs_per_prompt=1)
+    traced = [
+        RunRecord("product-reviews", 1, [ToolCall(TOOL, BAD_ARGS, REJECTED), ToolCall(TOOL, GOOD_ARGS, ACCEPTED)]),
+        RunRecord("product-reviews", 2, [ToolCall(TOOL, BAD_ARGS, REJECTED)]),
+        RunRecord("session-x", 1, [ToolCall(TOOL, GOOD_ARGS, ACCEPTED)]),
+    ]
+    window = {"since": "2026-11-18T00:00:00Z", "until": "2026-11-19T00:00:00Z"}
+
+    result = run_pipeline(
+        _inputs(
+            agent_config,
+            pre_fix_tool,
+            tmp_path,
+            prompts=[Prompt("product-reviews", "reviews")],
+            runs_per_prompt=3,
+            traced_baseline=traced,
+            trace_window=window,
+        ),
+        runner=runner,
+        analyzer=FakeAnalyzer(_analysis(post_fix_tool)),
+        results_dir=tmp_path / "results",
+    )
+
+    jsonschema.validate(result, RESULT_SCHEMA)
+    assert "baseline" not in runner.configs
+    assert result["dataset"] == {
+        "source": "traces",
+        "sessions": 3,
+        "window": window,
+        "prompts": 1,
+        "runs_per_prompt": 3,
+    }
+    baseline = result["variants"][0]
+    assert baseline["description"] == "The agent as registered, scored from 3 traced session(s) in Intake."
+    assert baseline["metrics"]["runs"] == 3
+    assert baseline["metrics"]["rejected_calls"] == 2
+    assert set(baseline["per_prompt"]) == {"product-reviews", "session-x"}
+    assert [variant["id"] for variant in result["variants"]] == ["baseline", "config-fix", "schema-fix"]
+
+
+def test_traced_baseline_without_prompts_skips_verification(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    runner = FakeRunner({}, runs_per_prompt=1)
+
+    result = run_pipeline(
+        _inputs(
+            agent_config,
+            pre_fix_tool,
+            tmp_path,
+            prompts=[],
+            traced_baseline=[RunRecord("s", 1, [ToolCall(TOOL, BAD_ARGS, REJECTED)])],
+            trace_window={"since": "a", "until": "b"},
+        ),
+        runner=runner,
+        analyzer=FakeAnalyzer(_analysis(post_fix_tool)),
+        results_dir=tmp_path / "results",
+    )
+
+    assert runner.configs == {}
+    assert [variant["id"] for variant in result["variants"]] == ["baseline"]
+    assert any(finding["id"] == "no-replay-prompts" for finding in result["findings"])
+    assert [s["verified_by_variant"] for s in result["suggestions"]] == [None, None]
+    assert result["recommendation"] == (
+        "The baseline rejects 100% of tool calls. The prompt fix and schema patch were proposed but not verified: "
+        "no user prompt could be recovered from the traced sessions; pass a prompt dataset to verify it."
+    )
+
+
+def _missing_model(step: AnalysisStep) -> AnalyzerFailure:
+    return AnalyzerFailure(
+        step=step,
+        model="default/fake-analyzer",
+        message='Analyzer model \'default/fake-analyzer\' returned HTTP 404: {"detail": "No VirtualModel named ..."}',
+        status=404,
+        reason="no VirtualModel",
+    )
+
+
+def test_one_failed_analyzer_call_is_named_next_to_the_verified_fix(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    analysis = _analysis(post_fix_tool)
+    analysis.schema_fix = None
+    analysis.errors = [_missing_model("schema-fix")]
+
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner({"baseline": 3, "config-fix": 1}, runs_per_prompt=2),
+        analyzer=FakeAnalyzer(analysis),
+        results_dir=tmp_path / "results",
+    )
+
+    assert [variant["id"] for variant in result["variants"]] == ["baseline", "config-fix"]
+    assert result["findings"][0]["id"] == "analysis-error-schema-fix"
+    assert result["findings"][0]["title"] == "Analyzer failed, so no schema patch was proposed"
+    assert result["recommendation"] == (
+        "Apply the config fix now: it cuts the tool error rate from 75% to 50%. No schema patch was proposed: "
+        "analyzer model `default/fake-analyzer` is unavailable (HTTP 404, no VirtualModel). Register the model in "
+        "the inference gateway or set `analyzer_model`, then re-run."
+    )
+
+
+def test_analyzer_that_proposes_nothing_says_so(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any]
+) -> None:
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner({"baseline": 1}, runs_per_prompt=1),
+        analyzer=FakeAnalyzer(Analysis()),
+        results_dir=tmp_path / "results",
+    )
+
+    assert (
+        result["recommendation"]
+        == "The baseline rejects 50% of tool calls. The analyzer proposed no fix; see the findings."
+    )
+
+
+def test_verification_left_out_by_the_spec_is_explained(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any], post_fix_tool: dict[str, Any]
+) -> None:
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path, verify=("config-fix",)),
+        runner=FakeRunner({"baseline": 3, "config-fix": 1}, runs_per_prompt=2),
+        analyzer=FakeAnalyzer(_analysis(post_fix_tool)),
+        results_dir=tmp_path / "results",
+    )
+
+    assert result["recommendation"].endswith("The schema patch was proposed but not verified: `verify` leaves it out.")
+
+
+@pytest.mark.parametrize(
+    ("rejected", "recommended", "recommendation"),
+    [
+        (
+            {"baseline": 3, "config-fix": 1, "schema-fix": 2},
+            "config-fix",
+            "Apply the config fix now: it cuts the tool error rate from 75% to 50%. "
+            "The schema patch did not help further (67%).",
+        ),
+        (
+            {"baseline": 1, "config-fix": 2, "schema-fix": 0},
+            "schema-fix",
+            "The config fix did not lower the tool error rate (50% -> 67%); don't apply it as is. "
+            "Send the schema patch to the tool's owner: together with the config fix it brings the tool error rate "
+            "to 0%.",
+        ),
+        (
+            {"baseline": 1, "config-fix": 3, "schema-fix": 2},
+            None,
+            "The config fix did not lower the tool error rate (50% -> 75%); don't apply it as is. "
+            "The schema patch did not help further (67%).",
+        ),
+        (
+            {"baseline": 1, "config-fix": 1, "schema-fix": 1},
+            None,
+            "The config fix did not lower the tool error rate (50% -> 50%); don't apply it as is. "
+            "The schema patch did not help further (50%).",
+        ),
+    ],
+)
+def test_recommended_variant_matches_the_recommendation(
+    tmp_path: Path,
+    agent_config: dict[str, Any],
+    pre_fix_tool: dict[str, Any],
+    post_fix_tool: dict[str, Any],
+    rejected: dict[str, int],
+    recommended: str | None,
+    recommendation: str,
+) -> None:
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner(rejected, runs_per_prompt=1),
+        analyzer=FakeAnalyzer(_analysis(post_fix_tool)),
+        results_dir=tmp_path / "results",
+    )
+
+    jsonschema.validate(result, RESULT_SCHEMA)
+    assert result["recommended_variant"] == recommended
+    assert result["recommendation"] == recommendation
+    expected_line = "Recommended variant: none." if recommended is None else f"(`{recommended}`)."
+    assert expected_line in (tmp_path / "results" / "report.md").read_text()
+
+
+def test_no_recommended_variant_when_nothing_was_verified(
+    tmp_path: Path, agent_config: dict[str, Any], pre_fix_tool: dict[str, Any]
+) -> None:
+    result = run_pipeline(
+        _inputs(agent_config, pre_fix_tool, tmp_path),
+        runner=FakeRunner({"baseline": 2}, runs_per_prompt=1),
+        analyzer=FakeAnalyzer(Analysis(errors=[_missing_model("config-fix"), _missing_model("schema-fix")])),
+        results_dir=tmp_path / "results",
+    )
+
+    assert result["recommended_variant"] is None
+    assert "Recommended variant: none." in (tmp_path / "results" / "report.md").read_text()

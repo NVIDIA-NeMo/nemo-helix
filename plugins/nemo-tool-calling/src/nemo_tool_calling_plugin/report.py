@@ -10,7 +10,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from nemo_tool_calling_plugin.analyzer import SchemaFix, ToolDefinition
@@ -93,19 +93,34 @@ def _percent(rate: float) -> str:
     return f"{round(rate * 100)}%"
 
 
-def recommendation(variants: Sequence[dict[str, Any]], *, has_config_fix: bool) -> str:
+@dataclass(frozen=True)
+class Recommendation:
+    text: str
+    variant: Literal["config-fix", "schema-fix"] | None
+
+
+def recommendation(
+    variants: Sequence[dict[str, Any]], *, has_config_fix: bool, notes: Sequence[str] = ()
+) -> Recommendation:
+    """What to do, from the verified variants, followed by why any suggestion is missing or unverified.
+
+    The sentence and ``variant`` come from the same comparisons, so the text never recommends a variant other than
+    the one ``recommended_variant`` names.
+    """
     by_id = {variant["id"]: variant["metrics"] for variant in variants}
     baseline = by_id["baseline"]["tool_error_rate"]
     config = by_id.get("config-fix")
     schema = by_id.get("schema-fix")
-    if config is None and schema is None:
-        if baseline == 0:
-            return "No rejected tool calls in the baseline; nothing to fix."
-        return (
-            f"The baseline rejects {_percent(baseline)} of tool calls, but no fix could be verified; see the findings."
-        )
     parts: list[str] = []
+    recommended: Literal["config-fix", "schema-fix"] | None = None
+    if config is None and schema is None:
+        parts.append(
+            "No rejected tool calls in the baseline."
+            if baseline == 0
+            else f"The baseline rejects {_percent(baseline)} of tool calls."
+        )
     if config is not None and config["tool_error_rate"] < baseline:
+        recommended = "config-fix"
         parts.append(
             f"Apply the config fix now: it cuts the tool error rate from {_percent(baseline)} to "
             f"{_percent(config['tool_error_rate'])}."
@@ -116,16 +131,20 @@ def recommendation(variants: Sequence[dict[str, Any]], *, has_config_fix: bool) 
             f"{_percent(config['tool_error_rate'])}); don't apply it as is."
         )
     if schema is not None:
-        reference = config["tool_error_rate"] if config is not None else baseline
+        best_so_far = min(baseline, config["tool_error_rate"]) if config is not None else baseline
         together = "together with the config fix " if has_config_fix else ""
-        if schema["tool_error_rate"] < reference:
+        if schema["tool_error_rate"] < best_so_far:
+            recommended = "schema-fix"
             parts.append(
                 f"Send the schema patch to the tool's owner: {together}it brings the tool error rate to "
                 f"{_percent(schema['tool_error_rate'])}."
             )
         else:
             parts.append(f"The schema patch did not help further ({_percent(schema['tool_error_rate'])}).")
-    return " ".join(parts)
+    if baseline == 0 and config is None and schema is None and not notes:
+        parts.append("Nothing to fix.")
+    parts.extend(notes)
+    return Recommendation(text=" ".join(parts), variant=recommended)
 
 
 def render_markdown(result: dict[str, Any]) -> str:
@@ -133,6 +152,8 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"# Tool-calling report: {result['agent']}",
         "",
         result["recommendation"],
+        "",
+        f"Recommended variant: {_variant_label(result)}.",
         "",
         f"Dataset: {result['dataset']['prompts']} prompts x {result['dataset']['runs_per_prompt']} runs. "
         f"Analyzer: `{result['analyzer_model']}`.",
@@ -167,3 +188,11 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{suggestion['rationale']} Artifact: `{suggestion['artifact']}`, diff: `{suggestion['diff_artifact']}`."
         )
     return "\n".join(lines) + "\n"
+
+
+def _variant_label(result: dict[str, Any]) -> str:
+    recommended = result["recommended_variant"]
+    if recommended is None:
+        return "none"
+    label = next((variant["label"] for variant in result["variants"] if variant["id"] == recommended), recommended)
+    return f"**{label}** (`{recommended}`)"

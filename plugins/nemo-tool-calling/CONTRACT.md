@@ -22,7 +22,13 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
   "version": 1,
   "agent": "default/data-designer-toolcall",
   "analyzer_model": "default/nemotron-3-5-super",
-  "dataset": { "prompts": 5, "runs_per_prompt": 3 },
+  "dataset": {
+    "source": "traces",                  // "traces" (baseline scored from Intake) | "dataset" (baseline re-run from a prompt file)
+    "sessions": 12,                      // traces only: agent sessions scored for the baseline
+    "window": { "since": "2026-11-18T20:00:00Z", "until": "2026-11-19T02:00:00Z" },  // traces only
+    "prompts": 5,                        // prompts replayed for the verify variants
+    "runs_per_prompt": 3
+  },
   "variants": [
     {
       "id": "baseline",                  // "baseline" | "config-fix" | "schema-fix"
@@ -87,6 +93,8 @@ detail page reads `tool-calling-result.json`; every file also shows in the Artif
       "verified_by_variant": "schema-fix"
     }
   ],
+  "recommended_variant": "schema-fix",   // the variant the recommendation tells the user to adopt; null when none is
+                                         // recommended (no fix verified, or no fix beat the baseline)
   "recommendation": "Apply the config fix now and send the schema patch to the tool's owner: together they cut the tool error rate from 80% to 6%."
 }
 ```

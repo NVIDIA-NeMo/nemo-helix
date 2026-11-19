@@ -19,6 +19,7 @@ from nemo_tool_calling_plugin.analyzer import (
     extract_json,
     parse_config_fix,
     parse_schema_fix,
+    short_reason,
 )
 from nemo_tool_calling_plugin.scoring import ToolCall
 
@@ -149,4 +150,45 @@ def test_gateway_analyzer_records_errors_instead_of_failing() -> None:
     analysis = GatewayAnalyzer(base_url="http://gw/v1", model="m").analyze(_context())
 
     assert analysis.config_fix is None and analysis.schema_fix is None
-    assert len(analysis.errors) == 2
+    assert [(failure.step, failure.status, failure.reason) for failure in analysis.errors] == [
+        ("config-fix", 503, "down"),
+        ("schema-fix", 503, "down"),
+    ]
+
+
+@respx.mock
+def test_gateway_analyzer_names_a_missing_virtual_model() -> None:
+    body = {"detail": "No VirtualModel named 'default/nemotron3-5-super' in workspace 'default'. " + "x" * 2000}
+    respx.post("http://gw/v1/chat/completions").mock(return_value=httpx.Response(404, json=body))
+
+    analyzer = GatewayAnalyzer(base_url="http://gw/v1", model="default/nemotron3-5-super")
+    [failure, _] = analyzer.analyze(_context()).errors
+
+    assert failure.status == 404
+    assert failure.reason == "no VirtualModel"
+    assert failure.cause() == "analyzer model `default/nemotron3-5-super` is unavailable (HTTP 404, no VirtualModel)"
+    assert failure.remedy().startswith("Register the model in the inference gateway or set `analyzer_model`")
+    assert len(failure.message) < 400
+
+
+@respx.mock
+def test_gateway_analyzer_reports_a_transport_error() -> None:
+    respx.post("http://gw/v1/chat/completions").mock(side_effect=httpx.ConnectError("refused"))
+
+    [failure, _] = GatewayAnalyzer(base_url="http://gw/v1", model="m").analyze(_context()).errors
+
+    assert failure.status is None
+    assert failure.cause() == "analyzer model `m` failed (ConnectError)"
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        ('{"error": {"message": "model overloaded\\ntry later"}}', "model overloaded"),
+        ("plain failure", "plain failure"),
+        ("x" * 200, "x" * 79 + "…"),
+        ("", ""),
+    ],
+)
+def test_short_reason(body: str, reason: str) -> None:
+    assert short_reason(body) == reason
