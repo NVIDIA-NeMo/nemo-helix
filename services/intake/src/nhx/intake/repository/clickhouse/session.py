@@ -77,12 +77,18 @@ class ClickHouseSessionRepository(SessionRepository):
             ClickHouseQuery(
                 name="sessions.for_evaluation",
                 statement=f"""
-                    SELECT DISTINCT session_id
-                    FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
-                    PREWHERE workspace = %(workspace)s
-                    WHERE is_deleted = 0
-                        AND (%(first_page)s OR session_id > %(after)s)
-                        AND has([{values}], %(evaluation_name)s)
+                    SELECT DISTINCT session_id FROM (
+                        SELECT session_id
+                        FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE has([{values}], %(evaluation_name)s)
+                        UNION ALL
+                        SELECT session_id
+                        FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE is_deleted = 0 AND evaluation_name = %(evaluation_name)s
+                    )
+                    WHERE (%(first_page)s OR session_id > %(after)s)
                     ORDER BY session_id
                     LIMIT %(limit)s
                 """,
@@ -106,7 +112,24 @@ class ClickHouseSessionRepository(SessionRepository):
         rows = await self._executor.fetch_all(query)
         return _row_to_session(rows[0]) if rows else None
 
-    async def get_evaluation_names(self, *, workspace: str, session_id: str) -> list[str]:
+    async def has_live_trace_index(self, *, workspace: str, session_id: str) -> bool:
+        return bool(
+            await self._executor.fetch_scalar(
+                ClickHouseQuery(
+                    name="sessions.live_index",
+                    statement=f"""
+                SELECT 1 FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                PREWHERE workspace = %(workspace)s
+                WHERE session_id = %(session_id)s AND is_deleted = 0 LIMIT 1
+            """,
+                    parameters={"workspace": workspace, "session_id": session_id},
+                )
+            )
+        )
+
+    async def get_evaluation_names(
+        self, *, workspace: str, session_id: str, include_deleted: bool = False
+    ) -> list[str]:
         # Inspect all current spans, including child-only and historical attribute
         # spellings, so deleting one evaluation never bypasses another association.
         keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
@@ -115,14 +138,22 @@ class ClickHouseSessionRepository(SessionRepository):
             ClickHouseQuery(
                 name="sessions.evaluation_names",
                 statement=f"""
-                    SELECT DISTINCT arrayJoin([{values}]) AS evaluation_name
-                    FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
-                    PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
-                    WHERE is_deleted = 0 AND notEmpty(evaluation_name)
+                    SELECT DISTINCT evaluation_name FROM (
+                        SELECT arrayJoin([{values}]) AS evaluation_name
+                        FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
+                        PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
+                        WHERE (%(include_deleted)s OR is_deleted = 0)
+                        UNION ALL
+                        SELECT evaluation_name
+                        FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE session_id = %(session_id)s AND is_deleted = 0
+                    ) WHERE notEmpty(evaluation_name)
                 """,
                 parameters={
                     "workspace": workspace,
                     "session_id": session_id,
+                    "include_deleted": include_deleted,
                     **{f"evaluation_key_{index}": key for index, key in enumerate(keys)},
                 },
             )
@@ -161,6 +192,27 @@ class ClickHouseSessionRepository(SessionRepository):
                 parameters={"workspace": workspace, "session_id": session_id},
             )
         )
+        # A previous root may now be a child, or an earlier MV write may have
+        # failed after source tombstones committed. Repair the index separately.
+        index = self._executor.table(ClickHouseTable.TRACE_INDEX)
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.delete_index",
+                statement=f"""
+                INSERT INTO {index}
+                SELECT * REPLACE (
+                    greatest(now64(6), event_ts + INTERVAL 1 MICROSECOND) AS event_ts,
+                    toUInt8(1) AS is_deleted
+                )
+                    FROM (
+                        SELECT * FROM {index} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE session_id = %(session_id)s AND is_deleted = 0
+                    )
+            """,
+                parameters={"workspace": workspace, "session_id": session_id},
+            )
+        )
 
 
 def _session_trace_index_collision_query(spans_table: str, trace_index_table: str) -> ClickHouseQuery:
@@ -178,6 +230,11 @@ def _session_trace_index_collision_query(spans_table: str, trace_index_table: st
                 FROM {spans_table} FINAL
                 PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
                 WHERE is_deleted = 0 AND external_parent_span_id = ''
+                UNION DISTINCT
+                SELECT root_started_at, trace_id, root_span_id
+                FROM {trace_index_table}
+                PREWHERE workspace = %(workspace)s
+                WHERE session_id = %(session_id)s
             ), owners AS (
                 SELECT
                     start_time AS root_started_at,
@@ -188,8 +245,6 @@ def _session_trace_index_collision_query(spans_table: str, trace_index_table: st
                 FROM {spans_table} FINAL
                 PREWHERE workspace = %(workspace)s
                     AND (start_time, trace_id, external_span_id) IN (SELECT * FROM target_roots)
-                WHERE is_deleted = 0 AND external_parent_span_id = ''
-
                 UNION ALL
 
                 SELECT root_started_at, trace_id, root_span_id, session_id, source_format

@@ -940,16 +940,35 @@ async def _soft_delete(entity_client: EntityClient, entity: EntityT) -> EntityT:
         entity.name = _deleted_name(original_name)
     elif entity.deletion_name is None:
         entity.deletion_name = _deleted_name(original_name)
-    return await entity_client.update(entity, original_name=original_name)
+    try:
+        return await entity_client.update(entity, original_name=original_name)
+    except EntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Deletion state changed; retry the request.") from exc
 
 
 async def _cleanup_evaluation_sessions(
     service: IntakeSpansService, entity_client: EntityClient, entity: Evaluation, *, workspace: str
 ) -> None:
-    # Keep the original name reserved throughout cleanup. Persist a single target
-    # before touching ClickHouse so retries also repair a partially applied relink.
+    # Reload by immutable ID: a caller may hold a snapshot from before another
+    # request finished deletion and a replacement acquired its original name.
+    entity = await entity_client.get_by_id(Evaluation, entity.id)
+    if not entity.is_deleted:
+        raise HTTPException(status_code=409, detail="Evaluation must be deleted before telemetry cleanup.")
+    if entity.name == entity.deletion_name:
+        return
+    if entity.deletion_owner is not None:
+        raise HTTPException(status_code=409, detail="Evaluation telemetry cleanup is already in progress.")
     if entity.deletion_name is None:
         entity = await _soft_delete(entity_client, entity)
+    # Persisted optimistic locking coordinates separate Intake workers. Never
+    # expire/take over this claim: ClickHouse mutations cannot be fenced against
+    # a paused old worker. A crashed owner requires operator recovery after that
+    # worker has stopped. Ordinary storage errors release the claim for retry.
+    entity.deletion_owner = secrets.token_hex(16)
+    try:
+        entity = await entity_client.update(entity)
+    except EntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Deletion state changed; retry the request.") from exc
     original_name = entity.name
     deleted_name = entity.deletion_name
     assert deleted_name is not None
@@ -958,15 +977,32 @@ async def _cleanup_evaluation_sessions(
         await service.rename_evaluation_references(
             workspace=workspace, original_name=original_name, deleted_name=deleted_name
         )
+        entity.name = deleted_name
+        entity.deletion_owner = None
+        await entity_client.update(entity, original_name=original_name)
     except TraceIndexCollisionError as exc:
+        await _release_evaluation_cleanup(entity_client, entity, original_name)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ClickHouseQueryError as exc:
+        await _release_evaluation_cleanup(entity_client, entity, original_name)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CLICKHOUSE_UNAVAILABLE_MESSAGE
         ) from exc
-    if original_name != deleted_name:
-        entity.name = deleted_name
-        await entity_client.update(entity, original_name=original_name)
+    except Exception:
+        # An uncertain final rename must not trigger any further telemetry writes.
+        # Retain the claim on unexpected errors; a retry reloads authoritative state.
+        logger.exception("Evaluation cleanup needs recovery: %s/%s", workspace, entity.id)
+        raise
+
+
+async def _release_evaluation_cleanup(entity_client: EntityClient, entity: Evaluation, original_name: str) -> None:
+    entity.name = original_name
+    entity.deletion_owner = None
+    try:
+        await entity_client.update(entity)
+    except (EntityConflictError, EntityNotFoundError):
+        # Fail closed if another entity update invalidated our snapshot.
+        logger.exception("Could not release evaluation cleanup claim: %s", entity.id)
 
 
 async def _count_live_evaluations_in_group(entity_client: EntityClient, *, workspace: str, group_id: str) -> int:

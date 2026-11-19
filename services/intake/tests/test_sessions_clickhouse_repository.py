@@ -158,7 +158,7 @@ async def test_delete_session_writes_scoped_tombstones_without_loading_payloads(
 
     await _repository(executor).delete_session(workspace=workspace, session_id=session_id)
 
-    collision_query, query = executor.queries
+    collision_query, query, index_query = executor.queries
     assert collision_query.name == "sessions.trace_index_collision"
     assert collision_query.parameters == {"workspace": workspace, "session_id": session_id}
     assert query.name == "sessions.delete"
@@ -171,6 +171,10 @@ async def test_delete_session_writes_scoped_tombstones_without_loading_payloads(
     assert workspace not in query.statement
     assert session_id not in query.statement
     assert query.parameters == {"workspace": workspace, "session_id": session_id}
+    assert index_query.name == "sessions.delete_index"
+    assert "INSERT INTO trace_index" in index_query.statement
+    assert "FROM trace_index FINAL" in index_query.statement
+    assert index_query.parameters == query.parameters
 
 
 @pytest.mark.asyncio
@@ -208,7 +212,7 @@ def test_collision_query_checks_exact_keys_in_current_spans_and_raw_index_histor
     assert "FROM trace_index\n" in query.statement
     assert "FROM trace_index FINAL" not in query.statement
     assert "HAVING uniqExact(session_id, source_format) > 1" in query.statement
-    assert query.statement.count("PREWHERE workspace = %(workspace)s") == 3
+    assert query.statement.count("PREWHERE workspace = %(workspace)s") == 4
     assert "input" not in query.statement
     assert "output" not in query.statement
 
@@ -227,8 +231,8 @@ async def test_evaluation_names_checks_current_scoped_spans_and_legacy_keys(link
     assert query.name == "sessions.evaluation_names"
     assert "FROM spans FINAL" in query.statement
     assert "PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s" in query.statement
-    assert "WHERE is_deleted = 0" in query.statement
-    assert "SELECT DISTINCT arrayJoin" in query.statement
+    assert "%(include_deleted)s OR is_deleted = 0" in query.statement
+    assert "arrayJoin" in query.statement
     assert "notEmpty(evaluation_name)" in query.statement
     assert "external_parent_span_id" not in query.statement
     assert "nemo.evaluation.name" in query.parameters.values()

@@ -3,14 +3,56 @@
 
 """Evaluation deletion cleans complete sessions while protecting shared evidence."""
 
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from nhx.common.entities.client import EntityClient
+from nhx.intake.entities.experiments import Experiment as Evaluation
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
 from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 
 BASE = "/apis/intake/v2/workspaces/default"
+
+
+def test_concurrent_evaluation_cleanup_claim_uses_entity_version(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    group = client.post(f"{BASE}/experiments", json={"name": "claim-group"}).json()
+    body = {"name": "claim-evaluation", "experiment_group_id": group["id"], "dataset_name": "test"}
+    created = client.post(f"{BASE}/evaluations", json=body)
+    assert created.status_code == 201, created.text
+    barrier = threading.Barrier(2)
+    update = EntityClient.update
+
+    async def race_claims(self, entity, **kwargs):
+        if isinstance(entity, Evaluation) and entity.deletion_owner is not None:
+            await asyncio.to_thread(barrier.wait, 10)
+        return await update(self, entity, **kwargs)
+
+    monkeypatch.setattr(EntityClient, "update", race_claims)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(client.delete, f"{BASE}/evaluations/claim-evaluation")
+
+        # The first request has already soft-deleted the entity when it waits
+        # at claim acquisition, so both requests race using the same DB version.
+        async def wait_for_first() -> None:
+            for _ in range(1000):
+                if barrier.n_waiting:
+                    return
+                await asyncio.sleep(0.01)
+            raise AssertionError("first cleanup never reached claim acquisition")
+
+        asyncio.run(wait_for_first())
+        second = pool.submit(client.delete, f"{BASE}/evaluations/claim-evaluation")
+        responses = [first.result(timeout=20), second.result(timeout=20)]
+    assert sorted(response.status_code for response in responses) == [204, 409], [r.text for r in responses]
+    replacement = client.post(f"{BASE}/evaluations", json=body)
+    assert replacement.status_code == 201, replacement.text
+    assert replacement.json()["id"] != created.json()["id"]
 
 
 @pytest.mark.parametrize("through_group", [False, True])

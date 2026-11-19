@@ -39,7 +39,14 @@ class SessionRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_evaluation_names(self, *, workspace: str, session_id: str) -> list[str]:
+    async def has_live_trace_index(self, *, workspace: str, session_id: str) -> bool:
+        """Whether index rows still need cleanup, even when spans are tombstoned."""
+        pass
+
+    @abstractmethod
+    async def get_evaluation_names(
+        self, *, workspace: str, session_id: str, include_deleted: bool = False
+    ) -> list[str]:
         """Return every evaluation name referenced by the session's current spans."""
         pass
 
