@@ -14,8 +14,10 @@ import {
 } from '@nvidia/foundations-react-core';
 import { DetailPanel } from '@studio/components/DetailPanel';
 import styles from '@studio/routes/evaluation/SkillComparisonRoute/comparison.module.css';
+import { MetricDetails } from '@studio/routes/evaluation/SkillComparisonRoute/MetricDetails';
 import {
   ARM_LABELS,
+  isNormalizedOutput,
   metricLabel,
 } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
@@ -39,6 +41,12 @@ const flag = (value: boolean | null | undefined) =>
   value == null ? 'Unmeasured' : value ? 'Yes' : 'No';
 const deltaText = (value: number | null) =>
   value === null ? '—' : `${value > 0 ? '+' : ''}${format(value)}`;
+
+const tableNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+const tableDifference = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 2,
+  signDisplay: 'exceptZero',
+});
 
 const SCORE_TICKS = [0, 0.25, 0.5, 0.75, 1];
 const scorePosition = (score: number) => `${score * 100}%`;
@@ -89,7 +97,9 @@ function Observation({ observation }: { observation: MetricObservation }) {
   const { coverage, value, status } = observation;
   return (
     <Stack gap="1">
-      <Text className="tabular-nums">{observation.label ?? format(value)}</Text>
+      <Text className="tabular-nums">
+        {observation.label ?? (value === null ? 'Unmeasured' : tableNumber.format(value))}
+      </Text>
       <Text kind="body/regular/sm" className="text-secondary">
         {status}
         {coverage ? ` · ${coverage.scored}/${coverage.total} scored` : ''}
@@ -109,6 +119,8 @@ export function MetricComparison({
   const chartMetrics = metrics.filter(
     (row) =>
       !row.name.includes('.pass@') &&
+      !row.name.endsWith('.complete') &&
+      isNormalizedOutput(row.name) &&
       [row.baseline.value, row.treatment.value].some(
         (value) => value !== null && value >= 0 && value <= 1
       ) &&
@@ -227,7 +239,11 @@ export function MetricComparison({
                   },
                   { children: <Observation observation={metric.baseline} />, align: 'right' },
                   { children: <Observation observation={metric.treatment} />, align: 'right' },
-                  { children: deltaText(metric.delta), align: 'right', className: 'tabular-nums' },
+                  {
+                    children: metric.delta === null ? '—' : tableDifference.format(metric.delta),
+                    align: 'right',
+                    className: 'tabular-nums',
+                  },
                 ],
               }))}
             />
@@ -315,8 +331,18 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
       score.outputs.forEach((output) => metricNames.add(`${score.metric_type}.${output.name}`));
     }
   }
+  const outcomeTypes = new Set(
+    [...metricNames]
+      .filter((name) => isNormalizedOutput(name) && !name.endsWith('.complete'))
+      .map((name) => name.split('.', 1)[0])
+  );
   const metrics = [...metricNames]
-    .filter((name) => !name.endsWith('.label') && !name.endsWith('.efficiency_tokens'))
+    .filter(
+      (name) =>
+        !name.endsWith('.label') &&
+        ((isNormalizedOutput(name) && !name.endsWith('.complete')) ||
+          !outcomeTypes.has(name.split('.', 1)[0]))
+    )
     .sort();
   return (
     <Stack gap="density-md">
@@ -385,7 +411,7 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                           : null
                       : null;
                   const heat =
-                    value !== null && value >= 0 && value <= 1
+                    value !== null && value >= 0 && value <= 1 && isNormalizedOutput(metric)
                       ? heatColors[Math.round(value * 6)]
                       : '';
                   const display =
@@ -432,15 +458,11 @@ export function TrialHeatmap({ report }: { report: ComparisonReport }) {
                 { key: 'metric', label: 'Metric', value: selection.metric },
               ]}
             />
-            <pre className="text-sm whitespace-pre-wrap break-all">
-              {JSON.stringify(
-                selection.row.scores.filter((score) =>
-                  selection.metric.startsWith(`${score.metric_type}.`)
-                ),
-                null,
-                2
-              )}
-            </pre>
+            {selection.row.scores
+              .filter((score) => selection.metric.startsWith(`${score.metric_type}.`))
+              .map((score, index) => (
+                <MetricDetails key={index} name={score.metric_type} result={score} />
+              ))}
           </Stack>
         )}
       </Modal>
@@ -509,31 +531,47 @@ export function ArmEvidence({
 export function MetricEvidence({ report, metric }: { report: ComparisonReport; metric: string }) {
   return (
     <Stack gap="density-lg">
-      <Text kind="body/regular/sm" className="text-secondary">
-        These are the stored scorer records. Semantic views are aggregates; their supporting metric
-        records remain in each arm’s scoring bundle.
-      </Text>
-      {ARM_NAMES.map((name) => (
-        <DetailPanel title={ARM_LABELS[name]} key={name}>
-          <pre className="text-sm whitespace-pre-wrap break-all">
-            {JSON.stringify(
-              {
-                aggregate:
-                  report.arms[name].replay?.summary.scores.scores.find(
-                    (score) => score.name === metric
-                  ) ?? null,
-                scores:
-                  report.arms[name].replay?.scores.filter(
-                    (score) =>
-                      !metric.startsWith('view.') && metric.startsWith(`${score.metric_type}.`)
-                  ) ?? [],
-              },
-              null,
-              2
-            )}
-          </pre>
-        </DetailPanel>
-      ))}
+      {ARM_NAMES.map((name) => {
+        const replay = report.arms[name].replay;
+        const aggregate = replay?.summary.scores.scores.find((score) => score.name === metric);
+        const scores = replay?.scores.filter((score) => metric.startsWith(`${score.metric_type}.`));
+        return (
+          <DetailPanel title={ARM_LABELS[name]} key={name}>
+            <Stack gap="density-lg">
+              {aggregate && (
+                <KeyValueGrid
+                  items={[
+                    {
+                      key: 'value',
+                      label: aggregate.score_type === 'scalar' ? 'Value' : 'Mean',
+                      value: format(
+                        aggregate.score_type === 'scalar' ? aggregate.value : aggregate.mean
+                      ),
+                    },
+                    {
+                      key: 'min',
+                      label: 'Minimum',
+                      value: aggregate.min == null ? null : format(aggregate.min),
+                    },
+                    {
+                      key: 'max',
+                      label: 'Maximum',
+                      value: aggregate.max == null ? null : format(aggregate.max),
+                    },
+                    { key: 'count', label: 'Samples', value: aggregate.count },
+                  ]}
+                />
+              )}
+              {scores?.map((score, index) => (
+                <DetailPanel title={`${score.task_id} / ${score.trial_id}`} key={index}>
+                  <MetricDetails name={score.metric_type} result={score} />
+                </DetailPanel>
+              ))}
+              {!aggregate && !scores?.length && <Text>No scoring evidence was retained.</Text>}
+            </Stack>
+          </DetailPanel>
+        );
+      })}
     </Stack>
   );
 }

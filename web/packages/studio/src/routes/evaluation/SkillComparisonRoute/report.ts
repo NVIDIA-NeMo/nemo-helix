@@ -106,6 +106,7 @@ const reportSchema = z
   })
   .passthrough();
 
+export type MetricResult = z.infer<typeof metricResultSchema>;
 export type ComparisonReport = z.infer<typeof reportSchema>;
 export type ComparisonArm = ComparisonReport['arms'][ArmName];
 export type MetricCoverage = z.infer<typeof coverageSchema>;

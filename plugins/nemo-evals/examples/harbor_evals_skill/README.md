@@ -152,7 +152,9 @@ are retained in the run directory.
 Open **Evaluations → Skill Comparisons** and import `$RUN_DIR/skill-eval-summary.json`.
 **Scores by Metric** shows mean scores and marks the observed minimum and maximum
 for variant scores when they vary across trials. Select a metric or a cell in
-**Task Results** to inspect its scoring evidence.
+**Task Results** to inspect its scoring evidence. **Every Metric** includes counts
+and scores with up to two decimal places. **Package Checks** shows scan findings
+and other diagnostics when the report includes them.
 
 **Load Saved Runs** can open a completed variant and select its linked control.
 Older runs can be paired manually using the same pinned taskset. The loader

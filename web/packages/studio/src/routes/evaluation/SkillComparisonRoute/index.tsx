@@ -12,7 +12,6 @@ import {
   Modal,
   PageHeader,
   Stack,
-  Table,
   Tabs,
   Text,
 } from '@nvidia/foundations-react-core';
@@ -26,7 +25,11 @@ import {
   TokenComparison,
   TrialHeatmap,
 } from '@studio/routes/evaluation/SkillComparisonRoute/ComparisonResults';
-import { ARM_LABELS } from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
+import { MetricDetails } from '@studio/routes/evaluation/SkillComparisonRoute/MetricDetails';
+import {
+  ARM_LABELS,
+  metricLabel,
+} from '@studio/routes/evaluation/SkillComparisonRoute/presentation';
 import {
   ARM_NAMES,
   comparisonWarnings,
@@ -221,33 +224,10 @@ export const SkillComparisonRoute = () => {
                           These checks run once on the pinned skill archive. They do not measure the
                           difference between trial arms.
                         </Text>
-                        {report.package_metrics ? (
+                        {report.package_metrics && Object.keys(report.package_metrics).length ? (
                           Object.entries(report.package_metrics).map(([name, result]) => (
-                            <DetailPanel key={name} title={name}>
-                              <Stack gap="density-md">
-                                <Table
-                                  aria-label={`${name} outputs`}
-                                  columns={['Output', 'Value']}
-                                  rows={result.outputs.map((output) => ({
-                                    id: output.name,
-                                    cells: [
-                                      output.name,
-                                      {
-                                        children: (
-                                          <pre className="whitespace-pre-wrap break-all text-sm">
-                                            {JSON.stringify(output.value, null, 2)}
-                                          </pre>
-                                        ),
-                                      },
-                                    ],
-                                  }))}
-                                />
-                                {result.diagnostics.map((diagnostic, index) => (
-                                  <Text key={`${index}-${diagnostic.message}`}>
-                                    {diagnostic.message}
-                                  </Text>
-                                ))}
-                              </Stack>
+                            <DetailPanel key={name} title={metricLabel(name)}>
+                              <MetricDetails name={name} result={result} />
                             </DetailPanel>
                           ))
                         ) : (

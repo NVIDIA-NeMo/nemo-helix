@@ -74,6 +74,63 @@ describe('SkillComparisonRoute', () => {
     expect(within(chart).getAllByRole('img', { name: /observed range/ })).toHaveLength(1);
   });
 
+  it('formats metric values to two decimal places and keeps tool counts out of the score chart', async () => {
+    renderComparison();
+    const report = makeSkillComparisonReport();
+    for (const [name, arm] of Object.entries(report.arms)) {
+      arm.replay!.summary.scores.scores.push(
+        { name: 'tool_execution_outcome.successful', mean: 1, count: 1, nan_count: 0 },
+        {
+          name: 'tool_execution_outcome.success_rate',
+          mean: name === 'baseline' ? 0.5253 : 0.7307,
+          count: 1,
+          nan_count: 0,
+        }
+      );
+    }
+    await importReport(report);
+    const chart = screen.getByRole('region', { name: 'Scores by metric' });
+    expect(
+      within(chart).queryByRole('button', { name: 'tool_execution_outcome.successful' })
+    ).not.toBeInTheDocument();
+    expect(
+      within(chart).getByRole('button', { name: 'tool_execution_outcome.success_rate' })
+    ).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'Metric comparison' });
+    const row = within(table).getByRole('row', { name: /tool_execution_outcome.success_rate/ });
+    expect(within(row).getByText('0.53', { exact: true })).toBeInTheDocument();
+    expect(within(row).getByText('0.73', { exact: true })).toBeInTheDocument();
+    expect(within(row).getByText('+0.21', { exact: true })).toBeInTheDocument();
+  });
+
+  it('shows structured package scan findings alongside the measured counts', async () => {
+    renderComparison();
+    const report = makeSkillComparisonReport();
+    report.package_metrics = {
+      skill_security_scan: {
+        outputs: [{ name: 'finding_count', value: 1 }],
+        diagnostics: [
+          {
+            message: 'Scanner finding.',
+            details: {
+              rule: 'check-permissions',
+              file: 'scripts/setup.py',
+              line: 7,
+              severity: 'low',
+            },
+          },
+        ],
+      },
+    };
+    await importReport(report);
+    await userEvent.click(screen.getByRole('tab', { name: 'Package Checks' }));
+    expect(screen.getByRole('table', { name: 'Skill security scan outputs' })).toHaveTextContent(
+      'Finding count'
+    );
+    expect(screen.getByText('scripts/setup.py')).toBeInTheDocument();
+    expect(screen.getByText('check-permissions')).toBeInTheDocument();
+  });
+
   it('selects a linked baseline outside the recent run list', async () => {
     const baseline: TasksetRunStatus = {
       run_id: 'run-baseline',
