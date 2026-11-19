@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from nhx_sandbox.harbor_opensandbox_services import EGRESS_API_FALLBACK_PORTS
 
 ROOT = Path(__file__).parent.parent.parent
 HELM_DIR = ROOT / "k8s" / "helm"
@@ -143,6 +144,57 @@ def test_extra_ingress_can_admit_everything() -> None:
     )
 
     assert policy["spec"]["ingress"][-1] == {}
+
+
+def test_probe_source_cidrs_admit_the_kubelet_to_the_probe_port_only() -> None:
+    """On CNIs that police node traffic (kube-router), the kubelet's readiness probe needs its own narrow rule."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set-json",
+            'opensandbox.sandboxNetworkPolicy.probeSourceCIDRs=["10.54.0.0/16","fd00::/64"]',
+        )
+    )
+
+    assert policy["spec"]["ingress"][1] == {
+        "from": [{"ipBlock": {"cidr": "10.54.0.0/16"}}, {"ipBlock": {"cidr": "fd00::/64"}}],
+        "ports": [{"protocol": "TCP", "port": 18080}],
+    }
+
+
+def test_probe_rule_follows_probe_port_and_precedes_extra_ingress() -> None:
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set-json",
+            'opensandbox.sandboxNetworkPolicy.probeSourceCIDRs=["10.54.0.0/16"]',
+            "--set",
+            "opensandbox.sandboxNetworkPolicy.probePort=9000",
+            "--set-json",
+            "opensandbox.sandboxNetworkPolicy.extraIngress=[{}]",
+        )
+    )
+
+    assert [rule.get("ports") for rule in policy["spec"]["ingress"]] == [
+        None,
+        [{"protocol": "TCP", "port": 9000}],
+        None,
+    ]
+
+
+def test_probe_rule_admits_the_moved_egress_api_ports_with_compose_services() -> None:
+    """The compose extension moves the egress probe off 18080 when a service takes it, to a port in its fallback range."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.composeServices.enabled=true",
+            "--set-json",
+            'opensandbox.sandboxNetworkPolicy.probeSourceCIDRs=["10.54.0.0/16"]',
+        )
+    )
+
+    assert [port["port"] for port in policy["spec"]["ingress"][1]["ports"]] == [18080, *EGRESS_API_FALLBACK_PORTS]
 
 
 def test_sandbox_policy_refuses_to_admit_the_whole_sandbox_namespace() -> None:
