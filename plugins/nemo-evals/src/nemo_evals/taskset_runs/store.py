@@ -102,6 +102,7 @@ class RunAcceptance:
             filesets must never be included.
         auth_context: The caller's full principal, stored on the run so the controller
             can create its task Jobs on the caller's behalf; None with auth off.
+        baseline_run_id: Validated comparison baseline in the run's workspace, or None.
     """
 
     plan: TasksetRunPlan
@@ -113,6 +114,7 @@ class RunAcceptance:
     finalization_deadline_at: datetime
     discard_on_loss: tuple[FilesetReceipt, ...] = ()
     auth_context: AuthContext | None = None
+    baseline_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -349,6 +351,7 @@ class TasksetRunStore:
             taskset_ref=plan.taskset_ref,
             idempotency_key=acceptance.idempotency_key,
             request_digest=acceptance.request_digest,
+            baseline_run_id=acceptance.baseline_run_id,
             accepted_at=acceptance.accepted_at,
             timeout_seconds=acceptance.timeout_seconds,
             execution_deadline_at=acceptance.execution_deadline_at,

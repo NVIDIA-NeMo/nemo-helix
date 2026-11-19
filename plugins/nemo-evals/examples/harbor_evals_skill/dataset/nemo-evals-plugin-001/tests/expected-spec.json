@@ -1,0 +1,18 @@
+{
+  "dataset": [
+    {"expected": "Paris", "output": "Paris"},
+    {"expected": "Paris", "output": "London"}
+  ],
+  "metrics": [
+    {
+      "metric_type": "exact-match",
+      "kind": "inline",
+      "type": "exact-match",
+      "reference": "{{item.expected}}",
+      "candidate": "{{item.output}}"
+    }
+  ],
+  "has_target": false,
+  "field_mapping": null,
+  "prompt_template": null
+}

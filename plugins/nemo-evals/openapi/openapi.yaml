@@ -9490,6 +9490,17 @@ components:
         \ comparable across a ``replace``."
     TasksetRunInput:
       properties:
+        baseline_run_id:
+          anyOf:
+          - type: string
+            maxLength: 256
+            minLength: 1
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          - type: 'null'
+          title: Baseline Run Id
+          description: Optional existing baseline run ID in this workspace. Both runs must
+            evaluate the same pinned taskset revision. Records a comparison relationship;
+            it does not launch or wait for the baseline.
         spec:
           allOf:
           - $ref: '#/components/schemas/AgentEvalInputSpec'
@@ -9654,6 +9665,12 @@ components:
         record.
     TasksetRunStatus:
       properties:
+        baseline_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Baseline Run Id
+          description: Explicit baseline run ID in this workspace; None for unlinked runs.
         run_id:
           type: string
           title: Run Id
@@ -9776,6 +9793,12 @@ components:
       title: TasksetRunStatussPage
     TasksetRunSubmitResponse:
       properties:
+        baseline_run_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Baseline Run Id
+          description: Explicit baseline run ID in this workspace; None for unlinked runs.
         run_id:
           type: string
           title: Run Id

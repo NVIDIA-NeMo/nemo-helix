@@ -26,6 +26,7 @@ export {
 export {
   evaluationRoutes,
   getEvaluationSideNavItems,
+  getSkillComparisonSideNavItems,
   getTasksetSideNavItems,
 } from '@studio/routes/groups/evaluationRoutes';
 export {

@@ -35,6 +35,7 @@ import {
   getOptimizerSideNavItems,
   getSafeSynthesizerSideNavItems,
   getSettingsSideNavItems,
+  getSkillComparisonSideNavItems,
   getTasksetSideNavItems,
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
@@ -75,6 +76,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const tracesNav = getIntakeSideNavItems(workspace);
     const evaluationItems = [
       ...getExperimentSideNavItems(workspace),
+      ...getSkillComparisonSideNavItems(workspace),
       ...getTasksetSideNavItems(workspace),
     ];
     const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);

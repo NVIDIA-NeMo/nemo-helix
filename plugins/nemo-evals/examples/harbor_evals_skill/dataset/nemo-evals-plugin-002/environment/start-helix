@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+set -eu
+cd /opt/helix-task
+exec /usr/bin/env -i HOME=/var/lib/helix-task/root XDG_CONFIG_HOME=/var/lib/helix-task/root/.config \
+    PATH=/app/.venv/bin:/usr/bin:/bin PYTHONUNBUFFERED=1 \
+    /app/.venv/bin/python /opt/helix-task/start_task.py

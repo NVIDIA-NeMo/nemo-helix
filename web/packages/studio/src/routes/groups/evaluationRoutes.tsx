@@ -12,6 +12,7 @@ import {
   gateModelEvaluationFormRoutes,
   gateTasksetRoutes,
   getEvaluationResultsRoute,
+  getSkillComparisonsRoute,
   getTasksetsRoute,
   getTasksRoute,
 } from '@studio/routes/utils';
@@ -49,6 +50,12 @@ const TaskListRoute = lazy(() =>
     default: module.TaskListRoute,
   }))
 );
+
+const SkillComparisonRoute = lazy(() =>
+  import('@studio/routes/evaluation/SkillComparisonRoute').then((module) => ({
+    default: module.SkillComparisonRoute,
+  }))
+);
 const TaskDetailRoute = lazy(() =>
   import('@studio/routes/evaluation/tasks/TaskDetailRoute').then((module) => ({
     default: module.TaskDetailRoute,
@@ -66,6 +73,11 @@ const TasksetDetailRoute = lazy(() =>
 );
 
 export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
+  {
+    path: ROUTES.workspace.skillComparisons,
+    element: <SkillComparisonRoute />,
+    errorElement: <RouteErrorPanel title="Skill Comparisons" />,
+  },
   {
     path: ROUTES.workspace.evaluation,
     element: <EvaluationLayout />,
@@ -124,6 +136,7 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
 ]);
 
 const NavIcon = ENTITY_ICONS.evaluationResults;
+const ComparisonIcon = ENTITY_ICONS.skillComparisons;
 const TasksetsIcon = ENTITY_ICONS.tasksets;
 const TasksIcon = ENTITY_ICONS.tasks;
 
@@ -135,6 +148,18 @@ export const getEvaluationSideNavItems = (workspace: string) =>
           slotIcon: <NavIcon className={iconColorClass} />,
           slotLabel: 'Evaluations',
           href: getEvaluationResultsRoute(workspace),
+        },
+      ]
+    : [];
+
+export const getSkillComparisonSideNavItems = (workspace: string) =>
+  EVALS_ENABLED
+    ? [
+        {
+          id: 'skill-comparisons',
+          slotIcon: <ComparisonIcon className={iconColorClass} />,
+          slotLabel: 'Skill Comparisons',
+          href: getSkillComparisonsRoute(workspace),
         },
       ]
     : [];

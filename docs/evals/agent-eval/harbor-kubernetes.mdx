@@ -39,6 +39,20 @@ flowchart LR
 - `verifier.environment_mode` unset or `"shared"` → verification runs in the agent sandbox.
 - `verifier.environment_mode = "separate"`, or a `[verifier.environment]` table → the task gets its own verifier sandbox.
 
+## Link a comparison baseline
+
+To associate a treatment with an existing baseline, set the optional top-level
+`baseline_run_id` in the run submission JSON. The baseline must be readable in the
+submission workspace and evaluate the same pinned taskset revision. Submit, run
+detail, and run history return the stored link. Existing runs and submissions
+without a link continue to work and return `baseline_run_id: null`.
+
+The link records your comparison choice: agents, models, and skills can differ.
+It does not launch a baseline, wait for completion, or establish that all other
+evaluation settings match. Use distinct idempotency keys for the two runs;
+changing the baseline on a keyed retry returns a conflict. Links are set at
+submission and cannot be added retroactively to older runs.
+
 ## Before you begin
 
 - A CLI context for the deployment: see [Connect to Deployments](/documentation/reference/cli-reference/connect-to-deployments).

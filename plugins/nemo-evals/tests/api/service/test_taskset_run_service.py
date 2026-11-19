@@ -37,6 +37,65 @@ from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
 
+async def test_baseline_link_persists_in_submit_detail_history_and_replay(service, published, request_body, run_store):
+    baseline = await service.submit(
+        TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
+    )
+    baseline_id = baseline.status.run_id
+    request_body.update(idempotency_key="treatment", baseline_run_id=baseline_id)
+    request = TasksetRunInput.model_validate(request_body)
+    treatment = await service.submit(request, workspace="default", caller="user:alice")
+    assert treatment.status.baseline_run_id == baseline_id
+    assert (await run_store.find("default", treatment.status.run_id)).baseline_run_id == baseline_id
+    assert (await service.get("default", treatment.status.run_id)).baseline_run_id == baseline_id
+    history = await service.list_runs("default", caller="user:alice")
+    assert next(run for run in history.data if run.run_id == treatment.status.run_id).baseline_run_id == baseline_id
+    replay = await service.submit(request, workspace="default", caller="user:alice")
+    assert not replay.created
+    assert replay.status.baseline_run_id == baseline_id
+    request_body["baseline_run_id"] = "another-baseline"
+    with pytest.raises(RunRequestConflict):
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice")
+
+
+@pytest.mark.parametrize("baseline_workspace,taskset_ref", [("other", None), ("default", "default/suite#" + "f" * 64)])
+async def test_baseline_requires_same_workspace_and_pinned_revision(
+    service, published, request_body, seed_run, run_store, baseline_workspace, taskset_ref
+):
+    state = {"taskset_ref": taskset_ref} if taskset_ref else {}
+    await seed_run(name="baseline", workspace=baseline_workspace, **state)
+    request_body["baseline_run_id"] = "baseline"
+    with pytest.raises(TasksetRunResolutionError, match="baseline run"):
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice")
+    assert len((await run_store.list_runs("default")).data) == (1 if baseline_workspace == "default" else 0)
+
+
+async def test_missing_baseline_rejects_submit(service, published, request_body):
+    request_body["baseline_run_id"] = "missing"
+    with pytest.raises(TasksetRunResolutionError, match="baseline run.*doesn't exist"):
+        await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice")
+
+
+async def test_baseline_read_authorized_before_lookup_and_on_replay(service, published, request_body, authorizer):
+    baseline = await service.submit(
+        TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
+    )
+    request_body.update(idempotency_key="treatment", baseline_run_id=baseline.status.run_id)
+    request = TasksetRunInput.model_validate(request_body)
+    await service.submit(request, workspace="default", caller="user:alice")
+    path = f"/apis/evals/v2/workspaces/default/agent-evaluate/runs/{baseline.status.run_id}"
+    authorizer.assert_any_await("GET", path)
+
+    async def deny_baseline(method, resource):
+        if resource == path:
+            raise HTTPException(status_code=403, detail="baseline denied")
+
+    authorizer.side_effect = deny_baseline
+    with pytest.raises(HTTPException) as exc:
+        await service.submit(request, workspace="default", caller="user:alice")
+    assert exc.value.status_code == 403
+
+
 @pytest.mark.parametrize(
     "reference,expected",
     [
@@ -477,6 +536,7 @@ async def test_get_reads_stored_state_without_plan_or_source_resolution(
     assert status.model_dump(mode="json") == {
         "run_id": "run-selected",
         "workspace": "default",
+        "baseline_run_id": None,
         "taskset_ref": "default/suite#" + "a" * 64,
         "phase": "expired",
         "result_state": "ready",
