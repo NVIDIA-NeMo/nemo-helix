@@ -31,6 +31,8 @@ const aggregateSchema = z
   .object({
     name: text,
     mean: number.nullish(),
+    min: number.nullish(),
+    max: number.nullish(),
     value: number.nullish(),
     count: count.optional(),
     nan_count: count.default(0),
@@ -88,14 +90,13 @@ const armSchema = z
   })
   .passthrough();
 
-// Project the scorer's public JSON contract. Unused fields may evolve independently;
-// no imported HTML, URLs, or paths are executed or fetched by this viewer.
 const reportSchema = z
   .object({
     taskset_ref: pin,
     skill_ref: pin,
     workspace: text,
     context: text,
+    synthetic_demo: z.boolean().optional(),
     judge_model_ref: z.string().optional(),
     scoring_taskset_ref: pin.optional(),
     skill_files_hash: z.string().optional(),
@@ -169,6 +170,7 @@ export function comparisonWarnings(report: ComparisonReport): string[] {
 export interface MetricObservation {
   value: number | null;
   label?: string;
+  range?: { min: number; max: number };
   coverage?: MetricCoverage;
   status: 'Measured' | 'Partial' | 'Unmeasured' | 'Unavailable';
 }
@@ -204,8 +206,22 @@ function observation(arm: ComparisonArm, name: string): MetricObservation {
     (!label && (aggregate?.nan_count ?? 0) > 0) ||
     (!!coverage &&
       (coverage.failed > 0 || coverage.missing > 0 || coverage.scored < coverage.total));
+  const min = aggregate?.min;
+  const max = aggregate?.max;
+  const range =
+    aggregate?.score_type !== 'scalar' &&
+    (aggregate?.count ?? coverage?.scored ?? 0) > 1 &&
+    value !== null &&
+    min != null &&
+    max != null &&
+    min < max &&
+    min <= value &&
+    value <= max
+      ? { min, max }
+      : undefined;
   return {
     value,
+    range,
     ...(label ? { label } : {}),
     coverage,
     status: !summary

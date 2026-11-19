@@ -67,6 +67,8 @@ export const SkillComparisonRoute = () => {
   };
   const report = imported?.report;
   const warnings = report ? comparisonWarnings(report) : [];
+  const singleTrial =
+    report && ARM_NAMES.every((name) => report.arms[name].replay?.summary.trial_count === 1);
   const incomplete =
     !!report &&
     (!!report.error ||
@@ -88,7 +90,8 @@ export const SkillComparisonRoute = () => {
             slotHeading={
               <Flex gap="density-md" align="center" className="flex-wrap">
                 Skill Comparisons{' '}
-                {report && (
+                {report?.synthetic_demo && <Badge color="yellow">Synthetic Demo</Badge>}
+                {report && (!report.synthetic_demo || incomplete) && (
                   <Badge color={incomplete ? 'yellow' : 'gray'}>
                     {incomplete ? 'Needs Review' : 'Imported Report'}
                   </Badge>
@@ -177,12 +180,13 @@ export const SkillComparisonRoute = () => {
                       {report.arms[name].reward.toFixed(2)}
                     </Text>
                     <Text kind="body/regular/sm" className="text-secondary">
-                      task reward
+                      {report.synthetic_demo ? 'example task reward' : 'task reward'}
                     </Text>
                   </Flex>
                 ))}
                 <Text kind="body/regular/sm" className="text-secondary">
-                  Each arm is one live trial. Select a score to inspect its evidence.
+                  {singleTrial && 'Each arm is one live trial. '}Select a score to inspect its
+                  evidence.
                 </Text>
               </Flex>
               <Tabs

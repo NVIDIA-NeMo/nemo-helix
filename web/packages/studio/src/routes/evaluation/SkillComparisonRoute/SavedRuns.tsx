@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { evalsListTasksetRuns } from '@nemo/sdk/generated/evals/evals-plugin-taskset-run-routes';
+import {
+  evalsGetTasksetRun,
+  evalsListTasksetRuns,
+} from '@nemo/sdk/generated/evals/evals-plugin-taskset-run-routes';
 import type { TasksetRunStatus } from '@nemo/sdk/generated/evals/schema';
 import { Button, Flex, Modal, Stack, Table, Text } from '@nvidia/foundations-react-core';
 import { loadSavedComparison } from '@studio/routes/evaluation/SkillComparisonRoute/history';
@@ -20,8 +23,12 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
   const [treatment, setTreatment] = useState<TasksetRunStatus>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [baselineNotice, setBaselineNotice] = useState<string>();
   const show = async () => {
     setOpen(true);
+    setBaseline(undefined);
+    setTreatment(undefined);
+    setBaselineNotice(undefined);
     setLoading(true);
     setError(undefined);
     try {
@@ -29,6 +36,43 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
       setRuns(page.data.filter((run) => run.phase === 'completed' && run.result_state === 'ready'));
     } catch {
       setError('Could not load saved executions. Check the connection to this Helix deployment.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  const chooseTreatment = async (run: TasksetRunStatus) => {
+    setTreatment(run);
+    setBaselineNotice(undefined);
+    setError(undefined);
+    const linkedId = run.baseline_run_id;
+    if (!linkedId) {
+      setBaseline((current) =>
+        current?.taskset_ref === run.taskset_ref && current.run_id !== run.run_id
+          ? current
+          : undefined
+      );
+      return;
+    }
+    setBaseline(undefined);
+    setLoading(true);
+    try {
+      const linked =
+        runs.find((candidate) => candidate.run_id === linkedId) ??
+        (await evalsGetTasksetRun(workspace, linkedId));
+      if (
+        linked.phase !== 'completed' ||
+        linked.result_state !== 'ready' ||
+        linked.taskset_ref !== run.taskset_ref ||
+        linked.run_id === run.run_id
+      ) {
+        setBaselineNotice(
+          'The linked baseline has no compatible retained results. Choose a baseline below.'
+        );
+        return;
+      }
+      setBaseline(linked);
+    } catch {
+      setBaselineNotice('The linked baseline could not be loaded. Choose a baseline below.');
     } finally {
       setLoading(false);
     }
@@ -62,13 +106,15 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
       >
         <Stack gap="density-lg">
           <Text className="text-secondary">
-            Choose a baseline without skills and a with-skill execution of the same taskset. This
-            loads retained results; it does not start an evaluation. Showing completed runs from the
-            latest 100 executions. Uses the latest completed scoring replay matching each trial ID;
-            scoring job names are shown in Evidence.
+            Choose a with-skill execution. A linked baseline is selected automatically. Otherwise,
+            choose a baseline from the same taskset. This list shows completed runs from the latest
+            100 executions.
           </Text>
           <Flex gap="density-xl" className="flex-wrap">
-            <Text>Baseline: {baseline?.run_id ?? 'Choose below'}</Text>
+            <Text>
+              Baseline: {baseline?.run_id ?? 'Choose below'}
+              {baseline && baseline.run_id === treatment?.baseline_run_id && ' (linked)'}
+            </Text>
             <Text>With skill: {treatment?.run_id ?? 'Choose below'}</Text>
           </Flex>
           {error && (
@@ -76,6 +122,7 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
               {error}
             </Text>
           )}
+          {baselineNotice && <Text role="status">{baselineNotice}</Text>}
           {loading && <Text role="status">Loading saved results…</Text>}
           <div className="max-h-[45vh] overflow-auto">
             <Table
@@ -96,7 +143,10 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
                           size="small"
                           kind={baseline?.run_id === run.run_id ? 'primary' : 'secondary'}
                           disabled={loading}
-                          onClick={() => setBaseline(run)}
+                          onClick={() => {
+                            setBaseline(run);
+                            setBaselineNotice(undefined);
+                          }}
                         >
                           Baseline
                         </Button>
@@ -104,7 +154,7 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
                           size="small"
                           kind={treatment?.run_id === run.run_id ? 'primary' : 'secondary'}
                           disabled={loading}
-                          onClick={() => setTreatment(run)}
+                          onClick={() => void chooseTreatment(run)}
                         >
                           With Skill
                         </Button>
@@ -120,7 +170,13 @@ export function SavedRuns({ workspace, onLoad }: SavedRunsProps) {
           )}
           <Flex justify="end">
             <Button
-              disabled={loading || !baseline || !treatment || baseline.run_id === treatment.run_id}
+              disabled={
+                loading ||
+                !baseline ||
+                !treatment ||
+                baseline.run_id === treatment.run_id ||
+                baseline.taskset_ref !== treatment.taskset_ref
+              }
               onClick={() => void load()}
             >
               Load Comparison

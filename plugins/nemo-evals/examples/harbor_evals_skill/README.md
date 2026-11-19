@@ -149,40 +149,16 @@ are retained in the run directory.
 
 ### Inspect the comparison in Studio
 
-Open **Evaluations → Skill Comparisons** in Studio and import
-`$RUN_DIR/skill-eval-summary.json`. The view includes paired metric bars, a detailed
-comparison table, token usage, and a task/trial heatmap. Select a metric or heatmap
-cell to inspect the stored scorer records and diagnostics. **Package Checks** shows
-archive checks separately from trial results; **Evidence** lists revision pins,
-effective images, local bundle paths, and links to scoring Jobs.
+Open **Evaluations → Skill Comparisons** and import `$RUN_DIR/skill-eval-summary.json`.
+**Scores by Metric** shows mean scores and marks the observed minimum and maximum
+for with-skill scores when they vary across trials. Select a metric or a cell in
+**Task Results** to inspect its scoring evidence.
 
-Import reads JSON in the current browser tab. It does not upload results, start
-runs, or fetch local bundles. Refreshing the page clears the report. Job links
-open the current Helix deployment, so use the deployment matching the report's
-source context and workspace. The page follows the existing Evaluations feature
-flag and does not require the Tasks/Tasksets flag.
-
-Missing measurements remain unmeasured. Differences are withheld when scoring
-is incomplete, metric coverage is partial, or the arms' images/discovery do not
-match the expected comparison. One trial per arm does not support significance
-claims or confidence intervals. New reports retain inclusive prompt, cached
-input, and completion token measurements; older reports may only retain the
-uncached prompt plus completion metric.
-
-The presentation adapts the paired-result, coverage, and token-accounting patterns
-from [SkillEvaluator](https://gitlab-master.nvidia.com/ai_tools/nvevalcollection/skill-evaluator).
-It uses Helix metric names and evidence contracts. It does not reinterpret those
-metrics as native SkillEvaluator dimensions or publish data to Eval Studio.
-
-The viewer also offers **Load Saved Runs** for completed Helix executions in the
-current workspace. Select a baseline without skills and a treatment with the same
-pinned taskset and one skill. The initial loader supports one task and one trial
-per arm, searches the latest 100 executions/scoring jobs, and uses the latest
-completed scoring replay with the exact trial ID. Its scoring job is identified
-in Evidence. Imported reports remain available for choosing other scoring
-configurations. No new evaluation is launched. Saved-run loading does not
-confirm runtime skill discovery from the live rollout, so differences remain
-withheld until that evidence is available.
+**Load Saved Runs** can open a completed execution and select its linked baseline.
+Older runs can be paired manually using the same pinned taskset. The loader
+supports one task and one trial per arm and uses the most recent completed
+scoring replay for each trial. **Evidence** lists the source jobs and revision
+pins. Use the exported report to include the verified skill discovery evidence.
 
 Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
 The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.

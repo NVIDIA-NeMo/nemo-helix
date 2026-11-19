@@ -38,6 +38,51 @@ const flag = (value: boolean | null | undefined) =>
 const deltaText = (value: number | null) =>
   value === null ? '—' : `${value > 0 ? '+' : ''}${format(value)}`;
 
+const SCORE_TICKS = [0, 0.25, 0.5, 0.75, 1];
+const scorePosition = (score: number) => `${score * 100}%`;
+
+function ScoreBar({ arm, observation }: { arm: ArmName; observation: MetricObservation }) {
+  const { value, range } = observation;
+  const whisker =
+    arm === 'with-skill' && range && range.min >= 0 && range.max <= 1 ? range : undefined;
+  const score = format(value);
+  const description = whisker
+    ? `${labels[arm]}: ${score}, observed range ${format(whisker.min)} to ${format(whisker.max)}`
+    : `${labels[arm]}: ${score}`;
+  return (
+    <svg className={styles.scoreTrack} height="18" role="img" aria-label={description}>
+      <title>{description}</title>
+      {value !== null && (
+        <rect
+          className={arm === 'with-skill' ? styles.treatmentBar : styles.baselineBar}
+          x="0"
+          y={arm === 'with-skill' ? 2 : 7}
+          width={scorePosition(value)}
+          height={arm === 'with-skill' ? 14 : 4}
+          rx="2"
+        />
+      )}
+      {whisker && (
+        <g className={styles.range}>
+          <line x1={scorePosition(whisker.min)} x2={scorePosition(whisker.max)} y1="9" y2="9" />
+          {[whisker.min, whisker.max].map((bound) => (
+            <line key={bound} x1={scorePosition(bound)} x2={scorePosition(bound)} y1="3" y2="15" />
+          ))}
+        </g>
+      )}
+      <text
+        className={styles.value}
+        x={scorePosition(whisker?.max ?? value ?? 0)}
+        dx="9"
+        y="50%"
+        dominantBaseline="central"
+      >
+        {score}
+      </text>
+    </svg>
+  );
+}
+
 function Observation({ observation }: { observation: MetricObservation }) {
   const { coverage, value, status } = observation;
   return (
@@ -69,6 +114,9 @@ export function MetricComparison({
         (value) => value === null || (value >= 0 && value <= 1)
       )
   );
+  const hasRanges = chartMetrics.some(
+    ({ treatment: { range } }) => range && range.min >= 0 && range.max <= 1
+  );
   return (
     <Stack gap="density-xl">
       {chartMetrics.length > 0 && (
@@ -76,7 +124,7 @@ export function MetricComparison({
           <Stack gap="density-lg">
             <Flex justify="between" align="center" gap="density-lg">
               <Text kind="title/sm">Scores by Metric</Text>
-              <Flex gap="density-lg" align="center">
+              <Flex gap="density-lg" align="center" className="flex-wrap">
                 <Flex gap="2" align="center">
                   <svg width="24" height="12" aria-hidden>
                     <rect
@@ -94,12 +142,25 @@ export function MetricComparison({
                   </svg>
                   <Text>Baseline</Text>
                 </Flex>
+                {hasRanges && (
+                  <Flex gap="2" align="center">
+                    <svg width="24" height="12" viewBox="0 0 24 12" fill="none" aria-hidden>
+                      <path d="M2 2v8m0-4h20m0-4v8" stroke="currentColor" strokeWidth="1.5" />
+                    </svg>
+                    <Text>With-skill min–max</Text>
+                  </Flex>
+                )}
               </Flex>
             </Flex>
+            {!hasRanges && (
+              <Text kind="body/regular/sm" className="text-secondary">
+                Range markers appear when retained trial scores vary.
+              </Text>
+            )}
             <div className={styles.scoreGrid}>
               <span />
               <div className={styles.axis} aria-hidden>
-                {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
+                {SCORE_TICKS.map((tick) => (
                   <span key={tick}>{tick}</span>
                 ))}
               </div>
@@ -116,44 +177,12 @@ export function MetricComparison({
                   </Button>
                   <div className={styles.plot}>
                     <div className={styles.gridlines} aria-hidden>
-                      {[0, 1, 2, 3, 4].map((tick) => (
+                      {SCORE_TICKS.map((tick) => (
                         <span key={tick} />
                       ))}
                     </div>
-                    {(
-                      [
-                        ['with-skill', metric.treatment],
-                        ['baseline', metric.baseline],
-                      ] as const
-                    ).map(([arm, observation]) => (
-                      <Flex
-                        key={arm}
-                        gap="density-sm"
-                        align="center"
-                        aria-label={`${metric.name}, ${labels[arm]}: ${format(observation.value)}`}
-                      >
-                        <div className="flex-1 relative" aria-hidden>
-                          <svg
-                            viewBox="0 0 100 12"
-                            preserveAspectRatio="none"
-                            width="100%"
-                            height={arm === 'with-skill' ? 12 : 4}
-                          >
-                            <rect
-                              width={(observation.value ?? 0) * 100}
-                              height="12"
-                              rx="0.3"
-                              fill={
-                                arm === 'with-skill'
-                                  ? 'var(--color-chart-data-categorical-1)'
-                                  : 'var(--text-color-secondary)'
-                              }
-                            />
-                          </svg>
-                        </div>
-                        <Text className={styles.value}>{format(observation.value)}</Text>
-                      </Flex>
-                    ))}
+                    <ScoreBar arm="with-skill" observation={metric.treatment} />
+                    <ScoreBar arm="baseline" observation={metric.baseline} />
                   </div>
                 </div>
               ))}

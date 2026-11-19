@@ -26,7 +26,6 @@ const taskJobSchema = z.object({
   }),
 });
 
-// Read only the scorer's JSON members in memory. No archive paths are extracted or fetched.
 export async function readScoringBundle(blob: Blob) {
   if (blob.size > MAX_BUNDLE_BYTES) throw new Error('Scoring bundle exceeds 32 MiB.');
   const reader = blob.stream().pipeThrough(new DecompressionStream('gzip')).getReader();

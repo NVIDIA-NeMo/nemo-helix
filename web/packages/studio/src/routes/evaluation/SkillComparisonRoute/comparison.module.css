@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 .chart {
+  --score-label-space: 96px;
   border: 1px solid var(--border-color-base);
   border-radius: var(--radius-lg);
   background: var(--background-color-surface-raised);
@@ -15,28 +16,37 @@
   row-gap: 14px;
 }
 
+.axis,
+.gridlines {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 0;
+  justify-items: start;
+}
+
 .axis {
-  display: flex;
-  justify-content: space-between;
-  padding-right: 72px;
+  min-height: 18px;
+  margin-right: var(--score-label-space);
   color: var(--text-color-secondary);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
+}
+
+.axis > span {
+  transform: translateX(-50%);
 }
 
 .plot {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  margin-right: var(--score-label-space);
   padding-block: 4px;
 }
 
 .gridlines {
   position: absolute;
-  inset: 0 72px 0 0;
-  display: flex;
-  justify-content: space-between;
+  inset: 0;
   pointer-events: none;
 }
 
@@ -45,13 +55,32 @@
   background: var(--border-color-chart);
 }
 
+.scoreTrack {
+  position: relative;
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+.treatmentBar {
+  fill: var(--color-chart-data-categorical-1);
+}
+
+.baselineBar {
+  fill: var(--text-color-secondary);
+}
+
+.range {
+  stroke: var(--text-color-primary);
+  stroke-width: 2px;
+  filter: drop-shadow(0 0 1px var(--background-color-surface-raised));
+}
+
 .value {
-  width: 64px;
-  flex-shrink: 0;
+  fill: var(--text-color-primary);
   font-family: ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   font-size: 14px;
-  text-align: right;
 }
 
 .matrix {
