@@ -197,7 +197,8 @@ nemo describe""",
 Commands for plugin discovery.
 
 External plugins served by their own HTTP adapter can be previewed, registered,
-and removed with `preview`, `install`, `installed`, and `uninstall`.
+inspected, called, and removed with `preview`, `install`, `installed`, `endpoints`,
+`call`, and `uninstall`.
 
 Examples:
 # List installed plugins, including registered external ones.
@@ -206,6 +207,9 @@ nemo plugins list
 nemo plugins preview http://127.0.0.1:6007/plugin.yaml
 # Register it (shows the manifest and asks for consent).
 nemo plugins install http://127.0.0.1:6007/plugin.yaml
+# See what registered plugins expose, then call an endpoint.
+nemo plugins endpoints
+nemo plugins call phoenix spans -q project=support-agent-demo
 # List and remove registered external plugins.
 nemo plugins installed
 nemo plugins uninstall phoenix""",

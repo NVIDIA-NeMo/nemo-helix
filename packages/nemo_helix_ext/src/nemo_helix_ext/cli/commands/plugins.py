@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import json
+from dataclasses import asdict
+from typing import Annotated, Any, Optional
 
 import click
 import typer
 from nemo_helix_plugin.cli_confirm import confirm_destructive
-from nemo_helix_plugin.cli_options import YesOption
+from nemo_helix_plugin.cli_options import WorkspaceOption, YesOption
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.types import PreparedRequest
 from nemo_helix_plugin.community_plugins.client import CommunityPluginsClient
 from nemo_helix_plugin.community_plugins.types import (
     EnableRequest,
@@ -20,6 +23,15 @@ from nemo_helix_plugin.community_plugins.types import (
     PreviewResponse,
 )
 
+from nemo_helix_ext.cli.commands.plugins_external import (
+    endpoint_rows,
+    fill_path,
+    gateway_path,
+    parse_body,
+    parse_pairs,
+    scalar_columns,
+    select_endpoint,
+)
 from nemo_helix_ext.cli.core.code_generator import handle_code_generation
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.errors import handle_errors
@@ -44,7 +56,8 @@ app = create_typer_app(
 Commands for plugin discovery.
 
 External plugins served by their own HTTP adapter can be previewed, registered,
-and removed with `preview`, `install`, `installed`, and `uninstall`.
+inspected, called, and removed with `preview`, `install`, `installed`, `endpoints`,
+`call`, and `uninstall`.
 
 Examples:
 # List installed plugins, including registered external ones.
@@ -53,6 +66,9 @@ nemo plugins list
 nemo plugins preview http://127.0.0.1:6007/plugin.yaml
 # Register it (shows the manifest and asks for consent).
 nemo plugins install http://127.0.0.1:6007/plugin.yaml
+# See what registered plugins expose, then call an endpoint.
+nemo plugins endpoints
+nemo plugins call phoenix spans -q project=support-agent-demo
 # List and remove registered external plugins.
 nemo plugins installed
 nemo plugins uninstall phoenix""",
@@ -329,6 +345,171 @@ def list_installed_plugins(
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
     )
+
+
+@app.command("endpoints")
+@collect_warnings
+@handle_errors
+def list_plugin_endpoints(
+    ctx: typer.Context,
+    plugin: Annotated[
+        Optional[str], typer.Argument(help="Only show this plugin's endpoints. Default: all enabled plugins.")
+    ] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+) -> None:
+    """List what registered external plugins expose, with a command to call each.
+
+    Shows every endpoint declared in the manifests of enabled external plugins and a
+    ready-to-paste `nemo plugins call` command for it.
+
+    Examples:
+      nemo plugins endpoints
+      nemo plugins endpoints phoenix
+    """
+    state: CLIContext = ctx.obj
+    columns_explicit = columns is not None and str(columns).strip() != "default"
+    resolved_output_format = state.get_output_format(output_format, apply_non_tty_default=not columns_explicit)
+    check_output_columns_with_format(columns, resolved_output_format)
+
+    registry = _plugins_client(state).list_installed_plugins().data()
+    plugins = [p for p in registry.plugins if plugin is None or p.name == plugin]
+    if plugin is not None and not plugins:
+        raise click.ClickException(f"No external plugin named '{plugin}' is registered. See `nemo plugins installed`.")
+    rows = [asdict(row) for row in endpoint_rows(plugins)]
+    if plugin is not None and not rows:
+        raise click.ClickException(f"Plugin '{plugin}' is disabled. Run `nemo plugins enable {plugin}`.")
+
+    output_columns: str | list[Column] | None = columns
+    if not columns_explicit:
+        output_columns = [Column(name, None) for name in ("plugin", "endpoint", "method", "access", "example")]
+    format_output(
+        rows,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+def _render_call_result(
+    payload: Any,
+    output_format: str,
+    *,
+    state: CLIContext,
+    columns: str | None,
+    no_truncate: bool | None,
+) -> None:
+    """Show a plugin's JSON response: a table for paged lists, key/values for one object."""
+    if output_format in ("json", "yaml", "raw"):
+        format_output(payload, is_list=isinstance(payload, list), output_format=output_format)
+        return
+    items = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(items, list):
+        rows = [item if isinstance(item, dict) else {"value": item} for item in items]
+        columns_explicit = columns is not None and str(columns).strip() != "default"
+        output_columns: str | list[Column] | None = columns
+        if not columns_explicit:
+            output_columns = [Column(name, None) for name in scalar_columns(rows)]
+        if not rows or not output_columns:
+            format_output(payload, is_list=False, output_format="json")
+            return
+        format_output(
+            rows,
+            is_list=True,
+            output_format=output_format,
+            output_columns=output_columns,
+            no_truncate=state.get_no_truncate(no_truncate),
+            timestamp_format=state.get_timestamp_format(),
+        )
+        return
+    if isinstance(payload, dict) and payload:
+        width = max(len(key) for key in payload)
+        for key, value in payload.items():
+            typer.echo(f"{key.ljust(width)}  {value if isinstance(value, str) else json.dumps(value)}")
+        return
+    format_output(payload, is_list=False, output_format="json")
+
+
+@app.command("call")
+@collect_warnings
+@handle_errors
+def call_plugin(
+    ctx: typer.Context,
+    plugin: Annotated[str, typer.Argument(help="Name of a registered external plugin.")],
+    endpoint: Annotated[
+        Optional[str],
+        typer.Argument(help="Endpoint name, such as 'spans'. Optional when the plugin has one endpoint."),
+    ] = None,
+    method: Annotated[
+        Optional[str],
+        typer.Option("--method", "-X", help="HTTP method, when the endpoint name alone is ambiguous."),
+    ] = None,
+    workspace: WorkspaceOption = None,
+    query: Annotated[
+        Optional[list[str]], typer.Option("--query", "-q", help="Query parameter as KEY=VALUE. Repeatable.")
+    ] = None,
+    param: Annotated[
+        Optional[list[str]],
+        typer.Option("--param", help="Value for a path template other than {workspace}, as KEY=VALUE."),
+    ] = None,
+    data: Annotated[
+        Optional[str], typer.Option("--data", "-d", help="JSON request body, or @file.json. Not for GET.")
+    ] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+) -> None:
+    """Call an endpoint of a registered external plugin through the gateway.
+
+    The endpoint is found from the plugin's manifest, so you type its name instead of
+    the gateway path. Use `nemo plugins endpoints` to see what is available. Lists are
+    shown as a table and single objects as key/values; use `-f json` for the raw body.
+
+    Examples:
+      nemo plugins call is-it-christmas
+      nemo plugins call phoenix projects
+      nemo plugins call phoenix spans -q project=support-agent-demo -f json
+      nemo plugins call phoenix spans -X POST -q project=demo --data @spans.json
+    """
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    if resolved_output_format == "code":
+        raise click.UsageError("-f code is not supported for `plugins call`.")
+
+    registry = _plugins_client(state).list_installed_plugins().data()
+    found = next((p for p in registry.plugins if p.name == plugin), None)
+    if found is None:
+        raise click.ClickException(f"No external plugin named '{plugin}' is registered. See `nemo plugins installed`.")
+    if not found.enabled:
+        raise click.ClickException(f"Plugin '{plugin}' is disabled. Run `nemo plugins enable {plugin}`.")
+
+    chosen = select_endpoint(found, endpoint, method)
+    resolved_workspace = workspace or state.get_workspace() or "default"
+    path = gateway_path(
+        found.name,
+        fill_path(chosen.path, workspace=resolved_workspace, params=parse_pairs(param, option="--param")),
+    )
+    content = parse_body(data, method=chosen.method)
+    query_params: dict[str, str | int | bool | None] = dict(parse_pairs(query, option="--query"))
+    request: PreparedRequest[None] = PreparedRequest(
+        path_template=path,
+        path_params={},
+        method=chosen.method,
+        content=content,
+        content_type="application/json" if content is not None else None,
+        response_type=None,
+        query_params=query_params or None,
+    )
+    response = state.get_client().send(request).http_response
+    try:
+        payload = response.json()
+    except ValueError:
+        typer.echo(response.text if response.content else f"✓ {response.status_code}")
+        return
+    _render_call_result(payload, resolved_output_format, state=state, columns=columns, no_truncate=no_truncate)
 
 
 @app.command("uninstall")

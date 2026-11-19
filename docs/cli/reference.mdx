@@ -1287,7 +1287,8 @@ nemo wait inference provider [OPTIONS] NAME
 Commands for plugin discovery.
 
 External plugins served by their own HTTP adapter can be previewed, registered,
-and removed with `preview`, `install`, `installed`, and `uninstall`.
+inspected, called, and removed with `preview`, `install`, `installed`, `endpoints`,
+`call`, and `uninstall`.
 
 **Examples:**
 
@@ -1298,6 +1299,9 @@ nemo plugins list
 nemo plugins preview http://127.0.0.1:6007/plugin.yaml
 # Register it (shows the manifest and asks for consent).
 nemo plugins install http://127.0.0.1:6007/plugin.yaml
+# See what registered plugins expose, then call an endpoint.
+nemo plugins endpoints
+nemo plugins call phoenix spans -q project=support-agent-demo
 # List and remove registered external plugins.
 nemo plugins installed
 nemo plugins uninstall phoenix
@@ -1319,6 +1323,8 @@ nemo plugins [OPTIONS] [COMMAND] [ARGS]...
 * `preview`: Show what installing an external plugin would approve.
 * `install`: Register an external plugin after reviewing and...
 * `installed`: List external plugins registered with the platform.
+* `endpoints`: List what registered external plugins expose, with a...
+* `call`: Call an endpoint of a registered external plugin through...
 * `uninstall`: Remove an external plugin's registration.
 * `enable`: Re-enable a disabled external plugin.
 * `disable`: Disable an external plugin without removing its...
@@ -1447,6 +1453,86 @@ nemo plugins installed -f json
 ```shell
 nemo plugins installed [OPTIONS]
 ```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo plugins endpoints
+
+List what registered external plugins expose, with a command to call each.
+
+Shows every endpoint declared in the manifests of enabled external plugins and a
+ready-to-paste `nemo plugins call` command for it.
+
+**Examples:**
+
+```shell
+nemo plugins endpoints
+nemo plugins endpoints phoenix
+```
+
+**Usage:**
+
+```shell
+nemo plugins endpoints [OPTIONS] [PLUGIN]
+```
+
+**Arguments:**
+
+* `<PLUGIN>`: Only show this plugin's endpoints. Default: all enabled plugins.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo plugins call
+
+Call an endpoint of a registered external plugin through the gateway.
+
+The endpoint is found from the plugin's manifest, so you type its name instead of
+the gateway path. Use `nemo plugins endpoints` to see what is available. Lists are
+shown as a table and single objects as key/values; use `-f json` for the raw body.
+
+**Examples:**
+
+```shell
+nemo plugins call is-it-christmas
+nemo plugins call phoenix projects
+nemo plugins call phoenix spans -q project=support-agent-demo -f json
+nemo plugins call phoenix spans -X POST -q project=demo --data @spans.json
+```
+
+**Usage:**
+
+```shell
+nemo plugins call [OPTIONS] PLUGIN [ENDPOINT]
+```
+
+**Arguments:**
+
+* `<PLUGIN>`: Name of a registered external plugin.
+* `<ENDPOINT>`: Endpoint name, such as 'spans'. Optional when the plugin has one endpoint.
+
+**Options:**
+
+* `--method, -X`: HTTP method, when the endpoint name alone is ambiguous.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--query, -q`: Query parameter as KEY=VALUE. Repeatable.
+* `--param`: Value for a path template other than \{workspace}, as KEY=VALUE.
+* `--data, -d`: JSON request body, or @file.json. Not for GET.
 
 **Help:**
 
