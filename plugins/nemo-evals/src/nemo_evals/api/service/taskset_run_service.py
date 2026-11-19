@@ -515,6 +515,7 @@ class TasksetRunService:
         snapshot = registered_agent_files_receipt(spec.target)
         acceptance_started = False
         try:
+            await self._validate_baseline(req, workspace, taskset_ref=pinned.root)
             try:
                 await require_closed_book_route(spec.target, async_sdk=self._async_client, authorize=self._authorizer)
             except ValueError as exc:
@@ -558,6 +559,7 @@ class TasksetRunService:
                 finalization_deadline_at=finalization,
                 discard_on_loss=(snapshot,) if snapshot is not None else (),
                 auth_context=self._auth_context,
+                baseline_run_id=req.baseline_run_id,
             )
             acceptance_started = True
             result = await self._store.accept(acceptance)
@@ -578,6 +580,20 @@ class TasksetRunService:
             notices.append(open_book)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=[*warnings, *notices])
         return SubmitOutcome(status, created=result.created)
+
+    async def _validate_baseline(self, req: TasksetRunInput, workspace: str, *, taskset_ref: str) -> None:
+        """Require an existing baseline in this workspace evaluating the same pinned taskset.
+
+        The link records the caller's comparison choice. Model, agent and skills may differ;
+        the baseline need not have finished yet. No baseline plan or results are required.
+        """
+        if req.baseline_run_id is None:
+            return
+        baseline = await self._store.find(workspace, req.baseline_run_id)
+        if baseline is None:
+            raise TasksetRunResolutionError(f"baseline run {workspace}/{req.baseline_run_id} doesn't exist")
+        if baseline.taskset_ref != taskset_ref:
+            raise TasksetRunResolutionError("baseline run must evaluate the same pinned taskset revision")
 
     def _default_dispatcher_image(self) -> str:
         """The platform's nhx-tasks image: the dispatcher a run gets when ``runs.harbor`` doesn't pin one."""
@@ -834,6 +850,12 @@ class TasksetRunService:
             HTTPException: A caller cannot read a referenced source.
         """
         assert isinstance(req.spec.tasks, TasksetRef)
+        if req.baseline_run_id is not None:
+            await self._authorizer(
+                "GET",
+                f"/apis/evals/v2/workspaces/{quote(workspace, safe='')}/agent-evaluate/runs/"
+                f"{quote(req.baseline_run_id, safe='')}",
+            )
         source_workspace, name, _ = parse_subentity_ref(req.spec.tasks.root, workspace)
         await self._authorizer(
             "GET", f"/apis/evals/v2/workspaces/{quote(source_workspace, safe='')}/tasksets/{quote(name, safe='')}"
