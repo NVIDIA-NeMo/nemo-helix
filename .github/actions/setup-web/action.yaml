@@ -26,7 +26,7 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: web/packages/sdk/generated
-        key: web-sdk-${{ runner.os }}-${{ hashFiles('.nvmrc', 'web/pnpm-lock.yaml', 'openapi/openapi.yaml', 'plugins/*/openapi/openapi.yaml', 'web/packages/sdk/orval.config.ts', 'web/packages/sdk/generateAll.ts', 'web/packages/sdk/orval/**') }}
+        key: web-sdk-${{ runner.os }}-${{ hashFiles('.nvmrc', 'web/pnpm-lock.yaml', 'openapi/openapi.yaml', 'plugins/*/openapi/openapi.yaml', 'web/packages/sdk/orval.config.ts', 'web/packages/sdk/generateAll.ts', 'web/packages/sdk/package.json','web/packages/sdk/orval/**') }}
     - name: Install dependencies
       shell: bash
       working-directory: web

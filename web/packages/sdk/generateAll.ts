@@ -115,6 +115,7 @@ const computeInputHash = (): string => {
     path.join(ORVAL_DIR, 'generate-capabilities.ts'),
     path.join(ORVAL_DIR, 'generate-schema-extensions.ts'),
     path.join(__dirname, 'generateAll.ts'),
+    path.join(__dirname, 'package.json'),
   ];
   for (const file of generatorSources) {
     if (fs.existsSync(file)) {
