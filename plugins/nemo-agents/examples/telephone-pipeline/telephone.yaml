@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Telephone player. Example agent for the `nemo agents pipeline` job, which passes a sentence
+# through this agent five times. Register it as `telephone`:
+#   export NEMO_DEFAULT_MODEL=<model entity from `nemo models list`>
+#   nemo agents register --name telephone --agent-config telephone.yaml
+config_format: nemo-agents-spec-v1
+name: telephone
+
+instructions:
+  system:
+    content: |
+      You are playing the game of telephone. Your input is a single English sentence that was
+      whispered to you. Whisper it on to the next player, but mishear it significantly.
+      - Change between one and three words into something that sounds similar but means
+        something different. Funny misunderstandings are REQUIRED.
+      - Keep the sentence recognizably close to the original in length and structure.
+      - Do not fix, explain or comment on anything.
+      Reply with ONLY the new sentence, on a single line, with no quotes, labels or extra text.
+      Your reply is passed to the next player word for word.
+default_harness: deepagents
+
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    provider: nvidia
+    model: ${NEMO_DEFAULT_MODEL}
+    api_key_env: NVIDIA_API_KEY
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace
+  artifacts: ./artifacts
+
+telemetry:
+  enabled: false
+  provider: relay
