@@ -17,15 +17,17 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.service import BuilderService, get_settle
 from nemo_builder_plugin.settle import settle
-from nemo_builder_plugin.submit import SubmitResult
+from nemo_builder_plugin.submit import BackendChanged, BuildConflict, MissingSecrets, SubmitResult
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from pydantic import ValidationError
 
 
 def _app(
@@ -145,7 +147,9 @@ STEP = Caller(auth=True, actor="job-step", submitter="alice")
 SERVICE_STEP = Caller(auth=True, actor="service:builder", submitter="alice")
 
 
-def _row(status: Literal["pending", "ready", "failed"] = "pending", digest: str | None = None) -> ContainerImage:
+def _row(
+    status: Literal["pending", "ready", "failed"] = "pending", digest: str | None = None, backend: str = "execution"
+) -> ContainerImage:
     row = ContainerImage(
         name="build-1-0",
         workspace="ws-a",
@@ -156,6 +160,7 @@ def _row(status: Literal["pending", "ready", "failed"] = "pending", digest: str 
             revision=1,
             job="ws-a/build-1",
             request_digest="sha256:" + "a" * 64,
+            backend=backend,
         ),
     )
     row.status, row.digest = status, digest
@@ -195,6 +200,34 @@ class TestComplete:
         response, _ = self._post(_row(), body={"digest": DIGEST, "runtime_config": runtime_config})
         assert response.status_code == 200
         assert response.json()["runtime_config"] == runtime_config
+
+    @pytest.mark.parametrize("caller", [Caller(auth=False), STEP, SERVICE_STEP], ids=["auth-off", "step", "service"])
+    def test_a_remote_build_steps_handle_is_recorded_with_it(self, caller: Caller) -> None:
+        external = {"image_id": "img-1", "build_id": "build-1", "attributes": {"builder": "v1"}}
+        row = _row(backend="remote")
+        response, entities = self._post(row, caller=caller, body={"digest": DIGEST, "external": external})
+        assert response.status_code == 200
+        assert response.json()["external"] == external
+        assert response.json()["runtime_config"] is None
+        entities.update.assert_awaited_once()
+
+    def test_a_handle_for_an_image_this_cluster_builds_is_a_409(self) -> None:
+        body = {"digest": DIGEST, "external": {"image_id": "img-1"}}
+        response, entities = self._post(_row(), body=body)
+        assert response.status_code == 409
+        assert "built in this cluster" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+
+    def test_a_misspelt_handle_is_refused_not_dropped(self) -> None:
+        body = {"digest": DIGEST, "external": {"imageid": "img-1"}}
+        response, entities = self._post(_row(backend="remote"), body=body)
+        assert response.status_code == 422
+        entities.update.assert_not_awaited()
+
+    def test_an_image_this_cluster_built_has_no_handle(self) -> None:
+        response, _ = self._post(_row())
+        assert response.json()["external"] is None
+        assert response.json()["provenance"]["backend"] == "execution"
 
     def test_an_image_already_ready_at_that_digest_is_returned_as_it_is(self) -> None:
         response, entities = self._post(_row("ready", DIGEST))
@@ -371,6 +404,124 @@ class TestSubmitting:
     )
     def test_anyone_else_may(self, caller: Caller) -> None:
         assert submit_refusal(caller) is None
+
+    def _post(self, monkeypatch: pytest.MonkeyPatch, config: BuilderConfig | None = None):
+        """Submit to a deployment configured as ``config``, whose Jobs has no execution profiles."""
+
+        def jobs(request: httpx.Request) -> httpx.Response:
+            assert request.url.path.endswith("/execution-profiles"), "nothing else is asked before a refusal"
+            return httpx.Response(200, json=[])
+
+        if config is not None:
+            monkeypatch.setattr(service, "_load_config", lambda: config)
+        client = AsyncNemoClient(
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(jobs))
+        )
+        entities = AsyncMock()
+        app = _app(entities)
+        app.dependency_overrides[get_nemo_client] = lambda: client
+        response = TestClient(app).post(self.BUILDS, json=self.BODY)
+        entities.create.assert_not_awaited()
+        return response
+
+    @pytest.mark.parametrize(
+        ("config", "named"),
+        [
+            ({"backend": "remote"}, "builder.remote.registry and builder.remote.repository"),
+            ({"backend": "remot"}, "'remot', which is no backend"),
+            ({}, "builder.registry"),
+        ],
+        ids=["remote-unconfigured", "no-such-backend", "in-cluster-unconfigured"],
+    )
+    def test_a_backends_refusal_is_a_409_that_says_it_is_one(
+        self, config: dict, named: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A caller must tell it from a revision another request holds: this one the same request meets again."""
+        response = self._post(monkeypatch, BuilderConfig.model_validate(config))
+        assert response.status_code == 409
+        assert response.json()["code"] == "backend_rejected"
+        # `detail` is the sentence it always was, for a caller that only reads that.
+        assert named in response.json()["detail"]
+
+    def test_a_misspelt_setting_is_named_in_the_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate({"remote": {"repositry": "team/images"}})
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        with pytest.raises(ValidationError):
+            BuilderConfig.get()
+        response = self._post(monkeypatch)
+        assert response.status_code == 409
+        assert response.json()["code"] == "backend_rejected"
+        assert "configuration is invalid (remote.repositry: " in response.json()["detail"]
+
+    def test_a_refused_value_is_named_but_not_repeated(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A validator's own sentence quotes what it refused, and an operator may have pasted a credential there."""
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate({"remote": {"registry": "bot:t0ken@registry.example.com/team"}})
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "the builder's configuration is invalid (remote.registry: invalid value); the API log says more"
+        )
+        # The operator's log has the rest.
+        assert "remote.registry must be a host" in caplog.text
+
+    def test_a_check_on_the_section_as_a_whole_is_named_for_the_section(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Such a check has no one setting to name. An answer of `(: invalid value)` would name nothing."""
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate({"registry_username_secret": "user", "registry_password_secret": None})
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "the builder's configuration is invalid (builder: invalid value); the API log says more"
+        )
+
+    def test_a_config_that_cant_be_read_at_all_is_a_refusal_too(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Such as a `builder:` section with every line under it commented out."""
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            raise ValueError("Settings for service 'builder' must be a mapping, got 'hunter2'.")
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert response.status_code == 409
+        assert response.json()["code"] == "backend_rejected"
+        assert response.json()["detail"] == "the builder's configuration can't be read; the API log says why"
+        assert "must be a mapping" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("failure", "code"),
+        [
+            (MissingSecrets("the build job needs platform secrets"), "missing_secrets"),
+            (BackendChanged("already built by the 'execution' backend"), "backend_changed"),
+            (BuildConflict("already submitted with a different request"), None),
+        ],
+        ids=["secrets", "another-backends-row", "another-requests-revision"],
+    )
+    def test_each_other_409_says_which_it_is(
+        self, failure: Exception, code: str | None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def submit(*_args: object, **_kwargs: object) -> SubmitResult:
+            raise failure
+
+        monkeypatch.setattr(service, "load_backend", lambda *_args: None)
+        monkeypatch.setattr(service, "submit_build_set", submit)
+        response = self._post(monkeypatch, BuilderConfig.model_validate({}))
+        assert response.status_code == 409
+        assert response.json()["detail"] == str(failure)
+        # A revision another request holds is the one a caller gets past by reading or resubmitting.
+        assert response.json().get("code") == code
 
 
 class TestWhoTheRoutesAdmit:

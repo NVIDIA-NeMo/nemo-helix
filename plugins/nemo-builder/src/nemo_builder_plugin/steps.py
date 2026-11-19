@@ -190,3 +190,37 @@ class PushStepConfig(BaseModel):
                 if not ref.startswith(f"{self.registry}/"):
                     raise ValueError(f"{ref} is not on {self.registry}")
         return self
+
+
+#: Where a remote-build step finds the build service's credential, when the deployment keeps it in a platform
+#: secret. A deployment whose Jobs profile mounts the credential sets nothing here.
+REMOTE_CREDENTIAL_ENV = "NHX_BUILD_REMOTE_CREDENTIAL"
+
+#: The Dockerfile a build service finds without being told: the one at the context's root.
+ROOT_DOCKERFILE = "Dockerfile"
+
+
+class RemoteBuildImage(BaseModel):
+    """One image a remote build service builds from a context this step fetches."""
+
+    image: str = Field(description="The `ContainerImage` row name, which the builder's routes take.")
+    source: ContextSource
+    dockerfile: str = Field(description="Dockerfile path, relative to the context.")
+    platform: str
+
+
+class RemoteBuildStepConfig(BaseModel):
+    """What the remote-build step needs. It names no service: the step's image is the service's client."""
+
+    images: list[RemoteBuildImage] = Field(min_length=1)
+    registry: str = Field(description="The registry host the service publishes to.")
+    repository: str = Field(description="The one repository it publishes to. Every row was written with it.")
+    build_timeout_seconds: int = Field(ge=1, description="How long to wait for one image before cancelling it.")
+    credential_in_environment: bool = Field(
+        default=False, description=f"Whether the service's credential is in `{REMOTE_CREDENTIAL_ENV}`."
+    )
+
+    @property
+    def destination(self) -> str:
+        """``<registry>/<repository>``: where every image this step completes must be."""
+        return f"{self.registry}/{self.repository}"

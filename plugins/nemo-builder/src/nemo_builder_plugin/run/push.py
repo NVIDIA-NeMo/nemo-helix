@@ -30,7 +30,7 @@ import httpx
 from cryptography.exceptions import UnsupportedAlgorithm
 from nemo_builder_plugin.client import BuilderClient
 from nemo_builder_plugin.completion import CompleteRequest
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.registry import REGISTRY_TIMEOUT_SECONDS, Registry, registry_client
 from nemo_builder_plugin.registry_auth import login
 from nemo_builder_plugin.run.tools import run_tool
@@ -279,8 +279,20 @@ class Builder:
                 self._sleep(2.0**attempt)
         raise failure
 
-    def complete(self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None) -> ContainerImage:
-        body = CompleteRequest(digest=digest, runtime_config=runtime_config)
+    def complete(
+        self,
+        image: str,
+        digest: str,
+        runtime_config: ImageRuntimeConfig | None,
+        external: ExternalImage | None = None,
+    ) -> ContainerImage:
+        # Left unset, not null, for an image built here: the client sends only what is set, and an API from before
+        # the field existed refuses one it doesn't know.
+        body = (
+            CompleteRequest(digest=digest, runtime_config=runtime_config)
+            if external is None
+            else CompleteRequest(digest=digest, runtime_config=runtime_config, external=external)
+        )
         return self._call(
             f"completing {image}",
             lambda: self._client.complete_container_image(workspace=self._workspace, name=image, body=body).data(),

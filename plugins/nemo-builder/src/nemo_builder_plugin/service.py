@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
 from nemo_builder_plugin.backend import BackendRejectedError
@@ -28,9 +29,16 @@ from nemo_builder_plugin.completion import (
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
-from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
+from nemo_builder_plugin.schema import (
+    CODE_BACKEND_CHANGED,
+    CODE_BACKEND_REJECTED,
+    CODE_MISSING_SECRETS,
+    BuildSet,
+    SubmitBuildResponse,
+)
 from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
+    BackendChanged,
     BuildConflict,
     InvalidBuildRequest,
     MissingSecrets,
@@ -55,6 +63,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +73,47 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
         return await entity_client.get(ContainerImage, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+
+
+def _refusal(code: str, exc: Exception) -> JSONResponse:
+    """A 409 that says which kind it is.
+
+    ``detail`` is the sentence it always was. ``code`` is for a caller that must tell a refusal, which the same
+    request meets every time, from a revision another request holds, which the next revision gets past.
+    """
+    return JSONResponse(status_code=409, content={"detail": str(exc), "code": code})
+
+
+def _setting(location: tuple[int | str, ...]) -> str:
+    """The setting a validation error is about. A check on the section as a whole has no location: `builder`."""
+    return ".".join(map(str, location)) or "builder"
+
+
+def _load_config() -> BuilderConfig:
+    try:
+        return BuilderConfig.get()
+    except ValidationError as exc:
+        # Named, not a bare 500: an operator who misspelt a key finds it in the answer. The answer says which
+        # settings and what kind of problem. A validator's own sentence may quote the value it refused, which a
+        # submitter has no business reading, so that goes to the log only.
+        errors = exc.errors(include_input=False, include_url=False)
+        logger.error(
+            "the builder's configuration is invalid: %s",
+            sanitize_for_log("; ".join(f"{_setting(error['loc'])}: {error['msg']}" for error in errors)),
+        )
+        problems = "; ".join(
+            f"{_setting(error['loc'])}: "
+            + ("invalid value" if error["type"] in ("value_error", "assertion_error") else error["msg"])
+            for error in errors
+        )
+        raise BackendRejectedError(
+            f"the builder's configuration is invalid ({problems}); the API log says more"
+        ) from exc
+    except ValueError as exc:
+        # Not a setting that fails its check, but a section that can't be read at all: `builder:` left empty, or
+        # an environment variable that isn't the JSON it must be. The message may quote what it couldn't read.
+        logger.error("the builder's configuration can't be read: %s", sanitize_for_log(str(exc)))
+        raise BackendRejectedError("the builder's configuration can't be read; the API log says why") from exc
 
 
 #: ``image`` as it stands once settled: failed if its job abandoned it.
@@ -121,7 +171,7 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         client: AsyncNemoClient = Depends(get_nemo_client),
         caller: Caller = Depends(current_caller),
-    ) -> SubmitBuildResponse:
+    ) -> SubmitBuildResponse | JSONResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. Jobs starts the job once
@@ -156,7 +206,7 @@ def _build_router() -> APIRouter:
 
         try:
             # The sandbox runs where the build's profiles put its steps.
-            config = BuilderConfig.get()
+            config = _load_config()
             backend = load_backend(config, await jobs_client.list_execution_profiles())
             result = await submit_build_set(
                 body,
@@ -171,7 +221,13 @@ def _build_router() -> APIRouter:
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
+        except BackendRejectedError as exc:
+            return _refusal(CODE_BACKEND_REJECTED, exc)
+        except MissingSecrets as exc:
+            return _refusal(CODE_MISSING_SECRETS, exc)
+        except BackendChanged as exc:
+            return _refusal(CODE_BACKEND_CHANGED, exc)
+        except BuildConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except UpstreamUnavailable as exc:
             raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
@@ -271,7 +327,7 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
     ) -> ContainerImage:
-        """Make an image `ready` at the digest its push step pushed and signed.
+        """Make an image `ready` at the digest the step that built it published.
 
         Completing an image already `ready` at that digest returns it; 409 if it settled otherwise.
         """
@@ -292,6 +348,7 @@ def _build_router() -> APIRouter:
                 name=name,
                 digest=body.digest,
                 runtime_config=body.runtime_config,
+                external=body.external,
             )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc

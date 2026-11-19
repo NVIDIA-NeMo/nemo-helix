@@ -11,9 +11,9 @@ from typing import Literal
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, settle
+from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, EndedJob, ended_job, settle
 from nemo_helix_plugin.entities import EntityConflictError
-from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 
 NOW = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 DIGEST = "sha256:" + "d" * 64
@@ -61,11 +61,11 @@ class FakeRows:
 
 
 class FakeJobs:
-    def __init__(self, statuses: dict[str, HelixJobStatus | Exception]) -> None:
+    def __init__(self, statuses: dict[str, HelixJobStatus | EndedJob | Exception]) -> None:
         self.statuses = statuses
         self.asked: list[str] = []
 
-    async def __call__(self, workspace: str, name: str) -> HelixJobStatus | None:
+    async def __call__(self, workspace: str, name: str) -> HelixJobStatus | EndedJob | None:
         self.asked.append(f"{workspace}/{name}")
         found = self.statuses.get(name)
         if isinstance(found, Exception):
@@ -149,7 +149,7 @@ class TestHowAReadWrites:
         events: list[str] = []
         jobs = FakeJobs({"builder-demo-1": HelixJobStatus.ERROR, "builder-demo-2": HelixJobStatus.ERROR})
 
-        async def recorded(workspace: str, name: str) -> HelixJobStatus | None:
+        async def recorded(workspace: str, name: str) -> HelixJobStatus | EndedJob | None:
             events.append(f"read:{name}")
             return await jobs(workspace, name)
 
@@ -239,3 +239,142 @@ class TestWhat010Queued:
         [image] = await _settle(rows, FakeJobs({"builder-demo-1": HelixJobStatus.ACTIVE}))
         assert image.status == "queued"
         assert rows.updates == []
+
+
+ENDED = "not built: its build job ended (error) without publishing it"
+REASON = "the build service reports it failed: base image could not be pulled [build build-1]"
+WHEN = "2026-11-05T12:00:00Z"
+
+
+def _job(
+    *, status: str = "error", log_tail: str | None = None, message: str | None = None, step_message: str | None = None
+) -> HelixJobStatusResponse:
+    """A job's status as Jobs returns it, with the end of its one task's log."""
+    task = {
+        "id": "task-1",
+        "name": "remote-build",
+        "status": status,
+        "status_details": {},
+        "error_details": None,
+        "error_stack": log_tail,
+        "created_at": WHEN,
+        "updated_at": WHEN,
+    }
+    step = {
+        "id": "step-1",
+        "name": "remote-build",
+        "status": status,
+        "status_details": {},
+        "error_details": None if step_message is None else {"message": step_message},
+        "tasks": [task],
+        "created_at": WHEN,
+        "updated_at": WHEN,
+    }
+    return HelixJobStatusResponse.model_validate(
+        {
+            "id": "job-1",
+            "name": "builder-demo-1",
+            "status": status,
+            "status_details": {},
+            "error_details": None if message is None else {"message": message},
+            "steps": [step],
+            "created_at": WHEN,
+            "updated_at": WHEN,
+        }
+    )
+
+
+class TestWhyAnEndedJobDidNotBuildIt:
+    @pytest.mark.asyncio
+    async def test_the_line_its_step_logged_for_the_image_is_the_reason(self) -> None:
+        rows = FakeRows(_row())
+        ended = EndedJob(HelixJobStatus.ERROR, reasons={"demo-1.img0": REASON}, message="Task failed")
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
+        assert (image.status, image.status_detail) == ("failed", f"{ENDED}: {REASON}")
+
+    @pytest.mark.asyncio
+    async def test_the_jobs_own_account_is_the_reason_when_the_step_left_none(self) -> None:
+        """Jobs ended the step itself, at its time limit, before the step could say anything."""
+        rows = FakeRows(_row("a"), _row("b"))
+        timed_out = "Job timed out after reaching max TTL of 86400 seconds"
+        ended = EndedJob(HelixJobStatus.ERROR, reasons={"a": REASON}, message=timed_out)
+        a, b = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
+        # Each image's own line, never another's.
+        assert (a.status_detail, b.status_detail) == (f"{ENDED}: {REASON}", f"{ENDED}: {timed_out}")
+
+    @pytest.mark.asyncio
+    async def test_a_job_of_the_default_backend_gives_its_own_account_too(self) -> None:
+        """No step of the in-cluster build logs a marked line, so what Jobs says of the job is the reason. Read
+        through ``ended_job``, as the controller reads it."""
+        rows = FakeRows(_row())
+        assert rows.rows["demo-1.img0"].provenance.backend == "execution"
+        ended = ended_job(_job(message="Step push failed"))
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": ended}))
+        assert image.status_detail == f"{ENDED}: Step push failed"
+
+    @pytest.mark.asyncio
+    async def test_a_job_that_said_nothing_reads_as_it_always_did(self) -> None:
+        rows = FakeRows(_row())
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": EndedJob(HelixJobStatus.CANCELLED)}))
+        assert image.status_detail == "not built: its build job ended (cancelled) without publishing it"
+
+    def test_the_reason_is_read_from_the_end_of_the_tasks_log(self) -> None:
+        """As Kubernetes hands it back: the container's last lines, after Jobs' own prefix."""
+        log_tail = (
+            "Container nemo-job-task terminated with exit code 1: "
+            "[INFO] 2026-11-05 12:00:01,000 nemo_builder_plugin.run.remote: build build-1: building\n"
+            f"[ERROR] 2026-11-05 12:09:41,512 nemo_builder_plugin.run.remote: NHX_BUILD_FAILED demo-1.img0: {REASON}\n"
+            "[INFO] 2026-11-05 12:09:41,513 nemo_builder_plugin.run.remote: 1 image(s), 1 failure(s)\n"
+        )
+        ended = ended_job(_job(log_tail=log_tail, message="Step remote-build failed"))
+        assert ended == EndedJob(HelixJobStatus.ERROR, {"demo-1.img0": REASON}, "Step remote-build failed")
+
+    def test_an_images_last_line_is_its_reason_and_a_long_one_is_cut(self) -> None:
+        log_tail = f"NHX_BUILD_FAILED a: first\nNHX_BUILD_FAILED b: {'x' * 2000}\nNHX_BUILD_FAILED a: second\n"
+        reasons = ended_job(_job(log_tail=log_tail)).reasons
+        assert reasons["a"] == "second"
+        assert len(reasons["b"]) == 500
+
+    def test_the_reason_is_read_from_a_log_kept_as_json_lines(self) -> None:
+        """As the subprocess executor hands it back, taken from a real run: each log line is the string that ends
+        a JSON object, so it is escaped, and the tail's first line is cut wherever 2,048 characters began."""
+        entry = (
+            '{"timestamp": "2026-11-17T18:49:31.454239+00:00", "job": "builder-demo-1", "job_step": "remote-build", '
+            '"job_task": "task-0a2d95345500482f9ebf86b172dfd158", "message": "[stderr] %s"}'
+        )
+        reason = 'the build service reports it failed: no package named \\"nosuchpkg\\" \\u2026 [build b-be6e0bc02e]'
+        log_tail = "\n".join(
+            [
+                # The cut first line: its opening is gone, and what follows the marker is whole.
+                '2d95345500482f9ebf86b172dfd158", "message": "[stderr] [ERROR] run.remote: NHX_BUILD_FAILED a: first"}',
+                entry % "[INFO] 2026-11-17 13:49:31,440 nemo_builder_plugin.run.remote: build b-be6e0bc02e: failed",
+                entry % f"[ERROR] 2026-11-17 13:49:31,446 nemo_builder_plugin.run.remote: NHX_BUILD_FAILED b: {reason}",
+                entry % "[INFO] 2026-11-17 13:49:31,446 nemo_builder_plugin.run.remote: 2 image(s), 2 failure(s)",
+                "",
+            ]
+        )
+        assert ended_job(_job(log_tail=log_tail, message="Job exited with code 1")).reasons == {
+            "a": "first",
+            "b": 'the build service reports it failed: no package named "nosuchpkg" … [build b-be6e0bc02e]',
+        }
+
+    @pytest.mark.parametrize("inside", ["\x0c", "\u2028", "\x85", "\x1e"], ids=repr)
+    def test_a_line_ends_at_a_newline_and_nowhere_else(self, inside: str) -> None:
+        """Python counts a form feed and a line separator as line ends. A service's text may hold one, and what
+        followed it must not be dropped, or read as a line of its own."""
+        log_tail = (
+            f"[ERROR] run.remote: NHX_BUILD_FAILED a: step 3 failed{inside}NHX_BUILD_FAILED a: forged [build b-1]\r\n"
+            "[INFO] run.remote: 1 image(s), 1 failure(s)\r\n"
+        )
+        reason = ended_job(_job(log_tail=log_tail)).reasons["a"]
+        assert reason.startswith("step 3 failed")
+        assert reason.endswith("NHX_BUILD_FAILED a: forged [build b-1]")
+
+    def test_a_reason_is_one_line_of_printable_text(self) -> None:
+        """A job's log is whatever its step printed, and the reason is shown to whoever reads the row."""
+        reasons = ended_job(_job(log_tail="NHX_BUILD_FAILED a: bad\x1b[31m   base\timage\r\n")).reasons
+        assert reasons["a"] == "bad[31m base image"
+
+    def test_a_job_with_no_message_of_its_own_gives_its_steps(self) -> None:
+        assert ended_job(_job(step_message="OOMKilled")).message == "OOMKilled"
+        assert ended_job(_job()) == EndedJob(HelixJobStatus.ERROR)

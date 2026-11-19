@@ -17,7 +17,16 @@ from filesets import parse_fileset_ref
 from nemo_builder_plugin.client import AsyncBuilderClient
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
-from nemo_builder_plugin.schema import BuildMount, BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import (
+    CODE_BACKEND_REJECTED,
+    CODE_MISSING_SECRETS,
+    BuildMount,
+    BuildSet,
+    BuildSpec,
+    FileSetSource,
+    ImageSource,
+    SubmitBuildResponse,
+)
 from nemo_builder_plugin.upstream import UpstreamError, UpstreamRegistry
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
@@ -92,6 +101,11 @@ def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
     return FileSetSource(fileset=f"{workspace}/{fileset}", archive=path, context_path=context_path)
 
 
+#: The codes Builder gives a 409 that refuses the request itself, where the next revision would fare no better.
+#: A revision another request holds has no code, and a row another backend built has one of its own.
+_REFUSALS = frozenset({CODE_BACKEND_REJECTED, CODE_MISSING_SECRETS})
+
+
 async def ensure_build(
     builder: ImageBuilder,
     *,
@@ -116,7 +130,10 @@ async def ensure_build(
             return await builder.submit(
                 name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
             )
-        except ConflictError:
+        except ConflictError as exc:
+            if isinstance(exc.body, dict) and exc.body.get("code") in _REFUSALS:
+                # Builder refuses the request itself, and would refuse it under any revision.
+                raise
             logger.info("Builder holds %s-%d for another request; submitting the next revision", name, revision - 1)
     return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform)
 
@@ -140,7 +157,8 @@ async def adopt_or_build(
     ``name`` is keyed by content (:func:`builder_name`), so another task, run or user may already have built it:
     a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one, or one made
     before ``built_after``, gets the next revision. Builder refuses a revision another request holds, so a submit
-    that loses that race reads the winner's build instead.
+    that loses that race reads the winner's build instead. A refusal that leaves no row is Builder refusing the
+    request itself, and is raised.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)
@@ -151,6 +169,10 @@ async def adopt_or_build(
                 name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
             )
         except ConflictError:
+            if await builder.get_image(f"{name}-{revision}") is None:
+                # Nothing holds the revision, so no other request won it: Builder refused this request, and
+                # would again. A request that loses the race always finds the winner's row.
+                raise
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
             continue
         return submitted.images[0]

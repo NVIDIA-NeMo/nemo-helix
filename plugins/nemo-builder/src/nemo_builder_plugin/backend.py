@@ -19,6 +19,9 @@ class BackendRejectedError(ValueError):
 
 
 class Backend(Protocol):
+    #: What `builder.backend` calls it. Every row it builds records this, in `provenance.backend`.
+    name: str
+
     def check(self, plan: BuildPlan) -> None:
         """Raise :class:`BackendRejectedError` for a request this backend cannot build, or if it is misconfigured."""
         ...

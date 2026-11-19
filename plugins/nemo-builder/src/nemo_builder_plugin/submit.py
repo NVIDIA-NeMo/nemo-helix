@@ -59,6 +59,10 @@ class BuildConflict(Exception):
     """This ``(name, revision)`` was submitted with a different request, or its job name is taken (409)."""
 
 
+class BackendChanged(BuildConflict):
+    """This ``(name, revision)`` was built by another backend than the deployment builds with now (409)."""
+
+
 class UpstreamUnavailable(Exception):
     """An image to copy couldn't be resolved because its registry failed (502)."""
 
@@ -92,7 +96,7 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
-def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
+def _rows_for(plan: BuildPlan, digest: str, backend: str) -> list[ContainerImage]:
     return [
         ContainerImage(
             name=image.name,
@@ -107,6 +111,7 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
                 job=f"{plan.workspace}/{plan.job_name}",
                 request_digest=digest,
                 upstream=_upstream_image(image),
+                backend=backend,
             ),
         )
         for image in plan.images
@@ -197,18 +202,18 @@ async def submit_build_set(
     ]
     if missing:
         raise MissingSecrets(
-            "the push step needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
+            "the build job needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
         )
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
-    for row in _rows_for(plan, digest):
+    for row in _rows_for(plan, digest, backend.name):
         try:
             created.append(await entity_client.create(row))
             images.append(created[-1])
         except EntityConflictError:
             try:
-                images.append(await _adopt(entity_client, row, digest, build_set, workspace))
+                images.append(await _adopt(entity_client, row, digest, build_set, workspace, backend.name))
             except BuildConflict:
                 await fail_rows(
                     entity_client,
@@ -279,11 +284,18 @@ async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], de
 
 
 async def _adopt(
-    entity_client: _EntityWriter, row: ContainerImage, digest: str, build_set: BuildSet, workspace: str
+    entity_client: _EntityWriter, row: ContainerImage, digest: str, build_set: BuildSet, workspace: str, backend: str
 ) -> ContainerImage:
     existing = await entity_client.get(ContainerImage, name=row.name, workspace=workspace)
     if existing.provenance.request_digest != digest:
         raise _different_request(build_set)
+    # The same request, but another backend built it: its image is somewhere this backend doesn't publish.
+    if existing.provenance.backend != backend:
+        raise BackendChanged(
+            f"build set {build_set.name!r} revision {build_set.revision} was already built by the "
+            f"{existing.provenance.backend!r} backend, and this deployment now builds with {backend!r}. "
+            "Submit a new revision."
+        )
     return existing
 
 

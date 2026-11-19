@@ -916,10 +916,35 @@ safe_synthesizer:
 
 ### `builder`
 
-Configuration for in-cluster container image builds.
+Configuration for container image builds.
 
 ```yaml wordWrap
 builder:
+  # Which backend builds: `execution`, in this cluster, or `remote`, through a build service outside it (see `remote`). Any other value refuses every submit. | default: 'execution'
+  backend: execution
+  remote:
+    # Host of the registry the service publishes every image to. Unset refuses every submit.
+    registry:
+    # The one repository the service publishes to, in every workspace's name: an image is told apart by its digest. Unset refuses every submit.
+    repository:
+    # The Jobs execution profile, provider `cpu`, the remote-build step runs on. Its `max_active_jobs` caps the builds in flight, so set it to what the service lets this deployment queue. Its `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for each image. A profile whose limit is below the builds' own is refused. That check is a floor: it leaves out the time to fetch each build context and, once an image is built, up to five minutes of reporting it to the builder. | default: 'build-remote'
+    profile: build-remote
+    # The image the remote-build step runs: one that holds the service's step program. Unset, the profile's `default_task_image`, which must then be set.
+    image:
+    # The step program in that image, and its arguments.
+    command:
+    - remote-build
+    # The platform secret holding the service's credential, which the step reads from its environment. Write it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read from each submitter's own workspace, so every workspace would need its own. Null when the step's Jobs profile mounts the credential instead, which a platform using workload token exchange requires.
+    credential_secret:
+    # The platforms the service builds, as `os/architecture`. A spec for any other is refused.
+    platforms:
+    - linux/amd64
+    # How many images one build set may hold. A larger set is refused. | default: 1
+    max_specs_per_set: 1
+    # Take a spec whose Dockerfile isn't `Dockerfile` at the context root: the step puts that file at the root of the context it hands the service, in place of any `Dockerfile` already there. A build that copies its own root `Dockerfile` into the image then copies the named one, and an ignore file named for the Dockerfile (`<its path>.dockerignore`) is not moved with it. False refuses such a spec. | default: True
+    allow_dockerfile_path: true
+    # How long the step waits for one image, from when it asks the service to start, before it cancels the build and fails the image. Time the service makes the step wait for its queue counts. | default: 3600
+    build_timeout_seconds: 3600
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:

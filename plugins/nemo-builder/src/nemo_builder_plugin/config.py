@@ -65,11 +65,122 @@ class SandboxConfig(BaseModel):
     )
 
 
+class RemoteConfig(BaseModel):
+    """The `remote` backend: a build service outside this cluster builds, signs and publishes each image.
+
+    Nothing here names a service. The step image holds the service's client; its Jobs profile holds whatever that
+    client reads from its environment. From the environment, the section is one JSON value, ``NEMO_BUILDER_REMOTE``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    registry: str | None = Field(
+        default=None,
+        description="Host of the registry the service publishes every image to. Unset refuses every submit.",
+    )
+    repository: str | None = Field(
+        default=None,
+        description=(
+            "The one repository the service publishes to, in every workspace's name: an image is told apart by "
+            "its digest. Unset refuses every submit."
+        ),
+    )
+    profile: str = Field(
+        default="build-remote",
+        description=(
+            "The Jobs execution profile, provider `cpu`, the remote-build step runs on. Its `max_active_jobs` caps "
+            "the builds in flight, so set it to what the service lets this deployment queue. Its "
+            "`ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build "
+            "was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for "
+            "each image. A profile whose limit is below the builds' own is refused. That check is a floor: it "
+            "leaves out the time to fetch each build context and, once an image is built, up to five minutes of "
+            "reporting it to the builder."
+        ),
+    )
+    image: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The image the remote-build step runs: one that holds the service's step program. Unset, the profile's "
+            "`default_task_image`, which must then be set."
+        ),
+    )
+    command: list[str] = Field(
+        default_factory=lambda: ["remote-build"],
+        min_length=1,
+        description="The step program in that image, and its arguments.",
+    )
+    credential_secret: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The platform secret holding the service's credential, which the step reads from its environment. Write "
+            "it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read "
+            "from each submitter's own workspace, so every workspace would need its own. Null when the step's Jobs "
+            "profile mounts the credential instead, which a platform using workload token exchange requires."
+        ),
+    )
+    platforms: list[str] = Field(
+        default_factory=lambda: ["linux/amd64"],
+        min_length=1,
+        description="The platforms the service builds, as `os/architecture`. A spec for any other is refused.",
+    )
+    max_specs_per_set: int = Field(
+        default=1, ge=1, description="How many images one build set may hold. A larger set is refused."
+    )
+    allow_dockerfile_path: bool = Field(
+        default=True,
+        description=(
+            "Take a spec whose Dockerfile isn't `Dockerfile` at the context root: the step puts that file at the "
+            "root of the context it hands the service, in place of any `Dockerfile` already there. A build that "
+            "copies its own root `Dockerfile` into the image then copies the named one, and an ignore file named "
+            "for the Dockerfile (`<its path>.dockerignore`) is not moved with it. False refuses such a spec."
+        ),
+    )
+    build_timeout_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description=(
+            "How long the step waits for one image, from when it asks the service to start, before it cancels the "
+            "build and fails the image. Time the service makes the step wait for its queue counts."
+        ),
+    )
+
+    @field_validator("registry")
+    @classmethod
+    def _registry_is_a_host(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return validate_registry_host(value)
+        except ImageIdentityError as exc:
+            raise ValueError(f"remote.registry must be a host, optionally with a port, got {value!r}") from exc
+
+    @field_validator("repository")
+    @classmethod
+    def _repository_is_a_path(cls, value: str | None) -> str | None:
+        return None if value is None else validate_repository(value.strip("/"))
+
+    @field_validator("platforms", mode="before")
+    @classmethod
+    def _platform_names(cls, value: Any) -> Any:
+        return [platform_name(item) for item in value] if isinstance(value, list) else value
+
+
 class BuilderConfig(NemoConfig):
-    """Configuration for in-cluster container image builds."""
+    """Configuration for container image builds."""
 
     plugin_name: ClassVar[str] = "builder"
-    plugin_description: ClassVar[str] = "In-cluster container image builds for NeMo Helix."
+    plugin_description: ClassVar[str] = "Container image builds for NeMo Helix."
+
+    backend: str = Field(
+        default="execution",
+        description=(
+            "Which backend builds: `execution`, in this cluster, or `remote`, through a build service outside it "
+            "(see `remote`). Any other value refuses every submit."
+        ),
+    )
+    remote: RemoteConfig = Field(default_factory=RemoteConfig)
 
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
@@ -219,6 +330,15 @@ class BuilderConfig(NemoConfig):
                 "builder.max_concurrent_builds is deprecated and ignored: set the build profiles' max_active_jobs "
                 "instead (the Helm chart's builder.maxConcurrentBuilds does)"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_unknown_settings(self) -> Self:
+        # The section takes keys it doesn't know, so a misspelt one changes nothing and says nothing: with
+        # `bakend: remote`, builds would stay in this cluster. Warned of, not refused: a retired key must not
+        # stop a deployment building.
+        if self.model_extra:
+            logger.warning("builder: these settings are not known, and are ignored: %s", ", ".join(self.model_extra))
         return self
 
     @model_validator(mode="after")

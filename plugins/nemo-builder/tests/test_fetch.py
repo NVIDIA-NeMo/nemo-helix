@@ -17,8 +17,16 @@ from typing import Literal, cast
 import pytest
 from nemo_builder_plugin.run import fetch
 from nemo_builder_plugin.run.fetch import ArchiveRefused, clear_earlier_attempts, fetch_source
+from nemo_builder_plugin.run.remote import fetch_context, stage_context
 from nemo_builder_plugin.run.supervise import _volume_mounts
-from nemo_builder_plugin.steps import ContextSource, FetchImport, SandboxGroup, SandboxImage, WorkLayout
+from nemo_builder_plugin.steps import (
+    ContextSource,
+    FetchImport,
+    RemoteBuildImage,
+    SandboxGroup,
+    SandboxImage,
+    WorkLayout,
+)
 from nemo_helix_plugin.files.client import FilesClient
 
 JOB_SLICE = "jobs/default/abc"
@@ -219,6 +227,38 @@ class TestArchives:
         with pytest.raises(ArchiveRefused, match="more than 10 bytes"):
             _fetch_archive(tmp_path, _tar({"a": b"12345678", "b": b"12345678"}))
         assert not (tmp_path / "unpacked/default/fs-a/tb/task.tar.gz/b").exists()
+
+
+class TestWhatARemoteBuildHandsItsService:
+    """``fetch_context`` then ``stage_context``, as the remote-build step runs them for each image."""
+
+    @staticmethod
+    def _context(files: dict[str, bytes], source: ContextSource, dockerfile: str, root: Path) -> Path:
+        image = RemoteBuildImage(image="demo-1", source=source, dockerfile=dockerfile, platform="linux/amd64")
+        return stage_context(fetch_context(_client(files), image, workspace="default", root=root), image.dockerfile)
+
+    def test_a_filesets_subtree_with_its_dockerfile_moved_to_the_root(self, tmp_path: Path) -> None:
+        files = {"app/main.py": b"print()", "app/docker/Dockerfile": b"FROM app", "README": b"hi"}
+        source = ContextSource(fileset="default/fs-a", context_path="app")
+
+        context = self._context(files, source, "docker/Dockerfile", tmp_path)
+
+        assert tmp_path in context.parents
+        assert (context / "Dockerfile").read_bytes() == b"FROM app"
+        assert (context / "main.py").read_bytes() == b"print()"
+        # The subtree is the whole context: nothing above it came along.
+        assert not (context / "README").exists()
+
+    def test_a_directory_of_an_archive_with_its_dockerfile_moved_to_the_root(self, tmp_path: Path) -> None:
+        task = TASK | {"environment/docker/Dockerfile": b"FROM elsewhere"}
+        source = ContextSource(fileset="default/fs-a", archive="tb/task.tar.gz", context_path="environment")
+
+        context = self._context({"tb/task.tar.gz": _tar(task), "README": b"hi"}, source, "docker/Dockerfile", tmp_path)
+
+        # The directory's own root Dockerfile gives way to the one the spec names.
+        assert (context / "Dockerfile").read_bytes() == b"FROM elsewhere"
+        assert (context / "run.sh").read_bytes() == b"#!/bin/sh"
+        assert not (context / "tests").exists()
 
 
 class TestHostileListings:

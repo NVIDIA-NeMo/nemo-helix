@@ -8,11 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.identity import DIGEST_PATTERN
 from nemo_helix_plugin.auth import current_auth_context, is_service_principal_id, platform_auth_enabled
 from nemo_helix_plugin.entities import EntityConflictError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CompleteRequest(BaseModel):
@@ -20,11 +20,31 @@ class CompleteRequest(BaseModel):
 
     digest: str = Field(
         pattern=DIGEST_PATTERN,
-        description="The manifest digest the push step pushed under the image's system tag, and signed.",
+        description=(
+            "The manifest digest the image is published at: the one the push step pushed under the image's system "
+            "tag and signed, or the one a remote build service published."
+        ),
     )
     runtime_config: ImageRuntimeConfig | None = Field(
-        default=None, description="How the image starts by default, read from the config the push step pushed."
+        default=None,
+        description=(
+            "How the image starts by default, read from the config the push step pushed. A remote-build step "
+            "sends none."
+        ),
     )
+    external: ExternalImage | None = Field(
+        default=None,
+        description="What a remote build service calls the image. Only a remote-build step sends it.",
+    )
+
+    @field_validator("external", mode="before")
+    @classmethod
+    def _external_has_no_unknown_fields(cls, value: object) -> object:
+        """A misspelt key would otherwise make a row ready with no handle. The stored model stays lenient, so a
+        row written by a later builder still reads."""
+        if isinstance(value, dict) and (unknown := sorted(set(value) - set(ExternalImage.model_fields))):
+            raise ValueError(f"unknown fields: {', '.join(map(str, unknown))}")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +136,18 @@ def settled(row: ContainerImage, digest: str) -> bool:
 
 
 async def complete(
-    rows: _Rows, *, workspace: str, name: str, digest: str, runtime_config: ImageRuntimeConfig | None = None
+    rows: _Rows,
+    *,
+    workspace: str,
+    name: str,
+    digest: str,
+    runtime_config: ImageRuntimeConfig | None = None,
+    external: ExternalImage | None = None,
 ) -> ContainerImage:
     """Write the row ``name`` ``ready`` at ``digest``, conditional on the version it was read at.
 
-    ``runtime_config`` is written with it: how the image starts by default, from its config.
+    ``runtime_config`` is written with it: how the image starts by default, from its config. So is ``external``:
+    what a remote build service calls the image.
 
     Raises :class:`CompletionConflict` if the row settled otherwise, or the store's not-found error.
     """
@@ -131,8 +158,11 @@ async def complete(
         upstream = row.provenance.upstream
         if upstream is not None and digest != upstream.manifest_digest:
             raise CompletionConflict(f"{name} copies {upstream.manifest_digest}, not {digest}")
+        if external is not None and row.provenance.backend == IN_CLUSTER_BACKEND:
+            raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
         row.digest = digest
         row.runtime_config = runtime_config
+        row.external = external
         row.status = "ready"
         row.status_detail = None
         try:

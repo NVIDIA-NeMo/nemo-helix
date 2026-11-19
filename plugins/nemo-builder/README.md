@@ -392,7 +392,7 @@ status is `queued` and the rows stay `pending`.
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
 | `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail five minutes on. Or you're a service that isn't acting for a person. |
-| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
+| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. A `409` that refuses the request itself carries a `code` beside its `detail`: `backend_rejected` (the deployment or its backend can't build this), `missing_secrets`, or `backend_changed` (another backend built this revision). A revision another request holds has none. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
@@ -416,7 +416,8 @@ service on its own permissions, so the service checks its user may read images h
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or whose config couldn't be read. |
-| `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. |
+| `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). |
+| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that starts the image through that service; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and reads none of them. |
 
 Names come from the request:
 
@@ -563,6 +564,87 @@ images still build, push and complete. The failed image's row fails once the job
 | sandbox (kaniko) | no ServiceAccount token | nothing | its own context read-only, and one output directory per image | yes |
 | `push` | `nhx-build-push` | the workspace's registry credential and signing key, unless the deployment turned them off | yes | no |
 
+## Building through a service outside the cluster
+
+Everything above describes the default backend, `execution`, which builds in this cluster. A
+deployment can instead set `builder.backend: remote`, and a build service outside the cluster then
+builds, signs and publishes every image. The API, the rows and the caller's requests stay the same.
+The plugin names no service: the deployment names a step image that holds the service's client.
+
+```yaml
+builder:
+  backend: remote
+  remote:
+    registry: registry.example.com       # where the service publishes; unset refuses every submit
+    repository: team/images              # its one repository: images are told apart by digest
+    image: steps.example.com/my-step:1   # the step image; unset, the profile's default_task_image
+    command: [remote-build]              # the step program in that image
+    profile: build-remote                # the Jobs profile, provider cpu, the step runs on
+    credential_secret: null              # or <workspace>/<name> of a platform secret holding the credential
+    platforms: [linux/amd64]
+    max_specs_per_set: 1
+    allow_dockerfile_path: true
+    build_timeout_seconds: 3600          # for one image, from when the service is asked to start
+```
+
+A build set becomes one job with one step, `remote-build`. The step fetches each image's context
+from Files, acting for the submitter, has the service build it, and completes the row with the digest
+the service published and the service's own handle (`external`). No sandbox runs, and the push step's
+secrets, the build namespace and the work volume aren't used.
+
+What differs for a caller:
+
+- A spec with `output`, `mounts` or an image to copy is refused with `409`, as is a platform outside
+  `platforms` and a set of more than `max_specs_per_set` images. The answer's `code` is
+  `backend_rejected`; a revision another request holds is a `409` with no `code`.
+- Every workspace's images land in the service's one repository, and no tag is pushed. Pin
+  `image_ref`.
+- The builder doesn't sign, and holds no key. Whether an image is signed, and by whom, is the
+  service's.
+- `runtime_config` is null: the step never reads the image's config.
+- There is no build log. A failed row's `status_detail` ends with the step's one-line reason, which
+  names the service's build once one was started.
+- A build that starts while the service is unreachable is tried again for ten minutes, and one
+  already running is waited on until its timeout. A longer outage fails each queued build as it
+  reaches a slot.
+
+What an operator sets up:
+
+- The step image. Its program is a few lines around `run/remote.py`'s `step_main`, which takes a
+  factory for a `RemoteBuildService`: three methods, `start`, `status` and `cancel`, and three error
+  types that tell the driver whether to repeat a call, wait, or fail the image. The driver does the
+  rest: the context, the deadline, polling, cancelling when the job is told to stop, and completing
+  rows. Each of the three calls must bound its own time: the driver can't interrupt one, and a pod
+  has about 30 seconds from the stop signal to cancel its build.
+- The Jobs profile, written in full: a profile added under `jobs.executors` inherits nothing from
+  `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
+  security context, as the chart does for the in-cluster build profiles. Its `max_active_jobs` caps
+  the builds in flight, so set it to what the service lets the deployment queue. Its
+  `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when
+  the build was submitted, so it must cover the longest a build waits for a slot as well as the
+  build. Whatever the service's client reads from its environment is set there too, and so is the
+  network path to the service: a Jobs profile has no egress setting. A profile in a namespace other
+  than the release's also needs what the chart creates only for the in-cluster builder: a Role and
+  RoleBinding there for the Jobs controller, the ServiceAccount the profile names, with
+  `sandboxClusterCapable` a Secret under the OpenSandbox key's name (Jobs gives every job pod a
+  reference to it), and a namespace-qualified `platform.base_url`.
+- The credential. Either the profile mounts it, or `credential_secret` names a platform secret,
+  which every user who may build must be able to read. Write it as `<workspace>/<name>`: a bare name
+  is read from each submitter's own workspace. A platform that uses workload token exchange must
+  mount it, because Jobs can't fetch a step's secrets there, and a submit is refused until it does.
+  A step program that reads a mounted credential passes `step_main` the function that reads it
+  (`read_credential`), so the driver keeps it out of the log and out of every reason, as it does one
+  from the environment.
+
+A deployment that can't run the step refuses every submit with `409` and says what is missing: the
+registry or repository, the profile, a step image, a profile whose limit is below one full set's
+build timeouts plus two minutes, or a `default_platform` the service doesn't build.
+
+Switching a deployment's backend doesn't move its images. A resubmit of a revision the other backend
+built is refused (`code` `backend_changed`); submit the next revision. Upgrade every API pod before
+setting `backend: remote`: a pod from before the setting existed ignores it and builds in this
+cluster, and refuses a remote step's completion.
+
 ## Publishing and signing
 
 The push step is the only step that holds the registry credential or the signing key. Before it
@@ -612,7 +694,7 @@ records the digest the push step names.
 | `200` | The image is `ready` at the digest, now or already. |
 | `403` | The caller lacks the permission, or doesn't act for the image's submitter. |
 | `404` | No such image. |
-| `409` | The image has already settled: `ready` at another digest, or `failed`. |
+| `409` | The image has already settled: `ready` at another digest, or `failed`. Or the request carries `external` for an image this cluster builds. An unknown key inside `external` is a `422`. |
 | `422` | The body is anything but a sha256 digest. |
 
 ## Deploying
@@ -904,7 +986,7 @@ lists what it needs to run against another cluster.
 | `schema.py` | The request models: `BuildSet`, `BuildSpec`, `FileSetSource`, `BuildOutput` |
 | `plan.py` | `BuildPlan`: a request resolved into names, then placed by the backend |
 | `backend.py` | The backend interface: what a backend refuses, compiles and places |
-| `backends.py`, `execution.py` | The deployment's backend, and the `execution` backend |
+| `backends.py`, `execution.py`, `remote.py` | The deployment's backend, the `execution` backend and the `remote` backend |
 | `compile.py` | Turns a plan into the `HelixJobSpec`, fetch, build and push, as a pure function |
 | `submit.py` | The submit sequence: plan, secrets, rows, then the job |
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
@@ -916,6 +998,6 @@ lists what it needs to run against another cluster.
 | `entities.py` | `ContainerImage` |
 | `identity.py` | Registry hosts, repository paths and tags, and the system tag |
 | `config.py` | `BuilderConfig` |
-| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; and `tools.py`, which runs crane for `push` |
+| `run/` | The programs: `fetch.py`, `supervise.py` and `push.py`; `remote.py`, the remote-build step's driver and the interface a build service implements; `main.py`, the `nhx-build` entry point; `utils.py`, what the steps share; and `tools.py`, which runs crane for `push` |
 | `docker/builder/`, at the repository root | The `nhx-builder-tasks` and `nhx-kaniko` images |
 | `config/` | The chart values for the minikube quickstart |

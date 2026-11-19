@@ -13,6 +13,10 @@ A submit writes the rows, then creates the job, so a row without a job is only a
 passed. A submit slow enough to create its job after that builds images already failed: their push step's completion
 is refused, and the job fails. Either way, the images end ``failed``, and a caller submits the next revision.
 
+A row failed because its job ended says why, when the job does: the line its step logged for the image (a
+remote-build step logs one, see ``run/remote.py``), or else the job's own account, such as a time limit Jobs
+enforced.
+
 A ``queued`` row, which only 0.10's builder wrote, is settled as a ``pending`` one is. If 0.10's queue created its job,
 it is completed or failed with that job; if not, nothing will create it now, and it fails once :data:`JOB_GRACE` has
 passed.
@@ -21,8 +25,11 @@ passed.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -30,7 +37,7 @@ from nemo_builder_plugin.entities import ContainerImage
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
-from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -50,20 +57,93 @@ WAITING = ("pending", "queued")
 #: took longer than the controller's 90-second health window (3 × its 30-second interval) on a loaded cluster.
 JOB_READS = 8
 
-#: The status of the job ``(workspace, name)``, or None when there is no such job.
-JobStatus = Callable[[str, str], Awaitable[HelixJobStatus | None]]
+#: The line a step logs for an image it didn't build: ``NHX_BUILD_FAILED <row name>: <reason>``. The same marker
+#: as ``run/remote.py``'s ``FAILURE_MARKER``, spelt here so the API doesn't load a step's program.
+_MARKER = "NHX_BUILD_FAILED "
+_FAILURE_LINE = re.compile(r"NHX_BUILD_FAILED (\S+): (.+)")
+#: The longest reason a row records.
+_MAX_REASON_CHARS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class EndedJob:
+    """A job that has ended, and what it said about why."""
+
+    status: HelixJobStatus
+    #: Why each image wasn't built, by row name, as its step logged it.
+    reasons: Mapping[str, str] = field(default_factory=dict)
+    #: The job's own account of how it ended, when it gave one.
+    message: str | None = None
+
+
+#: The status of the job ``(workspace, name)``, an :class:`EndedJob` when it ended and said why, or None when
+#: there is no such job.
+JobStatus = Callable[[str, str], Awaitable[HelixJobStatus | EndedJob | None]]
+
+
+def _clip(reason: str) -> str:
+    # One line of printable text: a job's log is whatever its step printed.
+    reason = "".join(character for character in " ".join(reason.split()) if character.isprintable())
+    return reason if len(reason) <= _MAX_REASON_CHARS else reason[: _MAX_REASON_CHARS - 1] + "…"
+
+
+def _message(details: object) -> str | None:
+    message = details.get("message") if isinstance(details, dict) else None
+    return _clip(message) if isinstance(message, str) and message.strip() else None
+
+
+def _marked_lines(log_tail: str) -> Iterator[str]:
+    """Each marked line in ``log_tail``, from the marker on, as the step wrote it.
+
+    Each executor keeps a step's log its own way. Kubernetes and Docker hand back the text. The subprocess
+    executor keeps JSON lines, with a log line as the string that ends each object: read from there, the line is
+    still escaped and ends with the object's ``"}``. The tail is cut by length, so its first line may be the end
+    of one; what follows the marker is whole all the same.
+
+    A line ends at a newline and nowhere else. ``str.splitlines`` also breaks on a form feed and six more
+    characters, which a reason may hold, and what followed one would read as a line of its own.
+    """
+    for line in log_tail.split("\n"):
+        line = line.removesuffix("\r")
+        start = line.find(_MARKER)
+        if start < 0:
+            continue
+        text = line[start:]
+        if text.endswith('"}'):
+            try:
+                decoded = json.loads(f'"{text[:-2]}"')
+            except ValueError:
+                decoded = None
+            if isinstance(decoded, str):
+                text = decoded
+        yield text
+
+
+def ended_job(job: HelixJobStatusResponse) -> EndedJob:
+    """What an ended ``job`` said: each image's line from the end of its tasks' logs, and the job's own message."""
+    reasons: dict[str, str] = {}
+    message = _message(job.error_details)
+    for step in job.steps:
+        message = message or _message(step.error_details)
+        for task in step.tasks:
+            # Jobs keeps the last lines of a failed task's log here. The last line for an image is its reason.
+            for line in _marked_lines(task.error_stack or ""):
+                if found := _FAILURE_LINE.match(line):
+                    reasons[found.group(1)] = _clip(found.group(2))
+    return EndedJob(status=job.status, reasons=reasons, message=message)
 
 
 def job_status_from(jobs: AsyncJobsClient) -> JobStatus:
     """:data:`JobStatus` over ``jobs``, which must act as the builder: a caller who may not see a job must not have it
     taken for missing."""
 
-    async def job_status(workspace: str, name: str) -> HelixJobStatus | None:
+    async def job_status(workspace: str, name: str) -> HelixJobStatus | EndedJob | None:
         try:
             response = await jobs.get_job_status(workspace=workspace, name=name)
         except NotFoundError:
             return None
-        return response.data().status
+        job = response.data()
+        return ended_job(job) if job.status in _ENDED else job.status
 
     return job_status
 
@@ -95,11 +175,11 @@ async def settle(
     return settled
 
 
-async def _job_statuses(jobs: list[str], job_status: JobStatus) -> dict[str, HelixJobStatus | None]:
+async def _job_statuses(jobs: list[str], job_status: JobStatus) -> dict[str, HelixJobStatus | EndedJob | None]:
     """Each distinct job's status, read :data:`JOB_READS` at a time; a job that can't be read is left out."""
     limit = asyncio.Semaphore(JOB_READS)
 
-    async def read(job: str) -> tuple[str, HelixJobStatus | None] | None:
+    async def read(job: str) -> tuple[str, HelixJobStatus | EndedJob | None] | None:
         workspace, _, name = job.partition("/")
         async with limit:
             try:
@@ -112,7 +192,7 @@ async def _job_statuses(jobs: list[str], job_status: JobStatus) -> dict[str, Hel
     return dict(found for found in read_jobs if found is not None)
 
 
-def _abandoned(image: ContainerImage, status: HelixJobStatus | None, now: datetime) -> str | None:
+def _abandoned(image: ContainerImage, status: HelixJobStatus | EndedJob | None, now: datetime) -> str | None:
     """Why no job will complete ``image``, or None if one still may."""
     if status is None:
         created = image.created_at
@@ -124,9 +204,12 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | None, now: dateti
         if now - created < JOB_GRACE:
             return None
         return QUEUE_GONE if image.status == "queued" else NO_JOB
-    if status in _ENDED:
-        return f"not built: its build job ended ({status.value}) without publishing it"
-    return None
+    ended = status if isinstance(status, EndedJob) else EndedJob(status)
+    if ended.status not in _ENDED:
+        return None
+    detail = f"not built: its build job ended ({ended.status.value}) without publishing it"
+    why = ended.reasons.get(image.name) or ended.message
+    return f"{detail}: {why}" if why else detail
 
 
 async def _fail(rows: _Rows, image: ContainerImage, detail: str) -> ContainerImage:

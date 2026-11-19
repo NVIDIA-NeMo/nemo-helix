@@ -320,6 +320,14 @@ class BuildSet(BaseModel):
         return self
 
 
+#: The ``code`` a 409 from ``POST /builds`` carries when it must be told from a revision another request holds.
+#: The first two refuse the request itself, whatever its revision. The third refuses a revision whose rows
+#: another backend wrote.
+CODE_BACKEND_REJECTED = "backend_rejected"
+CODE_MISSING_SECRETS = "missing_secrets"
+CODE_BACKEND_CHANGED = "backend_changed"
+
+
 class SubmitBuildResponse(BaseModel):
     """The submitted build's job and images."""
 

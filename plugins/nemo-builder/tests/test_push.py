@@ -16,7 +16,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from nemo_builder_plugin.client import BuilderClient
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.registry import RegistryError
 from nemo_builder_plugin.run import push as push_module
 from nemo_builder_plugin.run import tools
@@ -232,6 +232,16 @@ class TestTheBuilderClient:
         assert seen[0].url.path == f"{IMAGES}/demo-1-0/complete"
         body = json.loads(seen[0].content)
         assert (body["digest"], body["runtime_config"]["entrypoint"]) == (digest, ["/bin/bash", "-l", "-c"])
+        # Nothing an API from before remote builds existed would refuse: it forbids fields it doesn't know.
+        assert set(body) == {"digest", "runtime_config"}
+
+    def test_a_remote_builds_handle_is_sent_with_it(self) -> None:
+        digest = "sha256:" + "d" * 64
+        builder, seen, _ = self._builder(
+            [httpx.Response(200, json=_row(digest=digest, status="ready").model_dump(mode="json"))]
+        )
+        builder.complete("demo-1-0", digest, None, ExternalImage(image_id="img-1", build_id="build-1"))
+        assert json.loads(seen[0].content)["external"] == {"image_id": "img-1", "build_id": "build-1"}
 
     def test_a_platform_that_is_briefly_down_is_retried(self) -> None:
         digest = "sha256:" + "d" * 64
