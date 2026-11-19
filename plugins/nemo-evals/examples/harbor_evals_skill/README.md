@@ -7,8 +7,8 @@ Run one pinned Taskset twice with the same Codex model and sandbox images. The b
 injected skills. The treatment receives a published NeMo Evals skill revision through
 `spec.target.skills`. The task asks Codex to submit a two-row offline exact-match evaluation
 to NeMo Helix and retrieve its results. A separate Harbor verifier checks the live job evidence.
-The scorer replays the saved trials with the Harbor reward, skill activation, token efficiency
-and expected-behavior metrics, and scores the skill archive once.
+The scorer replays saved trials with Harbor reward, skill activation, token efficiency,
+command outcomes, and expected behavior. It scores package readiness once per skill archive.
 
 Run the commands from the checkout root in Bash with `jq`, Python 3.12 or newer, and the
 checkout's NeMo CLI and SDK available. Use a Kubernetes deployment with Builder, OpenSandbox and
@@ -142,3 +142,14 @@ are retained in the run directory.
 Set `EXPECT_SETUP_EGRESS=0` when using a profile with an empty `agent_setup_egress` list.
 The stored scoring Taskset follows the documented Harbor replay and metric extension APIs.
 [Custom metrics and views](https://docs.nvidia.com/nemo-helix/v0.10/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
+
+The command metric reports success among root Codex `exec_command` calls with a
+matched exit status. Missing outcomes remain unknown. Replay sends outcome flags
+and marks the trace partial.
+
+To see sample trace, scan, and bundled-test evidence and scores, run the offline
+fixture with the Evals SDK installed:
+
+```bash
+uv run --no-sync python plugins/nemo-evals/examples/harbor_evals_skill/score_evidence_example.py
+```

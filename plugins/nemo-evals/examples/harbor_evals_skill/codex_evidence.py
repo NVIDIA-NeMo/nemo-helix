@@ -20,6 +20,9 @@ _CATALOG_KEYS = ("skills", "host_skills", "cloud_skills")
 _CATALOG_ALIAS = re.compile(r"^- `([rec]\d+)` = `([^`]+)`$", re.MULTILINE)
 _CATALOG_ENTRY = re.compile(r"^- ([^:]+):.*\((file|executor package|cloud package|custom resource): (.+)\)$")
 _TOOL_CALLS = {"custom_tool_call", "function_call", "local_shell_call", "tool_search_call", "web_search_call"}
+_EXEC_EXIT = re.compile(
+    r"\A(?:Chunk ID: [^\n]*\n)?(?:Wall time: [^\n]*\n)?Process exited with code (-?[0-9]+)(?:\n|\Z)"
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class CodexEvidence:
     skill_listed: bool
     activated: bool | None
     measurements: TrialMeasurements
+    command_outcomes: tuple[bool | None, ...] = ()
 
 
 def rollout_events(agent_dir: Path) -> Iterator[dict[str, Any]]:
@@ -191,12 +195,22 @@ def _read_document_output(text: object, document: str) -> bool:
     return isinstance(text, str) and bool(text.strip()) and text.strip() in document
 
 
-def _proves_tool_read(call: dict[str, Any], output: object, registered: str, document: str) -> bool:
+def _function_output_text(output: object) -> str | None:
     if isinstance(output, list):
         # Codex serializes function output as a string or a list of typed content parts.
         parts = [part.get("text") for part in output if isinstance(part, dict) and part.get("type") == "input_text"]
         output = parts[0] if len(parts) == 1 else None
-    if not isinstance(output, str):
+    return output if isinstance(output, str) else None
+
+
+def _command_succeeded(output: str | None) -> bool | None:
+    # Only the tool envelope can establish an exit code. Command stdout is untrusted.
+    status = _EXEC_EXIT.match(output or "")
+    return status[1] == "0" if status else None
+
+
+def _proves_tool_read(call: dict[str, Any], output: str | None, registered: str, document: str) -> bool:
+    if output is None:
         return False
     if (call.get("namespace"), call.get("name")) == ("skills", "read") or call.get("name") == "skills.read":
         response = _json_object(output)
@@ -218,12 +232,13 @@ def _proves_tool_read(call: dict[str, Any], output: object, registered: str, doc
 
 
 def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: str) -> CodexEvidence:
-    """Read launch discovery, proven skill use, and final cumulative token usage."""
     registered = str(AGENT_HOME / ".agents" / "skills" / skill_name / "SKILL.md")
     listed = None
     activated = None
     after_tool = False
     pending: dict[str, dict[str, Any]] = {}
+    command_outcomes: dict[str, bool | None] = {}
+    seen_outputs: set[str] = set()
     usage: dict[str, Any] = {}
     for event in events:
         payload = event.get("payload")
@@ -237,10 +252,22 @@ def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: s
             kind, call_id = payload.get("type"), payload.get("call_id")
             if kind in _TOOL_CALLS:
                 after_tool = True
-                if kind == "function_call" and isinstance(call_id, str):
+                if kind == "function_call" and isinstance(call_id, str) and call_id:
+                    if call_id in command_outcomes:
+                        command_outcomes[call_id] = None
+                        seen_outputs.add(call_id)
+                    elif payload.get("name") == "exec_command" and payload.get("namespace") in (None, "functions"):
+                        command_outcomes[call_id] = None
+                        if call_id in pending:
+                            seen_outputs.add(call_id)
                     pending[call_id] = payload
-            elif listed and kind == "function_call_output" and isinstance(call_id, str):
-                if _proves_tool_read(pending.pop(call_id, {}), payload.get("output"), registered, document):
+            elif kind == "function_call_output" and isinstance(call_id, str):
+                output = _function_output_text(payload.get("output"))
+                if call_id in command_outcomes:
+                    command_outcomes[call_id] = _command_succeeded(output) if call_id not in seen_outputs else None
+                seen_outputs.add(call_id)
+                call = pending.pop(call_id, {})
+                if listed and _proves_tool_read(call, output, registered, document):
                     activated = True
         elif event.get("type") == "event_msg" and payload.get("type") == "token_count":
             info = payload.get("info")
@@ -259,4 +286,4 @@ def observe_codex(events: Iterable[dict[str, Any]], skill_name: str, document: s
                     activated = True
     if listed is None:
         raise ValueError("Codex rollout has no explicit launch skill catalog before the first tool call")
-    return CodexEvidence(listed, activated, _measurements(usage))
+    return CodexEvidence(listed, activated, _measurements(usage), tuple(command_outcomes.values()))

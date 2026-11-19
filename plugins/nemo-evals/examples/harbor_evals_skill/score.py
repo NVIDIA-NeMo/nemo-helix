@@ -37,6 +37,13 @@ from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskS
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
 from nhx_evals_sdk.enums import MetricType
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
+from nhx_evals_sdk.metrics.skill_readiness import (
+    SkillDescriptionQualityMetric,
+    SkillReliabilityReadinessMetric,
+    SkillStaticCorrectnessMetric,
+    SkillUnicodeSafetyMetric,
+)
+from nhx_evals_sdk.metrics.skill_traces import ToolExecutionOutcomeMetric
 from nhx_evals_sdk.metrics.skills import (
     SkillActivationMetric,
     SkillContextEfficiencyMetric,
@@ -47,6 +54,7 @@ from nhx_evals_sdk.metrics.skills import (
 )
 from nhx_evals_sdk.values import ModelRef
 from nhx_evals_sdk.values.evidence import EVIDENCE_LOGS
+from nhx_evals_sdk.values.skill_evidence import SkillToolCall, SkillToolTrace
 from nhx_evals_sdk.values.skills import SkillSnapshot
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -58,6 +66,7 @@ _REPLAY_METRICS = {
     MetricType.HARBOR_REWARD,
     MetricType.SKILL_ACTIVATION,
     MetricType.TOKEN_EFFICIENCY,
+    MetricType.TOOL_EXECUTION_OUTCOME,
     MetricType.LLM_JUDGE,
 }
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -178,7 +187,15 @@ async def _package_metrics(snapshot: SkillSnapshot) -> dict[str, Any]:
         row=DatasetRow(data={"reference": {"skill_snapshot": snapshot.model_dump(mode="json")}}),
         candidate=CandidateOutput(),
     )
-    metrics = (SkillStructureMetric(), SkillReferenceIntegrityMetric(), SkillContextEfficiencyMetric())
+    metrics = (
+        SkillStructureMetric(),
+        SkillReferenceIntegrityMetric(),
+        SkillContextEfficiencyMetric(),
+        SkillStaticCorrectnessMetric(),
+        SkillDescriptionQualityMetric(),
+        SkillReliabilityReadinessMetric(),
+        SkillUnicodeSafetyMetric(),
+    )
     return {
         metric.type.value: (await metric.compute_scores(metric_input)).model_dump(mode="json") for metric in metrics
     }
@@ -216,9 +233,12 @@ def _evidence(
 
 
 def replay_trial(
-    trial: AgentEvalTrial, expected_reward: float, measurements: TrialMeasurements, activation: bool | None
+    trial: AgentEvalTrial,
+    expected_reward: float,
+    measurements: TrialMeasurements,
+    activation: bool | None,
+    command_outcomes: tuple[bool | None, ...] = (),
 ) -> AgentEvalTrial:
-    """Keep the original reward and send only the evidence the stored metrics consume."""
     if trial.error is not None or trial.status != AgentEvalTrialStatus.COMPLETED:
         raise ValueError("The saved Harbor trial did not complete successfully")
     reward_key = trial.metadata.get(HARBOR_PRIMARY_REWARD_KEY)
@@ -237,6 +257,17 @@ def replay_trial(
     metadata = {HARBOR_PRIMARY_REWARD_KEY: reward_key, "reward": reward, "reward_details": details}
     if activation is not None:
         metadata["skill_activation"] = {SKILL_NAME: activation}
+    if command_outcomes:
+        # The root rollout covers only selected calls. Its event order does not establish tool step boundaries.
+        trace = SkillToolTrace(
+            trial_id=trial.id,
+            complete=False,
+            calls=[
+                SkillToolCall(id=f"exec-{index}", step=0, tool="exec_command", succeeded=outcome)
+                for index, outcome in enumerate(command_outcomes, start=1)
+            ],
+        )
+        metadata["skill_tool_trace"] = trace.model_dump(mode="json", exclude_none=True)
     answer = trial.output.output_text if trial.output is not None else None
     return AgentEvalTrial(
         id=trial.id,
@@ -287,7 +318,12 @@ def _scoring_taskset(
         ],
     )
     source.metrics.extend(
-        [SkillActivationMetric(skill_name=SKILL_NAME, should_activate=True), TokenEfficiencyMetric(), judge]
+        [
+            SkillActivationMetric(skill_name=SKILL_NAME, should_activate=True),
+            TokenEfficiencyMetric(),
+            ToolExecutionOutcomeMetric(tool_pattern="exec_command"),
+            judge,
+        ]
     )
     source.views.update(views)
     prepared = evaluator.tasks.prepare(source, workspace=workspace)
@@ -391,7 +427,9 @@ def _score(run_dir: Path, comparison: Comparison, judge: ModelRef, *, expect_set
                         raise ValueError("Expected one saved Harbor trial")
                     expected = {SKILL_NAME: inventory} if name == "with-skill" else {}
                     evidence = _evidence(bundle, saved[0], snapshot, expected, expect_setup_egress=expect_setup_egress)
-                    trials[name] = replay_trial(saved[0], arm.reward, evidence.measurements, evidence.activated)
+                    trials[name] = replay_trial(
+                        saved[0], arm.reward, evidence.measurements, evidence.activated, evidence.command_outcomes
+                    )
                     report["arms"][name]["discovery"] = evidence.skill_listed
                     report["arms"][name]["activation"] = evidence.activated
                 except _ERRORS as exc:
