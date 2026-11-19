@@ -74,6 +74,8 @@ Select **Run Evaluation** in the page header to open the **Run Agent Evaluation*
 
 The run saves its eval config as `eval-config.json` (or `.yaml`) in the `<experiment>-data` fileset, where **Choose from Fileset** can find it later.
 
+The dataset is read where it lives, not copied, so a re-run reads the file as it is now. The run records each dataset file's name and size, and a re-run compares them: if the files are gone, the wizard blocks the re-run, and if any file was added, removed, or changed size, it warns that scores may not compare. An edit that keeps every file the same size isn't detected.
+
 The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
 
 ## Optimize an Agent

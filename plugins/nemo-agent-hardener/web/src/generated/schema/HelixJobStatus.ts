@@ -21,6 +21,8 @@ export type HelixJobStatus = typeof HelixJobStatus[keyof typeof HelixJobStatus];
 
 
 export const HelixJobStatus = {
+  creation_pending: 'creation_pending',
+  deletion_pending: 'deletion_pending',
   created: 'created',
   queued: 'queued',
   pending: 'pending',

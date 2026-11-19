@@ -3,12 +3,12 @@
 
 import asyncio
 import os
-import threading
 from contextvars import ContextVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nhx.guardrails.app.handlers.utils import (
+    get_merged_custom_headers_token,
     get_rail_types_from_config,
     get_rails_name_from_config,
     model_with_req_scoped_custom_headers,
@@ -139,26 +139,24 @@ class TestUpdateModelsInConfig:
         for model in [*updated_config.models, *added_config.models]:
             assert isinstance(model.parameters, ModelParameters)
         assert updated_config.models[0].parameters.base_url == "https://mock-nim/v1"
-        assert updated_config.models[1].parameters.default_headers == {"x-custom": "value"}
+        assert updated_config.models[1].parameters.default_headers == {}
 
-    def test_propagate_custom_headers_to_non_main_models(self, config: RailsConfig, mocker: MockerFixture):
-        new_model = Model(type="type3", model="model3", engine="engine3")
+    def test_request_headers_are_not_built_into_models(self, config: RailsConfig, mocker: MockerFixture):
+        """Only the configured headers (lower-cased) go into the models, not the request's headers.
 
-        # x-custom-header1 should be set to value2 since it should override the value1 provided in the config
-        # x-custom-header3 should be set to value3
+        The engine is shared across requests, so building in something like a proxy's unique
+        ``x-request-id`` would be wrong for every other request.
+        """
         mocker.patch(
             "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
-            return_value={"x-custom-header1": "value2", "x-custom-header3": "value3"},
+            return_value={"x-request-id": "unique-per-request", "x-custom-header1": "from-request"},
         )
-        config.models[1].parameters = {"default_headers": {"X-Custom-Header1": "value1"}}
+        config.models[1].parameters = {"default_headers": {"X-Custom-Header1": "configured"}}
 
-        updated_config = update_models_in_config(config, new_model)
-        assert len(updated_config.models) == 3
-        assert updated_config.models[0].model == "model1"
-        assert updated_config.models[0].parameters["default_headers"] == {
-            "x-custom-header1": "value2",
-            "x-custom-header3": "value3",
-        }
+        updated_config = update_models_in_config(config, Model(type="type3", model="model3", engine="engine3"))
+
+        assert updated_config.models[0].parameters["default_headers"] == {}
+        assert updated_config.models[1].parameters["default_headers"] == {"x-custom-header1": "configured"}
 
 
 def test_get_rail_types_from_config():
@@ -270,6 +268,36 @@ class TestModelWithReqScopedCustomHeaders:
             model_with_req_scoped_custom_headers(model, req_custom_headers)
 
 
+class TestEngineCacheKeyHeaders:
+    def test_request_headers_do_not_change_the_key(self, mocker: MockerFixture):
+        """A unique ``x-request-id`` per request (added by proxies like Envoy) mustn't change the key."""
+        mocker.patch(
+            "nhx.guardrails.app.handlers.utils.get_platform_auth_headers_from_context",
+            return_value={"X-NHX-Principal-Id": "service:guardrails"},
+        )
+        keys = set()
+        for request_id in ("a", "b"):
+            mocker.patch(
+                "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+                return_value={"x-request-id": request_id},
+            )
+            keys.add(get_merged_custom_headers_token("caller-token"))
+
+        assert len(keys) == 1
+
+    def test_credentials_built_into_the_engine_change_the_key(self, mocker: MockerFixture):
+        """The caller's model credential and platform auth headers are built into the engine, so
+        callers with different values need different engines."""
+        auth = mocker.patch("nhx.guardrails.app.handlers.utils.get_platform_auth_headers_from_context")
+        auth.return_value = {"X-NHX-Principal-On-Behalf-Of": "user:a"}
+        user_a = get_merged_custom_headers_token("token")
+        auth.return_value = {"X-NHX-Principal-On-Behalf-Of": "user:b"}
+        user_b = get_merged_custom_headers_token("token")
+        other_token = get_merged_custom_headers_token("other-token")
+
+        assert len({user_a, user_b, other_token}) == 3
+
+
 class TestSetMainModelMergedCustomHeadersIntoContext:
     @pytest.mark.parametrize(
         "main_model_params, test_id",
@@ -293,16 +321,41 @@ class TestSetMainModelMergedCustomHeadersIntoContext:
         ],
         ids=lambda x: x if isinstance(x, str) else "",
     )
-    def test_context_updated_correctly(self, main_model_params, test_id, set_headers_into_context_mock: MagicMock):
+    def test_context_updated_correctly(
+        self, main_model_params, test_id, set_headers_into_context_mock: MagicMock, mocker: MockerFixture
+    ):
         """Test that context is updated correctly with model's custom headers."""
+        mocker.patch("nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context", return_value={})
         main_model = Model(type="main", model="main_model", engine="test_engine", parameters=main_model_params)
 
         set_main_model_merged_custom_headers_into_context(main_model)
         assert set_headers_into_context_mock.call_count == 1
 
         called_headers = set_headers_into_context_mock.call_args[0][0]
-        expected_headers = main_model_params.get("default_headers", {})
+        expected_headers = {k.lower(): v for k, v in main_model_params.get("default_headers", {}).items()}
         assert called_headers == expected_headers
+
+    def test_request_headers_override_configured_headers(
+        self, set_headers_into_context_mock: MagicMock, mocker: MockerFixture
+    ):
+        """The main model sends its configured headers with this request's headers on top. They come
+        from the request context, since the model itself is shared across requests."""
+        mocker.patch(
+            "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+            return_value={"x-header": "from-request", "x-request-id": "this-request"},
+        )
+        main_model = Model(
+            type="main",
+            model="main_model",
+            engine="test_engine",
+            parameters={"default_headers": {"X-Header": "configured", "X-Static": "kept"}},
+        )
+
+        set_main_model_merged_custom_headers_into_context(main_model)
+
+        set_headers_into_context_mock.assert_called_once_with(
+            {"x-header": "from-request", "x-static": "kept", "x-request-id": "this-request"}
+        )
 
     def test_none_model_raises_error(self, set_headers_into_context_mock: MagicMock):
         """Test that no headers are reset into context when model is None."""
@@ -341,12 +394,11 @@ class TestSetMainModelMergedCustomHeadersIntoContext:
 
 
 class TestRunGenerateAsync:
-    """Tests for run_generate_async, which offloads generate_async to a thread
-    to prevent the NemoGuardrails Colang runtime from blocking the FastAPI event loop."""
+    """Tests for run_generate_async, which runs the rails on the server event loop."""
 
     @pytest.mark.asyncio
     async def test_returns_generate_async_result(self):
-        """generate_async result is returned correctly through the thread boundary."""
+        """generate_async's result is returned to the caller."""
         expected = {"response": "hello"}
         mock_llm_rails = MagicMock()
         mock_llm_rails.generate_async = AsyncMock(return_value=expected)
@@ -394,49 +446,28 @@ class TestRunGenerateAsync:
             await run_generate_async(mock_llm_rails, messages=[])
 
     @pytest.mark.asyncio
-    async def test_runs_in_a_different_thread(self):
-        """generate_async executes in a worker thread, not the calling thread,
-        so the asyncio event loop remains free during Colang processing."""
-        caller_thread = threading.current_thread()
-        inner_thread: threading.Thread | None = None
-
-        async def capture_thread(**kwargs):
-            nonlocal inner_thread
-            inner_thread = threading.current_thread()
-            return {}
-
-        mock_llm_rails = MagicMock()
-        mock_llm_rails.generate_async = AsyncMock(side_effect=capture_thread)
-
-        await run_generate_async(mock_llm_rails, messages=[])
-
-        assert inner_thread is not None
-        assert inner_thread is not caller_thread
-
-    @pytest.mark.asyncio
-    async def test_runs_in_a_new_event_loop(self):
-        """generate_async runs under a freshly created event loop, not the main one,
-        so blocking Colang work never stalls the FastAPI event loop."""
-        main_loop = asyncio.get_event_loop()
-        inner_loop: asyncio.AbstractEventLoop | None = None
+    async def test_every_request_runs_on_the_server_loop(self):
+        """Model clients are tied to the loop that first used them, so every request has to run on
+        the server loop. With a new loop per request, later requests found the client on a closed
+        loop and had to wait and retry."""
+        server_loop = asyncio.get_running_loop()
+        loops: list[asyncio.AbstractEventLoop] = []
 
         async def capture_loop(**kwargs):
-            nonlocal inner_loop
-            inner_loop = asyncio.get_event_loop()
+            loops.append(asyncio.get_running_loop())
             return {}
 
         mock_llm_rails = MagicMock()
         mock_llm_rails.generate_async = AsyncMock(side_effect=capture_loop)
 
         await run_generate_async(mock_llm_rails, messages=[])
+        await run_generate_async(mock_llm_rails, messages=[])
 
-        assert inner_loop is not None
-        assert inner_loop is not main_loop
+        assert loops == [server_loop, server_loop]
 
     @pytest.mark.asyncio
-    async def test_contextvars_are_propagated_into_thread(self):
-        """asyncio.to_thread copies the current contextvars snapshot, so request-scoped
-        variables (auth token, headers, etc.) are accessible inside the pipeline."""
+    async def test_request_contextvars_are_visible_to_the_rails(self):
+        """Request-scoped variables (auth token, headers, main model) reach the rails pipeline."""
         _test_var: ContextVar[str] = ContextVar("_test_var")
         _test_var.set("expected_value")
 

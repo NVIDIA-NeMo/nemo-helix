@@ -408,9 +408,11 @@ describe('CombinedAgentsTable', () => {
       const deleteItems = await screen.findAllByRole('menuitem', { name: 'Delete' });
       await user.click(deleteItems[0]);
 
-      expect(await screen.findByText('Delete Agent')).toBeInTheDocument();
       expect(
-        screen.getByText('Are you sure you want to delete this agent and all its deployments?')
+        await screen.findByRole('heading', { name: /^Delete agent 'react-agent2?'\?$/ })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The agent and all of its deployments are deleted and can't be restored.")
       ).toBeInTheDocument();
     });
 
@@ -476,7 +478,7 @@ describe('CombinedAgentsTable', () => {
       await user.click(deleteItems[0]);
 
       const confirmDialog = await screen.findByRole('dialog');
-      await user.click(within(confirmDialog).getByRole('button', { name: 'Delete' }));
+      await user.click(within(confirmDialog).getByRole('button', { name: 'Delete Agent' }));
 
       // Deployment is deleted before the agent.
       await waitFor(() => expect(order).toContain('agent:react-agent'));
@@ -556,7 +558,7 @@ describe('CombinedAgentsTable', () => {
       await user.click(screen.getAllByRole('button', { name: /actions/i })[0]);
       await user.click((await screen.findAllByRole('menuitem', { name: 'Delete' }))[0]);
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await user.click(within(dialog).getByRole('button', { name: 'Delete Agent' }));
 
       await waitFor(() => expect(order).toContain('agent:react-agent'));
       // Only the target agent's deployment (from page 2) is deleted, before the agent.
@@ -616,7 +618,7 @@ describe('CombinedAgentsTable', () => {
       await user.click(screen.getAllByRole('button', { name: /actions/i })[0]);
       await user.click((await screen.findAllByRole('menuitem', { name: 'Delete' }))[0]);
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await user.click(within(dialog).getByRole('button', { name: 'Delete Agent' }));
 
       expect(await screen.findByTestId('mock-toast-error')).toBeInTheDocument();
       expect(agentDeleteCalled).toBe(false);
@@ -700,8 +702,8 @@ describe('CombinedAgentsTable', () => {
       // The selection bar's Delete button opens the confirmation.
       await user.click(await screen.findByRole('button', { name: 'Delete selected agents' }));
       const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).getByText('Delete 2 Agents')).toBeInTheDocument();
-      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      expect(within(dialog).getByRole('heading', { name: 'Delete 2 agents?' })).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Delete 2 Agents' }));
 
       await waitFor(() =>
         expect([...deletedAgents].sort()).toEqual(['react-agent', 'react-agent2'])
@@ -773,7 +775,7 @@ describe('CombinedAgentsTable', () => {
 
       await user.click(await screen.findByRole('button', { name: 'Delete selected agents' }));
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await user.click(within(dialog).getByRole('button', { name: 'Delete 2 Agents' }));
 
       // The succeeded agent is still deleted; the failure is surfaced as a summary toast.
       await waitFor(() => expect(deletedAgents).toEqual(['react-agent']));

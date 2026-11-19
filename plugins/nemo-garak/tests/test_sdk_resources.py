@@ -395,6 +395,7 @@ class TestSyncRun:
 # ---------------------------------------------------------------------------
 
 _JOB_PAYLOAD = {
+    "id": "platform-job-original",
     "name": "audit-job-abc123",
     "workspace": "default",
     "status": "created",
@@ -577,7 +578,12 @@ async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
 # GarakJobResource
 # ---------------------------------------------------------------------------
 
-_STATUS_PAYLOAD = {"name": "audit-job-abc123", "status": "active", "workspace": "default"}
+_STATUS_PAYLOAD = {
+    "id": "platform-job-original",
+    "name": "audit-job-abc123",
+    "status": "active",
+    "workspace": "default",
+}
 
 
 def _make_tar_bytes() -> bytes:
@@ -617,7 +623,7 @@ class TestGarakJobResource:
 
     def test_get_job_status_hits_status_url(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "active"})
 
         status = resource.get_job_status()
 
@@ -628,17 +634,17 @@ class TestGarakJobResource:
 
     def test_check_if_complete_returns_true_when_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "completed"})
         assert resource.check_if_complete() is True
 
     def test_check_if_complete_returns_false_when_active(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "active"})
         assert resource.check_if_complete() is False
 
     def test_check_if_complete_raises_when_requested(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "error"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "error"})
         with pytest.raises(RuntimeError):
             resource.check_if_complete(raise_if_not_complete=True)
 
@@ -646,9 +652,9 @@ class TestGarakJobResource:
         platform, resource = self._make_resource()
         # Status sequence: active → completed; logs return empty pages each time.
         status_responses = [
-            _ok_response({"status": "active"}),
-            _ok_response({"status": "active"}),
-            _ok_response({"status": "completed"}),
+            _ok_response({"id": "platform-job-original", "status": "active"}),
+            _ok_response({"id": "platform-job-original", "status": "active"}),
+            _ok_response({"id": "platform-job-original", "status": "completed"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
         platform.http.get.side_effect = (
@@ -663,8 +669,8 @@ class TestGarakJobResource:
     def test_wait_until_done_exits_on_terminal_failure(self) -> None:
         platform, resource = self._make_resource()
         status_responses = [
-            _ok_response({"status": "active"}),
-            _ok_response({"status": "error"}),
+            _ok_response({"id": "platform-job-original", "status": "active"}),
+            _ok_response({"id": "platform-job-original", "status": "error"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
         platform.http.get.side_effect = [
@@ -678,14 +684,14 @@ class TestGarakJobResource:
 
     def test_download_artifacts_raises_when_not_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "active"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "active"})
 
         with pytest.raises(RuntimeError, match="status 'active'"):
             resource.download_artifacts()
 
     def test_download_artifacts_extracts_tarball(self, tmp_path: Path) -> None:
         platform, resource = self._make_resource()
-        status_resp = _ok_response({"status": "completed"})
+        status_resp = _ok_response({"id": "platform-job-original", "status": "completed"})
         tar_resp = MagicMock(spec=httpx.Response)
         tar_resp.raise_for_status.return_value = None
         tar_resp.content = _make_tar_bytes()
@@ -695,7 +701,7 @@ class TestGarakJobResource:
 
         assert result == tmp_path
         platform.http.get.assert_called_with(
-            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/audit-job-abc123/results/artifacts/download"
+            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/platform-job-original/results/artifacts/download"
         )
 
     def test_poll_safe_returns_fallback_on_transient_error(self) -> None:
@@ -737,7 +743,7 @@ class TestAsyncGarakJobResource:
 
     async def test_get_job_status_hits_status_url(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "completed"})
 
         status = await resource.get_job_status()
 
@@ -748,21 +754,21 @@ class TestAsyncGarakJobResource:
 
     async def test_check_if_complete_returns_true_when_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "completed"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "completed"})
         assert await resource.check_if_complete() is True
 
     async def test_check_if_complete_raises_when_requested(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "cancelled"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "cancelled"})
         with pytest.raises(RuntimeError):
             await resource.check_if_complete(raise_if_not_complete=True)
 
     async def test_wait_until_done_polls_until_completed(self) -> None:
         platform, resource = self._make_resource()
         status_responses = [
-            _ok_response({"status": "active"}),
-            _ok_response({"status": "active"}),
-            _ok_response({"status": "completed"}),
+            _ok_response({"id": "platform-job-original", "status": "active"}),
+            _ok_response({"id": "platform-job-original", "status": "active"}),
+            _ok_response({"id": "platform-job-original", "status": "completed"}),
         ]
         logs_response = _ok_response({"data": [], "next_page": None})
         platform.http.get.side_effect = (
@@ -774,14 +780,14 @@ class TestAsyncGarakJobResource:
 
     async def test_download_artifacts_raises_when_not_completed(self) -> None:
         platform, resource = self._make_resource()
-        platform.http.get.return_value = _ok_response({"status": "pending"})
+        platform.http.get.return_value = _ok_response({"id": "platform-job-original", "status": "pending"})
 
         with pytest.raises(RuntimeError, match="status 'pending'"):
             await resource.download_artifacts()
 
     async def test_download_artifacts_extracts_tarball(self, tmp_path: Path) -> None:
         platform, resource = self._make_resource()
-        status_resp = _ok_response({"status": "completed"})
+        status_resp = _ok_response({"id": "platform-job-original", "status": "completed"})
         tar_resp = MagicMock(spec=httpx.Response)
         tar_resp.raise_for_status.return_value = None
         tar_resp.content = _make_tar_bytes()

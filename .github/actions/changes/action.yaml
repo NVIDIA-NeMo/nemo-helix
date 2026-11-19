@@ -79,6 +79,9 @@ outputs:
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
+  nightly-taskset-runs-report:
+    description: "'true' if the nightly taskset-runs e2e report helper or its tests changed"
+    value: ${{ steps.filter.outputs.nightly-taskset-runs-report }}
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
     value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
@@ -263,6 +266,7 @@ runs:
             - 'services/**'
             - 'plugins/**'
           k8s-smoke:
+            - '.github/workflows/build-cpu-smoke-images.yaml'
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
             - 'e2e/test_evaluator_plugin.py'
@@ -288,6 +292,9 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/src/nhx/common/jobs/**'
             - 'packages/nhx_testing/src/nhx/testing/**'
+          nightly-taskset-runs-report:
+            - '.github/scripts/nightly_taskset_runs_report.py'
+            - '.github/scripts/tests/test_nightly_taskset_runs_report.py'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'

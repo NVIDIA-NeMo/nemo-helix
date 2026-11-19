@@ -29,6 +29,9 @@
 #   OPENSANDBOX_UMBRELLA_VERSION    Umbrella tarball that contains the server chart (default: 0.2.2)
 #   KUBE_NAMESPACE               Job / Helm-release namespace (default: default). Alias: NHX_NAMESPACE
 #   MINIKUBE_PROFILE             kubectl/helm --context (default: minikube). Does not change the current kubeconfig context.
+#   KUBE_CONTEXT                 kubectl/helm --context for another cluster, such as kind-<name> (default: MINIKUBE_PROFILE)
+#   BATCHSANDBOX_TEMPLATE        BatchSandbox template ConfigMap (default: e2e/k8s/values/batchsandbox-minikube-template.yaml)
+#   SANDBOX_PULL_SECRET          Pull Secret the template names, required in KUBE_NAMESPACE (default: nvcrimagepullsecret)
 #   SKIP_VERIFY=1                Skip k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 #   HELM_TIMEOUT                 Helm --wait timeout (default: 10m)
 set -euo pipefail
@@ -46,6 +49,8 @@ MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-10m}"
 API_SECRET="opensandbox-server-api-key"
+BATCHSANDBOX_TEMPLATE="${BATCHSANDBOX_TEMPLATE:-${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml}"
+SANDBOX_PULL_SECRET="${SANDBOX_PULL_SECRET:-nvcrimagepullsecret}"
 OPENSANDBOX_CONTROLLER_VERSION="${OPENSANDBOX_CONTROLLER_VERSION:-0.2.0}"
 OPENSANDBOX_UMBRELLA_VERSION="${OPENSANDBOX_UMBRELLA_VERSION:-0.2.2}"
 OPENSANDBOX_RELEASES="${OPENSANDBOX_RELEASES:-https://github.com/opensandbox-group/OpenSandbox/releases/download}"
@@ -141,12 +146,12 @@ kubectl create namespace "${CONTROL_PLANE_NS}" --dry-run=client -o yaml | kubect
 kubectl create namespace "${KUBE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 log_info "Applying BatchSandbox template ConfigMap..."
-kubectl apply -f "${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml"
+kubectl apply -f "${BATCHSANDBOX_TEMPLATE}"
 
-if ! kubectl get secret nvcrimagepullsecret -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
-    log_error "Secret nvcrimagepullsecret is missing in ${KUBE_NAMESPACE}."
+if ! kubectl get secret "${SANDBOX_PULL_SECRET}" -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
+    log_error "Secret ${SANDBOX_PULL_SECRET} is missing in ${KUBE_NAMESPACE}."
     log_error "The BatchSandbox template hard-codes that name. Run setup_local_minikube_gpu.sh first,"
-    log_error "or create the pull Secret, or edit imagePullSecrets in ${REPO_ROOT}/e2e/k8s/values/batchsandbox-minikube-template.yaml."
+    log_error "or create the pull Secret, or edit imagePullSecrets in ${BATCHSANDBOX_TEMPLATE}."
     exit 1
 fi
 

@@ -142,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "254fde5799bd4b9eee56ee5c6a298c0ec648e76b"
+  default = "43f85ee63c23b2cc8bc45da20bde6b9306facf3f"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
@@ -388,7 +388,8 @@ group "docker-cpu" {
 }
 
 # CI extension that adds the colocated Gym task smoke-test stage to docker-cpu.
-# The larger sandbox-host image has a dedicated Platform-Deploy build job.
+# The sandboxed Gym host is published here, not in docker-cpu, so local and
+# unpublished PR builds do not load it.
 group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
@@ -396,6 +397,8 @@ group "docker-cpu-ci" {
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
+    "nhx-gym-host-docker",
+    "nhx-gym-host-smoke-test",
     "nhx-agent-hardener-tasks-smoke-test",
     "nhx-builder-tasks-docker",
     "nhx-builder-tasks-smoke-test",

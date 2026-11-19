@@ -21,7 +21,6 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   useSecretsDeleteSecret,
@@ -45,8 +44,6 @@ type SecretWithId = HelixSecretResponse & { id: string };
 type ModalState = 'delete' | 'edit' | 'none';
 
 export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate, attributes }) => {
-  const toast = useToast();
-
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
@@ -98,17 +95,12 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
       return false;
     }
 
-    try {
-      await deleteSecretMutation.mutateAsync({
-        workspace,
-        name: modalSecret.name!,
-      });
-      refetch();
-      return true;
-    } catch {
-      toast.error('Failed to delete secret');
-      return false;
-    }
+    await deleteSecretMutation.mutateAsync({
+      workspace,
+      name: modalSecret.name!,
+    });
+    refetch();
+    return true;
   };
 
   const handleModalClose = () => {
@@ -213,10 +205,10 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
       {modalOpen === 'delete' && modalSecret && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="secret"
+          ids={[modalSecret.name ?? 'unnamed']}
+          description="Anything that uses this secret loses access to its value."
           onDelete={handleDeleteSecret}
-          title={`Delete: ${modalSecret.name}`}
-          description="Are you sure you want to delete?"
           onClose={handleModalClose}
         />
       )}

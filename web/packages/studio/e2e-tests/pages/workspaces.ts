@@ -38,11 +38,13 @@ export class WorkspacesPage {
 
   async deleteWorkspace(workspaceName: string) {
     await this.page.getByRole('button', { name: 'Delete Workspace' }).click();
-    const deleteDialog = this.page.getByRole('dialog', { name: `Delete ${workspaceName}` });
+    const deleteDialog = this.page.getByRole('dialog', {
+      name: `Delete workspace '${workspaceName}'?`,
+    });
     await expect(deleteDialog).toBeVisible();
-    await deleteDialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await deleteDialog.getByRole('button', { name: 'Delete Workspace', exact: true }).click();
     await waitForLongOperation(this.page);
-    await expectToastIsVisible(this.page, `Workspace "${workspaceName}" deleted successfully.`);
+    await expectToastIsVisible(this.page, `Deleted workspace '${workspaceName}'.`);
   }
 
   async waitForPageLoad() {

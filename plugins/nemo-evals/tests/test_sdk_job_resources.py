@@ -46,6 +46,7 @@ from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
 _JOB_PAYLOAD = {
+    "id": "platform-job-original",
     "name": "job-123",
     "status": "created",
     "spec": {
@@ -58,14 +59,12 @@ _JOB_PAYLOAD = {
         "dataset": [{"expected": "a", "output": "a"}],
     },
 }
-_STATUS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
-_AGGREGATE_URL = (
-    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/aggregate-scores/download"
+_STATUS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/status"
+_AGGREGATE_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/results/aggregate-scores/download"
+_ROW_SCORES_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/results/row-scores/download"
+_ARTIFACTS_URL = (
+    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/results/artifacts/download"
 )
-_ROW_SCORES_URL = (
-    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/row-scores/download"
-)
-_ARTIFACTS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
 
 
 @pytest.fixture
@@ -634,7 +633,10 @@ async def test_async_get_job_status_delegates_to_metric_jobs_resource(
     status = _status_response("active")
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+        assert (
+            str(request.url)
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/status"
+        )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=status.model_dump(mode="json"))
 
@@ -654,7 +656,10 @@ async def test_async_get_job_status_accepts_nullable_detail_fields(
     payload["error_details"] = None
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+        assert (
+            str(request.url)
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/status"
+        )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=payload)
 
@@ -749,7 +754,7 @@ async def test_async_download_artifacts_extracts_artifact_tarball(
     async def handler(request: httpx.Request) -> httpx.Response:
         assert (
             str(request.url)
-            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/platform-job-original/results/artifacts/download"
         )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, content=_artifact_tar_bytes())

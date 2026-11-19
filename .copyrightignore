@@ -26,4 +26,4 @@ services/guardrails/callouts/internal/server/callout_server_test.go
 k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl
 plugins/prompt-master/src/prompt_master_plugin/vendor/
 # Harbor task prompts: a header would reach the agent
-e2e/data/taskset_runs_dataset/*/instruction.md
+e2e/data/taskset_runs_*dataset/*/instruction.md

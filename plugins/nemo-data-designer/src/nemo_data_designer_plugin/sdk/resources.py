@@ -319,10 +319,12 @@ class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
             ValueError: If the job ID provided is empty.
         """
         try:
-            self._data_designer_client.get_job(workspace=workspace, name=job_name).data()
+            job = self._data_designer_client.get_job(workspace=workspace, name=job_name).data()
         except Exception as e:
             raise _get_error(e) from e
-        return DataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
+        return DataDesignerJobResource(
+            job_name=job_name, job_id=job.id, client=self._data_designer_client, workspace=workspace
+        )
 
     def get_default_model_configs(self) -> list[dd.ModelConfig]:
         """Default model configs are not supported in the NeMo Helix Data Designer service."""
@@ -450,6 +452,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
             logger.info(f"  |-- job name: {job.name}")
             job_client = DataDesignerJobResource(
                 job_name=job.name,
+                job_id=job.id,
                 client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,
@@ -561,10 +564,12 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
         """
         try:
             response = await self._data_designer_client.get_job(workspace=workspace, name=job_name)
-            response.data()
+            job = response.data()
         except Exception as e:
             raise _get_error(e) from e
-        return AsyncDataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
+        return AsyncDataDesignerJobResource(
+            job_name=job_name, job_id=job.id, client=self._data_designer_client, workspace=workspace
+        )
 
     async def get_default_model_configs(self) -> list[dd.ModelConfig]:
         """Default model configs are not supported in the NeMo Helix Data Designer service."""
@@ -661,6 +666,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
             logger.info(f"  |-- job name: {job.name}")
             job_client = AsyncDataDesignerJobResource(
                 job_name=job.name,
+                job_id=job.id,
                 client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,

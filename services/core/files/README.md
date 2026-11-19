@@ -54,9 +54,39 @@ Cache-status listings use at most eight concurrent metadata lookups, with one
 HEAD per object in a cold listing. Use `include_cache_status` only when needed;
 upstream lookup failures return the standard HTTP 502 error rather than 500.
 
+Local S3 cache writes retain at most **two completed versions per object** by
+default. Configure `files.s3_cache_max_versions_per_object` or
+`NHX_FILES_S3_CACHE_MAX_VERSIONS_PER_OBJECT` (minimum 1). After a successful cache
+write, older siblings are pruned under an object-wide writer lock. Temporary
+uploads and other objects are excluded; already-open POSIX readers continue
+reading their file descriptors. An eviction before opening is handled as a cache
+miss. This bounds growth from repeated rewrites, not total storage across all
+objects or bytes held by active readers.
+
 Legacy entries under `cache/s3/` are ignored in favor of `cache/s3-v2/`; no manual
-cleanup is needed to restore fresh reads after upgrading. Legacy and superseded
-files are not automatically removed by the freshness/TTL fixes.
+cleanup is needed to restore fresh reads after upgrading. Legacy files are not
+automatically removed.
+
+### Opt-in S3 cache regression
+
+```bash
+RUN_EXTERNAL_STORAGE_TESTS=1 uv run --frozen pytest \
+  services/core/files/tests/integration/external_storage/test_s3_cache.py -v -n 0
+```
+
+The test runs the Files API in-process, with real S3 requests and disk caching.
+By default it starts a digest-pinned, disposable MinIO container on a random
+loopback port (Docker required; no cloud credentials). To use an existing S3
+server instead, set `S3_TEST_ENDPOINT`, `S3_TEST_ACCESS_KEY`,
+`S3_TEST_SECRET_KEY`, and optionally `S3_TEST_REGION` (default `us-east-1`).
+The credentials must allow bucket creation/deletion and versioning; each case
+cleans up its own bucket, including versions and delete markers.
+
+Cases cover unversioned/versioned buckets with retention limits of one/two,
+API overwrite/delete with the default metadata TTL, direct bucket mutations
+with strict revalidation, ranged reads and headers, signed `If-Match`, ignored
+legacy entries, and an unbuffered reader surviving eviction. No S3 or cache I/O
+is mocked. This is not a full deployed-platform or AWS IAM/KMS test.
 
 ## scripts
 `services/core/files/script` has a few e2e scripts for testing functionality.
