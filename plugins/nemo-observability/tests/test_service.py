@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 from nemo_observability_plugin.session import COOKIE_NAME
@@ -152,6 +153,26 @@ def test_response_headers_pass_through_and_redirects_stay_on_studio_origin(make_
         "b=2; Path=/apis/observability/ui/mlflow",
     ]
     assert response.headers["x-frame-options"] == "SAMEORIGIN"
+
+
+@pytest.mark.parametrize(
+    ("name", "upstream_location", "expected"),
+    [
+        ("mlflow", "/apis/observability/ui/mlflow/#/x", "/apis/observability/ui/mlflow/#/x"),
+        ("phoenix", "http://phoenix.test:6006/login?next=/", "/apis/observability/ui/phoenix/login?next=/"),
+        ("phoenix", "http://phoenix.test:6006", "/apis/observability/ui/phoenix/"),
+        ("phoenix", "/login", "/apis/observability/ui/phoenix/login"),
+        ("phoenix", "/apis/observability/ui/phoenix/projects", "/apis/observability/ui/phoenix/projects"),
+        ("phoenix", "https://idp.example/authorize", "https://idp.example/authorize"),
+        ("phoenix", "//idp.example/authorize", "//idp.example/authorize"),
+        ("phoenix", "projects", "projects"),
+    ],
+)
+def test_redirects_stay_under_the_connection_prefix(make_client, name, upstream_location, expected):
+    client = make_client(lambda request: httpx.Response(302, headers={"location": upstream_location}))
+    _open_session(client, name)
+    response = client.get(f"/apis/observability/ui/{name}/", follow_redirects=False)
+    assert response.headers["location"] == expected
 
 
 def test_unreachable_upstream_is_502(make_client):

@@ -96,10 +96,10 @@ async def proxy(
     try:
         upstream = await client.send(upstream_request, stream=True)
     except httpx.RequestError as exc:
-        logger.warning("Observability connection %r unreachable: %s", connection.name, exc)
+        logger.warning("Observability connection unreachable", extra={"connection": connection.name, "error": str(exc)})
         raise HTTPException(status_code=502, detail=f"Trace explorer {connection.name!r} is unreachable.") from exc
     headers = [
-        (key, _rewrite_location(value, connection) if key.lower() == "location" else value)
+        (key, _rewrite_location(value, connection, adapter) if key.lower() == "location" else value)
         for key, value in upstream.headers.multi_items()
         if key.lower() not in _RESPONSE_DROP
     ]
@@ -131,8 +131,16 @@ def _request_origin(request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}"
 
 
-def _rewrite_location(location: str, connection: ObservabilityConnection) -> str:
-    """Keep redirects on the Studio origin instead of sending the frame to the upstream host."""
-    if location == connection.base_url or location.startswith(connection.base_url + "/"):
-        return location[len(connection.base_url) :] or "/"
-    return location
+def _rewrite_location(location: str, connection: ObservabilityConnection, adapter: ProviderAdapter) -> str:
+    """Keep redirects on the Studio origin and under the connection's prefix (the inverse of ``upstream_url``)."""
+    base_url = connection.base_url
+    if location == base_url or location.startswith(base_url + "/"):
+        path = location[len(base_url) :] or "/"
+    elif location.startswith("/") and not location.startswith("//"):
+        path = location
+    else:
+        return location
+    prefix = connection_prefix(connection)
+    if adapter.strip_prefix and path != prefix and not path.startswith(prefix + "/"):
+        return prefix + path
+    return path
