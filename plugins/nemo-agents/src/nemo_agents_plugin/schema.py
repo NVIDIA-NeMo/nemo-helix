@@ -205,6 +205,40 @@ class SkillFilter(NemoFilter):
         return _walk(operation)
 
 
+def public_skill_filter(operation: FilterOperation | None) -> dict[str, object] | None:
+    """The list response's ``filter`` echo, in the public field names a caller can submit again.
+
+    Reverses :meth:`SkillFilter.translate_operation`: a ``revisions`` relationship condition goes
+    back to ``description`` or ``tags``, and an OR of tag conditions back to ``tags: {$in: [...]}``.
+    """
+
+    def tag_value(op: FilterOperation) -> object | None:
+        if (
+            isinstance(op, RelationshipOperation)
+            and op.condition is not None
+            and op.condition.field == f"{_REVISION_FRONTMATTER}.tags"
+        ):
+            return op.condition.value
+        return None
+
+    def walk(op: FilterOperation) -> dict[str, object]:
+        if isinstance(op, RelationshipOperation) and op.condition is not None:
+            field = op.condition.field.removeprefix(f"{_REVISION_FRONTMATTER}.")
+            if field == "tags":
+                return {"tags": {FilterOperator.EQ.value: op.condition.value}}
+            return {field: {op.condition.operator.value: op.condition.value}}
+        if isinstance(op, LogicalOperation):
+            values = [tag_value(child) for child in op.operations]
+            if op.operator == FilterOperator.OR and op.operations and all(v is not None for v in values):
+                return {"tags": {FilterOperator.IN.value: values}}
+            if op.operator == FilterOperator.NOT:
+                return {op.operator.value: walk(op.operations[0])}
+            return {op.operator.value: [walk(child) for child in op.operations]}
+        return op.to_dict()
+
+    return None if operation is None else walk(operation)
+
+
 def _has_frontmatter_tag(op: ComparisonOperation) -> FilterOperation:
     def contains(value: object) -> RelationshipOperation:
         if not isinstance(value, str) or not value:

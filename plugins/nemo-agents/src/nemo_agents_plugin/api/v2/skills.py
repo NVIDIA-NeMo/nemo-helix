@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, st
 from nemo_agents_plugin.api.v2._perms import SkillPerms
 from nemo_agents_plugin.api.v2.dependencies import get_skill_service
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.schema import SkillFilter, SkillSort
+from nemo_agents_plugin.schema import SkillFilter, SkillSort, public_skill_filter
 from nemo_agents_plugin.skill_service import (
     LinkedTasksetNotFoundError,
     SkillExistsError,
@@ -137,7 +137,7 @@ async def list_skills(
             filter_operation=parsed_filter.operation,
         ),
     )
-    page.filter = parsed_filter.to_response()
+    page.filter = public_skill_filter(parsed_filter.operation)
     return page
 
 

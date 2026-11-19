@@ -7349,7 +7349,7 @@ nemo agents skills get [OPTIONS] NAME
 
 ##### nemo agents skills list
 
-List skills, each at its latest revision. Filters match the latest revision's frontmatter.
+List skills, each at its latest revision. Filters match the frontmatter of any published revision.
 
 **Usage:**
 
@@ -7359,7 +7359,7 @@ nemo agents skills list [OPTIONS]
 
 **Options:**
 
-* `--tag, -t`: Only skills whose frontmatter metadata.tags has this tag; repeatable.
+* `--tag, -t`: Only skills with a published revision whose frontmatter metadata.tags has this tag; repeatable.
 * `--filter`: Filter as JSON, e.g. '`{"description": {"$like": "pdf"}}`'. Fields: name, description, tags.
 * `--sort`: name, created_at or updated_at; prefix '-' to descend.
 * `--page <INTEGER>`: Page number (1-indexed).

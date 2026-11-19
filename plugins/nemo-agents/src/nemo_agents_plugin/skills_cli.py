@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -47,6 +48,7 @@ from nemo_helix_plugin.cli_state import CLIState, cli_state, resolve_cli_workspa
 from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.skill_archive import DEFAULT_LIMITS, EXCLUDED_TOP_LEVEL_DIRS
 
 #: Fileset that ``--from-dir`` uploads into when ``--upload-fileset`` is not given.
 DEFAULT_UPLOAD_FILESET = "skill-sources"
@@ -113,27 +115,61 @@ TagOption = Annotated[
 
 
 def _upload_dir(files: FilesClient, directory: Path, *, workspace: str, fileset: str, skill: str) -> str:
-    """Upload ``directory`` under ``<skill>/<content hash>/`` in ``fileset``; return its fileset reference."""
-    members: list[tuple[str, bytes]] = []
-    for path in sorted(directory.rglob("*")):
-        relative = path.relative_to(directory).as_posix()
-        if path.is_symlink():
-            raise click.BadParameter(
-                f"{relative!r} is a symlink; skills hold regular files and directories only", param_hint="'--from-dir'"
-            )
-        if path.is_file():
-            members.append((relative, path.read_bytes()))
+    """Upload ``directory`` under ``<skill>/<content hash>/`` in ``fileset``; return its fileset reference.
+
+    Applies the archive rules before anything is uploaded: a top-level ``evals/`` directory is left
+    out (it is test material the archive excludes), symlinks are refused, and the archive limits on
+    entries, path length, file size and total size are checked from ``stat``. Files are hashed in
+    chunks and read one at a time for upload, so memory stays bounded by the largest file.
+    """
+    limits = DEFAULT_LIMITS
+    members: list[tuple[str, Path]] = []
+    entries = 0
+    total = 0
+    for root, dirnames, filenames in os.walk(directory, followlinks=False):
+        root_path = Path(root)
+        if root_path == directory:
+            dirnames[:] = [d for d in dirnames if d not in EXCLUDED_TOP_LEVEL_DIRS]
+        dirnames.sort()
+        for name in [*dirnames, *sorted(filenames)]:
+            path = root_path / name
+            relative = path.relative_to(directory).as_posix()
+            if path.is_symlink():
+                raise click.BadParameter(
+                    f"{relative!r} is a symlink; skills hold regular files and directories only",
+                    param_hint="'--from-dir'",
+                )
+            entries += 1
+            if entries > limits.max_entries:
+                raise click.BadParameter(f"more than {limits.max_entries} entries", param_hint="'--from-dir'")
+            if len(f"{skill}/{relative}".encode()) > limits.max_path_length:
+                raise click.BadParameter(f"{relative!r} is too long a path", param_hint="'--from-dir'")
+            if name in filenames:
+                if not path.is_file():
+                    raise click.BadParameter(f"{relative!r} is not a regular file", param_hint="'--from-dir'")
+                size = path.stat().st_size
+                total += size
+                if size > limits.max_file_bytes or total > limits.max_total_payload_bytes:
+                    raise click.BadParameter(f"{relative!r} exceeds the skill size limits", param_hint="'--from-dir'")
+                members.append((relative, path))
+    members.sort()
     if not any(relative == "SKILL.md" for relative, _ in members):
         raise click.BadParameter(f"{str(directory)!r} has no SKILL.md at its root", param_hint="'--from-dir'")
 
     digest = hashlib.sha256()
-    for relative, content in members:
-        digest.update(relative.encode() + b"\0" + hashlib.sha256(content).digest())
+    for relative, path in members:
+        file_digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                file_digest.update(chunk)
+        digest.update(relative.encode() + b"\0" + file_digest.digest())
     prefix = f"{skill}/{digest.hexdigest()}"
 
     files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=fileset), exist_ok=True).data()
-    for relative, content in members:
-        files.upload_file(workspace=workspace, name=fileset, path=f"{prefix}/{relative}", content=content).data()
+    for relative, path in members:
+        files.upload_file(
+            workspace=workspace, name=fileset, path=f"{prefix}/{relative}", content=path.read_bytes()
+        ).data()
     return f"{workspace}/{fileset}#{prefix}"
 
 
@@ -298,7 +334,11 @@ def build_skills_app() -> typer.Typer:
         ctx: typer.Context,
         tag: Annotated[
             Optional[list[str]],
-            typer.Option("--tag", "-t", help="Only skills whose frontmatter metadata.tags has this tag; repeatable."),
+            typer.Option(
+                "--tag",
+                "-t",
+                help="Only skills with a published revision whose frontmatter metadata.tags has this tag; repeatable.",
+            ),
         ] = None,
         filter_expression: Annotated[
             Optional[str],
@@ -318,12 +358,22 @@ def build_skills_app() -> typer.Typer:
         no_truncate: NoTruncateOption = None,
         columns: OutputColumnsOption = None,
     ) -> None:
-        """List skills, each at its latest revision. Filters match the latest revision's frontmatter."""
+        """List skills, each at its latest revision. Filters match the frontmatter of any published revision."""
         state = cli_state(ctx)
         resolved_output_format = resolve_output_format(ctx, output_format)
         check_output_columns_with_format(columns, resolved_output_format)
         query_params: ListSkillsQueryParams = {}
-        merged = merge_filter_dict(filter_expression, tags={"$in": tag} if tag else None)
+        merged = merge_filter_dict(filter_expression)
+        if tag:
+            # Combine with $and rather than adding a sibling key, so a JSON filter with a top-level
+            # logical operator ($or, $and, $not) stays valid.
+            tag_filter = {"tags": {"$in": tag}}
+            if merged is None:
+                merged = tag_filter
+            elif isinstance(merged, dict):
+                merged = {"$and": [merged, tag_filter]}
+            else:
+                raise click.UsageError("--tag cannot be combined with a text filter; pass --filter as JSON.")
         if merged:
             query_params["filter"] = merged if isinstance(merged, str) else json.dumps(merged)
         if sort is not None:

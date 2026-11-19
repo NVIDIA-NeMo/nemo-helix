@@ -27,11 +27,11 @@ from typing import BinaryIO
 from nemo_helix_plugin.agents.skills import SkillArchiveDescriptor
 from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.files.storage_config import StorageConfigType
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.skill_archive import (
     DEFAULT_LIMITS,
+    EXCLUDED_TOP_LEVEL_DIRS,
     SkillArchiveError,
     SkillArchiveInfo,
     SkillArchiveLimits,
@@ -160,6 +160,8 @@ class SkillArchiveStore:
             relative = PurePosixPath(path[len(prefix) :])
             if not relative.parts or relative.is_absolute() or any(p in {"", ".", ".."} for p in relative.parts):
                 raise SkillSourceError(f"Source file path {path!r} is unsafe")
+            if len(relative.parts) > 1 and relative.parts[0] in EXCLUDED_TOP_LEVEL_DIRS:
+                continue  # the archive leaves these out, so neither download nor count them
             if len(str(relative).encode("utf-8")) > self.limits.max_path_length:
                 raise SkillSourceError(
                     f"Source file path {path!r} exceeds the {self.limits.max_path_length}-byte limit"
@@ -269,14 +271,13 @@ class SkillArchiveStore:
         return info
 
     async def _ensure_fileset(self, workspace: str) -> None:
-        """Create the skills fileset if absent, and refuse one that is not plain platform storage.
+        """Create the skills fileset if absent (on the platform's default storage).
 
         Known gap: the Files service has no way to reserve a fileset for a service, so a workspace
-        editor can still pre-create it or overwrite its objects. Every read verifies the archive
-        against its pinned hash, so tampering is detected, not silently served. Refusing non-local
-        storage at least stops a pre-created fileset from pointing at storage the caller controls.
+        editor can pre-create it or overwrite its objects. Every read verifies the archive against
+        its pinned hash, so tampering is detected rather than served.
         """
-        fileset = (
+        (
             await self.files_client.create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
@@ -285,11 +286,6 @@ class SkillArchiveStore:
                 exist_ok=True,
             )
         ).data()
-        if fileset.storage.type != StorageConfigType.LOCAL:
-            raise SkillStorageError(
-                f"Fileset {workspace}/{SKILLS_FILESET_NAME} is reserved for skill archives and must use platform "
-                f"storage, but it uses {fileset.storage.type!r} storage"
-            )
 
     async def _download(
         self,

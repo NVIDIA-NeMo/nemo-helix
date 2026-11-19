@@ -12,6 +12,7 @@ from nemo_helix_plugin.agents.skills import (
     ListSkillsQueryParams,
     Skill,
     SkillInput,
+    SkillProjectQueryParams,
     SkillTagQueryParams,
 )
 from nemo_helix_plugin.agents.types import (
@@ -383,12 +384,16 @@ def download_agent_job_result(
 
 @post(f"{_SKILLS}/{{name}}")
 @abstractmethod
-def create_skill(*, workspace: str | None = None, name: str, body: SkillInput) -> Skill: ...
+def create_skill(
+    *, workspace: str | None = None, name: str, body: SkillInput, query_params: SkillProjectQueryParams | None = None
+) -> Skill: ...
 
 
 @put(f"{_SKILLS}/{{name}}")
 @abstractmethod
-def publish_skill(*, workspace: str | None = None, name: str, body: SkillInput) -> Skill: ...
+def publish_skill(
+    *, workspace: str | None = None, name: str, body: SkillInput, query_params: SkillProjectQueryParams | None = None
+) -> Skill: ...
 
 
 @get(f"{_SKILLS}/{{name}}")

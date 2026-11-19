@@ -31,13 +31,11 @@ from nemo_helix_plugin.client.errors import (
     PermissionDeniedError,
     UnprocessableEntityError,
 )
-from nemo_helix_plugin.client_provider import DefaultNemoClientProvider, set_nemo_client_provider
+from nemo_helix_plugin.client_provider import DefaultNemoClientProvider, _build_headers, set_nemo_client_provider
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
-from nhx.common.auth.models import Principal
-from nhx.common.client_factory import get_async_nemo_client as platform_async_nemo_client
 from nhx.core.files.service import FilesService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import (
@@ -81,17 +79,13 @@ class _InProcessClientProvider(DefaultNemoClientProvider):
         on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
     ) -> AsyncNemoClient:
-        principal = (
-            on_behalf_of
-            if on_behalf_of is None or isinstance(on_behalf_of, str)
-            else Principal.model_validate(on_behalf_of, from_attributes=True)
-        )
-        return platform_async_nemo_client(
-            as_service=as_service,
-            internal=internal,
-            on_behalf_of=principal,
+        headers = _build_headers(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
+        return AsyncNemoClient(
+            base_url=str(self._http_client.base_url),
             workspace=workspace,
+            default_headers=headers or None,
             http_client=self._http_client,
+            owns_http_client=False,
         )
 
 

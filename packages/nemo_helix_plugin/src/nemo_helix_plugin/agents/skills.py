@@ -165,3 +165,7 @@ class ListSkillRevisionsQueryParams(TypedDict, total=False):
 
 class SkillTagQueryParams(TypedDict, total=False):
     revision: NotRequired[str]
+
+
+class SkillProjectQueryParams(TypedDict, total=False):
+    project: NotRequired[str]
