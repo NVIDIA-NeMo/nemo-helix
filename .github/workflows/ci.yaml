@@ -602,17 +602,8 @@ jobs:
           enable-cache: true
           python-version: "3.13"
           cache-dependency-glob: uv.lock
-      - name: Install nodejs
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: |
-          npm i -g corepack@0.31.0
-          corepack enable pnpm
-      - name: Install web dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       # Unit tests skip the vendor bundler; exercise the same production mode
       # as the Studio image so asset/loader failures are caught before merge.
       - name: Build Studio production assets
@@ -1342,14 +1333,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test GitHub JavaScript scripts
         run: node --test .github/scripts/tests/*.test.cjs
       - name: Lint GitHub JavaScript scripts
@@ -1375,32 +1360,11 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        id: deps
-        run: pnpm install --frozen-lockfile
-      # Check the committed sources before generation can modify them.
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
+      # Covers @nemo/sdk too. Its generated tree is built fresh, or restored only when
+      # generated/.input-hash matches the current specs and generator.
       - name: Typecheck web packages
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.changes.outputs.openapi }}" != "true" ]; then
-            git fetch origin "${{ github.base_ref }}" --depth=1
-            pnpm --filter="...[origin/${{ github.base_ref }}]" run --parallel --if-present typecheck
-          else
-            pnpm run --recursive --parallel --if-present typecheck
-          fi
-      - name: Generate SDK from OpenAPI specs
-        id: sdk
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk gen:all-force
-      - name: Typecheck SDK generated output
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk typecheck
-      - name: Typecheck web packages against regenerated SDK
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
@@ -1415,8 +1379,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Studio product areas (STUDIO_TEST_GROUPS in web/packages/studio/vite.config.ts),
-        # plus `packages` for every other web package's tests.
         group: [agents, data, models, platform, packages]
     defaults:
       run:
@@ -1426,13 +1388,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test changed packages
         env:
           GROUP: ${{ matrix.group }}
@@ -1472,14 +1429,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
+      - name: Set up web dependencies
         id: deps
-        run: pnpm install --frozen-lockfile
+        uses: ./.github/actions/setup-web
       - name: Check formatting
         run: pnpm format
       - name: Lint
