@@ -17,6 +17,7 @@ import { MEMBERS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
+  getCommunityPluginsRoute,
   getSecretsRoute,
   getWorkspaceInferenceProvidersRoute,
   getWorkspaceMembersRoute,
@@ -142,6 +143,22 @@ export const WorkspaceSettingsRoute: FC = () => {
                 }
               />
             </>
+
+            <Divider />
+            <SettingsSection
+              label="Community Plugins"
+              body="Register external APIs, and optionally a Studio UI, from a plugin manifest URL. Requires the HelixAdmin role."
+              action={
+                <Button
+                  color="neutral"
+                  kind="secondary"
+                  onClick={() => navigate(getCommunityPluginsRoute(workspace))}
+                  className="shrink-0"
+                >
+                  Manage Plugins
+                </Button>
+              }
+            />
 
             <Divider />
             <SettingsSection

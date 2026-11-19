@@ -174,6 +174,8 @@ export const ROUTES = {
     settings: `/workspaces/:${P.workspace}/settings`,
     /** Workspace members and role-based access (Entities role bindings) */
     members: `/workspaces/:${P.workspace}/members`,
+    /** Admin registry of community plugins (external APIs and UI bundles) */
+    communityPlugins: `/workspaces/:${P.workspace}/community-plugins`,
     agentsList: `/workspaces/:${P.workspace}/agents`,
     assistantChat: `/workspaces/:${P.workspace}/dashboard/assistant`,
     agentDetail: `/workspaces/:${P.workspace}/agents/:${P.agentName}`,
