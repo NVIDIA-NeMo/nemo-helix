@@ -1104,6 +1104,55 @@ def test_mcp_tools_list_includes_feature_flag_enabled_destinations(monkeypatch: 
     assert "chat with or try a model" in studio_link_tool["description"]
 
 
+def test_studio_link_tool_lists_each_enabled_destination_with_its_label():
+    tool = studio_links.tool_for_destinations(
+        studio_links.enabled_destinations({"experiment": True, "evals_enabled": True})
+    )
+
+    description = tool["description"]
+    assert "Choose the destination whose label matches the page the user asked about" in description
+    assert "experiment: Experiments" in description
+    assert "evaluation_results: Evaluation results" in description
+    # Placeholders read as required arguments rather than raw template braces.
+    assert "agent: Agent <name>" in description
+    assert "experiment_detail: Experiment <experiment_name>" in description
+    assert "{" not in description.partition("Enabled destinations and the page each opens")[2]
+
+
+def test_studio_link_tool_omits_disabled_destinations_from_the_labels():
+    tool = studio_links.tool_for_destinations(
+        studio_links.enabled_destinations({"experiment": False, "evals_enabled": True})
+    )
+
+    labels = tool["description"].partition("Enabled destinations and the page each opens")[2]
+    assert "experiment:" not in labels
+    assert "experiment_detail:" not in labels
+    assert "evaluation_results:" in labels
+
+
+def test_studio_link_labels_keep_the_schema_destination_list_parseable():
+    destinations = studio_links.enabled_destinations({"experiment": True})
+    tool = studio_links.tool_for_destinations(destinations)
+
+    description = tool["inputSchema"]["properties"]["destination"]["description"]
+    assert supported_destinations_from_description(description) == set(destinations)
+
+
+@pytest.mark.parametrize(
+    "requested", ["experiment", "experiments", "experiment_list", "experiments_page", "Experiments"]
+)
+def test_experiment_list_destination_accepts_plural_and_list_names(requested: str):
+    result = studio_links.build_studio_link_result(
+        "default",
+        "https://studio.test",
+        {"destination": requested},
+        studio_links.enabled_destinations({"experiment": True}),
+    )
+
+    assert result["destination"] == "experiment"
+    assert result["path"] == "/workspaces/default/experiment"
+
+
 def test_assistant_studio_flag_enables_dashboard_destination():
     enabled_destinations = studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
@@ -2194,15 +2243,31 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "when a Studio view, Studio link, or Studio progress card is available" in captured["studio_system_prompt"]
     assert "Default to trying to include a Studio link in Studio-related responses" in captured["studio_system_prompt"]
     assert "link to the closest list page for the current workspace" in captured["studio_system_prompt"]
-    assert "Base Models or available base models use destination='base_models'" in captured["studio_system_prompt"]
-    assert "never use customizations for Base Models" in captured["studio_system_prompt"]
+    # The two safeguards that labels alone cannot enforce stay in the prompt.
+    assert "never link the customizations destination for Base Models" in captured["studio_system_prompt"]
+    assert (
+        "Do not list agents or ask the user to choose an agent for model-chat intent"
+        in captured["studio_system_prompt"]
+    )
     assert "Enabled Studio link destinations for this Studio instance" in captured["studio_system_prompt"]
     assert "Only call studio_link with one of the enabled destinations above" in captured["studio_system_prompt"]
     assert "Do not invent Studio route paths manually" in captured["studio_system_prompt"]
-    assert "destination='evaluation_results'" in captured["studio_system_prompt"]
+    # Routing is label-driven: general rules replace the per-resource "use destination=X" bullets.
+    assert "Choose the studio_link destination whose label best matches the page" in captured["studio_system_prompt"]
+    assert "send questions about experiments to the experiment pages" in captured["studio_system_prompt"]
+    assert "check mcp__nemo_studio__studio_docs" not in captured["studio_system_prompt"]
+    assert "check studio_docs before choosing a destination" in captured["studio_system_prompt"]
+    for removed in (
+        "destination='evaluation_results'",
+        "destination='data_designer_job'",
+        "destination='safe_synthesizer_job'",
+        "destination='base_models'",
+        "destination='fileset'",
+        "destination='agents'",
+    ):
+        assert removed not in captured["studio_system_prompt"]
     # Route paths live in the studio_link destination table, not hardcoded in the prompt.
     assert "/dashboard/evaluations/" not in captured["studio_system_prompt"]
-    assert "use destination='model_chat'" in captured["studio_system_prompt"]
     assert "Direct Studio link requests are mandatory tool-use requests" in captured["studio_system_prompt"]
     assert "Never answer a Studio link request by saying you cannot generate URLs" in captured["studio_system_prompt"]
     assert (
@@ -2216,10 +2281,10 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert f"studio_session_id='{session_id}'" in captured["studio_system_prompt"]
     assert "The approval context for nemo_api is injected by Studio" in captured["studio_system_prompt"]
     assert "mutating calls will automatically pause for the user's approval" in captured["studio_system_prompt"]
-    assert (
-        "For a newly created agent, use studio_link with destination='agent_chat'" in captured["studio_system_prompt"]
-    )
-    assert "destination='agent_chat'" in captured["studio_system_prompt"]
+    # After-action agent_chat guidance now lives in the studio_link tool description, not the prompt.
+    assert "For a newly created agent, use studio_link" not in captured["studio_system_prompt"]
+    assert "destination='agent_chat'" not in captured["studio_system_prompt"]
+    assert "Choose the studio_link destination whose label best matches the page" in captured["studio_system_prompt"]
 
 
 def test_platform_route_stream_infers_studio_url_from_browser_headers(monkeypatch: pytest.MonkeyPatch):

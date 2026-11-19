@@ -3,6 +3,7 @@
 
 """Studio link destinations and MCP tool helpers for the assistant bridge."""
 
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from urllib.parse import quote
 
 from nhx.studio.config import StudioConfig
 from nhx.studio.env_mappings import ENV_MAPPINGS
+
+_LABEL_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 
 @dataclass(frozen=True)
@@ -308,7 +311,11 @@ STUDIO_LINK_DESTINATIONS: dict[str, StudioLinkDestination] = {
         "/workspaces/{workspace}/members",
         aliases=("workspace_members", "member_list"),
     ),
-    "experiment": StudioLinkDestination("Experiment", "/workspaces/{workspace}/experiment"),
+    "experiment": StudioLinkDestination(
+        "Experiments",
+        "/workspaces/{workspace}/experiment",
+        aliases=("experiments", "experiment_list", "experiments_page"),
+    ),
     "experiment_group": StudioLinkDestination(
         "Experiment group {name}",
         "/workspaces/{workspace}/experiment/{name}",
@@ -500,6 +507,19 @@ def destination_description(destinations: Mapping[str, StudioLinkDestination]) -
     return ", ".join(sorted(destinations))
 
 
+def destination_labels(destinations: Mapping[str, StudioLinkDestination]) -> str:
+    """Describe each destination by the page it opens, so the model can route by meaning.
+
+    Generated from the destination table, so a new or disabled page shows up (or disappears) without
+    editing any prompt. A ``<name>`` in a label means the destination needs that argument.
+    """
+    entries = []
+    for key in sorted(destinations):
+        label = _LABEL_PLACEHOLDER_RE.sub(r"<\1>", destinations[key].label)
+        entries.append(f"{key}: {label}")
+    return "; ".join(entries)
+
+
 def tool_for_destinations(destinations: Mapping[str, StudioLinkDestination]) -> dict[str, Any]:
     tool = deepcopy(_STUDIO_LINK_TOOL)
     description_parts = [
@@ -532,6 +552,11 @@ def tool_for_destinations(destinations: Mapping[str, StudioLinkDestination]) -> 
         description_parts.append(
             "For an intake span link, use destination='intake_span' with session_id, trace_id, and span_id."
         )
+    description_parts.append(
+        "Choose the destination whose label matches the page the user asked about, using the term they used. "
+        "Enabled destinations and the page each opens (a <name> in a label means that argument is required): "
+        f"{destination_labels(destinations)}."
+    )
     description_parts.append("Include the returned markdown link exactly in your final response.")
     tool["description"] = " ".join(description_parts)
     destination_schema = tool["inputSchema"]["properties"]["destination"]

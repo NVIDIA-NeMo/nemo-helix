@@ -478,33 +478,15 @@ def _build_studio_system_prompt(
         "Whenever you start, submit, or kick off any platform job and you know its job name, you MUST call mcp__nemo_studio__job_progress with that job name before your final response, once for every job you launch.",
         "Do not replace the job_progress card with a plain-text job summary or by telling the user to run a status command; call job_progress in addition to any Studio link.",
         "Use the returned markdown from studio_link exactly; do not replace it with localhost, the API host, or the MCP server host.",
-        "If the user asks for an agent link and an agent name is known from the conversation, use destination='agent' with that name; otherwise use destination='agents'.",
-        "If the user asks for an agent chat or playground link and an agent name is known from the conversation, use destination='agent_chat' with that name; otherwise use destination='agents'.",
-        "If the user asks for a deployment, deployment chat, or deployment playground link and the agent name is known from the conversation, use destination='agent_chat' with the agent name; otherwise use destination='agents'.",
-        "For a newly started job, use destination='job' and the job name when available; otherwise use destination='jobs'.",
-        "For generated filesets, custom models, deployments, evaluations, guardrails, secrets, Data Designer, Safe Synthesizer, settings, members, or intake work, choose the matching studio_link destination.",
-        "For created datasets or filesets use destination='fileset' with the fileset name when available; otherwise use destination='filesets'.",
-        "For started evaluations use destination='evaluation_result' with the result or job name when available; otherwise use destination='evaluation_results' or destination='evaluation_metrics'.",
-        "For the evaluation results list specifically, use destination='evaluation_results'.",
-        "For Data Designer jobs use destination='data_designer_job' with the job name when available; otherwise use destination='data_designer'.",
-        "For Safe Synthesizer jobs use destination='safe_synthesizer_job' or destination='safe_synthesizer_report' with the job name when available; otherwise use destination='safe_synthesizer'.",
-        "For Base Models or available base models use destination='base_models'.",
-        "For Custom Models or customization jobs use destination='customizations'; never use customizations for Base Models.",
-        "For Agents use destination='agents'.",
+        "Choose the studio_link destination whose label best matches the page the user is asking about; the tool lists every enabled destination with the page it opens.",
+        "Use the term the user used and do not substitute a related page: for example, send questions about experiments to the experiment pages, not to evaluation pages, and the other way around.",
+        "If you are unsure which page covers a concept, check mcp__nemo_studio__studio_docs before choosing a destination.",
+        "Base Models (available base models) and Custom Models (customization jobs) are different pages; never link the customizations destination for Base Models.",
     ]
-    if "agent_chat" in destinations:
-        lines.extend(
-            [
-                "For a newly created agent, use studio_link with destination='agent_chat' and the agent name when available; otherwise use destination='agents'.",
-                "For a newly deployed agent, use destination='agent_chat' and the agent name when available; otherwise use destination='agents'.",
-            ]
-        )
     if "model_chat" in destinations:
         lines.extend(
             [
-                "When the user wants to chat with, try, compare, validate, or test a model, call studio_link with destination='model_chat' and point them to the Studio Chat page.",
                 "Do not list agents or ask the user to choose an agent for model-chat intent unless the user explicitly asks to chat with an agent.",
-                "For model chat, model comparison, or trying an available model, use destination='model_chat'.",
             ]
         )
     return "\n".join(lines)
