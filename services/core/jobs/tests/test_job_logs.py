@@ -12,6 +12,7 @@ from nhx.common.jobs.log_client import dep_job_logs_client
 from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, HelixJobStatus, InvalidPageCursorError
 from nhx.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
 from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.entities import HelixJob
 from nhx.testing import create_test_client
 
@@ -68,7 +69,9 @@ class TestJobLogsAPI:
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
 
-            dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+            dispatcher = JobDispatcher(
+                events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+            )
             yield dispatcher
 
     @pytest.fixture

@@ -59,6 +59,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobStorageReclaimPendingError,
     generate_job_name,
 )
+from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
     HelixJobStepSpec,
@@ -472,7 +473,9 @@ async def test_cancellation_cleans_all_pages_and_retries_partial_success(mock_di
 @pytest.mark.asyncio
 async def test_cancellation_serializes_with_late_task_creation(mock_dispatcher, mock_store, mock_files_client):
     job_name, step, _ = await cancellation_test_data(mock_store)
-    other_dispatcher = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
+    other_dispatcher = JobDispatcher(
+        events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files_client, secrets=AsyncMock()
+    )
     cleanup_started = asyncio.Event()
     allow_cleanup = asyncio.Event()
     original_update = mock_store.update
@@ -512,7 +515,9 @@ async def test_terminal_post_save_sweep_catches_other_replica_task(
 ):
     """Bypass the process-local lock to simulate an independently running API worker."""
     job_name, step, _ = await cancellation_test_data(mock_store)
-    replica = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
+    replica = JobDispatcher(
+        events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files_client, secrets=AsyncMock()
+    )
     original_update = mock_store.update
     late_task = None
 
@@ -603,7 +608,9 @@ async def test_other_replica_task_write_after_final_sweep_rechecks_parent(
 ):
     """A worker with a stale parent read must not commit an orphan after the last sweep."""
     job_name, step, _ = await cancellation_test_data(mock_store)
-    replica = JobDispatcher(store=mock_store, files=mock_files_client, secrets=AsyncMock())
+    replica = JobDispatcher(
+        events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files_client, secrets=AsyncMock()
+    )
     creation_started = asyncio.Event()
     allow_creation = asyncio.Event()
     original_create = mock_store.create
@@ -2093,7 +2100,9 @@ async def test_list_steps_across_multiple_workspaces(
         mock_files.create_fileset.return_value = mock_resp
 
         # Create dispatcher with the multi-workspace store
-        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        mock_dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
 
         # Create jobs in workspace "default"
         job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
@@ -2222,7 +2231,9 @@ async def test_list_steps_with_status_filter(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        mock_dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
         await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
         # Filtering by a status that no step has should return nothing — the
@@ -2265,7 +2276,9 @@ async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
-        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
         jobs = [
             await dispatcher.create_job(
                 sample_platform_job_request.model_copy(update={"name": f"batched-job-{index}"}), DEFAULT_WORKSPACE
@@ -2314,7 +2327,9 @@ async def test_list_steps_drops_a_step_whose_job_no_longer_exists(sample_platfor
         mock_resp = MagicMock()
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
-        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
         kept = await dispatcher.create_job(
             sample_platform_job_request.model_copy(update={"name": "kept-job"}), DEFAULT_WORKSPACE
         )
@@ -2515,7 +2530,9 @@ async def test_get_job_by_id_does_not_cross_workspaces(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
 
         # A job that lives in "other-workspace".
         other_job = await dispatcher.create_job(sample_platform_job_request, "other-workspace")
@@ -2552,7 +2569,9 @@ async def test_list_jobs_across_multiple_workspaces(
         mock_files.create_fileset.return_value = mock_resp
 
         # Create dispatcher with the multi-workspace store
-        mock_dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        mock_dispatcher = JobDispatcher(
+            events=AsyncMock(spec=JobEventRecorder), store=mock_store, files=mock_files, secrets=AsyncMock()
+        )
 
         # Create jobs in workspace "default"
         job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)

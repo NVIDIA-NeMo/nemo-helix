@@ -7,12 +7,15 @@ import threading
 import time
 
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
+from nhx.common.entities import SyncEntityClient
 from nhx.common.service.api.health import wait_for_service_ready
+from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
@@ -90,7 +93,13 @@ def run(parent_stop_signal: threading.Event | None = None):
     )
 
     # Job reconciler loop
-    job_reconciler = JobReconciler(backend_registry, nemo_client, stop_signal=local_stop_signal)
+    event_store = SyncEntityClient(EntitiesClient.from_client(nemo_client.with_options(timeout=2)))
+    job_reconciler = JobReconciler(
+        backend_registry,
+        nemo_client,
+        events=SyncJobEventRecorder(event_store, WorkspacesClient.from_client(nemo_client)),
+        stop_signal=local_stop_signal,
+    )
     job_reconciler_monitored = TrackLastExecutionTime(job_reconciler)
     job_reconciler_loop = Loop(
         TimedLoopWaiter(jobs_config.reconcile_interval_seconds, stop_signal=local_stop_signal),

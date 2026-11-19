@@ -19,6 +19,8 @@ from nhx.common.entities import EntityConflictError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.app.constants import STORAGE_SWEPT_AT
+from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
+from nhx.core.jobs.app.event_stream import SyncJobEventStream
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.config import JobsStorageConfig
@@ -51,7 +53,7 @@ def test_job_reconciler_retries_terminal_child_cleanup_without_backend_sync(
         paginated_response([step]),
         paginated_response([]),
     ]
-    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     backend = backend_registry.get_backend(provider="cpu", profile="default")
 
     reconciler.step()
@@ -77,7 +79,7 @@ def test_terminal_cleanup_query_failure_does_not_block_active_reconciliation(
     else:
         error = NemoTransportError(httpx.ConnectError("cleanup query unavailable", request=request))
     mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active]), error, paginated_response([])]
-    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     backend = backend_registry.get_backend(provider="cpu", profile="default")
 
     reconciler.step()
@@ -95,7 +97,7 @@ def test_job_reconciler_syncs_active_job(
     mock_jobs_client,
     test_step_active: HelixJobStepWithContext,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
 
     # Mock the jobs list response
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
@@ -155,7 +157,7 @@ def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
 ):
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
 
-    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     test_backend = job_reconciler._backend_registry.get_backend(provider="cpu", profile="default")
     assert isinstance(test_backend, MockDockerCPUJobBackend)
 
@@ -178,7 +180,7 @@ def test_job_reconciler_marks_itself_unhealthy_after_transport_failure(
     mock_nemo_client,
     mock_jobs_client,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     mock_jobs_client.list_steps.return_value = paginated_response([])
     job_reconciler.step()
     assert job_reconciler.is_healthy
@@ -209,7 +211,7 @@ def test_reconciler_tick_traces_work_and_correlates_summary_logs(
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", provider.get_tracer(__name__))
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active] if has_steps else [])
-    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    reconciler = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     system_entities = MagicMock()
     system_entities.list.return_value = SimpleNamespace(data=[])
     if reclaim_fails:
@@ -266,7 +268,9 @@ def test_reconciler_stopped_tick_does_not_emit_spans(backend_registry, mock_nemo
     monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", tracer)
     stop_signal = threading.Event()
     stop_signal.set()
-    reconciler = JobReconciler(backend_registry, mock_nemo_client, stop_signal=stop_signal)
+    reconciler = JobReconciler(
+        backend_registry, mock_nemo_client, stop_signal=stop_signal, events=MagicMock(spec=SyncJobEventRecorder)
+    )
 
     reconciler.step()
 
@@ -323,6 +327,7 @@ def _reconciler(backend_registry, mock_nemo_client, storage_config: JobsStorageC
         mock_nemo_client,
         storage_config=storage_config or JobsStorageConfig(),
         system_entity_client=system_entities,
+        events=MagicMock(spec=SyncJobEventRecorder),
     )
     return reconciler, system_entities
 
@@ -568,7 +573,12 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
             break
         assert len(stored[record.name].targets) == 1
         system_entities.delete_by_id.assert_not_called()
-        reconciler = JobReconciler(reconciler._backend_registry, mock_nemo_client, system_entity_client=system_entities)
+        reconciler = JobReconciler(
+            reconciler._backend_registry,
+            mock_nemo_client,
+            system_entity_client=system_entities,
+            events=MagicMock(spec=SyncJobEventRecorder),
+        )
 
     assert not stored
     system_entities.delete_by_id.assert_called_once_with(
@@ -925,11 +935,13 @@ def test_pending_cleanup_keeps_owner_until_files_settle_and_survives_restart(
         store.create(HelixJobStep(name="basic", workspace="default", attempt_id=attempt.id))
         now = datetime.datetime.now(datetime.timezone.utc)
         if pending_status == HelixJobStatus.CREATION_PENDING:
-            JobReconciler(backend_registry, ctx.client)._cleanup_pending_jobs()
+            JobReconciler(
+                backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder)
+            )._cleanup_pending_jobs()
             assert store.get_by_id(HelixJob, job.id).db_version == job.db_version
         future = now + datetime.timedelta(hours=1 if pending_status == HelixJobStatus.CREATION_PENDING else 0)
         with time_machine.travel(future, tick=False):
-            first = JobReconciler(backend_registry, ctx.client)
+            first = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
             if not borrowed:
                 with patch.object(
                     first._files, "delete_fileset_by_id", side_effect=RuntimeError("Files temporarily unavailable")
@@ -941,7 +953,7 @@ def test_pending_cleanup_keeps_owner_until_files_settle_and_survives_restart(
                     == b"retained-output"
                 )
             # A replacement controller discovers ownership from persisted state.
-            replacement = JobReconciler(backend_registry, ctx.client)
+            replacement = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
             replacement._cleanup_pending_jobs()
         with pytest.raises(EntityNotFoundError):
             store.get_by_id(HelixJob, job.id)
@@ -980,7 +992,7 @@ def test_late_setup_child_is_cascaded_after_cleanup_fences_owner(backend_registr
                 status=HelixJobStatus.CREATION_PENDING,
             )
         )
-        cleaner = JobReconciler(backend_registry, ctx.client)
+        cleaner = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
         settle = cleaner._settle_pending_storage
         late_ids: list[str] = []
 
@@ -1069,7 +1081,7 @@ def test_deleted_legacy_job_is_removed_without_deleting_unverified_fileset(
 
         with caplog.at_level(logging.WARNING, logger="nhx.core.jobs.controllers.reconciler"):
             if retry_after_store_failure:
-                first = JobReconciler(backend_registry, ctx.client)
+                first = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
                 with patch.object(
                     first._system_entities, "delete_by_id", side_effect=RuntimeError("entity store unavailable")
                 ):
@@ -1078,7 +1090,7 @@ def test_deleted_legacy_job_is_removed_without_deleting_unverified_fileset(
                 assert not any(
                     "Retaining unverified artifact Fileset" in record.getMessage() for record in caplog.records
                 )
-            replacement = JobReconciler(backend_registry, ctx.client)
+            replacement = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
             replacement._cleanup_pending_jobs()
             replacement._cleanup_pending_jobs()
 
@@ -1112,7 +1124,7 @@ def test_missing_receipt_never_adopts_editable_fileset_ownership(backend_registr
         current_attempt_id="attempt" if has_attempt else None,
         platform_spec=TestConstants.PLATFORM_SPEC,
     )
-    controller = JobReconciler(backend_registry, mock_nemo_client)
+    controller = JobReconciler(backend_registry, mock_nemo_client, events=MagicMock(spec=SyncJobEventRecorder))
     controller._files = MagicMock()
     controller._files.get_fileset.return_value = data_response(
         SimpleNamespace(id="unrelated-allocation", custom_fields={"job_id": owner.id})
@@ -1148,7 +1160,9 @@ def test_reclaim_queue_advances_past_retained_owners(backend_registry, mock_nemo
     ]
     entities.list.side_effect = [SimpleNamespace(data=records), SimpleNamespace(data=[])]
     entities.get_by_id.return_value = owner
-    controller = JobReconciler(backend_registry, mock_nemo_client, system_entity_client=entities)
+    controller = JobReconciler(
+        backend_registry, mock_nemo_client, system_entity_client=entities, events=MagicMock(spec=SyncJobEventRecorder)
+    )
     controller._reclaim_queued_storage()
     controller._reclaim_queued_storage()
     assert [call.kwargs["page"] for call in entities.list.call_args_list] == [1, 2]
@@ -1212,7 +1226,7 @@ def test_abandoned_rerun_recovery_survives_restart_and_fences_late_start(
             job.status = HelixJobStatus.CREATED
             job = store.update(job)
         jobs = JobsClient(base_url=ctx.client.base_url, http_client=ctx.client._client)
-        controller = JobReconciler(backend_registry, ctx.client)
+        controller = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
         controller._jobs = jobs
         # Recent requests must be allowed to finish.
         controller._recover_unstarted_reruns()
@@ -1230,7 +1244,7 @@ def test_abandoned_rerun_recovery_survives_restart_and_fences_late_start(
                 # The ERROR Step persists even if projecting it onto the Attempt fails.
                 tombstone = store.get(HelixJobStep, "basic", parent=prepared.id, workspace="default")
                 assert tombstone.status_details["task_cleanup_pending"]
-                controller = JobReconciler(backend_registry, ctx.client)
+                controller = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
                 controller._jobs = jobs
                 controller.step()
             else:
@@ -1273,7 +1287,9 @@ def test_rerun_recovery_cannot_replace_a_concurrently_started_step(backend_regis
                 platform_spec=job.platform_spec,
             )
         )
-        controller = JobReconciler(backend_registry, ctx.client, system_entity_client=store)
+        controller = JobReconciler(
+            backend_registry, ctx.client, system_entity_client=store, events=MagicMock(spec=SyncJobEventRecorder)
+        )
         original_create = store.create
 
         def starter_wins(entity):
@@ -1324,8 +1340,46 @@ def test_rerun_recovery_excludes_initial_attempts_before_pagination(backend_regi
         with time_machine.travel(
             datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1), tick=False
         ):
-            controller = JobReconciler(backend_registry, ctx.client)
+            controller = JobReconciler(backend_registry, ctx.client, events=MagicMock(spec=SyncJobEventRecorder))
             controller._jobs = JobsClient(base_url=ctx.client.base_url, http_client=ctx.client._client)
             controller._recover_unstarted_reruns()
         assert store.get_by_id(HelixJobAttempt, rerun.id).status == HelixJobStatus.ERROR
         assert all(store.get_by_id(HelixJobAttempt, attempt.id).status == HelixJobStatus.CREATED for attempt in initial)
+
+
+@pytest.mark.parametrize("deleted, expected_calls", [(0, 1), (100, 2)])
+def test_reconciler_runs_bounded_event_cleanup_and_drains_backlog(
+    backend_registry, mock_nemo_client, mock_jobs_client, deleted, expected_calls
+):
+    mock_jobs_client.list_steps.return_value = paginated_response([])
+    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
+    with patch.object(SyncJobEventStream, "cleanup", return_value=deleted) as cleanup:
+        reconciler.step()
+        reconciler.step()
+        assert cleanup.call_count == expected_calls
+        cleanup.assert_called_with(batch_size=100)
+        reconciler._next_event_cleanup = 0
+        reconciler.step()
+        assert cleanup.call_count == expected_calls + 1
+    assert reconciler.is_healthy
+
+
+def test_event_cleanup_failure_preserves_reconciliation_and_retries(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, caplog
+):
+    mock_jobs_client.list_steps.side_effect = lambda *, name, workspace, query_params: paginated_response(
+        [test_step_active] if "active" in query_params["filter[status]"].split(",") else []
+    )
+    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+    with patch.object(SyncJobEventStream, "cleanup", side_effect=[RuntimeError("cleanup unavailable"), 0]) as cleanup:
+        reconciler.step()
+        reconciler.step()
+        assert cleanup.call_count == 1
+        assert reconciler.is_healthy
+        assert len(backend.mock.sync_calls) == 2
+        assert "Jobs lifecycle retention cleanup failed" in caplog.text
+        reconciler._next_event_cleanup = 0
+        reconciler.step()
+        assert cleanup.call_count == 2
+    assert len(backend.mock.sync_calls) == 3

@@ -31,6 +31,8 @@ from nhx.core.jobs.app.constants import (
     STORAGE_SWEPT_AT,
 )
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
+from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
+from nhx.core.jobs.app.event_stream import SyncJobEventStream
 from nhx.core.jobs.app.lifecycle import (
     effective_pause_ttl_seconds,
     parse_timestamp,
@@ -62,10 +64,12 @@ class JobReconciler(HeartbeatMixin, Controller):
         self,
         backend_registry: BackendRegistry,
         nemo_client: NemoClient,
+        events: SyncJobEventRecorder,
         stop_signal: threading.Event | None = None,
         storage_config: JobsStorageConfig | None = None,
         system_entity_client: SyncEntityClient | None = None,
     ) -> None:
+        self._events = events
         self._backend_registry = backend_registry
         self._nemo_client = nemo_client
         self._storage_config = storage_config or jobs_config.storage
@@ -81,6 +85,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._is_healthy = False
         self._logger = logger
         self._last_retention_at: float | None = None
+        self._next_event_cleanup = 0.0
         # Storage reclaim records outlive the jobs they describe, so they are read from the
         # entity store as the jobs service rather than through the jobs API.
         self._system_entities = system_entity_client or SyncEntityClient(
@@ -242,6 +247,21 @@ class JobReconciler(HeartbeatMixin, Controller):
             self._cleanup_pending_jobs()
             self._enforce_storage_retention()
 
+        self._cleanup_events()
+
+    def _cleanup_events(self) -> None:
+        if self._stop_signal and self._stop_signal.is_set():
+            return
+        now = time.monotonic()
+        if now < self._next_event_cleanup:
+            return
+        try:
+            deleted = SyncJobEventStream(self._system_entities).cleanup(batch_size=100)
+            self._next_event_cleanup = time.monotonic() + (0 if deleted == 100 else 60)
+        except Exception:
+            self._next_event_cleanup = time.monotonic() + 15
+            logger.exception("Jobs lifecycle retention cleanup failed")
+
     def _recover_unstarted_reruns(self) -> None:
         """Retire a rerun whose Attempt was saved without its first Step.
 
@@ -313,6 +333,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                         error_details={"message": "Rerun did not publish its first Step before the creation deadline"},
                     )
                 )
+                self._events.created(step)
                 # Parent-scoped Step uniqueness prevents a paused starter from
                 # creating runnable work after recovery. The existing terminal
                 # cleanup scan retries this update if the request fails.
@@ -368,12 +389,16 @@ class JobReconciler(HeartbeatMixin, Controller):
             try:
                 if job.status == HelixJobStatus.CREATION_PENDING:
                     # Claim abandoned setup before cleanup; stale publication loses its version.
+                    before = self._events.before(job)
                     job.status = HelixJobStatus.DELETION_PENDING
                     job = self._system_entities.update(job)
+                    self._events.updated(before, job)
                 if not self._settle_pending_storage(job):
                     continue
                 job = self._settle_pending_artifacts(job)
+                deleted_images = self._events.deletion_images(job)
                 self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
+                self._events.deleted(deleted_images)
                 if job.output_location is None and job.fileset_id is None and job.current_attempt_id is not None:
                     logger.warning(
                         "Retaining unverified artifact Fileset after deleting Job without allocation receipt",

@@ -3,6 +3,7 @@
 
 """Job API endpoints."""
 
+import asyncio
 import logging
 import math
 import re
@@ -15,9 +16,17 @@ from fastapi.openapi.models import Example
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
-from nemo_helix_plugin.client.errors import HTTPClientError
+from nemo_helix_plugin.client.errors import HTTPClientError, NemoHTTPError
 from nemo_helix_plugin.entities.base import ID_PATTERN
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.events import (
+    ExpiredJobEventCursor,
+    InvalidJobEventCursor,
+    JobEventCursor,
+    JobEventErrorResponse,
+    JobEventPage,
+    JobEventRequest,
+)
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.jobs.types import JobControl
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -26,7 +35,7 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params, parse_deep_object
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.config import get_platform_config
-from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
+from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError, EntityValidationError
 from nhx.common.jobs.docker import validate_gpu_available_for_docker
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.jobs.log_client import JobLogsClient, dep_job_logs_client
@@ -40,7 +49,7 @@ from nhx.common.jobs.schemas import (
     InvalidPageCursorError,
 )
 from nhx.common.observability import scoped_app_ctx
-from nhx.core.jobs.api.dependencies import dep_dispatcher, dep_files_client
+from nhx.core.jobs.api.dependencies import dep_dispatcher, dep_files_client, dep_system_entity_client
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
     HelixAttemptStepsListFilter,
@@ -76,6 +85,7 @@ from nhx.core.jobs.app.dispatcher import (
     StateTransitionConflictError,
     create_attempt_response,
 )
+from nhx.core.jobs.app.event_stream import JobEventStream
 from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import (
@@ -1502,3 +1512,46 @@ async def get_attempt_step_task(
             detail=f"Task '{name}' for step '{step}' of attempt '{attempt}' not found.",
         )
     return task
+
+
+@router.post(
+    "/v2/jobs/events",
+    response_model=JobEventPage,
+    operation_id="read_job_events",
+    responses={400: {"model": JobEventErrorResponse}, 410: {"model": JobEventErrorResponse}},
+)
+async def read_job_events(
+    request: Request,
+    body: JobEventRequest,
+    entity_client: EntityClient = Depends(dep_system_entity_client),
+) -> JobEventPage:
+    deadline = asyncio.get_running_loop().time() + body.wait_seconds
+    query = body
+    while True:
+        try:
+            page = await JobEventStream(entity_client).read(query)
+        except InvalidJobEventCursor as error:
+            raise HTTPException(status_code=400, detail={"code": "invalid_cursor", "message": str(error)}) from error
+        except ExpiredJobEventCursor as error:
+            raise HTTPException(status_code=410, detail={"code": "cursor_expired", "message": str(error)}) from error
+        except NemoHTTPError as error:
+            if error.status_code in (401, 403):
+                raise HTTPException(status_code=error.status_code, detail="Event stream access denied") from error
+            if error.status_code in (400, 410):
+                try:
+                    problem = JobEventErrorResponse.model_validate_json(error.http_response.content)
+                except ValidationError as invalid:
+                    raise HTTPException(status_code=502, detail="Invalid event-store response") from invalid
+                raise HTTPException(status_code=error.status_code, detail=problem.detail.model_dump()) from error
+            raise HTTPException(status_code=503, detail="Event store is unavailable") from error
+        if page.data or body.wait_seconds == 0:
+            return page
+        if body.cursor is not None:
+            backward = JobEventCursor.decode(body.cursor).direction == "backward"
+        else:
+            backward = body.direction == "backward"
+        remaining = deadline - asyncio.get_running_loop().time()
+        if backward or remaining <= 0 or await request.is_disconnected():
+            return page
+        query = JobEventRequest(cursor=page.next_cursor, limit=body.limit)
+        await asyncio.sleep(min(1.0, remaining))

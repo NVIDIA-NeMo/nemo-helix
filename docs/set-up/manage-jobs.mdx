@@ -66,6 +66,70 @@ nemo jobs update <job-name> \
 
 Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
 
+## Reading lifecycle events
+
+The deployment-wide event stream records Job, Attempt, and Step creation, state changes, and deletion. Task events, progress updates, and notification delivery are outside this API. Access uses the existing `jobs.list` permission in the system workspace and `jobs:read` or `platform:read` scopes. Both users and service principals can read the deployment-wide stream when authorized; the optional workspace filter narrows results.
+
+Use `POST /apis/jobs/v2/jobs/events` to start reading, continue from a returned cursor, replace filters, or poll for new events. The operation accepts `limit` (1–1000, default 100) and `wait_seconds` (0–30, default 0) outside the cursor. A request returns immediately when matching events exist. Otherwise, a forward request can wait until a match is detected or the wait expires. Timeout returns an empty page with a continuation cursor.
+
+Use the typed Python Jobs client:
+
+```python
+from nemo_helix_plugin.client.auth import StaticToken
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.events import (
+    JobEventFilters,
+    JobEventPage,
+    JobEventRequest,
+    JobEventType,
+)
+
+
+async def read_attempt_events(base_url: str, access_token: str) -> JobEventPage:
+    async with AsyncNemoClient(base_url=base_url, auth=StaticToken(access_token)) as client:
+        jobs = AsyncJobsClient.from_client(client)
+        response = await jobs.read_job_events(
+            body=JobEventRequest(
+                filters=JobEventFilters(
+                    event_types=[JobEventType.ATTEMPT_STATE_CHANGED]
+                ),
+                start="latest",
+                wait_seconds=30,
+            )
+        )
+        page = response.data()
+        response = await jobs.read_job_events(
+            body=JobEventRequest(cursor=page.next_cursor, wait_seconds=30)
+        )
+        return response.data()
+```
+
+Web clients use the generated TypeScript operation:
+
+```typescript
+import { readJobEvents } from '@nemo/sdk/generated/platform/jobs';
+
+const page = await readJobEvents({
+  filters: { event_types: ['attempt.state_changed'] },
+  start: 'latest',
+  wait_seconds: 30,
+});
+const nextPage = await readJobEvents({
+  cursor: page.next_cursor,
+  limit: 100,
+  wait_seconds: 30,
+});
+```
+
+`next_cursor` reads forward and `prev_cursor`, when present, reads backward. Keep cursor values opaque. To change filters at the same position, POST the cursor and a complete replacement `filters` object; omitted filter members clear those constraints. Use `start: "oldest"` to replay retained history or `start: "latest"` to follow new events. Re-reading a position can return the same events, so checkpoint the cursor after processing and use event IDs to deduplicate side effects.
+
+Event IDs are decimal strings and retain their values in filtered results. Nullable Attempt/Step references identify the affected resource, and `previous_state`/`new_state` describe its transition. The compact `snapshot` preserves descriptive context after deletion; clients should tolerate new optional snapshot fields.
+
+Events expire seven days after recording, even if their Job still exists. Expired events disappear from reads before periodic storage cleanup. A cursor that has lost retained history returns HTTP 410 with `cursor_expired`; the consumer must explicitly choose to replay the retained window or start at the current end. Malformed cursors return HTTP 400 with `invalid_cursor`.
+
+Jobs records lifecycle events as ordinary entities through the Entity Store API. Capture is best effort in this prototype: an append failure is logged and the Jobs mutation still succeeds; a crash between those calls can leave a missing event. Appended event entities are durable. Direct Entity Store changes do not generate Jobs events, and existing Jobs do not produce reconstructed history. Run the Jobs controller for automatic cleanup. It removes expired event entities in bounded batches.
+
 ## Viewing Job Logs
 
 Use `nemo jobs get-logs` to inspect paginated job logs:

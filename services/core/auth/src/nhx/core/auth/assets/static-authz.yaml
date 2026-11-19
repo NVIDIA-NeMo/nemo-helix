@@ -1879,6 +1879,18 @@ authz:
         scopes:
         - intake:read
         - platform:read
+    /apis/jobs/v2/jobs/events:
+      post:
+        direct:
+          actor_perms:
+          - jobs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.list
+        scopes:
+        - jobs:read
+        - platform:read
     /apis/jobs/v2/execution-profiles:
       get:
         direct:

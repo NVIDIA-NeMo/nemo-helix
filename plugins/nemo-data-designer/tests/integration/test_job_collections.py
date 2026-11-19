@@ -14,6 +14,7 @@ collection writes, so no job compiles or runs.
 
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import MagicMock
 
 import data_designer.config as dd
 import pytest
@@ -36,6 +37,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nhx.core.files.service import FilesService
+from nhx.core.jobs.app.event_capture import SyncJobEventRecorder
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.service import JobsService
@@ -186,5 +188,5 @@ def test_retrieval_job_stored_before_split_breaks_create_list_until_deleted(ctx:
     core_jobs.delete_job(name="legacy-generate-job", workspace=WORKSPACE)
 
     # DELETE accepts cleanup; the existing reconciler must remove the Job first.
-    JobReconciler(BackendRegistry({}), ctx.client)._cleanup_pending_jobs()
+    JobReconciler(BackendRegistry({}), ctx.client, events=MagicMock(spec=SyncJobEventRecorder))._cleanup_pending_jobs()
     assert _list_names(ctx.test_client, "create") == {"create-job"}

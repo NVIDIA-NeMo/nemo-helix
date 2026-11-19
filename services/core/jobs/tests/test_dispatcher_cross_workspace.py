@@ -11,6 +11,8 @@ get_current_job_step_by_name, and attempt_get_current were defaulting
 to the "default" workspace instead of searching across all workspaces.
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_asyncio
 from nhx.common.entities import ALL_WORKSPACES, EntityClient
@@ -22,6 +24,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobTaskUpdate,
 )
 from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.app.test_helpers import TestConstants
 from nhx.core.jobs.entities import HelixJobTask
 from nhx.testing import create_test_client
@@ -40,6 +43,7 @@ def multi_workspace_store():
 async def multi_workspace_dispatcher(multi_workspace_store, mock_files_client, mock_secrets_client) -> JobDispatcher:
     """Create a JobDispatcher with multi-workspace EntityStore."""
     return JobDispatcher(
+        events=AsyncMock(spec=JobEventRecorder),
         store=multi_workspace_store,
         files=mock_files_client,
         secrets=mock_secrets_client,

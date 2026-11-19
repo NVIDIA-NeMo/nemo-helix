@@ -21,6 +21,7 @@ from nhx.core.auth.app.embedded_pdp import (
     set_policy_data,
     validate_entrypoint,
 )
+from wasmtime import Func
 
 
 @pytest.fixture
@@ -941,6 +942,7 @@ class TestPerAreaScopes:
     # POST endpoints that are semantically read operations (e.g. query endpoints).
     # These correctly use :read scopes despite being POST methods.
     READ_POST_ENDPOINTS: ClassVar[set[str]] = {
+        "/apis/jobs/v2/jobs/events",
         "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query",
     }
 
@@ -1075,7 +1077,9 @@ class TestWasmNativeBuiltins:
     def test_policy_wasm_requires_no_host_builtins(self):
         """The compiled policy must not depend on any host-provided builtin."""
         policy = get_policy()
-        required = policy._read_json(policy.exports["builtins"](policy.store))
+        builtins = policy.exports["builtins"]
+        assert isinstance(builtins, Func)
+        required = policy._read_json(builtins(policy.store))
         assert required == {}, (
             f"policy.wasm requires host builtins {list(required)} which the embedded "
             "engine stubs out — rewrite the policy using wasm-native builtins only "
@@ -1171,3 +1175,43 @@ async def test_policy_reload_only_applies_bootstrap_on_cold_start(static_authz_d
 
     assert await pdp_data.load_policy_data(MagicMock())
     assert applied == ([True] if preloaded else [False, True])
+
+
+@pytest.mark.parametrize("path", ["/apis/jobs/v2/jobs/events"])
+@pytest.mark.parametrize(
+    "workspace,role,scope,allowed",
+    [
+        ("system", "Viewer", "jobs:read", True),
+        ("system", "Viewer", "platform:read", True),
+        ("system", "Viewer", "jobs:write", False),
+        ("system", None, "jobs:read", False),
+        ("default", "Viewer", "jobs:read", False),
+    ],
+)
+def test_job_event_reads_require_normal_deployment_permissions(
+    static_authz_data, path: str, workspace: str, role: str | None, scope: str, allowed: bool
+) -> None:
+    principal = "events-reader@example.test"
+    static_authz_data["authz"]["principals"][principal] = {"workspaces": {workspace: [role] if role else []}}
+    set_policy_data(static_authz_data)
+    result = evaluate("allow", {"principal_id": principal, "method": "POST", "path": path, "scopes": [scope]})
+    assert result["allowed"] is allowed
+
+
+@pytest.mark.parametrize("path", ["/apis/jobs/v2/jobs/events"])
+@pytest.mark.parametrize("authorized", [True, False])
+def test_delegated_job_event_reads_preserve_subject_permissions(static_authz_data, path: str, authorized: bool) -> None:
+    subject = "events-reader@example.test"
+    static_authz_data["authz"]["principals"][subject] = {"workspaces": {"system": ["Viewer"] if authorized else []}}
+    set_policy_data(static_authz_data)
+    result = evaluate(
+        "allow",
+        {
+            "principal_id": "service:jobs",
+            "on_behalf_of_principal_id": subject,
+            "method": "POST",
+            "path": path,
+            "scopes": ["jobs:read"],
+        },
+    )
+    assert result["allowed"] is authorized

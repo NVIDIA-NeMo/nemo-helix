@@ -40,6 +40,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobStepWithContext,
 )
 from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.event_capture import JobEventRecorder
 from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
 from nhx.core.jobs.app.schemas import (
     HelixJobEnvironmentVariable,
@@ -144,6 +145,7 @@ def mock_store():
 async def mock_dispatcher(mock_store, mock_files_client, mock_secrets_client) -> JobDispatcher:
     """Create a JobDispatcher instance for testing with mock EntityStore and typed clients."""
     return JobDispatcher(
+        events=AsyncMock(spec=JobEventRecorder),
         store=mock_store,
         files=mock_files_client,
         secrets=mock_secrets_client,
