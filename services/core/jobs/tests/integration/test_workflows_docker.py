@@ -313,7 +313,7 @@ def docker_workflow(
             finally:
                 harness.registry.shutdown_all_backends()
     finally:
-        for container in client.containers.list(all=True):
+        for container in client.containers.list(all=True, filters={"name": prefix}, ignore_removed=True):
             if prefix in container.name:
                 container.remove(force=True, v=True)
         for volume in client.volumes.list():
