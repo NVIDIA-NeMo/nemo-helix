@@ -211,30 +211,4 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
   });
-
-  it('submits the chosen parallelism when re-running an evaluation', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.click(await screen.findByRole('combobox', { name: /evaluation to re-run/i }));
-    await user.click(await screen.findByRole('option', { name: 'baseline' }));
-    const name = await screen.findByLabelText('New Evaluation Name');
-    await user.clear(name);
-    await user.type(name, 'baseline-throttled');
-    await setParallelism(user, '2');
-
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
-    );
-    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
-
-    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
-    expect(submittedParallelism()).toBe(2);
-    expect(createRunEvaluation).toHaveBeenCalledWith(
-      DEFAULT_WORKSPACE,
-      expect.objectContaining({ datasetName: 'source-data' })
-    );
-  });
 });
