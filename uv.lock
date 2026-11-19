@@ -48,6 +48,7 @@ members = [
     "nemo-safe-synthesizer-plugin",
     "nemo-sandboxed-gym",
     "nemo-switchyard-plugin",
+    "nemo-tool-calling-plugin",
     "nemo-unsloth-plugin",
     "nemohelix",
     "nhx-auth",
@@ -7692,6 +7693,33 @@ requires-dist = [
 ]
 
 [[package]]
+name = "nemo-tool-calling-plugin"
+version = "0.1.0"
+source = { editable = "plugins/nemo-tool-calling" }
+dependencies = [
+    { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "mcp" },
+    { name = "nemo-agent-optimization-plugin" },
+    { name = "nemo-agents-plugin" },
+    { name = "nemo-helix-plugin" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "jsonschema", specifier = ">=4.23.0" },
+    { name = "mcp", specifier = ">=1.20.0" },
+    { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },
+    { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "pydantic", specifier = ">=2.12.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+]
+
+[[package]]
 name = "nemo-unsloth-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-unsloth" }
@@ -7937,6 +7965,7 @@ dev = [
     { name = "nemo-helix-tools" },
     { name = "nemo-nb" },
     { name = "nemo-safe-synthesizer-plugin" },
+    { name = "nemo-tool-calling-plugin" },
     { name = "nest-asyncio" },
     { name = "nhx-build-tools" },
     { name = "nhx-common" },
@@ -8228,6 +8257,7 @@ dev = [
     { name = "nemo-helix-tools", editable = "tools/nemo-helix-tools" },
     { name = "nemo-nb", editable = "packages/nemo_nb" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
+    { name = "nemo-tool-calling-plugin", editable = "plugins/nemo-tool-calling" },
     { name = "nest-asyncio", specifier = "==1.6.0" },
     { name = "nhx-build-tools", editable = "packages/nhx_build_tools" },
     { name = "nhx-common", editable = "packages/nhx_common" },

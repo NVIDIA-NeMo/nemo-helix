@@ -112,6 +112,7 @@ dev = [
   # Dev only, so its unit tests and type checks run with the rest; it stays out of
   # `enabled-plugins` and `nemo-helix[all]`, so no shipped image carries Strands.
   "strands-harness-optimizer-plugin",
+  "nemo-tool-calling-plugin",     # Hackathon `tool-calling` optimize strategy; dev only, like the Strands one
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -486,6 +487,7 @@ nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
 nemo-agent-optimization-plugin = { workspace = true }
+nemo-tool-calling-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nemo-builder-plugin = { workspace = true }
@@ -547,6 +549,7 @@ members = [
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
   "plugins/nemo-agent-optimization",
+  "plugins/nemo-tool-calling",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "plugins/nemo-builder",
@@ -673,6 +676,8 @@ extra-paths = [
   "plugins/prompt-master/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
+  # So the tool-calling strategy plugin's tests resolve nemo_tool_calling_plugin.
+  "plugins/nemo-tool-calling/src",
 ]
 
 [tool.ty.src]

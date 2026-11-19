@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-tool-calling-plugin"
+version = "0.1.0"
+description = "The `tool-calling` strategy for `nemo agents optimize`: scores an agent's tool calls, lints its MCP tool schemas, and verifies a suggested prompt fix and schema patch."
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "httpx>=0.28.1",
+  "jsonschema>=4.23.0",
+  "mcp>=1.20.0",
+  "nemo-agent-optimization-plugin",
+  "nemo-agents-plugin",
+  "nemo-helix-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.2",
+]
+
+[project.entry-points."nemo.jobs"]
+"agent-optimization.tool-calling" = "nemo_tool_calling_plugin.jobs.optimize:ToolCallingOptimizeJob"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_tool_calling_plugin"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
