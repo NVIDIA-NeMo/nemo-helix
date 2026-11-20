@@ -45,8 +45,23 @@ const num = (value: unknown): number | undefined => (typeof value === 'number' ?
 const humanize = (event: string): string =>
   event.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
+// agent-hardener's console level for an `output` line: `ok`, `warn`, `fail`, `section`, `detail`, … Lines
+// from releases before the level existed have none, and render exactly as before.
+const outputLevel = (evt: SwarmEvent): string | undefined =>
+  evt.event === 'output' ? str(evt.payload.level) : undefined;
+
+const LEVEL_COLOR: Record<string, string> = { ok: ACCENT.green, warn: ACCENT.yellow, fail: ACCENT.red };
+
+// The feed shows what the CLI shows by default: `detail` lines are the CLI's `--debug` tier.
+export const isFeedEvent = (evt: SwarmEvent): boolean => outputLevel(evt) !== 'detail';
+
+// An `output` line's color by its level (✓ green, ! yellow, ✗ red), or undefined to keep the default.
+export const levelColor = (evt: SwarmEvent): string | undefined => LEVEL_COLOR[outputLevel(evt) ?? ''];
+
 // Color an event's line by its agent's swarm (so it matches the graph), falling back to the event category.
 const lineColor = (evt: SwarmEvent): string => {
+  const byLevel = levelColor(evt);
+  if (byLevel) return byLevel;
   const id = nodeForAgent(evt.payload);
   if (id && GROUP_BY_NODE[id]) return GROUP_COLOR[GROUP_BY_NODE[id]];
   return CATEGORY_COLOR[categoryOf(evt.event) ?? 'lifecycle'];
@@ -119,7 +134,8 @@ const formatTime = (ts?: number): string =>
 
 // Live tail of the run's EventBus (newest last), auto-scrolling to the bottom unless the user has scrolled
 // up to read history. Highlights the agent(s) currently running and separates each line for readability.
-export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
+export const MessageFeed: FC<MessageFeedProps> = ({ events: allEvents }) => {
+  const events = useMemo(() => allEvents.filter(isFeedEvent), [allEvents]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
@@ -198,7 +214,8 @@ export const MessageFeed: FC<MessageFeedProps> = ({ events }) => {
               </span>
               <Text
                 kind="body/regular/sm"
-                className={`min-w-0 break-words ${isRunning ? 'font-semibold' : ''}`}
+                className={`min-w-0 break-words ${isRunning || outputLevel(evt) === 'section' ? 'font-semibold' : ''}`}
+                style={levelColor(evt) ? { color: levelColor(evt) } : undefined}
               >
                 {formatEvent(evt)}
               </Text>

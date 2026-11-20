@@ -237,6 +237,58 @@ def test_native_process_boundary_scrubs_platform_auth_without_mutating_caller(
     assert supplied == {**_PLATFORM_AUTH_ENV, **_NATIVE_RUNTIME_ENV}
 
 
+def test_the_complete_agent_hardener_log_is_saved_as_a_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: dict[str, str] = {}
+
+    def on_save(name: str, path: Path) -> SimpleNamespace:
+        saved[name] = Path(path).read_text(encoding="utf-8")
+        return SimpleNamespace(model_dump=lambda: {"name": name})
+
+    ctx = make_job_context(tmp_path, on_save=on_save)
+    stale = ctx.storage.persistent / "agent-hardener-full.log"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("an earlier command's log", encoding="utf-8")
+
+    def write_full_log(_cmd, env, *_args, **_kwargs):
+        Path(env["AGENT_HARDENER_LOG_FILE"]).write_text("Traceback (most recent call last): ...", encoding="utf-8")
+        return SimpleNamespace(returncode=0), "", None
+
+    monkeypatch.setattr(run_module._common, "execute", write_full_log)
+
+    *_rest, full_log_ref = execution._run_agent_hardener(
+        ["agent-hardener", "run"],
+        {},
+        ctx.storage.persistent / "agent-hardener.log",
+        ctx,
+        artifact_name="agent-hardener-log",
+    )
+
+    assert saved == {"agent-hardener-log-full": "Traceback (most recent call last): ..."}  # not the stale one
+    assert run_module._results(execution.RunOutcome("completed", 0, full_log_ref=full_log_ref)) == {
+        "agent-hardener-log-full": full_log_ref.model_dump()
+    }
+
+
+def test_no_complete_log_or_a_failed_upload_never_costs_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+    log_path = ctx.storage.persistent / "agent-hardener.log"
+    monkeypatch.setattr(
+        run_module._common, "execute", lambda *_a, **_k: (SimpleNamespace(returncode=0), "", None)
+    )  # an agent-hardener that predates AGENT_HARDENER_LOG_FILE writes nothing
+    assert execution._run_agent_hardener(["agent-hardener", "run"], {}, log_path, ctx, artifact_name="x")[-1] is None
+
+    full_log = log_path.with_name("agent-hardener-full.log")
+    full_log.write_text("log", encoding="utf-8")
+
+    def broken_save(*_args, **_kwargs):
+        raise OSError("fileset unavailable")
+
+    monkeypatch.setattr(ctx.results, "save", broken_save)
+    assert execution._save_full_log(full_log, ctx, "agent-hardener-log-full") is None
+
+
 def test_war_game_generated_victim_env_cannot_reload_platform_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
