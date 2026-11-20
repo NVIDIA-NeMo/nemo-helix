@@ -35,6 +35,8 @@ _OPAQUE_DOCKER_PROOF_SECRET_BYTES = 32
 _OPAQUE_DOCKER_PROOF_HASH_PREFIX = "v1:sha256:"
 _DELEGATION_HASH_LENGTH = 48
 _REVOCATION_DELETE_ATTEMPTS = 3
+# The ``workload_kind`` the Jobs backends give a job step's delegation.
+_JOB_WORKLOAD_KIND = "job"
 
 
 class WorkloadDelegationError(Exception):
@@ -104,6 +106,11 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
     workload_claim_id: str | None = None
     workload_generation: str | None = None
     job_id: str | None = None
+    # Entity ID of the job (HelixJob.id). ``job_id`` above is the job's NAME as the Jobs backends write it; a
+    # later job can reuse a name, never an ID. None for non-job workloads, for records written before this
+    # field existed, and when the writer was not given the ID: "unknown", never a match. Compare it with
+    # ``is_step_of_job``, not with ``==``.
+    job_uid: str | None = None
     attempt_id: str | None = None
     step_id: str | None = None
     auth_context: AuthContext
@@ -115,7 +122,7 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
     # Existing stored markers remain authoritative; new revocations delete the record.
     revoked_at: datetime | None = None
 
-    @field_validator("bound_reference_name", "bound_reference_value")
+    @field_validator("bound_reference_name", "bound_reference_value", "job_uid")
     @classmethod
     def normalize_empty_reference(cls, value: str | None) -> str | None:
         return value or None
@@ -128,6 +135,34 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
     def is_active(self, *, now: datetime | None = None) -> bool:
         """Return whether this delegation can still be used."""
         return self.revoked_at is None and not self.is_expired(now=now)
+
+    def is_step_of_job(self, job_uid: str, *, now: datetime | None = None) -> bool:
+        """Whether this record stands and was written for a step of the job whose entity ID is ``job_uid``.
+
+        False when either ID is missing or empty, so a record written before ``job_uid`` existed never matches a
+        caller that has no job ID either. It says the step belongs to some attempt of that job. It does not say
+        who created the job or what the job runs. "Stands" means not revoked and not past ``expires_at``; it does
+        not mean the step is still running.
+
+        This is what the record states. The record is an ordinary entity in the system workspace, so the answer
+        is as trustworthy as the principals that may write entities there.
+        """
+        return (
+            self.is_active(now=now)
+            and self.workload_kind == _JOB_WORKLOAD_KIND
+            and bool(job_uid)
+            and bool(self.job_uid)
+            and self.job_uid == job_uid
+        )
+
+    def is_step_of_attempt(self, job_uid: str, attempt_id: str, *, now: datetime | None = None) -> bool:
+        """``is_step_of_job``, and the step belongs to the attempt ``attempt_id`` of that job."""
+        return (
+            self.is_step_of_job(job_uid, now=now)
+            and bool(attempt_id)
+            and bool(self.attempt_id)
+            and self.attempt_id == attempt_id
+        )
 
 
 def docker_delegation_name(*, workload_workspace: str, job_id: str, attempt_id: str, step_id: str) -> str:
@@ -693,6 +728,14 @@ def _validate_delegation(
     _require_non_empty(entity.workload_audience, "workload_audience")
     _require_non_empty(entity.workload_workspace, "workload_workspace")
     _validate_workload_identity_metadata(entity)
+
+    # A consistency rule for writers that register through a store. A direct write to the entity store skips it.
+    if entity.job_uid is not None and not (
+        entity.workload_kind == _JOB_WORKLOAD_KIND and entity.job_id and entity.attempt_id and entity.step_id
+    ):
+        raise WorkloadDelegationValidationError(
+            "job_uid is only valid on a job step's delegation that also carries job_id, attempt_id and step_id"
+        )
 
     if entity.is_expired():
         raise WorkloadDelegationValidationError("workload delegation expires_at must be in the future")

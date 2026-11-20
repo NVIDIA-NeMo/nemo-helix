@@ -232,6 +232,56 @@ def current_auth_context() -> AuthContext | None:
     return AuthContext.from_principal(auth_client.principal)
 
 
+def current_workload_delegation_id() -> str | None:
+    """ID of the workload delegation record the current request's token was minted from, or None.
+
+    A value is returned only when the platform's middleware authenticated the request this auth context was
+    created for with a workload access token the platform signed, that acts for someone, that names the
+    delegation record the auth service's token exchange minted it from, and that has not expired since. Nothing
+    else fills it: not a header, the body, an access key, a user's own token or a service's token. "The platform
+    signed" means the platform's workload signing key, which platform services share: the value is as
+    trustworthy as they are.
+
+    None in every other case. To tell "this caller is not a recorded workload" from "nothing here can be
+    verified", ask ``workload_delegation_verifiable()``: where that is False (trusted-header mode, or auth off)
+    no caller ever has a value. Read this before switching to service credentials.
+
+    It is the record's ID, for ``WorkloadDelegationStore.get_by_id``, not its lookup name. It says which
+    delegation the token belongs to. It does not say the record still stands (a token can outlive its record
+    until the token expires) or that the peer is the workload itself (a service may forward its caller's token).
+    Read the record and compare with ``WorkloadDelegationEntity.is_step_of_job`` or ``is_step_of_attempt``.
+    """
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return None
+    auth_client = auth_client_context.get()
+    return None if auth_client is None else auth_client.workload_delegation_id
+
+
+def workload_delegation_verifiable() -> bool:
+    """Whether the current auth context is in the mode in which the platform verifies workload delegations.
+
+    True when that context was made with platform auth on and workload token exchange configured. For a request
+    the middleware authenticated, a job step's call then carries a platform-minted delegated token, trusted
+    identity headers are refused, and ``current_workload_delegation_id()`` returning None means the request
+    carried no unexpired token of a workload the platform recorded a delegation for.
+
+    It reports the mode, not how the caller was authenticated. A context that switched to service credentials
+    reports the mode too, also in a background task that no request started, and has no delegation ID. So True
+    does not by itself say that a request was authenticated with a token.
+
+    False in trusted-header mode and with auth off, when no auth context exists, and outside the platform
+    process: nothing verified says which workload is calling.
+    """
+    try:
+        from nhx.common.auth.dependencies import auth_client_context
+    except ImportError:
+        return False
+    auth_client = auth_client_context.get()
+    return auth_client is not None and auth_client.workload_delegation_verifiable
+
+
 def platform_auth_enabled() -> bool:
     """Return whether platform authentication is enabled.
 
@@ -317,8 +367,10 @@ __all__ = [
     "RuntimeAuthClient",
     "current_auth_client",
     "current_auth_context",
+    "current_workload_delegation_id",
     "inference_gateway_credential",
     "is_service_principal_id",
     "platform_auth_enabled",
     "verified_access_key_claims",
+    "workload_delegation_verifiable",
 ]

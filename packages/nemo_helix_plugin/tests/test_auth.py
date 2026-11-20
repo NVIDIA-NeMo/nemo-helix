@@ -4,18 +4,142 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import patch
 
 import nhx.common.auth as nhx_common_auth
+import nhx.common.auth.dependencies as nhx_common_auth_dependencies
 import pytest
-from nemo_helix_plugin.auth import AuthContext, is_service_principal_id
+from nemo_helix_plugin.auth import (
+    AuthContext,
+    current_workload_delegation_id,
+    is_service_principal_id,
+    workload_delegation_verifiable,
+)
 from nemo_helix_plugin.auth.workload_identity import (
     DEFAULT_WORKLOAD_AUDIENCE,
     WorkloadIdentityConfigError,
     get_workload_delegation_audience,
     is_workload_identity_token_exchange_enabled,
 )
-from nhx.common.auth import AuthClient, AuthConfig, Principal, auth_client_context
+from nhx.common.auth import AuthClient, AuthConfig, Principal, auth_as_service, auth_client_context
+from nhx.common.auth.token_claims import ActorClaims, TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
+
+_DELEGATION_ID = "workload_delegation-abc123"
+
+
+def _config(tmp_path: Path, *, enabled: bool, token_exchange: bool) -> AuthConfig:
+    if not token_exchange:
+        return AuthConfig(enabled=enabled)
+    return AuthConfig(
+        enabled=enabled,
+        # Token exchange needs a signing key to be named. These tests never sign or verify, so none is written.
+        token_signing=TokenSigningConfig(key_id="test-workload", private_key_file=str(tmp_path / "workload.pem")),
+        oidc=OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload")),
+    )
+
+
+def _client_with_delegated_token(config: AuthConfig) -> AuthClient:
+    """The auth client the middleware builds for a job step's unexpired token that names ``_DELEGATION_ID``."""
+    resolved = ResolvedBearerToken(
+        claims=TokenClaims(
+            subject="creator@example.com",
+            email=None,
+            groups=[],
+            scopes=[],
+            raw_claims={
+                "exp": time.time() + 300,
+                "nhx_service_attributes": {"auth": {"delegation_id": _DELEGATION_ID}},
+            },
+            actor=ActorClaims(subject="system:serviceaccount:nemo-runs:job-runner", groups=[]),
+        ),
+        token_kind="workload_access_token",
+    )
+    return AuthClient(principal=resolved.principal, config=config, resolved_bearer_token=resolved)
+
+
+def _client_without_token(config: AuthConfig) -> AuthClient:
+    return AuthClient(principal=Principal(id="user@example.com"), config=config)
+
+
+@pytest.mark.parametrize(
+    ("build_client", "enabled", "token_exchange", "delegation_id", "verifiable"),
+    [
+        pytest.param(_client_with_delegated_token, True, True, _DELEGATION_ID, True, id="delegated token"),
+        pytest.param(_client_without_token, True, True, None, True, id="no token, token exchange mode"),
+        pytest.param(_client_without_token, True, False, None, False, id="no token, trusted-header mode"),
+        pytest.param(_client_with_delegated_token, True, False, None, False, id="delegated token, no token exchange"),
+        pytest.param(_client_with_delegated_token, False, True, None, False, id="delegated token, auth off"),
+    ],
+)
+def test_workload_delegation_accessors_read_the_request_auth_client(
+    tmp_path: Path,
+    build_client: Callable[[AuthConfig], AuthClient],
+    enabled: bool,
+    token_exchange: bool,
+    delegation_id: str | None,
+    verifiable: bool,
+) -> None:
+    token = auth_client_context.set(build_client(_config(tmp_path, enabled=enabled, token_exchange=token_exchange)))
+    try:
+        assert current_workload_delegation_id() == delegation_id
+        assert workload_delegation_verifiable() is verifiable
+    finally:
+        auth_client_context.reset(token)
+
+
+def test_workload_delegation_accessors_without_request_auth_context() -> None:
+    token = auth_client_context.set(None)
+    try:
+        assert current_workload_delegation_id() is None
+        assert workload_delegation_verifiable() is False
+    finally:
+        auth_client_context.reset(token)
+
+
+def test_service_credentials_in_a_request_hide_its_workload_delegation_id(tmp_path: Path) -> None:
+    token = auth_client_context.set(_client_with_delegated_token(_config(tmp_path, enabled=True, token_exchange=True)))
+    try:
+        with auth_as_service("builder"):
+            # The mode is still the request's. The ID belongs to the request's token, which this context lacks.
+            assert current_workload_delegation_id() is None
+            assert workload_delegation_verifiable() is True
+
+        assert current_workload_delegation_id() == _DELEGATION_ID
+    finally:
+        auth_client_context.reset(token)
+
+
+@pytest.mark.parametrize("token_exchange", [True, False])
+def test_service_credentials_without_a_request_report_the_platform_mode(tmp_path: Path, token_exchange: bool) -> None:
+    """A background task that switches to service credentials has an auth context, although nothing was verified."""
+    config = _config(tmp_path, enabled=True, token_exchange=token_exchange)
+    token = auth_client_context.set(None)
+    try:
+        with patch("nhx.common.config.get_auth_config", return_value=config), auth_as_service("builder"):
+            assert current_workload_delegation_id() is None
+            assert workload_delegation_verifiable() is token_exchange
+
+        assert workload_delegation_verifiable() is False
+    finally:
+        auth_client_context.reset(token)
+
+
+def test_workload_delegation_accessors_without_nhx_common(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    token = auth_client_context.set(_client_with_delegated_token(_config(tmp_path, enabled=True, token_exchange=True)))
+    try:
+        # Without nhx_common the request auth context can't be imported.
+        monkeypatch.delattr(nhx_common_auth_dependencies, "auth_client_context")
+
+        assert current_workload_delegation_id() is None
+        assert workload_delegation_verifiable() is False
+    finally:
+        monkeypatch.undo()
+        auth_client_context.reset(token)
 
 
 def test_auth_context_from_runtime_or_headers_uses_platform_runtime_context() -> None:

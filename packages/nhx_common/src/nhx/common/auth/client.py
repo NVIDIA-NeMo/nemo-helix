@@ -5,6 +5,7 @@
 
 import asyncio
 import logging
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 from .authz_format import validate_permission_strings
 from .exceptions import InvalidPermissionFormatError
 from .models import Principal
+from .token_claims import WORKLOAD_ACCESS_TOKEN_LEEWAY_SECONDS, workload_delegation_id_from_claims
 from .token_resolver import ResolvedBearerToken
 
 logger = logging.getLogger(__name__)
@@ -109,6 +111,53 @@ class AuthClient(BaseModel):
     def policy_decision_point_base_url(self) -> Optional[str]:
         """Policy Decision Point (PDP) base URL for permission checks."""
         return self.config.policy_decision_point_base_url
+
+    @property
+    def workload_delegation_verifiable(self) -> bool:
+        """Whether this client's config is in workload token-exchange mode.
+
+        That is: auth is on and workload token exchange is configured, the condition under which the middleware
+        refuses trusted identity headers and verifies platform-minted workload tokens. When False, no caller can
+        have a workload delegation ID.
+
+        It reports the mode, not how this client was authenticated: a client made by ``auth_as_service()``
+        reports it too, with or without a request.
+        """
+        return self.config.enabled and self.config.oidc.workload is not None
+
+    def _verified_delegated_token(self) -> ResolvedBearerToken | None:
+        """This request's bearer token, if it is a workload access token the platform signed, it acts for
+        someone, and this client's principal is still the one the token names. None otherwise."""
+        resolved = self.resolved_bearer_token
+        if (
+            self.principal.verified_workload_delegation
+            and resolved is not None
+            and resolved.token_kind == "workload_access_token"
+            and resolved.claims.actor is not None
+            and self.principal.id == resolved.claims.actor.subject
+            and self.principal.on_behalf_of == resolved.claims.subject
+        ):
+            return resolved
+        return None
+
+    @property
+    def workload_delegation_id(self) -> str | None:
+        """ID of the workload delegation record the auth service minted this request's token from.
+
+        Read only from the verified token's claims, and only while that token is inside its validity window.
+        None for any other credential and whenever ``workload_delegation_verifiable`` is False.
+        """
+        if not self.workload_delegation_verifiable:
+            return None
+        resolved = self._verified_delegated_token()
+        if resolved is None:
+            return None
+        expires_at = resolved.claims.raw_claims.get("exp")
+        if not isinstance(expires_at, (int, float)):
+            return None
+        if time.time() >= expires_at + WORKLOAD_ACCESS_TOKEN_LEEWAY_SECONDS:
+            return None
+        return workload_delegation_id_from_claims(resolved.claims.raw_claims)
 
     def _new_pdp_http_client(self) -> httpx.AsyncClient:
         endpoint = parse_platform_endpoint(self.config.policy_decision_point_base_url)
@@ -223,15 +272,7 @@ class AuthClient(BaseModel):
         self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=True)
 
         # This fact belongs to the verified credential, never a caller-supplied snapshot.
-        resolved = self.resolved_bearer_token
-        if (
-            self.principal.verified_workload_delegation
-            and resolved is not None
-            and resolved.token_kind == "workload_access_token"
-            and resolved.claims.actor is not None
-            and self.principal.id == resolved.claims.actor.subject
-            and self.principal.on_behalf_of == resolved.claims.subject
-        ):
+        if self._verified_delegated_token() is not None:
             auth_input["verified_workload_delegation"] = True
 
         auth_url = self.config.get_pdp_url("allow")

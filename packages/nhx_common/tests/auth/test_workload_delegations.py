@@ -141,6 +141,18 @@ def _generic_reference_entity(**overrides) -> WorkloadDelegationEntity:
     return WorkloadDelegationEntity.model_validate(values)
 
 
+def _job_step_entity(**overrides) -> WorkloadDelegationEntity:
+    """A job step's row as the Jobs backends write it: kind ``job``, the job's name, and the job's entity ID."""
+    values = {
+        "workload_kind": "job",
+        "workload_id": "job-123",
+        "workload_generation": "attempt-1/step-a",
+        "job_uid": "platform-job-123",
+    }
+    values.update(overrides)
+    return _entity(**values)
+
+
 def _list_response(
     data: list[WorkloadDelegationEntity],
     *,
@@ -348,7 +360,7 @@ async def test_reference_bound_entity_registers_with_reference_pair() -> None:
 @pytest.mark.asyncio
 async def test_renew_preserves_grant_binding() -> None:
     entity_client = _entity_client()
-    fetched = _entity(opaque_subject_token_hash="proof", docker_container_id="container-a")
+    fetched = _job_step_entity(opaque_subject_token_hash="proof", docker_container_id="container-a")
     fetched._id = "grant"
     fetched._db_version = 7
     entity_client.get_by_id.return_value = fetched
@@ -359,6 +371,7 @@ async def test_renew_preserves_grant_binding() -> None:
     assert renewed.expires_at == expiry
     assert renewed.auth_context == fetched.auth_context
     assert renewed.job_id == fetched.job_id
+    assert renewed.job_uid == "platform-job-123"
     assert renewed.docker_container_id == "container-a"
     assert renewed.opaque_subject_token_hash == "proof"
     entity_client.get.assert_not_called()
@@ -703,13 +716,14 @@ async def test_revoke_missing_is_idempotent_and_cleans_existing_revoked_record()
 @pytest.mark.asyncio
 async def test_bind_docker_container_is_write_once_and_renewal_preserves_it() -> None:
     entity_client = _entity_client()
-    entity = _entity(opaque_subject_token_hash="proof")
+    entity = _job_step_entity(opaque_subject_token_hash="proof")
     entity._id = "grant"
     entity_client.get_by_id.return_value = entity
     entity_client.update.side_effect = lambda value: value
     store = WorkloadDelegationStore(entity_client)
     bound = await store.bind_docker_container("grant", "container-a")
     assert bound.docker_container_id == "container-a"
+    assert bound.job_uid == "platform-job-123"
     assert entity.docker_container_id is None
     entity_client.get_by_id.return_value = bound
     entity_client.update.reset_mock()
@@ -718,6 +732,7 @@ async def test_bind_docker_container_is_write_once_and_renewal_preserves_it() ->
         await store.bind_docker_container("grant", "container-b")
     renewed = await store.renew("grant", expected_db_version=bound.db_version, expires_at=_expires_at())
     assert renewed.docker_container_id == "container-a"
+    assert renewed.job_uid == "platform-job-123"
 
 
 @pytest.mark.asyncio
@@ -969,3 +984,168 @@ async def test_docker_binding_and_rotation_reject_actual_references(reference_na
             opaque_subject_token_hash="rotated",
         )
     client.update.assert_not_awaited()
+
+
+def test_job_uid_is_none_when_the_record_has_none_or_an_empty_one() -> None:
+    # A record written before the field existed has no such key. An entity ID that was never set reads as "".
+    assert _entity().job_uid is None
+    assert _entity(job_uid="").job_uid is None
+    assert _entity(job_uid="platform-job-123").job_uid == "platform-job-123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entity",
+    [
+        pytest.param(_job_step_entity(opaque_subject_token_hash="proof"), id="docker-job-step"),
+        pytest.param(
+            _reference_entity(
+                workload_kind="job",
+                workload_id="job-123",
+                workload_generation="attempt-1/step-a/pod-uid-123",
+                job_uid="platform-job-123",
+            ),
+            id="kubernetes-job-step",
+        ),
+    ],
+)
+async def test_register_accepts_job_uid_on_a_job_step_row(entity: WorkloadDelegationEntity) -> None:
+    entity_client = _entity_client()
+    entity_client.add.side_effect = lambda value: value
+    sync_entity_client = MagicMock()
+    sync_entity_client.add.side_effect = lambda value: value
+
+    saved = await WorkloadDelegationStore(entity_client).register(entity)
+    sync_saved = SyncWorkloadDelegationStore(sync_entity_client).register(entity)
+
+    assert saved.job_uid == "platform-job-123"
+    assert sync_saved.job_uid == "platform-job-123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entity",
+    [
+        pytest.param(_entity(job_uid="platform-job-123"), id="legacy-job-row-without-kind"),
+        pytest.param(_generic_docker_entity(job_uid="platform-job-123"), id="deployment-docker-row"),
+        pytest.param(
+            _generic_reference_entity(workload_kind="job", job_uid="platform-job-123"),
+            id="job-kind-row-without-job-fields",
+        ),
+        # Each job field is required on its own: these rows pass every other register check.
+        *[
+            pytest.param(
+                _reference_entity(
+                    workload_kind="job",
+                    workload_id="job-123",
+                    workload_generation="attempt-1/step-a/pod-uid-123",
+                    job_uid="platform-job-123",
+                    **{missing: None},
+                ),
+                id=f"job-kind-row-without-{missing.replace('_', '-')}",
+            )
+            for missing in ("job_id", "attempt_id", "step_id")
+        ],
+    ],
+)
+async def test_register_rejects_job_uid_outside_a_job_step_row(entity: WorkloadDelegationEntity) -> None:
+    entity_client = _entity_client()
+    sync_entity_client = MagicMock()
+
+    with pytest.raises(WorkloadDelegationValidationError, match="job_uid"):
+        await WorkloadDelegationStore(entity_client).register(entity)
+    with pytest.raises(WorkloadDelegationValidationError, match="job_uid"):
+        SyncWorkloadDelegationStore(sync_entity_client).register(entity)
+
+    entity_client.add.assert_not_called()
+    sync_entity_client.add.assert_not_called()
+
+
+# The argument is left untyped on purpose: a caller that passes None where a job ID is required must get False,
+# never a match between two missing IDs.
+@pytest.mark.parametrize(
+    ("record", "job_uid", "expected"),
+    [
+        pytest.param(_job_step_entity(), "platform-job-123", True, id="active-job-row-with-the-same-id"),
+        pytest.param(_job_step_entity(), "platform-job-999", False, id="another-job"),
+        pytest.param(_job_step_entity(), "", False, id="empty-argument"),
+        pytest.param(_job_step_entity(), None, False, id="missing-argument"),
+        pytest.param(_job_step_entity(job_uid=None), "platform-job-123", False, id="record-without-job-uid"),
+        pytest.param(_job_step_entity(job_uid=None), "", False, id="record-without-job-uid-and-empty-argument"),
+        pytest.param(_job_step_entity(job_uid=None), None, False, id="record-without-job-uid-and-missing-argument"),
+        # An empty ID can only reach the record past validation, as model_copy does.
+        pytest.param(
+            _job_step_entity().model_copy(update={"job_uid": ""}),
+            "",
+            False,
+            id="record-with-empty-job-uid-and-empty-argument",
+        ),
+        pytest.param(
+            _job_step_entity(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)),
+            "platform-job-123",
+            False,
+            id="expired-record",
+        ),
+        pytest.param(
+            _job_step_entity(revoked_at=datetime.now(timezone.utc)), "platform-job-123", False, id="revoked-record"
+        ),
+        pytest.param(
+            _job_step_entity(workload_kind="deployment"), "platform-job-123", False, id="deployment-kind-record"
+        ),
+        pytest.param(_entity(job_uid="platform-job-123"), "platform-job-123", False, id="record-without-a-kind"),
+    ],
+)
+def test_is_step_of_job(record: WorkloadDelegationEntity, job_uid, expected: bool) -> None:
+    assert record.is_step_of_job(job_uid) is expected
+
+
+@pytest.mark.parametrize(
+    ("record", "job_uid", "attempt_id", "expected"),
+    [
+        pytest.param(_job_step_entity(), "platform-job-123", "attempt-1", True, id="same-job-and-attempt"),
+        pytest.param(_job_step_entity(), "platform-job-123", "attempt-2", False, id="another-attempt"),
+        pytest.param(_job_step_entity(), "platform-job-999", "attempt-1", False, id="another-job"),
+        pytest.param(_job_step_entity(), "platform-job-123", "", False, id="empty-attempt-argument"),
+        pytest.param(_job_step_entity(), "platform-job-123", None, False, id="missing-attempt-argument"),
+        pytest.param(
+            _job_step_entity(attempt_id=None), "platform-job-123", "attempt-1", False, id="record-without-attempt"
+        ),
+        pytest.param(
+            _job_step_entity(attempt_id=None),
+            "platform-job-123",
+            None,
+            False,
+            id="record-without-attempt-and-missing-argument",
+        ),
+        pytest.param(
+            _job_step_entity(attempt_id=""),
+            "platform-job-123",
+            "",
+            False,
+            id="record-with-empty-attempt-and-empty-argument",
+        ),
+        pytest.param(
+            _job_step_entity(job_uid=None), "platform-job-123", "attempt-1", False, id="record-without-job-uid"
+        ),
+        pytest.param(
+            _job_step_entity(revoked_at=datetime.now(timezone.utc)),
+            "platform-job-123",
+            "attempt-1",
+            False,
+            id="revoked-record",
+        ),
+    ],
+)
+def test_is_step_of_attempt(record: WorkloadDelegationEntity, job_uid, attempt_id, expected: bool) -> None:
+    assert record.is_step_of_attempt(job_uid, attempt_id) is expected
+
+
+def test_is_step_of_job_and_attempt_judge_expiry_at_the_supplied_time() -> None:
+    record = _job_step_entity()
+    before_expiry = record.expires_at - timedelta(seconds=1)
+    after_expiry = record.expires_at + timedelta(seconds=1)
+
+    assert record.is_step_of_job("platform-job-123", now=before_expiry)
+    assert record.is_step_of_attempt("platform-job-123", "attempt-1", now=before_expiry)
+    assert not record.is_step_of_job("platform-job-123", now=after_expiry)
+    assert not record.is_step_of_attempt("platform-job-123", "attempt-1", now=after_expiry)
