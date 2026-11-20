@@ -135,6 +135,44 @@ def test_opensandbox_host_provider_preserves_configured_entrypoint():
     assert sandbox_spec.entrypoint == ["custom-runtime", "--serve"]
 
 
+@requires_opensandbox
+def test_opensandbox_host_provider_installs_agent_bundle():
+    from sandboxed_gym.host.opensandbox import _BUNDLE_LAUNCHER, AGENT_BUNDLE_EXTENSION_KEY, OpenSandboxGymHostProvider
+
+    bundle = {"image": "nvcr.io/x/codex:1", "installer": "/install", "entrypoint": "bin/codex"}
+    provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"}, agent_bundle=bundle)
+    sandbox_spec = provider._to_sandbox_spec(_gym_host_spec(entrypoint=("custom-runtime", "--serve")))
+
+    assert json.loads(sandbox_spec.provider_options["extensions"][AGENT_BUNDLE_EXTENSION_KEY]) == bundle
+    assert sandbox_spec.entrypoint == [
+        "/bin/sh",
+        "-c",
+        _BUNDLE_LAUNCHER,
+        "/installed-agent/bin/codex",
+        "custom-runtime",
+        "--serve",
+    ]
+
+
+def test_bundle_launcher_puts_agent_on_path_and_fails_fast(tmp_path):
+    from sandboxed_gym.host.opensandbox import _BUNDLE_LAUNCHER
+
+    agent = tmp_path / "bin" / "codex"
+    agent.parent.mkdir()
+    agent.write_text("#!/bin/sh\necho 1.0\n")
+    agent.chmod(0o755)
+    run = [_BUNDLE_LAUNCHER, str(agent), "/bin/sh", "-c", "command -v codex"]
+
+    ok = subprocess.run(["/bin/sh", "-c", *run], capture_output=True, text=True, check=False)
+    assert ok.returncode == 0
+    assert ok.stdout.strip() == str(agent)
+
+    agent.write_text("#!/bin/sh\nexit 3\n")
+    broken = subprocess.run(["/bin/sh", "-c", *run], capture_output=True, text=True, check=False)
+    assert broken.returncode != 0
+    assert broken.stdout == ""
+
+
 # --------------------------------------------------------------------------------------------
 # gym_host.sh — the copy that stages Gym into a writable tree
 #
