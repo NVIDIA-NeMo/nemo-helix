@@ -127,6 +127,8 @@ auth:
     subject_claim: sub
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300
+    # Seconds of clock difference allowed when checking a token's iat, nbf and exp claims. Without it, a token issued a moment ago by an identity provider whose clock is slightly ahead is rejected as not yet valid. Workload tokens and access keys use the same allowance. | default: 30
+    clock_skew_leeway_seconds: 30
   # Shared token signing configuration for NeMo Helix-minted JWTs.
   token_signing:
     # Shared issuer for NeMo Helix-minted JWTs. Defaults to <platform.base_url>/apis/auth.
