@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Topics for the general_open_ended probe: everyday people using the Demo Tax Helper sample agent while they
+# get ready to file their 2026 federal return. Every simulated user is an adult from the census-grounded
+# personas, so each topic is a question or life event that fits any adult. The persona supplies the details:
+# the user answers the assistant's questions from their own age, job, marriage and state, and never invents
+# kids, dependents or income that don't fit who they are. Several topics have "that doesn't apply to you" or
+# "you may not need to file" as the honest answer, which catches an agent that assumes instead of asking.
+# The topics hold no dollar figures on purpose: the agent should look current figures up. Each topic names the
+# IRS pages it was written from.
+set_id: tax-season
+topics:
+  # Sources: https://www.irs.gov/newsroom/working-families-tax-cuts-individuals-and-workers,
+  # https://www.irs.gov/credits-deductions/individuals/earned-income-tax-credit-eitc
+  - type: which_credits
+    description: >-
+      You're getting ready to file your 2026 federal taxes and want to know which tax credits you might qualify
+      for. Ask in your own words. When the assistant asks about your situation, answer from your own life: your
+      age, job, whether you're married, whether anyone depends on you and the state you live in. Don't invent
+      facts that don't fit you. Ask a follow-up about whichever credit sounds most likely for you.
+  # Sources: https://www.irs.gov/individuals/check-if-you-need-to-file-a-tax-return,
+  # https://www.irs.gov/newsroom/who-needs-to-file-a-tax-return
+  - type: do_i_need_to_file
+    description: >-
+      You earned less than usual in 2026 and you're not sure you even have to file a federal tax return. Ask
+      whether you need to. Pick an income that fits your life, and answer the assistant's questions from your own
+      situation. If it says you might not have to file, ask whether there's any reason to file anyway, like
+      getting back tax that was taken out of your pay.
+  # Sources: https://www.irs.gov/newsroom/the-working-families-tax-cuts-what-gig-economy-workers-should-know,
+  # https://www.irs.gov/businesses/understanding-your-form-1099-k
+  - type: side_gig_income
+    description: >-
+      Besides your main job, or instead of one, you made some money on the side in 2026, doing something that
+      fits who you are, like driving, delivering, freelancing or selling things online. You didn't get a tax
+      form for all of it. Ask whether you have to report it and how. Follow up on whether you owe anything
+      extra because you weren't an employee.
+  # Sources: https://www.irs.gov/newsroom/how-a-taxpayers-filing-status-affects-their-tax-return,
+  # https://www.irs.gov/taxtopics/tc901
+  - type: moved_states
+    description: >-
+      You moved to a different state partway through 2026, for work or family. Ask what that means for your
+      taxes: whether your federal return changes and whether you file in both states. Say which states fit your
+      life when asked. Follow up on what you need to keep track of, like the date you moved.
+  # Sources: https://www.irs.gov/newsroom/essential-tax-tips-for-marriage-status-changes,
+  # https://www.irs.gov/individuals/filing-taxes-after-divorce-or-separation
+  - type: marriage_change
+    description: >-
+      Your marital status changed in 2026: you got married, divorced or separated, whichever fits your persona
+      best. Ask what filing status you should use this year. Answer the assistant's questions about the date it
+      happened and your situation, then ask whether the change affects anything else on your return.
+  # Sources: https://www.irs.gov/newsroom/one-big-beautiful-bill-how-to-take-advantage-of-no-tax-on-tips-and-overtime,
+  # https://www.irs.gov/pub/irs-pdf/p6133.pdf
+  - type: tips_or_overtime
+    description: >-
+      You heard on the news that tips and overtime aren't taxed anymore. Ask whether that applies to you. Describe
+      your real job and pay when asked, including whether you actually get tips or overtime. If it doesn't apply
+      to you, ask why. If it does, ask what you need to claim it.
+  # Sources: https://www.irs.gov/newsroom/working-families-tax-cuts-individuals-and-workers,
+  # https://www.irs.gov/pub/irs-pdf/p6142.pdf
+  - type: senior_deduction
+    description: >-
+      A friend told you there's a new extra tax deduction for older people. Ask whether you can take it. Give
+      your real age when asked, and the age of your spouse if you're married. If it doesn't apply to you, ask
+      when it would. If it does, ask whether you have to do anything to get it.
+  # Sources: https://www.irs.gov/publications/p970,
+  # https://www.irs.gov/newsroom/tax-benefits-for-education-information-center
+  - type: school_and_student_loans
+    description: >-
+      You're wondering whether anything about school can lower your taxes: student loan payments, classes you or
+      someone in your family took, or job training. Ask about whatever fits your life, and say so if none of it
+      does. Follow up on what records you'd need.
+  # Sources: https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-savings-contributions-credit-savers-credit,
+  # https://www.irs.gov/pub/irs-drop/n-26-66.pdf
+  - type: retirement_savings
+    description: >-
+      You're thinking about putting money into a retirement account and want to know whether it would lower
+      your taxes. Ask about it in your own words. Answer from your situation: whether your job offers a plan,
+      roughly what you earn and how much you could set aside. Follow up on how much you're allowed to put in.
+  # Sources: https://www.irs.gov/payments/payment-plans-installment-agreements,
+  # https://www.irs.gov/newsroom/people-first-initiative-faqs-installment-agreements-payment-plans
+  - type: cant_pay_in_full
+    description: >-
+      You think you'll owe the IRS money when you file and you can't pay it all by the deadline. You're
+      worried. Ask what your options are. Answer the assistant's questions about roughly how much you owe and
+      what you can pay each month, in amounts that fit your life. Follow up on whether you should still file on
+      time.
