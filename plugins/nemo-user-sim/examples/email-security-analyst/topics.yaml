@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Topics for the general_open_ended probe: security analysts at contoso.com using the Email Security
+# Triage sample agent, the way it's built to be used. Each simulated user is an analyst working the
+# reported-phishing queue: they paste one or more reported emails, ask the assistant to triage them,
+# review them or draft a warning to staff, and follow up the way an analyst would. Half the emails are
+# phishing and half are legitimate, so an agent that calls everything phishing fails as clearly as one
+# that calls everything safe. Domains use real top-level domains: an agent rightly treats a reserved
+# domain such as .example as fake.
+set_id: email-security-analyst
+topics:
+  - type: triage_password_lure
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word. You're working the reported-phishing queue. An employee reported
+      this email. Paste it and ask whether it's phishing. "Subject: Action required: your mailbox is almost
+      full. From: it-helpdesk@m1crosoft-support.com. Your mailbox has reached 98% of its quota. Sign in
+      within 24 hours at http://m1crosoft-support.com/quota to avoid losing incoming mail." Once you have a
+      verdict, ask which details gave it away so you can note them in the ticket.
+  - type: triage_known_vendor_invoice
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. Accounts payable reported this invoice because it has an
+      attachment. Paste it and ask whether it's safe to release. "Subject: Invoice 44817 for October.
+      From: billing@northwind-supplies.com. Please find attached invoice 44817 for $2,340.00, due
+      November 30. Payment details are unchanged from previous invoices." You know Northwind Supplies is
+      a long-standing supplier and northwind-supplies.com is their real domain. If the assistant calls it
+      phishing, tell it that and ask it to reconsider.
+  - type: triage_changed_bank_details
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. Finance flagged this email before paying it. Paste it and
+      ask for a verdict. "Subject: URGENT updated remittance details. From:
+      accounts@northwind-supp1ies.com. We have changed banks. Please send this month's payment of $18,900
+      to the new account below today to avoid a late fee. Do not use the old account." Then ask what
+      finance should do before paying any supplier that changes bank details.
+  - type: warn_staff_gift_cards
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. Several assistants got this email today. Paste it and ask
+      the assistant to draft a short warning you can send to all staff. "Subject: Quick favor. From:
+      ceo.office@gmail.com. Are you at your desk? I need you to buy five $200 gift cards for a client today
+      and send me the codes. Keep this between us for now." If the draft is long, ask for a shorter one.
+  - type: triage_benefits_notice
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. Three employees reported this HR email because it has a
+      link. Paste it and ask whether it's legitimate. "Subject: Open enrollment closes Friday. From:
+      benefits@contoso.com. Open enrollment for 2027 benefits ends Friday. Review your choices in the HR
+      portal at https://hr.contoso.com. No action is needed if you want to keep your current plan." Then ask
+      what you should tell the employees who reported it.
+  - type: review_reported_batch
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word. You're clearing this morning's queue. Paste these three reported
+      emails together, numbered, and ask which ones to quarantine. "1. Subject: Delivery attempt failed.
+      From: notify@parcel-track-24.net. Pay a $1.99 redelivery fee at http://parcel-track-24.net/pay within
+      12 hours. 2. Subject: Q4 planning deck shared with you. From: drive-shares-noreply@google.com on
+      behalf of Priya Raman. Priya Raman shared 'Q4 planning v3' with you. 3. Subject: New sign-in to your
+      account. From: no-reply@accounts.contoso.com. We noticed a new sign-in from a Windows device at 9:14
+      AM. If this was you, no action is needed." Ask about any verdict you don't follow.
+  - type: warn_staff_payroll_lure
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. A dozen people got this email in the last hour. Paste it
+      and ask the assistant to write a warning for staff. "Subject: Your payroll direct deposit is on hold.
+      From: payroll-update@hr-portal-secure.net. Confirm your bank details at
+      http://hr-portal-secure.net before Friday or this month's pay will be delayed." Then ask it to add
+      what people should do if they already entered their details.
+  - type: triage_shared_document
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. An employee reported this share notification. Paste it and
+      ask whether it's safe. "Subject: Q4 planning deck shared with you. From:
+      drive-shares-noreply@google.com on behalf of Priya Raman. Priya Raman shared 'Q4 planning v3' with
+      you. Open in Slides." Priya Raman works in the planning team at contoso.com. Ask what would have made
+      it suspicious.
+  - type: triage_real_sign_in_alert
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. An employee reported this sign-in alert and says they did
+      just log in from a new laptop. Paste it and ask whether it's real. "Subject: New sign-in to your
+      account. From: no-reply@accounts.contoso.com. We noticed a new sign-in from a Windows device in your
+      city at 9:14 AM. If this was you, no action is needed. If not, reset your password from the company
+      portal." Then ask whether the employee needs to do anything.
+  - type: triage_already_clicked
+    description: >-
+      You're a security analyst at contoso.com, not the person who received the email, and you talk like one. Your first message must include the full reported email text below, word for word.. An employee clicked the link in this email and typed their
+      password before reporting it. Paste it and ask for a verdict. "Subject: Document requires your
+      signature. From: sign@docu-sign-review.net. You have a document waiting for signature. Review and sign
+      at http://docu-sign-review.net/s/88213." Then ask what steps to take now that the password was
+      entered.
