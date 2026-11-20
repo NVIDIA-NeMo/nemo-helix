@@ -13,7 +13,7 @@ A Fabric agent (Route A) needs **none of this in code** — the `telemetry: {pro
 atof: {enabled: true}}` block in `agent.yaml` makes the adapter do all of it. This reference is
 for Route B (BYO).
 
-## The two obligations — both, not one
+## The obligations — all of them, not one
 
 1. **Start Relay and let it discover its config**, once, at startup:
 
@@ -36,15 +36,41 @@ for Route B (BYO).
    | Framework | The interception line |
    |---|---|
    | LangChain `create_agent` | `create_agent(model=…, tools=…, middleware=[NemoRelayMiddleware()])` |
-   | Hand-built LangGraph graph | `graph.add_node("tools", create_tool_node(TOOLS))` — `from nemo_relay.integrations.langgraph import create_tool_node` |
+   | Hand-built LangGraph graph | `graph.add_node("tools", create_tool_node(TOOLS))` — `from nemo_relay.integrations.langgraph import create_tool_node`; or, to keep your own `ToolNode` options, `ToolNode(TOOLS, awrap_tool_call=NemoRelayMiddleware().awrap_tool_call)` (what `examples/langgraph-victim` does) |
    | DeepAgents library | `create_deep_agent(**add_nemo_relay_integration(kwargs))` — `from nemo_relay.integrations.deepagents import add_nemo_relay_integration` |
-   | Hermes | no code: `export HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml` and `hermes plugins enable observability/nemo_relay` in the Dockerfile |
+   | Hermes | no code: `ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml` in the Dockerfile (what `examples/hermes-victim` does). Do not run `hermes plugins enable observability/nemo_relay`: current Hermes removed that plugin, and enabling it fails the image build |
 
    Install the matching extra in the image: `pip install "nemo-relay[langgraph]"` (or
    `[langchain]`). `create_tool_node` preserves ToolNode's argument injection, parallel
    execution, error handling, `Command` results and interrupts.
 
-3. *(Attribution, recommended)* pass Relay's callback handler on each invocation so a turn's
+3. **Put Relay in the LLM path** (hand-built LangGraph graph only — `create_agent` middleware and
+   the other rows above already do it). Send each model call through `nemo_relay.llm.execute`
+   instead of calling the model directly:
+
+   ```python
+   import nemo_relay
+   from langchain_core.messages import SystemMessage, messages_from_dict, messages_to_dict
+   from nemo_relay.integrations.langchain._serialization import LANGCHAIN_MODEL_RESPONSE_KEY, LangChainCodec
+
+   async def model(state: MessagesState) -> dict[str, list]:
+       messages = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
+       codec = LangChainCodec()
+       request = nemo_relay.LLMRequest({}, {"messages": messages_to_dict(messages), "model": MODEL})
+
+       async def call(request: nemo_relay.LLMRequest) -> Any:
+           reply = await llm.ainvoke(messages_from_dict(request.content["messages"]))
+           return {LANGCHAIN_MODEL_RESPONSE_KEY: {"messages": messages_to_dict([reply])}}
+
+       result = await nemo_relay.llm.execute(MODEL, request, call, model_name=MODEL, codec=codec, response_codec=codec)
+       return {"messages": messages_from_dict(result[LANGCHAIN_MODEL_RESPONSE_KEY]["messages"])}
+   ```
+
+   A bare `await llm.ainvoke(...)` in the model node records no LLM span. Guardrails on tool calls
+   still fire, but each attack's trace then has no prompt and no model steps, so the traces
+   guardrails defender cannot match an attack to its trace and writes no rail from it.
+
+4. *(Attribution, recommended)* pass Relay's callback handler on each invocation so a turn's
    scopes nest under one root:
 
    ```python
@@ -54,10 +80,14 @@ for Route B (BYO).
 ## The trap: instrumented-looking but unguarded
 
 On a hand-built LangGraph graph, `NemoRelayCallbackHandler()` alone gives **visibility only** —
-LLM scopes appear in the telemetry while tool calls execute outside Relay, so a guardrail is
+graph scopes appear in the telemetry while tool calls execute outside Relay, so a guardrail is
 never consulted. The victim looks instrumented, `--relay-confirmed` blesses it, and every attack
 scores as unblocked while the defenses were never in the fight. The interception is the tools
 node (`create_tool_node`), not the callback.
+
+The half-way version of the same trap: the tools node is wired but the model node calls the model
+directly. Tool calls are guarded, but the callback handler records no LLM call either, so the
+traces have no LLM events and no attack can be matched to its trace. Obligation 3 closes it.
 
 ## How Agent Hardener verifies the promise
 
@@ -70,5 +100,6 @@ Two checks, two moments; each failure names its cause:
 | "emitted no new Relay events in 30s (N older records present)" | this invocation went untraced | the serving path bypasses the instrumented agent object |
 | "Relay recorded no tool call at all" (after round 1) | tool calls bypass Relay — the trap above | obligation 2: `create_tool_node` / middleware in the tool path |
 
-A worked, verified example of all of it: `plugins/nemo-agent-hardener/examples/langgraph-victim/` —
-`agent.py` (tools node wiring) and `server.py` (`activate()` + per-request scope + callback).
+A worked example of all of it: `plugins/nemo-agent-hardener/examples/langgraph-victim/` —
+`agent.py` (tools node and `llm.execute` model node) and `server.py` (`activate()` + per-request
+scope + callback).

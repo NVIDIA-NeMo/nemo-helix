@@ -3,7 +3,7 @@
 
 """``agent-hardener.war-game`` job — registered under ``nemo.jobs``.
 
-Orchestrates one attack/defend/validate war-game against a deployed NAT agent by shelling out to
+Orchestrates one attack/defend/validate war-game against a deployed agent by shelling out to
 agent-hardener's own CLI (its own venv; agent-hardener is never imported). This module holds only the job
 class: ``compile`` builds the platform job spec (pre-creating the run record for Studio's live view)
 and ``run`` sequences the phases. The mechanics live in sibling modules:
@@ -41,6 +41,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     classify_exception,
 )
 from nemo_agent_hardener_plugin.jobs.execution import (
+    RunOutcome,
     _build_native_subprocess_env,
     _run_one_shot,
     _run_service_driven,
@@ -182,12 +183,18 @@ def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext, capture: Artif
     return _save_hitlog_fileset(sdk, ctx.workspace, capture)
 
 
+def _results(outcome: RunOutcome) -> dict[str, Any]:
+    """The run's log results: its console (``agent-hardener-log``) and, when written, its complete log."""
+    refs = {"agent-hardener-log": outcome.log_ref, "agent-hardener-log-full": outcome.full_log_ref}
+    return {name: ref.model_dump() for name, ref in refs.items() if ref}
+
+
 class AgentHardenerRunJob(NemoJob):
     """Run the attack/defend/validate war-game against the configured agent."""
 
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
     job_collection_path = "/jobs"
-    description = "Run the Agent Hardener war-game against a deployed NAT agent."
+    description = "Run the Agent Hardener war-game against a deployed agent."
     container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = WarGameSpec
 
@@ -483,7 +490,7 @@ class AgentHardenerRunJob(NemoJob):
             "status": outcome.status,
             "returncode": outcome.returncode,
             "log_tail": outcome.log_text[-_LOG_TAIL:],
-            "results": {"agent-hardener-log": outcome.log_ref.model_dump()} if outcome.log_ref else {},
+            "results": _results(outcome),
             "run_record": record_name,
         }
         if outcome.failure is not None:  # a subprocess-classified failure surfaces its cause here too

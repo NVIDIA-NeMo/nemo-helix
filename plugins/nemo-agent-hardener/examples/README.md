@@ -21,7 +21,7 @@ guardable.
 | `relay-victim/` | deepagents | registered (Route A) | `telemetry:` block in `agent.yaml` — the adapter wires it, no code |
 | `hermes-victim/` | hermes | registered (Route A) | opt-in Hermes plugin, enabled in the Dockerfile; no `telemetry:` block |
 | `langchain-victim/` | langchain | BYO (Route B) | `middleware=[NemoRelayMiddleware()]` on `create_agent` |
-| `langgraph-victim/` | langgraph | BYO (Route B) | `create_tool_node` / `awrap_tool_call` on a hand-built `ToolNode` |
+| `langgraph-victim/` | langgraph | BYO (Route B) | `awrap_tool_call` on a hand-built `ToolNode`, `nemo_relay.llm.execute` in the model node |
 | `other-victim/` | other | BYO (Route B) | `nemo_relay.typed.tool_execute` called by hand, per tool call |
 
 **Registered vs BYO.** A registered agent is a Fabric spec (`nemo-agents-spec-v1`) the platform
