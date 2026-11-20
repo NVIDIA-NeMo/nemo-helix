@@ -38,7 +38,7 @@ for Route B (BYO).
    | LangChain `create_agent` | `create_agent(model=…, tools=…, middleware=[NemoRelayMiddleware()])` |
    | Hand-built LangGraph graph | `graph.add_node("tools", create_tool_node(TOOLS))` — `from nemo_relay.integrations.langgraph import create_tool_node`; or, to keep your own `ToolNode` options, `ToolNode(TOOLS, awrap_tool_call=NemoRelayMiddleware().awrap_tool_call)` (what `examples/langgraph-victim` does) |
    | DeepAgents library | `create_deep_agent(**add_nemo_relay_integration(kwargs))` — `from nemo_relay.integrations.deepagents import add_nemo_relay_integration` |
-   | Hermes | no code: `export HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml` and `hermes plugins enable observability/nemo_relay` in the Dockerfile |
+   | Hermes | no code: `ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml` in the Dockerfile (what `examples/hermes-victim` does). Do not run `hermes plugins enable observability/nemo_relay`: current Hermes removed that plugin, and enabling it fails the image build |
 
    Install the matching extra in the image: `pip install "nemo-relay[langgraph]"` (or
    `[langchain]`). `create_tool_node` preserves ToolNode's argument injection, parallel
@@ -50,7 +50,7 @@ for Route B (BYO).
 
    ```python
    import nemo_relay
-   from langchain_core.messages import messages_from_dict, messages_to_dict
+   from langchain_core.messages import SystemMessage, messages_from_dict, messages_to_dict
    from nemo_relay.integrations.langchain._serialization import LANGCHAIN_MODEL_RESPONSE_KEY, LangChainCodec
 
    async def model(state: MessagesState) -> dict[str, list]:
