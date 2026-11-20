@@ -4,11 +4,14 @@
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { Link } from 'react-router';
 import { pluginPath } from './paths';
-import { useIsItChristmas } from './queries';
+import { useIsItChristmas, usePicture } from './queries';
 import type { PluginHost } from './types';
 
 export function IsItChristmasPage({ host }: { host: PluginHost }) {
   const { data, isPending, isError, error } = useIsItChristmas(host);
+  // YES gets the waving Stefan, NO gets the sad one. Wait for the answer to know which.
+  const mood = data ? (data.is_christmas ? 'happy' : 'sad') : undefined;
+  const stefan = usePicture(host, 'stefan', mood, mood !== undefined);
 
   return (
     <Flex align="center" justify="center" className="h-full p-6">
@@ -29,7 +32,25 @@ export function IsItChristmasPage({ host }: { host: PluginHost }) {
             <Text kind="body/regular/xs" color="secondary">
               {data.date} · next Christmas {data.next_christmas}
             </Text>
+            {data.forced && (
+              <Text kind="body/regular/xs" color="secondary">
+                Forced for the demo by CHRISTMAS_OVERRIDE on the server
+              </Text>
+            )}
           </>
+        )}
+        {stefan.data && (
+          <img
+            src={stefan.data.data_url}
+            alt={
+              mood === 'happy'
+                ? 'Stefan, a cartoon figure in a Santa hat and sunglasses, waving'
+                : 'Stefan, a cartoon figure in a Santa hat and sunglasses, crying'
+            }
+            width={220}
+            height={220}
+            style={{ borderRadius: 16 }}
+          />
         )}
         <Text kind="body/regular/xs" color="secondary">
           Answered by a Rust server on the other side of the Helix gateway.

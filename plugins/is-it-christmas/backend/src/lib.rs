@@ -21,6 +21,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -28,12 +29,122 @@ use sha2::{Digest, Sha256};
 
 pub const PLUGIN_NAME: &str = "is-it-christmas";
 
+/// A 640px copy of the original photo, compiled in so the server is self-contained.
+const STEFAN_JPEG: &[u8] = include_bytes!("../assets/stefan_waving_christmas.jpeg");
+
+/// An image in a form the Studio UI can use directly.
+///
+/// The Helix gateway only relays JSON and text as-is: any other content type is rewritten to
+/// `application/octet-stream` and sent as an attachment, so a raw `image/jpeg` response would
+/// download instead of rendering. Wrapping the image in JSON as a `data:` URL sidesteps that,
+/// and Studio's content security policy allows `data:` images.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Picture {
+    pub name: &'static str,
+    pub content_type: &'static str,
+    pub bytes: usize,
+    pub data_url: String,
+}
+
+/// A 360px, 64-colour copy of the animated original (30 frames, loops forever).
+/// The same figure, crying, for the NO page.
+const STEFAN_SAD_JPEG: &[u8] = include_bytes!("../assets/stefan_sad.jpeg");
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Mood {
+    #[default]
+    Happy,
+    Sad,
+}
+
+#[derive(Deserialize)]
+struct PictureQuery {
+    /// `happy` (waving, the default) or `sad` (for the NO page).
+    #[serde(default)]
+    mood: Mood,
+}
+
+const STEFAN_GIF: &[u8] = include_bytes!("../assets/stefan_waving_animated_christmas.gif");
+
+fn picture(content_type: &'static str, image: &[u8]) -> Picture {
+    Picture {
+        name: "Stefan",
+        content_type,
+        bytes: image.len(),
+        data_url: format!("data:{content_type};base64,{}", STANDARD.encode(image)),
+    }
+}
+
+pub fn stefan(mood: Mood) -> Picture {
+    match mood {
+        Mood::Happy => picture("image/jpeg", STEFAN_JPEG),
+        Mood::Sad => picture("image/jpeg", STEFAN_SAD_JPEG),
+    }
+}
+
+/// The animated version, shown on the error page. It is its own endpoint so the large image
+/// never rides along inside the 500 body that the CLI and network tools print.
+pub fn stefan_animated() -> Picture {
+    picture("image/gif", STEFAN_GIF)
+}
+
+async fn stefan_endpoint(
+    Path(_workspace): Path<String>,
+    Query(query): Query<PictureQuery>,
+) -> Json<Picture> {
+    Json(stefan(query.mood))
+}
+
+async fn stefan_animated_endpoint(Path(_workspace): Path<String>) -> Json<Picture> {
+    Json(stefan_animated())
+}
+
+/// Forces the answer for demos: set `CHRISTMAS_OVERRIDE=yes|no|auto` when starting the server.
+/// `auto` (the default) follows the calendar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Override {
+    #[default]
+    Auto,
+    Yes,
+    No,
+}
+
+impl std::str::FromStr for Override {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "" | "auto" => Ok(Override::Auto),
+            "yes" => Ok(Override::Yes),
+            "no" => Ok(Override::No),
+            other => Err(format!(
+                "CHRISTMAS_OVERRIDE must be yes, no or auto, not {other:?}"
+            )),
+        }
+    }
+}
+
+impl Override {
+    /// The date to answer for. `Yes` pretends it is Christmas Day; `No` pretends it is not.
+    pub fn apply(self, today: NaiveDate) -> NaiveDate {
+        let christmas = NaiveDate::from_ymd_opt(today.year(), 12, 25);
+        match (self, christmas) {
+            (Override::Yes, Some(day)) => day,
+            (Override::No, Some(day)) if today == day => day.pred_opt().unwrap_or(today),
+            _ => today,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Where Helix can reach this server (used in the manifest's upstream and bundle URLs).
     pub public_url: String,
     /// Directory holding the built UI: `index.js` and `plugin.manifest.json`.
     pub bundle_dir: PathBuf,
+    /// Forces the YES or NO answer; see [`Override`].
+    pub answer_override: Override,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -43,6 +154,8 @@ pub struct Answer {
     pub days_until: i64,
     pub next_christmas: String,
     pub message: String,
+    /// True when `CHRISTMAS_OVERRIDE` decided the answer instead of the calendar.
+    pub forced: bool,
 }
 
 /// Answer the question for `today`. `None` only for dates at the edge of chrono's range.
@@ -65,6 +178,7 @@ pub fn answer(today: NaiveDate) -> Option<Answer> {
         days_until,
         next_christmas: next.to_string(),
         message,
+        forced: false,
     })
 }
 
@@ -79,6 +193,7 @@ fn bad_request(detail: &str) -> Response {
 }
 
 async fn is_it_christmas(
+    State(config): State<Arc<Config>>,
     Path(_workspace): Path<String>,
     Query(query): Query<AnswerQuery>,
 ) -> Response {
@@ -89,8 +204,11 @@ async fn is_it_christmas(
             Err(_) => return bad_request("date must be YYYY-MM-DD"),
         },
     };
-    match answer(today) {
-        Some(answer) => Json(answer).into_response(),
+    match answer(config.answer_override.apply(today)) {
+        Some(mut answer) => {
+            answer.forced = config.answer_override != Override::Auto;
+            Json(answer).into_response()
+        }
         None => bad_request("date is out of range"),
     }
 }
@@ -179,6 +297,18 @@ fn manifest(config: &Config) -> Value {
                 "access": "read",
                 "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/panic"),
             },
+            {
+                "method": "GET",
+                "path": "/v2/workspaces/{workspace}/stefan",
+                "access": "read",
+                "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/stefan"),
+            },
+            {
+                "method": "GET",
+                "path": "/v2/workspaces/{workspace}/stefan-animated",
+                "access": "read",
+                "upstream_url": format!("{base}/v1/workspaces/{{workspace}}/stefan-animated"),
+            },
         ],
     });
     let script = std::fs::read(config.bundle_dir.join("index.js"));
@@ -228,6 +358,11 @@ pub fn router(config: Config) -> Router {
             get(is_it_christmas),
         )
         .route("/v1/workspaces/{workspace}/panic", get(panic_endpoint))
+        .route("/v1/workspaces/{workspace}/stefan", get(stefan_endpoint))
+        .route(
+            "/v1/workspaces/{workspace}/stefan-animated",
+            get(stefan_animated_endpoint),
+        )
         .with_state(Arc::new(config))
 }
 
@@ -291,11 +426,125 @@ mod tests {
         )
     }
 
-    fn app(dir: PathBuf) -> Router {
+    fn app_with(dir: PathBuf, answer_override: Override) -> Router {
         router(Config {
             public_url: "http://127.0.0.1:6010/".into(),
             bundle_dir: dir,
+            answer_override,
         })
+    }
+
+    fn app(dir: PathBuf) -> Router {
+        app_with(dir, Override::Auto)
+    }
+
+    #[test]
+    fn override_yes_is_christmas_and_no_is_not_whatever_the_date() {
+        let some_tuesday = day(2026, 11, 17);
+        assert_eq!(Override::Yes.apply(some_tuesday), day(2026, 12, 25));
+        assert_eq!(Override::No.apply(some_tuesday), some_tuesday);
+        assert_eq!(Override::No.apply(day(2026, 12, 25)), day(2026, 12, 24));
+        assert_eq!(Override::Auto.apply(day(2026, 12, 25)), day(2026, 12, 25));
+    }
+
+    #[test]
+    fn override_parses_the_values_people_will_type_and_rejects_typos() {
+        assert_eq!("YES".parse::<Override>(), Ok(Override::Yes));
+        assert_eq!(" no ".parse::<Override>(), Ok(Override::No));
+        assert_eq!("".parse::<Override>(), Ok(Override::Auto));
+        assert!("maybe"
+            .parse::<Override>()
+            .unwrap_err()
+            .contains("yes, no or auto"));
+    }
+
+    #[tokio::test]
+    async fn the_override_decides_the_answer_and_says_so() {
+        let url = "/v1/workspaces/default/is-it-christmas?date=2026-11-17";
+        let (_, yes) = get_json(app_with(temp_bundle("yes"), Override::Yes), url).await;
+        assert_eq!(
+            (yes["is_christmas"].clone(), yes["forced"].clone()),
+            (true.into(), true.into())
+        );
+        let (_, no) = get_json(app_with(temp_bundle("no"), Override::No), url).await;
+        assert_eq!(
+            (no["is_christmas"].clone(), no["forced"].clone()),
+            (false.into(), true.into())
+        );
+        let (_, auto) = get_json(app(temp_bundle("auto")), url).await;
+        assert_eq!(
+            (auto["is_christmas"].clone(), auto["forced"].clone()),
+            (false.into(), false.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_sad_picture_is_a_different_jpeg() {
+        let base = "/v1/workspaces/default/stefan";
+        let (_, happy) = get_json(app(temp_bundle("happy")), base).await;
+        let (_, sad) = get_json(app(temp_bundle("sad")), &format!("{base}?mood=sad")).await;
+        assert_eq!(sad["content_type"], "image/jpeg");
+        assert_ne!(happy["data_url"], sad["data_url"]);
+        assert_eq!(sad["bytes"], STEFAN_SAD_JPEG.len());
+    }
+
+    #[test]
+    fn stefan_is_a_real_jpeg_in_a_data_url() {
+        let picture = stefan(Mood::Happy);
+        let encoded = picture
+            .data_url
+            .strip_prefix("data:image/jpeg;base64,")
+            .expect("a jpeg data url");
+        let decoded = STANDARD.decode(encoded).expect("valid base64");
+        assert_eq!(decoded, STEFAN_JPEG);
+        assert_eq!(picture.bytes, decoded.len());
+        assert_eq!(
+            &decoded[..3],
+            &[0xFF, 0xD8, 0xFF],
+            "starts with the JPEG magic bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn stefan_endpoint_answers_json_the_gateway_will_relay() {
+        let (status, body) =
+            get_json(app(temp_bundle("stefan")), "/v1/workspaces/default/stefan").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["name"], "Stefan");
+        assert_eq!(body["content_type"], "image/jpeg");
+        assert!(body["data_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/jpeg;base64,"));
+    }
+
+    #[test]
+    fn animated_stefan_is_a_looping_gif_in_a_data_url() {
+        let picture = stefan_animated();
+        let encoded = picture
+            .data_url
+            .strip_prefix("data:image/gif;base64,")
+            .expect("a gif data url");
+        let decoded = STANDARD.decode(encoded).expect("valid base64");
+        assert_eq!(decoded, STEFAN_GIF);
+        assert_eq!(&decoded[..6], b"GIF89a");
+        assert!(
+            decoded.windows(11).any(|w| w == b"NETSCAPE2.0"),
+            "has the infinite-loop extension"
+        );
+    }
+
+    #[tokio::test]
+    async fn animated_endpoint_is_separate_so_the_panic_body_stays_small() {
+        let app = app(temp_bundle("animated"));
+        let (status, body) = get_json(app.clone(), "/v1/workspaces/default/stefan-animated").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["content_type"], "image/gif");
+        let (_, panic_body) = get_json(app, "/v1/workspaces/default/panic").await;
+        assert!(
+            panic_body.get("data_url").is_none(),
+            "the 500 body carries no image"
+        );
     }
 
     #[test]
@@ -359,7 +608,7 @@ mod tests {
             "http://127.0.0.1:6010/v1/workspaces/{workspace}/is-it-christmas"
         );
         assert!(plugin.get("bundle").is_none() && plugin.get("navigation").is_none());
-        assert_eq!(plugin["endpoints"].as_array().map(Vec::len), Some(2));
+        assert_eq!(plugin["endpoints"].as_array().map(Vec::len), Some(4));
         assert_eq!(
             plugin["endpoints"][1]["path"],
             "/v2/workspaces/{workspace}/panic"

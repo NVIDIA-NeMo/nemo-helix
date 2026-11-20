@@ -12,6 +12,8 @@ export interface Answer {
   days_until: number;
   next_christmas: string;
   message: string;
+  /** True when the server's CHRISTMAS_OVERRIDE decided the answer instead of the calendar. */
+  forced: boolean;
 }
 
 /** The viewer's own calendar date (not UTC), as YYYY-MM-DD. */
@@ -60,4 +62,30 @@ export async function getPanic(host: ApiHost, signal?: AbortSignal): Promise<Rus
   });
   if (res.status === 500) return (await res.json()) as RustPanic;
   throw new Error(res.ok ? 'Expected the endpoint to panic, but it answered normally' : `${res.status} ${res.statusText}`);
+}
+
+/** An image the Rust server wraps in JSON as a data URL, so the gateway relays it as-is. */
+export interface Picture {
+  name: string;
+  content_type: string;
+  bytes: number;
+  data_url: string;
+}
+
+export type PictureKind = 'stefan' | 'stefan-animated';
+export type Mood = 'happy' | 'sad';
+
+export async function getPicture(
+  host: ApiHost,
+  kind: PictureKind,
+  { mood, signal }: { mood?: Mood; signal?: AbortSignal } = {}
+): Promise<Picture> {
+  const token = host.auth.getAccessToken();
+  const res = await fetch(pluginUrl(host, mood ? `${kind}?mood=${mood}` : kind), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    redirect: 'error',
+    signal,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (await res.json()) as Picture;
 }

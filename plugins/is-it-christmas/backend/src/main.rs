@@ -3,7 +3,7 @@
 
 use std::{env, net::SocketAddr, path::PathBuf};
 
-use is_it_christmas::{router, Config};
+use is_it_christmas::{router, Config, Override};
 
 #[tokio::main]
 async fn main() {
@@ -16,18 +16,28 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist"));
 
+    // CHRISTMAS_OVERRIDE=yes|no|auto forces the answer for the demo. A typo is an error, not "auto".
+    let answer_override: Override = env::var("CHRISTMAS_OVERRIDE")
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or_else(|message: String| {
+            eprintln!("{message}");
+            std::process::exit(2);
+        });
+
     // Loopback only: Helix reaches this adapter from the same machine in the demo.
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind listener");
-    println!("is-it-christmas listening on http://{addr}");
+    println!("is-it-christmas listening on http://{addr} (answer override: {answer_override:?})");
     println!("register with: nemo plugins install {public_url}/plugin.json");
     axum::serve(
         listener,
         router(Config {
             public_url,
             bundle_dir,
+            answer_override,
         }),
     )
     .await

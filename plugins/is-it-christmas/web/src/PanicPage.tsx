@@ -4,17 +4,27 @@
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { Link } from 'react-router';
 import { pluginPath } from './paths';
-import { useRustPanic } from './queries';
+import { usePicture, useRustPanic } from './queries';
 import type { PluginHost } from './types';
 
 /** Shows the error a Rust handler panic produces, as the server reported it. */
 export function PanicPage({ host }: { host: PluginHost }) {
   const { data, isPending, isError, error } = useRustPanic(host);
+  const wave = usePicture(host, 'stefan-animated');
 
   return (
     <Flex align="center" justify="center" className="h-full p-6">
       <Stack gap="4" style={{ maxWidth: 880 }}>
         <Text kind="label/bold/lg">The Rust server panicked</Text>
+        {wave.data && (
+          <img
+            src={wave.data.data_url}
+            alt="Stefan, a cartoon figure in a Santa hat and sunglasses, waving in an animation"
+            width={360}
+            height={203}
+            style={{ borderRadius: 16 }}
+          />
+        )}
         {isPending && (
           <Text kind="body/regular/md" color="secondary">
             Asking it to panic…

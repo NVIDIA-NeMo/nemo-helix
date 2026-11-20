@@ -32,8 +32,45 @@ The server exposes:
   own stderr. Try `nemo plugins call is-it-christmas panic`, or the "Trigger a Rust panic" link in
   the Studio page. The CLI retries 5xx responses, so one call shows up as three panics.
 
+- `GET /v1/workspaces/{workspace}/stefan?mood=happy|sad` and `.../stefan-animated`: a still JPEG (the
+  waving one for YES, the crying one for NO; shown under the answer) and an animated GIF (shown on the panic page), compiled into the binary from
+  `backend/assets/` (web-sized copies of the originals). They answer **JSON with a `data:` URL**, not
+  raw `image/jpeg`: the Helix gateway relays only JSON and text as-is and rewrites any other content
+  type to an `application/octet-stream` download, which an `<img>` can't render. Studio's content
+  security policy allows `data:` images. The animation is its own endpoint so the big image never
+  rides in the panic's 500 body. `nemo plugins call is-it-christmas stefan` shortens the long value;
+  add `-f json` for all of it.
+
 There is no credential: the endpoint is public on loopback. A real plugin would add a
 `credential` (a workspace secret sent as a bearer token), as the Phoenix plugin does.
+
+## Run it yourself, and change the answer
+
+The server is an ordinary process: run it in your own terminal and restart it freely. Helix
+only needs the URL to answer, so a restart needs no re-registration.
+
+```bash
+cd plugins/is-it-christmas/backend
+CHRISTMAS_OVERRIDE=no cargo run       # or yes, or auto (the default: follow the calendar)
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `CHRISTMAS_OVERRIDE` | `auto` | `yes` or `no` forces the answer (and the happy or sad Stefan). Anything else is an error. |
+| `PORT` | `6010` | Port to listen on (loopback only). |
+| `PUBLIC_URL` | `http://127.0.0.1:$PORT` | The address Helix uses in the manifest. Set it to a tap's address to route through one. |
+| `BUNDLE_DIR` | `../dist` | Where the built UI lives. |
+
+A forced answer says so: the JSON has `"forced": true` and the page notes it. Without the server
+override you can still try dates: `nemo plugins call is-it-christmas -q date=2026-12-25`.
+
+Changing `PUBLIC_URL`, the endpoints, or the UI changes the manifest, so after that:
+
+```bash
+nemo plugins preview  http://127.0.0.1:6010/plugin.json            # note the manifest sha256
+nemo plugins uninstall is-it-christmas --yes
+nemo plugins install  http://127.0.0.1:6010/plugin.json --manifest-sha256 <sha256> --yes
+```
 
 ## Run it
 

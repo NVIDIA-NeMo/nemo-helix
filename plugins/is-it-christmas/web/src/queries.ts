@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from '@tanstack/react-query';
-import { getAnswer, getPanic, localDate, type ApiHost } from './api';
+import { getAnswer, getPanic, getPicture, localDate, type ApiHost, type Mood, type PictureKind } from './api';
 import { PLUGIN_NAME } from './paths';
 
 export const useIsItChristmas = (host: ApiHost) => {
@@ -20,4 +20,15 @@ export const useRustPanic = (host: ApiHost) =>
     queryFn: ({ signal }) => getPanic(host, signal),
     retry: false,
     refetchOnWindowFocus: false,
+  });
+
+/** Decoration only: a missing picture must never break the page, so do not retry it. */
+export const usePicture = (host: ApiHost, kind: PictureKind, mood?: Mood, enabled = true) =>
+  useQuery({
+    queryKey: [PLUGIN_NAME, host.apiBaseUrl, host.workspaceId, kind, mood ?? 'default'],
+    queryFn: ({ signal }) => getPicture(host, kind, { mood, signal }),
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
   });
