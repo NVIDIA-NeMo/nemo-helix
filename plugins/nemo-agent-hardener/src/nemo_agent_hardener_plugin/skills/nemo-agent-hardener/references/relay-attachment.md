@@ -49,6 +49,8 @@ for Route B (BYO).
    instead of calling the model directly:
 
    ```python
+   from typing import Any
+
    import nemo_relay
    from langchain_core.messages import SystemMessage, messages_from_dict, messages_to_dict
    from nemo_relay.integrations.langchain._serialization import LANGCHAIN_MODEL_RESPONSE_KEY, LangChainCodec
