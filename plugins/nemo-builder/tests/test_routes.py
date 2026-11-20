@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,13 +17,23 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from nemo_builder_plugin import service
-from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
+from nemo_builder_plugin import completion, service
+from nemo_builder_plugin.completion import (
+    Caller,
+    current_caller,
+    current_delegation,
+    step_refusal,
+    submit_refusal,
+    verified_delegation,
+)
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService, get_settle
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.service import BuilderService, get_job_of, get_settle
 from nemo_builder_plugin.settle import settle
 from nemo_builder_plugin.submit import BackendChanged, BuildConflict, MissingSecrets, SubmitResult
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationEntity, WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
@@ -35,8 +47,12 @@ def _app(
     caller: Caller = Caller(auth=False),
     job_status: AsyncMock | None = None,
     builder: AsyncMock | None = None,
+    delegation: str | None = None,
+    job_of: AsyncMock | None = None,
 ) -> FastAPI:
-    """``entities`` is the caller's entity store; ``builder`` the builder's, which settling writes through."""
+    """``entities`` is the caller's entity store; ``builder`` the builder's, which settling writes through.
+    ``delegation`` is the workload delegation the caller's token names, and ``job_of`` the platform's record of
+    which job each one was made for a step of."""
     app = FastAPI()
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
@@ -53,6 +69,9 @@ def _app(
         return (await settle(rows, [image], jobs))[0]
 
     app.dependency_overrides[get_settle] = lambda: settle_as_builder
+    app.dependency_overrides[current_delegation] = lambda: delegation
+    if job_of is not None:
+        app.dependency_overrides[get_job_of] = lambda: job_of
     return app
 
 
@@ -148,12 +167,20 @@ IMAGE = "/v2/workspaces/ws-a/container-images/build-1-0"
 STEP = Caller(auth=True, actor="job-step", submitter="alice")
 #: The push step without workload token exchange: the builder's own service principal, acting for the submitter.
 SERVICE_STEP = Caller(auth=True, actor="service:builder", submitter="alice")
-#: Not the image's build job, and acting for its submitter all the same: a step of another job of theirs, as the
-#: platform names it under workload token exchange, and, without exchange, any request whose headers name a service.
-OTHER_WORKLOADS = [
-    Caller(auth=True, actor="system:serviceaccount:jobs:default", submitter="alice"),
-    Caller(auth=True, actor="service:evals", submitter="alice"),
-]
+#: Acting for the image's submitter, and not its build job: without workload token exchange, any request whose
+#: headers name a service.
+NAMED_SERVICE = Caller(auth=True, actor="service:evals", submitter="alice")
+#: Under workload token exchange a step acts for the submitter as the ServiceAccount its pod runs as, and its
+#: token names the delegation the platform recorded for its pod: the image's own remote-build step's, and that
+#: of a step of another job of the same submitter's.
+EXCHANGED_STEP = Caller(auth=True, actor="system:serviceaccount:builds:build-remote", submitter="alice")
+OWN, OTHER_JOBS = "delegation-own", "delegation-other"
+
+
+def _job_of(jobs: Mapping[str, str | None] | None = None) -> AsyncMock:
+    """The job each delegation was made for a step of, as the platform has it on record."""
+    known = {OWN: "ws-a/build-1", OTHER_JOBS: "ws-a/eval-7"} if jobs is None else jobs
+    return AsyncMock(side_effect=lambda delegation: known.get(delegation))
 
 
 def _row(
@@ -186,10 +213,19 @@ def _entities(row: ContainerImage) -> AsyncMock:
 
 
 class TestComplete:
-    def _post(self, row: ContainerImage, *, caller: Caller = Caller(auth=False), body: dict | None = None):
+    def _post(
+        self,
+        row: ContainerImage,
+        *,
+        caller: Caller = Caller(auth=False),
+        body: dict | None = None,
+        delegation: str | None = None,
+        job_of: AsyncMock | None = None,
+    ):
         entities = _entities(row)
         body = {"digest": DIGEST} if body is None else body
-        response = TestClient(_app(entities, caller)).post(f"{IMAGE}/complete", json=body)
+        app = _app(entities, caller, delegation=delegation, job_of=job_of)
+        response = TestClient(app).post(f"{IMAGE}/complete", json=body)
         return response, entities
 
     def test_the_pushed_digest_makes_the_image_ready(self) -> None:
@@ -251,6 +287,37 @@ class TestComplete:
         assert response.status_code == 409
         entities.update.assert_not_awaited()
 
+    def test_a_repeat_that_starts_a_remote_image_another_way_is_a_409(self) -> None:
+        """Answered 200, the caller would take the runtime configuration the row has for the one it sent."""
+        row = _row("ready", DIGEST, backend="remote")
+        row.external = ExternalImage(build_id="build-1")
+        row.runtime_config = ImageRuntimeConfig(entrypoint=["/altered"])
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}, "runtime_config": {"entrypoint": ["/published"]}}
+        response, entities = self._post(row, body=body)
+        assert response.status_code == 409
+        assert "another runtime configuration" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+        # The completion the row was made ready by, repeated, is still returned.
+        response, entities = self._post(row, body=body | {"runtime_config": {"entrypoint": ["/altered"]}})
+        assert (response.status_code, response.json()["runtime_config"]["entrypoint"]) == (200, ["/altered"])
+        entities.update.assert_not_awaited()
+
+    def test_a_repeat_for_an_image_built_here_before_how_it_starts_was_recorded_returns_it(self) -> None:
+        """A push step's completion, repeated across an upgrade, carries what the row was written without."""
+        body = {"digest": DIGEST, "runtime_config": {"entrypoint": ["/bin/app"], "user": "agent"}}
+        response, entities = self._post(_row("ready", DIGEST), body=body)
+        assert (response.status_code, response.json()["runtime_config"]) == (200, None)
+        entities.update.assert_not_awaited()
+
+    def test_a_repeat_that_starts_an_image_built_here_another_way_is_a_409(self) -> None:
+        row = _row("ready", DIGEST)
+        row.runtime_config = ImageRuntimeConfig(entrypoint=["/altered"], user="")
+        body = {"digest": DIGEST, "runtime_config": {"entrypoint": ["/bin/app"], "user": ""}}
+        response, entities = self._post(row, body=body)
+        assert response.status_code == 409
+        assert "another runtime configuration" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+
     @pytest.mark.parametrize("caller", [STEP, SERVICE_STEP], ids=["with-token-exchange", "without"])
     def test_a_job_step_acting_for_the_images_submitter_may_complete_it(self, caller: Caller) -> None:
         assert self._post(_row(), caller=caller)[0].status_code == 200
@@ -270,24 +337,119 @@ class TestComplete:
         assert response.status_code == 403
         entities.update.assert_not_awaited()
 
-    @pytest.mark.parametrize("other", OTHER_WORKLOADS, ids=["another-jobs-step", "a-request-naming-a-service"])
-    def test_another_workload_acting_for_the_submitter_makes_the_first_completion(self, other: Caller) -> None:
-        """Not wanted, and stated in the README's Security section: nothing the platform hands the route says
-        which job is calling, so a remote row's own step and anything else acting for its submitter look alike."""
+    def test_a_request_naming_a_service_for_the_submitter_makes_the_first_completion(self) -> None:
+        """Not wanted, and stated in the README's Security section: without workload token exchange nothing the
+        platform hands the route says which job is calling, so a remote row's own step and anything else acting
+        for its submitter look alike."""
         entities = _entities(_row(backend="remote"))
         chosen = "sha256:" + "f" * 64
-        first = TestClient(_app(entities, other)).post(
-            f"{IMAGE}/complete", json={"digest": chosen, "external": {"build_id": "made-up"}}
+        starts = {"entrypoint": ["/chosen"], "cmd": None, "working_dir": None, "user": None}
+        first = TestClient(_app(entities, NAMED_SERVICE)).post(
+            f"{IMAGE}/complete",
+            json={"digest": chosen, "external": {"build_id": "made-up"}, "runtime_config": starts},
         )
         assert (first.status_code, first.json()["status"]) == (200, "ready")
-        # What a consumer then pins and runs: the digest and the build the other workload chose.
+        # What a consumer then pins and runs: the digest, the build and the entrypoint the other workload chose.
         assert first.json()["image_ref"] == f"reg.example.com/ws-a/app@{chosen}"
         assert first.json()["external"]["build_id"] == "made-up"
+        assert first.json()["runtime_config"] == starts
         # And the row's own step, with the digest its build published, is the one refused.
-        own = TestClient(_app(entities, STEP)).post(
+        own = TestClient(_app(entities, SERVICE_STEP)).post(
             f"{IMAGE}/complete", json={"digest": DIGEST, "external": {"build_id": "build-1"}}
         )
         assert own.status_code == 409
+        entities.update.assert_awaited_once()
+
+    def test_another_jobs_step_is_refused_and_the_images_own_makes_the_first_completion(self) -> None:
+        """Under workload token exchange each step's token names the platform's record of its pod, which says
+        which job the pod is a step of: another job of the submitter's is told from the image's own."""
+        entities = _entities(_row(backend="remote"))
+        job_of = _job_of()
+        other = TestClient(_app(entities, EXCHANGED_STEP, delegation=OTHER_JOBS, job_of=job_of)).post(
+            f"{IMAGE}/complete", json={"digest": "sha256:" + "f" * 64, "external": {"build_id": "made-up"}}
+        )
+        assert other.status_code == 403
+        assert "a step of another job" in other.json()["detail"]
+        entities.update.assert_not_awaited()
+        # The row is still pending, and its own step completes it with what its build published.
+        own = TestClient(_app(entities, EXCHANGED_STEP, delegation=OWN, job_of=job_of)).post(
+            f"{IMAGE}/complete", json={"digest": DIGEST, "external": {"build_id": "build-1"}}
+        )
+        assert (own.status_code, own.json()["status"], own.json()["digest"]) == (200, "ready", DIGEST)
+        assert [call.args for call in job_of.await_args_list] == [(OTHER_JOBS,), (OWN,)]
+        entities.update.assert_awaited_once()
+
+    def test_a_repeat_from_another_jobs_step_is_refused_too(self) -> None:
+        """It is not told what the image's own step wrote by sending the same."""
+        row = _row("ready", DIGEST, backend="remote")
+        row.external = ExternalImage(build_id="build-1")
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response, _ = self._post(row, caller=EXCHANGED_STEP, body=body, delegation=OTHER_JOBS, job_of=_job_of())
+        assert response.status_code == 403
+        response, _ = self._post(row, caller=EXCHANGED_STEP, body=body, delegation=OWN, job_of=_job_of())
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("jobs", [{}, {OWN: None}], ids=["no-longer-on-record", "not-a-job-steps"])
+    def test_a_step_the_platform_has_no_job_on_record_for_is_refused(self, jobs: dict[str, str | None]) -> None:
+        """A token outlives the record it was minted from by a little: its job has ended, and the record with it."""
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response, entities = self._post(
+            _row(backend="remote"), caller=EXCHANGED_STEP, body=body, delegation=OWN, job_of=_job_of(jobs)
+        )
+        assert response.status_code == 403
+        assert "not on record as a job step" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+
+    def test_a_record_that_cant_be_read_admits_no_one(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Answered as an outage, which the step waits out: the image is built, and only this call is left."""
+        job_of = AsyncMock(side_effect=RuntimeError("entity store down"))
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response, entities = self._post(
+            _row(backend="remote"), caller=EXCHANGED_STEP, body=body, delegation=OWN, job_of=job_of
+        )
+        assert response.status_code == 503
+        assert "entity store down" not in response.text
+        assert "could not tell which job is completing ws-a/build-1-0" in caplog.text
+        entities.update.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "caller",
+        [Caller(auth=False), SERVICE_STEP, NAMED_SERVICE],
+        ids=["auth-off", "the-step-without-exchange", "a-request-naming-a-service"],
+    )
+    def test_a_caller_whose_token_names_no_workload_is_asked_nothing_more(self, caller: Caller) -> None:
+        job_of = _job_of()
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response, _ = self._post(_row(backend="remote"), caller=caller, body=body, job_of=job_of)
+        assert response.status_code == 200
+        job_of.assert_not_awaited()
+
+    def test_no_record_is_read_for_a_caller_refused_already(self) -> None:
+        job_of = _job_of()
+        someone_elses = Caller(auth=True, actor="system:serviceaccount:builds:build-remote", submitter="bob")
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response, _ = self._post(_row(backend="remote"), caller=someone_elses, body=body, delegation=OWN, job_of=job_of)
+        assert response.status_code == 403
+        job_of.assert_not_awaited()
+
+    def test_a_step_of_a_job_under_the_build_jobs_name_passes_as_its_step(self) -> None:
+        """Not wanted, and stated in the README's Security section: the platform's record names a job as the
+        row does, by workspace and name, and a job created once the build's is deleted can take its name."""
+        job_of = _job_of({OTHER_JOBS: "ws-a/build-1"})
+        body = {"digest": "sha256:" + "f" * 64, "external": {"build_id": "made-up"}}
+        response, entities = self._post(
+            _row(backend="remote"), caller=EXCHANGED_STEP, body=body, delegation=OTHER_JOBS, job_of=job_of
+        )
+        assert (response.status_code, response.json()["external"]["build_id"]) == (200, "made-up")
+        entities.update.assert_awaited_once()
+
+    def test_an_image_this_cluster_builds_is_completed_by_whoever_acts_for_its_submitter(self) -> None:
+        """Not wanted, and stated in the README's Security section: only a row a build service built is held
+        to its own job. The push step's completion is as it was before the builder asked."""
+        job_of = _job_of()
+        response, entities = self._post(_row(), caller=EXCHANGED_STEP, delegation=OTHER_JOBS, job_of=job_of)
+        assert (response.status_code, response.json()["status"]) == (200, "ready")
+        job_of.assert_not_awaited()
         entities.update.assert_awaited_once()
 
     def test_what_a_build_services_client_reported_of_how_the_image_starts_is_recorded(self) -> None:
@@ -320,6 +482,220 @@ class TestComplete:
         response, entities = self._post(_row(), body=body)
         assert response.status_code == 422
         entities.update.assert_not_awaited()
+
+
+#: The claims of the token the platform's auth service mints for a job step that has proved which pod it is.
+MINTED = {
+    "sub": "alice",
+    "act": {"sub": "system:serviceaccount:builds:build-remote"},
+    "nhx_service_attributes": {"auth": {"delegation_id": "workload-delegation-1"}},
+}
+
+
+def _authenticated(
+    kind: str | None, claims: object, *, actor: str | None = "system:serviceaccount:builds:build-remote"
+) -> SimpleNamespace:
+    """The auth client the platform's middleware leaves for a route, with the token it verified for the request."""
+    acting = SimpleNamespace(subject=actor, groups=[]) if actor else None
+    token = SimpleNamespace(token_kind=kind, claims=SimpleNamespace(actor=acting, raw_claims=claims))
+    return SimpleNamespace(resolved_bearer_token=token)
+
+
+def _delegation(
+    job: str = "build-1", *, kind: str = "job", now: datetime | None = None, steps: bool = True
+) -> WorkloadDelegationEntity:
+    """The record Jobs' Kubernetes backend makes for a step's pod, built with what it builds one from."""
+    record = build_kubernetes_pod_uid_workload_delegation(
+        scope=WorkloadDelegationScope(workload_workspace="ws-a", workload_kind=kind, workload_instance_id=job),
+        workload_audience="platform",
+        workload_generation="attempt-1/step-1/pod-1",
+        namespace="builds",
+        service_account_name="build-remote",
+        pod_uid="pod-1",
+        job_id=job if steps else None,
+        attempt_id="attempt-1" if steps else None,
+        step_id="step-1" if steps else None,
+        auth_context=AuthContext(principal_id="alice"),
+        ttl_seconds_active=3600,
+        now=now,
+    )
+    record._id = "workload-delegation-1"
+    return record
+
+
+class TestWhichJobIsCalling:
+    """Under workload token exchange, a step's token names the platform's record of its pod."""
+
+    def test_a_workload_tokens_delegation_is_read_from_its_verified_claims(self) -> None:
+        assert verified_delegation(_authenticated("workload_access_token", MINTED)) == "workload-delegation-1"
+
+    @pytest.mark.parametrize(
+        ("kind", "actor"),
+        [
+            ("access_key", "service:evals"),
+            ("oidc_access_token", "service:evals"),
+            ("workload_subject_token", "service:evals"),
+            (None, "service:evals"),
+            ("workload_access_token", None),
+        ],
+        ids=["an-access-key", "a-users-token", "a-pods-own-token", "no-kind", "a-workload-acting-for-no-one"],
+    )
+    def test_the_same_claim_in_any_other_token_is_not_the_platforms_word(
+        self, kind: str | None, actor: str | None
+    ) -> None:
+        """An access key carries attributes a platform service chose for it. Only the token the auth service
+        mints for a workload it has verified, acting for someone, names a delegation."""
+        assert verified_delegation(_authenticated(kind, MINTED, actor=actor)) is None
+
+    @pytest.mark.parametrize(
+        "client",
+        [
+            SimpleNamespace(),
+            SimpleNamespace(resolved_bearer_token=None),
+            _authenticated("workload_access_token", {"sub": "alice", "act": {"sub": "service:evals"}}),
+            _authenticated("workload_access_token", {"nhx_service_attributes": {"auth": {"delegation_id": ""}}}),
+            _authenticated("workload_access_token", {"nhx_service_attributes": {"auth": {"delegation_id": 7}}}),
+            _authenticated("workload_access_token", {"nhx_service_attributes": {"auth": "workload-delegation-1"}}),
+            _authenticated("workload_access_token", {"nhx_service_attributes": ["workload-delegation-1"]}),
+            _authenticated("workload_access_token", None),
+        ],
+        ids=[
+            "headers",
+            "no-token",
+            "a-services-own-token",
+            "an-empty-id",
+            "an-id-that-is-no-text",
+            "no-mapping-for-auth",
+            "no-mapping-of-attributes",
+            "no-claims",
+        ],
+    )
+    def test_a_request_whose_token_names_none_has_none(self, client: SimpleNamespace) -> None:
+        assert verified_delegation(client) is None
+
+    def test_the_claim_read_is_the_one_the_platform_mints_for_a_job_step(self) -> None:
+        """Against the platform's own auth, where it is installed: the builder reads a verified token by the
+        names the platform gives its parts, and would ask nothing if one of them changed."""
+        exchange = pytest.importorskip("nhx.core.auth.api.v2.workload_token_exchange")
+        token_claims = pytest.importorskip("nhx.common.auth.token_claims")
+        token_resolver = pytest.importorskip("nhx.common.auth.token_resolver")
+        auth_client = pytest.importorskip("nhx.common.auth.client")
+        record = _delegation()
+        minted = exchange._build_delegated_claims(
+            record, exchange.VerifiedSubjectToken(subject=record.workload_subject, groups=[])
+        )
+        claims = token_claims.TokenClaims(
+            subject=minted["sub"],
+            email=None,
+            groups=[],
+            scopes=[],
+            raw_claims=minted,
+            actor=token_claims.ActorClaims(subject=minted["act"]["sub"], groups=[]),
+        )
+        token = token_resolver.ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
+        # Where a route finds the token: on the auth client the middleware leaves for it.
+        assert "resolved_bearer_token" in auth_client.AuthClient.model_fields
+        assert verified_delegation(SimpleNamespace(resolved_bearer_token=token)) == record.id
+
+    def test_the_route_reads_the_delegation_the_requests_token_names(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Through the route, with the caller and its token read as the platform leaves them for it."""
+        monkeypatch.setattr(completion, "platform_auth_enabled", lambda: True)
+        monkeypatch.setattr(
+            completion,
+            "current_auth_context",
+            lambda: AuthContext(
+                principal_id="system:serviceaccount:builds:build-remote", principal_on_behalf_of="alice"
+            ),
+        )
+        monkeypatch.setattr(
+            completion, "current_auth_client", lambda _request: _authenticated("workload_access_token", MINTED)
+        )
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        for job, answer in (("ws-a/eval-7", 403), ("ws-a/build-1", 200)):
+            job_of = _job_of({"workload-delegation-1": job})
+            app = _app(_entities(_row(backend="remote")), job_of=job_of)
+            del app.dependency_overrides[current_caller], app.dependency_overrides[current_delegation]
+            assert TestClient(app).post(f"{IMAGE}/complete", json=body).status_code == answer
+            job_of.assert_awaited_once_with("workload-delegation-1")
+
+    def test_with_auth_off_no_token_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Anyone may complete an image then, so which workload one of them is changes nothing."""
+        monkeypatch.setattr(completion, "platform_auth_enabled", lambda: False)
+        monkeypatch.setattr(
+            completion, "current_auth_client", lambda _request: _authenticated("workload_access_token", MINTED)
+        )
+        job_of = _job_of({"workload-delegation-1": "ws-a/eval-7"})
+        app = _app(_entities(_row(backend="remote")), job_of=job_of)
+        del app.dependency_overrides[current_caller], app.dependency_overrides[current_delegation]
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        assert TestClient(app).post(f"{IMAGE}/complete", json=body).status_code == 200
+        job_of.assert_not_awaited()
+
+    async def test_only_a_step_of_the_images_own_job_passes(self) -> None:
+        row = _row(backend="remote")
+        assert await step_refusal(row, OWN, _job_of()) is None
+        assert "a step of another job" in (await step_refusal(row, OTHER_JOBS, _job_of()) or "")
+        assert "not on record as a job step" in (await step_refusal(row, OWN, _job_of({})) or "")
+
+    async def test_nothing_is_asked_where_no_token_names_a_workload_or_the_image_is_built_here(self) -> None:
+        job_of = _job_of()
+        assert await step_refusal(_row(backend="remote"), None, job_of) is None
+        assert await step_refusal(_row(), OTHER_JOBS, job_of) is None
+        job_of.assert_not_awaited()
+
+    def test_a_delegations_job_is_the_one_its_images_row_names(self) -> None:
+        """Jobs records the workspace and the job's name for a step's pod, and the row its build job by both."""
+        assert service._job_named(_delegation()) == _row().provenance.job == "ws-a/build-1"
+        assert service._job_named(_delegation("eval-7")) == "ws-a/eval-7"
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            None,
+            _delegation(now=datetime(2020, 1, 1, tzinfo=UTC)),
+            _delegation(kind="deployment", steps=False),
+            _delegation(kind="deployment"),
+        ],
+        ids=["no-longer-on-record", "expired", "a-deployments", "a-deployment-that-names-a-job"],
+    )
+    def test_a_record_that_is_not_a_standing_job_steps_names_no_job(
+        self, record: WorkloadDelegationEntity | None
+    ) -> None:
+        assert service._job_named(record) is None
+
+    async def test_the_record_is_read_by_its_id_as_the_builder(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Not as the caller: the record is the platform's own, kept where no submitter reads."""
+        record = _delegation()
+        stored = {
+            "entity_type": "workload_delegation",
+            "id": record.id,
+            "workspace": "system",
+            "name": record.name,
+            "data": record.model_dump(mode="json", exclude_computed_fields=True),
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "db_version": 1,
+        }
+
+        def entities(request: httpx.Request) -> httpx.Response:
+            if request.url.path == f"/apis/entities/v2/entities/{record.id}":
+                return httpx.Response(200, json=stored)
+            return httpx.Response(404, json={"detail": "Entity not found"})
+
+        client = AsyncNemoClient(
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(entities))
+        )
+        asked: list[dict[str, object]] = []
+
+        @asynccontextmanager
+        async def as_builder(**kwargs: object) -> AsyncGenerator[AsyncNemoClient]:
+            asked.append(kwargs)
+            yield client
+
+        monkeypatch.setattr(service, "get_async_nemo_client", as_builder)
+        assert await service._job_of_as_builder(record.id) == "ws-a/build-1"
+        assert asked == [{"as_service": "builder", "internal": True}]
+        assert await service._job_of_as_builder("workload-delegation-2") is None
 
 
 class TestReadingOneImage:

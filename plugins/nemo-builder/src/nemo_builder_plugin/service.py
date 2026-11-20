@@ -21,10 +21,13 @@ from nemo_builder_plugin.completion import (
     Caller,
     CompleteRequest,
     CompletionConflict,
+    JobOf,
     caller_refusal,
     complete,
     current_caller,
+    current_delegation,
     read_refusal,
+    step_refusal,
     submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
@@ -48,6 +51,7 @@ from nemo_builder_plugin.submit import (
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationEntity, WorkloadDelegationStore
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -197,6 +201,31 @@ async def _settle_as_builder(image: ContainerImage) -> ContainerImage:
 def get_settle() -> Settle:
     """How reading an image settles it, if its job abandoned it."""
     return _settle_as_builder
+
+
+def _job_named(record: WorkloadDelegationEntity | None) -> str | None:
+    """``<workspace>/<name>`` of the job ``record`` was made for a step of, as an image's row names its build
+    job. None if it was made for something else, or no longer stands.
+
+    Jobs records the job's workspace and its name for each step's pod, and withdraws the record once the step
+    has ended.
+    """
+    if record is None or not record.is_active() or record.workload_kind != "job" or not record.job_id:
+        return None
+    return f"{record.workload_workspace}/{record.job_id}"
+
+
+async def _job_of_as_builder(delegation: str) -> str | None:
+    # As the builder, not the caller: the record is the platform's own, kept where no submitter reads. By its
+    # ID, which names one record: a later workload's is another, though it may be found under the same name.
+    async with get_async_nemo_client(as_service="builder", internal=True) as client:
+        records = WorkloadDelegationStore(EntityClient(AsyncEntitiesClient.from_client(client)))
+        return _job_named(await records.get_by_id(delegation))
+
+
+def get_job_of() -> JobOf:
+    """How the builder learns which job a caller's workload delegation was made for a step of."""
+    return _job_of_as_builder
 
 
 class BuilderService(NemoService):
@@ -385,14 +414,32 @@ def _build_router() -> APIRouter:
         body: CompleteRequest,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
+        delegation: str | None = Depends(current_delegation),
+        job_of: JobOf = Depends(get_job_of),
     ) -> ContainerImage:
         """Make an image `ready` at the digest the step that built it published.
 
-        Completing an image already `ready` at that digest, with the same `external`, returns it; 409 if it
-        settled otherwise, or if the request doesn't fit the image's backend.
+        Completing an image already `ready` at that digest, with the same `external` and the same
+        `runtime_config`, returns it; 409 if it settled otherwise, or if the request doesn't fit the image's
+        backend. For an image a build service built, 403 to a caller whose token shows it to be a step of
+        another job than the image's build job.
         """
         row = await _get_row(entity_client, workspace, name)
         refusal = caller_refusal(row, caller)
+        if refusal is None:
+            try:
+                refusal = await step_refusal(row, delegation, job_of)
+            except Exception as exc:
+                # No one is admitted on a record that couldn't be read. Answered as an outage, which a step
+                # waits out: its image is built, and only this call is left.
+                logger.exception(
+                    "could not tell which job is completing %s/%s",
+                    sanitize_for_log(workspace),
+                    sanitize_for_log(name),
+                )
+                raise HTTPException(
+                    status_code=503, detail="Couldn't check which job the caller is a step of; try again."
+                ) from exc
         if refusal is not None:
             logger.warning(
                 "completing %s/%s refused: %s",

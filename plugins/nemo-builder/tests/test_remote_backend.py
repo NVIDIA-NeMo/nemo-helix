@@ -17,7 +17,7 @@ from nemo_builder_plugin.backend import Backend, BackendRejectedError
 from nemo_builder_plugin.backends import load_backend
 from nemo_builder_plugin.completion import CompleteRequest, CompletionConflict, complete
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage, ExternalImage, Provenance
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.execution import ExecutionBackend
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.plan import BuildPlan
@@ -434,6 +434,17 @@ async def _submit(
     )
 
 
+async def _submit_in_cluster(client: FakeEntityClient) -> None:
+    """Submit the set to a deployment that builds in this cluster."""
+    profiles: list[ExecutionProfile] = [
+        _profile(name, storage={"pvc_name": "work"}) for name in ("build-fetch", "build-control", "build-push")
+    ]
+    config = BuilderConfig.model_validate(
+        {"registry": "reg.example.com", "sandbox": {"image": "kaniko.example.com/executor:debug"}}
+    )
+    await _submit(client, FakeJobs(client.events), ExecutionBackend(config, profiles))
+
+
 class TestSubmitting:
     """The generic submit path, with the remote backend behind it."""
 
@@ -619,6 +630,94 @@ class TestTheRecord:
             with pytest.raises(CompletionConflict, match="another build's image"):
                 await complete(client, workspace="default", name="demo-1", digest=digest, external=other)
         assert client.rows["demo-1"].external == external
+
+    async def test_completing_again_must_say_the_image_starts_the_same_way(self) -> None:
+        """The same digest and the same build with another runtime configuration is not the same completion.
+        Returned as done, the row would keep the first one, and the caller would take it for what it sent."""
+        client = FakeEntityClient()
+        await _submit(client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES))
+        digest = "sha256:" + "c" * 64
+        external = ExternalImage(build_id="build-1")
+        starts = ImageRuntimeConfig(entrypoint=["/entrypoint.sh"], cmd=["serve"], working_dir="/srv", user="")
+
+        async def again(runtime_config: ImageRuntimeConfig | None) -> ContainerImage:
+            return await complete(
+                client,
+                workspace="default",
+                name="demo-1",
+                digest=digest,
+                runtime_config=runtime_config,
+                external=external,
+            )
+
+        await again(starts)
+        # The same one, read anew from a retried request, returns the row.
+        assert (await again(ImageRuntimeConfig.model_validate(starts.model_dump()))).runtime_config == starts
+        for other in (
+            starts.model_copy(update={"entrypoint": ["/altered"]}),
+            starts.model_copy(update={"cmd": None}),
+            starts.model_copy(update={"user": None}),
+            None,
+        ):
+            with pytest.raises(CompletionConflict, match="another runtime configuration"):
+                await again(other)
+        assert client.rows["demo-1"].runtime_config == starts
+
+    async def test_a_remote_row_completed_with_none_is_not_completed_again_with_one(self) -> None:
+        """A build service's step sends the same on every try, so a row that records none was sent none."""
+        client = FakeEntityClient()
+        await _submit(client, FakeJobs(client.events), RemoteBackend(_config(), PROFILES))
+        digest = "sha256:" + "c" * 64
+        external = ExternalImage(build_id="build-1")
+        await complete(client, workspace="default", name="demo-1", digest=digest, external=external)
+        with pytest.raises(CompletionConflict, match="another runtime configuration"):
+            await complete(
+                client,
+                workspace="default",
+                name="demo-1",
+                digest=digest,
+                runtime_config=ImageRuntimeConfig(entrypoint=["/entrypoint.sh"]),
+                external=external,
+            )
+        assert client.rows["demo-1"].runtime_config is None
+
+    async def test_an_image_built_here_takes_again_what_its_row_does_not_record(self) -> None:
+        """A row an earlier builder completed records no runtime configuration, or not the image's user. A push
+        step whose completion is repeated across the upgrade sends both, for an image that is published."""
+        client = FakeEntityClient()
+        await _submit_in_cluster(client)
+        digest = "sha256:" + "c" * 64
+        starts = ImageRuntimeConfig(entrypoint=["/bin/app"], cmd=["serve"], working_dir="/app", user="agent")
+
+        await complete(client, workspace="default", name="demo-1", digest=digest)
+        repeated = await complete(client, workspace="default", name="demo-1", digest=digest, runtime_config=starts)
+        # Returned as it is: a ready row is never written again.
+        assert (repeated.status, repeated.runtime_config) == ("ready", None)
+
+        client.rows["demo-1"].runtime_config = starts.model_copy(update={"user": None})
+        repeated = await complete(client, workspace="default", name="demo-1", digest=digest, runtime_config=starts)
+        assert repeated.runtime_config == starts.model_copy(update={"user": None})
+        assert [event for event in client.events if event.startswith("update:")] == ["update:demo-1:ready"]
+
+    async def test_an_image_built_here_is_not_completed_again_another_way(self) -> None:
+        """What its row does record, a repeat must match, as for a row a build service built."""
+        client = FakeEntityClient()
+        await _submit_in_cluster(client)
+        digest = "sha256:" + "c" * 64
+        starts = ImageRuntimeConfig(entrypoint=["/bin/app"], cmd=["serve"], working_dir="/app", user="agent")
+        await complete(client, workspace="default", name="demo-1", digest=digest, runtime_config=starts)
+
+        assert (await complete(client, workspace="default", name="demo-1", digest=digest, runtime_config=starts)) is (
+            client.rows["demo-1"]
+        )
+        for other in (
+            starts.model_copy(update={"entrypoint": ["/altered"]}),
+            starts.model_copy(update={"user": "root"}),
+            None,
+        ):
+            with pytest.raises(CompletionConflict, match="another runtime configuration"):
+                await complete(client, workspace="default", name="demo-1", digest=digest, runtime_config=other)
+        assert client.rows["demo-1"].runtime_config == starts
 
     async def test_completing_writes_the_handle_with_the_digest(self) -> None:
         client = FakeEntityClient()

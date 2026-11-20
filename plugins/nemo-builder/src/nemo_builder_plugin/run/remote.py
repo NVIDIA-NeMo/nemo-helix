@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import sys
 import tempfile
 import time
@@ -44,7 +45,7 @@ from nemo_builder_plugin.entities import (
     ExternalImage,
     ImageRuntimeConfig,
 )
-from nemo_builder_plugin.run.fetch import ArchiveRefused, fetch_source
+from nemo_builder_plugin.run.fetch import MAX_UNPACKED_BYTES, MAX_UNPACKED_ENTRIES, ArchiveRefused, fetch_source
 from nemo_builder_plugin.run.push import Builder
 from nemo_builder_plugin.run.utils import read_step_config
 from nemo_builder_plugin.steps import (
@@ -154,7 +155,11 @@ class RemoteBuild:
 
     #: Stable for this job attempt and image. ``start`` twice with one key starts one build.
     key: str
-    #: The build context, with the Dockerfile at its root.
+    #: The build context, with the Dockerfile at its root. It is the whole context, as the step holds it on
+    #: disk: nothing has applied its ignore rules, so what a build leaves out is still in it. The ignore file
+    #: a builder reads is at its root, as a regular file: ``Dockerfile.dockerignore`` if there is one, and
+    #: otherwise ``.dockerignore``. What a client owes a context it sends anywhere is said on
+    #: :meth:`RemoteBuildService.start`.
     context: Path
     platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
@@ -179,7 +184,9 @@ class RemoteImage:
     #: How the published image starts by default: its entrypoint, command, working directory and user, from
     #: the image's config, with what it inherits from its base image. A client that can read that config
     #: reports it, with ``user`` an empty string for an image that sets none, and the row records it as it
-    #: does for an image built in the cluster. Left None, the row records none. A consumer whose runtime
+    #: does for an image built in the cluster. Left None, the row records none, and so it does when any part
+    #: of what is reported holds the build service's credential: a consumer runs what the row records, and
+    #: with the credential taken out that is no longer how the image starts. A consumer whose runtime
     #: replaces a container's entrypoint then can't start the image's own: it has to refuse a workload that
     #: sets a command of its own and leaves the entrypoint to the image, and building the image again changes
     #: nothing.
@@ -214,6 +221,25 @@ class RemoteBuildService(Protocol):
         The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
         nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
         ends the build.
+
+        ``build.context`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
+        An implementation that sends the context anywhere first applies the ignore file at the context's
+        root, as a container build does, and sends nothing those rules leave out: the Dockerfile's own,
+        ``Dockerfile.dockerignore``, if there is one, and otherwise ``.dockerignore``. The Dockerfile and
+        that ignore file are sent whatever the rules say, as a container build still reads them: rules
+        that leave out everything and then name what to keep seldom name those two. What a build leaves
+        out, a file of local settings say, then never leaves the step. Rules that the service applies to
+        what it was sent come too late for that.
+
+        It follows no link: it packs each link as a link, or refuses a context that holds one. And it
+        packs the names of one file, hard links of one another, as one file. The driver has checked the
+        links as they are written: each leads inside the context wherever the context is unpacked, and
+        none leads back to a directory it is in.
+        Followed, a link is sent as a copy of what it leads to, which the ignore rules may have left out
+        under its own name, and which a context's links can repeat many times over. The driver refuses a
+        context that its links, followed, would make more of than a source may unpack to, but it measures
+        one file once, however many names the file has: sent as a file for each name, it is as many times
+        its size.
         """
         ...
 
@@ -321,7 +347,17 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     A context with a link that leads out of it is refused. Its links were checked, where it was unpacked, to
     stay inside what was unpacked, which may be more than this context: a service's packager that follows links
     would send a file from beside the context with it. So is one with a link that leads back to a directory it
-    is in, which such a packager would follow without end.
+    is in, which such a packager would follow without end. And so is one that its links make too much of:
+    links to directories that never come back round still repeat what they lead to, each time one is
+    followed, so a context with links is measured as a packager that follows them would send it, and refused
+    if that comes to more entries or bytes than a source may unpack to.
+
+    A link that is kept leads inside the context wherever the context is unpacked, and not only here. One
+    whose path leaves the context on the way to what it leads to inside it, by the context's own name
+    (``../app/payload``, in a context named ``app``) or as an absolute path, would lead out of the context
+    under any other name, so it is rewritten in place, as the way from its own directory to what it leads
+    to. A build that copies the link itself then copies it as rewritten. A link whose path stays inside
+    the context is left exactly as it is written.
     """
     if not context.is_dir():
         raise ImageFailed("its build context is not a directory in what was fetched: its context path matches none")
@@ -336,10 +372,7 @@ def stage_context(context: Path, dockerfile: str) -> Path:
         source = None
     if source is None or root not in source.parents or not source.is_file():
         raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
-    if (link := _link_out(context)) is not None:
-        raise ImageFailed(
-            f"the build context has a link that leads out of it, or back to a directory it is in: {link!r}"
-        )
+    _check_links(context)
     target = context / ROOT_DOCKERFILE
     # Whether the spec names the root Dockerfile by its own path, however that path is spelt.
     at_root = named.name == ROOT_DOCKERFILE and named.parent.resolve() == root
@@ -404,26 +437,90 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     return context
 
 
-def _link_out(context: Path) -> str | None:
-    """The first link under ``context`` that a packager must not follow, as its path in the context. None if
-    there is none.
+@dataclass(slots=True)
+class _Links:
+    """What one walk of a build context finds of its links."""
 
-    One that leads out of the context would bring in what is beside it. One by which a walk that follows links
-    comes back to a directory it is in, straight away or by way of other links, would be followed round and
-    round.
+    #: The first link that leads out of the context, as its path in the context. The walk ends at it.
+    out: str | None = None
+    #: From each directory, the ways on: the directories in it, and where each link in it leads, with the link.
+    ways: dict[Path, list[tuple[Path, str | None]]] = field(default_factory=dict)
+    #: What each directory holds itself, in entries and in bytes, with a link to a file counted as the file.
+    holds: dict[Path, tuple[int, int]] = field(default_factory=dict)
+    #: Every link, where it is.
+    found: list[Path] = field(default_factory=list)
+
+
+def _check_links(context: Path) -> None:
+    """Refuse ``context`` for links a packager must not follow, and rewrite those that only lead inside it here.
+
+    A link that leads out of the context would bring in what is beside it. One by which a walk that follows
+    links comes back to a directory it is in, straight away or by way of other links, would be followed round
+    and round. Links to directories that never come back round are each followed, and what they lead to sent
+    again each time: a context that comes to more that way than a source may unpack to is refused. A context
+    with no links is as large as it was fetched, which is the fetch's to bound, and is not measured.
     """
     root = context.resolve()
-    #: From each directory, the ways on: the directories in it, and where each link in it leads, with the link.
-    ways: dict[Path, list[tuple[Path, str | None]]] = {}
+    links = _links(context)
+    if (refused := links.out or _link_round(root, links.ways)) is not None:
+        raise _leads_out(refused)
+    if not links.found:
+        return
+    entries, size = _followed(root, links)
+    if entries > MAX_UNPACKED_ENTRIES:
+        raise ImageFailed(
+            f"the build context comes to more than {MAX_UNPACKED_ENTRIES} entries with its links followed"
+        )
+    if size > MAX_UNPACKED_BYTES:
+        raise ImageFailed(f"the build context comes to more than {MAX_UNPACKED_BYTES} bytes with its links followed")
+    rewritten = [link for link in links.found if _keep_inside(root, link)]
+    if rewritten:
+        logger.info(
+            "%d link(s) of the build context left it on the way to what they lead to inside it, and are rewritten "
+            "to stay inside wherever it is unpacked: the first is %s",
+            len(rewritten),
+            _quoted(rewritten[0].relative_to(root).as_posix()),
+        )
+
+
+def _leads_out(link: str) -> ImageFailed:
+    """Why a context with ``link``, a link that a packager must not follow, isn't built."""
+    return ImageFailed(f"the build context has a link that leads out of it, or back to a directory it is in: {link!r}")
+
+
+def _links(context: Path) -> _Links:
+    """What a walk of ``context`` finds of its links. One pass over the context, which follows no link.
+
+    It ends at the first link that leads out of the context, which is all that is then asked of it.
+    """
+    root = context.resolve()
+    links = _Links()
+    #: The files with more than one name whose bytes are counted: such names are one file, and unpacking
+    #: counts it once. Counted for each name, a source that was let through could be refused here.
+    counted: set[tuple[int, int]] = set()
     for directory, directories, files in os.walk(context):
         here = Path(directory).resolve()
-        on = ways.setdefault(here, [])
+        on = links.ways.setdefault(here, [])
+        entries = size = 0
         for name, listed_as_directory in (*((name, True) for name in directories), *((name, False) for name in files)):
             path = Path(directory, name)
-            if not path.is_symlink():
+            entries += 1
+            try:
+                status = os.lstat(path)
+            except OSError:
+                # Gone, or not to be read: no link that can be followed.
+                status = None
+            if status is None or not stat.S_ISLNK(status.st_mode):
                 if listed_as_directory:
                     on.append((here / name, None))
+                elif status is not None and stat.S_ISREG(status.st_mode):
+                    number = (status.st_dev, status.st_ino)
+                    if number not in counted:
+                        size += status.st_size
+                    if status.st_nlink > 1:
+                        counted.add(number)
                 continue
+            links.found.append(here / name)
             try:
                 end = path.resolve()
             except (OSError, RuntimeError):
@@ -431,10 +528,108 @@ def _link_out(context: Path) -> str | None:
                 continue
             where = path.relative_to(context).as_posix()
             if end != root and root not in end.parents:
-                return where
-            if end.is_dir():
+                links.out = where
+                return links
+            try:
+                led_to = os.stat(end)
+            except OSError:
+                # It leads to nothing.
+                continue
+            if stat.S_ISDIR(led_to.st_mode):
                 on.append((end, where))
-    return _link_round(root, ways)
+            elif stat.S_ISREG(led_to.st_mode):
+                # Followed, the link is another copy of the file.
+                size += led_to.st_size
+        links.holds[here] = (entries, size)
+    return links
+
+
+def _followed(root: Path, links: _Links) -> tuple[int, int]:
+    """How many entries, and how many bytes, a walk from ``root`` that follows links comes to.
+
+    As a packager that follows links would send the context: what a link leads to is counted where the link
+    is, each time the walk comes to it. Each directory's total is worked out once and remembered, so this
+    costs no more than the context's own size, however many times over its links lead to one directory. Its
+    place is kept in a list and not in calls: a context may be nested deeper than a function may call itself.
+    Neither total is counted past one more than its limit, since each level of a context may double them.
+
+    No way in ``links`` comes back round: :func:`_link_round` is asked first.
+    """
+    most = (MAX_UNPACKED_ENTRIES + 1, MAX_UNPACKED_BYTES + 1)
+    totals: dict[Path, tuple[int, int]] = {}
+    trail: list[tuple[Path, Iterator[tuple[Path, str | None]]]] = [(root, iter(links.ways.get(root, ())))]
+    while trail:
+        here, on = trail[-1]
+        # The next directory on from here that is not yet measured, before this one can be.
+        there = next((there for there, _ in on if there not in totals), None)
+        if there is not None:
+            trail.append((there, iter(links.ways.get(there, ()))))
+            continue
+        trail.pop()
+        entries, size = links.holds.get(here, (0, 0))
+        for there, _ in links.ways.get(here, ()):
+            entries, size = min(entries + totals[there][0], most[0]), min(size + totals[there][1], most[1])
+        totals[here] = (entries, size)
+    return totals[root]
+
+
+def _keep_inside(root: Path, link: Path) -> bool:
+    """Rewrite ``link`` if its path leaves ``root`` on the way to what it leads to inside it. Whether it did.
+
+    Such a link leads inside the context only while the context is where it is, under the name it has. It
+    becomes the way from its own directory to what its path names, with the links on the way there followed
+    and that one not, should it be a link too: it still names the link it named. Where what it names is
+    beside the context, a link there that leads back in, it becomes the way to where that leads.
+
+    One that leads nowhere is rewritten too, to where its path comes to. If that is out of the context, a
+    path through a loop of links that climbs out after it, the context is refused: nothing says where such
+    a link leads once the context is unpacked.
+    """
+    directory, written = link.parent, os.readlink(link)
+    if _stays_inside(root, directory, written):
+        return False
+    named = directory / written
+    to = _followed_to(named) if named.name in ("", "..") else _followed_to(named.parent) / named.name
+    if not _inside(root, to):
+        to = _followed_to(link)
+    if not _inside(root, to):
+        raise _leads_out(link.relative_to(root).as_posix())
+    link.unlink()
+    link.symlink_to(os.path.relpath(to, directory))
+    return True
+
+
+def _stays_inside(root: Path, directory: Path, written: str) -> bool:
+    """Whether a link in ``directory`` with the path ``written`` is followed to its end without leaving ``root``.
+
+    Read as the system reads it, a name at a time and with each link on the way followed, not as it is
+    spelt: after a link to a directory, a step back is from where the link led, and may be out of the context
+    though the path never seems to climb that far.
+    """
+    if os.path.isabs(written):
+        return False
+    here = directory
+    for name in PurePosixPath(written).parts:
+        if name == "..":
+            if here == root:
+                return False
+            here = here.parent
+            continue
+        here = _followed_to(here / name)
+        if not _inside(root, here):
+            return False
+    return True
+
+
+def _followed_to(path: Path) -> Path:
+    """Where ``path`` leads with every link in it followed. A loop of links is left in it as a name, whatever
+    the Python: ``Path.resolve`` raises for one on some."""
+    return Path(os.path.realpath(path))
+
+
+def _inside(root: Path, path: Path) -> bool:
+    """Whether ``path`` is ``root`` or in it. Both with their links followed."""
+    return path == root or root in path.parents
 
 
 def _link_round(root: Path, ways: Mapping[Path, list[tuple[Path, str | None]]]) -> str | None:
@@ -655,18 +850,29 @@ def _problems(exc: ValidationError) -> str:
 def _starts_as(built: RemoteImage, image: str, redact: Callable[[str], str]) -> ImageRuntimeConfig | None:
     """How ``image`` starts by default, as the service's client reports it, for the row. None if it reports none.
 
-    Every reader of the image reads this too, so the credential is taken out of its strings as it is out of the
-    handle's. One that can't be recorded is logged and left out, as the push step leaves out an image config it
-    can't read: the image is built and published all the same.
+    Every reader of the image reads this too, so it must not hold the credential. But it is not a text to take
+    the credential out of, as the handle is: it is what a consumer runs, and with a mark where an argument
+    was it is no longer how the image starts. So one that holds the credential in any part is left out whole,
+    and the log says so. One that can't be recorded is logged and left out too, as the push step leaves out
+    an image config it can't read. Either way the image is built and published all the same.
     """
     if built.runtime_config is None:
         return None
     try:
-        reported = ImageRuntimeConfig.model_validate(built.runtime_config)
-        return ImageRuntimeConfig.model_validate(_redact_value(reported.model_dump(), redact))
+        reported = ImageRuntimeConfig.model_validate(built.runtime_config).model_dump()
+        recorded = ImageRuntimeConfig.model_validate(reported)
     except ValidationError as exc:
         logger.warning("can't record how %s starts; recording none: %s", _quoted(image), _quoted(_problems(exc)))
         return None
+    if _redact_value(reported, redact) is not reported:
+        # Which part, and what it held, is not said: the row and the log are read by more than the step.
+        logger.warning(
+            "not recording how %s starts: it holds the build service's credential, and with that taken out it "
+            "would not be how the image starts",
+            _quoted(image),
+        )
+        return None
+    return recorded
 
 
 def _complete(
@@ -1158,12 +1364,20 @@ def take_credential(environ: MutableMapping[str, str]) -> str:
     return value
 
 
-def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> logging.LogRecord:
+def _redact_record(
+    record: logging.LogRecord, redact: Callable[[str], str], *, keep_exception: bool = False
+) -> logging.LogRecord:
     """``record``, with the credential out of everything a handler prints of it.
 
     And out of what its message is made from, which stays on the record for a handler that reads it apart from
     the message: where that holds the credential, the record keeps the message as it is formatted, as text,
     and not the arguments.
+
+    Its exception is passed on as text, formatted as the standard formatter writes one and redacted, and not
+    as itself, whether or not the text held the credential. A handler may print more of an exception than
+    its text: one that shows the variables of each frame prints a client's variable that holds the
+    credential, though the error says nothing of it. ``keep_exception`` is for a redaction that has no
+    secret to take out: the exception is then left on the record.
     """
     try:
         message, formatted = record.getMessage(), True
@@ -1177,9 +1391,13 @@ def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> l
     # It prints `exc_text` as it finds it, so the redacted text is put there first.
     if record.exc_info and not record.exc_text:
         record.exc_text = logging.Formatter().formatException(record.exc_info)
-    if record.exc_text and (redacted := redact(record.exc_text)) != record.exc_text:
-        # The exception itself still holds what was taken out of its text, and some handlers print it themselves.
-        record.exc_text, record.exc_info = redacted, None
+    text = record.exc_text
+    if text:
+        record.exc_text = redact(text)
+    if not keep_exception or record.exc_text != text:
+        # The exception itself holds more than its text, what was taken out of the text included: the frames
+        # it passed through, with their variables. Some handlers print those themselves.
+        record.exc_info = None
     if record.stack_info:
         record.stack_info = redact(record.stack_info)
     return record
@@ -1313,7 +1531,7 @@ class _RedactedFields(dict[str, Any]):
     request's headers say, would print the credential in it. So a record's fields are kept in one of these.
     """
 
-    def __init__(self, fields: Mapping[str, Any], redact: Callable[[str], str]) -> None:
+    def __init__(self, fields: Mapping[str, Any], redact: Redaction) -> None:
         super().__init__(fields)
         self.redact = redact
 
@@ -1342,16 +1560,17 @@ class _RedactedFields(dict[str, Any]):
     def _set_exception(self, exc_info: Any) -> None:
         """An exception set on a record after it was made, as ``logging.makeLogRecord`` sets one.
 
-        As :func:`_redact_record` treats one a log call attached: it is kept as it is unless its text, the
-        exceptions it was raised from included, holds the credential. Then the text is kept without it, and
-        the exception is not: a formatter prints the text it finds, and needs the exception whole or not at all.
+        As :func:`_redact_record` treats one a log call attached. Once there is a secret to take out, its
+        text is kept, the exceptions it was raised from included, without the secret, and the exception is
+        not, whether or not the text held the secret: a formatter prints the text it finds, and a handler
+        that is handed the exception may print what its frames held. With no secret, it is kept as it is.
         """
         try:
             text = logging.Formatter().formatException(exc_info)
             redacted = self.redact(text)
         except Exception:
             text, redacted = "", WITHHELD
-        if redacted == text:
+        if redacted == text and not self.redact.holds_a_secret:
             super().__setitem__("exc_info", exc_info)
             return
         super().__setitem__("exc_info", None)
@@ -1392,6 +1611,11 @@ class Redaction:
         if secret:
             self._redactors.append(_redactor(secret))
 
+    @property
+    def holds_a_secret(self) -> bool:
+        """Whether it has been given a secret to take out. Until then, it changes nothing."""
+        return bool(self._redactors)
+
     def __call__(self, text: str) -> str:
         for redact in self._redactors:
             text = redact(text)
@@ -1412,12 +1636,13 @@ class _RedactingFactory:
     def __call__(self, *args: Any, **kwargs: Any) -> logging.LogRecord:
         record = self._make(*args, **kwargs)
         try:
-            _redact_record(record, _REDACTION)
+            # Once there is a secret, no record is passed on with its exception: only with the exception's text.
+            _redact_record(record, _REDACTION, keep_exception=not _REDACTION.holds_a_secret)
             if record.name != logger.name:
                 _unmark_record(record)
             if record.exc_info:
-                # Nothing was taken out of the exception. Its text, made here to be checked, is not kept: a
-                # handler's own formatter writes it as it would have.
+                # There is no secret to take out, and the exception's text holds no marker. That text, made
+                # here to be checked, is not kept: a handler's own formatter writes it as it would have.
                 record.exc_text = None
         except Exception:
             # Never into the code that logged. A record that can't be checked is withheld, not printed as it is.
@@ -1441,6 +1666,15 @@ def log_redaction() -> Redaction:
     or a set is looked into, whatever it prints as; what any other object holds and doesn't print is not known.
     A field that a filter sets on a record once it is made is not checked at all. A record made some other way,
     built by hand or read back from a queue, is covered only if it is made with ``logging.makeLogRecord``.
+
+    Once it has been given a secret, a handler receives a record's exception as text and never as the
+    exception: ``exc_text`` holds it as the standard formatter writes one, with the secrets out, and
+    ``exc_info`` is None, whether or not the text held a secret. An exception holds more than its text. A
+    handler that prints a traceback with the variables of each frame would print a client's variable that
+    holds the credential, whatever the error says. So a handler's own way of formatting an exception is not
+    used: a formatter's ``formatException`` is not called, and a handler that draws tracebacks itself is
+    handed none to draw. Until a secret is given, records are passed on with their exceptions as they were
+    logged.
 
     It is also a function, which takes the same secrets out of any text. Call it again after anything that may
     have installed a record factory of its own, as a tracing library does: that puts this one back on top.
@@ -1515,10 +1749,13 @@ def step_main(
 
     The step logs with the level first, in brackets, which Jobs' launcher reads. A step program that sets up
     logging of its own before it calls this keeps that format, which must end a line with the message: what
-    follows an image's name on its failure line is taken for the reason. What a step program prints, instead of
-    logging, is not redacted, and what it prints after the driver's last line pushes the failure lines out of
-    the end of the log that Jobs keeps: standard output is made line-buffered here so that nothing is held back
-    until then.
+    follows an image's name on its failure line is taken for the reason. Its handlers receive a logged
+    exception as text, already formatted and redacted, and not the exception, from when the driver or the
+    client first gives a secret to keep out (see :func:`log_redaction`): a handler's own way of formatting
+    an exception, a traceback on one line or one drawn with each frame's variables, is not used. What a step
+    program prints, instead of logging, is not redacted, and what it prints after the driver's last line
+    pushes the failure lines out of the end of the log that Jobs keeps: standard output is made line-buffered
+    here so that nothing is held back until then.
     """
     # The level first, in brackets: the Jobs launcher reads it from there, and records any other line as an error.
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s: %(message)s")

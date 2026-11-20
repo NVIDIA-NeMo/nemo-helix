@@ -256,7 +256,9 @@ def read_runtime_config(layout: Path, digest: str) -> ImageRuntimeConfig | None:
 class Builder:
     """This step's calls to the builder's routes, acting for the submitter, retrying what may be transient.
 
-    Both are safe to repeat: completing an image already ``ready`` at the same digest returns it.
+    Both are safe to repeat: completing an image already ``ready`` returns it, when the completion is the same
+    one again, with the same digest and the same account of how the image starts. Each caller works that
+    out once for an image, and sends it on every try.
     """
 
     def __init__(self, client: BuilderClient, *, workspace: str, sleep: Callable[[float], None] = time.sleep) -> None:

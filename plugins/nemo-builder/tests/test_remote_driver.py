@@ -15,6 +15,7 @@ import pickle
 import shutil
 import signal
 import sys
+import tarfile
 import tempfile
 import time
 import tracemalloc
@@ -28,7 +29,7 @@ import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.run import remote as driver
-from nemo_builder_plugin.run.fetch import ArchiveRefused
+from nemo_builder_plugin.run.fetch import MAX_UNPACKED_BYTES, MAX_UNPACKED_ENTRIES, ArchiveRefused
 from nemo_builder_plugin.run.remote import (
     CANCEL_PAUSE_SECONDS,
     CANCEL_SECONDS,
@@ -282,6 +283,19 @@ def _run(
     )
 
 
+def _unpacked_elsewhere(context: Path, destination: Path) -> Path:
+    """``context`` as a packager that keeps its links sends it, unpacked in ``destination``, under another
+    name, by an extractor that refuses a link out of where it unpacks."""
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w") as archive:
+        archive.add(context, arcname=".")
+    packed.seek(0)
+    destination.mkdir(parents=True)
+    with tarfile.open(fileobj=packed) as archive:
+        archive.extractall(destination, filter="data")
+    return destination
+
+
 class TestABuildThatSucceeds:
     def test_the_row_is_completed_once_with_the_digest_and_the_services_handle(
         self, context: Path, tmp_path: Path
@@ -355,16 +369,39 @@ class TestABuildThatSucceeds:
         assert _run(FakeService([RemoteBuildStatus("done", image=image)]), builder, context, tmp_path) == 0
         assert [image for image, _, _ in builder.completed] == ["demo-1"]
 
-    def test_the_credential_is_taken_out_of_how_the_image_is_said_to_start(self, context: Path, tmp_path: Path) -> None:
-        """Every reader of the image reads this too. An image may be built to start with a key in its command."""
-        reported = ImageRuntimeConfig(
-            entrypoint=["/bin/sh", "-c"], cmd=["serve --key token-value"], working_dir="/srv/token-value", user="1000"
-        )
+    @pytest.mark.parametrize(
+        "reported",
+        [
+            ImageRuntimeConfig(entrypoint=["/entrypoint.sh", "--token", "token-value"], cmd=["serve"], user=""),
+            ImageRuntimeConfig(entrypoint=["/bin/sh", "-c"], cmd=["serve --key token-value"], user="1000"),
+            ImageRuntimeConfig(entrypoint=["/entrypoint.sh"], working_dir="/srv/token-value"),
+            ImageRuntimeConfig(entrypoint=["/entrypoint.sh"], user="token-value"),
+        ],
+        ids=["in-its-entrypoint", "in-its-command", "in-its-working-directory", "in-its-user"],
+    )
+    def test_how_an_image_starts_is_not_recorded_when_any_part_of_it_holds_the_credential(
+        self, reported: ImageRuntimeConfig, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """How an image starts is what a consumer runs. With the credential taken out of an argument, what is
+        left is not how the image starts: a consumer would start it with the mark in the argument's place."""
         image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", runtime_config=reported)
-        recorded = ImageRuntimeConfig(
-            entrypoint=["/bin/sh", "-c"], cmd=["serve --key [credential]"], working_dir="/srv/[credential]", user="1000"
-        )
-        builder = FakeBuilder(runtime_config=recorded)
+        # A builder that is told nothing of how the image starts: `complete` checks that.
+        builder = FakeBuilder()
+        service = FakeService([RemoteBuildStatus("done", image=image)])
+        with caplog.at_level(logging.INFO):
+            assert _run(service, builder, context, tmp_path, redact=driver._redactor("token-value")) == 0
+        # The image is built and published all the same, and the log says why its row holds no way to start it.
+        assert len(builder.completed) == 1
+        assert "not recording how demo-1 starts: it holds the build service's credential" in caplog.text
+        assert "token-value" not in caplog.text
+
+    def test_how_an_image_starts_is_recorded_as_reported_when_nothing_is_taken_out_of_it(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """A credential the step knows changes nothing of a configuration that doesn't hold it."""
+        reported = ImageRuntimeConfig(entrypoint=["/bin/sh", "-c"], cmd=["serve --key $KEY"], working_dir="/srv")
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", runtime_config=reported)
+        builder = FakeBuilder(runtime_config=reported)
         service = FakeService([RemoteBuildStatus("done", image=image)])
         assert _run(service, builder, context, tmp_path, redact=driver._redactor("token-value")) == 0
         assert len(builder.completed) == 1
@@ -409,6 +446,31 @@ class TestABuildThatSucceeds:
         assert _run(FakeService([DONE]), builder, context, tmp_path, clock=clock) == 0
         assert len(builder.completed) == 1
         assert clock.sleeps == [2.0, 4.0, 8.0]
+
+    def test_a_completion_tried_again_says_the_same_of_how_the_image_starts(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """The builder refuses a second completion of a remote image that says it starts another way, or names
+        another build. So what the step works out for an image, it sends on every try."""
+        reported = ImageRuntimeConfig(entrypoint=["/entrypoint.sh"], cmd=["serve"], working_dir="/app", user="")
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", runtime_config=reported)
+        #: What each call to `complete` carried, the ones that failed included.
+        sent: list[tuple[ImageRuntimeConfig | None, ExternalImage | None]] = []
+
+        class Noting(FakeBuilder):
+            def complete(
+                self,
+                image: str,
+                digest: str,
+                runtime_config: ImageRuntimeConfig | None,
+                external: ExternalImage | None = None,
+            ) -> ContainerImage:
+                sent.append((runtime_config, external))
+                return super().complete(image, digest, runtime_config, external)
+
+        builder = Noting(failing=[_unreachable(), _refused(503, "restarting")], runtime_config=reported)
+        assert _run(FakeService([RemoteBuildStatus("done", image=image)]), builder, context, tmp_path) == 0
+        assert sent == [(reported, ExternalImage(image_id="img-1", build_id="build-1"))] * 3
 
     def test_an_api_pod_from_before_the_handle_existed_is_tried_past(self, context: Path, tmp_path: Path) -> None:
         """Mid-upgrade, an older pod refuses the request's shape. The next try may reach a newer one."""
@@ -1325,6 +1387,45 @@ class TestTheContext:
         assert _run(Reading([DONE]), FakeBuilder(), context, tmp_path, config=config) == 0
         assert seen == ["FROM busybox\n"]
 
+    def test_the_client_is_handed_what_the_build_leaves_out_with_the_rules_that_leave_it_out(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """Nothing applies the ignore rules before the client is called. It is handed the whole context, a file
+        the build leaves out included, with the ignore file a builder would read at the root: a client that
+        sends the context anywhere applies that file first."""
+        (context / "private.env").write_text("sample only\n")
+        (context / ".dockerignore").write_text("*.md\n")
+        (context / "services" / "feed" / "Dockerfile.dockerignore").write_text("private.env\n")
+        handed: list[dict[str, str]] = []
+
+        class Looking(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                names = ("private.env", "Dockerfile.dockerignore", ".dockerignore")
+                handed.append({name: (build.context / name).read_text() for name in names})
+                return super().start(build)
+
+        config = _config(dockerfile="services/feed/Dockerfile")
+        assert _run(Looking([DONE]), FakeBuilder(), context, tmp_path, config=config) == 0
+        # The Dockerfile's own ignore file, which a builder reads before the context's, and the file it names.
+        assert handed == [
+            {"private.env": "sample only\n", "Dockerfile.dockerignore": "private.env\n", ".dockerignore": "*.md\n"}
+        ]
+
+    def test_the_client_is_handed_a_file_the_contexts_own_rules_leave_out(self, context: Path, tmp_path: Path) -> None:
+        """The Dockerfile is at the root, and nothing is moved. What `.dockerignore` leaves out of the build is
+        still in the directory the client is handed, beside the rules: packed as it is, it would leave the step."""
+        (context / "local.env").write_text("sample only\n")
+        (context / ".dockerignore").write_text("local.env\n")
+        handed: list[list[str]] = []
+
+        class Looking(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                handed.append(sorted(path.name for path in build.context.iterdir()))
+                return super().start(build)
+
+        assert _run(Looking([DONE]), FakeBuilder(), context, tmp_path) == 0
+        assert handed == [[".dockerignore", "Dockerfile", "app.py", "local.env", "services"]]
+
     @pytest.mark.parametrize("dockerfile", ["../outside/Dockerfile", "missing/Dockerfile", "services"])
     def test_a_dockerfile_that_is_not_a_file_in_the_context_is_refused(
         self, dockerfile: str, context: Path, tmp_path: Path
@@ -1648,6 +1749,182 @@ class TestTheContext:
         (context / "all-services").symlink_to("services")
         staged = stage_context(context, "services/feed/Dockerfile")
         assert (staged / "all-services" / "feed" / "up").read_text() == "print('hello')\n"
+
+    @pytest.mark.parametrize(
+        ("link", "written", "rewritten"),
+        [
+            ("cached.txt", "../app/payload", "payload"),
+            ("lib/cached.txt", "../../app/payload", "../payload"),
+            ("cached.txt", "{context}/payload", "payload"),
+            ("cached.txt", "../beside/alias", "payload"),
+            ("cached.txt", "lib/vendored/../../app/payload", "payload"),
+        ],
+        ids=[
+            "by-its-directorys-name",
+            "from-a-directory-below",
+            "by-an-absolute-path",
+            "by-a-link-beside-it",
+            "past-a-link-to-a-directory",
+        ],
+    )
+    def test_a_link_that_leaves_the_context_on_its_way_back_into_it_is_rewritten_to_stay_inside(
+        self, link: str, written: str, rewritten: str, tmp_path: Path
+    ) -> None:
+        """`cached.txt -> ../app/payload`, in a context named `app`. It leads inside the context where the step
+        holds it, and out of it wherever a service unpacks the context under another name."""
+        source = tmp_path / "fetched" / "app"
+        (source / "lib").mkdir(parents=True)
+        (source / "vendor").mkdir()
+        (source / "Dockerfile").write_text("FROM scratch\nCOPY . /srv\n")
+        (source / "payload").write_text("built once\n")
+        # A way to a directory of the context, and a link beside the context that comes back into it.
+        (source / "lib" / "vendored").symlink_to("../vendor")
+        (tmp_path / "fetched" / "beside").mkdir()
+        (tmp_path / "fetched" / "beside" / "alias").symlink_to("../app/payload")
+        (source / link).symlink_to(written.format(context=source))
+
+        staged = stage_context(source, "Dockerfile")
+
+        assert os.readlink(staged / link) == rewritten
+        unpacked = _unpacked_elsewhere(staged, tmp_path / "service" / "build-context")
+        assert (unpacked / link).read_text() == "built once\n"
+        # A link that stayed inside as it was written is as it was.
+        assert os.readlink(unpacked / "lib" / "vendored") == "../vendor"
+
+    @pytest.mark.parametrize(
+        ("link", "written"),
+        [
+            ("services/feed/up", "../../app.py"),
+            ("here", "./services"),
+            ("down-and-up", "services/../app.py"),
+            ("by-a-link", "all-services/feed/../../app.py"),
+            ("nowhere", "no-such-file"),
+        ],
+        ids=["up-to-the-root", "with-a-dot", "down-and-up", "by-a-link-to-a-directory", "to-nothing"],
+    )
+    def test_a_link_that_stays_inside_the_context_as_it_is_written_is_left_exactly_as_it_is(
+        self, link: str, written: str, context: Path
+    ) -> None:
+        """Not made the shortest way to what it leads to: a build that copies the link copies it as it was."""
+        (context / "all-services").symlink_to("services")
+        (context / link).symlink_to(written)
+        staged = stage_context(context, "Dockerfile")
+        assert (os.readlink(staged / link), os.readlink(staged / "all-services")) == (written, "services")
+
+    def test_a_rewritten_link_still_names_the_link_it_named(
+        self, context: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`first -> ../context/second`, and `second -> app.py`. Rewritten, the first is still a link to the
+        second, not to the file the two lead to."""
+        (context / "second").symlink_to("app.py")
+        (context / "first").symlink_to("../context/second")
+        (context / "gone").symlink_to("../context/no-such-file")
+        with caplog.at_level(logging.INFO):
+            staged = stage_context(context, "Dockerfile")
+        assert (os.readlink(staged / "first"), os.readlink(staged / "second")) == ("second", "app.py")
+        # The step's log says how many links it rewrote: a build that copies one copies it as rewritten.
+        assert "2 link(s) of the build context left it on the way to what they lead to inside it" in caplog.text
+        # One that leads to nothing is rewritten too: where it led is still inside the context, and still empty.
+        assert os.readlink(staged / "gone") == "no-such-file"
+        assert _unpacked_elsewhere(staged, context.parent / "elsewhere").joinpath("first").read_text() == (
+            "print('hello')\n"
+        )
+
+    def test_a_link_through_a_loop_that_climbs_out_of_the_context_after_it_is_refused(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """It leads nowhere here, for the loop. Whatever the Python, and whether or not it raises for a loop,
+        a path that comes to a file beside the context is not one to hand on."""
+        (tmp_path / "beside").mkdir()
+        (tmp_path / "beside" / "answer.txt").write_text("not this build's\n")
+        (context / "one").symlink_to("two")
+        (context / "two").symlink_to("one")
+        (context / "fixture").symlink_to("one/../../beside/answer.txt")
+        with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'fixture'"):
+            stage_context(context, "Dockerfile")
+
+    @staticmethod
+    def _doubling(context: Path, levels: int) -> Path:
+        """``levels`` directories in ``context``, one inside the other, each with a link to it beside it: two
+        ways into every level, so a walk that follows links comes to the last one ``2 ** levels`` times.
+        Returns the last."""
+        level = context
+        for _ in range(levels):
+            (level / "n").mkdir()
+            (level / "a").symlink_to("n")
+            level = level / "n"
+        return level
+
+    def test_links_that_multiply_a_context_past_the_entries_a_source_may_unpack_to_are_refused(
+        self, context: Path
+    ) -> None:
+        """No link here comes back round, so a packager that follows links follows every one, and sends the
+        one file at the bottom a million million times. Counted with each directory's total remembered:
+        walked, forty levels would never end."""
+        (self._doubling(context, 40) / "payload").write_text("x")
+        with pytest.raises(ImageFailed, match=f"more than {MAX_UNPACKED_ENTRIES} entries with its links followed"):
+            stage_context(context, "Dockerfile")
+
+    def test_links_that_multiply_a_context_past_the_bytes_a_source_may_unpack_to_are_refused(
+        self, context: Path
+    ) -> None:
+        """Thirteen levels are 8,192 copies of one mebibyte: entries enough to be allowed, and twice the bytes."""
+        (self._doubling(context, 13) / "payload").write_bytes(b"x" * 1024 * 1024)
+        with pytest.raises(ImageFailed, match=f"more than {MAX_UNPACKED_BYTES} bytes with its links followed"):
+            stage_context(context, "Dockerfile")
+
+    def test_a_context_is_measured_as_a_packager_that_follows_its_links_would_send_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each link counts as what it leads to, each time a walk comes to it. A context that comes to the
+        limit exactly is built."""
+        context = tmp_path / "measured"
+        context.mkdir()
+        (context / "Dockerfile").write_text("FROM scratch\n")
+        (self._doubling(context, 3) / "payload").write_bytes(b"x" * 100)
+        (context / "again").symlink_to("n/n/n/payload")
+        # At the bottom, the payload. At each level above it, a directory and a link to it, each with all that
+        # is below. At the root, the Dockerfile and a link to the payload besides.
+        entries = 2 + (2 + 2 * (2 + 2 * (2 + 2 * 1)))
+        size = len("FROM scratch\n") + 100 + 8 * 100
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", entries)
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size)
+        assert stage_context(context, "Dockerfile") == context
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", entries - 1)
+        with pytest.raises(ImageFailed, match=f"more than {entries - 1} entries with its links followed"):
+            stage_context(context, "Dockerfile")
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", entries)
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size - 1)
+        with pytest.raises(ImageFailed, match=f"more than {size - 1} bytes with its links followed"):
+            stage_context(context, "Dockerfile")
+
+    def test_one_file_under_many_names_is_measured_once_as_unpacking_counts_it(
+        self, context: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hard links. An archive that was let through for its size is not refused for it here, for holding
+        a link as well."""
+        files = [path for path in context.rglob("*") if path.is_file()]
+        (context / "payload").write_bytes(b"x" * 1000)
+        for number in range(8):
+            os.link(context / "payload", context / f"payload-{number}")
+        (context / "alias").symlink_to("app.py")
+        size = sum(path.stat().st_size for path in files) + 1000 + (context / "app.py").stat().st_size
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size)
+        assert stage_context(context, "Dockerfile") == context
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size - 1)
+        with pytest.raises(ImageFailed, match="bytes with its links followed"):
+            stage_context(context, "Dockerfile")
+
+    def test_a_context_with_no_links_is_not_measured(self, context: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No link makes more of it than was fetched, and what bounds a fetch is the fetch's to say."""
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", 1)
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", 1)
+        assert stage_context(context, "Dockerfile") == context
+
+    def test_links_that_multiply_a_context_within_what_a_source_may_unpack_to_are_followed(self, context: Path) -> None:
+        """Eight levels are 256 copies of a small file: no more than an archive may hold without a link."""
+        (self._doubling(context, 8) / "payload").write_text("x")
+        assert stage_context(context, "Dockerfile") == context
 
 
 class TestTheImagesOfOneSet:
@@ -1979,11 +2256,21 @@ class TestTheImagesOfOneSet:
 
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
         config = self._set(archive | {"context_path": "services/api"}, archive | {"context_path": "services/web"})
-        Reading, seen = self._reading("Dockerfile")
+        #: Each context's Dockerfile, and what its link to the library is written as, where it has one.
+        seen: list[tuple[str, str | None]] = []
+
+        class Reading(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                shared = build.context / "shared"
+                written = os.readlink(shared) if shared.is_symlink() else None
+                seen.append(((build.context / "Dockerfile").read_text(), written))
+                return super().start(build)
+
         builder = FakeBuilder()
         assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
         assert [image for image, _, _ in builder.completed] == ["a", "b"]
-        assert seen == ["FROM api\n", "FROM web\n"]
+        # Handed on, the link no longer climbs out of the context to come back: it leads where it did, inside.
+        assert seen == [("FROM api\n", "lib"), ("FROM web\n", None)]
 
     def test_a_shared_download_is_removed_once_its_last_image_has_had_its_turn(self, tmp_path: Path) -> None:
         """Two archives, two images each. While the second pair builds, the first archive is no longer held."""
@@ -2037,11 +2324,21 @@ class TestTheImagesOfOneSet:
 
         archive = {"fileset": "default/fs-a", "archive": "task.tar.gz"}
         config = self._set(archive | {"context_path": "current"}, archive | {"context_path": "other"})
-        Reading, seen = self._reading("Dockerfile")
+        #: Each context's Dockerfile, and what its link back is written as, where it has one.
+        seen: list[tuple[str, str | None]] = []
+
+        class Reading(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                again = build.context / "again"
+                written = os.readlink(again) if again.is_symlink() else None
+                seen.append(((build.context / "Dockerfile").read_text(), written))
+                return super().start(build)
+
         builder = FakeBuilder()
         assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
         assert [image for image, _, _ in builder.completed] == ["a", "b"]
-        assert seen == ["FROM v2\n", "FROM other\n"]
+        # Handed on, the link no longer comes back by the directory's name: it leads where it did, inside.
+        assert seen == [("FROM v2\n", "Dockerfile"), ("FROM other\n", None)]
 
     def test_a_directory_reached_by_a_link_out_of_a_shared_download_is_refused(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -2335,6 +2632,28 @@ class TestTheStepProgram:
         (logged,) = [record for record in caplog.records if record.name == "some.build.client"]
         # The exception itself still holds the marker, and some handlers print it themselves.
         assert logged.exc_info is None
+
+    def test_an_exception_a_client_logs_during_a_step_reaches_no_handler_as_itself(
+        self, step: dict[str, list], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The credential the step was given is a secret from its first record on. An error that says nothing
+        of it is still handed on as text: the frames it passed through are the client's, which holds it."""
+
+        class Logging(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                try:
+                    raise ConnectionError("connection refused")
+                except ConnectionError:
+                    logging.getLogger("some.build.client").exception("the first call failed")
+                return super().start(build)
+
+        with caplog.at_level(logging.INFO):
+            assert step_main(lambda config, credential: Logging([DONE])) == 0
+        (logged,) = [record for record in caplog.records if record.name == "some.build.client"]
+        assert logged.exc_info is None
+        assert "ConnectionError: connection refused" in (logged.exc_text or "")
+        # Nor does any line of the driver's own carry one.
+        assert [record.getMessage() for record in caplog.records if record.exc_info] == []
 
     def test_the_marker_is_taken_out_of_a_stack_a_library_logs_too(self) -> None:
         """A stack shows lines of source. One of them may spell the marker out."""
@@ -2690,8 +3009,9 @@ class TestTheStepProgram:
         # The same function the driver cuts a reason with: it knows the token too, though it was given later.
         assert redact("401: the-access-token expired") == "401: [credential] expired"
 
-    def test_an_exception_whose_text_was_redacted_is_not_left_on_the_record(self) -> None:
-        """Some handlers print the exception themselves, from the record, and not the text a formatter kept."""
+    def test_an_exception_is_not_left_on_the_record_whether_or_not_its_text_held_the_credential(self) -> None:
+        """Some handlers print the exception themselves, from the record, and more of it than its text: the
+        frames it passed through, with what each one held."""
         try:
             raise ValueError("refused: Bearer token-value")
         except ValueError:
@@ -2704,7 +3024,53 @@ class TestTheStepProgram:
         driver._redact_record(leaking, redact)
         driver._redact_record(harmless, redact)
         assert leaking.exc_info is None and "Bearer [credential]" in (leaking.exc_text or "")
-        assert harmless.exc_info is not None
+        assert harmless.exc_info is None and "ValueError: refused" in (harmless.exc_text or "")
+
+    @pytest.mark.parametrize("made", ["by-a-log-call", "from-a-mapping"])
+    def test_a_handler_that_shows_what_each_frame_held_is_handed_no_exception_to_show(
+        self, made: str, signals: None
+    ) -> None:
+        """A client's variable holds the credential where its error says only that the connection was refused,
+        and no line of source that a traceback shows spells it out. A handler that prints a traceback with the
+        variables of each frame would print it."""
+        credential = "token-value"
+        printed: list[str] = []
+
+        class ShowsVariables(logging.Handler):
+            """Prints a record's exception as such a handler does: its frames, and what each one held."""
+
+            def emit(self, record: logging.LogRecord) -> None:
+                lines = [self.format(record)]
+                at = record.exc_info[2] if record.exc_info else None
+                while at is not None:
+                    lines.extend(f"{name} = {value!r}" for name, value in at.tb_frame.f_locals.items())
+                    at = at.tb_next
+                printed.append("\n".join(lines))
+
+        def send(authorization: str) -> None:
+            raise ConnectionError("connection refused")
+
+        handler = ShowsVariables()
+        client_log = logging.getLogger("some.build.client.frames")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        driver.redact_log(credential)
+        try:
+            try:
+                send(f"Bearer {credential}")
+            except ConnectionError:
+                if made == "by-a-log-call":
+                    client_log.exception("the call failed")
+                else:
+                    fields = {"msg": "the call failed", "levelno": logging.ERROR, "exc_info": sys.exc_info()}
+                    client_log.handle(logging.makeLogRecord(fields))
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        (shown,) = printed
+        assert credential not in shown
+        # All that a formatter prints of the exception is there, as text.
+        assert "ConnectionError: connection refused" in shown and "in send" in shown
 
     def test_a_record_that_cant_be_checked_is_withheld_not_printed(self, signals: None) -> None:
         """Logging never raises into the code that logs, and what could not be checked is not let through."""
@@ -3043,9 +3409,12 @@ class TestTheStepProgram:
         record = logging.makeLogRecord({"msg": "the call failed", "exc_info": True})
         assert (record.exc_info, record.exc_text) == (None, driver.WITHHELD)
 
-    def test_an_exception_nothing_was_taken_out_of_is_written_by_a_handlers_own_formatter(self, signals: None) -> None:
-        """A step program's format may put a traceback on one line. The text made to check the exception is
-        not left on the record in its place."""
+    def test_a_handlers_own_way_of_formatting_an_exception_is_not_used_once_there_is_a_secret(
+        self, signals: None
+    ) -> None:
+        """A step program's format may put a traceback on one line. It is handed the exception as text, made
+        as the standard formatter makes it, whether or not anything was taken out of it: the exception itself
+        holds more than its text."""
         driver.redact_log("token-value")
 
         class OneLine(logging.Formatter):
@@ -3058,17 +3427,47 @@ class TestTheStepProgram:
             record = logging.getLogger("some.build.client").makeRecord(
                 "some.build.client", logging.ERROR, __file__, 1, "start failed", (), sys.exc_info()
             )
-        assert record.exc_info is not None and record.exc_text is None
+        assert record.exc_info is None
+        printed = OneLine("%(message)s").format(record)
+        assert printed.startswith("start failed\nTraceback (most recent call last):\n")
+        assert printed.endswith("\nValueError: no such build")
+
+    @pytest.mark.parametrize("made", ["by-a-log-call", "from-a-mapping"])
+    def test_with_no_secret_to_take_out_an_exception_is_left_for_a_handlers_own_formatter(
+        self, made: str, signals: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A step whose client finds the credential itself, and has given none to `redact_log` yet. The text
+        made to check the exception is not left on the record in its place."""
+        monkeypatch.setattr(driver, "_REDACTION", driver.Redaction())
+        driver.log_redaction()
+
+        class OneLine(logging.Formatter):
+            def formatException(self, ei: Any) -> str:
+                return f"raised {type(ei[1]).__name__}"
+
+        try:
+            raise ValueError("no such build")
+        except ValueError:
+            raised = sys.exc_info()
+        if made == "by-a-log-call":
+            record = logging.getLogger("some.build.client").makeRecord(
+                "some.build.client", logging.ERROR, __file__, 1, "start failed", (), raised
+            )
+        else:
+            record = logging.makeLogRecord({"msg": "start failed", "exc_info": raised, "exc_text": None})
+        assert record.exc_info is raised and record.exc_text is None
         assert OneLine("%(message)s").format(record) == "start failed\nraised ValueError"
 
-    def test_an_exception_without_the_credential_stays_on_a_record_made_from_a_mapping(self, signals: None) -> None:
+    def test_an_exception_without_the_credential_is_text_on_a_record_made_from_a_mapping_too(
+        self, signals: None
+    ) -> None:
         driver.redact_log("token-value")
         try:
             raise ValueError("refused: no such build")
         except ValueError:
             raised = sys.exc_info()
         record = logging.makeLogRecord({"msg": "the call failed", "exc_info": raised, "exc_text": None})
-        assert record.exc_info is raised
+        assert record.exc_info is None
         assert "ValueError: refused: no such build" in logging.Formatter().format(record)
 
     def test_every_record_is_redacted_whichever_logger_and_handler_it_goes_through(self, signals: None) -> None:
