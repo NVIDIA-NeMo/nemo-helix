@@ -181,7 +181,7 @@ def rebuild_wandb(version: str, work: Path) -> Path:
     finally:
         os.chdir(previous)
     version_info = check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
-    if version_info.splitlines()[0].split()[-1] != "go1.27.3":
+    if version_info.splitlines()[0].split()[-1] != "go1.27.4":
         raise ValueError(f"Unexpected wandb-core toolchain: {version_info}")
     if source_collection_enabled():
         run_process(
