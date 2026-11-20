@@ -205,7 +205,13 @@ def delete_experiments(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
-    """Delete Experiment"""
+    """Delete an experiment and evaluations with no remaining experiment membership.
+
+    Cleans eligible complete sessions and all current traces and spans. Sessions
+    shared with live or unresolved evaluations remain protected. Requires
+    intake.sessions.delete (workspace Admin by default) and write scope.
+    Annotations and evaluator results are retained; later ingestion can recreate telemetry.
+    """
     state = cli_state(ctx)
     state.typed_client(IntakeClient).delete_experiment(name=name, workspace=workspace)
 

@@ -11,7 +11,7 @@ import { Trash } from 'lucide-react';
 import { useState } from 'react';
 
 export const EXPERIMENT_DELETE_DESCRIPTION =
-  'Evaluations belonging only to the selected experiments will also be deleted, including evaluations from other agents. Evaluations that also belong to an experiment outside the selection are preserved. This cannot be undone.';
+  'Evaluations belonging only to the selected experiments will also be deleted, including evaluations from other agents. Evaluations that also belong to an experiment outside the selection are preserved. Eligible complete sessions and all their current traces and spans are deleted. Sessions shared with live or unresolved evaluations are preserved. Requires intake.sessions.delete (workspace Admin by default). Annotations and evaluator results are retained. Later ingestion can recreate telemetry. This cannot be undone.';
 
 interface ExperimentDeleteButtonProps {
   workspace: string;

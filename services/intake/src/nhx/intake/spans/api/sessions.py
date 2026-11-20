@@ -4,15 +4,40 @@
 """Read and delete APIs for ClickHouse-backed Intake sessions."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import get_auth_client
 from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
 from nhx.intake.repository.clickhouse.executor import ClickHouseQueryError
 from nhx.intake.repository.session import TraceIndexCollisionError
 from nhx.intake.spans.api.dependencies import SpansServiceDep, require_workspace_access
 from nhx.intake.spans.api.sessions_schemas import Session
 from nhx.intake.spans.service import SessionInEvaluationError, SessionNotFoundError
+from pydantic import BaseModel
 
 router = APIRouter(dependencies=[Depends(require_workspace_access)])
 API_TAG = "Sessions"
+
+
+class SessionDeletionPermission(BaseModel):
+    """Permission hint for session deletion; write scopes and protection are checked on DELETE."""
+
+    allowed: bool
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/sessions/{id}/deletion-permission",
+    response_model=SessionDeletionPermission,
+    tags=[API_TAG],
+)
+async def get_session_deletion_permission(
+    workspace: str, id: str, auth_client: AuthClient = Depends(get_auth_client)
+) -> SessionDeletionPermission:
+    """Check deletion permission without requiring existing telemetry.
+
+    This is a UI hint; DELETE still enforces permissions, write scopes, and
+    evaluation protection. It remains available during partial-cleanup retries.
+    """
+    return SessionDeletionPermission(allowed=await auth_client.has_permissions(workspace, ["intake.sessions.delete"]))
 
 
 @router.get(

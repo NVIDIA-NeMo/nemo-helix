@@ -267,6 +267,32 @@ Run `make refresh-openapi` after Intake route or schema changes.
 
 ## Session deletion
 
+Studio exposes **Delete session telemetry** in the session and selected-trace
+header. The confirmation identifies the workspace and session, shows available
+trace/span counts, and always deletes the complete session's current telemetry.
+The CLI uses the same API:
+
+```bash
+nemo intake sessions delete session-1 --workspace team-a
+# Explicit confirmation for scripts, or to retry incomplete cleanup:
+nemo intake sessions delete session-1 --workspace team-a --yes
+# Print the typed Python client call without sending a request:
+nemo intake sessions delete session-1 --workspace team-a --output-format code
+```
+
+`GET /apis/intake/v2/workspaces/{workspace}/sessions/{id}/deletion-permission`
+returns `{"allowed": true|false}` for the authenticated caller's
+`intake.sessions.delete` permission, subject to workspace access and session-read
+authorization. It does not read telemetry, so it works for missing sessions and
+partial-cleanup repairs. Studio hides the action when denied or the check fails.
+This is a UI hint: DELETE still checks write scopes, authorization, and evaluation
+protection. A `403` explains authorization requirements; a `409` preserves the
+backend's conflict explanation. Neither interface deletes evaluations to bypass
+protection. A `503` offers an explicit retry using the same workspace/session,
+even if session detail returns `404`. Success refreshes affected telemetry queries
+and leaves the deleted detail view; missing/already-removed sessions are handled
+without treating them as a successful deletion in CLI scripts (API errors exit 3).
+
 `DELETE /apis/intake/v2/workspaces/{workspace}/sessions/{id}` soft-deletes all current
 traces and spans belonging to the session in this workspace. It returns `204` on
 success and `404` for a missing or already-deleted session. Other sessions remain intact.

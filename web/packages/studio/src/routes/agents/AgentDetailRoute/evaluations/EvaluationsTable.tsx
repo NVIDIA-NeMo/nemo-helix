@@ -22,6 +22,7 @@ import {
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
+import { invalidateSessionDeletion } from '@studio/api/intake/invalidateSessionDeletion';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import {
@@ -152,6 +153,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
         rowsToDelete.map((row) => deleteEvaluation(workspace, row.name))
       );
       await queryClient.invalidateQueries({ queryKey: getListEvaluationsQueryKey(workspace) });
+      await invalidateSessionDeletion(queryClient, workspace);
 
       const failed = rowsToDelete.filter((_, index) => results[index]?.status === 'rejected');
       if (failed.length) {
@@ -416,11 +418,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           open
           entity="evaluation"
           ids={deleteRows.map((row) => row.name)}
-          description={
-            deleteRows.length === 1
-              ? "The evaluation and its results are deleted and can't be restored."
-              : "The evaluations and their results are deleted and can't be restored."
-          }
+          description="The selected evaluations and eligible complete sessions, including all their current traces and spans, are deleted. Sessions shared with live or unresolved evaluations are preserved. Requires intake.sessions.delete (workspace Admin by default). Annotations and evaluator results are retained. Later ingestion can recreate telemetry. This cannot be undone."
           onDelete={async () => {
             await handleDelete(deleteRows);
             return true;
