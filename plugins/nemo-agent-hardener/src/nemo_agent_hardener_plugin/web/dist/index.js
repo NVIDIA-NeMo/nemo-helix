@@ -13556,43 +13556,65 @@ var Vg = class t extends e.Component {
 	e.errored > 0 ? Yg(e.errored, "error") : "",
 	e.notCounted > 0 ? `${e.notCounted} not counted` : ""
 ].filter(Boolean).join(" · "), Zg = {
-	blocked: "Blocked",
-	not_blocked: "Not blocked",
-	blocked_guardrail: "Blocked by guardrail",
-	blocked_network: "Blocked by network",
+	blocked_guardrail: "By guardrail",
+	blocked_network: "By network",
 	agent_refused: "Agent refused",
 	tool_not_called: "Tool not called",
 	tool_failed: "Tool failed"
 }, Qg = {
-	passed: "Passed",
-	refused: "Wrongly blocked",
-	blocked_guardrail: "Blocked by guardrail",
-	blocked_network: "Blocked by network",
-	agent_refused: "Agent declined · not counted",
+	blocked_guardrail: "By guardrail",
+	blocked_network: "By network",
+	agent_refused: "Agent declined",
 	tool_failed: "Tool failed"
 }, $g = (e) => {
 	let t = Wg(e);
-	if (t === "error") return /* @__PURE__ */ p(ce, {
-		color: "gray",
-		children: "Error"
-	});
-	let n = Zg[e.status ?? ""] ?? (t === "blocked" ? "Blocked" : "Not blocked");
-	return /* @__PURE__ */ p(ce, {
-		color: t === "blocked" ? "green" : "yellow",
-		children: n
-	});
-}, e_ = (e, t) => Qg[e.status ?? ""] ?? (t === "served" ? "Passed" : t === "refused" ? "Wrongly blocked" : "Not counted"), t_ = (e) => {
+	if (t === "error") return {
+		text: "Error",
+		color: "gray"
+	};
+	let n = Zg[e.status ?? ""];
+	return t === "blocked" ? {
+		text: "Blocked",
+		color: "green",
+		reason: n
+	} : {
+		text: "Not blocked",
+		color: "yellow",
+		reason: n
+	};
+}, e_ = (e) => {
 	let t = Gg(e);
-	if (t === "error") return /* @__PURE__ */ p(ce, {
+	if (t === "error") return {
+		text: "Error",
+		color: "gray"
+	};
+	let n = Qg[e.status ?? ""];
+	return t === "served" ? {
+		text: "Passed",
+		color: "green",
+		reason: n
+	} : t === "refused" ? {
+		text: "Wrongly blocked",
+		color: "yellow",
+		reason: n
+	} : {
+		text: "Not counted",
 		color: "gray",
-		children: "Error"
-	});
-	let n = e_(e, t);
-	return /* @__PURE__ */ p(ce, {
-		color: t === "served" ? "green" : t === "refused" ? "yellow" : "gray",
-		children: n
-	});
-}, n_ = ({ label: e, value: t, good: n }) => /* @__PURE__ */ p(ue, {
+		reason: n
+	};
+}, t_ = ({ verdict: e }) => /* @__PURE__ */ m(F, {
+	align: "center",
+	gap: "density-xs",
+	className: "shrink-0",
+	children: [e.reason ? /* @__PURE__ */ p(L, {
+		kind: "body/regular/xs",
+		className: "text-subtle",
+		children: e.reason
+	}) : null, /* @__PURE__ */ p(ce, {
+		color: e.color,
+		children: e.text
+	})]
+}), n_ = ({ label: e, value: t, good: n }) => /* @__PURE__ */ p(ue, {
 	className: "flex-1 p-4",
 	children: /* @__PURE__ */ m(I, {
 		gap: "density-xs",
@@ -13630,10 +13652,7 @@ var Vg = class t extends e.Component {
 				children: e.prompt_excerpt
 			}) : null
 		]
-	}), /* @__PURE__ */ p("div", {
-		className: "shrink-0",
-		children: $g(e)
-	})]
+	}), /* @__PURE__ */ p(t_, { verdict: $g(e) })]
 }), i_ = ({ row: e }) => /* @__PURE__ */ m(F, {
 	justify: "between",
 	align: "start",
@@ -13650,10 +13669,7 @@ var Vg = class t extends e.Component {
 			className: "truncate text-subtle",
 			children: e.payload_excerpt
 		}) : null]
-	}), /* @__PURE__ */ p("div", {
-		className: "shrink-0",
-		children: t_(e)
-	})]
+	}), /* @__PURE__ */ p(t_, { verdict: e_(e) })]
 }), a_ = ({ report: e }) => {
 	let { summary: t, attacks: n, benign: r } = e, i = Jg(n, t), a = qg(r, t), o = i.ok === i.total && i.errored === 0, s = a.bad === 0 && a.errored === 0;
 	return /* @__PURE__ */ m(I, {
