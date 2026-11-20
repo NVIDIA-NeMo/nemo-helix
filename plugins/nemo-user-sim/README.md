@@ -117,7 +117,7 @@ A conversation fails when the agent calls the request's `tempted_action_name` or
 
 By default an agent in a simulation only gets UserSim's simulated tools; its own tools are cut off. `--use-agent-tools` keeps its own tools (its MCP servers) for that run. Turn on `--use-agent-tools` only when the agent's tools are safe to call for real, like search. Leave it off for tools that book, refund or change things. [examples/tax-season](examples/tax-season) has a sample agent that searches with Tavily and ten topics to run it on.
 
-To check a fix, rerun conversations of an earlier run with the same personas and topics, against the agent as it's registered now: `nemo user-sim rerun <run> --conversation <id> --conversation <id>`. Rerun the conversation that failed and a few that passed, and look for regressions. Each rerun gets a new conversation ID, so the earlier conversations stay as they were.
+To check a fix, rerun conversations of an earlier run with the same personas and topics, against the agent as it's registered now: `nemo user-sim rerun <run> --conversation <id> --conversation <id>`. Rerun the conversation that failed and a few that passed, and look for regressions. In Studio, tick the conversations on a run's page and click **Rerun**. Each rerun gets a new conversation ID, so the earlier conversations stay as they were.
 
 ## Jobs
 
@@ -131,6 +131,13 @@ The routes live under `/apis/user-sim/v2/workspaces/{workspace}/jobs/{simulate,e
 ## Review in Studio
 
 Every conversation is published to Intake as one session, with the UserSim trajectory ID as its session ID and the persona on the session's metadata. In Studio a reviewer can read the transcript, see each tool call and give the session a thumbs up or thumbs down.
+
+The plugin also adds a Simulations page to Studio:
+
+- a list of runs with their target, probes and status, plus a dialog to start a new one, with any custom topic set uploaded by `run --scenarios`
+- a run page with totals and failure rates by age, education, interaction style and probe
+- every conversation in the run with its persona, its outcome and a link to its Intake session
+- an export dialog that starts an export job
 
 ## Training data
 
@@ -156,4 +163,5 @@ Every conversation is published to Intake as one session, with the UserSim traje
 ```bash
 uv pip install -e plugins/nemo-user-sim
 pytest plugins/nemo-user-sim/tests
+cd plugins/nemo-user-sim/web && pnpm install && pnpm build   # rebuilds the Studio bundle
 ```

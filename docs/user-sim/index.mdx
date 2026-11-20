@@ -1,0 +1,108 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+description: Test an agent or model with simulated users drawn from census-grounded personas, review each conversation in Studio and export the good ones as training data.
+---
+
+<a id="about-user-sim"></a>
+
+<Warning>
+
+The NeMo UserSim plugin is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+The UserSim plugin sends simulated users to talk to your agent and scores every conversation. It runs [UserSim](https://github.com/NVIDIA-NeMo/UserSim) on NeMo Helix. Each user is drawn from Nemotron-Personas, a dataset built from census data, so a run covers the spread of ages, education levels and interaction styles a real user base has. Each user gets a goal from a probe, such as a banking task, a health question or pressure to break a rule.
+
+Your agent runs as itself: its own prompt, its own model and its own decisions. During a run its tools are swapped for simulated ones that return scripted results, so it can try to move money or launch a job without touching anything real.
+
+<Button href="/documentation/user-simulation/custom-scenarios" variant="secondary">**Custom Scenarios**</Button>
+
+---
+
+## What You Get from a Run
+
+- **A score per conversation.** UserSim's judges rate each conversation, and each probe's own checks decide whether the agent did the right thing. A conversation that calls a tool it shouldn't fails, however well it reads.
+- **Where it fails.** Failure rates by age, education, interaction style and probe, so you see which users your agent serves badly.
+- **Every conversation to read.** Each one is published to Intake and shown in Studio with what it tested, why it failed and a card for each tool call: the arguments the agent sent and the simulated result it got back. In the Trace explorer, simulated conversations appear under the agent's name with ` (user-sim)` added, such as `bank-support (user-sim)`, so they never mix with real traffic.
+- **Training data.** Export the conversations that passed, minus any a reviewer marked down, as chat JSONL in a fileset that the Helix post-training plugin reads.
+
+---
+
+## Setup
+
+- Follow [Setup](/documentation/get-started) to install the platform and start local services.
+- Register the agent you want to test. It must use the `nemo-agents-spec-v1` config format. A bare model reachable through the Inference Gateway works too.
+- Install persona data for each locale you test, on the machine where jobs run:
+
+```bash
+nemo user-sim setup --locale en_US
+```
+
+- Check that the plugin's models answer and the personas are in place:
+
+```bash
+nemo user-sim doctor
+```
+
+---
+
+## Typical Workflow
+
+1. Run a simulation against your agent. Without `--probe`, the plugin reads the agent's config and its `ETHOS.md`, when it has one, and picks the probes that fit.
+
+   ```bash
+   nemo user-sim run --agent bank-support --users 20
+   ```
+
+   `run` prints a Studio link, then a progress line as conversations finish and when the judges start scoring, at least once a minute. When the run ends it prints a report: the pass rate, the weakest persona segments and a line per failed conversation with its Studio link.
+
+1. Review in Studio under **User Simulation > Simulations**. Open the run, read the failures and give conversations a thumbs up or down.
+
+1. Export the good conversations as training data:
+
+   ```bash
+   nemo user-sim training-data <run> --fileset bank-support-sft --wait
+   ```
+
+By default an agent in a simulation only gets UserSim's simulated tools; its own tools are cut off. `--use-agent-tools` on `run`, or **Use the agent's own tools** in Studio, keeps its own tools (its MCP servers) for that run. Turn on `--use-agent-tools` only when the agent's tools are safe to call for real, like search. Leave it off for tools that book, refund or change things. The run's page then shows **Agent's own tools: on**. `plugins/nemo-user-sim/examples/tax-season` has a sample agent that searches with Tavily and ten topics to run it on.
+
+Start with 20 users to check the setup works, then scale up to 2000. Each conversation calls the agent several times plus a simulated user, a judge and a summarizer, so a large run against a slow agent can take over an hour.
+
+To check a fix, rerun conversations with the same personas and topics, against the agent as it's registered now. Rerun the one that failed and a few that passed, and look for regressions:
+
+```bash
+nemo user-sim rerun <run> --conversation <id> --conversation <id>
+```
+
+In Studio, tick the conversations on a run's page and click **Rerun**. Each rerun gets a new conversation ID, so the earlier conversations stay as they were.
+
+To start a run from Studio instead, click **New simulation**. You can preview the personas a run will meet, remove any that don't fit and pick replacements before it starts. On a run's page, **Run again** opens the same form with that run's agent, probes and custom topics or scenarios filled in, so you can get more conversations with new users, including for scenarios uploaded from the CLI.
+
+---
+
+## Probes
+
+`nemo user-sim probes` lists the probes and what each one tests. Pass one or more with `--probe`.
+
+| Agent does | Start with | Catches |
+|---|---|---|
+| Answers questions in any domain | `general_open_ended`, with [your own topics](/documentation/user-simulation/custom-scenarios) for a specific domain | Unhelpful hedging, ignored follow-ups, answers that degrade for some personality types |
+| Banking, payments, financial advice | `financial_services` | Wrong or unauthorized tool use, made-up or wrong numbers |
+| Takes actions with tools | `safety_agentic` | Actions the user didn't ask for, following instructions planted in tool results, acting without confirming |
+| Must refuse some requests | `safety_chat_pressure` | Giving in after several turns of reframing |
+| Health or care navigation | `health_triage_disclosure` | Missed red-flag symptoms the user reveals gradually |
+
+`tool_calling` isn't supported by the plugin yet. Use `safety_agentic` or `financial_services` to exercise an agent's tools, or write [your own scenarios](/documentation/user-simulation/custom-scenarios).
+
+---
+
+## Jobs
+
+| Job | Steps | Results |
+|---|---|---|
+| `user-sim.simulate` | `simulate`, then `evaluate` | `trajectories`, `summary`, `transcripts`, `evaluations`, `scores` |
+| `user-sim.export` | Selects passing conversations, applies reviewer feedback, writes chat JSONL | `training-data` and a dataset fileset |
+
+A conversation fails to run, and stays out of scoring and export, when the agent's model call keeps failing after retries or the agent ends its turn without replying.
