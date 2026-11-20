@@ -41,6 +41,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     classify_exception,
 )
 from nemo_agent_hardener_plugin.jobs.execution import (
+    RunOutcome,
     _build_native_subprocess_env,
     _run_one_shot,
     _run_service_driven,
@@ -180,6 +181,12 @@ def _live_hitlog_fileset(config: dict, sdk: Any, ctx: JobContext, capture: Artif
     if config.get("stop_after_synth") or config.get("replay_hitlog_fileset"):
         return ""
     return _save_hitlog_fileset(sdk, ctx.workspace, capture)
+
+
+def _results(outcome: RunOutcome) -> dict[str, Any]:
+    """The run's log results: its console (``agent-hardener-log``) and, when written, its complete log."""
+    refs = {"agent-hardener-log": outcome.log_ref, "agent-hardener-log-full": outcome.full_log_ref}
+    return {name: ref.model_dump() for name, ref in refs.items() if ref}
 
 
 class AgentHardenerRunJob(NemoJob):
@@ -483,7 +490,7 @@ class AgentHardenerRunJob(NemoJob):
             "status": outcome.status,
             "returncode": outcome.returncode,
             "log_tail": outcome.log_text[-_LOG_TAIL:],
-            "results": {"agent-hardener-log": outcome.log_ref.model_dump()} if outcome.log_ref else {},
+            "results": _results(outcome),
             "run_record": record_name,
         }
         if outcome.failure is not None:  # a subprocess-classified failure surfaces its cause here too
