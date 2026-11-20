@@ -605,6 +605,9 @@ navigation:
           - section: Release Notes
             path: ../../about/release-notes/index.mdx
             contents:
+              - page: v0.11.0
+                slug: release-0-11-0
+                path: ../../about/release-notes/release-0-11-0.mdx
               - page: v0.10.0
                 slug: release-0-10-0
                 path: ../../about/release-notes/release-0-10-0.mdx

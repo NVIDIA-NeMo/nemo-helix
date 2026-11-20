@@ -169,7 +169,8 @@ async def adopt_or_build(
     a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one, or one made
     before ``built_after``, gets the next revision. Builder refuses a revision another request holds, so a submit
     that loses that race reads the winner's build instead. A 409 by which Builder refuses the request itself
-    is raised, whether it says so by its code or leaves no row at the revision.
+    is reported as a refusal, with Builder's own detail, whether it says so by its code or leaves no row at the
+    revision.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)
@@ -180,11 +181,12 @@ async def adopt_or_build(
                 name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
             )
         except ConflictError as exc:
-            # What Builder says first: a row another request wrote meanwhile must not hide a refusal of this one.
+            # Builder also answers 409 when it refuses the request before writing anything (no registry, unusable
+            # execution profiles, missing secrets). What it says is read first, by its code: a row another request
+            # wrote meanwhile must not hide a refusal of this one. A Builder that gives no code leaves no row
+            # either: a lost race leaves the winner's revision behind; a refusal doesn't.
             if _refuses_the_request(exc) or await builder.get_image(f"{name}-{revision}") is None:
-                # Nothing holds the revision, so no other request won it: Builder refused this request, and
-                # would again. A request that loses the race always finds the winner's row.
-                raise
+                raise RuntimeError(f"Builder refused build {name}-{revision}: {exc.detail}") from exc
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
             continue
         return submitted.images[0]

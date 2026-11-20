@@ -210,14 +210,13 @@ async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() ->
     assert image.name == "harbor-env-0123456789ab-1"
 
 
-async def test_adopt_or_build_raises_what_builder_refuses_outright() -> None:
-    """No row holds the revision, so no other request won it: Builder refused the request, and would again."""
+async def test_adopt_or_build_reports_a_refusal_that_wrote_no_build() -> None:
+    """Builder answers 409 for a deployment it can't build on too; with no winner's build to read, that is not a race."""
     builder = _Builder([], conflicting=frozenset({1}))
 
-    with pytest.raises(ConflictError, match="a revision names one request"):
+    with pytest.raises(RuntimeError, match="a revision names one request"):
         await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
-    # Once, not three times: asking again changes nothing.
     assert builder.submitted == [1]
 
 
@@ -232,7 +231,7 @@ async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_t
         return _container_image(name, "ready") if revision == 1 and builder.submitted else None
 
     builder.get_image = race  # ty: ignore[invalid-assignment]
-    with pytest.raises(ConflictError):
+    with pytest.raises(RuntimeError, match="Builder refused build harbor-env-0123456789ab-1: a revision names"):
         await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
     assert builder.submitted == [1]
 

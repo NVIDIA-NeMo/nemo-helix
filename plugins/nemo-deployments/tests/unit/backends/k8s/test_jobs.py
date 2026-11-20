@@ -234,7 +234,7 @@ async def test_create_job_registers_live_pod_uid_workload_delegation(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.create_namespaced_job.return_value = mock_job(active=1)
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
         items=[
@@ -294,7 +294,7 @@ async def test_create_job_waits_for_pod_before_registering_workload_delegation(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.create_namespaced_job.return_value = mock_job(active=1)
     mock_k8s_clients.core_v1.list_namespaced_pod.side_effect = [
         MagicMock(items=[]),
@@ -343,7 +343,7 @@ async def test_create_job_fails_when_workload_identity_auth_context_missing(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
 
     with patch(
         "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
@@ -376,7 +376,7 @@ async def test_read_job_status_ignores_spoofed_pod_uid_workload_delegation(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = mock_job(active=1, backoff_limit=0)
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
         items=[
@@ -419,7 +419,7 @@ async def test_read_job_status_ignores_pod_with_matching_job_name_wrong_uid(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     job_name = k8s_deployment_resource_name("default", "task")
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = mock_job(active=1, backoff_limit=0)
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
@@ -464,7 +464,7 @@ async def test_read_job_status_skips_workload_delegation_for_foreign_identity_la
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     foreign = mock_job(active=1, backoff_limit=0)
     foreign.metadata.labels = {**job_identity_labels(backoff_limit=0), DEPLOYMENT_WORKSPACE_LABEL: "other-workspace"}
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = foreign
@@ -515,9 +515,10 @@ async def test_read_job_status_revokes_stale_pod_uid_when_pod_list_is_confirmed_
         ttl_seconds_active=900,
     )
     workload_store = MagicMock()
+    stale._id = "stale-pod-grant"
     workload_store.list_by_workload = AsyncMock(return_value=[stale])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = mock_job(active=1, backoff_limit=0)
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(items=[])
 
@@ -541,7 +542,7 @@ async def test_read_job_status_revokes_stale_pod_uid_when_pod_list_is_confirmed_
 
     assert update.status == "STARTING"
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_awaited_once_with(stale.name)
+    workload_store.revoke_by_id.assert_awaited_once_with(stale.id)
 
 
 @pytest.mark.asyncio
@@ -566,9 +567,10 @@ async def test_read_job_status_keeps_delegation_when_pod_list_fails(
         ttl_seconds_active=900,
     )
     workload_store = MagicMock()
+    stale._id = "stale-pod-grant"
     workload_store.list_by_workload = AsyncMock(return_value=[stale])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = mock_job(active=1, backoff_limit=0)
     mock_k8s_clients.core_v1.list_namespaced_pod.side_effect = RuntimeError("apiserver unavailable")
 
@@ -593,7 +595,7 @@ async def test_read_job_status_keeps_delegation_when_pod_list_fails(
     assert update.status == "STARTING"
     workload_store.list_by_workload.assert_not_awaited()
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_not_awaited()
+    workload_store.revoke_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -604,7 +606,7 @@ async def test_read_job_status_with_missing_auth_context_keeps_running_status(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.batch_v1.read_namespaced_job.return_value = mock_job(active=1, backoff_limit=0)
 
     with patch(
@@ -629,7 +631,7 @@ async def test_read_job_status_with_missing_auth_context_keeps_running_status(
     mock_k8s_clients.core_v1.list_namespaced_pod.assert_not_called()
     workload_store.list_by_workload.assert_not_awaited()
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_not_awaited()
+    workload_store.revoke_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio

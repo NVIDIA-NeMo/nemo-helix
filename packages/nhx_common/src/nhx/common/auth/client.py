@@ -222,6 +222,18 @@ class AuthClient(BaseModel):
             auth_input["scopes"] = scopes
         self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=True)
 
+        # This fact belongs to the verified credential, never a caller-supplied snapshot.
+        resolved = self.resolved_bearer_token
+        if (
+            self.principal.verified_workload_delegation
+            and resolved is not None
+            and resolved.token_kind == "workload_access_token"
+            and resolved.claims.actor is not None
+            and self.principal.id == resolved.claims.actor.subject
+            and self.principal.on_behalf_of == resolved.claims.subject
+        ):
+            auth_input["verified_workload_delegation"] = True
+
         auth_url = self.config.get_pdp_url("allow")
 
         logger.debug("Calling PDP: url=%s, input=%s", auth_url, auth_input)

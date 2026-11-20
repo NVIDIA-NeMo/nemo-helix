@@ -4,6 +4,7 @@
 package nhxclient
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -130,7 +131,7 @@ func TestSecretClient_GetSecret(t *testing.T) {
 			defer mockServer.Close()
 
 			client := NewSecretClient(mockServer.URL, tc.principal)
-			secret, err := client.GetSecret(tc.workspace, tc.secretName)
+			secret, err := client.GetSecret(context.Background(), tc.workspace, tc.secretName)
 
 			// Check error expectations
 			if tc.expectError {
@@ -203,7 +204,7 @@ func TestSecretClient_GetSecretOverUDS(t *testing.T) {
 	}
 	client := NewSecretClientForEndpoint(endpoint, &Principal{ID: "test-principal"})
 
-	secret, err := client.GetSecret("default", "api-key")
+	secret, err := client.GetSecret(context.Background(), "default", "api-key")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -276,7 +277,7 @@ func TestSecretClient_AuthHeaders(t *testing.T) {
 			defer mockServer.Close()
 
 			client := NewSecretClient(mockServer.URL, tc.principal)
-			_, _ = client.GetSecret("ws", "secret")
+			_, _ = client.GetSecret(context.Background(), "ws", "secret")
 		})
 	}
 }
