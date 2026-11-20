@@ -12,6 +12,17 @@ const isFailedReply = (
 ): status is Extract<MessageStatus, { type: 'incomplete' }> =>
   status?.type === 'incomplete' && status.reason === 'error';
 
+/** The model stopped short on its own (token limit, content filter, dropped stream, no answer). */
+export const isStoppedEarlyReply = (status: MessageStatus | undefined): boolean =>
+  status?.type === 'incomplete' && status.reason !== 'error' && status.reason !== 'cancelled';
+
+export const useStoppedEarlyNotice = (): string | undefined =>
+  useAuiState((state) => {
+    const status = state.message.status;
+    if (!isStoppedEarlyReply(status) || status?.type !== 'incomplete') return undefined;
+    return typeof status.error === 'string' ? status.error : undefined;
+  });
+
 export const useIsFailedReply = (): boolean =>
   useAuiState((state) => isFailedReply(state.message.status));
 
