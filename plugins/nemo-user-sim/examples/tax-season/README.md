@@ -34,7 +34,7 @@ nemo user-sim run --agent demo-tax-helper --scenarios plugins/nemo-user-sim/exam
 
 `--use-agent-tools` keeps the agent's own tools, here Tavily search, during the run. Without it, the plugin cuts an agent off from its own tools, and the helper can only answer from memory. Turn it on only for tools that are safe to call for real, like search.
 
-Then review the conversations in Studio, give them a thumbs up or down and export the good ones as training data.
+Then review the conversations in Studio under **User Simulation**, give them a thumbs up or down and export the good ones as training data. In Studio, **New simulation** offers the same set under **Topics** as `tax-season`, and **Use the agent's own tools** under the agent.
 
 ## Files
 

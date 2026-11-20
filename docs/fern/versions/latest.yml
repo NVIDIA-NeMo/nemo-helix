@@ -442,6 +442,11 @@ navigation:
                 path: ../../garak/targets/inference-gateway.mdx
               - page: Schema
                 path: ../../garak/targets/schema.mdx
+      - section: User Simulation
+        path: ../../user-sim/index.mdx
+        contents:
+          - page: Custom Scenarios
+            path: ../../user-sim/custom-scenarios.mdx
       - section: Studio
         path: ../../studio/index.mdx
         contents:
