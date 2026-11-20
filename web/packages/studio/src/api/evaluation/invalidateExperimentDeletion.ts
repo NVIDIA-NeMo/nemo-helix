@@ -3,10 +3,12 @@
 
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
+import { invalidateSessionDeletion } from '@studio/api/intake/invalidateSessionDeletion';
 import type { QueryClient } from '@tanstack/react-query';
 
 /** Refresh memberships as well as experiments, including agent rollups and cached detail pages. */
 export const invalidateExperimentDeletion = async (client: QueryClient, workspace: string) => {
+  await invalidateSessionDeletion(client, workspace);
   const roots = [
     getListExperimentsQueryKey(workspace)[0],
     getListEvaluationsQueryKey(workspace)[0],

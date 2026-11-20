@@ -10,12 +10,22 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from nhx.common.auth.client import AuthClient
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.intake.entities.experiments import Experiment as Evaluation
 from nhx.intake.repository.session import SessionRepository, TraceIndexCollisionError
-from nhx.intake.spans.api.sessions import delete_session, get_session
+from nhx.intake.spans.api.sessions import delete_session, get_session, get_session_deletion_permission
 from nhx.intake.spans.domain import IntakeSession, SpanStatus
 from nhx.intake.spans.service import IntakeSpansService, SessionInEvaluationError, SessionNotFoundError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_session_deletion_permission_does_not_require_stored_session(allowed: bool) -> None:
+    auth_client = SimpleNamespace(has_permissions=AsyncMock(return_value=allowed))
+    response = await get_session_deletion_permission("workspace-a", "missing-session", cast(AuthClient, auth_client))
+    assert response.allowed is allowed
+    auth_client.has_permissions.assert_awaited_once_with("workspace-a", ["intake.sessions.delete"])
 
 
 @pytest.mark.asyncio

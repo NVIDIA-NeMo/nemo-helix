@@ -68,6 +68,21 @@ def test_session_delete_authorization_precedes_storage(monkeypatch: pytest.Monke
             require_workspace_access: lambda: None,
         },
     ) as client:
+        if resource == "sessions":
+            for principal, workspace, allowed in [
+                ("viewer@test.com", "default", False),
+                ("editor@test.com", "default", False),
+                ("admin@test.com", "default", True),
+                ("platform-admin@test.com", "other", True),
+            ]:
+                set_policy_data(policy)
+                response = client.get(
+                    f"/apis/intake/v2/workspaces/{workspace}/sessions/missing/deletion-permission",
+                    headers={"X-NHX-Principal-Id": principal, "X-NHX-Scopes": "intake:read"},
+                )
+                assert response.status_code == 200, response.text
+                assert response.json() == {"allowed": allowed}
+            service.delete_session.assert_not_awaited()
         cases = [
             ("viewer@test.com", "default", "intake:write", 403),
             ("editor@test.com", "default", "intake:write", 403),
