@@ -55,7 +55,7 @@ def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeyp
     responses = iter([json.dumps(metadata).encode(), data])
     monkeypatch.setattr(trust, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
     monkeypatch.setattr(trust, "machine", lambda: "aarch64")
-    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.4\n")
     collected = []
     monkeypatch.setattr(trust, "run_process", lambda command, **kwargs: collected.append(command))
 
