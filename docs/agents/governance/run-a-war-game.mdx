@@ -57,8 +57,14 @@ the result, so every later run attacks the same thing.
 
 <Tab title="Registered agent">
 
+The examples on this page use `ledger`, the Fabric agent in
+[`plugins/nemo-agent-hardener/examples/relay-victim`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-agent-hardener/examples/relay-victim).
+Register it, then create the manifest:
+
 ```bash
-nemo agent-hardener init --agent react-agent
+nemo agents register --name ledger \
+  --agent-config plugins/nemo-agent-hardener/examples/relay-victim/agent.yaml
+nemo agent-hardener init --agent ledger
 ```
 
 The agent must be registered with `nemo agents register`. It does not have to be
@@ -81,7 +87,7 @@ effect there.
 Declare the hosts your agent's tools call:
 
 ```bash
-nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
+nemo agent-hardener init --agent ledger --egress mcp.deepwiki.com
 ```
 
 A bare host opens port 443 only. Write `host:80` for plain HTTP. Hosts cannot
@@ -91,7 +97,7 @@ package, so declare them here.
 If the agent reads non-secret environment variables, set them at the same time:
 
 ```bash
-nemo agent-hardener init --agent react-agent \
+nemo agent-hardener init --agent ledger \
   --env BACKEND_URL=http://host.docker.internal:8086
 ```
 
@@ -100,7 +106,7 @@ declare it with `--backend NAME:PORT[,PORT]`. It is repeatable, and the sandbox
 reaches the service through `host.docker.internal`:
 
 ```bash
-nemo agent-hardener init --agent react-agent --backend docs-mcp:8090
+nemo agent-hardener init --agent ledger --backend docs-mcp:8090
 ```
 
 The Inference Gateway backend is added for you and its name is reserved. Model
@@ -176,7 +182,7 @@ after hardening. `nemo agent-hardener run` consumes a suite and never generates 
 so create it before the first run:
 
 ```bash
-nemo agent-hardener synth-benign --manifest-id react-agent
+nemo agent-hardener synth-benign --manifest-id ledger
 ```
 
 This opens an interview about what the agent does, then lets you review and
@@ -186,8 +192,8 @@ later runs.
 Two non-interactive forms:
 
 ```bash
-nemo agent-hardener synth-benign --manifest-id react-agent --yes
-nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive
+nemo agent-hardener synth-benign --manifest-id ledger --yes
+nemo agent-hardener synth-benign --manifest-id ledger --no-interactive
 ```
 
 `--yes` accepts the interview's suggested answers. `--no-interactive` skips the
@@ -196,7 +202,7 @@ interview and generates from rules alone, which suits CI.
 ## 3. Run the Cycle
 
 ```bash
-nemo agent-hardener run --manifest-id react-agent
+nemo agent-hardener run --manifest-id ledger
 ```
 
 The run attacks a sandboxed copy of the agent, generates fixes with both
@@ -217,7 +223,7 @@ run can deviate from the frozen baseline without breaking comparability. To
 change the stored defaults instead:
 
 ```bash
-nemo agent-hardener manifest set react-agent --rounds 2 --attack-intensity thorough
+nemo agent-hardener manifest set ledger --rounds 2 --attack-intensity thorough
 ```
 
 Check recent runs:
@@ -232,7 +238,7 @@ Editing the agent does not change an existing manifest. Pick up the changes
 deliberately:
 
 ```bash
-nemo agent-hardener refresh --manifest-id react-agent
+nemo agent-hardener refresh --manifest-id ledger
 ```
 
 Egress, backends, secrets, models, defenders and the cached benign suite are all
@@ -242,6 +248,22 @@ newer than its manifest. In Studio, use **Refresh Target**, or call
 
 Applying a mitigation refreshes the manifest for you, so a run, harden, apply,
 run sequence measures the change you just made.
+
+Refresh works only for a manifest created from a registered agent with
+`init --agent`. A manifest created with `init --project-dir` stores the uploaded
+project rather than a reference to an agent, so `refresh` returns HTTP 422 for it.
+To pick up changes to an unregistered project, create a new manifest from the
+updated directory. Manifest names are unique within a workspace, so give it a new
+`--name`:
+
+```bash
+nemo agent-hardener init --project-dir ~/my-agent --name my-agent-v2
+```
+
+The new manifest keeps none of the earlier manifest's settings. Pass the egress,
+backends, secrets and other `init` flags again. To reuse the old name, delete the
+old manifest first with `client.agent_hardener.delete_manifest` from the
+[Python SDK](/documentation/agents/governance/cli-reference#python-sdk).
 
 ## Run It in Studio
 
