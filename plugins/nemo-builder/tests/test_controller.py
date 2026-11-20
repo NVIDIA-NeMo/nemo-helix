@@ -15,7 +15,7 @@ import httpx
 import pytest
 from nemo_builder_plugin.controller import BuildQueueController, SettleController
 from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild
-from nemo_builder_plugin.settle import QUEUE_GONE, job_status_from
+from nemo_builder_plugin.settle import QUEUE_GONE, EndedJob, job_status_from
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityNotFoundError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -219,3 +219,21 @@ class TestReadingAJobAsTheBuilder:
         jobs.get_job_status = AsyncMock(return_value=response)
         assert await job_status_from(jobs)("ws-a", "builder-demo-1") == HelixJobStatus.QUEUED
         jobs.get_job_status.assert_awaited_once_with(workspace="ws-a", name="builder-demo-1")
+
+    @pytest.mark.asyncio
+    async def test_a_job_that_ended_comes_with_what_it_said(self) -> None:
+        task = SimpleNamespace(error_stack="NHX_BUILD_FAILED demo-1: the build service reports it failed: no base")
+        job = SimpleNamespace(
+            status=HelixJobStatus.ERROR,
+            error_details={"message": "Step remote-build failed"},
+            steps=[SimpleNamespace(name="remote-build", error_details=None, tasks=[task])],
+        )
+        response = MagicMock()
+        response.data.return_value = job
+        jobs = MagicMock()
+        jobs.get_job_status = AsyncMock(return_value=response)
+        assert await job_status_from(jobs)("ws-a", "builder-demo-1") == EndedJob(
+            HelixJobStatus.ERROR,
+            {"demo-1": "the build service reports it failed: no base"},
+            "Step remote-build failed",
+        )

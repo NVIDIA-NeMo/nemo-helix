@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Iterator
 from typing import ClassVar, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
 from nemo_builder_plugin.backend import BackendRejectedError
@@ -19,18 +21,28 @@ from nemo_builder_plugin.completion import (
     Caller,
     CompleteRequest,
     CompletionConflict,
+    JobOf,
     caller_refusal,
     complete,
     current_caller,
+    current_delegation,
     read_refusal,
+    step_refusal,
     submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
-from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
+from nemo_builder_plugin.schema import (
+    CODE_BACKEND_CHANGED,
+    CODE_BACKEND_REJECTED,
+    CODE_MISSING_SECRETS,
+    BuildSet,
+    SubmitBuildResponse,
+)
 from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
+    BackendChanged,
     BuildConflict,
     InvalidBuildRequest,
     MissingSecrets,
@@ -39,6 +51,7 @@ from nemo_builder_plugin.submit import (
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationEntity, WorkloadDelegationStore
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -54,7 +67,9 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nemo_helix_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
+from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +79,101 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
         return await entity_client.get(ContainerImage, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+
+
+class Refused(Exception):
+    """A submit the builder refuses with a 409 that says which kind it is.
+
+    ``detail`` is a sentence, as a 409's always is. ``code`` is for a caller that must tell which it met.
+    ``backend_rejected`` and ``missing_secrets`` refuse the request itself, under any revision.
+    ``backend_changed``, like the 409 with no code for a revision another request holds, is one the next
+    revision gets past.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def _refused(_request: Request, refused: Exception) -> JSONResponse:
+    """The answer to a :class:`Refused`: what an ``HTTPException`` would answer, with ``code`` beside ``detail``."""
+    if not isinstance(refused, Refused):
+        raise refused
+    return JSONResponse(status_code=409, content={"detail": refused.detail, "code": refused.code})
+
+
+#: The shortest value taken out of a logged validation message.
+_MIN_REFUSED_CHARS = 4
+
+
+def _setting(location: tuple[int | str, ...]) -> str:
+    """The setting a validation error is about. A check on the section as a whole has no location: `builder`."""
+    return ".".join(map(str, location)) or "builder"
+
+
+def _refused_values(refused: object, depth: int = 0) -> Iterator[str]:
+    """Each string in what a setting was given, and in a list or mapping of them, as a message might repeat it."""
+    if isinstance(refused, str):
+        # As a validator would most likely have written it, quoted, then bare. One trimmed of what a validator
+        # trims first, too. Not a short one: it would be found in words that have nothing to do with it.
+        for spelling in (refused, refused.strip(), refused.strip("/")):
+            for form in (repr(spelling), repr(spelling)[1:-1], spelling):
+                if len(form) >= _MIN_REFUSED_CHARS:
+                    yield form
+    elif depth < 4 and isinstance(refused, list | tuple | set | frozenset):
+        for item in refused:
+            yield from _refused_values(item, depth + 1)
+    elif depth < 4 and isinstance(refused, dict):
+        # Its values, not its keys: a check on a whole section is given the section, and names its settings.
+        for item in refused.values():
+            yield from _refused_values(item, depth + 1)
+
+
+def _without_input(error: ErrorDetails) -> str:
+    """A validation error's message, for the log, without the value it refused.
+
+    Only a validator's own sentence could repeat what it was given. The builder's validators of a registry,
+    the settings most likely to be written with a login in them, are written not to. This is for any that does:
+    a setting may hold a credential.
+    """
+    message = error["msg"]
+    if error["type"] not in ("value_error", "assertion_error"):
+        # Pydantic's own sentence, which doesn't quote the value. Left as it is.
+        return message
+    for form in sorted(set(_refused_values(error.get("input"))), key=len, reverse=True):
+        # As a word of its own: a check on a whole section is given every value in it, and one of them may be
+        # part of a setting's name, which the sentence is there to give.
+        message = re.sub(rf"(?<![\w-]){re.escape(form)}(?![\w-])", "<the value>", message)
+    return message
+
+
+def _load_config() -> BuilderConfig:
+    try:
+        return BuilderConfig.get()
+    except ValidationError as exc:
+        # Named, not a bare 500: an operator who misspelt a key finds it in the answer. The answer says which
+        # settings and what kind of problem. A validator's own sentence goes to the log only, and without the
+        # value it refused, should it quote that: a setting may hold a credential, such as a registry given
+        # with a login.
+        errors = exc.errors(include_url=False)
+        logger.error(
+            "the builder's configuration is invalid: %s",
+            sanitize_for_log("; ".join(f"{_setting(error['loc'])}: {_without_input(error)}" for error in errors)),
+        )
+        problems = "; ".join(
+            f"{_setting(error['loc'])}: "
+            + ("invalid value" if error["type"] in ("value_error", "assertion_error") else error["msg"])
+            for error in errors
+        )
+        raise BackendRejectedError(
+            f"the builder's configuration is invalid ({problems}); the API log says more"
+        ) from exc
+    except ValueError as exc:
+        # Not a setting that fails its check, but a section that can't be read at all: `builder:` left empty, or
+        # an environment variable that isn't the JSON it must be. The message may quote what it couldn't read.
+        logger.error("the builder's configuration can't be read: %s", sanitize_for_log(str(exc)))
+        raise BackendRejectedError("the builder's configuration can't be read; the API log says why") from exc
 
 
 #: ``image`` as it stands once settled: failed if its job abandoned it.
@@ -93,9 +203,37 @@ def get_settle() -> Settle:
     return _settle_as_builder
 
 
+def _job_named(record: WorkloadDelegationEntity | None) -> str | None:
+    """``<workspace>/<name>`` of the job ``record`` was made for a step of, as an image's row names its build
+    job. None if it was made for something else, or no longer stands.
+
+    Jobs records the job's workspace and its name for each step's pod, and withdraws the record once the step
+    has ended.
+    """
+    if record is None or not record.is_active() or record.workload_kind != "job" or not record.job_id:
+        return None
+    return f"{record.workload_workspace}/{record.job_id}"
+
+
+async def _job_of_as_builder(delegation: str) -> str | None:
+    # As the builder, not the caller: the record is the platform's own, kept where no submitter reads. By its
+    # ID, which names one record: a later workload's is another, though it may be found under the same name.
+    async with get_async_nemo_client(as_service="builder", internal=True) as client:
+        records = WorkloadDelegationStore(EntityClient(AsyncEntitiesClient.from_client(client)))
+        return _job_named(await records.get_by_id(delegation))
+
+
+def get_job_of() -> JobOf:
+    """How the builder learns which job a caller's workload delegation was made for a step of."""
+    return _job_of_as_builder
+
+
 class BuilderService(NemoService):
     name: ClassVar[str] = "builder"
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "secrets"]
+
+    def get_exception_handlers(self) -> dict[type[Exception], ExceptionHandler]:
+        return {Refused: _refused}
 
     def get_routers(self) -> list[RouterSpec]:
         return [
@@ -156,7 +294,7 @@ def _build_router() -> APIRouter:
 
         try:
             # The sandbox runs where the build's profiles put its steps.
-            config = BuilderConfig.get()
+            config = _load_config()
             backend = load_backend(config, await jobs_client.list_execution_profiles())
             result = await submit_build_set(
                 body,
@@ -171,7 +309,13 @@ def _build_router() -> APIRouter:
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (BackendRejectedError, BuildConflict, MissingSecrets) as exc:
+        except BackendRejectedError as exc:
+            raise Refused(CODE_BACKEND_REJECTED, str(exc)) from exc
+        except MissingSecrets as exc:
+            raise Refused(CODE_MISSING_SECRETS, str(exc)) from exc
+        except BackendChanged as exc:
+            raise Refused(CODE_BACKEND_CHANGED, str(exc)) from exc
+        except BuildConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except UpstreamUnavailable as exc:
             raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
@@ -270,13 +414,32 @@ def _build_router() -> APIRouter:
         body: CompleteRequest,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
+        delegation: str | None = Depends(current_delegation),
+        job_of: JobOf = Depends(get_job_of),
     ) -> ContainerImage:
-        """Make an image `ready` at the digest its push step pushed and signed.
+        """Make an image `ready` at the digest the step that built it published.
 
-        Completing an image already `ready` at that digest returns it; 409 if it settled otherwise.
+        Completing an image already `ready` at that digest, with the same `external` and the same
+        `runtime_config`, returns it; 409 if it settled otherwise, or if the request doesn't fit the image's
+        backend. For an image a build service built, 403 to a caller whose token shows it to be a step of
+        another job than the image's build job.
         """
         row = await _get_row(entity_client, workspace, name)
         refusal = caller_refusal(row, caller)
+        if refusal is None:
+            try:
+                refusal = await step_refusal(row, delegation, job_of)
+            except Exception as exc:
+                # No one is admitted on a record that couldn't be read. Answered as an outage, which a step
+                # waits out: its image is built, and only this call is left.
+                logger.exception(
+                    "could not tell which job is completing %s/%s",
+                    sanitize_for_log(workspace),
+                    sanitize_for_log(name),
+                )
+                raise HTTPException(
+                    status_code=503, detail="Couldn't check which job the caller is a step of; try again."
+                ) from exc
         if refusal is not None:
             logger.warning(
                 "completing %s/%s refused: %s",
@@ -292,6 +455,7 @@ def _build_router() -> APIRouter:
                 name=name,
                 digest=body.digest,
                 runtime_config=body.runtime_config,
+                external=body.external,
             )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc

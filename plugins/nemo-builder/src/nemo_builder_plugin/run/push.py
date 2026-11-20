@@ -30,7 +30,7 @@ import httpx
 from cryptography.exceptions import UnsupportedAlgorithm
 from nemo_builder_plugin.client import BuilderClient
 from nemo_builder_plugin.completion import CompleteRequest
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.registry import REGISTRY_TIMEOUT_SECONDS, Registry, registry_client
 from nemo_builder_plugin.registry_auth import login
 from nemo_builder_plugin.run.tools import run_tool
@@ -256,7 +256,9 @@ def read_runtime_config(layout: Path, digest: str) -> ImageRuntimeConfig | None:
 class Builder:
     """This step's calls to the builder's routes, acting for the submitter, retrying what may be transient.
 
-    Both are safe to repeat: completing an image already ``ready`` at the same digest returns it.
+    Both are safe to repeat: completing an image already ``ready`` returns it, when the completion is the same
+    one again, with the same digest and the same account of how the image starts. Each caller works that
+    out once for an image, and sends it on every try.
     """
 
     def __init__(self, client: BuilderClient, *, workspace: str, sleep: Callable[[float], None] = time.sleep) -> None:
@@ -279,8 +281,20 @@ class Builder:
                 self._sleep(2.0**attempt)
         raise failure
 
-    def complete(self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None) -> ContainerImage:
-        body = CompleteRequest(digest=digest, runtime_config=runtime_config)
+    def complete(
+        self,
+        image: str,
+        digest: str,
+        runtime_config: ImageRuntimeConfig | None,
+        external: ExternalImage | None = None,
+    ) -> ContainerImage:
+        # Left unset, not null, for an image built here: the client sends only what is set, and an API from before
+        # the field existed refuses one it doesn't know.
+        body = (
+            CompleteRequest(digest=digest, runtime_config=runtime_config)
+            if external is None
+            else CompleteRequest(digest=digest, runtime_config=runtime_config, external=external)
+        )
         return self._call(
             f"completing {image}",
             lambda: self._client.complete_container_image(workspace=self._workspace, name=image, body=body).data(),

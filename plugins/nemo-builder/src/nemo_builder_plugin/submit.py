@@ -23,6 +23,7 @@ from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ class BuildConflict(Exception):
     """This ``(name, revision)`` was submitted with a different request, or its job name is taken (409)."""
 
 
+class BackendChanged(BuildConflict):
+    """This ``(name, revision)`` was submitted under another backend than the deployment builds with now (409)."""
+
+
 class UpstreamUnavailable(Exception):
     """An image to copy couldn't be resolved because its registry failed (502)."""
 
@@ -92,7 +97,7 @@ class SubmitResult:
     images: list[ContainerImage]
 
 
-def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
+def _rows_for(plan: BuildPlan, digest: str, backend: str) -> list[ContainerImage]:
     return [
         ContainerImage(
             name=image.name,
@@ -107,6 +112,7 @@ def _rows_for(plan: BuildPlan, digest: str) -> list[ContainerImage]:
                 job=f"{plan.workspace}/{plan.job_name}",
                 request_digest=digest,
                 upstream=_upstream_image(image),
+                backend=backend,
             ),
         )
         for image in plan.images
@@ -189,6 +195,19 @@ async def submit_build_set(
         raise
     except ValueError as exc:
         raise InvalidBuildRequest(str(exc)) from exc
+    try:
+        # Made here, with the rest of what can refuse the request, though they are written further down. A
+        # workspace whose name a row's job reference can't hold gets this far only when no repository path
+        # needed its name first.
+        rows = _rows_for(plan, digest, backend.name)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(map(str, error['loc']))}: {error['msg']}"
+            for error in exc.errors(include_input=False, include_url=False)
+        )
+        raise InvalidBuildRequest(
+            f"an image's row can't record this request in workspace {workspace!r} ({problems})"
+        ) from exc
     # Jobs checks these too, but only once the rows exist, and its refusal looks like a taken job name.
     missing = [
         f"{secret_workspace}/{name}"
@@ -197,23 +216,27 @@ async def submit_build_set(
     ]
     if missing:
         raise MissingSecrets(
-            "the push step needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
+            "the build job needs platform secrets that don't exist, or that you can't read: " + ", ".join(missing)
         )
 
     images: list[ContainerImage] = []
     created: list[ContainerImage] = []
-    for row in _rows_for(plan, digest):
+    for row in rows:
         try:
             created.append(await entity_client.create(row))
             images.append(created[-1])
         except EntityConflictError:
             try:
-                images.append(await _adopt(entity_client, row, digest, build_set, workspace))
-            except BuildConflict:
+                images.append(await _adopt(entity_client, row, digest, build_set, workspace, backend.name))
+            except BuildConflict as exc:
+                # What the answer says: the rows this request wrote are failed for the same reason.
+                why = (
+                    "was already submitted under another backend"
+                    if isinstance(exc, BackendChanged)
+                    else "belongs to a different request"
+                )
                 await fail_rows(
-                    entity_client,
-                    created,
-                    f"not built: {build_set.name} revision {build_set.revision} belongs to a different request",
+                    entity_client, created, f"not built: {build_set.name} revision {build_set.revision} {why}"
                 )
                 raise
 
@@ -279,11 +302,19 @@ async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], de
 
 
 async def _adopt(
-    entity_client: _EntityWriter, row: ContainerImage, digest: str, build_set: BuildSet, workspace: str
+    entity_client: _EntityWriter, row: ContainerImage, digest: str, build_set: BuildSet, workspace: str, backend: str
 ) -> ContainerImage:
     existing = await entity_client.get(ContainerImage, name=row.name, workspace=workspace)
     if existing.provenance.request_digest != digest:
         raise _different_request(build_set)
+    # The same request, but another backend holds it: its image is, or would be, somewhere this backend doesn't
+    # publish. Whether anything was built is not looked at.
+    if existing.provenance.backend != backend:
+        raise BackendChanged(
+            f"build set {build_set.name!r} revision {build_set.revision} was already submitted under the "
+            f"{existing.provenance.backend!r} backend, and this deployment now builds with {backend!r}. "
+            "Submit a new revision."
+        )
     return existing
 
 
