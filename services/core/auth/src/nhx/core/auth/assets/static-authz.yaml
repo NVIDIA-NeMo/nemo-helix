@@ -1797,6 +1797,18 @@ authz:
         scopes:
         - intake:write
         - platform:write
+    /apis/intake/v2/workspaces/{workspace}/sessions/{id}/deletion-permission:
+      get:
+        direct:
+          actor_perms:
+          - intake.sessions.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - intake.sessions.read
+        scopes:
+        - intake:read
+        - platform:read
     /apis/intake/v2/workspaces/{workspace}/sessions/{id}:
       delete:
         direct:

@@ -109,6 +109,9 @@ const mockAgents = (workspace: unknown) => {
  * but tests can override these with `server.use`.
  */
 export const handlers = [
+  http.get('*/apis/intake/v2/workspaces/:workspace/sessions/:sessionId/deletion-permission', () =>
+    HttpResponse.json({ allowed: false })
+  ),
   // Platform liveness probe gating the whole app (PlatformGuard)
   http.get(`${PLATFORM_BASE_URL}/health/live`, () => HttpResponse.json({ status: 'live' })),
   http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>

@@ -6692,6 +6692,44 @@ paths:
             , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
             \ ${response.status}`);\nconsole.log(response.status); // no response\
             \ body\n"
+  /apis/intake/v2/workspaces/{workspace}/sessions/{id}/deletion-permission:
+    get:
+      tags:
+      - Sessions
+      summary: Get Session Deletion Permission
+      description: 'Check deletion permission without requiring existing telemetry.
+
+
+        This is a UI hint; DELETE still enforces permissions, write scopes, and
+
+        evaluation protection. It remains available during partial-cleanup retries.'
+      operationId: get_session_deletion_permission_apis_intake_v2_workspaces__workspace__sessions__id__deletion_permission_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDeletionPermission'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/intake/v2/workspaces/{workspace}/spans:
     get:
       tags:
@@ -23280,6 +23318,17 @@ components:
       title: Session
       description: Aggregate telemetry for one Intake session; does not include traces
         or span payloads.
+    SessionDeletionPermission:
+      properties:
+        allowed:
+          type: boolean
+          title: Allowed
+      type: object
+      required:
+      - allowed
+      title: SessionDeletionPermission
+      description: Permission hint for session deletion; write scopes and protection
+        are checked on DELETE.
     SingleCallConfig:
       properties:
         enabled:

@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getGetSessionQueryKey } from '@nemo/sdk/generated/platform/sessions';
+import {
+  getGetSessionDeletionPermissionQueryKey,
+  getGetSessionQueryKey,
+} from '@nemo/sdk/generated/platform/sessions';
 import { getGetSpanQueryKey, getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getGetTraceQueryKey, getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -43,6 +46,31 @@ const renderSessionDetail = (sessionId = 'session-agent-run-001', search = '') =
 
 describe('IntakeSessionDetailRoute', () => {
   afterEach(() => sessionStorage.clear());
+
+  it('offers a confirmed cleanup repair even when session detail already returns 404', async () => {
+    const deleted = vi.fn(() =>
+      HttpResponse.json({ detail: 'storage unavailable' }, { status: 503 })
+    );
+    server.use(
+      http.get(
+        mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'),
+        () => new HttpResponse(null, { status: 404 })
+      ),
+      http.get(
+        mockApiUrl(getGetSessionDeletionPermissionQueryKey, ':workspace', ':sessionId'),
+        () => HttpResponse.json({ allowed: true })
+      ),
+      http.delete(mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'), deleted)
+    );
+    renderSessionDetail();
+    expect(await screen.findByText('Session Not Found')).toBeVisible();
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete session telemetry' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Traces: unavailable. Spans: unavailable/)).toBeVisible();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Session Telemetry' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cleanup may be incomplete');
+    expect(deleted).toHaveBeenCalledOnce();
+  });
 
   it('hydrates the session header and all trace trajectories with summary payloads', async () => {
     const sessionDetailRequests: string[] = [];

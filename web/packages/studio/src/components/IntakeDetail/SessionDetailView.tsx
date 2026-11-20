@@ -5,6 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { IconError } from '@nemo/icons/icons';
 import { PageHeader, Stack, StatusMessage } from '@nvidia/foundations-react-core';
 import { NoSpanSelected } from '@studio/components/IntakeDetail/NoSpanSelected';
+import { SessionDeleteButton } from '@studio/components/IntakeDetail/SessionDeleteButton';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
 import { TraceSpanTree } from '@studio/components/IntakeDetail/TraceDetailSpanTree';
 import {
@@ -148,12 +149,25 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
     [setSearchParams]
   );
 
+  const deleteAction = (
+    <SessionDeleteButton
+      key={JSON.stringify([workspace, sessionId])}
+      workspace={workspace}
+      sessionId={sessionId}
+      traceCount={session?.trace_count}
+      spanCount={session?.span_count}
+    />
+  );
+
   if (sessionError?.response?.status === 404) {
     return (
-      <NotFound
-        subheader="Session Not Found"
-        message="The session does not exist or you do not have permission to view it."
-      />
+      <Stack padding="density-2xl" gap="density-lg">
+        {deleteAction}
+        <NotFound
+          subheader="Session Not Found"
+          message="The session does not exist or you do not have permission to view it."
+        />
+      </Stack>
     );
   }
 
@@ -248,7 +262,12 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
         <PageHeader
           className="p-0"
           slotHeading={title}
-          slotActions={routeContext?.kind === 'evaluation' ? routeContext.headerActions : undefined}
+          slotActions={
+            <Stack direction="row" gap="density-sm">
+              {routeContext?.kind === 'evaluation' ? routeContext.headerActions : null}
+              {deleteAction}
+            </Stack>
+          }
         />
         {routeContext?.kind === 'evaluation' && routeContext.renderBody
           ? routeContext.renderBody({ trajectories, traceView })

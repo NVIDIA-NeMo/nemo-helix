@@ -11,6 +11,7 @@ from typing import Annotated, Literal, cast
 import typer
 from nemo_helix_plugin.cli import create_typer_app
 from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_confirm import confirm_destructive
 from nemo_helix_plugin.cli_error_handling import handle_errors
 from nemo_helix_plugin.cli_input import (
     build_request_body,
@@ -26,6 +27,8 @@ from nemo_helix_plugin.cli_options import (
     NoTruncateOption,
     OutputColumnsOption,
     StreamOutputOption,
+    WorkspaceOption,
+    YesOption,
 )
 from nemo_helix_plugin.cli_output import (
     Column,
@@ -38,8 +41,9 @@ from nemo_helix_plugin.cli_pagination import (
     collect_offset_pages,
     warn_if_more_pages,
 )
-from nemo_helix_plugin.cli_state import CLIState, cli_state
+from nemo_helix_plugin.cli_state import CLIState, cli_state, resolve_cli_workspace, resolve_output_format
 from nemo_helix_plugin.cli_warnings import collect_warnings
+from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.intake.types import (
     ANNOTATION_INPUT_ADAPTER,
@@ -1229,6 +1233,53 @@ def retrieve_sessions(
 
     result = state.typed_client(IntakeClient).get_session(id=id, workspace=workspace)
     _format_entity(state, result, resolved_output_format)
+
+
+@sessions_app.command("delete")
+@collect_warnings
+@handle_errors
+def delete_session(
+    ctx: typer.Context,
+    id: Annotated[str, typer.Argument(help="Session whose entire current telemetry will be deleted.")],
+    workspace: WorkspaceOption = None,
+    yes: YesOption = False,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Delete all current traces and spans in a session (workspace Admin required).
+
+    Annotations and evaluator results are retained. Later ingestion can recreate
+    telemetry. Live or unresolved evaluations protect the session from deletion.
+    Pass --yes in scripts. After a storage failure, repeat the same command even
+    if sessions get returns 404: the retry can repair unfinished index cleanup.
+
+    Example: nemo intake sessions delete session-1 --workspace team-a --yes
+    """
+    state = cli_state(ctx)
+    resolved_output_format = resolve_output_format(ctx, output_format)
+    resolved_workspace = resolve_cli_workspace(ctx, workspace)
+    kwargs = {"id": id, "workspace": resolved_workspace}
+    if handle_code_generation(IntakeClient, "delete_session", kwargs, resolved_output_format, state, result="none"):
+        return
+    confirm_destructive(
+        f"Delete ALL current traces and spans in session '{id}' in workspace '{resolved_workspace}'? "
+        "Annotations and evaluator results are retained. Later ingestion can recreate telemetry.",
+        yes=yes,
+    )
+    try:
+        state.typed_client(IntakeClient).delete_session(**kwargs)
+    except NemoHTTPError as error:
+        guidance = {
+            403: "Requires intake.sessions.delete, workspace access, and write scope (workspace Admin by default).",
+            404: "Session is missing or already removed.",
+            409: "Deletion is blocked by a protected evaluation, conflicting ownership, or competing cleanup. "
+            "Resolve the reported conflict before retrying; do not delete evaluations automatically.",
+            503: "Cleanup may be incomplete. Retry this command with the same workspace and session, "
+            "even if sessions get returns 404.",
+        }.get(error.status_code)
+        if guidance:
+            typer.echo(guidance, err=True)
+        raise
+    typer.echo(f"Deleted current telemetry for session '{id}' in workspace '{resolved_workspace}'.")
 
 
 # ---------------------------------------------------------------------------
