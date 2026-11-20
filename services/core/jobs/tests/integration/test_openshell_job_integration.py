@@ -256,6 +256,30 @@ def test_cleanup_reclaims_completed_sandbox_for_terminal_step(backend: OpenShell
     assert _sandbox_gone(backend, name), f"completed sandbox {name} not reclaimed by cleanup"
 
 
+# Reads the cgroup v2 and v1 CPU and memory limit files that runtimes size themselves
+# from (DuckDB opens them on every connect and aborts when the open is denied). Exits 1
+# when a limit file exists but cannot be read, and 3 when the host exposes none of them.
+_READ_CGROUP_LIMITS = [
+    "/bin/sh",
+    "-c",
+    "found=0; "
+    "for f in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max "
+    "/sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/memory/memory.limit_in_bytes; do "
+    '[ -e "$f" ] || continue; found=1; cat "$f" >/dev/null || exit 1; '
+    "done; "
+    '[ "$found" = 1 ] || exit 3',
+]
+
+
+def test_default_policy_allows_reading_cgroup_limits(backend: OpenShellJobBackend) -> None:
+    step = _step()
+    _create_sandbox(backend, step, _READ_CGROUP_LIMITS)
+
+    update = _sync_until(backend, step, {HelixJobStatus.COMPLETED, HelixJobStatus.ERROR})
+
+    assert update.status == HelixJobStatus.COMPLETED, update.status_details
+
+
 # Fetches EGRESS_TEST_HOST over HTTPS; exits 0 only when the request goes through.
 _FETCH_EGRESS_HOST = [
     "/usr/local/bin/python3",
