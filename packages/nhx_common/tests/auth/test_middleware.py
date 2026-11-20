@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.auth import current_workload_delegation_id, workload_delegation_verifiable
 from nhx.common.auth.access_key_lifecycle import ACCESS_KEY_LIFECYCLE_CIRCUIT_FAILURE_THRESHOLD
 from nhx.common.auth.client import AuthClient, AuthorizationResult
 from nhx.common.auth.dependencies import get_auth_client
@@ -37,6 +38,9 @@ from nhx.common.config.base import (
     TokenSigningConfig,
 )
 from starlette.responses import Response
+
+# The claim the auth service's token exchange puts in a delegated token.
+_DELEGATION_CLAIM = {"nhx_service_attributes": {"auth": {"delegation_id": "workload_delegation-abc123"}}}
 
 
 @pytest.fixture(autouse=True)
@@ -1163,6 +1167,154 @@ class TestBearerTokenAuth:
             },
         }
         assert mock_authorize.call_args.kwargs["scopes"] == ["models:read"]
+
+    @staticmethod
+    def _workload_delegation_app(auth_config: AuthConfig) -> FastAPI:
+        """An app whose one route reports what the request's auth client says about workload delegations."""
+        app = FastAPI()
+
+        @app.get("/delegation")
+        async def delegation(auth_client: AuthClient = Depends(get_auth_client)):
+            return {
+                "id": auth_client.workload_delegation_id,
+                "verifiable": auth_client.workload_delegation_verifiable,
+            }
+
+        Configuration.set_override(auth_config)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+        return app
+
+    @staticmethod
+    def _get_with_bearer_token(app: FastAPI, resolved: ResolvedBearerToken, policy_result: object):
+        """GET /delegation with a bearer token the resolver accepts as ``resolved``."""
+        with (
+            patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
+            mock_authorize.return_value = policy_result
+            return TestClient(app, raise_server_exceptions=False).get(
+                "/delegation", headers={"Authorization": "Bearer some-token"}
+            )
+
+    @pytest.mark.parametrize(
+        "policy_result",
+        [
+            MagicMock(allowed=True),
+            # A real decision replaces the auth client's principal with a copy that carries account context.
+            AuthorizationResult(
+                allowed=True,
+                actor_account_id="account-job-runner",
+                actor_aliases=["system:serviceaccount:nemo-runs:job-runner"],
+                subject_account_id="account-creator",
+                subject_aliases=["creator@example.com"],
+            ),
+        ],
+        ids=["policy keeps the principal", "policy replaces the principal"],
+    )
+    def test_delegated_bearer_token_names_its_workload_delegation(self, auth_config_token_exchange, policy_result):
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="creator@example.com",
+                email="creator@example.com",
+                groups=["workspace-editors"],
+                scopes=[],
+                raw_claims={"exp": time.time() + 300, **_DELEGATION_CLAIM},
+                actor=ActorClaims(subject="system:serviceaccount:nemo-runs:job-runner", groups=[]),
+            ),
+            token_kind="workload_access_token",
+        )
+
+        response = self._get_with_bearer_token(
+            self._workload_delegation_app(auth_config_token_exchange), resolved, policy_result
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"id": "workload_delegation-abc123", "verifiable": True}
+
+    def test_delegated_bearer_token_without_the_claim_names_no_workload_delegation(self, auth_config_token_exchange):
+        # A service's token on behalf of a user: verified, unexpired and delegated, but not minted from a record.
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="creator@example.com",
+                email="creator@example.com",
+                groups=["workspace-editors"],
+                scopes=[],
+                raw_claims={"exp": time.time() + 300},
+                actor=ActorClaims(subject="service:jobs", groups=[]),
+            ),
+            token_kind="workload_access_token",
+        )
+
+        response = self._get_with_bearer_token(
+            self._workload_delegation_app(auth_config_token_exchange), resolved, MagicMock(allowed=True)
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"id": None, "verifiable": True}
+
+    def test_access_key_carrying_the_claim_names_no_workload_delegation(self, auth_config_token_exchange):
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="alice@example.com",
+                email="alice@example.com",
+                groups=[],
+                scopes=[],
+                raw_claims={"exp": time.time() + 300, **_DELEGATION_CLAIM},
+            ),
+            token_kind="access_key",
+        )
+
+        response = self._get_with_bearer_token(
+            self._workload_delegation_app(auth_config_token_exchange), resolved, MagicMock(allowed=True)
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"id": None, "verifiable": True}
+
+    def test_header_identified_request_cannot_verify_workload_delegations(self, auth_config_enabled):
+        app = self._workload_delegation_app(auth_config_enabled)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = TestClient(app, raise_server_exceptions=False).get(
+                "/delegation",
+                headers={
+                    "X-NHX-Principal-Id": "system:serviceaccount:nemo-runs:job-runner",
+                    "X-NHX-Principal-On-Behalf-Of": "creator@example.com",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"id": None, "verifiable": False}
+
+    def test_plugin_workload_delegation_accessors_work_as_route_dependencies(self, auth_config_token_exchange):
+        app = FastAPI()
+
+        @app.get("/delegation")
+        async def delegation(
+            delegation_id: str | None = Depends(current_workload_delegation_id),
+            verifiable: bool = Depends(workload_delegation_verifiable),
+        ):
+            return {"id": delegation_id, "verifiable": verifiable}
+
+        Configuration.set_override(auth_config_token_exchange)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(
+                subject="creator@example.com",
+                email="creator@example.com",
+                groups=[],
+                scopes=[],
+                raw_claims={"exp": time.time() + 300, **_DELEGATION_CLAIM},
+                actor=ActorClaims(subject="system:serviceaccount:nemo-runs:job-runner", groups=[]),
+            ),
+            token_kind="workload_access_token",
+        )
+
+        response = self._get_with_bearer_token(app, resolved, MagicMock(allowed=True))
+
+        assert response.status_code == 200
+        assert response.json() == {"id": "workload_delegation-abc123", "verifiable": True}
 
     def test_oidc_bearer_token_with_actor_uses_direct_auth_client_context(self, auth_config_enabled):
         app = FastAPI()

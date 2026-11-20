@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
-from nhx.common.auth import Principal
+from nhx.common.auth import AuthClient, Principal
 from nhx.common.auth.signing_keys import RSASigningKeyCache
 from nhx.common.auth.workload_delegations import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
@@ -28,6 +28,7 @@ from nhx.common.auth.workload_delegations import (
     kubernetes_pod_uid_delegation_name,
     reference_delegation_name,
 )
+from nhx.common.auth.workload_tokens import resolve_workload_access_token
 from nhx.common.config import AuthConfig, Configuration
 from nhx.common.config.base import AccessKeyConfig, OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 from nhx.common.entities import SYSTEM_WORKSPACE, EntityNotFoundError
@@ -1143,6 +1144,86 @@ def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_ro
         "sub": "system:serviceaccount:nemo-deployments:deployment-runner",
         "groups": "system:serviceaccounts",
     }
+
+
+def _delegation_id_a_service_reads(exchange_config: AuthConfig, access_token: str) -> str | None:
+    """The workload delegation ID a service's auth client reports for a request carrying ``access_token``.
+
+    The token is resolved as the auth middleware's workload resolver does it, and the ID is read from the auth
+    client built from the result. This is the reader that must agree with the exchange on where the ID is.
+    """
+    resolved = asyncio.run(resolve_workload_access_token(exchange_config, access_token))
+    assert resolved is not None
+    auth_client = AuthClient(principal=resolved.principal, config=exchange_config, resolved_bearer_token=resolved)
+    assert auth_client.workload_delegation_verifiable is True
+    return auth_client.workload_delegation_id
+
+
+def test_docker_delegated_access_token_names_its_delegation_to_services(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    entity_client: _FakeEntityClient,
+) -> None:
+    subject_token, token_hash = create_opaque_docker_proof_token(_docker_delegation_name())
+    delegation = _delegation_entity(opaque_subject_token_hash=token_hash, workload_kind="job")
+    entity_client.entities[delegation.name] = delegation
+
+    response = client.post(
+        "/token",
+        data=_exchange_form(subject_token, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE),
+    )
+
+    assert response.status_code == 200
+    assert delegation.id
+    assert _delegation_id_a_service_reads(exchange_config, response.json()["access_token"]) == delegation.id
+
+
+def test_kubernetes_delegated_access_token_names_its_delegation_to_services(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delegation = _reference_delegation_entity()
+    entity_client.entities[delegation.name] = delegation
+
+    async def decode_subject_token(
+        config: AuthConfig, subject_token: str, audience: str
+    ) -> exchange.DecodedSubjectToken:
+        return _decoded_subject_token(
+            {"sub": "system:serviceaccount:nemo-runs:job-runner", "groups": ["system:serviceaccounts"]},
+            bound_reference=_pod_uid_bound_reference(),
+        )
+
+    monkeypatch.setattr(exchange_service, "decode_subject_token", decode_subject_token)
+
+    response = client.post("/token", data=_exchange_form("kubernetes-token"))
+
+    assert response.status_code == 200
+    assert delegation.id
+    assert _delegation_id_a_service_reads(exchange_config, response.json()["access_token"]) == delegation.id
+
+
+def test_workload_only_access_token_names_no_delegation_to_services(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def decode_subject_token(
+        config: AuthConfig, subject_token: str, audience: str
+    ) -> exchange.DecodedSubjectToken:
+        return _decoded_subject_token(
+            {"sub": "system:serviceaccount:nemo-runs:job-runner", "groups": ["system:serviceaccounts"]}
+        )
+
+    monkeypatch.setattr(exchange_service, "decode_subject_token", decode_subject_token)
+
+    response = client.post("/token", data=_exchange_form("kubernetes-token"))
+
+    assert response.status_code == 200
+    assert _delegation_id_a_service_reads(exchange_config, response.json()["access_token"]) is None
 
 
 def test_kubernetes_reference_lookup_retries_missing_row_without_waiting(
