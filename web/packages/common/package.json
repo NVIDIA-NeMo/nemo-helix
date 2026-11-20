@@ -7,6 +7,7 @@
     "check": "pnpm concurrently --group -c 'red,blue,green' -n 'typecheck,test,lint:fix' \"pnpm typecheck\" \"pnpm test\" \"pnpm lint:fix\"",
     "check:ci": "pnpm concurrently --group -c 'red,blue' -n 'typecheck,test:ci' \"pnpm typecheck\" \"pnpm test:ci\"",
     "format": "prettier --check './**/*.{js,jsx,ts,tsx}'",
+    "gen:meta-schema-validator": "tsx scripts/generate-meta-schema-validator.ts",
     "format:fix": "prettier --write './**/*.{js,jsx,ts,tsx}'",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix --report-unused-disable-directives --max-warnings 0",

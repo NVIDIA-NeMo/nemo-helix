@@ -19,6 +19,8 @@ export default mergeConfig(
       globalSetup: '@nemo/testing/react/global-setup',
       coverage: {
         include: ['src/**/*.{js,jsx,ts,tsx}'],
+        // ajv-generated validator: not hand-written, not meaningfully coverable
+        exclude: ['src/utils/jsonSchema/generated/**'],
         provider: 'v8',
         reporter: ['text', 'html'],
         reportsDirectory: '.test-reports/coverage',
