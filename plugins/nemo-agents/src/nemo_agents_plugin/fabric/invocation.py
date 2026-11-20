@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir
+from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir, stage_one_shot_deepagents_skills
 from nemo_agents_plugin.fabric.progress import LocalProgressObserver
 from nemo_agents_plugin.fabric.progress import logger as progress_logger
 from nemo_agents_plugin.fabric.runtime import FabricOneShotRequest, FabricRuntimeResult, run_fabric_agent_once
@@ -89,12 +89,13 @@ def _local_environment_path(base_dir: Path, configured_path: str, *, field: str)
 
 async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
     """Translate a Platform agent config and run one input through Fabric once."""
-    fabric_config = translate_agent_config(request.agent_config, proxy_origin=request.proxy_origin)
-    await asyncio.to_thread(ensure_local_workspace_dir, request.agent_config, request.base_dir)
-    if request.agent_config.environment.provider == "local":
+    agent_config = await asyncio.to_thread(stage_one_shot_deepagents_skills, request.agent_config, request.base_dir)
+    fabric_config = translate_agent_config(agent_config, proxy_origin=request.proxy_origin)
+    await asyncio.to_thread(ensure_local_workspace_dir, agent_config, request.base_dir)
+    if agent_config.environment.provider == "local":
         artifacts_dir = _local_environment_path(
             request.base_dir,
-            request.agent_config.environment.artifacts,
+            agent_config.environment.artifacts,
             field="artifacts",
         )
         await asyncio.to_thread(artifacts_dir.mkdir, parents=True, exist_ok=True)
@@ -102,7 +103,7 @@ async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest
     observer_task: asyncio.Task[None] | None = None
     if request.observe_progress:
         try:
-            if request.agent_config.environment.provider != "local":
+            if agent_config.environment.provider != "local":
                 progress_logger.info("Live agent telemetry unavailable for a non-local environment.")
             else:
                 observer = LocalProgressObserver(fabric_config, request.base_dir.resolve(), artifacts_dir)

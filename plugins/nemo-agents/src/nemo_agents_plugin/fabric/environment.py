@@ -224,6 +224,41 @@ def _stage_deepagents_skills(config: AgentConfig, base_dir: Path, target: Path, 
         _copy_workspace_inputs(source, target / name, excluded, follow_symlinks=True)
 
 
+def stage_one_shot_deepagents_skills(agent_config: AgentConfig, base_dir: Path) -> AgentConfig:
+    """Copy configured skills into the job workspace and point DeepAgents at them.
+
+    A one-shot job keeps ``environment.workspace`` as the directory it collects.
+    DeepAgents reads skills through a virtual filesystem rooted there, so the
+    bundles have to live inside it. The serving path does the same copy into
+    each session workspace and then hands DeepAgents ``/.nemo-deepagents/skills``.
+    """
+    harness = agent_config.harnesses.get(agent_config.default_harness or "")
+    if (
+        harness is None
+        or not uses_default_deepagents_backend(harness)
+        or agent_config.environment.provider != "local"
+        or agent_config.skills is None
+        or not agent_config.skills.paths
+    ):
+        return agent_config
+
+    ensure_local_workspace_dir(agent_config, base_dir)
+    workspace = (base_dir / agent_config.environment.workspace).resolve()
+    target = workspace / DEEPAGENTS_SKILLS_DIR
+    if target.is_symlink():
+        raise ValueError("DeepAgents skill directory must not be a symlink.")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    _stage_deepagents_skills(
+        agent_config,
+        base_dir,
+        target,
+        _deepagents_workspace_exclusions(agent_config, base_dir, workspace),
+    )
+    return deepagents_workspace_config(agent_config, base_dir=base_dir, workspace_dir=workspace)
+
+
 def deepagents_workspace_config(config: AgentConfig, *, base_dir: Path, workspace_dir: Path) -> AgentConfig:
     """Derive a runtime config for a workspace populated from the DeepAgents baseline."""
     runtime_config = config.model_copy(deep=True)

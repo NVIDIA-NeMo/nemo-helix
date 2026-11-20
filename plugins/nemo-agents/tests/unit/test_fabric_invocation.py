@@ -71,6 +71,33 @@ async def test_invoke_agent_config_request_once_translates_and_runs_one_input(tm
 
 
 @pytest.mark.asyncio
+async def test_one_shot_deepagents_skills_are_staged_inside_the_workspace(tmp_path: Path) -> None:
+    skill = tmp_path / "skills" / "eval-author"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Eval Author\n")
+    config = _agent_config()
+    config["default_harness"] = "deepagents"
+    config["harnesses"] = {"deepagents": {"kind": "deepagents"}}
+    config["environment"] = {"workspace": "./workspace", "artifacts": "./artifacts"}
+    config["skills"] = {"paths": ["skills/eval-author"]}
+    captured: list[Any] = []
+
+    async def _run_fabric_agent_once(request: Any) -> FabricRuntimeResult:
+        captured.append(request)
+        return FabricRuntimeResult(status="succeeded")
+
+    agent_config = AgentConfig.model_validate(config)
+    with patch("nemo_agents_plugin.fabric.invocation.run_fabric_agent_once", _run_fabric_agent_once):
+        await invoke_agent_config_request_once(
+            AgentConfigInvocationRequest(agent_config=agent_config, input="one", base_dir=tmp_path)
+        )
+
+    staged = tmp_path / "workspace" / ".nemo-deepagents" / "skills" / "eval-author" / "SKILL.md"
+    assert staged.read_text() == "# Eval Author\n"
+    assert [str(path) for path in captured[0].fabric_config.skills.paths] == ["/.nemo-deepagents/skills"]
+
+
+@pytest.mark.asyncio
 async def test_invoke_agent_config_once_translates_and_runs_each_input(tmp_path: Path) -> None:
     captured: list[Any] = []
 
