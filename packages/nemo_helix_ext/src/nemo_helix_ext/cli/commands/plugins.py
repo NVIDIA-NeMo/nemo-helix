@@ -394,6 +394,16 @@ def list_plugin_endpoints(
     )
 
 
+_MAX_VALUE_CHARS = 100
+
+
+def _shorten(text: str) -> str:
+    """Keep one huge value (a base64 image, say) from burying a key/value view. -f json is unabridged."""
+    if len(text) <= _MAX_VALUE_CHARS:
+        return text
+    return f"{text[: _MAX_VALUE_CHARS - 1]}… ({len(text)} chars; use -f json for all of it)"
+
+
 def _render_call_result(
     payload: Any,
     output_format: str,
@@ -428,7 +438,7 @@ def _render_call_result(
     if isinstance(payload, dict) and payload:
         width = max(len(key) for key in payload)
         for key, value in payload.items():
-            typer.echo(f"{key.ljust(width)}  {value if isinstance(value, str) else json.dumps(value)}")
+            typer.echo(f"{key.ljust(width)}  {_shorten(value if isinstance(value, str) else json.dumps(value))}")
         return
     format_output(payload, is_list=False, output_format="json")
 

@@ -261,6 +261,20 @@ def test_call_shows_a_single_object_as_aligned_key_values() -> None:
     assert "message       No. 36 days to go." in result.output
 
 
+def test_call_truncates_a_huge_value_in_the_key_value_view_but_not_in_json() -> None:
+    picture = {"name": "Stefan", "data_url": "data:image/jpeg;base64," + "A" * 5000}
+    runner, state = make_runner(Recorder(httpx.Response(200, json=picture)))
+
+    shown = runner.invoke(app, ["plugins", "call", "is-it-christmas", "-f", "table"], obj=state)
+    assert shown.exit_code == 0, shown.output
+    assert "chars; use -f json" in shown.output
+    assert "A" * 500 not in shown.output
+
+    runner, state = make_runner(Recorder(httpx.Response(200, json=picture)))
+    raw = runner.invoke(app, ["plugins", "call", "is-it-christmas", "-f", "json"], obj=state)
+    assert json.loads(raw.stdout)["data_url"].endswith("A" * 5000)
+
+
 def test_call_shows_a_paged_list_as_a_table() -> None:
     page = {
         "data": [{"name": "support_agent.run", "status_code": "OK"}, {"name": "lookup_order", "status_code": "ERROR"}]
