@@ -7,11 +7,12 @@ The jobs-launcher now supports automatic secret injection from the NeMo Helix Se
 
 ## Configuration
 
-The feature uses three environment variables:
+The feature uses the following environment variables:
 
 1. **`NEMO_JOB_SECRETS`** (required) - A comma-separated list of secret references, e.g  `NEMO_JOB_SECRETS='ENV_VAR=workspace/secret_name,OTHER_ENV_VAR=workspace/other_secret_name'`
 2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
-3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
+3. **`NHX_PRINCIPAL`** - JSON containing the creator's auth context for trusted authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`. Bearer-authenticated launchers use their configured workload or access-token file instead.
+4. **`NHX_AUTH_URL`** (falls back to `NHX_BASE_URL`) - Platform auth endpoint used to verify anonymous secret injection. When no bearer credential or creator ID is present, `/apis/auth/discovery` must explicitly report `"auth_enabled": false`. Failed discovery or a missing auth-enabled flag is rejected; no synthetic creator or service identity is added.
 
 ## Usage Example
 
