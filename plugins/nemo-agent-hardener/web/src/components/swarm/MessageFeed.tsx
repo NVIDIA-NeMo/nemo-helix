@@ -6,7 +6,7 @@ import {
   type EventCategory,
   type SwarmEvent,
 } from '@agent-hardener/components/eventTypes';
-import { NODES, nodeForAgent, type NodeGroup } from '@agent-hardener/components/swarm/swarmModel';
+import { NODES, nodeForAgent, reconLabel, type NodeGroup } from '@agent-hardener/components/swarm/swarmModel';
 import { ACCENT } from '@agent-hardener/theme';
 import { Flex, Text } from '@nvidia/foundations-react-core';
 import { FC, useLayoutEffect, useMemo, useRef } from 'react';
@@ -113,7 +113,7 @@ const formatEvent = (evt: SwarmEvent): string => {
     case 'defender_summary':
       return `Defender summary (${Array.isArray(p.defenders) ? p.defenders.length : 0} defender(s))`;
     case 'synth_phase':
-      return str(p.label) ?? 'Recon step';
+      return reconLabel(p, str(p.phase) ?? 'Recon step');
     case 'interview_started':
       return 'Interview started';
     case 'interview_completed':

@@ -346,16 +346,25 @@ export interface ReconStep {
 
 // Fold `synth_phase` events into an ordered recon checklist. agent-hardener emits one event per completed recon
 // node, so every received step is done; the consumer shows a trailing "working" affordance while the job runs.
-// Deduped by phase, preserving first-seen order.
+// Deduped by phase, preserving first-seen order; a step that runs again (the profile is re-merged after the
+// interview) keeps its row and shows its latest result. The label carries what the step produced when the
+// event says (`detail`, e.g. "58 → 42 kept"), so a step that went wrong shows it as it happens.
 export const reconSteps = (events: SwarmEvent[]): ReconStep[] => {
   const byPhase = new Map<string, ReconStep>();
   for (const ev of events) {
     if (ev.event !== 'synth_phase') continue;
     const phase = asString(ev.payload.phase);
     if (!phase) continue;
-    byPhase.set(phase, { phase, label: asString(ev.payload.label) ?? phase });
+    byPhase.set(phase, { phase, label: reconLabel(ev.payload, phase) });
   }
   return [...byPhase.values()];
+};
+
+// "filtered and deduplicated requests — 58 → 42 kept", or the bare label when the step reports no detail.
+export const reconLabel = (payload: Record<string, unknown>, phase: string): string => {
+  const label = asString(payload.label) ?? phase;
+  const detail = asString(payload.detail);
+  return detail ? `${label} — ${detail}` : label;
 };
 
 // The current lifecycle stage the run is in, from the latest status/deploy event — a live "what's happening
