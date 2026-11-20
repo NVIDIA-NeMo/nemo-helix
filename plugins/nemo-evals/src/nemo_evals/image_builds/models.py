@@ -79,6 +79,27 @@ class BuildImage(BaseModel):
             "Builder didn't record it, as for an image it built before it started to."
         ),
     )
+    # The two below are left out of every dump when unset, so a build this cluster made is recorded as it always was.
+    external_image_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The build service's own handle for the image, once it's ready, when a remote build service built it and "
+            "has one. Left out otherwise. It is as the Builder row reported it: not checked against the build "
+            "service, and not necessarily unique to an image. Kept for a consumer that uses the same service; a run "
+            "doesn't read it."
+        ),
+    )
+    builder_backend: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The Builder backend that builds the image, such as `remote`, when it isn't the in-cluster one. Set only "
+            "once Builder has a row for the image (`builder_image` is set). Left out for an image this cluster "
+            "builds, for one Builder refused, whichever backend refused it, and on any record made before this field "
+            "existed."
+        ),
+    )
     error: str | None = None
 
 

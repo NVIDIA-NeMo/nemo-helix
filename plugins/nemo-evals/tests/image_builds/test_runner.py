@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import tarfile
 from collections.abc import Sequence
 from typing import Literal
@@ -14,7 +15,13 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.entities import (
+    IN_CLUSTER_BACKEND,
+    ContainerImage,
+    ExternalImage,
+    ImageRuntimeConfig,
+    Provenance,
+)
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
@@ -26,7 +33,12 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
     build_job_name,
 )
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
+from nemo_evals.image_builds.runner import (
+    TaskImageBuildSpec,
+    apply_builder_image,
+    read_task_archive,
+    run_task_image_build,
+)
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
@@ -41,9 +53,41 @@ _SEPARATE_VERIFIER = {"verifier": {"environment_mode": "separate"}}
 RUNTIME_CONFIG = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app")
 
 
+# What a remote build service calls an image it built: its own handle for the image, and its record of the build.
+REMOTE_BACKEND = "remote"
+HANDLE = "image-7f3a"
+REMOTE_IMAGE = ExternalImage(image_id=HANDLE, build_id="build-41")
+
+# Every key a build image was recorded with before it could carry a remote build service's handle, in order.
+BUILD_IMAGE_KEYS = [
+    "type",
+    "source",
+    "context_path",
+    "dockerfile",
+    "context_digest",
+    "image",
+    "platform",
+    "status",
+    "builder_image",
+    "build_job",
+    "image_ref",
+    "runtime_config",
+    "error",
+]
+
+
 def _container_image(
-    name: str, status: Literal["pending", "ready", "failed"] = "pending", *, detail: str | None = None
+    name: str,
+    status: Literal["pending", "ready", "failed"] = "pending",
+    *,
+    detail: str | None = None,
+    backend: str = IN_CLUSTER_BACKEND,
+    external: ExternalImage | None = None,
 ) -> ContainerImage:
+    """A Builder row. ``backend`` built it; ``external`` is what a remote build service calls the image.
+
+    Builder writes ``external`` when a row becomes ready. It is kept here at any status, to show when it is read.
+    """
     return ContainerImage(
         name=name,
         workspace="default",
@@ -53,17 +97,21 @@ def _container_image(
         repository=f"default/{name}",
         digest="sha256:" + "c" * 64 if status == "ready" else None,
         runtime_config=RUNTIME_CONFIG if status == "ready" else None,
+        external=external,
         provenance=Provenance(
             build_set=name.rsplit("-", 1)[0],
             revision=int(name.rsplit("-", 1)[1]),
             job=f"default/builder-{name}",
             request_digest="sha256:" + "a" * 64,
+            backend=backend,
         ),
     )
 
 
-def _submitted(name: str, revision: int) -> SubmitBuildResponse:
-    return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[_container_image(f"{name}-{revision}")])
+def _submitted(name: str, revision: int, *, backend: str = IN_CLUSTER_BACKEND) -> SubmitBuildResponse:
+    return SubmitBuildResponse(
+        job=f"builder-{name}-{revision}", images=[_container_image(f"{name}-{revision}", backend=backend)]
+    )
 
 
 class _Jobs:
@@ -75,7 +123,11 @@ class _Jobs:
 
 
 class _Builder:
-    """Builder whose images finish with ``outcomes[context_path]`` on the first read after submit."""
+    """Builder whose images finish with ``outcomes[context_path]`` on the first read after submit.
+
+    It builds in-cluster unless ``backend`` names another; ``external`` is then what its build service calls each
+    ready image.
+    """
 
     def __init__(
         self,
@@ -84,10 +136,14 @@ class _Builder:
         refuse: bool = False,
         job: str = "active",
         published: dict[str, list[str]] | None = None,
+        backend: str = IN_CLUSTER_BACKEND,
+        external: ExternalImage | None = None,
     ) -> None:
         self.outcomes = outcomes
         self.refuse = refuse
         self.job = job
+        self.backend = backend
+        self.external = external
         #: The platforms each prebuilt image is published for, by fully qualified reference.
         self.published = published or {}
         self.images: dict[str, str] = {}
@@ -100,7 +156,13 @@ class _Builder:
         if context is None:
             return None
         outcome = self.outcomes[context]
-        return _container_image(name, outcome, detail="kaniko exited 1" if outcome == "failed" else None)
+        return _container_image(
+            name,
+            outcome,
+            detail="kaniko exited 1" if outcome == "failed" else None,
+            backend=self.backend,
+            external=self.external,
+        )
 
     async def submit(
         self,
@@ -119,7 +181,7 @@ class _Builder:
         assert what is not None
         self.submits.append(source)
         self.images[f"{name}-{revision}"] = what
-        return _submitted(name, revision)
+        return _submitted(name, revision, backend=self.backend)
 
     async def job_status(self, job: str) -> str | None:
         return self.job
@@ -200,6 +262,134 @@ async def test_main_and_verifier_built_makes_the_build_ready(entity_store, store
     # How each image starts comes with it, so the task Job can restore its ENTRYPOINT.
     assert all(image.runtime_config == RUNTIME_CONFIG for image in build.images)
     assert await _stored_build(entity_store, spec) == build
+
+
+async def test_an_image_a_remote_build_service_built_records_its_handle_and_backend(
+    entity_store, store_task, archive
+) -> None:
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder(
+        {"sort-task/environment": "ready", "sort-task/tests": "ready"}, backend=REMOTE_BACKEND, external=REMOTE_IMAGE
+    )
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    assert [(image.external_image_id, image.builder_backend) for image in build.images] == [
+        (HANDLE, REMOTE_BACKEND),
+        (HANDLE, REMOTE_BACKEND),
+    ]
+    stored = await _stored_build(entity_store, spec)
+    assert stored == build
+    # What the entity store is sent holds both, beside the keys a build image always had.
+    for image in stored._get_data_fields()["images"]:
+        assert set(image) == {*BUILD_IMAGE_KEYS, "external_image_id", "builder_backend"}
+        assert (image["external_image_id"], image["builder_backend"]) == (HANDLE, REMOTE_BACKEND)
+
+
+async def test_a_ready_remote_image_without_a_handle_is_ready_with_none(entity_store, store_task, archive) -> None:
+    """A build service needn't have a handle of its own, so the backend is what says who built the image."""
+    spec = await _start(entity_store, store_task, config={})
+    builder = _Builder(
+        {"sort-task/environment": "ready"}, backend=REMOTE_BACKEND, external=ExternalImage(build_id="build-41")
+    )
+
+    build = await _run(entity_store, spec, builder)
+
+    [image] = build.images
+    assert (build.status, image.status, image.image_ref is not None) == ("ready", "ready", True)
+    assert (image.external_image_id, image.builder_backend) == (None, REMOTE_BACKEND)
+    [stored] = (await _stored_build(entity_store, spec))._get_data_fields()["images"]
+    assert set(stored) == {*BUILD_IMAGE_KEYS, "builder_backend"}
+
+
+async def test_an_image_built_in_cluster_is_recorded_key_for_key_as_before(entity_store, store_task, archive) -> None:
+    """A deployment that builds in-cluster must write the record it always wrote: an older reader refuses a new key."""
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    stored = await _stored_build(entity_store, spec)
+    for image, sent in zip(build.images, stored._get_data_fields()["images"], strict=True):
+        assert (image.external_image_id, image.builder_backend) == (None, None)
+        assert list(sent) == BUILD_IMAGE_KEYS
+        assert list(image.model_dump()) == BUILD_IMAGE_KEYS
+        assert list(image.model_dump(mode="json")) == BUILD_IMAGE_KEYS
+        assert list(json.loads(image.model_dump_json())) == BUILD_IMAGE_KEYS
+
+
+@pytest.mark.parametrize("status", ["pending", "failed", "ready"])
+def test_a_remote_image_names_its_backend_at_every_status_and_its_handle_only_once_ready(
+    status: Literal["pending", "ready", "failed"],
+) -> None:
+    """The backend is known at submit, so a build that is still running or has failed says who was building it.
+
+    The handle is the finished image's: a row that isn't ready records none, even when it carries one.
+    """
+    image = BuildImage(type="main", source="dockerfile")
+    row = _container_image("harbor-env-abc-1", status, backend=REMOTE_BACKEND, external=REMOTE_IMAGE)
+
+    apply_builder_image(image, row)
+
+    assert row.external == REMOTE_IMAGE
+    assert image.builder_backend == REMOTE_BACKEND
+    assert image.external_image_id == (HANDLE if status == "ready" else None)
+
+
+@pytest.mark.parametrize("status", ["pending", "failed", "ready"])
+def test_an_in_cluster_image_names_no_backend(status: Literal["pending", "ready", "failed"]) -> None:
+    """A row this cluster builds leaves the image as it was recorded before there was another backend to name."""
+    image = BuildImage(type="main", source="dockerfile")
+
+    apply_builder_image(image, _container_image("harbor-env-abc-1", status))
+
+    assert image.builder_backend is None
+    assert "builder_backend" not in image.model_dump()
+
+
+@pytest.mark.parametrize("backend", [IN_CLUSTER_BACKEND, REMOTE_BACKEND])
+async def test_an_image_builder_refused_names_no_backend_whichever_backend_refused_it(
+    entity_store, store_task, archive, backend: str
+) -> None:
+    """The backend is read from the image's Builder row, and Builder writes no row for a build it refuses.
+
+    So a missing backend doesn't by itself say this cluster built the image: such an image has no ``builder_image``.
+    """
+    spec = await _start(entity_store, store_task, config={})
+
+    build = await _run(entity_store, spec, _Builder({}, refuse=True, backend=backend))
+
+    [image] = build.images
+    assert (build.status, image.status, image.builder_image) == ("failed", "failed", None)
+    assert image.builder_backend is None
+    [stored] = (await _stored_build(entity_store, spec))._get_data_fields()["images"]
+    assert list(stored) == BUILD_IMAGE_KEYS
+
+
+def test_a_build_image_recorded_before_the_handle_existed_still_loads_and_is_saved_unchanged() -> None:
+    recorded = {
+        "type": "main",
+        "source": "dockerfile",
+        "context_path": "sort-task/environment",
+        "dockerfile": "Dockerfile",
+        "context_digest": "d" * 64,
+        "image": None,
+        "platform": None,
+        "status": "ready",
+        "builder_image": "harbor-env-abc-1",
+        "build_job": "builder-harbor-env-abc-1",
+        "image_ref": "registry.test/default/harbor-env-abc-1@sha256:" + "c" * 64,
+        "runtime_config": None,
+        "error": None,
+    }
+    assert list(recorded) == BUILD_IMAGE_KEYS
+
+    image = BuildImage.model_validate(recorded)
+
+    assert (image.external_image_id, image.builder_backend) == (None, None)
+    assert image.model_dump(mode="json") == recorded
 
 
 async def test_one_failed_image_fails_the_build_with_its_reason(entity_store, store_task, archive) -> None:

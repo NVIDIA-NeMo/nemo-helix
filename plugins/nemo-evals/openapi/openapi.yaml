@@ -4780,6 +4780,22 @@ components:
           description: How the image starts by default (its `ENTRYPOINT`, `CMD` and
             `WORKDIR`), once it's ready. None when Builder didn't record it, as for
             an image it built before it started to.
+        external_image_id:
+          title: External Image Id
+          description: 'The build service''s own handle for the image, once it''s
+            ready, when a remote build service built it and has one. Left out otherwise.
+            It is as the Builder row reported it: not checked against the build service,
+            and not necessarily unique to an image. Kept for a consumer that uses
+            the same service; a run doesn''t read it.'
+          type: string
+        builder_backend:
+          title: Builder Backend
+          description: The Builder backend that builds the image, such as `remote`,
+            when it isn't the in-cluster one. Set only once Builder has a row for
+            the image (`builder_image` is set). Left out for an image this cluster
+            builds, for one Builder refused, whichever backend refused it, and on
+            any record made before this field existed.
+          type: string
         error:
           title: Error
           type: string

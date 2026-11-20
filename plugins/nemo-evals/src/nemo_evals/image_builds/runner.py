@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -328,11 +328,18 @@ async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> boo
 
 
 def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> None:
-    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready."""
+    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready.
+
+    An image a remote build service builds also gets the backend that builds it and, once ready, the service's
+    handle for the image. A ready image may have no handle, so the backend is what says who built it.
+    """
+    backend = builder_image.provenance.backend
+    image.builder_backend = None if backend == IN_CLUSTER_BACKEND else backend
     if builder_image.status == "ready":
         image.status = "ready"
         image.image_ref = builder_image.image_ref
         image.runtime_config = builder_image.runtime_config
+        image.external_image_id = None if builder_image.external is None else builder_image.external.image_id
     elif builder_image.status == "failed":
         image.status = "failed"
         image.error = builder_image.status_detail or "the Builder build failed"

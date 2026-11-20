@@ -15,12 +15,20 @@ from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity
-from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
+from nemo_evals.image_builds.models import (
+    BuildImage,
+    ImageBuild,
+    ImageBuildRequest,
+    TaskImageBuildEntity,
+    build_entity_name,
+    build_job_name,
+)
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
+from nemo_helix_plugin.evals.types import TaskImageBuild
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 _BASE = "/v2/workspaces/default/tasks/sort-task/revisions"
@@ -91,6 +99,44 @@ def _set_status(entity_store, digest: str, attempt: int, status: str) -> None:
         await entity_store.update(build)
 
     asyncio.run(update())
+
+
+def _record_ready(entity_store, digest: str, image: BuildImage) -> None:
+    """Make build 1 ready with ``image``, as the task-builder Job does once Builder has built it."""
+
+    async def update() -> None:
+        head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+        build = await entity_store.get(
+            TaskImageBuildEntity, name=build_entity_name(digest, 1), workspace="default", parent=head.id
+        )
+        build.status, build.images = "ready", [image]
+        await entity_store.update(build)
+
+    asyncio.run(update())
+
+
+def _ready_image(*, external_image_id: str | None = None, builder_backend: str | None = None) -> BuildImage:
+    """A ready main image; the two arguments are what a remote build service's build adds to it."""
+    return BuildImage(
+        type="main",
+        source="dockerfile",
+        status="ready",
+        builder_image="harbor-env-abc-1",
+        build_job="builder-harbor-env-abc-1",
+        image_ref="registry.test/default/harbor-env-abc-1@sha256:" + "c" * 64,
+        external_image_id=external_image_id,
+        builder_backend=builder_backend,
+    )
+
+
+def _returned(client: TestClient, digest: str) -> list[dict]:
+    """Build 1's one image as each route returns it: get, list, and a repeated request."""
+    builds = [
+        client.get(f"{_BASE}/{digest}/image-builds/1").json(),
+        client.get(f"{_BASE}/{digest}/image-builds").json()["data"][0],
+        client.post(f"{_BASE}/{digest}/image-builds").json(),
+    ]
+    return [build["images"][0] for build in builds]
 
 
 def test_request_starts_a_build_and_its_job(client, store_task, jobs) -> None:
@@ -352,3 +398,50 @@ def test_the_request_schema_takes_every_spelling_the_route_does(platform: str) -
 
 def _string_pattern(schema: dict) -> str:
     return next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)
+
+
+def test_an_image_this_cluster_built_is_returned_key_for_key_as_before(client, store_task, entity_store) -> None:
+    """An older SDK or CLI refuses an image with a key it doesn't know, so an in-cluster build must gain none."""
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds")
+    _record_ready(entity_store, digest, _ready_image())
+
+    for image in _returned(client, digest):
+        assert list(image) == [
+            "type",
+            "source",
+            "context_path",
+            "dockerfile",
+            "context_digest",
+            "image",
+            "platform",
+            "status",
+            "builder_image",
+            "build_job",
+            "image_ref",
+            "runtime_config",
+            "error",
+        ]
+
+
+def test_an_image_a_remote_build_service_built_is_returned_with_its_handle_and_backend(
+    client, store_task, entity_store
+) -> None:
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds")
+    _record_ready(entity_store, digest, _ready_image(external_image_id="image-7f3a", builder_backend="remote"))
+
+    for image in _returned(client, digest):
+        assert (image["external_image_id"], image["builder_backend"]) == ("image-7f3a", "remote")
+    # The SDK reads a build as the typed client returns it.
+    returned = TaskImageBuild.model_validate(client.get(f"{_BASE}/{digest}/image-builds/1").json())
+    [parsed] = ImageBuild.model_validate(returned.model_dump(mode="json")).images
+    assert (parsed.external_image_id, parsed.builder_backend) == ("image-7f3a", "remote")
+
+
+def test_the_published_schema_names_the_handle_and_backend_without_requiring_them(client) -> None:
+    """Most images have neither, so a client validating against the schema must take a build without them."""
+    schema = client.app.openapi()["components"]["schemas"]["BuildImage"]
+
+    assert {"external_image_id", "builder_backend"} <= set(schema["properties"])
+    assert not {"external_image_id", "builder_backend"} & set(schema.get("required", []))
