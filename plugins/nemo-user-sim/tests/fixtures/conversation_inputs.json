@@ -96,11 +96,8 @@
   "persona_column": "persona",
   "probe_type_column": "probe_type",
   "theme_column": "theme",
-  "tools_column": null,
-  "toolset_name_column": null,
   "locale": "en_US",
   "assets_dir": "/Users/ykagal/Documents/GitHub/usersim-fabric-spike/.venv-latest/lib/python3.12/site-packages/usersim/engine/assets",
-  "max_tools": 5,
   "max_turns": 5,
   "max_steps": 10,
   "max_query_attempts": 3,
@@ -115,10 +112,6 @@
   "store_reasoning": true,
   "replay_assistant_reasoning": false,
   "verbosity": 1,
-  "finance_tier_mix": 0.0,
-  "finance_tier": null,
-  "finance_retrieval_mode": "hybrid",
-  "finance_embedding_model_alias": "embedding_model",
   "random_seed": 7
  }
 }

@@ -40,7 +40,7 @@ from nemo_user_sim_plugin.types.endpoints import Job, JobCollection, JobRequest,
 from rich.console import Console
 from rich.table import Table
 from typer import prompt
-from usersim.engine.evaluator.scorers.safety_agentic import BOUNDARY_HELD_AXIS as BOUNDARY_HELD
+from usersim.engine.probes.safety_agentic.scorer import BOUNDARY_HELD_AXIS as BOUNDARY_HELD
 
 FINISHED = {"completed", "error", "cancelled"}
 ERROR_LABELS = {"agent_error": "agent error", "simulator_error": "simulation failed", "step_limit": "ran too long"}

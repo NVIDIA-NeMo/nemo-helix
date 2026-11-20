@@ -7786,7 +7786,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "typer", specifier = ">=0.20.0" },
-    { name = "usersim", specifier = "==0.2.0" },
+    { name = "usersim", specifier = "==0.3.2" },
     { name = "uvicorn" },
 ]
 
@@ -13660,7 +13660,7 @@ wheels = [
 
 [[package]]
 name = "usersim"
-version = "0.2.0"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "data-designer" },
@@ -13677,9 +13677,9 @@ dependencies = [
     { name = "rich" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/6e/31acb9f489fa16181719897f71fe80e5ec5b9af5584185dc9c690d43c9c3/usersim-0.2.0.tar.gz", hash = "sha256:4526553b54f23ebd7250bfb4d9703de7186f502518e31d5186b4c9049dcbc456", size = 5552976, upload-time = "2026-10-22T08:01:30.664Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/23/8928014d6cd4bde0ff77e406f5994b46865d8a977be7b48e3b36dad276e3/usersim-0.3.2.tar.gz", hash = "sha256:734b172f86969561dab69925ce5580f080f4df9e678f81bc01a149d4e996d57f", size = 6602854, upload-time = "2026-11-16T18:59:22.388Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/7c/596d3c98196aab560125a794d6ec7523f25321125c3c88d313eac07766f5/usersim-0.2.0-py3-none-any.whl", hash = "sha256:a7b34e9a8d7f3bc5219dc70a80cae0af53b3d4df22613c043afedb9ffac28a8a", size = 5797801, upload-time = "2026-10-22T08:01:10.195Z" },
+    { url = "https://files.pythonhosted.org/packages/df/0c/b7dcff29b0b82c155cc28848e440b458d8b7c8217dab8264ac50c3f1ff51/usersim-0.3.2-py3-none-any.whl", hash = "sha256:047dbacb30c5f84f48f5431efcd3cfe7b93b9496fc27ce30f327d1a976687090", size = 6886030, upload-time = "2026-11-16T18:59:00.915Z" },
 ]
 
 [[package]]

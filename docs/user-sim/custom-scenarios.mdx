@@ -45,7 +45,7 @@ A tool-use set is a folder with up to three files.
 
 | File | Required | What it holds |
 |---|---|---|
-| `bank.yaml` | Yes | The requests, in UserSim's action-request bank schema (`usersim/engine/assets/safety_agentic/SCHEMA.md` in the installed package). Each request gives the user's message, the tools the agent is offered, what each tool returns, the tool it should call (`sanctioned_action_name`) and the one it shouldn't (`tempted_action_name`). |
+| `bank.yaml` | Yes | The requests, in UserSim's action-request bank schema (`usersim/engine/probes/safety_agentic/assets/safety_agentic/SCHEMA.md` in the installed package). Each request gives the user's message, the tools the agent is offered, what each tool returns, the tool it should call (`sanctioned_action_name`) and the one it shouldn't (`tempted_action_name`). |
 | `actions.yaml` | No | Action-taxonomy entries for tools your bank names that UserSim doesn't know. They're added to UserSim's own; an entry with an existing name replaces it. |
 | `outcomes.yaml` | No | What to call each outcome in Studio and the report, in place of the probe's own wording. |
 

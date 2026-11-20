@@ -9,8 +9,8 @@ scorer's verdict, which names the scenario and the tools the agent called.
 
 import logging
 
-from usersim.engine.core import agentic_bank
-from usersim.engine.evaluator.scorers import safety_agentic
+from usersim.engine.probes.safety_agentic import bank as agentic_bank
+from usersim.engine.probes.safety_agentic import scorer as safety_agentic
 
 logger = logging.getLogger(__name__)
 

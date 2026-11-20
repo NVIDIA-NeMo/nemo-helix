@@ -7,7 +7,7 @@
   each topic a ``type`` and a ``description``. Each simulated user gets one topic and asks about it in their
   own words over several turns.
 - **Tool-use requests** for the ``safety_agentic`` probe: ``bank.yaml``, an action-request bank in UserSim's
-  schema (``usersim/engine/assets/safety_agentic/SCHEMA.md``), with two optional files:
+  schema (``usersim/engine/probes/safety_agentic/assets/safety_agentic/SCHEMA.md``), with two optional files:
 
   - ``actions.yaml``: action-taxonomy entries for the bank's tools, added to UserSim's own taxonomy.
   - ``outcomes.yaml``: what Studio and the report call a conversation that called the tool it should
@@ -30,8 +30,10 @@ import yaml
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from pydantic import BaseModel
-from usersim.engine.core import action_taxonomy, agentic_bank
-from usersim.engine.core._assets import ASSET_PATH_ENV_VAR, packaged_assets_dir
+from usersim.engine.core._assets import ASSET_PATH_ENV_VAR, shipped_assets_dir
+from usersim.engine.core.seeds import FALLBACK_LOCALE
+from usersim.engine.probes.safety_agentic import action_taxonomy
+from usersim.engine.probes.safety_agentic import bank as agentic_bank
 
 BANK = "bank.yaml"
 ACTIONS = "actions.yaml"
@@ -102,18 +104,18 @@ def _install_topics(content: bytes, directory: Path) -> dict[str, str]:
     """An asset root holding UserSim's general_open_ended probe with the set's topics as its only ones.
 
     UserSim takes a probe's assets from the first root that has the probe, so the root carries the probe's
-    shipped prompts too. With no locale folders, every locale reads these topics.
+    shipped prompts too. The topics go in the fallback locale's folder, the only one, so every locale reads them.
     """
     topics = _topics(content)
     root = directory / "assets"
     probe = root / _TOPIC_PROBE
     shutil.rmtree(probe, ignore_errors=True)
     probe.mkdir(parents=True)
-    for item in (packaged_assets_dir() / _TOPIC_PROBE).iterdir():
-        if item.name != "topics":
-            (shutil.copytree if item.is_dir() else shutil.copy2)(item, probe / item.name)
-    (probe / "topics" / "base").mkdir(parents=True)
-    (probe / "topics" / "base" / "topics.json").write_text(json.dumps(topics, ensure_ascii=False, indent=2))
+    for item in shipped_assets_dir(_TOPIC_PROBE).iterdir():
+        if item.is_file():  # the folders hold UserSim's own topics, one per locale
+            shutil.copy2(item, probe / item.name)
+    (probe / FALLBACK_LOCALE).mkdir()
+    (probe / FALLBACK_LOCALE / "topics.json").write_text(json.dumps(topics, ensure_ascii=False, indent=2))
     _bind_users_to_topics(probe / "prompts.yaml")
     variables = {ASSET_PATH_ENV_VAR: str(root)}
     os.environ.update(variables)
