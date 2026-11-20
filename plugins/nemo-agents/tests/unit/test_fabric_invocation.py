@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.fabric.environment import stage_one_shot_deepagents_skills
 from nemo_agents_plugin.fabric.invocation import (
     AgentConfigInvocationRequest,
     FabricDirectories,
@@ -68,6 +69,105 @@ async def test_invoke_agent_config_request_once_translates_and_runs_one_input(tm
     assert request.caller_context == {"source": "job"}
     assert request.timeout_seconds == 12
     assert request.fabric_config.metadata.name == "fabric-agent"
+
+
+@pytest.mark.asyncio
+async def test_one_shot_deepagents_skills_are_staged_inside_the_workspace(tmp_path: Path) -> None:
+    skill = tmp_path / "skills" / "eval-author"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Eval Author\n")
+    config = _agent_config()
+    config["default_harness"] = "deepagents"
+    config["harnesses"] = {"deepagents": {"kind": "deepagents"}}
+    config["environment"] = {"workspace": "./workspace", "artifacts": "./artifacts"}
+    config["skills"] = {"paths": ["skills/eval-author"]}
+    captured: list[Any] = []
+
+    seen: list[str] = []
+
+    async def _run_fabric_agent_once(request: Any) -> FabricRuntimeResult:
+        captured.append(request)
+        staged = tmp_path / "workspace" / ".nemo-deepagents" / "skills" / "eval-author" / "SKILL.md"
+        seen.append(staged.read_text())
+        return FabricRuntimeResult(status="succeeded")
+
+    agent_config = AgentConfig.model_validate(config)
+    with patch("nemo_agents_plugin.fabric.invocation.run_fabric_agent_once", _run_fabric_agent_once):
+        await invoke_agent_config_request_once(
+            AgentConfigInvocationRequest(agent_config=agent_config, input="one", base_dir=tmp_path)
+        )
+
+    assert seen == ["# Eval Author\n"]
+    assert not (tmp_path / "workspace" / ".nemo-deepagents" / "skills").exists()
+    assert [str(path) for path in captured[0].fabric_config.skills.paths] == ["/.nemo-deepagents/skills"]
+    assert agent_config.skills is not None
+    assert agent_config.skills.paths == ["skills/eval-author"]
+
+
+def _deepagents_config(**environment: str) -> AgentConfig:
+    config = _agent_config()
+    config["default_harness"] = "deepagents"
+    config["harnesses"] = {"deepagents": {"kind": "deepagents", "settings": {"deepagents": {}}}}
+    config["environment"] = {"workspace": "./workspace", "artifacts": "./artifacts", **environment}
+    return AgentConfig.model_validate(config)
+
+
+def test_virtual_skill_paths_stay_inside_the_workspace(tmp_path: Path) -> None:
+    skill = tmp_path / "workspace" / ".agents" / "skills" / "prompt-master"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Prompt Master\n")
+    config = _deepagents_config()
+    config.skills = (
+        type(config).model_validate({**config.model_dump(), "skills": {"paths": ["/.agents/skills"]}}).skills
+    )
+    staged = stage_one_shot_deepagents_skills(config, tmp_path)
+    assert staged.skills is not None
+    assert staged.skills.paths == ["/.agents/skills"]
+    assert not (tmp_path / "workspace" / ".nemo-deepagents").exists()
+
+
+def test_a_missing_virtual_skill_path_does_not_read_the_host(tmp_path: Path) -> None:
+    config = _deepagents_config()
+    config.skills = AgentConfig.model_validate({**config.model_dump(), "skills": {"paths": ["/.agents/skills"]}}).skills
+    with pytest.raises(ValueError, match="job workspace"):
+        stage_one_shot_deepagents_skills(config, tmp_path)
+
+
+def test_a_non_local_provider_is_not_staged(tmp_path: Path) -> None:
+    config = _deepagents_config(provider="remote")
+    config.skills = AgentConfig.model_validate(
+        {**config.model_dump(), "skills": {"paths": ["skills/eval-author"]}}
+    ).skills
+    assert stage_one_shot_deepagents_skills(config, tmp_path) is config
+
+
+def test_a_symlinked_skills_directory_is_refused(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / ".nemo-deepagents").symlink_to(outside, target_is_directory=True)
+    config = _deepagents_config()
+    config.skills = AgentConfig.model_validate(
+        {**config.model_dump(), "skills": {"paths": ["skills/eval-author"]}}
+    ).skills
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        stage_one_shot_deepagents_skills(config, tmp_path)
+    assert outside.exists()
+
+
+def test_a_second_stage_replaces_the_skills_directory(tmp_path: Path) -> None:
+    skill = tmp_path / "skills" / "eval-author"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("first\n")
+    config = _deepagents_config()
+    config.skills = AgentConfig.model_validate(
+        {**config.model_dump(), "skills": {"paths": ["skills/eval-author"]}}
+    ).skills
+    stage_one_shot_deepagents_skills(config, tmp_path)
+    (skill / "SKILL.md").write_text("second\n")
+    stage_one_shot_deepagents_skills(config, tmp_path)
+    staged = tmp_path / "workspace" / ".nemo-deepagents" / "skills" / "eval-author" / "SKILL.md"
+    assert staged.read_text() == "second\n"
 
 
 @pytest.mark.asyncio
