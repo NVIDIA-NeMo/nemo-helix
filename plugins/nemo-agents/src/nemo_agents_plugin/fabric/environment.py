@@ -243,11 +243,26 @@ def stage_one_shot_deepagents_skills(agent_config: AgentConfig, base_dir: Path) 
         return agent_config
 
     ensure_local_workspace_dir(agent_config, base_dir)
-    workspace = (base_dir / agent_config.environment.workspace).resolve()
+    workspace_path = base_dir / agent_config.environment.workspace
+    if workspace_path.is_symlink():
+        raise ValueError("DeepAgents skill directory must not be a symlink.")
+    workspace = workspace_path.resolve()
+    if all(Path(path).expanduser().is_absolute() for path in agent_config.skills.paths):
+        # Prompt Master and similar agents already store skills at a virtual path
+        # such as /.agents/skills. Joining that onto the host would read the host root.
+        for configured_path in agent_config.skills.paths:
+            virtual = workspace.joinpath(*Path(configured_path).expanduser().parts[1:])
+            if not virtual.is_dir():
+                raise ValueError(
+                    f"Skill path {configured_path!r} is read inside the job workspace, and {virtual} is not a directory."
+                )
+        return agent_config
+
     target = workspace / DEEPAGENTS_SKILLS_DIR
-    if target.is_symlink():
+    if any(path.is_symlink() for path in (target.parent, target)):
         raise ValueError("DeepAgents skill directory must not be a symlink.")
     if target.exists():
+        logger.info("Replacing the DeepAgents skills directory at %s.", target)
         shutil.rmtree(target)
     target.mkdir(parents=True)
     _stage_deepagents_skills(

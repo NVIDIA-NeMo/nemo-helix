@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir, stage_one_shot_deepagents_skills
+from nemo_agents_plugin.fabric.environment import (
+    DEEPAGENTS_SKILLS_DIR,
+    ensure_local_workspace_dir,
+    stage_one_shot_deepagents_skills,
+)
 from nemo_agents_plugin.fabric.progress import LocalProgressObserver
 from nemo_agents_plugin.fabric.progress import logger as progress_logger
 from nemo_agents_plugin.fabric.runtime import FabricOneShotRequest, FabricRuntimeResult, run_fabric_agent_once
@@ -87,9 +91,21 @@ def _local_environment_path(base_dir: Path, configured_path: str, *, field: str)
     return resolved
 
 
+def _remove_staged_skills(agent_config: AgentConfig, base_dir: Path) -> None:
+    """Drop the copied skill tree before the job saves the workspace."""
+    if agent_config.environment.provider != "local":
+        return
+    target = base_dir / agent_config.environment.workspace / DEEPAGENTS_SKILLS_DIR
+    if target.is_symlink() or target.parent.is_symlink() or not target.is_dir():
+        return
+    shutil.rmtree(target)
+
+
 async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
     """Translate a Platform agent config and run one input through Fabric once."""
+    configured_paths = list(request.agent_config.skills.paths) if request.agent_config.skills is not None else []
     agent_config = await asyncio.to_thread(stage_one_shot_deepagents_skills, request.agent_config, request.base_dir)
+    staged_skills = agent_config.skills is not None and list(agent_config.skills.paths) != configured_paths
     fabric_config = translate_agent_config(agent_config, proxy_origin=request.proxy_origin)
     await asyncio.to_thread(ensure_local_workspace_dir, agent_config, request.base_dir)
     if agent_config.environment.provider == "local":
@@ -126,6 +142,8 @@ async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest
             observer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await observer_task
+        if staged_skills:
+            await asyncio.to_thread(_remove_staged_skills, agent_config, request.base_dir)
 
 
 async def invoke_agent_config_once(
