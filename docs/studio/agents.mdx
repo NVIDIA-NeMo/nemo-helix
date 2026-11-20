@@ -67,21 +67,23 @@ The agent details page has the following tabs:
 
 ### Inspect MCP Servers
 
-The **MCP Servers** section of the **Chat** tab shows whether the MCP servers declared in the agent's configuration actually started, and which tools they serve. It reports on the deployment selected in the Chat header. Select a different deployment there to inspect it.
+The **MCP Servers** section of the **Chat** tab checks the MCP servers declared in the agent's configuration and shows which tools they serve. It reports on the deployment selected in the Chat header. Select a different deployment there to inspect it.
 
-Each server is listed with an **MCP** badge, its name, its transport, and, once it's running, its tool count. The status badge shows the server's launch state:
+The deployment checks each server with a status probe: it launches stdio servers in a separate, short-lived process, or connects to HTTP and SSE servers at their URL, and lists their tools. The agent itself starts its servers lazily on a chat turn, so the probe result doesn't confirm that the agent has launched a server.
 
-| Badge               | Meaning                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Running**         | The server started. Its tools are listed below it.                                                                              |
-| **Not started**     | The selected deployment isn't running. Studio lists the declared servers but can't check them; they start when the deployment runs. |
-| **Not on PATH**     | The server's launch command wasn't found in the deployment's runtime.                                                           |
-| **Failed to start** | The server's command was found but the server didn't start. Studio shows the command, the error, and any captured stderr.        |
-| **Unknown**         | The runtime reported a state Studio doesn't recognize.                                                                          |
+Each server is listed with an **MCP** badge, its name, its transport, and, after a successful probe, its tool count. The status badge shows the probe result:
+
+| Badge               | Meaning                                                                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Running**         | The probe started or connected to the server and listed its tools. The tools are listed below it.                                                                                                                          |
+| **Not started**     | The selected deployment isn't running. Studio lists the declared servers but can't probe them.                                                                                                                              |
+| **Not on PATH**     | The stdio server's launch command wasn't found in the deployment's runtime.                                                                                                                                                 |
+| **Failed to start** | The probe couldn't launch or connect to the server, or the server didn't list its tools before the probe timed out. A remote HTTP or SSE server may still be running. Studio shows the command or URL, the error, and any captured stderr. |
+| **Unknown**         | The runtime reported a state Studio doesn't recognize.                                                                                                                                                                      |
 
 A tool marked **Blocked** is served by the MCP server but excluded from what the agent exposes, so the agent can't call it.
 
-A server listed in the agent's configuration hasn't necessarily started. Only **Running** confirms that the deployment launched the server. If the section says **This deployment's runtime doesn't report MCP status**, the deployment uses an older runtime; redeploy the agent to pick up a runtime that reports it. If the agent declares no servers, the section says **This agent declares no MCP servers**.
+If the section says **This deployment's runtime doesn't report MCP status**, the deployment uses an older runtime; redeploy the agent to pick up a runtime that reports it. If the agent declares no servers, the section says **This agent declares no MCP servers**.
 
 ## Evaluate an Agent
 
