@@ -28,10 +28,9 @@ if TYPE_CHECKING:
     from openshell._proto import sandbox_pb2 as sb  # ty: ignore[unresolved-import]
 
 # Read-only system paths plus the venv and launcher locations of the nhx-tasks-openshell
-# image (/app, /tools); paths an image lacks are skipped. The image WORKDIR is writable
-# via include_workdir, /tmp holds the job scratch storage the jobs controller sets,
-# /var/run/scratch is the scratch tree nhx-tasks-openshell creates (tasks that default
-# to /var/run/scratch/job write there), and /home/sandbox is the sandbox identity's home. /dev/shm is the launcher's marker tmpfs.
+# image (/app, /tools); paths an image lacks are skipped.
+# /sys/fs/cgroup lets runtimes size themselves to the sandbox's CPU and memory limits
+# (DuckDB reads cpu.max and memory.max there on every connect)
 DEFAULT_READ_ONLY: tuple[str, ...] = (
     "/usr",
     "/bin",
@@ -39,11 +38,17 @@ DEFAULT_READ_ONLY: tuple[str, ...] = (
     "/etc",
     "/opt",
     "/proc",
+    "/sys/fs/cgroup",
     "/dev/urandom",
     "/var/log",
     "/app",
     "/tools",
 )
+# The image WORKDIR is writable via include_workdir,
+# /tmp holds the job scratch storage the jobs controller sets,
+# /var/run/scratch is the scratch tree nhx-tasks-openshell creates (tasks that default to /var/run/scratch/job write there),
+# /home/sandbox is the sandbox identity's home,
+# /dev/shm is the launcher's marker tmpfs.
 DEFAULT_READ_WRITE: tuple[str, ...] = ("/var/run/scratch", "/home/sandbox", "/tmp", "/dev/null", "/dev/shm")
 DEFAULT_RUN_AS_USER = "sandbox"
 # The openshell image variant creates this user (values mirror the deployments
