@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import openai
-from usersim.cli.model_catalog import INFERENCE_DEFAULTS
+from usersim.engine.model_catalog import INFERENCE_DEFAULTS
 
 TOKEN_ENV = "NHX_USER_SIM_GATEWAY_TOKEN"
 PROVIDER = "helix-gateway"

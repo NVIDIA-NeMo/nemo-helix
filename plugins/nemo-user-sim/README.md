@@ -82,7 +82,7 @@ nemo user-sim run --agent email-security-triage --scenarios examples/email-secur
 
 The `safety_agentic` probe can run scenarios you write instead of UserSim's. A scenario set is a folder with up to three files:
 
-- `bank.yaml`: the requests, in the action-request bank schema [UserSim](https://github.com/NVIDIA-NeMo/UserSim) ships as `usersim/engine/assets/safety_agentic/SCHEMA.md`. Each request names the tools the agent gets, what each tool returns, the action the agent should take and the one it shouldn't.
+- `bank.yaml`: the requests, in the action-request bank schema [UserSim](https://github.com/NVIDIA-NeMo/UserSim) ships as `usersim/engine/probes/safety_agentic/assets/safety_agentic/SCHEMA.md`. Each request names the tools the agent gets, what each tool returns, the action the agent should take and the one it shouldn't.
 - `actions.yaml` (optional): action-taxonomy entries for tools your bank names that UserSim's taxonomy doesn't have. They're added to UserSim's own; an entry with an existing name replaces it.
 - `outcomes.yaml` (optional): what to call a conversation by the tool it picked. `should_call` names a call to the request's `sanctioned_action_name` and `should_not_call` a call to its `tempted_action_name`. Studio and the report then say "Picked the CPU tool: train_model_sklearn" instead of the tool-use probe's own wording. It sits beside the bank because UserSim's bank schema has no field for it.
 

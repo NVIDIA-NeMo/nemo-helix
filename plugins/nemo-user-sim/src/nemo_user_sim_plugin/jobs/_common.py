@@ -21,7 +21,7 @@ from nemo_helix_plugin.models.client import ModelsClient
 from nemo_user_sim_plugin.config import UserSimConfig
 from nemo_user_sim_plugin.gateway import export_token, write_models_file
 from nemo_user_sim_plugin.personas import MANAGED_ASSETS_ENV, managed_assets_path
-from usersim.engine.evaluator.scorers import safety_agentic
+from usersim.engine.probes.safety_agentic import scorer as safety_agentic
 from usersim.selection.profiles import GENEROUS, STRICT
 
 TRAJECTORIES = "trajectories.parquet"
