@@ -35,6 +35,27 @@ func NewSessionWithHTTPClient(client *http.Client) *Session {
 
 func (s *Session) BearerMode() bool { return s.workloadFile != "" || s.accessFile != "" }
 
+// ValidateSecretPrincipal permits an anonymous creator only when the platform
+// explicitly advertises auth-disabled operation. Missing credentials must not
+// silently downgrade an authenticated deployment to anonymous Secret access.
+func (s *Session) ValidateSecretPrincipal(ctx context.Context, principal *Principal) error {
+	if s.BearerMode() || (principal != nil && principal.ID != "") {
+		return nil
+	}
+	endpoint, err := ResolveServiceEndpointFromEnv("auth")
+	if err != nil {
+		return fmt.Errorf("resolve auth endpoint for anonymous Secret injection: %w", err)
+	}
+	discovery, err := discoverAuthConfigWithClient(ctx, endpoint.ConnectBaseURL, s.clientForEndpoint(endpoint))
+	if err != nil {
+		return fmt.Errorf("verify auth-disabled Secret injection: %w", err)
+	}
+	if discovery.AuthEnabled == nil || *discovery.AuthEnabled {
+		return fmt.Errorf("NHX_PRINCIPAL with a creator is required for trusted Secret injection unless auth discovery explicitly disables authentication")
+	}
+	return nil
+}
+
 func safeHTTPClient(client *http.Client) *http.Client {
 	if client == nil {
 		client = http.DefaultClient

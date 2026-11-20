@@ -31,7 +31,8 @@ const (
 )
 
 type authDiscoveryResponse struct {
-	OIDC authDiscoveryOIDC `json:"oidc"`
+	AuthEnabled *bool             `json:"auth_enabled"`
+	OIDC        authDiscoveryOIDC `json:"oidc"`
 }
 
 type authDiscoveryOIDC struct {
