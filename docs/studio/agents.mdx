@@ -61,22 +61,28 @@ Agent evaluations are not a separate item under the **Agents** navigation parent
 2. Select an agent.
 3. Select the **Evaluations** tab.
 
-Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** wizard. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The wizard has these steps:
+Select **Run Evaluation** in the page header to open the **Run Agent Evaluation** wizard. The button is available whenever the agent has a stored configuration; the agent doesn't need a running deployment. The wizard has two steps:
 
-1. **Begin**: Choose **Re-run an existing evaluation** or **Create a new experiment**. Re-running reuses the eval config from a previous run, adds the new run to that run's experiment, and skips directly to **Run Evaluation**.
-2. **Create experiment**: Enter a **Name** for the new experiment and, optionally, its description and default sort order.
-3. **Configuration**: Select a dataset file from a fileset or upload one; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files. When the selected Parquet file shares its folder with other Parquet files, **Use All N Parquet Files** reads them as one dataset through a `<folder>/*.parquet` pattern. Then choose how to provide the eval config:
+1. **Configuration**: Select a dataset file from a fileset or upload one; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files. When the selected Parquet file shares its folder with other Parquet files, **Use All N Parquet Files** reads them as one dataset through a `<folder>/*.parquet` pattern. Then choose how to provide the eval config:
    - **Build with Form**: Under **Agent Prompt**, select the dataset fields to send to the agent. Each field is added to the prompt under its name, in the order you select it; leave out fields the agent shouldn't see, such as expected answers. Select the pencil icon to view or edit the prompt itself. After you edit it, the checkboxes show which fields the prompt reads, and **Reset** discards the edit. Then set up the LLM-as-a-Judge metric: select a **Judge Model**, select the fields the **Judge Prompt** compares the response against (the agent's response is always included), and define the scores the judge returns.
    - **Choose from Fileset** or **Upload**: Pick a JSON or YAML eval config from a fileset, or upload one from your computer. Model evaluation configs work too. The wizard lists the config's metrics, lets you override its judge models, and blocks a config that reads fields the dataset doesn't have.
 
-   Either way, the run targets this agent. Set **Parallel Requests** at the bottom of the step.
-4. **Run Evaluation**: Enter an **Evaluation Name**. When re-running, select the evaluation to base the run on, enter a **New Evaluation Name**, and set **Parallel Requests**.
+   Either way, the run targets this agent.
+2. **Run**: Everything on this step is optional except **Parallel Requests**.
+   - **Experiment**: Link the run to an existing experiment. When you leave it empty, the run is kept in the agent's default `<agent>-runs` experiment and shows as **Not linked** until you link it.
+   - **Evaluation Name**: Name the run. When you leave it empty, a name is generated from the agent's name.
+   - **Parallel Requests**: Set how many dataset rows are sent to the agent at once.
 
-The run saves its eval config as `eval-config.json` (or `.yaml`) in the `<experiment>-data` fileset, where **Choose from Fileset** can find it later.
+The run saves its eval config as `eval-config.json` (or `.yaml`) in the `<evaluation>-data` fileset, where **Choose from Fileset** can find it later.
 
-The dataset is read where it lives, not copied, so a re-run reads the file as it is now. The run records each dataset file's name and size, and a re-run compares them: if the files are gone, the wizard blocks the re-run, and if any file was added, removed, or changed size, it warns that scores may not compare. An edit that keeps every file the same size isn't detected.
+The dataset is read where it lives, not copied, so a re-run reads the file as it is now. The run records each dataset file's name and size, and a re-run compares them: if the files are gone, the re-run is blocked, and if any file was added, removed, or changed size, a warning says scores may not compare. An edit that keeps every file the same size isn't detected.
 
-The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
+The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Each row's actions include:
+
+- **Re-run**: Submits a copy of the run's evaluation job. Only the experiment and evaluation name are asked for; the dataset, metrics, and target are reused as-is.
+- **Link to experiment**: Moves a run that is not linked yet out of the agent's default experiment and into the experiment you choose, or into a new one. For a run that is already linked, this action is **Add to experiment**.
+
+Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
 
 ## Optimize an Agent
 
