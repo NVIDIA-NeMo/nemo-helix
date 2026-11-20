@@ -161,10 +161,6 @@ class ExportParams(BaseModel):
         default="eager",
         description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg", description="Embedding pooling over hidden states. Ignored for cross_encoder."
-    )
-    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
     dimensions: bool = Field(
         default=False,
         description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
@@ -187,6 +183,23 @@ class RetrievalParams(BaseModel):
             "Score each query against every passage in the global batch instead of only its own "
             "train_n_passages. Widens the negative pool to num_gpus * micro_batch_size * train_n_passages "
             "at the cost of an all-gather per step. Ignored for cross_encoder."
+        ),
+    )
+    pooling: Optional[Literal["avg", "cls", "last"]] = Field(
+        default=None,
+        description=(
+            "How a bi_encoder turns its token vectors into one embedding: 'avg' (mean of all tokens), "
+            "'cls' (first token), or 'last' (last token). Omit to keep the pooling the base checkpoint was "
+            "pretrained with: its Sentence Transformers files, else its config's 'pooling', else 'avg'. "
+            "Ignored for cross_encoder."
+        ),
+    )
+    normalize: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Scale bi_encoder embeddings to unit length, so a dot product equals cosine similarity. Omit to keep "
+            "the base checkpoint's choice: normalize unless its Sentence Transformers files leave out Normalize. "
+            "Ignored for cross_encoder."
         ),
     )
     query_max_length: int = Field(default=512, ge=1)

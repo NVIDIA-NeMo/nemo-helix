@@ -2593,20 +2593,6 @@ components:
           title: Attn Implementation
           description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
           default: eager
-        pooling:
-          type: string
-          enum:
-          - avg
-          - cls
-          - last
-          title: Pooling
-          description: Embedding pooling. Ignored for cross_encoder.
-          default: avg
-        normalize:
-          type: boolean
-          title: Normalize
-          description: L2-normalize embeddings. Ignored for cross_encoder.
-          default: true
         dimensions:
           type: boolean
           title: Dimensions
@@ -3269,6 +3255,25 @@ components:
           description: Score each query against every passage in the global batch
             rather than only its own train_n_passages. Ignored for cross_encoder.
           default: false
+        pooling:
+          title: Pooling
+          description: 'How a bi_encoder turns its token vectors into one embedding:
+            ''avg'' (mean of all tokens), ''cls'' (first token), or ''last'' (last
+            token). Omit to keep the pooling the base checkpoint was pretrained with:
+            its Sentence Transformers files, else its config''s ''pooling'', else
+            ''avg''. Ignored for cross_encoder.'
+          type: string
+          enum:
+          - avg
+          - cls
+          - last
+        normalize:
+          title: Normalize
+          description: 'Scale bi_encoder embeddings to unit length, so a dot product
+            equals cosine similarity. Omit to keep the base checkpoint''s choice:
+            normalize unless its Sentence Transformers files leave out Normalize.
+            Ignored for cross_encoder.'
+          type: boolean
         query_max_length:
           type: integer
           minimum: 1.0
