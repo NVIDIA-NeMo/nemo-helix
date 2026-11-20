@@ -20,6 +20,7 @@ hand-built graph, in both nodes:
 - The model node sends each LLM call through ``nemo_relay.llm.execute``. Without it the LLM call
   never reaches Relay: no LLM span is recorded, so the attack's trace has no prompt and no model
   steps, and the traces guardrails defender cannot match the attack to it or write a rail from it.
+  After a refusal the guardrail plugin cannot end the turn either.
 
 The callback handler in ``server.py`` adds graph/scope telemetry on top, but it is observability
 only: it records no LLM call and cannot refuse anything.
@@ -138,12 +139,12 @@ TOOLS = [bash_executor, python_executor]
 
 
 def _refusal(exc: Exception) -> str:
-    """Turn a guardrail rejection into a tool result the model can answer with.
+    """Turn a tool that raised into a tool result the model can answer with.
 
-    A guardrail refusing a call surfaces out of ``awrap_tool_call`` as ``RuntimeError``, and
-    ToolNode's default error handling re-raises it — which would fail the whole graph run and make
-    the server answer a blocked attack with a 500. A war-game victim has to stay up and *say* it was
-    refused: an HTTP error is scored as a broken victim, not as a guardrail doing its job.
+    A guardrail refusal does not come through here: Relay's intercept returns it as a ``ToolMessage``
+    carrying the refusal text. This catches the tools' own failures, which ToolNode would otherwise
+    re-raise — failing the whole graph run, so the server answers with a 500. A war-game victim has to
+    stay up and answer: an HTTP error is scored as a broken victim, not as a reply.
     """
     return f"tool call refused: {exc}"
 
@@ -175,7 +176,8 @@ def build_agent() -> CompiledStateGraph:
         A bare ``await llm.ainvoke(...)`` reaches the provider directly, and a graph that does that is
         only half instrumented: a guardrail can refuse a tool, but no LLM intercept runs and no LLM span
         is recorded. The trace of an attack then carries no prompt, so nothing downstream can tell
-        which attack it belongs to.
+        which attack it belongs to, and the guardrail plugin's latch — which ends the turn after a
+        refusal by answering the next model call itself — never sees that call.
 
         ``create_agent`` gets this wiring from ``NemoRelayMiddleware``. A hand-built graph does it here,
         which is what ``nemo_relay.llm.execute`` is for: the provider call becomes the innermost link
