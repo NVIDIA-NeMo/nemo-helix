@@ -40,6 +40,7 @@ from urllib.parse import urlsplit
 import yaml
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, derive_binaries, dockerfile_env
 from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.agents.types import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_helix_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,23 @@ def agent_harness(agent_config: dict[str, Any]) -> str | None:
     """The harness this agent runs under, from ``default_harness``."""
     harness = agent_config.get("default_harness")
     return str(harness) if harness else None
+
+
+def require_fabric_agent(agent: dict[str, Any], ref: str) -> None:
+    """Reject a registered agent whose config the Fabric server cannot start.
+
+    Every registered victim is started with :func:`fabric_start_command`, which validates the config as
+    ``nemo-agents-spec-v1``. A legacy NAT workflow registers fine (as ``nat-workflow-v1``) and would pass
+    every other check here, then fail when the sandboxed agent starts. ``config_format`` is the entity's
+    field, the same one the ``agents.execute`` job checks; an entity that reports none is the legacy default.
+    """
+    config_format = agent.get("config_format") or NAT_WORKFLOW_CONFIG_FORMAT
+    if config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+        raise AgentResolutionError(
+            f"agent {ref!r} is registered as {config_format!r}, but Agent Hardener runs registered agents on the "
+            f"Fabric server, which only accepts {NEMO_AGENTS_SPEC_CONFIG_FORMAT!r}. Register a Fabric agent spec "
+            "(config_format: nemo-agents-spec-v1), or war-game the project with --project-dir instead."
+        )
 
 
 def require_guardable_harness(agent_config: dict[str, Any], ref: str) -> str | None:
@@ -577,11 +595,6 @@ def _fetch_agent(agents: AgentsResource, workspace: str, name: str) -> dict[str,
     return agent
 
 
-def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
-    """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
-    return _fetch_agent(agents, workspace, name)["config"]
-
-
 def _agent_timestamp(agent: dict[str, Any]) -> str:
     """When the stored agent last changed. Re-registering recreates the entity, so this moves."""
     return str(agent.get("updated_at") or agent.get("created_at") or "")
@@ -650,9 +663,11 @@ def inspect_agent(
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
     agents = _agents_resource(client)
-    agent_config = _fetch_agent_config(agents, workspace, name)
+    agent = _fetch_agent(agents, workspace, name)
+    agent_config = agent["config"]
     # Reject here too, not only in resolve_agent_to_manifest: this is what the Studio create form
-    # calls, so an unguardable agent is refused before an operator fills anything in.
+    # calls, so an unusable agent is refused before an operator fills anything in.
+    require_fabric_agent(agent, f"{workspace}/{name}")
     require_guardable_harness(agent_config, f"{workspace}/{name}")
     port, warnings = _resolve_victim_port(agents, workspace, name)
     secrets = derive_secret_names(agent_config)
@@ -695,6 +710,7 @@ def resolve_agent_to_manifest(
     agents = _agents_resource(client)
     agent = _fetch_agent(agents, workspace, name)
     agent_config = agent["config"]
+    require_fabric_agent(agent, f"{workspace}/{name}")
     harness = require_guardable_harness(agent_config, f"{workspace}/{name}")
     resolved_port, deployed_secret_refs, warnings = _resolve_deployment(agents, workspace, name)
     port = port or resolved_port

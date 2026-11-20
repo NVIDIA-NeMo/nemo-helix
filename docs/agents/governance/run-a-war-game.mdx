@@ -72,12 +72,10 @@ deployed: the Agent hardening plugin reads the stored config and builds its own 
 
 <Note>
 Only agents written in the Fabric agent spec, with `config_format: nemo-agents-spec-v1`,
-are supported. The sandboxed copy runs on the Fabric server, which
-rejects any other format when the agent starts. Legacy NeMo Agent Toolkit
-workflow configs, such as `plugins/nemo-agents/examples/react-agent/react-agent.yml`,
-register successfully and `init` accepts them, but the war-game fails when the
-agent starts. To war-game an agent in another format, use the **Unregistered project**
-tab instead.
+are supported, because the sandboxed copy runs on the Fabric server. Legacy NeMo
+Agent Toolkit workflow configs, such as `plugins/nemo-agents/examples/react-agent/react-agent.yml`,
+register as `nat-workflow-v1`, and `init` rejects them with HTTP 400. To war-game
+an agent in another format, use the **Unregistered project** tab instead.
 </Note>
 
 The manifest is named after the agent, and that name is the `--manifest-id`
