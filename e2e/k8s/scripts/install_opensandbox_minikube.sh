@@ -81,7 +81,7 @@ for tool in kubectl helm openssl python3 curl tar; do
 done
 
 if ! kubectl get node >/dev/null 2>&1; then
-    log_error "kubectl cannot reach a cluster. Start minikube first:"
+    log_error "kubectl cannot reach a cluster on context ${KUBE_CONTEXT}. For minikube, start it first:"
     log_error "  ./e2e/k8s/scripts/setup_local_minikube_gpu.sh"
     exit 1
 fi
@@ -90,7 +90,9 @@ download_tarball() {
     local url="$1"
     local dest="$2"
     log_info "Downloading ${url}"
-    curl -fsSL -L -o "${dest}" "${url}"
+    # The kind CI lane downloads both charts on every run; a transient GitHub failure should not fail it.
+    curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 --max-time 300 \
+      -o "${dest}" "${url}"
 }
 
 resolve_charts() {
@@ -150,7 +152,8 @@ kubectl apply -f "${BATCHSANDBOX_TEMPLATE}"
 
 if ! kubectl get secret "${SANDBOX_PULL_SECRET}" -n "${KUBE_NAMESPACE}" >/dev/null 2>&1; then
     log_error "Secret ${SANDBOX_PULL_SECRET} is missing in ${KUBE_NAMESPACE}."
-    log_error "The BatchSandbox template hard-codes that name. Run setup_local_minikube_gpu.sh first,"
+    log_error "The BatchSandbox template hard-codes that name. Run the cluster setup first (setup_local_minikube_gpu.sh,"
+    log_error "or setup_local_kind_cpu.sh with GITHUB_TOKEN set),"
     log_error "or create the pull Secret, or edit imagePullSecrets in ${BATCHSANDBOX_TEMPLATE}."
     exit 1
 fi
