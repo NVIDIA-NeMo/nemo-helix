@@ -161,7 +161,7 @@ def _compile_retrieval_config(
     by default,
     inline retrieval data with its own collator, and no sequence packing or LM loss.
     """
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         raise ValueError(
             f"Knowledge distillation is not supported by the '{recipe.value}' recipe; "
             "use the 'sft' recipe or drop the teacher model."
@@ -223,6 +223,8 @@ def _compile_retrieval_config(
         # tekken.json, but carries only tokenizer.json.
         "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
 
     _build_distributed(
         cfg,
@@ -336,6 +338,8 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
     _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
@@ -346,7 +350,7 @@ def _compile_llm_config(
     # configure backend/parallelizer settings.
     _configure_moe_backend(cfg, customizer_config)
 
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         _configure_kd(cfg, customizer_config, trust_remote_code=trust_remote_code)
 
     _build_integrations(cfg, customizer_config, job_ctx)
@@ -364,7 +368,7 @@ def _compile_vlm_config(
     Text rows and image rows share this recipe. The causal-LM target cannot
     load an image-text checkpoint, and a mixed fileset cannot be two recipes.
     """
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         raise ValueError(
             "Knowledge distillation is not supported for a vision-language checkpoint; "
             "use the 'sft' recipe without a teacher model."
@@ -401,12 +405,14 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
-    freeze_config: dict[str, bool] = {
+    freeze_config: dict[str, Any] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
     if traits.has_audio_tower:
         freeze_config["freeze_audio_tower"] = True
+    # Automodel applies the booleans first, then freeze_modules, then unfreeze_modules, which wins.
+    freeze_config.update(_module_selector_freeze_config(customizer_config))
     cfg["freeze_config"] = freeze_config
 
     _build_distributed(
@@ -842,7 +848,9 @@ def _build_peft(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> N
     """Write the LoRA adapter config for both unmerged and merged LoRA."""
     if customizer_config.training.training_type not in (
         TrainingType.SFT,
+        TrainingType.PARTIAL_SFT,
         TrainingType.DISTILLATION,
+        TrainingType.PARTIAL_DISTILLATION,
     ):
         return
     if customizer_config.training.finetuning_type not in (
@@ -1409,6 +1417,19 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
 
 
+def _module_selector_freeze_config(customizer_config: TrainingStepConfig) -> dict[str, list[dict[str, str]]]:
+    """The job's freeze_modules / unfreeze_modules in Automodel's freeze_config form."""
+    training = customizer_config.training
+    freeze_config: dict[str, list[dict[str, str]]] = {}
+    for key, selectors in (
+        ("freeze_modules", training.freeze_modules),
+        ("unfreeze_modules", training.unfreeze_modules),
+    ):
+        if selectors:
+            freeze_config[key] = [selector.model_dump(exclude_none=True) for selector in selectors]
+    return freeze_config
+
+
 def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
     """Store a full-weight distillation student in fp32 when the job sets no precision.
 
@@ -1416,7 +1437,7 @@ def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config:
     Adam state. Automodel r0.6.0's KD recipe stored such a student in fp32; v0.7.0 dropped that.
     """
     if (
-        customizer_config.training.training_type == TrainingType.DISTILLATION
+        customizer_config.training.training_type.is_distillation
         and "peft" not in cfg
         and customizer_config.model.precision is None
         and str(cfg["optimizer"]["_target_"]).startswith("torch.optim.")
