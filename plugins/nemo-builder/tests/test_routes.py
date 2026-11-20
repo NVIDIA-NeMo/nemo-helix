@@ -148,6 +148,12 @@ IMAGE = "/v2/workspaces/ws-a/container-images/build-1-0"
 STEP = Caller(auth=True, actor="job-step", submitter="alice")
 #: The push step without workload token exchange: the builder's own service principal, acting for the submitter.
 SERVICE_STEP = Caller(auth=True, actor="service:builder", submitter="alice")
+#: Not the image's build job, and acting for its submitter all the same: a step of another job of theirs, as the
+#: platform names it under workload token exchange, and, without exchange, any request whose headers name a service.
+OTHER_WORKLOADS = [
+    Caller(auth=True, actor="system:serviceaccount:jobs:default", submitter="alice"),
+    Caller(auth=True, actor="service:evals", submitter="alice"),
+]
 
 
 def _row(
@@ -263,6 +269,37 @@ class TestComplete:
         response, entities = self._post(_row(), caller=caller)
         assert response.status_code == 403
         entities.update.assert_not_awaited()
+
+    @pytest.mark.parametrize("other", OTHER_WORKLOADS, ids=["another-jobs-step", "a-request-naming-a-service"])
+    def test_another_workload_acting_for_the_submitter_makes_the_first_completion(self, other: Caller) -> None:
+        """Not wanted, and stated in the README's Security section: nothing the platform hands the route says
+        which job is calling, so a remote row's own step and anything else acting for its submitter look alike."""
+        entities = _entities(_row(backend="remote"))
+        chosen = "sha256:" + "f" * 64
+        first = TestClient(_app(entities, other)).post(
+            f"{IMAGE}/complete", json={"digest": chosen, "external": {"build_id": "made-up"}}
+        )
+        assert (first.status_code, first.json()["status"]) == (200, "ready")
+        # What a consumer then pins and runs: the digest and the build the other workload chose.
+        assert first.json()["image_ref"] == f"reg.example.com/ws-a/app@{chosen}"
+        assert first.json()["external"]["build_id"] == "made-up"
+        # And the row's own step, with the digest its build published, is the one refused.
+        own = TestClient(_app(entities, STEP)).post(
+            f"{IMAGE}/complete", json={"digest": DIGEST, "external": {"build_id": "build-1"}}
+        )
+        assert own.status_code == 409
+        entities.update.assert_awaited_once()
+
+    def test_what_a_build_services_client_reported_of_how_the_image_starts_is_recorded(self) -> None:
+        """A remote-build step sends it when its service's client reported one, as the push step sends what it
+        read: a consumer that must start the image's own entrypoint has nowhere else to learn it."""
+        runtime_config = {"entrypoint": ["/entrypoint.sh"], "cmd": ["serve"], "working_dir": "/srv", "user": ""}
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}, "runtime_config": runtime_config}
+        response, entities = self._post(_row(backend="remote"), caller=STEP, body=body)
+        assert response.status_code == 200
+        assert response.json()["runtime_config"] == runtime_config
+        assert response.json()["external"]["build_id"] == "build-1"
+        entities.update.assert_awaited_once()
 
     def test_an_image_that_does_not_exist_is_a_404(self) -> None:
         entities = AsyncMock()

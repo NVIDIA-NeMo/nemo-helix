@@ -29,7 +29,7 @@ import tempfile
 import time
 import traceback
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence, Set
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Protocol, TypeVar, get_args
@@ -89,10 +89,15 @@ CANCEL_PAUSE_SECONDS = 2.0
 CANCEL_SECONDS = 20.0
 #: What takes a credential's place in a text.
 REDACTED = "[credential]"
-#: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this.
+#: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this. By itself, it
+#: is the name of the context's own ignore file, which a builder reads for a Dockerfile that has none.
 _IGNORE_SUFFIX = ".dockerignore"
 #: How deep into a logged value the driver looks for a credential before it treats what is left as text.
 _MAX_FIELD_DEPTH = 6
+#: The containers that print everything they hold. Any other may print a mask where it holds a credential.
+_PLAIN_CONTAINERS = (dict, list, tuple, set, frozenset)
+#: What is a sequence and is still read as text, or holds only numbers.
+_NOT_CONTAINERS = (str, bytes, bytearray, memoryview, range)
 #: The shortest part of a credential that is taken out on its own: one line of a credential of several.
 _MIN_PART_CHARS = 8
 
@@ -154,8 +159,11 @@ class RemoteBuild:
     platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
     labels: Mapping[str, str] = field(default_factory=dict)
-    #: How long the driver waits for the build before it cancels it. A service that can end a build by itself
-    #: should be told: a step that is killed outright, out of memory or with its node, cancels nothing.
+    #: How long the driver waits for the build before it cancels it. A client hands this to its service as the
+    #: build's own deadline, wherever the service takes one. The driver's cancel is not enough: a step that is
+    #: killed outright, out of memory or with its node, cancels nothing, and nothing else can, since the
+    #: build's ID is only in the step's memory and its log. The row is then failed once its job has ended, and
+    #: the build runs until the service ends it.
     timeout_seconds: int | None = None
 
 
@@ -168,6 +176,14 @@ class RemoteImage:
     #: The service's own handle for the image, if it has one.
     image_id: str | None = None
     attributes: Mapping[str, str] = field(default_factory=dict)
+    #: How the published image starts by default: its entrypoint, command, working directory and user, from
+    #: the image's config, with what it inherits from its base image. A client that can read that config
+    #: reports it, with ``user`` an empty string for an image that sets none, and the row records it as it
+    #: does for an image built in the cluster. Left None, the row records none. A consumer whose runtime
+    #: replaces a container's entrypoint then can't start the image's own: it has to refuse a workload that
+    #: sets a command of its own and leaves the entrypoint to the image, and building the image again changes
+    #: nothing.
+    runtime_config: ImageRuntimeConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,10 +209,21 @@ class RemoteBuildService(Protocol):
         Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
         call must send the service the same request, so an implementation that uploads the context keeps the first
         upload for that key and reuses it. The ID is not empty: it is what the image's row names the build by.
+
+        Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
+        The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
+        nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
+        ends the build.
         """
         ...
 
-    def status(self, build_id: str) -> RemoteBuildStatus: ...
+    def status(self, build_id: str) -> RemoteBuildStatus:
+        """Where the build is. Once it is ``done``, with the image the service published.
+
+        A client that can read the published image's config reports how the image starts
+        (``RemoteImage.runtime_config``): the row is the only place a consumer of the image finds it.
+        """
+        ...
 
     def cancel(self, build_id: str) -> None:
         """Ask the service to stop. It may finish anyway.
@@ -284,7 +311,12 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     What the build leaves out must not change with the move. A builder reads the ignore file named for a
     Dockerfile (``<its path>.dockerignore``) in preference to the context's own ``.dockerignore``, so that file
     goes to the root with its Dockerfile, and one that was the replaced root Dockerfile's doesn't stay to stand in
-    for it.
+    for it. Whichever of the two the build reads is left at the root as a file, never as a link: a service's
+    packager may not follow one, and a link between them leads nowhere once the file it led to goes, as the
+    context's ``.dockerignore`` does when it is a link to the replaced Dockerfile's own. Each becomes a copy of
+    what it led to before anything at the root was replaced. The copies are made file to file, under another
+    name in the context and then renamed, and no ignore file is read into memory: unpacking lets one file of
+    an archive be gigabytes.
 
     A context with a link that leads out of it is refused. Its links were checked, where it was unpacked, to
     stay inside what was unpacked, which may be more than this context: a service's packager that follows links
@@ -321,8 +353,6 @@ def stage_context(context: Path, dockerfile: str) -> Path:
                 "reads the Dockerfile"
             )
         same = target.is_file() and target.samefile(source)
-        if same and at_root:
-            return context
         replaced = target.exists() and not same
     else:
         # A link is always replaced by a copy. That is another Dockerfile than the context's own only when the
@@ -334,17 +364,43 @@ def stage_context(context: Path, dockerfile: str) -> Path:
             ROOT_DOCKERFILE,
             _quoted(dockerfile),
         )
+    #: Whether the named Dockerfile is put at the root, or brings another ignore file there. Not when it is
+    #: the root Dockerfile, there as a file under its own name: then only links among the ignore files change.
+    moved = not (same and at_root)
     ignore, staged_ignore = named.with_name(named.name + _IGNORE_SUFFIX), context / (ROOT_DOCKERFILE + _IGNORE_SUFFIX)
-    if staged_ignore.is_dir() and not staged_ignore.is_symlink():
+    if moved and staged_ignore.is_dir() and not staged_ignore.is_symlink():
         raise ImageFailed(f"the build context has a directory named {staged_ignore.name} at its root")
-    kept = ignore.read_bytes() if ignore.is_file() else None
-    if not same:
-        # A link too: a service's packager may not follow one.
-        target.unlink(missing_ok=True)
-        shutil.copyfile(source, target)
-    staged_ignore.unlink(missing_ok=True)
-    if kept is not None:
-        staged_ignore.write_bytes(kept)
+    has_ignore = ignore.is_file()
+    #: Each ignore file to write at the root, with the file whose content it gets.
+    brought: dict[Path, Path] = {}
+    if has_ignore and not (
+        staged_ignore.is_file() and not staged_ignore.is_symlink() and ignore.samefile(staged_ignore)
+    ):
+        # The named Dockerfile's own. Unless that is the root one already, there as a file.
+        brought[staged_ignore] = ignore
+    if (context_ignore := context / _IGNORE_SUFFIX).is_symlink() and context_ignore.is_file():
+        # The context's own, which is what applies where the named Dockerfile has none.
+        brought[context_ignore] = context_ignore
+    aside: Path | None = None
+    try:
+        copies: list[tuple[Path, Path]] = []
+        if brought:
+            # Set aside before anything at the root is replaced: a link there may lead to what is. As a file
+            # is copied, in pieces, and inside the context, so that putting a copy in its place is a rename.
+            aside = Path(tempfile.mkdtemp(dir=context, prefix=".staging-"))
+            copies = [(Path(shutil.copyfile(file, aside / place.name)), place) for place, file in brought.items()]
+        if not same:
+            # A link too: a service's packager may not follow one.
+            target.unlink(missing_ok=True)
+            shutil.copyfile(source, target)
+        if moved and not has_ignore:
+            staged_ignore.unlink(missing_ok=True)
+        for copy, place in copies:
+            # In place of whatever is there, a link itself and not what it leads to.
+            os.replace(copy, place)
+    finally:
+        if aside is not None:
+            _remove(aside)
     return context
 
 
@@ -588,14 +644,36 @@ def _handle(built: RemoteImage, build_id: str, redact: Callable[[str], str]) -> 
             attributes=attributes,
         )
     except ValidationError as exc:
-        problems = "; ".join(f"{'.'.join(map(str, error['loc']))}: {error['msg']}" for error in exc.errors())
-        raise ImageFailed(f"the build service's handle for the image can't be recorded ({problems})") from exc
+        raise ImageFailed(f"the build service's handle for the image can't be recorded ({_problems(exc)})") from exc
+
+
+def _problems(exc: ValidationError) -> str:
+    """What is wrong with each field, on one line, without the values that were refused."""
+    return "; ".join(f"{'.'.join(map(str, error['loc']))}: {error['msg']}" for error in exc.errors())
+
+
+def _starts_as(built: RemoteImage, image: str, redact: Callable[[str], str]) -> ImageRuntimeConfig | None:
+    """How ``image`` starts by default, as the service's client reports it, for the row. None if it reports none.
+
+    Every reader of the image reads this too, so the credential is taken out of its strings as it is out of the
+    handle's. One that can't be recorded is logged and left out, as the push step leaves out an image config it
+    can't read: the image is built and published all the same.
+    """
+    if built.runtime_config is None:
+        return None
+    try:
+        reported = ImageRuntimeConfig.model_validate(built.runtime_config)
+        return ImageRuntimeConfig.model_validate(_redact_value(reported.model_dump(), redact))
+    except ValidationError as exc:
+        logger.warning("can't record how %s starts; recording none: %s", _quoted(image), _quoted(_problems(exc)))
+        return None
 
 
 def _complete(
     builder: _Builder,
     image: str,
     digest: str,
+    runtime_config: ImageRuntimeConfig | None,
     external: ExternalImage,
     *,
     clock: Clock,
@@ -609,7 +687,7 @@ def _complete(
     waits = 0
     while True:
         try:
-            return builder.complete(image, digest, None, external)
+            return builder.complete(image, digest, runtime_config, external)
         except NemoTransportError as exc:
             failure: Exception = exc
         except NemoHTTPError as exc:
@@ -692,7 +770,8 @@ def _build_one(
         if repository != destination or not _DIGEST.fullmatch(digest):
             raise ImageFailed(f"the build service published {built.reference!r}, not a digest in {destination}")
         external = _handle(built, build_id, redact)
-        done = _complete(builder, image.image, digest, external, clock=clock, cancelled=cancelled)
+        runtime_config = _starts_as(built, image.image, redact)
+        done = _complete(builder, image.image, digest, runtime_config, external, clock=clock, cancelled=cancelled)
         if done.status != "ready" or done.digest != digest:
             raise ImageFailed(f"the builder completed it as {done.status} at {done.digest}, not ready at {digest}")
     except ImageFailed as exc:
@@ -836,11 +915,12 @@ def run_remote_build(
     #: Each download that more than one image of the set names, by what names it, and where it is kept: read by
     #: `context_for`.
     fetched: dict[str, Path] = {}
+    #: The set's images, each with its context path spelt one way: what names a download is then the same for
+    #: every image that builds from one directory, however its spec wrote the path.
+    images = [image.model_copy(update={"source": _spelt_one_way(image.source)}) for image in config.images]
     #: The filesets some image of the set builds from whole: that download covers their directories too.
     whole_filesets = {
-        image.source.fileset
-        for image in config.images
-        if image.source.archive is None and image.source.context_path is None
+        image.source.fileset for image in images if image.source.archive is None and image.source.context_path is None
     }
 
     def downloaded(source: ContextSource) -> tuple[ContextSource, bool]:
@@ -849,7 +929,7 @@ def run_remote_build(
         return (source.model_copy(update={"context_path": None}) if whole else source), whole
 
     #: Each image's download, by what names it, in the set's order.
-    keys = [downloaded(image.source)[0].model_dump_json() for image in config.images]
+    keys = [downloaded(image.source)[0].model_dump_json() for image in images]
     #: How many of the set's images each download serves, and the last image that needs it.
     shared = Counter(keys)
     last = {key: index for index, key in enumerate(keys)}
@@ -905,14 +985,14 @@ def run_remote_build(
         # by way of the directories above it still does. Links as they are, never followed: staging checks
         # where each one leads.
         inside = context.relative_to(root) if root in context.parents else Path()
-        return Path(shutil.copytree(context, directory / (root.name or "context") / inside, symlinks=True))
+        return _copy_directory(context, directory / (root.name or "context") / inside)
 
     def report(image: str, reason: str, ending: str = "") -> None:
         reason, ending = redact(_one_line(redact(reason))), redact(_one_line(redact(ending)))
         _report(image, reason, ending)
         failed.append((image, reason, ending))
 
-    for index, image in enumerate(config.images):
+    for index, image in enumerate(images):
         # A download the set shared, once the last image that names it has had its turn: a set of large
         # contexts then holds no more of them than it still needs.
         for key in [key for key in sources if last[key] < index]:
@@ -990,6 +1070,46 @@ def run_remote_build(
     return 1 if failures else 0
 
 
+def _spelt_one_way(source: ContextSource) -> ContextSource:
+    """``source``, with its context path written the one way that has nothing to spare.
+
+    ``app``, ``app/`` and ``./app`` name one directory, and so do ``app/x`` and ``app//x``. A set downloads a
+    directory once for each way of naming it, so two spellings of one would be two downloads, of a source that
+    may change between them. A path that names no directory, or climbs with ``..``, is not made a better one:
+    whatever fetches it takes or refuses it as it would have.
+    """
+    if not source.context_path:
+        return source
+    path = PurePosixPath(source.context_path)
+    if not path.parts or path.as_posix() == source.context_path:
+        return source
+    return source.model_copy(update={"context_path": path.as_posix()})
+
+
+def _copy_directory(source: Path, destination: Path) -> Path:
+    """Copy the directory ``source`` to ``destination``, and return ``destination``.
+
+    A link is copied as a link, never followed. Names that are one file in ``source``, hard links of one
+    another, are one file in the copy too. Unpacking counts such a file once, however many names an archive
+    gives it, so a copy with a file for each name could be many times the size an archive is allowed to unpack
+    to. The copy shares no file with ``source``: staging changes what is in it.
+    """
+    #: The first copy of each file of `source` that has more than one name, by the file's device and number.
+    copied: dict[tuple[int, int], str] = {}
+
+    def copy(file: str, to: str) -> None:
+        status = os.stat(file)
+        number = (status.st_dev, status.st_ino)
+        if number in copied:
+            os.link(copied[number], to)
+            return
+        shutil.copy2(file, to)
+        if status.st_nlink > 1:
+            copied[number] = to
+
+    return Path(shutil.copytree(source, destination, symlinks=True, copy_function=copy))
+
+
 def _within(context: Path, source: Path) -> bool:
     """Whether ``context``, with every link in its path followed, is ``source`` or a directory inside it.
 
@@ -1039,14 +1159,19 @@ def take_credential(environ: MutableMapping[str, str]) -> str:
 
 
 def _redact_record(record: logging.LogRecord, redact: Callable[[str], str]) -> logging.LogRecord:
-    """``record``, with the credential out of everything a handler prints of it."""
+    """``record``, with the credential out of everything a handler prints of it.
+
+    And out of what its message is made from, which stays on the record for a handler that reads it apart from
+    the message: where that holds the credential, the record keeps the message as it is formatted, as text,
+    and not the arguments.
+    """
     try:
         message, formatted = record.getMessage(), True
     except Exception:
         # A log call whose arguments don't fit its message. A handler would report that by printing both as
         # they are, so they are put together here, where the credential can be taken out of them.
         message, formatted = f"{record.msg} (logged with {record.args!r})", False
-    if (redacted := redact(message)) != message or not formatted:
+    if (redacted := redact(message)) != message or not formatted or _holds_unprinted(record, redact):
         record.msg, record.args = redacted, None
     # A formatter prints the exception and the stack after the message, and an exception's own text with it.
     # It prints `exc_text` as it finds it, so the redacted text is put there first.
@@ -1079,37 +1204,105 @@ def _unmark_record(record: logging.LogRecord) -> logging.LogRecord:
     return record
 
 
+def _is_container(value: Any) -> bool:
+    """Whether ``value`` is a mapping, a sequence or a set of any kind, other than text."""
+    return isinstance(value, Mapping) or (isinstance(value, Sequence | Set) and not isinstance(value, _NOT_CONTAINERS))
+
+
+def _prints_all(value: Any) -> bool:
+    """Whether ``value`` prints everything it holds: every container in it, however deep, is a plain one.
+
+    Without recursion: it is asked of a value that is already too deep to look into.
+    """
+    left = [value]
+    seen: set[int] = set()
+    while left:
+        item = left.pop()
+        if type(item) in _PLAIN_CONTAINERS:
+            if id(item) not in seen:
+                seen.add(id(item))
+                left.extend(item)
+                if type(item) is dict:
+                    left.extend(item.values())
+        elif _is_container(item):
+            return False
+    return True
+
+
+def _redact_container(value: Any, redact: Callable[[str], str], depth: int) -> Any:
+    """A mapping, a sequence or a set, with the credential out of everything in it.
+
+    Itself, if nothing in it holds the credential. Otherwise a plain container of what it held, each thing
+    redacted on its own: a mapping becomes a ``dict``, a tuple a ``tuple``, a set a ``set`` or a ``frozenset``,
+    and any other sequence a ``list``.
+    """
+    mapping = isinstance(value, Mapping)
+    # A mapping's keys and values, turn about.
+    items = [part for pair in value.items() for part in pair] if mapping else list(value)
+    rebuilt = [_redact_value(item, redact, depth + 1) for item in items]
+    if all(new is old for new, old in zip(rebuilt, items, strict=True)):
+        return value
+    if mapping:
+        return dict(zip(rebuilt[::2], rebuilt[1::2], strict=True))
+    if isinstance(value, tuple):
+        return tuple(rebuilt)
+    if isinstance(value, Set):
+        try:
+            return frozenset(rebuilt) if isinstance(value, frozenset) else set(rebuilt)
+        except TypeError:
+            # One of its members, rebuilt, is no longer something a set can hold.
+            return rebuilt
+    return rebuilt
+
+
 def _redact_value(value: Any, redact: Callable[[str], str], depth: int = 0) -> Any:
     """``value`` as a log call attached it, with the credential out of it.
 
-    A value that doesn't hold the credential is returned as it is, whatever it is. One that does is rebuilt if
-    it is a plain container, and otherwise replaced by what it prints as, redacted.
+    A value that doesn't hold the credential is returned as it is, whatever it is. One that does is rebuilt, as
+    a plain container, if it is a mapping, a sequence or a set, and otherwise replaced by what it prints as,
+    redacted. A container is looked into, not read as it prints, whatever kind it is: a request's headers
+    print a mask where they hold the credential, and give it whole to a format that asks for one of them.
     """
     if isinstance(value, str):
-        redacted = redact(value)
         # As `str` compares, not as the value's own type may: a string of another type, a member of an
         # enumeration say, is kept as it is unless the credential was in it.
-        if type(value) is str or str.__ne__(redacted, value):
+        if str.__ne__(redacted := redact(value), value):
             return redacted
+        if type(value) is str:
+            return value
     if value is None or isinstance(value, bool | int | float):
         return value
-    if depth < _MAX_FIELD_DEPTH:
-        # Each string in it on its own, not the container as it prints: a string is quoted differently there.
-        rebuilt: Any = None
-        if type(value) is dict:
-            rebuilt = {
-                _redact_value(key, redact, depth + 1): _redact_value(item, redact, depth + 1)
-                for key, item in value.items()
-            }
-        elif type(value) in (list, tuple, set, frozenset):
-            rebuilt = type(value)(_redact_value(item, redact, depth + 1) for item in value)
-        if rebuilt is not None:
-            return value if rebuilt == value else rebuilt
+    if _is_container(value):
+        if depth < _MAX_FIELD_DEPTH:
+            # Each string in it on its own, not the container as it prints: a string is quoted differently there.
+            return _redact_container(value, redact, depth)
+        if not _prints_all(value):
+            # Too deep to look into, and it may hold what it doesn't print: passed on as its text, not itself.
+            return redact(repr(value))
     # As a formatter may print it either way: `%(field)s` prints what `str` gives, which can say more than `repr`.
     for shown in (repr(value), str(value)):
         if (redacted := redact(shown)) != shown:
             return redacted
     return value
+
+
+def _holds_unprinted(record: logging.LogRecord, redact: Callable[[str], str]) -> bool:
+    """Whether what ``record``'s message is made from holds the credential, though the message doesn't print it.
+
+    A message prints its arguments as they print: a request's headers as a mask, a mapping as the one value its
+    format names. So it does a message that was logged as an object, and not as text. What can't be looked into
+    is taken to hold the credential: the message, which was checked, says all that it printed.
+    """
+    made_from = (record.msg, record.args)
+    try:
+        return _redact_value(made_from, redact) is not made_from
+    except Exception:
+        return True
+
+
+#: The fields of a log record that :func:`_redact_record` takes the credential out of: its message, as it is
+#: formatted from the two, its exception and its stack.
+_RECORD_TEXT = frozenset({"msg", "args", "exc_info", "exc_text", "stack_info"})
 
 
 class _RedactedFields(dict[str, Any]):
@@ -1123,6 +1316,17 @@ class _RedactedFields(dict[str, Any]):
     def __init__(self, fields: Mapping[str, Any], redact: Callable[[str], str]) -> None:
         super().__init__(fields)
         self.redact = redact
+
+    def check(self) -> None:
+        """Take the credential out of the fields that are here already, however they came to be.
+
+        A record factory under the step's, a tracing library's, puts its own fields on a record before the
+        step's factory is handed it. It sets them as attributes, which reach these fields by none of the ways
+        below, whether or not the record's fields were one of these by then.
+        """
+        for key, value in list(self.items()):
+            if key not in _RECORD_TEXT:
+                self[key] = value
 
     def __setitem__(self, key: str, value: Any) -> None:
         if key == "exc_info" and value:
@@ -1219,8 +1423,11 @@ class _RedactingFactory:
             # Never into the code that logged. A record that can't be checked is withheld, not printed as it is.
             record.msg, record.args = WITHHELD, None
             record.exc_info = record.exc_text = record.stack_info = None
-        if not isinstance(record.__dict__, _RedactedFields):
-            record.__dict__ = _RedactedFields(record.__dict__, _REDACTION)
+        fields = record.__dict__
+        if not isinstance(fields, _RedactedFields):
+            record.__dict__ = fields = _RedactedFields(fields, _REDACTION)
+        # What the factories under this one put on the record. The call's own fields come after, by key.
+        fields.check()
         return record
 
 
@@ -1228,8 +1435,11 @@ def log_redaction() -> Redaction:
     """What takes secrets out of everything this process logs through a log call.
 
     Where records are made, not on the handlers there are now: a service's client may log through a logger that
-    doesn't pass its records up, or add a handler of its own later. That covers a record's message, its
-    exception and stack, and the ``extra`` fields of the call that logged it. A record made some other way,
+    doesn't pass its records up, or add a handler of its own later. That covers a record's message and the
+    arguments it was made from, its exception and stack, the ``extra`` fields of the call that logged it, and
+    the fields a record factory under this one put on it. A field or an argument that is a mapping, a sequence
+    or a set is looked into, whatever it prints as; what any other object holds and doesn't print is not known.
+    A field that a filter sets on a record once it is made is not checked at all. A record made some other way,
     built by hand or read back from a queue, is covered only if it is made with ``logging.makeLogRecord``.
 
     It is also a function, which takes the same secrets out of any text. Call it again after anything that may
@@ -1298,15 +1508,17 @@ def step_main(
     The credential is the one in the environment, when the deployment keeps it in a platform secret. Otherwise it
     is what ``read_credential`` returns, for a step program whose Jobs profile mounts it as a file. Either way the
     driver keeps it out of the log and out of every reason, as it was given: whole, and for one of several
-    lines, each line of eight characters or more. A part of it that a client uses alone, or a token a client trades it for, the driver doesn't know: the client gives
-    those to :func:`redact_log`. A ``read_credential`` that finds nothing fails every image, and says so. With
-    neither, ``make_service`` gets None and finds the credential itself, and gives it to :func:`redact_log`.
+    lines, each line of eight characters or more. A part of it that a client uses alone, or a token a client
+    trades it for, the driver doesn't know: the client gives those to :func:`redact_log`. A ``read_credential``
+    that finds nothing fails every image, and says so. With neither, ``make_service`` gets None and finds the
+    credential itself, and gives it to :func:`redact_log`.
 
     The step logs with the level first, in brackets, which Jobs' launcher reads. A step program that sets up
     logging of its own before it calls this keeps that format, which must end a line with the message: what
-    follows an image's name on its failure line is taken for the reason. What a step program prints, instead of logging,
-    is not redacted, and what it prints after the driver's last line pushes the failure lines out of the end of
-    the log that Jobs keeps: standard output is made line-buffered here so that nothing is held back until then.
+    follows an image's name on its failure line is taken for the reason. What a step program prints, instead of
+    logging, is not redacted, and what it prints after the driver's last line pushes the failure lines out of
+    the end of the log that Jobs keeps: standard output is made line-buffered here so that nothing is held back
+    until then.
     """
     # The level first, in brackets: the Jobs launcher reads it from there, and records any other line as an error.
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s %(name)s: %(message)s")

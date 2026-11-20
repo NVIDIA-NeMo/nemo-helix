@@ -29,8 +29,8 @@ class CompleteRequest(BaseModel):
     runtime_config: ImageRuntimeConfig | None = Field(
         default=None,
         description=(
-            "How the image starts by default, read from the config the push step pushed. A remote-build step "
-            "sends none."
+            "How the image starts by default: read from the config the push step pushed, or what a remote build "
+            "service's client reported for the image it built. None when neither is known."
         ),
     )
     external: ExternalImage | None = Field(
@@ -53,7 +53,8 @@ class Caller:
     """Who is asking. With platform auth off, nobody in particular."""
 
     auth: bool
-    #: The principal the request came as: with a job's token, the job step.
+    #: The principal the request came as. For a job step that is a service its headers name or, with a token,
+    #: the ServiceAccount its pod runs as: neither says which job the step belongs to.
     actor: str | None = None
     #: Whom the actor acts for, when it is delegated.
     submitter: str | None = None
@@ -72,9 +73,12 @@ def current_caller() -> Caller:
 def caller_refusal(row: ContainerImage, caller: Caller) -> str | None:
     """Why ``caller`` may not complete ``row``, or None if it may. With platform auth off, anyone may.
 
-    A user's own token is refused: the caller must act for the image's submitter, as its push step does.
-    That doesn't show the caller is the push step: the platform also takes a request's identity from its
-    headers, which anything inside the cluster, a build's own ``RUN`` included, can set.
+    A user's own token is refused: the caller must act for the image's submitter, as the step that built it does.
+    That doesn't show the caller is that step. Without workload token exchange the platform takes a request's
+    identity from its headers, which anything inside the cluster, a build's own ``RUN`` included, can set. With
+    it, a step's token says whom the step acts for and which ServiceAccount its pod runs as. The auth context the
+    platform hands a route has no field for the job a caller is a step of, so any other workload acting for the
+    submitter is admitted too, and can complete the image first.
     """
     if not caller.auth:
         return None

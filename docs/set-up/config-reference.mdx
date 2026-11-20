@@ -934,7 +934,7 @@ builder:
     # The step program in that image, and its arguments.
     command:
     - remote-build
-    # The platform secret holding the service's credential, which the step reads from its environment. Write it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read from each submitter's own workspace, so every workspace would need its own. Every user who may build must be able to read it. Null when the step's Jobs profile mounts the credential instead, which a platform using workload token exchange requires; a mounted credential is readable by any job that names the profile, whoever creates it.
+    # The platform secret holding the service's credential, which Jobs fetches as the build's submitter and the step reads from its environment, whether or not the platform uses workload token exchange. Write it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read from each submitter's own workspace, so every workspace would need its own. Every user who may build must be able to read it. Null when the step's Jobs profile mounts the credential instead: any user who may create a job can name that profile, and read a credential it mounts.
     credential_secret:
     # The platforms the service builds, as `os/architecture`. A spec for any other is refused.
     platforms:
@@ -943,7 +943,7 @@ builder:
     max_specs_per_set: 1
     # Take a spec whose Dockerfile isn't `Dockerfile` at the context root: the step puts that file at the root of the context it hands the service, in place of any `Dockerfile` already there. A build that copies its own root `Dockerfile` into the image then copies the named one. The Dockerfile's own ignore file (`<its path>.dockerignore`) goes to the root with it. False refuses such a spec. | default: True
     allow_dockerfile_path: true
-    # How long the step waits for one image, from when it asks the service to start, before it cancels the build and fails the image. Time the service makes the step wait for its queue counts. | default: 3600
+    # How long the step waits for one image, from when it asks the service to start, before it cancels the build and fails the image. Time the service makes the step wait for its queue counts. The step gives the same limit to the service's client, to pass to its service as the build's own deadline: only a service that enforces one ends a build whose step was killed. | default: 3600
     build_timeout_seconds: 3600
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.

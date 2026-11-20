@@ -33,7 +33,7 @@ from nemo_builder_plugin.submit import (
     referenced_secrets,
     submit_build_set,
 )
-from nemo_helix_plugin.auth.workload_identity import WorkloadIdentityConfigError
+from nemo_helix_plugin.auth import workload_identity
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
@@ -247,21 +247,18 @@ class TestADeploymentThatCannotBuild:
             RemoteBackend(_config(default_platform="linux/arm64"), PROFILES).check(_plan())
         RemoteBackend(_config(default_platform="linux/arm64", platforms=["linux/arm64"]), PROFILES)._check_deployment()
 
-    def test_a_secret_jobs_could_not_fetch_for_the_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Under workload token exchange the launcher has no identity to fetch a step's secrets with."""
+    def test_a_credential_secret_is_taken_under_workload_token_exchange(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Jobs' launcher fetches a step's secrets there too, with a token for the job's creator, so the backend
+        doesn't ask how the platform authenticates a step."""
+        # The platform uses exchange, wherever that is asked: where the platform answers it, and under the name
+        # the backend once read the answer by, and refused on. Nothing in the backend asks now.
+        monkeypatch.setattr(workload_identity, "is_workload_identity_token_exchange_enabled", lambda: True)
+        monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", lambda: True, raising=False)
         backend = RemoteBackend(_config(credential_secret="system/remote-credential"), PROFILES)
-        monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", lambda: True)
-        with pytest.raises(BackendRejectedError, match="credential_secret is set.*workload token exchange"):
-            backend.check(_plan())
-        # Mounted by the profile instead, there is nothing to fetch.
-        RemoteBackend(_config(), PROFILES).check(_plan())
-
-    def test_auth_config_that_cant_be_read_refuses_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def unreadable() -> bool:
-            raise WorkloadIdentityConfigError("no auth config")
-
-        monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", unreadable)
-        RemoteBackend(_config(credential_secret="system/remote-credential"), PROFILES).check(_plan())
+        plan = _plan()
+        backend.check(plan)
+        # And the step is still given the secret to read, as it is without exchange.
+        assert referenced_secrets(backend.compile(plan), "default") == [("system", "remote-credential")]
 
 
 class TestDestination:

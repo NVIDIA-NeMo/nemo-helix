@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import collections
+import filecmp
 import io
 import json
 import logging
@@ -15,11 +17,12 @@ import signal
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+import tracemalloc
+from collections.abc import Callable, Iterator, Mapping
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 import httpx
 import pytest
@@ -207,9 +210,12 @@ class FakeBuilder:
         failing: list[Exception] | None = None,
         unreadable: dict[str, Exception] | None = None,
         completes_as: tuple[str, str] | None = None,
+        runtime_config: ImageRuntimeConfig | None = None,
     ) -> None:
         #: The status and digest ``complete`` answers with, when not ``ready`` at the digest it was given.
         self.completes_as = completes_as
+        #: How ``complete`` is to be told the image starts: nothing, unless the service's client reports it.
+        self.runtime_config = runtime_config
         self.statuses = statuses or {}
         self.repository = repository
         #: Rows whose read fails.
@@ -230,7 +236,7 @@ class FakeBuilder:
         runtime_config: ImageRuntimeConfig | None,
         external: ExternalImage | None = None,
     ) -> ContainerImage:
-        assert runtime_config is None, "a remote build leaves no image config to read"
+        assert runtime_config == self.runtime_config, "the row records how the image starts as the client reports it"
         if self.failing:
             raise self.failing.pop(0)
         self.completed.append((image, digest, external))
@@ -338,6 +344,42 @@ class TestABuildThatSucceeds:
             build_id="build-1",
             attributes={"console": "https://build.example.com/b/42?key=[credential]"},
         )
+
+    def test_how_the_image_starts_is_recorded_when_the_services_client_reports_it(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """A runtime that replaces a container's entrypoint starts the image's own, which only its config holds."""
+        reported = ImageRuntimeConfig(entrypoint=["/entrypoint.sh"], cmd=["serve"], working_dir="/app", user="")
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", image_id="img-1", runtime_config=reported)
+        builder = FakeBuilder(runtime_config=reported)
+        assert _run(FakeService([RemoteBuildStatus("done", image=image)]), builder, context, tmp_path) == 0
+        assert [image for image, _, _ in builder.completed] == ["demo-1"]
+
+    def test_the_credential_is_taken_out_of_how_the_image_is_said_to_start(self, context: Path, tmp_path: Path) -> None:
+        """Every reader of the image reads this too. An image may be built to start with a key in its command."""
+        reported = ImageRuntimeConfig(
+            entrypoint=["/bin/sh", "-c"], cmd=["serve --key token-value"], working_dir="/srv/token-value", user="1000"
+        )
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", runtime_config=reported)
+        recorded = ImageRuntimeConfig(
+            entrypoint=["/bin/sh", "-c"], cmd=["serve --key [credential]"], working_dir="/srv/[credential]", user="1000"
+        )
+        builder = FakeBuilder(runtime_config=recorded)
+        service = FakeService([RemoteBuildStatus("done", image=image)])
+        assert _run(service, builder, context, tmp_path, redact=driver._redactor("token-value")) == 0
+        assert len(builder.completed) == 1
+
+    def test_how_an_image_starts_that_cant_be_recorded_does_not_cost_the_image(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """As the push step treats a config it can't read: the image is built and published all the same."""
+        reported = ImageRuntimeConfig.model_construct(entrypoint=["/entrypoint.sh"], user="u" * 300)
+        image = RemoteImage(reference=f"{DESTINATION}@{DIGEST}", runtime_config=reported)
+        builder = FakeBuilder()
+        with caplog.at_level(logging.WARNING):
+            assert _run(FakeService([RemoteBuildStatus("done", image=image)]), builder, context, tmp_path) == 0
+        assert len(builder.completed) == 1
+        assert "can't record how demo-1 starts; recording none" in caplog.text
 
     def test_each_stage_is_logged_once(self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
@@ -1137,7 +1179,7 @@ class TestSeveralImages:
             if not ignore_errors:
                 raise OSError(39, "Directory not empty")
 
-        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree)
+        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree, copy2=shutil.copy2)
         monkeypatch.setattr(driver, "shutil", kept)
         builder = FakeBuilder()
         assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 0
@@ -1154,7 +1196,7 @@ class TestSeveralImages:
         def rmtree(path: str, ignore_errors: bool = False) -> None:
             raise RecursionError("maximum recursion depth exceeded")
 
-        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree)
+        kept = SimpleNamespace(rmtree=rmtree, copyfile=shutil.copyfile, copytree=shutil.copytree, copy2=shutil.copy2)
         monkeypatch.setattr(driver, "shutil", kept)
         builder = FakeBuilder()
         assert _run(FakeService([DONE]), builder, context, tmp_path, config=_config("a", "b")) == 0
@@ -1390,6 +1432,136 @@ class TestTheContext:
         (context / "Dockerfile.dockerignore").write_text("services\n")
         staged = stage_context(context, "Dockerfile.slim")
         assert not (staged / "Dockerfile.dockerignore").exists()
+
+    def test_the_contexts_rules_are_kept_when_they_are_a_link_to_the_ignore_file_that_goes(self, context: Path) -> None:
+        """The named Dockerfile has no ignore file of its own, so the context's `.dockerignore` is what applies
+        to it: here a link to the root Dockerfile's own, which goes. Left a link, it would lead nowhere, and a
+        `COPY .` would publish the `private.env` that the build left out where it was written."""
+        (context / "private.env").write_text("sample only\n")
+        (context / "Dockerfile.dockerignore").write_text("private.env\n")
+        (context / ".dockerignore").symlink_to("Dockerfile.dockerignore")
+        before = sorted(path.name for path in context.iterdir())
+
+        staged = stage_context(context, "services/feed/Dockerfile")
+
+        assert (staged / ".dockerignore").read_text() == "private.env\n"
+        assert not (staged / ".dockerignore").is_symlink()
+        # The replaced root Dockerfile's own still doesn't stand in for one, and nothing else is left behind.
+        assert sorted(path.name for path in staged.iterdir()) == sorted(set(before) - {"Dockerfile.dockerignore"})
+
+    @pytest.mark.parametrize("dockerfile", ["Dockerfile", "services/feed/Dockerfile"], ids=["at-the-root", "elsewhere"])
+    def test_the_contexts_rules_that_are_a_link_to_another_file_become_a_file(
+        self, dockerfile: str, context: Path
+    ) -> None:
+        """A builder reads the rules at the context's root, and a service's packager may not follow links."""
+        (context / "rules").mkdir()
+        (context / "rules" / "ignore").write_text("private.env\n")
+        (context / ".dockerignore").symlink_to("rules/ignore")
+
+        staged = stage_context(context, dockerfile)
+
+        assert (staged / ".dockerignore").read_text() == "private.env\n"
+        assert not (staged / ".dockerignore").is_symlink()
+        assert (staged / "rules" / "ignore").read_text() == "private.env\n"
+
+    def test_a_root_dockerfiles_ignore_file_that_is_a_link_becomes_a_file(self, context: Path) -> None:
+        """Nothing is moved for the root Dockerfile. The rules it is built with are still made a file."""
+        (context / "rules").mkdir()
+        (context / "rules" / "prod.ignore").write_text("private.env\n")
+        (context / "Dockerfile.dockerignore").symlink_to("rules/prod.ignore")
+
+        staged = stage_context(context, "Dockerfile")
+
+        assert (staged / "Dockerfile.dockerignore").read_text() == "private.env\n"
+        assert not (staged / "Dockerfile.dockerignore").is_symlink()
+        assert sorted(path.name for path in staged.iterdir()) == [
+            "Dockerfile",
+            "Dockerfile.dockerignore",
+            "app.py",
+            "rules",
+            "services",
+        ]
+
+    def test_rules_reached_by_a_chain_of_links_are_kept_when_a_link_of_the_chain_goes(self, context: Path) -> None:
+        """`.dockerignore -> Dockerfile.dockerignore -> rules/prod.ignore`. The link in the middle was the
+        replaced root Dockerfile's, and goes; the context's own rules are still what they led to."""
+        (context / "rules").mkdir()
+        (context / "rules" / "prod.ignore").write_text("private.env\n")
+        (context / "Dockerfile.dockerignore").symlink_to("rules/prod.ignore")
+        (context / ".dockerignore").symlink_to("Dockerfile.dockerignore")
+
+        staged = stage_context(context, "services/feed/Dockerfile")
+
+        assert (staged / ".dockerignore").read_text() == "private.env\n"
+        assert not (staged / ".dockerignore").is_symlink()
+        assert not (staged / "Dockerfile.dockerignore").is_symlink()
+        assert not (staged / "Dockerfile.dockerignore").exists()
+        assert (staged / "rules" / "prod.ignore").read_text() == "private.env\n"
+
+    def test_the_contexts_rules_are_as_they_were_when_the_file_they_link_to_is_replaced(self, context: Path) -> None:
+        """The named Dockerfile brings its own ignore file to the root, in place of the one the context's
+        `.dockerignore` links to. The context's own rules stay the ones they were, not the ones brought."""
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+        (context / ".dockerignore").symlink_to("Dockerfile.dockerignore")
+        (context / "services" / "feed" / "Dockerfile.dockerignore").write_text("private.env\n")
+
+        staged = stage_context(context, "services/feed/Dockerfile")
+
+        assert (staged / "Dockerfile.dockerignore").read_text() == "private.env\n"
+        assert (staged / ".dockerignore").read_text() == "services\n"
+        assert not (staged / ".dockerignore").is_symlink()
+
+    def test_an_ignore_file_that_links_to_the_root_dockerfiles_is_the_one_staged(self, context: Path) -> None:
+        """`Dockerfile.dev.dockerignore -> Dockerfile.dockerignore`: two Dockerfiles that share their rules."""
+        (context / "Dockerfile.dev").write_text("FROM alpine\n")
+        (context / "Dockerfile.dockerignore").write_text("private.env\n")
+        (context / "Dockerfile.dev.dockerignore").symlink_to("Dockerfile.dockerignore")
+
+        staged = stage_context(context, "Dockerfile.dev")
+
+        assert (staged / "Dockerfile").read_text() == "FROM alpine\n"
+        assert (staged / "Dockerfile.dockerignore").read_text() == "private.env\n"
+        assert not (staged / "Dockerfile.dockerignore").is_symlink()
+        assert (staged / "Dockerfile.dev.dockerignore").read_text() == "private.env\n"
+
+    @pytest.mark.parametrize("leads_to", ["no-such-file", "services"], ids=["nowhere", "a-directory"])
+    def test_the_contexts_rules_that_link_to_no_file_are_left_as_they_were(self, leads_to: str, context: Path) -> None:
+        """There were no rules to read before the Dockerfile was moved, and there are none after."""
+        (context / ".dockerignore").symlink_to(leads_to)
+        staged = stage_context(context, "services/feed/Dockerfile")
+        assert (staged / ".dockerignore").is_symlink()
+        assert os.readlink(staged / ".dockerignore") == leads_to
+
+    def test_a_dockerfiles_own_ignore_file_is_never_held_in_memory_whole(self, context: Path) -> None:
+        """Unpacking lets one file of an archive be gigabytes. Read whole, it would end the step, and with it
+        the turn of every image of the set still to be built."""
+        block = (b"*.log\n" * 175_000)[: 1024 * 1024]
+        size = 16 * len(block)
+        ignore = context / "services" / "feed" / "Dockerfile.dockerignore"
+        with ignore.open("wb") as written:
+            for _ in range(16):
+                written.write(block)
+        tracing = tracemalloc.is_tracing()
+        if not tracing:
+            tracemalloc.start()
+        try:
+            tracemalloc.reset_peak()
+            held, _ = tracemalloc.get_traced_memory()
+            staged = stage_context(context, "services/feed/Dockerfile")
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            if not tracing:
+                tracemalloc.stop()
+
+        assert peak - held < size // 8
+        assert (staged / "Dockerfile.dockerignore").stat().st_size == size
+        assert filecmp.cmp(staged / "Dockerfile.dockerignore", ignore, shallow=False)
+        assert sorted(path.name for path in staged.iterdir()) == [
+            "Dockerfile",
+            "Dockerfile.dockerignore",
+            "app.py",
+            "services",
+        ]
 
     @pytest.mark.parametrize("kind", ["a-file", "a-directory", "by-an-absolute-path"])
     def test_a_context_with_a_link_that_leads_out_of_it_is_refused(
@@ -1641,6 +1813,71 @@ class TestTheImagesOfOneSet:
         config = self._set({"fileset": "default/fs-a"}, {"fileset": "default/fs-b"}, {"fileset": "default/fs-a"})
         assert _run(FakeService([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
         assert fetch.calls == ["default/fs-a", "default/fs-b"]  # ty: ignore[unresolved-attribute]
+
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [("app", "app/"), ("app", "./app"), ("app/x", "app//x"), ("./app/x/", "app/./x")],
+        ids=["a-trailing-slash", "a-leading-dot", "a-doubled-slash", "all-of-them"],
+    )
+    def test_two_spellings_of_one_directory_are_one_download(self, first: str, second: str, tmp_path: Path) -> None:
+        """`app` and `app/` name one directory of a fileset. Downloaded once under each spelling, a set's two
+        images would be built from the source as it was at two different times."""
+        files = {"Dockerfile": "FROM scratch\n", "version": "first"}
+        fetch = self._sources(files)
+        seen: list[str] = []
+
+        class Changing(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                seen.append((build.context / "version").read_text())
+                files["version"] = "second"
+                return super().start(build)
+
+        fileset = {"fileset": "default/fs-a"}
+        config = self._set(fileset | {"context_path": first}, fileset | {"context_path": second})
+        builder = FakeBuilder()
+        assert _run(Changing([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
+        assert seen == ["first", "first"]
+        assert [image for image, _, _ in builder.completed] == ["a", "b"]
+        # One download, asked for under the one spelling the two come to.
+        assert fetch.directories == [(None, PurePosixPath(first).as_posix())]  # ty: ignore[unresolved-attribute]
+
+    def test_a_copy_keeps_the_names_of_one_file_as_one_file(self, tmp_path: Path) -> None:
+        """An archive may hold one file under many names, as hard links, and unpacking counts its size once.
+        Copied as a file for each name, an archive that is allowed would fill the step's storage."""
+        payload = b"x" * 65536
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            (directory / "Dockerfile").write_text("FROM scratch\n")
+            (directory / "payload").write_bytes(payload)
+            (directory / "payload").chmod(0o750)
+            (directory / "names").mkdir()
+            for number in range(32):
+                os.link(directory / "payload", directory / "names" / f"payload-{number}")
+            return directory
+
+        #: For each image's copy: its names, its files, their bytes, and their modes.
+        copies: list[tuple[int, int, int, set[int]]] = []
+        #: Whether a copy shares a file with the download, and how many names the download's file then has.
+        downloads: list[tuple[bool, int]] = []
+        read: list[bool] = []
+
+        class Measuring(FakeService):
+            def start(self, build: RemoteBuild) -> str:
+                (download,) = (tmp_path / "scratch").glob("source-*/payload")
+                names = [build.context / "payload", *(build.context / "names").iterdir()]
+                files = {name.stat().st_ino: name.stat() for name in names}
+                sizes = sum(status.st_size for status in files.values())
+                copies.append((len(names), len(files), sizes, {status.st_mode & 0o777 for status in files.values()}))
+                downloads.append((download.stat().st_ino in files, download.stat().st_nlink))
+                read.append(all(name.read_bytes() == payload for name in names))
+                return super().start(build)
+
+        assert _run(Measuring([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 0
+        # Thirty-three names and one file of 64 KiB, as it was, in each image's copy.
+        assert copies == [(33, 1, len(payload), {0o750})] * 2
+        assert read == [True, True]
+        # A copy of its own: none of its names is a name of the download's file.
+        assert downloads == [(False, 33)] * 2
 
     def test_a_copy_keeps_a_link_as_a_link_so_one_that_leads_out_is_still_refused(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -2531,6 +2768,196 @@ class TestTheStepProgram:
         ]
         # The caller's own dictionary is not changed under it.
         assert headers["Authorization"] == "Bearer token-value"
+
+    def test_a_field_that_prints_a_mask_is_redacted_by_what_it_holds(self, signals: None) -> None:
+        """A request's headers print a mask where they hold the credential, and give it whole to a format
+        that asks for one of them by name."""
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        handler = Own()
+        handler.setFormatter(logging.Formatter("{message} {headers[authorization]} {headers[accept]}", style="{"))
+        client_log = logging.getLogger("some.build.client.headers")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        driver.redact_log("token-value")
+        headers = httpx.Headers({"Authorization": "Bearer token-value", "Accept": "application/json"})
+        try:
+            assert "token-value" not in repr(headers)
+            client_log.error("request failed", extra={"headers": headers})
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == ["request failed Bearer [credential] application/json"]
+        # The caller's own headers are not changed under it.
+        assert headers["authorization"] == "Bearer token-value"
+
+    def test_a_container_of_any_kind_is_looked_into_not_read_as_it_prints(self) -> None:
+        """Whatever is a mapping, a sequence or a set, not only the plain ones. One that holds the credential
+        becomes a plain container without it; one that doesn't is passed on as it is."""
+
+        class Masked(Mapping[str, str]):
+            def __init__(self, held: dict[str, str]) -> None:
+                self._held = held
+
+            def __getitem__(self, key: str) -> str:
+                return self._held[key]
+
+            def __iter__(self) -> Iterator[str]:
+                return iter(self._held)
+
+            def __len__(self) -> int:
+                return len(self._held)
+
+            def __repr__(self) -> str:
+                return f"Masked({sorted(self._held)})"
+
+        class Call(NamedTuple):
+            url: str
+            tries: int
+
+        redact = driver._redactor("token-value")
+        leaking = Masked({"authorization": "Bearer token-value", "accept": "application/json"})
+        without = {"authorization": "Bearer [credential]", "accept": "application/json"}
+
+        rebuilt = driver._redact_value(leaking, redact)
+        assert (type(rebuilt), rebuilt) == (dict, without)
+        # Inside a plain container too, which is then rebuilt around it.
+        assert driver._redact_value({"request": [leaking]}, redact) == {"request": [without]}
+        assert driver._redact_value(collections.deque(["token-value", 2]), redact) == ["[credential]", 2]
+        assert driver._redact_value(Call("https://build.example.com/builds?key=token-value", 2), redact) == (
+            "https://build.example.com/builds?key=[credential]",
+            2,
+        )
+        assert driver._redact_value({"token-value": 1}.keys(), redact) == {"[credential]"}
+        # Text and bytes are sequences too, and are still read as text.
+        assert driver._redact_value(b"key=token-value", redact) == "b'key=[credential]'"
+
+        harmless = Masked({"accept": "application/json"})
+        queue = collections.deque(["queued", "building"])
+        assert driver._redact_value(harmless, redact) is harmless
+        assert driver._redact_value(queue, redact) is queue
+        assert driver._redact_value(range(3), redact) == range(3)
+
+    def test_a_container_too_deep_to_look_into_is_passed_on_only_if_it_prints_all_it_holds(self) -> None:
+        """Past the depth the driver looks to, a value is read as it prints. That shows everything in plain
+        containers, and may not in any other: such a one is passed on as its text, not as itself."""
+
+        class Masked(collections.UserDict):
+            def __repr__(self) -> str:
+                return "Masked(…)"
+
+        def nested(value: object, levels: int) -> object:
+            for _ in range(levels):
+                value = [value]
+            return value
+
+        redact = driver._redactor("token-value")
+        leaking = Masked({"authorization": "Bearer token-value"})
+        for levels in (driver._MAX_FIELD_DEPTH, driver._MAX_FIELD_DEPTH + 3):
+            passed_on = driver._redact_value(nested(leaking, levels), redact)
+            assert "Masked(…)" in repr(passed_on)
+            # Nothing passed on still holds the mapping, to give the credential to whoever asks it.
+            while isinstance(passed_on, list):
+                (passed_on,) = passed_on
+            assert isinstance(passed_on, str)
+        plain = nested({"tries": 3, "stages": ("queued", "building")}, driver._MAX_FIELD_DEPTH + 3)
+        assert driver._redact_value(plain, redact) is plain
+
+    @pytest.mark.parametrize("installed", ["before-the-steps", "after-it-and-the-steps-put-back-on-top"])
+    def test_what_a_factory_under_the_steps_put_on_a_record_is_redacted_too(
+        self, installed: str, signals: None
+    ) -> None:
+        """A tracing library's record factory. Its fields are on the record when the step's factory is handed
+        it, set as attributes, where a log call's own fields are set afterwards and by key. The step puts its
+        factory back on top of one a client installed, so such a factory is always under the step's."""
+        printed: list[str] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                printed.append(self.format(record))
+
+        traced = {
+            "request_url": "https://build.example.com/builds?key=token-value",
+            "baggage": httpx.Headers({"Authorization": "Bearer token-value"}),
+            "span": 7,
+        }
+
+        def tracing(*args: Any, **kwargs: Any) -> logging.LogRecord:
+            record = under(*args, **kwargs)
+            for name, value in traced.items():
+                setattr(record, name, value)
+            return record
+
+        if installed == "before-the-steps":
+            under = logging.getLogRecordFactory()
+            logging.setLogRecordFactory(tracing)
+            driver.redact_log("token-value")
+        else:
+            driver.redact_log("token-value")
+            under = logging.getLogRecordFactory()
+            logging.setLogRecordFactory(tracing)
+            driver.log_redaction()
+        handler = Own()
+        handler.setFormatter(logging.Formatter("%(message)s %(request_url)s %(baggage)s %(span)s"))
+        client_log = logging.getLogger("some.build.client.traced")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        try:
+            client_log.error("request failed")
+            record = client_log.makeRecord("x", logging.INFO, __file__, 1, "build %s: %s", ("build-1", "queued"), None)
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        assert printed == [
+            "request failed https://build.example.com/builds?key=[credential] "
+            "{'authorization': 'Bearer [credential]'} 7"
+        ]
+        # What holds no credential is as the factory under the step's made it, and as the call logged it.
+        assert (vars(record)["span"], record.msg, record.args) == (7, "build %s: %s", ("build-1", "queued"))
+
+    def test_what_a_message_doesnt_print_of_what_it_is_made_from_does_not_stay_on_the_record(
+        self, signals: None
+    ) -> None:
+        """A message prints its arguments as they print: a request's headers as a mask, a mapping as the one
+        value its format names. A handler that reads the arguments themselves, to report them apart from the
+        message, would be handed the credential that the message left out. So it would from a message that
+        was logged as an object, and not as text."""
+        seen: list[logging.LogRecord] = []
+
+        class Own(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                seen.append(record)
+
+        handler = Own()
+        client_log = logging.getLogger("some.build.client.arguments")
+        client_log.propagate = False
+        client_log.addHandler(handler)
+        driver.redact_log("token-value")
+        headers = httpx.Headers({"Authorization": "Bearer token-value"})
+        request = {"method": "POST", "url": "https://build.example.com/builds?key=token-value"}
+        stages = {"stages": ("queued", "building")}
+        try:
+            client_log.error("request failed, sent %s", headers)
+            client_log.error("%(method)s failed", request)
+            client_log.error(headers)
+            client_log.error("try %d of %d", 2, 3)
+            client_log.error(stages)
+        finally:
+            client_log.removeHandler(handler)
+            client_log.propagate = True
+        masked, named, an_object, harmless, a_harmless_object = seen
+        # Each message is what it was, as text, and what held more than it printed is gone.
+        assert "token-value" not in repr(headers)
+        assert (masked.msg, masked.args) == (f"request failed, sent {headers!r}", None)
+        assert (named.msg, named.args) == ("POST failed", None)
+        assert (an_object.msg, an_object.args) == (str(headers), None)
+        # What holds no credential is left for a handler as it was logged.
+        assert (harmless.msg, harmless.args) == ("try %d of %d", (2, 3))
+        assert a_harmless_object.msg is stages
 
     def test_a_logged_value_without_the_credential_is_passed_on_as_it_is(self) -> None:
         redact = driver._redactor("token-value")

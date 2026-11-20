@@ -17,10 +17,6 @@ from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
 from nemo_builder_plugin.schema import MAX_BUILD_SPECS, ImageSource
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, ROOT_DOCKERFILE, RemoteBuildImage, RemoteBuildStepConfig
-from nemo_helix_plugin.auth.workload_identity import (
-    WorkloadIdentityConfigError,
-    is_workload_identity_token_exchange_enabled,
-)
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.spec import (
@@ -44,15 +40,6 @@ CANCEL_MARGIN_SECONDS = 120
 def is_root_dockerfile(dockerfile: str) -> bool:
     """Whether ``dockerfile`` is the one at the context's root, however it is spelt (``./Dockerfile`` too)."""
     return PurePosixPath(dockerfile).as_posix() == ROOT_DOCKERFILE
-
-
-def _token_exchange() -> bool:
-    try:
-        return is_workload_identity_token_exchange_enabled()
-    except WorkloadIdentityConfigError:
-        # The auth config can't be read here, so exchange is taken for off. If it is on, Jobs' launcher can't
-        # fetch the secret and the step never starts: the rows then say only what Jobs says of the job.
-        return False
 
 
 class RemoteBackend:
@@ -114,13 +101,6 @@ class RemoteBackend:
                 f"builder.default_platform is {self._config.default_platform}, which is not one of "
                 f"builder.remote.platforms ({', '.join(remote.platforms)}); a request that names no platform "
                 "could never build"
-            )
-        if remote.credential_secret is not None and _token_exchange():
-            # The launcher fetches a step's secrets as the job's principal, which token exchange doesn't give it.
-            raise BackendRejectedError(
-                "builder.remote.credential_secret is set, but this platform uses workload token exchange, under "
-                f"which Jobs cannot fetch a step's platform secrets; mount the credential on Jobs execution profile "
-                f"cpu/{name} and unset credential_secret (any job that names the profile can then read it)"
             )
 
     def check(self, plan: BuildPlan) -> None:

@@ -137,12 +137,12 @@ class RemoteConfig(BaseModel):
         default=None,
         min_length=1,
         description=(
-            "The platform secret holding the service's credential, which the step reads from its environment. Write "
+            "The platform secret holding the service's credential, which Jobs fetches as the build's submitter and "
+            "the step reads from its environment, whether or not the platform uses workload token exchange. Write "
             "it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read "
             "from each submitter's own workspace, so every workspace would need its own. Every user who may build "
-            "must be able to read it. Null when the step's Jobs profile mounts the credential instead, which a "
-            "platform using workload token exchange requires; a mounted credential is readable by any job that "
-            "names the profile, whoever creates it."
+            "must be able to read it. Null when the step's Jobs profile mounts the credential instead: any user "
+            "who may create a job can name that profile, and read a credential it mounts."
         ),
     )
     platforms: list[str] = Field(
@@ -167,7 +167,9 @@ class RemoteConfig(BaseModel):
         ge=60,
         description=(
             "How long the step waits for one image, from when it asks the service to start, before it cancels the "
-            "build and fails the image. Time the service makes the step wait for its queue counts."
+            "build and fails the image. Time the service makes the step wait for its queue counts. The step gives "
+            "the same limit to the service's client, to pass to its service as the build's own deadline: only a "
+            "service that enforces one ends a build whose step was killed."
         ),
     )
 
