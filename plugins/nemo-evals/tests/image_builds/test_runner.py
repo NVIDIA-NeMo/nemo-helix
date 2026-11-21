@@ -260,8 +260,8 @@ async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwar
     """Run a build to its end. ``_Builder``'s images finish on the first read after their submit.
 
     Unless a test brings its own, the clock moves 100 seconds each time it is read and the build is given 250.
-    A build left unsettled, as by an image that was never submitted, then ends as timed out instead of being
-    waited for on the real clock.
+    A build a broken runner left unsettled, as by stopping its submits without failing an image, then ends as
+    timed out instead of being waited for on the real clock.
     """
     ticks = iter(range(0, 10_000, 100))
     kwargs.setdefault("timeout", 250)
@@ -711,7 +711,7 @@ async def test_the_record_lists_images_in_the_order_the_task_plans_them(
 @pytest.mark.parametrize(
     ("error", "reason"),
     [
-        (PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed"})), "HTTP 403: not allowed"),
+        (_forbidden(), "HTTP 403: not allowed to build"),
         (ConflictError(httpx.Response(409, json={"detail": "held by another"})), "HTTP 409: held by another"),
         (NemoTransportError(httpx.ConnectError("no route to Builder")), "no route to Builder"),
     ],
