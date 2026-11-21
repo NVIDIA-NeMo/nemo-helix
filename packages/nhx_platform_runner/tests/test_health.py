@@ -156,3 +156,14 @@ def test_status_reports_runner_selector_instead_of_loop_names() -> None:
     assert payload["status"] == "healthy"
     assert payload["controllers"] == {"healthy": True, "status": {"jobs": True}}
     assert client.get("/health/ready").status_code == 200
+
+
+def test_cluster_info_reports_version_revision_and_architecture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nhx.platform_runner.health.get_platform_version", lambda: "0.10.0")
+    monkeypatch.setattr("nhx.platform_runner.health.get_revision", lambda: "abc123")
+    monkeypatch.setattr("nhx.platform_runner.health.get_architecture", lambda: "linux/arm64")
+
+    response = _client_for([]).get("/cluster-info")
+
+    assert response.status_code == 200
+    assert response.json() == {"platform_version": "0.10.0", "revision": "abc123", "architecture": "linux/arm64"}

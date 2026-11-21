@@ -6239,6 +6239,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
 * `deploy`: Deploy an agent on the platform.
+* `package-deploy`: Package a local agent, push it, and deploy it to a remote...
 * `redeploy`: Redeploy an agent from a new config, in one command.
 * `logs`: Show logs for an agent deployment.
 * `undeploy`: Stop and remove a deployment (or all deployments for an...
@@ -6581,6 +6582,48 @@ nemo agents deploy [OPTIONS]
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass `--no-wait` for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with `--wait`). [default: 300]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents package-deploy
+
+Package a local agent, push it, and deploy it to a remote platform, in one command.
+
+Every check runs before the image is built: the registry has no URL
+scheme and Docker holds credentials for it, you can sign in to the
+target, and the agent exists there. The image pins the target's
+nemo-helix release and is built for its architecture, under a tag
+unique to this build.
+
+Your CLI config and active context are never changed. A saved context
+for the same URL is reused while its login is valid; otherwise you sign
+in through the browser for this run only.
+
+Requires Docker and the nemo-agents plugin dependencies: a source
+checkout has them; a released CLI needs nemo-helix installed with its
+nemo-agents-plugin extra.
+
+**Usage:**
+
+```shell
+nemo agents package-deploy [OPTIONS]
+```
+
+**Options:**
+
+* `--agent, -a`: Name of the agent registered on the target platform.
+* `--agent-config, -c <FILE>`: Path to the local Fabric agent YAML to package (its directory is the build context).
+* `--target-url`: Base URL of the platform to deploy to, e.g. https://nemo.example.com.
+* `--workspace`: Workspace of the agent on the target platform.
+* `--registry, -r`: Registry to push the image to, without a URL scheme, e.g. nvcr.io/my-org/my-team.
+* `--mode`: Container runtime on the target: k8s, docker, or openshell. [default: k8s]
+* `--platform`: Docker platform of the target's nodes, e.g. linux/amd64. Defaults to the architecture the target reports; required when it reports none.
+* `--nemo-version`: Published nemo-helix release the image pins. Defaults to the target's release; required when the target runs an unreleased build.
+* `--no-browser`: Print the login URL and code instead of opening a browser.
+* `--wait, --no-wait`: Wait for the deployment to reach running or failed before returning.
+* `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with `--wait`). [default: 300]
 
 **Help:**
 

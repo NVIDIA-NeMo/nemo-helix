@@ -4,7 +4,7 @@
 from importlib.metadata import PackageNotFoundError
 
 import pytest
-from nhx.platform_runner.version import _resolve_version, get_revision
+from nhx.platform_runner.version import _resolve_version, get_architecture, get_revision
 
 
 def _package_version(value: str | None):
@@ -56,3 +56,19 @@ def test_get_revision(monkeypatch):
     assert get_revision() == "abc123"
     monkeypatch.delenv("NHX_CODE_REVISION", raising=False)
     assert get_revision() == "dev"
+
+
+@pytest.mark.parametrize(
+    ("machine", "expected"),
+    [
+        ("x86_64", "linux/amd64"),
+        ("AMD64", "linux/amd64"),
+        ("aarch64", "linux/arm64"),
+        ("arm64", "linux/arm64"),
+        ("riscv64", None),
+        ("", None),
+    ],
+)
+def test_get_architecture_normalizes_machine_to_docker_platform(monkeypatch, machine, expected):
+    monkeypatch.setattr("nhx.platform_runner.version.machine", lambda: machine)
+    assert get_architecture() == expected

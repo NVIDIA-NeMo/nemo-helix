@@ -3706,3 +3706,63 @@ class TestFabricWheelInstall:
             build_fabric_agent_image(fabric_agent_config, wheel=wheel, skip_validation=True)
 
         assert collision.read_text() == "USER OWNED"
+
+
+class TestFabricContractVersionPin:
+    """``package-deploy`` packages from a source checkout for a platform running a release,
+    so the build pins that release instead of the host's unpublished version."""
+
+    @patch("nemo_agents_plugin.container.builder.docker_build")
+    def test_pinned_release_replaces_the_host_version(
+        self, mock_build: MagicMock, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nemo_agents_plugin.container.template as template
+        from nemo_agents_plugin.container.builder import build_fabric_agent_image
+
+        monkeypatch.setattr(template, "get_contract_version", lambda: "0.11.0.post3.dev0+5d62bc7400")
+        rendered: dict[str, str] = {}
+        mock_build.side_effect = lambda **kwargs: rendered.setdefault(
+            "dockerfile", (fabric_agent_config.parent / "Dockerfile.generated").read_text()
+        )
+
+        build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x", contract_version="0.10.0")
+
+        assert '"nemo-helix[nemo-agents-plugin-deepagents]==0.10.0"' in rendered["dockerfile"]
+        assert 'com.nemo.agent.contract-version="0.10.0"' in rendered["dockerfile"]
+
+    @patch("nemo_agents_plugin.container.builder.docker_build")
+    def test_pinned_release_with_a_wheel_is_refused_before_building(
+        self, mock_build: MagicMock, fabric_agent_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from nemo_agents_plugin.container.builder import build_fabric_agent_image
+        from nemo_agents_plugin.container.template import WHEEL_ENV
+
+        wheel = tmp_path / "nemo_helix-0.4.0-py3-none-any.whl"
+        wheel.write_bytes(b"wheel")
+        monkeypatch.setenv(WHEEL_ENV, str(wheel))
+
+        with pytest.raises(ValueError, match=f"unset {WHEEL_ENV}"):
+            build_fabric_agent_image(
+                fabric_agent_config, skip_validation=True, agent_author="x", contract_version="0.10.0"
+            )
+        mock_build.assert_not_called()
+
+    def test_shared_params_follow_the_pinned_release(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nemo_agents_plugin.container.template as template
+
+        monkeypatch.setattr(template, "get_contract_version", lambda: "0.11.0.post3.dev0+5d62bc7400")
+
+        pinned = template.resolve_shared_render_params(fabric_agent_config, contract_version="0.10.0")
+        unpinned = template.resolve_shared_render_params(fabric_agent_config)
+
+        assert pinned.contract_version == "0.10.0"
+        assert unpinned.contract_version == "0.11.0.post3.dev0+5d62bc7400"
+
+    @pytest.mark.parametrize("version", ["dev", "0.11.0.dev0", "0.11.0+abc"])
+    def test_unpublished_versions_are_not_installable(self, version: str) -> None:
+        from nemo_agents_plugin.container.template import require_installable_contract_version
+
+        with pytest.raises(ValueError, match="no package index serves it"):
+            require_installable_contract_version(version)
