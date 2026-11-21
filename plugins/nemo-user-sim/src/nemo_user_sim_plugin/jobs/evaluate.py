@@ -36,6 +36,7 @@ from usersim.selection.engine import COL_AXIS_SCORES, COL_FAILED_GATES, COL_QUAL
 # Selection gates that judge the simulation rather than the agent: no judge output, a skipped or failed
 # simulation, too few turns. Health gates (``health:*``) and judge disagreement carry a prefix.
 _SIMULATION_GATES = {"no_eval", "skipped", "status", "min_turns"}
+_SCORER_ERROR = ":scorer_error"
 
 
 def _cell(value: Any) -> Any:
@@ -43,20 +44,32 @@ def _cell(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
+def fully_scored(selection_row: dict) -> bool:
+    """Whether the judge scored the conversation and no scorer it needed failed.
+
+    UserSim records a scorer that failed as a ``<axis>:scorer_error`` gate and leaves its scores out, so a
+    conversation can clear every other gate without having been scored on that axis.
+    """
+    failed_gates, axis_scores = (_cell(selection_row[column]) for column in (COL_FAILED_GATES, COL_AXIS_SCORES))
+    return bool(axis_scores) and not any(gate.endswith(_SCORER_ERROR) for gate in failed_gates)
+
+
 def agent_verdict(selection_row: dict) -> dict:
     """Whether the agent passed, from the judge's quality axes only.
 
     UserSim's selection also rejects conversations for simulator problems, such as the simulated user
     breaking character. Those decide training data, not the agent's result. ``passed`` is None when the
-    judge scored no axis.
+    conversation wasn't fully scored and no axis it was scored on failed.
     """
-    failed_gates, axis_scores = (_cell(selection_row[column]) for column in (COL_FAILED_GATES, COL_AXIS_SCORES))
+    failed_gates = _cell(selection_row[COL_FAILED_GATES])
     failed_axes = [gate for gate in failed_gates if ":" not in gate and gate not in _SIMULATION_GATES]
-    judged = bool(axis_scores)
-    return {
-        "passed": (not failed_axes) if judged else None,
-        "reason": ", ".join(failed_axes) or None,
-    }
+    if not _cell(selection_row[COL_AXIS_SCORES]):
+        passed = None
+    elif failed_axes:
+        passed = False
+    else:
+        passed = True if fully_scored(selection_row) else None
+    return {"passed": passed, "reason": ", ".join(failed_axes) or None}
 
 
 def scoring_failure(error: Exception) -> str:

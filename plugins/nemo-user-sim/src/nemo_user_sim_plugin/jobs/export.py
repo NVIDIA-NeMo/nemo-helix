@@ -27,6 +27,7 @@ from nemo_user_sim_plugin.jobs._common import (
     read_result_frame,
     task_step,
 )
+from nemo_user_sim_plugin.jobs.evaluate import fully_scored
 from nemo_user_sim_plugin.jobs.spec import ExportSpec
 from pydantic import BaseModel
 from usersim.selection import select_trajectories
@@ -62,7 +63,9 @@ class ExportJob(NemoJob):
                 skipped.append(job)
                 continue
             candidates += len(conversations)
-            curated.append(select_trajectories(conversations, evaluations, profile=PROFILES[spec.quality]).curated)
+            chosen = select_trajectories(conversations, evaluations, profile=PROFILES[spec.quality]).curated
+            # UserSim's selection lets through a conversation whose judge or scorer failed without raising.
+            curated.append(chosen[[fully_scored(row) for row in chosen.to_dict("records")]])
         if not curated:
             raise ValueError(f"None of {', '.join(spec.jobs)} has scored conversations to export.")
         selected = pd.concat(curated, ignore_index=True)

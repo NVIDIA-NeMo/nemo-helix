@@ -137,6 +137,14 @@ def test_run_rejects_use_agent_tools_with_a_model():
     assert result.exit_code != 0 and "--use-agent-tools needs --agent" in result.output
 
 
+def test_a_menu_asks_again_for_a_number_it_doesnt_offer(monkeypatch, capsys):
+    answers = iter(["0", "3", "x", "2"])
+    monkeypatch.setattr(cli, "prompt", lambda *args, **kwargs: next(answers))
+
+    assert cli._pick("Pick one", ["a", "b"]) == ["b"]
+    assert capsys.readouterr().out.count("Enter a number from 1 to 2.") == 3
+
+
 def test_a_rerun_copies_the_source_runs_settings():
     source = {
         "target": {"kind": "agent", "agent": "demo-tax-helper", "use_agent_tools": True},
@@ -146,6 +154,7 @@ def test_a_rerun_copies_the_source_runs_settings():
         "seed": 7,
         "max_turns": 5,
         "scenarios": "user-sim-scenarios-tax-season",
+        "publish_to_intake": False,
         "preview": "abc",
         "exclude_personas": ["p9"],
         "assistant_model": "m",
@@ -158,5 +167,6 @@ def test_a_rerun_copies_the_source_runs_settings():
         "locale": "en_US",
         "max_turns": 5,
         "scenarios": "user-sim-scenarios-tax-season",
+        "publish_to_intake": False,  # a run kept out of Intake stays out when it's rerun
         "rerun": {"job": "run-1", "conversations": ["a", "b"]},
     }

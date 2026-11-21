@@ -75,9 +75,13 @@ def _pick(title: str, options: list[str], *, many: bool = False, default: str = 
     typer.echo(title)
     for number, option in enumerate(options, 1):
         typer.echo(f"  {number}. {option}")
-    answer = prompt("Numbers, separated by commas" if many else "Number", default=default)
-    picked = [options[int(part) - 1] for part in answer.replace(" ", "").split(",") if part]
-    return picked if many else picked[:1]
+    while True:
+        answer = prompt("Numbers, separated by commas" if many else "Number", default=default)
+        parts = [part for part in str(answer).replace(" ", "").split(",") if part]
+        if parts and all(part.isdigit() and 1 <= int(part) <= len(options) for part in parts):
+            picked = [options[int(part) - 1] for part in parts]
+            return picked if many else picked[:1]
+        typer.echo(f"Enter a number from 1 to {len(options)}.")
 
 
 def run_target(agent: str | None, model: str | None, *, use_agent_tools: bool) -> dict:
@@ -88,7 +92,7 @@ def run_target(agent: str | None, model: str | None, *, use_agent_tools: bool) -
 
 
 # The settings a rerun keeps from its source run. The draw (users, seed, preview) comes from the source rows.
-RERUN_KEEPS = ("target", "probes", "locale", "max_turns", "scenarios")
+RERUN_KEEPS = ("target", "probes", "locale", "max_turns", "scenarios", "publish_to_intake")
 
 
 def rerun_request(source: dict, run: str, conversations: list[str]) -> dict:

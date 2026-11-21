@@ -3,11 +3,11 @@
 
 # Turning conversations into training data
 
-`nemo user-sim export --job <job> --fileset <name>` keeps the conversations that passed scoring and writes them as chat JSONL (`{"messages": [...]}`) to a dataset fileset. The Helix post-training plugin reads that format directly.
+`nemo user-sim training-data <run> --fileset <name>` keeps the conversations that passed scoring and writes them as chat JSONL (`{"messages": [...]}`) to a dataset fileset. The Helix post-training plugin reads that format directly.
 
 ## Quality gate
 
-The `strict` gate (default) drops conversations with any judge concern. `generous` keeps borderline ones; pass it with `--spec '{"quality": "generous"}'`. Use strict for fine-tuning and generous only when the user needs volume and will review by hand.
+The `strict` gate (default) drops conversations with any judge concern. `generous` keeps borderline ones; pass `--generous`. Use strict for fine-tuning and generous only when the user needs volume and will review by hand.
 
 ## Human review in Studio
 

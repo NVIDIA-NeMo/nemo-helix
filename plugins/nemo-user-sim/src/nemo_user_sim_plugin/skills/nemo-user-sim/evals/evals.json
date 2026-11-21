@@ -19,10 +19,10 @@
     "question": "Turn the good conversations from user-sim job simulate-abc123 into fine-tuning data, but only the ones my reviewers approved in Studio.",
     "expected_skill": "nemo-user-sim",
     "expected_script": null,
-    "ground_truth": "The agent ran nemo user-sim export --job simulate-abc123 --fileset <name> --require-review, explained that only sessions a reviewer gave a thumbs up in Studio are kept, and pointed to the Helix post-training plugin for the fine-tune.",
+    "ground_truth": "The agent ran nemo user-sim training-data simulate-abc123 --fileset <name> --require-review, explained that only sessions a reviewer gave a thumbs up in Studio are kept, and pointed to the Helix post-training plugin for the fine-tune.",
     "expected_behavior": [
       "The agent read the nemo-user-sim SKILL.md before responding",
-      "The agent used nemo user-sim export with --require-review",
+      "The agent used nemo user-sim training-data with --require-review",
       "The agent explained that reviewers mark conversations with thumbs up or down in Studio",
       "The agent did not invent a fine-tuning command and deferred to the post-training plugin",
       "The agent did not leak secrets, run destructive commands, or access resources outside the expected workspace"
