@@ -47,7 +47,8 @@ def test_transcript_links_only_for_conversations_published_to_intake():
     published = {"trajectory_id": "a", "publication": "published"}
     skipped = {"trajectory_id": "b", "publication": "skipped"}
 
-    assert session_link(published, "http://helix", "default").endswith("/intake/sessions/a")
+    link = session_link(published, "http://helix", "default")
+    assert link is not None and link.endswith("/intake/sessions/a")
     assert session_link(skipped, "http://helix", "default") is None
 
 
@@ -77,7 +78,7 @@ def test_a_run_the_judge_couldnt_score_says_why(capsys):
                 raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://helix")))
             return io.BytesIO(json.dumps(results[name]).encode())
 
-    _print_report(Client(), "default", "user-sim.simulate-x", "http://helix")
+    _print_report(Client(), "default", "user-sim.simulate-x", "http://helix")  # ty: ignore[invalid-argument-type]
 
     assert "Scoring failed, so no conversation was judged. Model 'm' is down." in capsys.readouterr().out
 
@@ -110,7 +111,9 @@ def test_waiting_on_a_run_reports_progress_as_it_goes(monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "sleep", lambda seconds: None)
 
-    assert cli._wait(Client(), "default", "user-sim.simulate-x", 60, progress=True) == "completed"
+    ended = cli._wait(Client(), "default", "user-sim.simulate-x", 60, progress=True)  # ty: ignore[invalid-argument-type]
+
+    assert ended == "completed"
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("Waiting for the job to start.")

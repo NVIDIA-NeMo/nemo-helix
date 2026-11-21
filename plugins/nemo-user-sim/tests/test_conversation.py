@@ -66,7 +66,7 @@ class Replies:
 
 def _deps(reply: str | Exception, assistant=Replies, **failures) -> ConversationDeps:
     return ConversationDeps(
-        roles=ScriptedRoles(),
+        roles=ScriptedRoles(),  # ty: ignore[invalid-argument-type]
         assistant_factory=lambda _bridge: assistant(reply, **failures),
         assistant_model="test/agent",
     )
@@ -187,14 +187,17 @@ async def test_a_model_that_never_stops_calling_tools_is_an_agent_error():
     async def resolved(value):
         return value
 
-    call = SimpleNamespace(id="1", function=SimpleNamespace(name="kb_search", arguments="{}"))
+    call = SimpleNamespace(id="1", type="function", function=SimpleNamespace(name="kb_search", arguments="{}"))
     message = SimpleNamespace(tool_calls=[call], content=None, model_dump=lambda **_: {"role": "assistant"})
     completions = SimpleNamespace(
         create=lambda **_: resolved(SimpleNamespace(choices=[SimpleNamespace(message=message)]))
     )
     bridge = SimpleNamespace(handle_tool_call=lambda name, arguments: resolved("{}"))
     assistant = ModelAssistant(
-        SimpleNamespace(chat=SimpleNamespace(completions=completions)), "m", bridge, max_tool_rounds=2
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),  # ty: ignore[invalid-argument-type]
+        "m",
+        bridge,
+        max_tool_rounds=2,
     )
 
     with pytest.raises(RuntimeError, match="2 rounds of tool calls"):
@@ -213,6 +216,7 @@ async def _started(monkeypatch, config, **kwargs):
     monkeypatch.setattr("nemo_user_sim_plugin.engine.assistants.Fabric", FakeFabric)
     assistant = FabricAssistant(config, **kwargs)
     await assistant.start([], None, "http://usersim.local/mcp")
+    assert assistant._root is not None
     assistant._root.cleanup()
     return seen["config"]
 

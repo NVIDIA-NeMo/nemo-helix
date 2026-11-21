@@ -42,16 +42,16 @@ async def test_simulate_compiles_to_simulate_then_evaluate_steps(personas_dir):
     )
 
     assert [step.name for step in job.steps] == ["simulate", "evaluate"]
-    assert job.steps[0].executor.command == ["python", "-m", "nemo_user_sim_plugin.tasks.simulate"]
+    assert getattr(job.steps[0].executor, "command") == ["python", "-m", "nemo_user_sim_plugin.tasks.simulate"]
     assert job.steps[0].config["users"] == 3
-    envs = [{variable.name: variable.value for variable in step.environment} for step in job.steps]
+    envs = [{variable.name: variable.value for variable in step.environment or []} for step in job.steps]
     assert envs[0]["NEMO_USER_SIM_RUN"] == "run-7"  # the simulate step tags its Intake traces with the run
     for env in envs:
         # Data Designer reads its asset path once, at import, and the jobs backend passes tasks only an
         # allowlist of the service's environment, so both travel in each step's environment.
         assert env["DATA_DESIGNER_MANAGED_ASSETS_PATH"] == str(personas_dir / "managed-assets")
         assert env["NEMO_USER_SIM_JUDGE_MODEL"] == "judge-from-config"
-        assert json.loads(env["NEMO_USER_SIM_MODEL_SETTINGS"]) == SETTINGS
+        assert json.loads(env["NEMO_USER_SIM_MODEL_SETTINGS"] or "") == SETTINGS
 
 
 @pytest.mark.parametrize(
@@ -262,7 +262,7 @@ def test_rerunning_a_run_made_before_reruns_existed_fails_plainly(monkeypatch, t
     monkeypatch.setattr(simulate, "fetch_result", missing)
 
     with pytest.raises(ValueError, match="before reruns"):
-        simulate.source_rows(None, "default", RerunSource(job="old-run", conversations=["a"]), tmp_path)
+        simulate.source_rows(None, "default", RerunSource(job="old-run", conversations=["a"]), tmp_path)  # ty: ignore[invalid-argument-type]
 
 
 def test_rerunning_reads_the_rows_the_source_run_saved(monkeypatch, tmp_path):
@@ -273,6 +273,6 @@ def test_rerunning_reads_the_rows_the_source_run_saved(monkeypatch, tmp_path):
 
     monkeypatch.setattr(simulate, "fetch_result", saved)
 
-    rows = simulate.source_rows(None, "default", RerunSource(job="run-1", conversations=["b"]), tmp_path)
+    rows = simulate.source_rows(None, "default", RerunSource(job="run-1", conversations=["b"]), tmp_path)  # ty: ignore[invalid-argument-type]
 
     assert rows == SOURCE_ROWS

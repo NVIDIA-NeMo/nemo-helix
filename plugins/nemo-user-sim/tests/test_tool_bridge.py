@@ -4,6 +4,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from nemo_user_sim_plugin.engine.assistants import AgentTurnError, rate_limited
@@ -25,7 +26,7 @@ def _activation(activation_id: str, role: str = "assistant", tools_enabled: bool
 class FakeRuntime:
     """Returns a continuing assistant activation after a tool call, then a user activation."""
 
-    def __init__(self, *following: SimpleNamespace):
+    def __init__(self, *following: Any):
         self.recorded: list[dict] = []
         self._following = list(following)
 

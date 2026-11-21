@@ -276,8 +276,8 @@ def _print_report(client: UserSimClient, workspace: str, job: str, base_url: str
         typer.echo(f"{passed} of {len(scored)} scored conversations passed.")
         for segment in SEGMENTS:
             rates = failure_rates(rows, segment)
-            worst = max(rates, key=rates.get, default=None)
-            if len(rates) > 1 and rates[worst] > 0:
+            worst = max(rates, key=lambda value: rates[value], default=None)
+            if worst is not None and len(rates) > 1 and rates[worst] > 0:
                 typer.echo(f"Highest failure rate by {segment}: {worst} ({rates[worst]:.0%}).")
     picks = Counter(row["picked"]["label"] for row in rows if row.get("picked"))
     for label, count in sorted(picks.items()):
@@ -491,11 +491,13 @@ class UserSimCLI(NemoCLI):
                 return
             table = Table("Run", "Tested", "Probes", "Users", "Status", "Started")
             for run in runs:
-                target = run.spec.get("target") or {}
+                target = run.spec.get("target")
+                tested = (target.get("agent") or target.get("model")) if isinstance(target, dict) else None
+                probes = run.spec.get("probes")
                 table.add_row(
                     run.name,
-                    str(target.get("agent") or target.get("model") or ""),
-                    ", ".join(run.spec.get("probes") or []),
+                    str(tested or ""),
+                    ", ".join(str(probe) for probe in probes) if isinstance(probes, list) else "",
                     str(run.spec.get("users", "")),
                     run.status.value if run.status else "",
                     _local(run.created_at) if run.created_at else "",

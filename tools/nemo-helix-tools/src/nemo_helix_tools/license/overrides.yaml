@@ -193,6 +193,7 @@ overrides:
   # NLP / AI Evaluation
   fastembed: Apache-2.0 # Fast text embedding
   langchain-oci: UPL-1.0 # LangChain Oracle Cloud Infrastructure integration
+  lingua-language-detector: Apache-2.0 # Language detection, used by usersim - https://github.com/pemistahl/lingua-py
   ragas: Apache-2.0 # RAG evaluation framework
   range-regex: BSD-3-Clause # Regex for ranges
   ratelimit: MIT # API rate limiting
