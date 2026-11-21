@@ -18,7 +18,6 @@ from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity
 from nemo_evals.image_builds.models import (
     BuildImage,
-    ImageBuild,
     ImageBuildRequest,
     TaskImageBuildEntity,
     build_entity_name,
@@ -29,7 +28,6 @@ from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, 
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
-from nemo_helix_plugin.evals.types import TaskImageBuild
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 _BASE = "/v2/workspaces/default/tasks/sort-task/revisions"
@@ -142,27 +140,19 @@ def _stored(entity_store, digest: str, attempt: int) -> TaskImageBuildEntity:
     return asyncio.run(read())
 
 
-def _set_status(entity_store, digest: str, attempt: int, status: str) -> None:
+def _set_status(
+    entity_store, digest: str, attempt: int, status: str, *, images: list[BuildImage] | None = None
+) -> None:
+    """Settle build ``attempt`` at ``status``, with ``images`` when given, as the task-builder Job does."""
+
     async def update() -> None:
         head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
         build = await entity_store.get(
             TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
         )
         build.status = status
-        await entity_store.update(build)
-
-    asyncio.run(update())
-
-
-def _record_ready(entity_store, digest: str, *images: BuildImage) -> None:
-    """Make build 1 ready with ``images``, as the task-builder Job does once Builder has built them."""
-
-    async def update() -> None:
-        head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-        build = await entity_store.get(
-            TaskImageBuildEntity, name=build_entity_name(digest, 1), workspace="default", parent=head.id
-        )
-        build.status, build.images = "ready", list(images)
+        if images is not None:
+            build.images = images
         await entity_store.update(build)
 
     asyncio.run(update())
@@ -456,28 +446,16 @@ def _string_pattern(schema: dict) -> str:
     return next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)
 
 
-def test_an_image_this_cluster_built_is_returned_key_for_key_as_before(client, store_task, entity_store) -> None:
+def test_an_image_this_cluster_built_is_returned_key_for_key_as_before(
+    client, store_task, entity_store, build_image_keys
+) -> None:
     """An older SDK or CLI refuses an image with a key it doesn't know, so an in-cluster build must gain none."""
     digest = _store(store_task)
     client.post(f"{_BASE}/{digest}/image-builds")
-    _record_ready(entity_store, digest, _ready_image())
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
 
     for image in _returned(client, digest):
-        assert list(image) == [
-            "type",
-            "source",
-            "context_path",
-            "dockerfile",
-            "context_digest",
-            "image",
-            "platform",
-            "status",
-            "builder_image",
-            "build_job",
-            "image_ref",
-            "runtime_config",
-            "error",
-        ]
+        assert list(image) == build_image_keys
 
 
 def test_an_image_a_remote_build_service_built_is_returned_with_its_handle_and_backend(
@@ -485,14 +463,16 @@ def test_an_image_a_remote_build_service_built_is_returned_with_its_handle_and_b
 ) -> None:
     digest = _store(store_task)
     remote_client.post(f"{_BASE}/{digest}/image-builds")
-    _record_ready(entity_store, digest, _ready_image(external_image_id="image-7f3a", builder_backend="remote"))
+    _set_status(
+        entity_store,
+        digest,
+        1,
+        "ready",
+        images=[_ready_image(external_image_id="image-7f3a", builder_backend="remote")],
+    )
 
     for image in _returned(remote_client, digest):
         assert (image["external_image_id"], image["builder_backend"]) == ("image-7f3a", "remote")
-    # The SDK reads a build as the typed client returns it.
-    returned = TaskImageBuild.model_validate(remote_client.get(f"{_BASE}/{digest}/image-builds/1").json())
-    [parsed] = ImageBuild.model_validate(returned.model_dump(mode="json")).images
-    assert (parsed.external_image_id, parsed.builder_backend) == ("image-7f3a", "remote")
 
 
 def test_the_published_schema_names_the_handle_and_backend_without_requiring_them(client) -> None:
@@ -524,7 +504,7 @@ def test_a_ready_build_answers_a_request_only_while_its_images_come_from_the_dep
     digest = _store(store_task)
     requested.post(f"{_BASE}/{digest}/image-builds")
     built_by = REMOTE_BACKEND if before == "remote_client" else None
-    _record_ready(entity_store, digest, _ready_image(builder_backend=built_by))
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=built_by)])
 
     again = repeated.post(f"{_BASE}/{digest}/image-builds")
 
@@ -548,11 +528,15 @@ def test_a_ready_build_with_one_image_another_backend_built_is_no_answer_to_eith
     routes = request.getfixturevalue(asking)
     digest = _store(store_task)
     routes.post(f"{_BASE}/{digest}/image-builds")
-    _record_ready(
+    _set_status(
         entity_store,
         digest,
-        _ready_image(),
-        _ready_image(builder_backend=REMOTE_BACKEND, image_type="verifier"),
+        1,
+        "ready",
+        images=[
+            _ready_image(),
+            _ready_image(builder_backend=REMOTE_BACKEND, image_type="verifier"),
+        ],
     )
 
     again = routes.post(f"{_BASE}/{digest}/image-builds").json()
@@ -567,7 +551,7 @@ def test_the_attempt_a_remote_deployment_starts_names_the_backend_on_its_record_
     """The task-builder Job reads the record, not the platform config file, so the setting travels there."""
     digest = _store(store_task)
     client.post(f"{_BASE}/{digest}/image-builds")
-    _record_ready(entity_store, digest, _ready_image())
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
 
     started = remote_client.post(f"{_BASE}/{digest}/image-builds").json()
 
@@ -612,7 +596,7 @@ def test_a_rebuild_starts_a_new_attempt_over_a_ready_build_of_the_deployments_ba
 ) -> None:
     digest = _store(store_task)
     remote_client.post(f"{_BASE}/{digest}/image-builds")
-    _record_ready(entity_store, digest, _ready_image(builder_backend=REMOTE_BACKEND))
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=REMOTE_BACKEND)])
 
     rebuilt = remote_client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
 

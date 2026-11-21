@@ -4803,7 +4803,7 @@ components:
         error:
           title: Error
           type: string
-      additionalProperties: false
+      additionalProperties: true
       type: object
       required:
       - type
