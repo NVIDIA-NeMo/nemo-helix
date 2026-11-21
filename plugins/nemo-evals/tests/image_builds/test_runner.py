@@ -64,8 +64,8 @@ RUNTIME_CONFIG = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], workin
 # A Builder backend other than this cluster's. Evals records whichever name a row carries.
 REMOTE_BACKEND = "remote"
 
-# What Builder says when it refuses a request itself, as a deployment that can't build it does.
-REFUSAL = "this deployment has no registry to push an image to"
+# What Builder says when it refuses a request itself, as a backend that can't build this one request does.
+REFUSAL = "the backend can't build this request"
 
 
 def _handle(name: str) -> ExternalImage:
@@ -78,11 +78,9 @@ def _no_handle(name: str) -> ExternalImage:
     return ExternalImage(build_id=f"build-{name}")
 
 
-def _refused(code: str | None = None) -> NemoClientError:
-    """Builder refusing a build: by permission, or with a 409 that names ``code``."""
-    if code is None:
-        return PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
-    return ConflictError(httpx.Response(409, json={"detail": "the backend refuses it", "code": code}))
+def _forbidden() -> PermissionDeniedError:
+    """Builder's 403 for a caller who may not build. It turns the caller away, not the request: see ``_refusal``."""
+    return PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
 
 
 def _container_image(
@@ -123,7 +121,7 @@ def _submitted(name: str, revision: int, *, backend: str = IN_CLUSTER_BACKEND) -
     )
 
 
-def _refusal(code: str | None = "backend_rejected") -> ConflictError:
+def _refusal(code: str | None = CODE_BACKEND_REJECTED) -> ConflictError:
     """Builder's 409 that refuses the request itself. It says so by its ``code``; an older Builder gives none."""
     return ConflictError(httpx.Response(409, json={"detail": REFUSAL} | ({"code": code} if code else {})))
 
@@ -322,7 +320,7 @@ async def test_a_remote_image_is_recorded_with_its_backend_from_its_submit(
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
     builder = _Builder(
         {"sort-task/environment": "ready"},
-        refusals={"sort-task/tests": _refused()},
+        refusals={"sort-task/tests": _forbidden()},
         backend=REMOTE_BACKEND,
         external=_handle,
     )
@@ -445,17 +443,18 @@ async def test_a_remote_row_an_older_builder_finds_ready_keeps_its_backend_and_g
 
 
 @pytest.mark.parametrize(
-    ("config", "refusal"),
+    ("config", "refusal", "error"),
     [
-        # This cluster refuses a user who may not build.
-        ({}, _refused()),
-        # A remote build service can't copy a prebuilt image, so Builder refuses it by the backend.
-        ({"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refused(CODE_BACKEND_REJECTED)),
+        # This cluster turns away a user who may not build. A 403 is recorded as the client reports it.
+        ({}, _forbidden(), "Builder refused the build: HTTP 403: not allowed to build"),
+        # A remote build service can't copy a prebuilt image, so Builder refuses it by the backend. A 409 that
+        # refuses the request is recorded as Builder's own sentence.
+        ({"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refusal(), f"Builder refused the build: {REFUSAL}"),
     ],
     ids=["in-cluster", "remote"],
 )
 async def test_an_image_builder_refused_names_no_backend_whichever_backend_refused_it(
-    entity_store, store_task, archive, build_image_keys, config: dict, refusal: NemoClientError
+    entity_store, store_task, archive, build_image_keys, config: dict, refusal: NemoClientError, error: str
 ) -> None:
     """The backend is read from the Builder row an image names, and an image whose submit Builder refused names none.
 
@@ -470,8 +469,7 @@ async def test_an_image_builder_refused_names_no_backend_whichever_backend_refus
 
     [image] = build.images
     assert (build.status, image.status, image.builder_image) == ("failed", "failed", None)
-    # A 403 is recorded as the client reports it; a 409 that refuses the request is recorded as Builder's own sentence.
-    assert image.error is not None and image.error.startswith("Builder refused the build: ")
+    assert image.error == error
     assert image.builder_backend is None
     [stored] = (await _stored_build(entity_store, spec))._get_data_fields()["images"]
     assert list(stored) == build_image_keys
@@ -547,8 +545,7 @@ async def test_an_image_whose_builder_job_ended_without_it_fails(entity_store, s
         async def get_image(self, name: str) -> ContainerImage | None:
             return None if name not in self.images else _container_image(name)
 
-    ticks = iter(range(0, 10_000, 100))
-    build = await _run(entity_store, spec, _Abandoned({}, job="error"), timeout=250, clock=lambda: next(ticks))
+    build = await _run(entity_store, spec, _Abandoned({}, job="error"))
 
     assert build.status == "failed"
     assert build.error is not None and build.error.startswith("main: Builder job builder-harbor-env-")
@@ -568,7 +565,7 @@ async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store
 async def test_builder_refusing_a_build_fails_the_image(entity_store, store_task, archive) -> None:
     spec = await _start(entity_store, store_task, config={})
 
-    build = await _run(entity_store, spec, _Builder({}, refusals={"sort-task/environment": _refused()}))
+    build = await _run(entity_store, spec, _Builder({}, refusals={"sort-task/environment": _forbidden()}))
 
     assert build.status == "failed"
     assert build.error is not None and "not allowed to build" in build.error
@@ -664,7 +661,6 @@ def compose_archive(monkeypatch, tmp_path) -> None:
 
     A compose task is extracted to be planned, so its archive is a whole task, packed as publishing packs one.
     """
-    pytest.importorskip("harbor")
     root = tmp_path / "sort-task"
     for name, text in {
         "task.toml": "",
@@ -748,7 +744,7 @@ async def test_an_error_that_is_no_refusal_fails_its_image_alone_and_the_rest_ar
 
     A copy's 409 that names no code stays the client error it was. Another request may have taken the revision
     meanwhile, or an older Builder may have refused the copy: no row is read to tell them apart, as one is for a
-    Dockerfile build, so the task's Dockerfile images are still submitted.
+    Dockerfile build that is not a rebuild, so the task's Dockerfile images are still submitted.
     """
     config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}, "verifier": {"environment": {"cpus": 1}}}
     spec = await _start(entity_store, store_task, config=config)
@@ -788,8 +784,7 @@ async def test_a_build_that_never_finishes_times_out(entity_store, store_task, a
         async def get_image(self, name: str) -> ContainerImage | None:
             return None if name not in self.images else _container_image(name)
 
-    ticks = iter(range(0, 10_000, 100))
-    build = await _run(entity_store, spec, _Stuck({}), timeout=250, clock=lambda: next(ticks))
+    build = await _run(entity_store, spec, _Stuck({}), timeout=250)
 
     assert build.status == "failed"
     assert build.error == "main: no result from Builder within 250 seconds"

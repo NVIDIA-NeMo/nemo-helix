@@ -252,8 +252,10 @@ async def _submit(
 ) -> bool:
     """Submit one image's build or copy and record where it stands; False when Builder refused the request itself.
 
-    The image then fails with Builder's own sentence, and the caller submits nothing more. Any other error from
-    Builder fails this image alone.
+    The image then fails with Builder's own sentence, and the caller submits nothing more. Any other error the
+    client reports (a :class:`NemoClientError`) fails this image alone. Giving up on a build other requests keep
+    submitting (:func:`adopt_or_build`) is not caught: it is raised, and the build then fails as a
+    ``task-builder error`` with no images recorded.
     """
     try:
         if image.image is not None:
@@ -261,6 +263,7 @@ async def _submit(
         else:
             builder_image = await _submit_build(builder, image, definition, rebuild=rebuild)
     except BuildRefused as exc:
+        logger.info("Submitting nothing after %s: %s", image.type, exc)
         image.status = "failed"
         image.error = f"Builder refused the build: {exc.detail}"
         return False
