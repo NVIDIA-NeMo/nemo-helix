@@ -31,12 +31,13 @@ from pydantic import BaseModel
 from usersim.cli._models import load_models_config
 from usersim.cli._pipeline import evaluate_dataframe
 from usersim.selection import select_trajectories
-from usersim.selection.engine import COL_AXIS_SCORES, COL_FAILED_GATES, COL_QUALITY
+from usersim.selection.engine import COL_AXIS_SCORES, COL_FAILED_GATES, COL_QUALITY, score_from_eval_cell
 
 # Selection gates that judge the simulation rather than the agent: no judge output, a skipped or failed
 # simulation, too few turns. Health gates (``health:*``) and judge disagreement carry a prefix.
 _SIMULATION_GATES = {"no_eval", "skipped", "status", "min_turns"}
 _SCORER_ERROR = ":scorer_error"
+_EVAL_COLUMN = "assistant_eval"  # where UserSim keeps a conversation's judge and scorer results
 
 
 def _cell(value: Any) -> Any:
@@ -45,13 +46,17 @@ def _cell(value: Any) -> Any:
 
 
 def fully_scored(selection_row: dict) -> bool:
-    """Whether the judge scored the conversation and no scorer it needed failed.
+    """Whether the judge scored every axis it was asked about and no scorer the conversation needed failed.
 
-    UserSim records a scorer that failed as a ``<axis>:scorer_error`` gate and leaves its scores out, so a
-    conversation can clear every other gate without having been scored on that axis.
+    UserSim's selection lets two kinds of unscored conversation through. A scorer that failed is recorded
+    as a ``<axis>:scorer_error`` gate with its scores left out. A judge that failed leaves its axis empty
+    and records no gate at all, so a rate UserSim computes itself can be the only score there is.
     """
     failed_gates, axis_scores = (_cell(selection_row[column]) for column in (COL_FAILED_GATES, COL_AXIS_SCORES))
-    return bool(axis_scores) and not any(gate.endswith(_SCORER_ERROR) for gate in failed_gates)
+    cell = _cell(selection_row.get(_EVAL_COLUMN))
+    cell = cell if isinstance(cell, dict) else {}
+    judged = all(score_from_eval_cell(cell, axis) is not None for axis in cell.get("axes") or {})
+    return bool(axis_scores) and judged and not any(gate.endswith(_SCORER_ERROR) for gate in failed_gates)
 
 
 def agent_verdict(selection_row: dict) -> dict:
