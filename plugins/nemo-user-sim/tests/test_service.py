@@ -34,7 +34,9 @@ def test_job_routes_are_mounted():
 
 
 def test_studio_bundle_is_built():
-    assert get_studio_spec().bundle_path.is_file()
+    bundle = get_studio_spec().bundle_path
+
+    assert bundle is not None and bundle.is_file()
 
 
 def test_probe_catalog_covers_every_probe_a_job_accepts():
