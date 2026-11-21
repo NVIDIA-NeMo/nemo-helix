@@ -38,13 +38,13 @@ from nemo_evals.agent_layers.models import AgentLayerEntity, layer_entity_name
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build, usable_build
+from nemo_evals.image_builds.contexts import upload_context
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, TERMINAL_IMAGE_STATUSES, BuildImage
 from nemo_evals.image_builds.planning import MAIN_SERVICE, ImagePlanError, TaskArchive, parse_task_config, plan_images
 from nemo_evals.image_builds.runner import apply_builder_image, downloaded_archive, refresh_images
 from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
 from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
@@ -283,12 +283,14 @@ async def _upload_context(
 ) -> tuple[FileSetSource, list[BuildMount]]:
     """Upload the context and the mounts, each a tar archive, to a fileset named for the build; returns Builder's
     source and mounts for them."""
-    await files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=name), exist_ok=True)
-    for root, archive in ((CONTEXT_ROOT, CONTEXT_ARCHIVE), (MOUNTS_ROOT, MOUNTS_ARCHIVE)):
-        await asyncio.to_thread(_pack, scratch / root, scratch / archive, root)
-        content = await asyncio.to_thread((scratch / archive).read_bytes)
-        await files.upload_file(workspace=workspace, name=name, path=archive, content=content)
-    fileset = f"{workspace}/{name}"
+    source = await upload_context(
+        files, workspace, name, scratch / CONTEXT_ROOT, archive=CONTEXT_ARCHIVE, root=CONTEXT_ROOT
+    )
+    # The context's upload made the fileset: the mounts go into it without asking Files for it again.
+    await upload_context(
+        files, workspace, name, scratch / MOUNTS_ROOT, archive=MOUNTS_ARCHIVE, root=MOUNTS_ROOT, create_fileset=False
+    )
+    fileset = source.fileset
     mounts = [
         BuildMount(
             source=FileSetSource(fileset=fileset, archive=MOUNTS_ARCHIVE, context_path=f"{MOUNTS_ROOT}/{directory}"),
@@ -296,12 +298,7 @@ async def _upload_context(
         )
         for directory, target in ((INSTALLER_DIR, INSTALLER_MOUNT), (AGENT_DIR, AGENT_MOUNT))
     ]
-    return FileSetSource(fileset=fileset, archive=CONTEXT_ARCHIVE, context_path=CONTEXT_ROOT), mounts
-
-
-def _pack(directory: Path, archive: Path, arcname: str) -> None:
-    with tarfile.open(archive, "w:gz") as tar:
-        tar.add(directory, arcname=arcname)
+    return source, mounts
 
 
 async def _fail(entities: EntityClient, layer: AgentLayerEntity, error: str) -> AgentLayerEntity:
