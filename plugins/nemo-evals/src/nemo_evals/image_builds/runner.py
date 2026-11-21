@@ -257,7 +257,9 @@ async def _submit(
     That is when Builder refused the request itself: the image then fails with Builder's own sentence. And it is
     when Builder took the request under another backend than ``backend``, the one the build's images must come
     from: the image then fails with a sentence that names the setting each backend comes from, as every image after
-    it would. Any other error from Builder fails this image alone.
+    it would. Any other error the client reports (a :class:`NemoClientError`) fails this image alone. Giving up
+    on a build other requests keep submitting (:func:`adopt_or_build`) is not caught: it is raised, and the build
+    then fails as a ``task-builder error`` with no images recorded.
     """
     try:
         if image.image is not None:
@@ -265,6 +267,7 @@ async def _submit(
         else:
             builder_image = await _submit_build(builder, image, definition, rebuild=rebuild, backend=backend)
     except BuildRefused as exc:
+        logger.info("Submitting nothing after %s: %s", image.type, exc)
         image.status = "failed"
         image.error = f"Builder refused the build: {exc.detail}"
         return False

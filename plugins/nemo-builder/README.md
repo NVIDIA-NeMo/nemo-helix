@@ -371,11 +371,12 @@ digest is the upstream one; the push step and `complete` both refuse any other. 
 like a build. Copies skip the build step, so a set of nothing but copies runs no sandbox.
 
 Only registries in the deployment's `import_registries` can be copied from, and only public images.
-A copy from any other registry is a `409`. Evals fails a task's image build on that answer, with its
-`detail` in the refused image's `error`. It asks for a task's copies before its Dockerfile builds and
-submits nothing more of the task after a refusal, so none of the task's Dockerfile images is
-submitted: they stay `pending` on the failed build. A reference that doesn't resolve, or names no
-image for the platform, is a `400`; a registry that can't be reached is a `502`.
+A copy from any other registry is a `409`. A reference that doesn't resolve, or names no image for
+the platform, is a `400`; a registry that can't be reached is a `502`. Evals fails a task's image
+build on that `409`: on its own record of the build, the refused image is `failed` with the answer's
+`detail` in its `error`. It asks for a task's copies before its Dockerfile builds and submits nothing
+more of the task after a refusal, so none of the task's Dockerfile images is submitted: the builder
+has no row for them, and they stay `pending` on Evals' record of the failed build.
 
 Every image goes to the deployment's one registry. With an `output`, it goes to
 `<registry>/<repository_prefix>/<workspace>/<output.repository>:<output.tag>`. Without one, it goes
@@ -424,7 +425,7 @@ service on its own permissions, so the service checks its user may read images h
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or one whose config couldn't be read. For a row the `remote` backend built, it is what the build service's client reported for the image, and null when the client reported none, or one that can't be recorded or that holds the service's credential. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). Evals records it on its own record of the image as `builder_backend`, whatever the row's status, when it isn't `execution`. |
-| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and uses none of them itself. It requires only that a completion carries a `build_id`, and that a second completion carries the same `external` and the same `runtime_config`. Evals copies `image_id` onto its own record of the image as `external_image_id`. It takes that and the row's backend as the row has them, checks neither and reads neither in a run: for what a row of a remote build shows, see [Security](#security). |
+| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and uses none of them itself. It requires only that a completion carries a `build_id`, and that a second completion carries the same `external` and the same `runtime_config`. Evals copies `image_id` onto its own record of the image as `external_image_id`. It takes that and the row's backend as the row has them and checks neither against the build service; a run's plan and its task Jobs read neither. Its build of an agent layer does read a row's backend: it refuses a row under the layer's name that another backend built (`layer_not_built_in_cluster`). For what a row of a remote build shows, see [Security](#security). |
 
 Names come from the request:
 
@@ -610,11 +611,12 @@ What differs for a caller:
   `platforms` and a set of more than `max_specs_per_set` images. The answer's `code` is
   `backend_rejected`; a revision another request holds is a `409` with no `code`. Evals asks for
   two of these: it builds agent layers with `mounts` and copies prebuilt task images, so this
-  backend refuses those builds. A task's image build that is refused fails, and the refused image's
-  `error` is `Builder refused the build:` followed by the answer's `detail`. Evals asks for a
-  task's copies before its Dockerfile builds and submits nothing more of the task after a refusal,
-  so a task that names a prebuilt image starts no build on this backend: its other images stay
-  `pending` on the failed build.
+  backend refuses those builds. A task's image build that is refused fails: on Evals' own record of
+  the build, the refused image's `error` is `Builder refused the build:` followed by the answer's
+  `detail`. Evals asks for a task's copies before its Dockerfile builds and submits nothing more of
+  the task after a refusal, so a task that names a prebuilt image starts no build on this backend:
+  its other images are never submitted, the builder has no row for them, and they stay `pending` on
+  that record.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
   it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
