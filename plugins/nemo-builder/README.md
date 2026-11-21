@@ -420,8 +420,8 @@ service on its own permissions, so the service checks its user may read images h
 | `digest` | The digest the image is published at, set when the row becomes `ready`: the one the push step pushed and signed, or the one a remote build service published. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
 | `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or one whose config couldn't be read. For a row the `remote` backend built, it is what the build service's client reported for the image, and null when the client reported none, or one that can't be recorded or that holds the service's credential. |
-| `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). |
-| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and uses none of them itself. It requires only that a completion carries a `build_id`, and that a second completion carries the same `external` and the same `runtime_config`. Evals copies `image_id` onto its own record of the image as `external_image_id`, with the row's `provenance.backend` as `builder_backend`. It copies them as the row has them, checks neither and reads neither in a run: for what a row of a remote build shows, see [Security](#security). |
+| `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. `backend` is the backend that built the row: `execution`, this cluster, or `remote` (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). Evals records it on its own record of the image as `builder_backend`, whatever the row's status, when it isn't `execution`. |
+| `external` | Only on a row the `remote` backend built: what the build service calls the image. `image_id` is the service's own handle, for a consumer that uses the same service, and isn't necessarily unique to a row; `build_id` is its record of the build; `attributes` holds a few facts it reports. The builder stores these and uses none of them itself. It requires only that a completion carries a `build_id`, and that a second completion carries the same `external` and the same `runtime_config`. Evals copies `image_id` onto its own record of the image as `external_image_id`. It takes that and the row's backend as the row has them, checks neither and reads neither in a run: for what a row of a remote build shows, see [Security](#security). |
 
 Names come from the request:
 
@@ -772,13 +772,14 @@ the `builder-settle` controller before setting `backend: remote`: an API pod fro
 setting existed ignores it and builds in this cluster, and refuses a remote step's completion, and
 an older controller writes a row back without the backend that built it. Upgrade Evals before then
 too, with the `nhx-tasks` image its build Jobs run in and users' SDK and CLI: Evals records the
-backend on each image of a remote build from the moment it is submitted, and the service's handle
-once the image is ready, and an older Evals, SDK or CLI refuses a build recorded with either. That
-isn't limited to the one build: once any attempt of a task's revision records either, an older
-Evals fails every listing of that revision's builds, so requesting a build or a rebuild of it and
-submitting a taskset run that includes it all fail, and an older CLI's `tasksets build-images` and
-`runs submit` fail for the whole taskset. For the same reason, don't go back to an older release
-once a remote build is recorded.
+backend on each image of a remote build as soon as it has submitted the build's images, and the
+service's handle once the image is ready, and an older Evals, SDK or CLI refuses a build recorded
+with either. That isn't limited to the one build: once any attempt of a task's revision records
+either, an older Evals fails every listing of that revision's builds, so requesting a build or a
+rebuild of it and submitting a taskset run that includes it all fail, and an older CLI's
+`tasksets build-images`, and its `runs submit` when it builds images from a Harbor source, fail for
+the whole taskset. For the same reason, don't go back to an older release once a remote build is
+recorded.
 
 ## Publishing and signing
 

@@ -21,7 +21,6 @@ from nemo_builder_plugin.entities import (
     ImageRuntimeConfig,
     Provenance,
 )
-from nemo_builder_plugin.remote import RemoteBackend
 from nemo_builder_plugin.schema import (
     CODE_BACKEND_REJECTED,
     BuildMount,
@@ -59,7 +58,8 @@ _SEPARATE_VERIFIER = {"verifier": {"environment_mode": "separate"}}
 RUNTIME_CONFIG = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app")
 
 
-REMOTE_BACKEND = RemoteBackend.name
+# A Builder backend other than this cluster's. Evals records whichever name a row carries.
+REMOTE_BACKEND = "remote"
 
 
 def _handle(name: str) -> ExternalImage:
@@ -130,14 +130,13 @@ class _Builder:
 
     It builds in-cluster unless ``backend`` names another; ``external`` then gives what its build service calls the
     image of each row, by the row's name. ``refusals`` is how Builder refuses the submit of each image it names, by
-    context path or prebuilt image; ``refuse`` refuses every submit for lack of permission.
+    context path or prebuilt image.
     """
 
     def __init__(
         self,
         outcomes: dict[str, Outcome],
         *,
-        refuse: bool = False,
         refusals: dict[str, NemoClientError] | None = None,
         job: str = "active",
         published: dict[str, list[str]] | None = None,
@@ -145,7 +144,6 @@ class _Builder:
         external: Callable[[str], ExternalImage] | None = None,
     ) -> None:
         self.outcomes = outcomes
-        self.refuse = refuse
         self.refusals = refusals or {}
         self.job = job
         self.backend = backend
@@ -181,8 +179,6 @@ class _Builder:
         mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
         self.platforms[name] = platform
-        if self.refuse:
-            raise _refused()
         what = source.image if isinstance(source, ImageSource) else source.context_path
         assert what is not None
         if what in self.refusals:
@@ -299,7 +295,10 @@ async def test_an_image_a_remote_build_service_built_records_its_handle_and_back
 async def test_a_remote_image_is_recorded_with_its_backend_from_its_submit(
     entity_store, store_task, archive, build_image_keys
 ) -> None:
-    """When another image is refused at submit, the build settles there: the submit is the only record of the rest."""
+    """When another image is refused at submit, for lack of permission, the build settles there.
+
+    The submit is then the only record of the rest.
+    """
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
     builder = _Builder(
         {"sort-task/environment": "ready"},
@@ -392,25 +391,60 @@ def test_a_read_without_the_backend_keeps_the_one_recorded(status: Literal["pend
     assert (image.external_image_id, image.builder_backend) == ("image-harbor-env-abc-1", REMOTE_BACKEND)
 
 
+async def test_a_remote_row_an_older_builder_finds_ready_keeps_its_backend_and_gets_no_handle(
+    entity_store, store_task, archive
+) -> None:
+    """A Builder from before the backend existed can be the one whose read finds a remote row ready.
+
+    The backend the submit named stays. The handle that read didn't carry is never recorded: a ready image isn't
+    read again.
+    """
+    spec = await _start(entity_store, store_task, config={})
+
+    class _ReadByAnOlderBuilder(_Builder):
+        async def submit(
+            self,
+            *,
+            name: str,
+            revision: int,
+            source: FileSetSource | ImageSource,
+            dockerfile: str | None,
+            platform: str | None,
+            mounts: Sequence[BuildMount] = (),
+        ) -> SubmitBuildResponse:
+            await super().submit(
+                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
+            )
+            return _submitted(name, revision, backend=REMOTE_BACKEND)
+
+    build = await _run(entity_store, spec, _ReadByAnOlderBuilder({"sort-task/environment": "ready"}))
+
+    assert build.status == "ready"
+    [image] = (await _stored_build(entity_store, spec)).images
+    assert (image.status, image.builder_backend, image.external_image_id) == ("ready", REMOTE_BACKEND, None)
+
+
 @pytest.mark.parametrize(
-    ("backend", "config", "refusal"),
+    ("config", "refusal"),
     [
         # This cluster refuses a user who may not build.
-        (IN_CLUSTER_BACKEND, {}, _refused()),
+        ({}, _refused()),
         # A remote build service can't copy a prebuilt image, so Builder refuses it by the backend.
-        (REMOTE_BACKEND, {"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refused(CODE_BACKEND_REJECTED)),
+        ({"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refused(CODE_BACKEND_REJECTED)),
     ],
     ids=["in-cluster", "remote"],
 )
 async def test_an_image_builder_refused_names_no_backend_whichever_backend_refused_it(
-    entity_store, store_task, archive, build_image_keys, backend: str, config: dict, refusal: NemoClientError
+    entity_store, store_task, archive, build_image_keys, config: dict, refusal: NemoClientError
 ) -> None:
-    """The backend is read from the image's Builder row, and Builder writes no row for a build it refuses.
+    """The backend is read from the Builder row an image names, and an image whose submit Builder refused names none.
 
-    So a missing backend doesn't by itself say this cluster built the image: such an image has no ``builder_image``.
+    Builder may still have written a row. So a missing backend doesn't by itself say this cluster built the image:
+    such an image has no ``builder_image``.
     """
     spec = await _start(entity_store, store_task, config=config)
-    builder = _Builder({}, refusals={"sort-task/environment": refusal, "ghcr.io/org/sort:1": refusal}, backend=backend)
+    # The double's own backend is left out: a refused submit returns no row to read one from.
+    builder = _Builder({}, refusals={"sort-task/environment": refusal, "ghcr.io/org/sort:1": refusal})
 
     build = await _run(entity_store, spec, builder)
 
@@ -513,7 +547,7 @@ async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store
 async def test_builder_refusing_a_build_fails_the_image(entity_store, store_task, archive) -> None:
     spec = await _start(entity_store, store_task, config={})
 
-    build = await _run(entity_store, spec, _Builder({}, refuse=True))
+    build = await _run(entity_store, spec, _Builder({}, refusals={"sort-task/environment": _refused()}))
 
     assert build.status == "failed"
     assert build.error is not None and "not allowed to build" in build.error

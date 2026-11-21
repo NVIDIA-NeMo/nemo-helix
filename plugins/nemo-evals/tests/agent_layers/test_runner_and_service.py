@@ -14,7 +14,13 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.entities import (
+    IN_CLUSTER_BACKEND,
+    ContainerImage,
+    ExternalImage,
+    ImageRuntimeConfig,
+    Provenance,
+)
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.agent_layers.dockerfile import AGENT_MOUNT, INSTALLER_MOUNT
 from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
@@ -82,6 +88,8 @@ def _ready(name: str, created_at: datetime | None = None, *, backend: str = IN_C
         repository=f"default/{name}",
         digest="sha256:" + "d" * 64,
         runtime_config=ImageRuntimeConfig(entrypoint=None, working_dir="/app"),
+        # Builder makes a row another backend built ready only with the name of that backend's build.
+        external=None if backend == IN_CLUSTER_BACKEND else ExternalImage(build_id=f"build-{name}"),
         provenance=Provenance(
             build_set=name.rsplit("-", 1)[0],
             revision=int(name.rsplit("-", 1)[1]),
