@@ -220,6 +220,25 @@ async def test_a_ready_build_gives_agent_and_verifier(clients, builds, store_tas
     assert result.images["agent"].source == "built"
 
 
+async def test_a_build_a_remote_build_service_made_is_prepared_as_any_other(
+    clients, builds, store_task, sandbox_policy, entity_store
+):
+    """The service's handle and the backend stay on the build record: what a run freezes from it names neither."""
+    digest = await store_task(config=SEPARATE)
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
+    in_cluster = await prepare(task(digest), clients, sandbox_policy)
+    remote = [
+        ready.model_copy(update={"external_image_id": f"image-{ready.type}", "builder_backend": "remote"})
+        for ready in READY
+    ]
+    await settle(entity_store, digest, 1, "ready", images=remote)
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result == in_cluster
+
+
 async def test_a_caller_who_may_not_build_still_gets_a_ready_build(
     clients, builds, store_task, sandbox_policy, entity_store, authorizer
 ):

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -328,11 +328,24 @@ async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> boo
 
 
 def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> None:
-    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready."""
+    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready.
+
+    An image a remote build service builds also gets the backend that builds it and, once ready, the service's
+    handle for the image. A ready image may have no handle, so the backend is what says who built it.
+
+    Neither is ever cleared once recorded: a Builder from before the backend existed reports every row as this
+    cluster's and without a handle, and the row an image names doesn't change backend. A handle that the read
+    which finds the row ready didn't carry isn't picked up later: a ready image isn't read again.
+    """
+    backend = builder_image.provenance.backend
+    if backend != IN_CLUSTER_BACKEND:
+        image.builder_backend = backend
     if builder_image.status == "ready":
         image.status = "ready"
         image.image_ref = builder_image.image_ref
         image.runtime_config = builder_image.runtime_config
+        if builder_image.external is not None and builder_image.external.image_id is not None:
+            image.external_image_id = builder_image.external.image_id
     elif builder_image.status == "failed":
         image.status = "failed"
         image.error = builder_image.status_detail or "the Builder build failed"
