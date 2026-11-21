@@ -123,9 +123,18 @@ class CreateDeploymentConfigRequest(BaseModel):
             "Null keeps the runtime default."
         ),
     )
+    auth_proxy_sidecar: bool = Field(default=False, alias="authProxySidecar")
+    auth_proxy_sidecar_identity: str | None = Field(default=None, alias="authProxySidecarIdentity")
+    auth_proxy_sidecar_on_behalf_of: str | None = Field(default=None, alias="authProxySidecarOnBehalfOf")
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_auth_proxy_identity(self) -> CreateDeploymentConfigRequest:
+        if self.auth_proxy_sidecar and not self.auth_proxy_sidecar_identity:
+            raise ValueError("auth_proxy_sidecar_identity is required when auth_proxy_sidecar is True")
+        return self
 
     @field_validator("shm_size")
     @classmethod

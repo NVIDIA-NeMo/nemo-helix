@@ -80,9 +80,30 @@ def test_workload_access_token_preserves_signed_account_context() -> None:
     assert principal.authz_aliases == ["user:alice", "alice@example.test"]
 
 
+@pytest.mark.parametrize(
+    "aliases,expected",
+    [
+        (["legacy-alice", "user:alice"], ["user:alice", "alice@example.test", "legacy-alice"]),
+        (None, ["user:alice", "alice@example.test"]),
+        ("legacy-alice", ["user:alice", "alice@example.test"]),
+        (["legacy-alice", 123], ["user:alice", "alice@example.test"]),
+    ],
+)
+def test_delegated_workload_token_subject_aliases(aliases: object, expected: list[str]) -> None:
+    claims = _claims_with_actor()
+    claims.raw_claims["nhx_subject_aliases"] = aliases
+
+    principal = ResolvedBearerToken(claims=claims, token_kind="workload_access_token").principal
+
+    assert principal.authz_aliases == ["service:jobs"]
+    assert principal.on_behalf_of_authz_aliases == expected
+
+
 @pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key", "workload_subject_token"])
 def test_non_workload_access_tokens_ignore_actor_claims(token_kind: ResolvedTokenKind) -> None:
-    resolved = ResolvedBearerToken(claims=_claims_with_actor(), token_kind=token_kind)
+    claims = _claims_with_actor()
+    claims.raw_claims["nhx_subject_aliases"] = ["legacy-alice"]
+    resolved = ResolvedBearerToken(claims=claims, token_kind=token_kind)
 
     principal = resolved.principal
 

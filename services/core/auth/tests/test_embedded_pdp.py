@@ -941,6 +941,7 @@ class TestPerAreaScopes:
     # POST endpoints that are semantically read operations (e.g. query endpoints).
     # These correctly use :read scopes despite being POST methods.
     READ_POST_ENDPOINTS: ClassVar[set[str]] = {
+        "/apis/files/v2/hf/api/models/{workspace}/{name}/paths-info/{revision}",
         "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query",
     }
 

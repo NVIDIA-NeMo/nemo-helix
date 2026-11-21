@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import pytest
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.metadata import FilesetMetadata
@@ -31,8 +32,30 @@ from nhx.core.models.schemas import (
     SlidingWindowConfig,
     ToolCallConfig,
 )
-from nhx.core.models.tasks.model_spec.run import ModelSpecRunner
+from nhx.core.models.tasks.model_spec.run import ModelSpecRunner, run
 from nhx.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NHXJobContext
+
+
+@pytest.mark.parametrize("injected", [False, True])
+def test_run_uses_task_authentication_and_closes_only_owned_client(injected: bool) -> None:
+    client = MagicMock(spec=NemoClient)
+    job_ctx = NHXJobContext.from_env()
+    config = ModelSpecTaskConfig(workspace=job_ctx.workspace, name="model")
+    with (
+        patch("nhx.core.models.tasks.model_spec.run.get_task_nemo_client", return_value=client) as factory,
+        patch("nhx.core.models.tasks.model_spec.run.get_config", return_value=config),
+        patch("nhx.core.models.tasks.model_spec.run.ModelSpecRunner", autospec=True) as runner,
+    ):
+        runner.return_value.analyze_checkpoint.return_value = SimpleNamespace(spec=None)
+        assert run(client=client if injected else None, job_ctx=job_ctx) == 0
+    runner.assert_called_once_with(client=client, job_ctx=job_ctx)
+    runner.return_value.analyze_checkpoint.assert_called_once_with(config)
+    if injected:
+        factory.assert_not_called()
+        client.close.assert_not_called()
+    else:
+        factory.assert_called_once_with("models", workspace=job_ctx.workspace)
+        client.close.assert_called_once()
 
 
 @dataclass(frozen=True)
