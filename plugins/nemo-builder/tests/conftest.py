@@ -11,6 +11,7 @@ import re
 
 import httpx
 import pytest
+from nemo_builder_plugin import submit
 from nemo_builder_plugin.registry import OCI_MANIFEST
 
 #: What the fake registry requires of every request.
@@ -76,3 +77,10 @@ class FakeOCIRegistry:
 @pytest.fixture
 def oci_registry() -> FakeOCIRegistry:
     return FakeOCIRegistry()
+
+
+@pytest.fixture(autouse=True)
+def _rows_are_read_again_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A submit that finds a job under its build's name, on rows that don't record it, reads the rows a few
+    more times before it refuses, a moment apart. No test waits out the moments."""
+    monkeypatch.setattr(submit, "ADOPT_PAUSE_SECONDS", 0)

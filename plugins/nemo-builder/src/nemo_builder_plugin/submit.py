@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -38,9 +39,32 @@ class _EntityWriter(Protocol):
     async def update(self, entity: ContainerImage) -> ContainerImage: ...
 
 
-CreateJob = Callable[[CreateHelixJobRequest], Awaitable[object]]
-#: The ``custom_fields`` of the job with this name.
-GetJobFields = Callable[[str], Awaitable[Mapping[str, Any]]]
+@dataclass(frozen=True, slots=True)
+class CreatedJob:
+    """What Jobs answered a create this submit made: what a row records of its build job.
+
+    Never filled from a job found under a name. Everything a caller can read back of such a job was written by
+    whoever created it, and the attempt it names is its latest, which a rerun replaces.
+    """
+
+    #: The job's ID, which Jobs gives no later job. Its name is free again once it is deleted.
+    uid: str
+    #: The ID of its first attempt, the one that runs the request as the builder compiled it.
+    attempt_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingJob:
+    """The job found under a name: its ID, and the ``custom_fields`` its creator gave it."""
+
+    uid: str
+    custom_fields: Mapping[str, Any]
+
+
+#: Create the build job, as the caller.
+CreateJob = Callable[[CreateHelixJobRequest], Awaitable[CreatedJob]]
+#: The job with this name, as the caller reads it.
+GetJob = Callable[[str], Awaitable[ExistingJob]]
 #: Whether the caller can read the platform secret ``(workspace, name)``.
 SecretReadable = Callable[[str, str], Awaitable[bool]]
 
@@ -174,12 +198,16 @@ async def submit_build_set(
     workspace: str,
     entity_client: _EntityWriter,
     create_job: CreateJob,
-    get_job_fields: GetJobFields,
+    get_job: GetJob,
     secret_readable: SecretReadable,
     resolve_upstream: ResolveUpstream,
     default_platform: str,
 ) -> SubmitResult:
-    """Resolve, check, place, compile; then write the rows and create the job. In that order."""
+    """Resolve, check, place, compile; then write the rows and create the job. In that order.
+
+    For a backend whose rows are completed on their caller's word, the rows are then written once more, with
+    the job the create made: the one whose steps may complete them.
+    """
     # Filled in before anything reads the set, the request digest included: a spec that names no platform is the
     # same request as one naming the default, as it was when the default was fixed at linux/amd64.
     build_set = build_set.with_default_platform(default_platform)
@@ -249,17 +277,27 @@ async def submit_build_set(
         custom_fields={"images": [image.name for image in images], "request_digest": digest},
     )
     try:
-        await create_job(request)
+        job = await create_job(request)
     except ConflictError:
-        existing = await get_job_fields(plan.job_name)
-        if existing.get("request_digest") != digest:
+        # Not proof that a job of that name exists: Jobs refuses a create for other reasons too. A job that
+        # can't then be read ends the submit with Jobs' own error, as it always did.
+        existing = await get_job(plan.job_name)
+        if backend.binds_rows_to_job:
+            # Not on what the job says of itself. Its creator wrote that, and anyone who knows the request can
+            # work out its digest: only a job the rows record was created by a submit of theirs.
+            images = await _rows_under(entity_client, images, existing.uid, plan.job_name)
+        elif existing.custom_fields.get("request_digest") == digest:
+            logger.info("job %s already exists for this request; adopting it", sanitize_for_log(plan.job_name))
+        else:
             await fail_rows(
                 entity_client, images, f"not built: job {plan.job_name!r} is held by a job this request did not create"
             )
             raise BuildConflict(
                 f"a job named {plan.job_name!r} already exists and was not created by this request"
             ) from None
-        logger.info("job %s already exists for this request; adopting it", sanitize_for_log(plan.job_name))
+    else:
+        if backend.binds_rows_to_job:
+            images = await _record_job(entity_client, images, job, plan.job_name)
 
     logger.info(
         "submitted build set %s revision %s as job %s with %d image(s)",
@@ -269,6 +307,149 @@ async def submit_build_set(
         len(images),
     )
     return SubmitResult(job=plan.job_name, images=images)
+
+
+#: What becomes of an image whose row does not record the job that builds it, for the log. Such a row records
+#: no job, or an earlier one of the same request that was deleted since.
+_UNRECORDED = (
+    "under workload token exchange no step of this job completes it, and the image then fails: its completion "
+    "is put off until its step gives up, or refused at once where the row records an earlier job; where no "
+    "caller is verified, the step completes it all the same"
+)
+
+
+async def _record_job(
+    entity_client: _EntityWriter, rows: list[ContainerImage], job: CreatedJob, job_name: str
+) -> list[ContainerImage]:
+    """Write on each of ``rows`` still waiting the job this submit created, and return the rows as they then are.
+
+    ``job`` is what Jobs answered this submit's own create with. A row that can't be written is logged and
+    left as it is, and the submit still answers. What then becomes of its image goes by how the platform
+    authenticates a caller: where a step is verified, its completion is put off for a row that records no
+    job, until the step gives up; where no caller is, the step completes the row all the same.
+    """
+    if not job.uid or not job.attempt_id:
+        logger.error(
+            "Jobs created job %s and named no ID, or no attempt, for it; its images record neither. For each, %s",
+            sanitize_for_log(job_name),
+            _UNRECORDED,
+        )
+        return rows
+    return [await _record_job_on(entity_client, row, job.uid, job.attempt_id) for row in rows]
+
+
+async def _record_job_on(
+    entity_client: _EntityWriter, row: ContainerImage, uid: str, attempt_id: str
+) -> ContainerImage:
+    """``row`` with the job recorded on it, on condition of the version it was read at. As it is, if it no
+    longer waits, or the job can't be recorded."""
+    current = row
+    try:
+        for again in (False, True):
+            if again:
+                # It changed since this submit read it. Read once more, and written only if it is still the row
+                # this submit holds and records no job. One recorded meanwhile is of a later create. One that
+                # was there already, an earlier job of the request, is written over by the first write alone:
+                # after a change, nothing here tells it from a later one.
+                current = await entity_client.get(ContainerImage, name=row.name, workspace=row.workspace)
+                recorded = current.provenance.job_uid is not None or current.provenance.job_attempt_id is not None
+                if current.id != row.id or recorded:
+                    break
+            if current.status != "pending":
+                # Settled meanwhile, or adopted as it was: no step completes it now.
+                return current
+            provenance = current.provenance.model_copy(update={"job_uid": uid, "job_attempt_id": attempt_id})
+            try:
+                return await entity_client.update(current.model_copy(update={"provenance": provenance}))
+            except EntityConflictError:
+                continue
+    except Exception:
+        logger.exception(
+            "image %s/%s could not record its build job: %s",
+            sanitize_for_log(row.workspace),
+            sanitize_for_log(row.name),
+            _UNRECORDED,
+        )
+        return row
+    logger.warning(
+        "image %s/%s changed while its build job was being recorded on it, and is left as it is. It does not "
+        "record this job: under workload token exchange no step of this job completes it; where no caller is "
+        "verified, the step completes it all the same",
+        sanitize_for_log(row.workspace),
+        sanitize_for_log(row.name),
+    )
+    return row
+
+
+#: How many times the rows are read, and how long apart, by a submit that finds a job under its build's name
+#: on rows that are still waiting and do not record it, before it answers that the job is not known to be
+#: theirs. Another submit of the same request, made at the same moment, creates the job first and records it
+#: on the rows a moment later.
+ADOPT_READS = 5
+ADOPT_PAUSE_SECONDS = 0.5
+
+
+async def _as_stored(entity_client: _EntityWriter, row: ContainerImage) -> ContainerImage | None:
+    """``row`` as it is stored now. None if it is gone, or another row has its name."""
+    try:
+        stored = await entity_client.get(ContainerImage, name=row.name, workspace=row.workspace)
+    except EntityNotFoundError:
+        return None
+    return stored if stored.id == row.id else None
+
+
+async def _rows_under(
+    entity_client: _EntityWriter, rows: list[ContainerImage], uid: str, job_name: str
+) -> list[ContainerImage]:
+    """``rows`` as they are stored now, for a submit that finds the job with the ID ``uid`` under its build's
+    name: returned if that job is the build's own, or nothing is left for a job to do. Raises
+    :class:`BuildConflict` if not.
+
+    The job is the build's own if every row still waiting records it. A row that has settled is not asked:
+    no step completes it now, whichever job holds the name, and one that settled before its job was recorded
+    never records one. So where no row is still waiting, the rows are returned as they are, as a build in
+    this cluster returns them: whose job holds the name then decides nothing.
+
+    Read anew: a row is recorded on after the job is created, by the submit that created it. One still
+    waiting that does not record the job may be that submit's, a moment before it writes: it records no
+    job, or the job an earlier submit of the request created, deleted since, which that write replaces.
+    So the rows are read a few times before the answer is a conflict. Such a row is then left as it is.
+    Failed here, it would be the build of the submit that created the job that failed: that submit's own
+    write would find the row settled, and its job would build nothing. If the write never comes, the row is
+    failed once the job has ended, as any abandoned row is, and until then no step of that job that is
+    verified completes it: the row records no job for one to be a step of, or the attempt of another job.
+
+    A row that is gone, or is no longer the one this submit holds, is not waited for. It does not come
+    back, so the rows this submit holds will never all record the job. No row is written here, whatever
+    the answer: one that is no longer this submit's is someone else's now.
+    """
+    waiting: list[ContainerImage] = []
+    for read in range(ADOPT_READS):
+        if read:
+            await asyncio.sleep(ADOPT_PAUSE_SECONDS)
+        stored = [await _as_stored(entity_client, row) for row in rows]
+        current = [row for row in stored if row is not None]
+        waiting = [row for row in current if row.status == "pending"]
+        if len(current) != len(rows):
+            # Not the build's own, whatever the rows that are left come to record.
+            break
+        if all(row.provenance.job_uid == uid for row in waiting):
+            if waiting:
+                logger.info("job %s already exists for this request; adopting it", sanitize_for_log(job_name))
+            else:
+                logger.info(
+                    "a job named %s exists, and no image of this request still waits on a job; returning them "
+                    "as they are",
+                    sanitize_for_log(job_name),
+                )
+            return current
+    conflict = f"a job named {job_name!r} already exists, and this request's images do not record it as their build job"
+    if any(row.provenance.job_uid != uid for row in waiting):
+        conflict += (
+            ". Another submit of the same request may be recording it now: submit the request again in a moment. "
+            "If the answer is still this, submit the next revision"
+        )
+    raise BuildConflict(conflict) from None
 
 
 async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], detail: str) -> bool:

@@ -88,6 +88,24 @@ COMPLETION_SECONDS = 300.0
 CANCEL_TRIES = 3
 CANCEL_PAUSE_SECONDS = 2.0
 CANCEL_SECONDS = 20.0
+#: How many names the driver takes, one after another, to learn where the links of one build context lead: each
+#: name of each path it follows is one. A context of as many links as a source may unpack to entries, each
+#: written as a path of thirty names, is followed in fewer. One that takes more was made to be costly to
+#: follow, by paths of thousands of names or by thousands of links that end in a loop, and its image fails,
+#: where its links would otherwise hold the step for hours. It bounds the work, not the time. Where each
+#: step reads the disk, for links that end in a loop or names that are not there, a context made to reach it
+#: has held the step for about half a minute on a local disk; where none does, for names such as ``.``, for
+#: a second or two. A step costs no more than the longest path it is taken at: see
+#: :data:`MAX_LINK_PATH_CHARS`. The limit is on each following of a context's links, and there are two:
+#: where it was fetched, and again once it is staged.
+MAX_LINK_STEPS = 100 * MAX_UNPACKED_ENTRIES
+#: The longest path the driver follows a context's links to. The system reads no path longer than 4,096
+#: characters, so nothing is there to find at a longer one, and no one link leads to more than twice that:
+#: the path of its directory, and the path it is written as. What comes to more is made of links that each
+#: add names that are not there to where another led. No build can follow those. Taking a name costs the
+#: length of the path it is added to, and so does remembering where a link ended, so without this the steps
+#: above would bound neither the time nor the memory that following them takes.
+MAX_LINK_PATH_CHARS = 2 * 4096
 #: What takes a credential's place in a text.
 REDACTED = "[credential]"
 #: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this. By itself, it
@@ -324,11 +342,19 @@ def idempotency_key(attempt: JobAttempt, image: str) -> str:
     return hashlib.sha256(material.encode()).hexdigest()
 
 
-def stage_context(context: Path, dockerfile: str) -> Path:
+def stage_context(context: Path, dockerfile: str, *, into: Path | None = None) -> Path:
     """``context``, once ``dockerfile`` is a regular file named ``Dockerfile`` at its root, where a service builds it.
 
-    Done in place, in the step's own copy of the context: a second copy would change where its relative links
-    lead, and they are checked below where the context is.
+    Done in place, where the context was fetched, when the context is this image's alone. With ``into``, it is
+    not: another image of the set builds from the same download. The context is then left exactly as it is,
+    and what is staged, and returned, is a copy of it at ``into``.
+
+    Either way its links are checked where it was fetched, before anything is written. A link may lead back
+    into the context by way of what is beside it there, the rest of an archive say, and a copy has none of
+    that beside it: checked in the copy, such a link would lead nowhere, and a context that builds alone
+    would be refused for being built with another. What is decided for each link where the context was fetched
+    is then written into the context that is staged, so an image is handed the context it is handed alone,
+    or is refused for the same reason.
 
     Docker resolves ``COPY`` against the context, not the Dockerfile's directory, so moving the file changes what a
     build reads only where it copies these files themselves: the root gains the named Dockerfile, in place of
@@ -352,29 +378,47 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     followed, so a context with links is measured as a packager that follows them would send it, and refused
     if that comes to more entries or bytes than a source may unpack to.
 
+    Those limits hold for the context as the service is handed it, and staging adds to a context: the
+    Dockerfile and the ignore files it writes at the root, and whatever a link to either of them then leads
+    to. A context that the files to be written would carry past a limit is refused before they are written,
+    where their sizes alone tell it. And one that staging wrote a file into, or that holds a link, is measured
+    again, the same way, once it is staged: what a link leads to after the root's files are replaced is only
+    known then.
+
+    That is of a context that was within the limits as it was fetched, which staging must not carry past
+    them. One with no link that was past a limit already is handed on unmeasured, whatever staging writes
+    into it: it is as large as its fetch let it be. A fileset that is not an archive has no limit as it is
+    fetched, and where its Dockerfile is doesn't give it one. And an archive is counted, as it is unpacked,
+    by the entries it lists, which need not name its directories: on disk it may be more names than that.
+
     A link that is kept leads inside the context wherever the context is unpacked, and not only here. One
     whose path leaves the context on the way to what it leads to inside it, by the context's own name
     (``../app/payload``, in a context named ``app``) or as an absolute path, would lead out of the context
-    under any other name, so it is rewritten in place, as the way from its own directory to what it leads
-    to. A build that copies the link itself then copies it as rewritten. A link whose path stays inside
-    the context is left exactly as it is written.
+    under any other name, so it is rewritten in the context that is staged, as the way from its own directory
+    to what it leads to. A build that copies the link itself then copies it as rewritten. A link whose path
+    stays inside the context is left exactly as it is written.
     """
-    if not context.is_dir():
+    # Asked as `os.path` asks: a path the system refuses outright, for a name longer than it allows say, is no
+    # directory. A path's own `is_dir` raises for that before Python 3.14, and the image would fail in the
+    # system's words on one Python and in these on another.
+    if not os.path.isdir(context):
         raise ImageFailed("its build context is not a directory in what was fetched: its context path matches none")
     # The directory itself, should the context be reached by a link: a packager that doesn't follow links would
     # otherwise be handed one, and nothing else.
-    context = root = context.resolve()
+    context = context.resolve()
+    _dockerfile(context, dockerfile)
+    links = _check_links(context)
+    if into is not None:
+        # Nothing has been written so far, and nothing is where the context was fetched: the rest is the copy's.
+        context = _copy_directory(context, into).resolve()
+    _rewrite(context, links.rewritten)
+    root = context
     named = context / dockerfile
-    try:
-        source = named.resolve()
-    except (OSError, RuntimeError):
-        # A loop of links, on a Python that raises for one.
-        source = None
-    if source is None or root not in source.parents or not source.is_file():
-        raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
-    _check_links(context)
+    # Where it is staged, and now that its links stay inside: in a copy, the way to it is by the copy's links.
+    source = _dockerfile(context, dockerfile)
     target = context / ROOT_DOCKERFILE
-    # Whether the spec names the root Dockerfile by its own path, however that path is spelt.
+    # Whether the spec names the root Dockerfile by its own path, however that path is spelt. Its directory is
+    # one the system read, on the way to the Dockerfile.
     at_root = named.name == ROOT_DOCKERFILE and named.parent.resolve() == root
     #: Whether the root Dockerfile is already the named file: nothing to copy, though under another name its
     #: ignore file is another one.
@@ -414,6 +458,28 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     if (context_ignore := context / _IGNORE_SUFFIX).is_symlink() and context_ignore.is_file():
         # The context's own, which is what applies where the named Dockerfile has none.
         brought[context_ignore] = context_ignore
+    #: Whether staging writes a file into the context: the Dockerfile at its root, or an ignore file there.
+    adds = bool(brought) or not same
+    #: Whether the context is within the limits before anything is written into it, with no link followed.
+    #: One with links is: it was measured with them followed, which comes to no less. One with none is as
+    #: large as it was fetched, and if that is past a limit, its fetch put none on it: a fileset that is not
+    #: an archive has no limit there, and an archive is counted by what it lists, which need not name its
+    #: directories. Staging carries no context past a limit it was within, and holds none to a limit that
+    #: its fetch did not.
+    within = links.entries <= MAX_UNPACKED_ENTRIES and links.size <= MAX_UNPACKED_BYTES
+    if adds and within:
+        # Before any of it is written, as far as sizes alone tell. Staged, the context holds its own names
+        # and files with each copy in place of what was there, and comes to no less than that, whatever its
+        # links then lead to. A file that is replaced is taken to go, though it stays if the context holds it
+        # under another name too: this may let through what the measure below refuses, never the reverse.
+        entries, size = links.entries, links.size
+        for place, file in (*brought.items(), *(() if same else ((target, source),))):
+            entry, held = _held(place)
+            entries, size = entries + 1 - entry, size + file.stat().st_size - held
+        if moved and not has_ignore:
+            entry, held = _held(staged_ignore)
+            entries, size = entries - entry, size - held
+        _hold_to_limits(entries, size)
     aside: Path | None = None
     try:
         copies: list[tuple[Path, Path]] = []
@@ -434,7 +500,77 @@ def stage_context(context: Path, dockerfile: str) -> Path:
     finally:
         if aside is not None:
             _remove(aside)
+    if links.found or (adds and within):
+        # As the service is handed it: with what was written, and with what each link leads to now. By the
+        # same walk, so a link that the files now at the root leave leading out is refused here as well.
+        _measured(context, _Follower(), always=True)
     return context
+
+
+def _dockerfile(context: Path, dockerfile: str) -> Path:
+    """The file that ``dockerfile`` names in ``context``, with the links on the way to it followed. Refused if
+    that is not a file inside the context.
+
+    The path is a submitter's, and so is every link on the way to it. Whether it leads to a file is asked of
+    the system first, which follows no more links than its own limit and reads no path past its longest. The
+    standard library follows a path with no limit, and one made of links that each add names that are not
+    there costs it the square of their number, so it is asked only of a path the system read to a file:
+    every name of one is there, and following it again here costs no more than the system let it. A path
+    the system reads to no file is refused with none of it followed, and so is one it refuses outright, for
+    a name longer than it allows say: asked as ``os.path`` asks, that is no file on any Python.
+
+    That is also a Dockerfile behind more links than the system follows, which the standard library would
+    still find. Nothing that reads a path through the system could open it, a builder among them. And where
+    the links are on the way to its directory, the ignore file written for it, which is looked for beside
+    the same path, could not be read either: the Dockerfile would be staged without it.
+    """
+    named = context / dockerfile
+    source: Path | None = None
+    if os.path.isfile(named):
+        try:
+            source = named.resolve()
+        except (OSError, RuntimeError):
+            # A loop of links, on a Python that raises for one: not expected of a path the system read.
+            source = None
+    if source is None or context not in source.parents:
+        raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
+    return source
+
+
+def _rewrite(context: Path, rewritten: Mapping[str, str]) -> None:
+    """Write each link of ``context`` that :func:`_check_links` said to rewrite, as it said to."""
+    for link, written in rewritten.items():
+        place = context / link
+        place.unlink()
+        place.symlink_to(written)
+    if rewritten:
+        logger.info(
+            "%d link(s) of the build context left it on the way to what they lead to inside it, and are rewritten "
+            "to stay inside wherever it is unpacked: the first is %s",
+            len(rewritten),
+            _quoted(next(iter(rewritten))),
+        )
+
+
+def _held(path: Path) -> tuple[int, int]:
+    """What the name ``path`` is of a context's own entries and bytes: an entry if anything is there, and its
+    size if that is a file. A link holds no bytes of its own."""
+    try:
+        status = os.lstat(path)
+    except OSError:
+        return 0, 0
+    return 1, status.st_size if stat.S_ISREG(status.st_mode) else 0
+
+
+def _hold_to_limits(entries: int, size: int) -> None:
+    """Refuse a context that comes to ``entries`` entries and ``size`` bytes, if either is more than a source
+    may unpack to."""
+    if entries > MAX_UNPACKED_ENTRIES:
+        raise ImageFailed(
+            f"the build context comes to more than {MAX_UNPACKED_ENTRIES} entries with its links followed"
+        )
+    if size > MAX_UNPACKED_BYTES:
+        raise ImageFailed(f"the build context comes to more than {MAX_UNPACKED_BYTES} bytes with its links followed")
 
 
 @dataclass(slots=True)
@@ -449,38 +585,161 @@ class _Links:
     holds: dict[Path, tuple[int, int]] = field(default_factory=dict)
     #: Every link, where it is.
     found: list[Path] = field(default_factory=list)
+    #: What the context holds with no link followed: its names, and the bytes of its files, the names of one
+    #: file counted once.
+    entries: int = 0
+    size: int = 0
+    #: The links to rewrite, each by its path in the context, with what it is to be written as. Empty until
+    #: :func:`_check_links` has asked it of each link.
+    rewritten: dict[str, str] = field(default_factory=dict)
 
 
-def _check_links(context: Path) -> None:
-    """Refuse ``context`` for links a packager must not follow, and rewrite those that only lead inside it here.
+class _Follower:
+    """Where the paths of one build context lead, with every link in them followed.
+
+    One of these serves a whole walk of a context. It remembers where each link it has followed ends, so a
+    link is read once, however many paths lead through it. Followed from scratch for every link that leads
+    to it, a chain of links costs the square of its length to read, and an archive of a megabyte holds a
+    chain of a hundred thousand. It also counts the names it takes, and fails the image past
+    :data:`MAX_LINK_STEPS`: what it remembers bounds how often a link is read, not how long the paths are
+    that the links are written as. The names are counted as it is given them, before it takes one, so it
+    never holds more of them than the limit. And it follows no path past :data:`MAX_LINK_PATH_CHARS`,
+    which fails the image too: a name costs the length of the path it is added to, and names that are not
+    there, added by one link after another, would make each step cost more than the last.
+
+    A path is read as the system reads one, a name at a time: a step back is from where the path has come
+    to, which after a link to a directory is where the link led. Unlike the system, it gives up on no path. A
+    name that isn't there is kept in the path as a name. So is a link that is come back to while it is being
+    followed, a loop of links: the path goes on from the link's name. That is how ``os.path.realpath`` reads
+    a path on Python 3.13 and later, and a path leads here where it leads for that, whatever the Python: what
+    is refused for a link is what was refused when each link was followed from scratch.
+
+    Where a link ends by way of such a loop rests on which link of the loop was come to first. So that is
+    remembered for the one path only, and worked out again for the next: a path then leads to the same place
+    whatever was followed before it, and in whatever order a directory lists its entries. Only the limit on
+    steps bounds what links like that cost. No build can follow them.
+
+    What it remembers holds for the context as it is. Nothing is written to a context while one of these is
+    asked about it: the links to rewrite are all decided first.
+    """
+
+    def __init__(self) -> None:
+        #: Where each link that has been followed ends, by the link's own path: those whose end does not rest
+        #: on a loop of links. One end for a link, and none longer than :data:`MAX_LINK_PATH_CHARS`.
+        self._ends: dict[str, str] = {}
+        #: How many names it has been given to take: those of each path it was asked about, and of each
+        #: link it read on the way.
+        self.steps = 0
+
+    def _names(self, path: str) -> list[str]:
+        """The names of ``path``, the first one last, counted before any of them is taken.
+
+        Counted as they are taken, the names of a chain of links would all be held before the limit was
+        reached: each link of one is read at the first name of the link before it.
+        """
+        names = path.split(os.sep)[::-1]
+        self.steps += len(names)
+        if self.steps > MAX_LINK_STEPS:
+            raise ImageFailed(
+                f"the build context's links take more than {MAX_LINK_STEPS} steps to follow: there are too "
+                "many of them, or the paths they are written as are too long"
+            )
+        return names
+
+    def end(self, directory: str, path: str) -> str:
+        """Where ``path`` leads, read from ``directory``: a directory with no link in its own path."""
+        sep = os.sep
+        at = sep if path.startswith(sep) else directory
+        #: The names still to take, the next one last.
+        names = self._names(path)
+        #: The links being followed, each with how many of ``names`` are left once its own are taken.
+        following: list[tuple[str, int]] = []
+        #: For this path alone: None for each link being followed, and where each link ended whose end rests
+        #: on a loop of links.
+        here: dict[str, str | None] = {}
+        #: How many of ``following``, from the first, end where they do by way of a loop.
+        unsure = 0
+        while True:
+            while following and len(names) == following[-1][1]:
+                # Every name of the link's own path is taken: where that came to is where the link ends.
+                link = following.pop()[0]
+                if len(following) >= unsure:
+                    del here[link]
+                    self._ends[link] = at
+                else:
+                    here[link] = at
+                    unsure = len(following)
+            if not names:
+                return at
+            name = names.pop()
+            if not name or name == os.curdir:
+                continue
+            if name == os.pardir:
+                at = at[: at.rindex(sep)] or sep
+                continue
+            there = at + name if at.endswith(sep) else at + sep + name
+            if len(there) > MAX_LINK_PATH_CHARS:
+                # Nothing is there to find, and a name that isn't there stays in the path: each one after it
+                # would cost the length of the path so far to take, and to remember where a link ended.
+                raise ImageFailed(
+                    f"the build context's links lead to a path of more than {MAX_LINK_PATH_CHARS} characters, "
+                    "where nothing can be: the paths they are written as are too long"
+                )
+            if there in self._ends:
+                at = self._ends[there]
+                continue
+            if there in here:
+                # A link that is being followed, come back to, or one that ended by way of such a loop. Every
+                # link that is being followed now ends where it does by way of it too.
+                at = here[there] or there
+                unsure = len(following)
+                continue
+            try:
+                written = os.readlink(there) if stat.S_ISLNK(os.lstat(there).st_mode) else None
+            except OSError:
+                # Not there, or not to be read: kept as a name.
+                written = None
+            if written is None:
+                at = there
+                continue
+            here[there] = None
+            following.append((there, len(names)))
+            if written.startswith(sep):
+                at = sep
+            names.extend(self._names(written))
+
+
+def _check_links(context: Path) -> _Links:
+    """Refuse ``context`` for links a packager must not follow, and say which of its links only lead inside it
+    here, with what each is to be rewritten as.
+
+    Nothing is written: the context may be another image's too, and the links are rewritten where the context
+    is staged (see :func:`stage_context`). ``context`` is a directory with no link in its own path.
+    """
+    follower = _Follower()
+    links = _measured(context, follower)
+    for link in links.found:
+        if (written := _kept_inside(context, link, follower)) is not None:
+            links.rewritten[link.relative_to(context).as_posix()] = written
+    return links
+
+
+def _measured(context: Path, follower: _Follower, *, always: bool = False) -> _Links:
+    """What a walk of ``context`` finds of its links, once the context is one a packager may be handed.
 
     A link that leads out of the context would bring in what is beside it. One by which a walk that follows
     links comes back to a directory it is in, straight away or by way of other links, would be followed round
     and round. Links to directories that never come back round are each followed, and what they lead to sent
     again each time: a context that comes to more that way than a source may unpack to is refused. A context
-    with no links is as large as it was fetched, which is the fetch's to bound, and is not measured.
+    with no links is as large as it was fetched, which is the fetch's to bound: it is measured only with
+    ``always``, once staging has written into one that was within the limits.
     """
-    root = context.resolve()
-    links = _links(context)
-    if (refused := links.out or _link_round(root, links.ways)) is not None:
+    links = _links(context, follower)
+    if (refused := links.out or _link_round(context, links.ways)) is not None:
         raise _leads_out(refused)
-    if not links.found:
-        return
-    entries, size = _followed(root, links)
-    if entries > MAX_UNPACKED_ENTRIES:
-        raise ImageFailed(
-            f"the build context comes to more than {MAX_UNPACKED_ENTRIES} entries with its links followed"
-        )
-    if size > MAX_UNPACKED_BYTES:
-        raise ImageFailed(f"the build context comes to more than {MAX_UNPACKED_BYTES} bytes with its links followed")
-    rewritten = [link for link in links.found if _keep_inside(root, link)]
-    if rewritten:
-        logger.info(
-            "%d link(s) of the build context left it on the way to what they lead to inside it, and are rewritten "
-            "to stay inside wherever it is unpacked: the first is %s",
-            len(rewritten),
-            _quoted(rewritten[0].relative_to(root).as_posix()),
-        )
+    if links.found or always:
+        _hold_to_limits(*_followed(context, links))
+    return links
 
 
 def _leads_out(link: str) -> ImageFailed:
@@ -488,22 +747,24 @@ def _leads_out(link: str) -> ImageFailed:
     return ImageFailed(f"the build context has a link that leads out of it, or back to a directory it is in: {link!r}")
 
 
-def _links(context: Path) -> _Links:
-    """What a walk of ``context`` finds of its links. One pass over the context, which follows no link.
+def _links(context: Path, follower: _Follower) -> _Links:
+    """What a walk of ``context`` finds of its links. One pass over the context, which follows no link itself:
+    where each link leads is asked of ``follower``. ``context`` is a directory with no link in its own path.
 
     It ends at the first link that leads out of the context, which is all that is then asked of it.
     """
-    root = context.resolve()
+    root = str(context)
     links = _Links()
     #: The files with more than one name whose bytes are counted: such names are one file, and unpacking
     #: counts it once. Counted for each name, a source that was let through could be refused here.
     counted: set[tuple[int, int]] = set()
     for directory, directories, files in os.walk(context):
-        here = Path(directory).resolve()
+        here = Path(directory)
         on = links.ways.setdefault(here, [])
-        entries = size = 0
+        #: What the directory holds with each link to a file counted as the file, and of that, its own files.
+        entries = size = own = 0
         for name, listed_as_directory in (*((name, True) for name in directories), *((name, False) for name in files)):
-            path = Path(directory, name)
+            path = here / name
             entries += 1
             try:
                 status = os.lstat(path)
@@ -512,35 +773,32 @@ def _links(context: Path) -> _Links:
                 status = None
             if status is None or not stat.S_ISLNK(status.st_mode):
                 if listed_as_directory:
-                    on.append((here / name, None))
+                    on.append((path, None))
                 elif status is not None and stat.S_ISREG(status.st_mode):
                     number = (status.st_dev, status.st_ino)
                     if number not in counted:
-                        size += status.st_size
+                        own += status.st_size
                     if status.st_nlink > 1:
                         counted.add(number)
                 continue
-            links.found.append(here / name)
-            try:
-                end = path.resolve()
-            except (OSError, RuntimeError):
-                # A loop of links, on a Python that raises for one: it reaches no file, in the context or out.
-                continue
+            links.found.append(path)
+            end = follower.end(directory, name)
             where = path.relative_to(context).as_posix()
-            if end != root and root not in end.parents:
+            if not _inside(root, end):
                 links.out = where
                 return links
             try:
                 led_to = os.stat(end)
             except OSError:
-                # It leads to nothing.
+                # It leads to nothing, or round to itself.
                 continue
             if stat.S_ISDIR(led_to.st_mode):
-                on.append((end, where))
+                on.append((Path(end), where))
             elif stat.S_ISREG(led_to.st_mode):
                 # Followed, the link is another copy of the file.
                 size += led_to.st_size
-        links.holds[here] = (entries, size)
+        links.holds[here] = (entries, size + own)
+        links.entries, links.size = links.entries + entries, links.size + own
     return links
 
 
@@ -573,8 +831,9 @@ def _followed(root: Path, links: _Links) -> tuple[int, int]:
     return totals[root]
 
 
-def _keep_inside(root: Path, link: Path) -> bool:
-    """Rewrite ``link`` if its path leaves ``root`` on the way to what it leads to inside it. Whether it did.
+def _kept_inside(root: Path, link: Path, follower: _Follower) -> str | None:
+    """What ``link`` is to be rewritten as, if its path leaves ``root`` on the way to what it leads to inside
+    it. None if its path stays inside, and it is left as it is written.
 
     Such a link leads inside the context only while the context is where it is, under the name it has. It
     becomes the way from its own directory to what its path names, with the links on the way there followed
@@ -585,21 +844,22 @@ def _keep_inside(root: Path, link: Path) -> bool:
     path through a loop of links that climbs out after it, the context is refused: nothing says where such
     a link leads once the context is unpacked.
     """
-    directory, written = link.parent, os.readlink(link)
-    if _stays_inside(root, directory, written):
-        return False
-    named = directory / written
-    to = _followed_to(named) if named.name in ("", "..") else _followed_to(named.parent) / named.name
-    if not _inside(root, to):
-        to = _followed_to(link)
-    if not _inside(root, to):
+    context, directory, written = str(root), str(link.parent), os.readlink(link)
+    if _stays_inside(context, directory, written, follower):
+        return None
+    named = PurePosixPath(written)
+    if named.name in ("", ".."):
+        to = follower.end(directory, written)
+    else:
+        to = os.path.join(follower.end(directory, str(named.parent)), named.name)
+    if not _inside(context, to):
+        to = follower.end(directory, link.name)
+    if not _inside(context, to):
         raise _leads_out(link.relative_to(root).as_posix())
-    link.unlink()
-    link.symlink_to(os.path.relpath(to, directory))
-    return True
+    return os.path.relpath(to, directory)
 
 
-def _stays_inside(root: Path, directory: Path, written: str) -> bool:
+def _stays_inside(root: str, directory: str, written: str, follower: _Follower) -> bool:
     """Whether a link in ``directory`` with the path ``written`` is followed to its end without leaving ``root``.
 
     Read as the system reads it, a name at a time and with each link on the way followed, not as it is
@@ -613,23 +873,17 @@ def _stays_inside(root: Path, directory: Path, written: str) -> bool:
         if name == "..":
             if here == root:
                 return False
-            here = here.parent
+            here = os.path.dirname(here)
             continue
-        here = _followed_to(here / name)
+        here = follower.end(here, name)
         if not _inside(root, here):
             return False
     return True
 
 
-def _followed_to(path: Path) -> Path:
-    """Where ``path`` leads with every link in it followed. A loop of links is left in it as a name, whatever
-    the Python: ``Path.resolve`` raises for one on some."""
-    return Path(os.path.realpath(path))
-
-
-def _inside(root: Path, path: Path) -> bool:
-    """Whether ``path`` is ``root`` or in it. Both with their links followed."""
-    return path == root or root in path.parents
+def _inside(root: str, path: str) -> bool:
+    """Whether ``path`` is ``root`` or in it. Both as they are with their links followed."""
+    return path == root or path.startswith(root if root.endswith(os.sep) else root + os.sep)
 
 
 def _link_round(root: Path, ways: Mapping[Path, list[tuple[Path, str | None]]]) -> str | None:
@@ -917,16 +1171,18 @@ def _build_one(
     config: RemoteBuildStepConfig,
     service: RemoteBuildService,
     builder: _Builder,
-    fetch: Callable[[RemoteBuildImage, Path], Path],
+    fetch: Callable[[RemoteBuildImage, Path], tuple[Path, Path | None]],
     attempt: JobAttempt,
     clock: Clock,
     cancelled: Callable[[], bool],
     scratch: Path,
     redact: Callable[[str], str],
 ) -> None:
-    """Build ``image``. ``fetch`` puts its build context in ``scratch``, which is this image's alone."""
+    """Build ``image``. ``fetch`` says where its build context is, and where in ``scratch``, which is this
+    image's alone, a copy of the context is to be staged: nowhere, if the context is in ``scratch`` already."""
     try:
-        context = stage_context(fetch(image, scratch), image.dockerfile)
+        fetched, copy = fetch(image, scratch)
+        context = stage_context(fetched, image.dockerfile, into=copy)
     except ImageFailed:
         raise
     except (ArchiveRefused, NemoHTTPError, NemoTransportError, OSError, ValueError) as exc:
@@ -1144,21 +1400,25 @@ def run_remote_build(
     #: A shared archive that was refused, with why: the same archive is refused the same way.
     refused: dict[str, ArchiveRefused] = {}
 
-    def context_for(image: RemoteBuildImage, directory: Path) -> Path:
-        """``image``'s build context, in ``directory``.
+    def context_for(image: RemoteBuildImage, directory: Path) -> tuple[Path, Path | None]:
+        """Where ``image``'s build context is, and where in ``directory`` its own copy of it goes, if it needs one.
 
         The images of one set are built one after another, and a source may change in between. So what a set
         downloads it downloads once, as the in-cluster build's fetch step does: an archive whole, whichever
         directory of it each image builds from, and a fileset whole if any image builds from all of it. Each
         image gets its own copy of its directory, so every image built from one download sees the same files. A
         download only one image names has nothing to share, and is spared the copy.
+
+        The copy is staging's to make, and not made here: an image's links are checked where the download
+        is, with the rest of it beside them, as they are for an image built alone. The download itself is
+        never written to.
         """
         source = image.source
         download, whole = downloaded(source)
         key = download.model_dump_json()
         if shared[key] == 1:
             # Nothing to share it with: fetched where it is built, and removed with the image's directory.
-            return fetch(image, directory)
+            return fetch(image, directory), None
         if key in refused:
             # Not fetched and unpacked again for each image that names it.
             raise refused[key]
@@ -1181,17 +1441,17 @@ def run_remote_build(
             if inside.is_absolute() or ".." in inside.parts:
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
             context = context.joinpath(*inside.parts)
-            if not context.is_dir():
+            if not os.path.isdir(context):
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory in its source")
             if not _within(context, fetched[key]):
                 raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
             # The directory that was checked, not a link to it: as an image built alone is staged.
             context = context.resolve()
-        # Where it was in the download, under the download's own name: a link that comes back to the context
-        # by way of the directories above it still does. Links as they are, never followed: staging checks
-        # where each one leads.
+        # The copy goes where the directory was in the download, under the download's own name. No link rests
+        # on those names: one that came back to the context by way of them is rewritten to stay inside, as is
+        # decided where the download is.
         inside = context.relative_to(root) if root in context.parents else Path()
-        return _copy_directory(context, directory / (root.name or "context") / inside)
+        return context, directory / (root.name or "context") / inside
 
     def report(image: str, reason: str, ending: str = "") -> None:
         reason, ending = redact(_one_line(redact(reason))), redact(_one_line(redact(ending)))
@@ -1322,11 +1582,17 @@ def _within(context: Path, source: Path) -> bool:
     A context path is checked as it is written, relative and with no ``..``, when a build is submitted. Where
     it leads once links are followed rests on how the source was unpacked. This is the driver's own check of
     that: the step holds the build service's credential, and hands the service what it takes for a context.
+
+    It is asked only of a ``context`` that the system reads to a directory, and of a ``source`` the step made.
+    The standard library follows a path with no limit, and one made of links that each add names that are
+    not there costs it the square of their number. The system reads no such path to a directory: every name
+    of one it does is there, and it has no more links than the system follows, so following it again here
+    costs no more than the system let it.
     """
     try:
         real, root = context.resolve(), source.resolve()
     except (OSError, RuntimeError):
-        # A loop of links, on a Python that raises for one: it leads to no directory.
+        # A loop of links, on a Python that raises for one: it leads to no directory, and is not asked about.
         return False
     return real == root or root in real.parents
 
@@ -1720,13 +1986,21 @@ def sleep_unless(cancelled: Callable[[], bool]) -> Callable[[float], None]:
 
 def fetch_context(files_client: FilesClient, image: RemoteBuildImage, *, workspace: str, root: Path) -> Path:
     """Download ``image``'s build context from Files into ``root``, acting for the submitter, and return its
-    directory."""
+    directory.
+
+    A context path that the system reads to a directory is followed here, to see that the directory is inside
+    its source. One that it reads to no directory is returned as it is, with no link in it followed, and
+    staging refuses it: what an archive's links make of such a path is not the step's to work out.
+    """
     layout = WorkLayout(PurePosixPath(root))
     source = image.source
     fetch_source(files_client, layout, source, workspace=workspace)
     context = Path(layout.context(source))
-    if source.context_path and not _within(
-        context, Path(layout.context(source.model_copy(update={"context_path": None})))
+    # Asked of the system first, as it is of a download that is shared: see `_within`.
+    if (
+        source.context_path
+        and os.path.isdir(context)
+        and not _within(context, Path(layout.context(source.model_copy(update={"context_path": None}))))
     ):
         raise ImageFailed(f"context path {source.context_path!r} is not a directory inside its source")
     return context
