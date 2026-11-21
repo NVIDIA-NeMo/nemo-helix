@@ -780,8 +780,12 @@ setting existed ignores it and builds in this cluster, and refuses a remote step
 an older controller writes a row back without the backend that built it. Upgrade Evals before then
 too, with the `nhx-tasks` image its build Jobs run in and users' SDK and CLI: Evals records the
 backend on each image of a remote build from the moment it is submitted, and the service's handle
-once the image is ready, and an older Evals, SDK or CLI can't read a build recorded with either.
-For the same reason, don't go back to an older release once a remote build is recorded.
+once the image is ready, and an older Evals, SDK or CLI refuses a build recorded with either. That
+isn't limited to the one build: once any attempt of a task's revision records either, an older
+Evals fails every listing of that revision's builds, so requesting a build or a rebuild of it and
+submitting a taskset run that includes it all fail, and an older CLI's `tasksets build-images` and
+`runs submit` fail for the whole taskset. For the same reason, don't go back to an older release
+once a remote build is recorded.
 
 ## Publishing and signing
 

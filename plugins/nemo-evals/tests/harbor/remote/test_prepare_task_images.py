@@ -237,8 +237,6 @@ async def test_a_build_a_remote_build_service_made_is_prepared_as_any_other(
     result = await prepare(task(digest), clients, sandbox_policy)
 
     assert result.status == "ready" and result == in_cluster
-    written = result.model_dump_json()
-    assert "external_image_id" not in written and "builder_backend" not in written and "image-main" not in written
 
 
 async def test_a_caller_who_may_not_build_still_gets_a_ready_build(

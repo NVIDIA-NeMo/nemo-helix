@@ -485,3 +485,49 @@ async def test_async_get_image_build_reads_one_build() -> None:
 
     assert _request_url(recorder.requests[0]) == f"{_BASE}/tasks/task-1/revisions/blessed/image-builds/2"
     assert build.status == "ready"
+
+
+def _remote_image_build_payload(build_id: str) -> dict[str, Any]:
+    """A ready build whose image a remote build service built: the service's handle and the backend are on it."""
+    image = {
+        "type": "main",
+        "source": "dockerfile",
+        "status": "ready",
+        "builder_image": "harbor-env-abc-1",
+        "image_ref": "registry.test/default/harbor-env-abc-1@sha256:" + "c" * 64,
+        "external_image_id": "image-7f3a",
+        "builder_backend": "remote",
+    }
+    return {**_image_build_payload(build_id, "ready"), "images": [image]}
+
+
+def test_sync_image_builds_read_a_remote_build_services_handle_and_backend() -> None:
+    resource, _ = _sync_resource(
+        _remote_image_build_payload("1"), _page([_remote_image_build_payload("1")]), _remote_image_build_payload("1")
+    )
+
+    builds = [
+        resource.get_image_build("task-1", "1"),
+        resource.list_image_builds("task-1").data[0],
+        resource.build_images("task-1"),
+    ]
+
+    for build in builds:
+        [image] = build.images
+        assert (image.external_image_id, image.builder_backend) == ("image-7f3a", "remote")
+
+
+async def test_async_image_builds_read_a_remote_build_services_handle_and_backend() -> None:
+    resource, _ = _async_resource(
+        _remote_image_build_payload("1"), _page([_remote_image_build_payload("1")]), _remote_image_build_payload("1")
+    )
+
+    builds = [
+        await resource.get_image_build("task-1", "1"),
+        (await resource.list_image_builds("task-1")).data[0],
+        await resource.build_images("task-1"),
+    ]
+
+    for build in builds:
+        [image] = build.images
+        assert (image.external_image_id, image.builder_backend) == ("image-7f3a", "remote")

@@ -77,6 +77,29 @@ from werkzeug import Request, Response
 
 
 @pytest.fixture
+def build_image_keys() -> list[str]:
+    """Every key a build image was recorded and returned with before it could name a remote build, in order.
+
+    An older Evals, SDK or CLI refuses a build image with any other key, so an in-cluster build must have exactly these.
+    """
+    return [
+        "type",
+        "source",
+        "context_path",
+        "dockerfile",
+        "context_digest",
+        "image",
+        "platform",
+        "status",
+        "builder_image",
+        "build_job",
+        "image_ref",
+        "runtime_config",
+        "error",
+    ]
+
+
+@pytest.fixture
 def files_service() -> InMemoryFilesService:
     """Return fresh isolated Files storage for each test's resource assertions."""
     return InMemoryFilesService()

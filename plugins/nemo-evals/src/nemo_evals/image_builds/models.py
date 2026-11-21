@@ -29,7 +29,9 @@ _BUILD_NAME_PREFIX = "build."
 class BuildImage(BaseModel):
     """One container image a task needs, and where its build stands."""
 
-    model_config = ConfigDict(extra="forbid")
+    # Never a request body: only ever read back from a record or a response. A key a later release adds is kept as
+    # it is, so this release reads that release's records, and a read-modify-write here doesn't drop the key.
+    model_config = ConfigDict(extra="allow")
 
     type: str = Field(
         # Builds recorded before the rename stored this as `role`; read either so they still load.

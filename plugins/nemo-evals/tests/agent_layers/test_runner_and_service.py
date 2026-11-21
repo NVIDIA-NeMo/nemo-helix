@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.agent_layers.dockerfile import AGENT_MOUNT, INSTALLER_MOUNT
 from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
@@ -75,7 +75,7 @@ async def _allow(workspace: str) -> None:
     pass
 
 
-def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
+def _ready(name: str, created_at: datetime | None = None, *, backend: str = IN_CLUSTER_BACKEND) -> ContainerImage:
     image = ContainerImage(
         name=name,
         workspace="default",
@@ -89,6 +89,7 @@ def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
             revision=int(name.rsplit("-", 1)[1]),
             job=f"default/builder-{name}",
             request_digest="sha256:" + "a" * 64,
+            backend=backend,
         ),
     )
     image._created_at = created_at or datetime.now(timezone.utc)
@@ -253,6 +254,39 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
         "mounts/nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu": "cpython-3.12.15-linux-x86_64-gnu",
         "mounts/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
     }
+
+
+async def test_a_layer_is_recorded_without_the_keys_of_a_remote_build(
+    entity_store, store_task, monkeypatch, tmp_path, build_image_keys
+) -> None:
+    """A layer's image is recorded as a build image is, and an older reader refuses a key it doesn't know."""
+    _serve_archive(monkeypatch, _ENV)
+    spec, _ = await _requested(entity_store, store_task)
+
+    layer = await _run(entity_store, spec, _Builder(), _Files(), tmp_path)
+
+    assert layer.status == "ready"
+    assert list(layer._get_data_fields()["image"]) == build_image_keys
+
+
+async def test_a_row_another_backend_built_under_the_layers_name_isnt_the_layer(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """Only this cluster builds with the agent's mount, so a row another backend built under the name lacks the agent."""
+    _serve_archive(monkeypatch, _ENV)
+    spec, _ = await _requested(entity_store, store_task)
+
+    class _Squatted(_Builder):
+        async def get_image(self, name: str) -> ContainerImage | None:
+            return _ready(name, backend="remote") if name.endswith("-1") else None
+
+    builder = _Squatted()
+
+    layer = await _run(entity_store, spec, builder, _Files(), tmp_path)
+
+    assert layer.status == "failed" and builder.submits == []
+    assert layer.error is not None and layer.error.startswith("layer_not_built_in_cluster: ")
+    assert layer.image is None
 
 
 async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
