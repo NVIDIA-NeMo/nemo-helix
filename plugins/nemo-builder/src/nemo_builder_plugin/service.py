@@ -21,7 +21,9 @@ from nemo_builder_plugin.completion import (
     Caller,
     CompleteRequest,
     CompletionConflict,
+    JobNotRecorded,
     JobOf,
+    RecordedStep,
     caller_refusal,
     complete,
     current_caller,
@@ -44,6 +46,8 @@ from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
     BackendChanged,
     BuildConflict,
+    CreatedJob,
+    ExistingJob,
     InvalidBuildRequest,
     MissingSecrets,
     UpstreamUnavailable,
@@ -52,6 +56,7 @@ from nemo_builder_plugin.submit import (
 from nemo_builder_plugin.upstream import UpstreamRegistry
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationEntity, WorkloadDelegationStore
+from nemo_helix_plugin.auth.workload_identity import is_workload_identity_token_exchange_enabled
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -65,6 +70,7 @@ from nemo_helix_plugin.entity_client import (
     get_entity_client,
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
@@ -203,29 +209,58 @@ def get_settle() -> Settle:
     return _settle_as_builder
 
 
-def _job_named(record: WorkloadDelegationEntity | None) -> str | None:
-    """``<workspace>/<name>`` of the job ``record`` was made for a step of, as an image's row names its build
-    job. None if it was made for something else, or no longer stands.
+def _step_on_record(record: WorkloadDelegationEntity | None) -> RecordedStep | None:
+    """What ``record`` says of the job step it was made for: the job's workspace and name, as an image's row
+    names its build job, and the attempt of the job the step belongs to, as the row records the one its submit
+    created. None if it was made for something else, or no longer stands.
 
-    Jobs records the job's workspace and its name for each step's pod, and withdraws the record once the step
-    has ended.
+    Jobs records these for each step's pod, and withdraws the record once the step has ended.
     """
-    if record is None or not record.is_active() or record.workload_kind != "job" or not record.job_id:
+    if record is None or not record.is_active() or record.workload_kind != "job":
         return None
-    return f"{record.workload_workspace}/{record.job_id}"
+    if not record.job_id or not record.attempt_id:
+        return None
+    # The platform doesn't record the job's own ID for a step's pod yet, only its name. Read where a later
+    # platform does: it would tell a job created under the name from a rerun of the job itself.
+    job_uid = getattr(record, "job_uid", None)
+    return RecordedStep(
+        workspace=record.workload_workspace,
+        job=record.job_id,
+        attempt_id=record.attempt_id,
+        job_uid=job_uid if isinstance(job_uid, str) and job_uid else None,
+    )
 
 
-async def _job_of_as_builder(delegation: str) -> str | None:
+async def _job_of_as_builder(delegation: str) -> RecordedStep | None:
     # As the builder, not the caller: the record is the platform's own, kept where no submitter reads. By its
     # ID, which names one record: a later workload's is another, though it may be found under the same name.
     async with get_async_nemo_client(as_service="builder", internal=True) as client:
         records = WorkloadDelegationStore(EntityClient(AsyncEntitiesClient.from_client(client)))
-        return _job_named(await records.get_by_id(delegation))
+        return _step_on_record(await records.get_by_id(delegation))
 
 
 def get_job_of() -> JobOf:
-    """How the builder learns which job a caller's workload delegation was made for a step of."""
+    """How the builder learns which job step a caller's workload delegation was made for."""
     return _job_of_as_builder
+
+
+def get_token_exchange() -> Callable[[], bool]:
+    """How the builder learns whether the platform mints its workloads' tokens: workload token exchange.
+
+    Asked only once a caller is known to be authenticated, of a row a build service built. It raises where the
+    platform's auth configuration can't be read.
+    """
+    return is_workload_identity_token_exchange_enabled
+
+
+def _unverified_completion_allowed() -> bool:
+    return _load_config().remote.allow_unverified_completion
+
+
+def get_allow_unverified() -> Callable[[], bool]:
+    """How the builder learns whether the operator accepted completions it cannot verify
+    (`builder.remote.allow_unverified_completion`). It raises where the builder's configuration can't be read."""
+    return _unverified_completion_allowed
 
 
 class BuilderService(NemoService):
@@ -270,11 +305,14 @@ def _build_router() -> APIRouter:
             raise HTTPException(status_code=403, detail=refusal)
         jobs_client = AsyncJobsClient.from_client(client)
 
-        async def create_job(request):
-            return await jobs_client.create_job(workspace=workspace, body=request)
+        async def create_job(request: CreateHelixJobRequest) -> CreatedJob:
+            # What Jobs answers the create with, and gives no other job: kept, for the rows to record.
+            job = (await jobs_client.create_job(workspace=workspace, body=request)).data()
+            return CreatedJob(uid=job.id, attempt_id=job.attempt_id)
 
-        async def get_job_fields(name: str):
-            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
+        async def get_job(name: str) -> ExistingJob:
+            job = (await jobs_client.get_job(workspace=workspace, name=name)).data()
+            return ExistingJob(uid=job.id, custom_fields=job.custom_fields or {})
 
         secrets_client = AsyncSecretsClient.from_client(client)
 
@@ -302,7 +340,7 @@ def _build_router() -> APIRouter:
                 workspace=workspace,
                 entity_client=entity_client,
                 create_job=create_job,
-                get_job_fields=get_job_fields,
+                get_job=get_job,
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
                 default_platform=config.default_platform,
@@ -416,39 +454,67 @@ def _build_router() -> APIRouter:
         caller: Caller = Depends(current_caller),
         delegation: str | None = Depends(current_delegation),
         job_of: JobOf = Depends(get_job_of),
+        token_exchange: Callable[[], bool] = Depends(get_token_exchange),
+        allow_unverified: Callable[[], bool] = Depends(get_allow_unverified),
     ) -> ContainerImage:
         """Make an image `ready` at the digest the step that built it published.
 
         Completing an image already `ready` at that digest, with the same `external` and the same
-        `runtime_config`, returns it; 409 if it settled otherwise, or if the request doesn't fit the image's
-        backend. For an image a build service built, 403 to a caller whose token shows it to be a step of
-        another job than the image's build job.
+        `runtime_config`, returns it; 409 if it settled otherwise, if the request doesn't fit the image's
+        backend, or if another image took its name meanwhile. For an image a build service built, with
+        platform auth on: under workload token exchange, 403 to a caller that is not a step of the attempt the
+        image records, and 503 while it records none; without workload token exchange, 403 to every caller
+        unless `builder.remote.allow_unverified_completion` is set. With platform auth off no caller is checked.
         """
-        row = await _get_row(entity_client, workspace, name)
-        refusal = caller_refusal(row, caller)
-        if refusal is None:
-            try:
-                refusal = await step_refusal(row, delegation, job_of)
-            except Exception as exc:
-                # No one is admitted on a record that couldn't be read. Answered as an outage, which a step
-                # waits out: its image is built, and only this call is left.
-                logger.exception(
-                    "could not tell which job is completing %s/%s",
+
+        async def admit(row: ContainerImage) -> None:
+            """Raise what the route answers a caller who may not complete ``row``: 403, or 503 while that
+            can't be told. Asked of the row the route reads, and again of any that is read in its place."""
+            refusal = caller_refusal(row, caller)
+            if refusal is None:
+                try:
+                    refusal = await step_refusal(
+                        row,
+                        caller,
+                        delegation,
+                        job_of,
+                        token_exchange=token_exchange,
+                        allow_unverified=allow_unverified,
+                    )
+                except JobNotRecorded as exc:
+                    # The submit that created the build job may still be writing it on the row. A step waits
+                    # this out, as it does an outage.
+                    logger.warning(
+                        "completing %s/%s put off: its row records no build job yet",
+                        sanitize_for_log(workspace),
+                        sanitize_for_log(name),
+                    )
+                    raise HTTPException(status_code=503, detail=f"{exc}; try again.") from exc
+                except Exception as exc:
+                    # No one is admitted on a record, or a deployment's settings, that couldn't be read.
+                    # Answered as an outage, which a step waits out: its image is built, and only this call
+                    # is left.
+                    logger.exception(
+                        "could not tell which job is completing %s/%s",
+                        sanitize_for_log(workspace),
+                        sanitize_for_log(name),
+                    )
+                    raise HTTPException(
+                        status_code=503, detail="Couldn't check which job the caller is a step of; try again."
+                    ) from exc
+            if refusal is not None:
+                logger.warning(
+                    "completing %s/%s refused: %s",
                     sanitize_for_log(workspace),
                     sanitize_for_log(name),
+                    sanitize_for_log(refusal),
                 )
-                raise HTTPException(
-                    status_code=503, detail="Couldn't check which job the caller is a step of; try again."
-                ) from exc
-        if refusal is not None:
-            logger.warning(
-                "completing %s/%s refused: %s",
-                sanitize_for_log(workspace),
-                sanitize_for_log(name),
-                sanitize_for_log(refusal),
-            )
-            raise HTTPException(status_code=403, detail=refusal)
+                raise HTTPException(status_code=403, detail=refusal)
+
+        row = await _get_row(entity_client, workspace, name)
+        await admit(row)
         try:
+            # The row that was let through is the one written: not whatever is under its name by then.
             ready = await complete(
                 entity_client,
                 workspace=workspace,
@@ -456,6 +522,8 @@ def _build_router() -> APIRouter:
                 digest=body.digest,
                 runtime_config=body.runtime_config,
                 external=body.external,
+                row=row,
+                admit=admit,
             )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc

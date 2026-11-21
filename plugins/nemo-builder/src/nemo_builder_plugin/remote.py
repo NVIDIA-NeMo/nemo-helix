@@ -17,7 +17,13 @@ from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
 from nemo_builder_plugin.schema import MAX_BUILD_SPECS, ImageSource
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, ROOT_DOCKERFILE, RemoteBuildImage, RemoteBuildStepConfig
+from nemo_helix_plugin.auth import platform_auth_enabled
+from nemo_helix_plugin.auth.workload_identity import (
+    WorkloadIdentityConfigError,
+    is_workload_identity_token_exchange_enabled,
+)
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
+from nemo_helix_plugin.jobs.execution_profiles import KubernetesJobExecutionProfile
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.spec import (
     HelixJobEnvironmentVariable,
@@ -46,6 +52,10 @@ class RemoteBackend:
     """:class:`~nemo_builder_plugin.backend.Backend` for builds a service outside this cluster runs."""
 
     name = "remote"
+    #: The builder holds no credential for the service, so a completion's digest, build and runtime
+    #: configuration are its caller's word. What stands for them is that the caller is a step of the job the
+    #: submit created.
+    binds_rows_to_job = True
 
     def __init__(self, config: BuilderConfig, profiles: Sequence[ExecutionProfile]) -> None:
         self._config = config
@@ -101,6 +111,68 @@ class RemoteBackend:
                 f"builder.default_platform is {self._config.default_platform}, which is not one of "
                 f"builder.remote.platforms ({', '.join(remote.platforms)}); a request that names no platform "
                 "could never build"
+            )
+        self._check_completion(profile)
+
+    def _check_completion(self, profile: ExecutionProfile) -> None:
+        """Refuse every request where the build's completion would be refused: no build is made that could
+        not then be recorded.
+
+        With platform auth on and workload token exchange off, the platform takes a request's identity from
+        headers that anything able to reach its API can set. Nothing then shows that a completion's caller is
+        the build's own step, and no secret the builder could hand that step is out of such a caller's reach.
+        With auth off no caller is checked at all, and the backend is not refused.
+
+        Whether the platform uses token exchange is read before the operator's setting is looked at, and a
+        platform whose auth configuration can't be read is refused whatever that setting is: the completion
+        route reads it first too, admits no one where it can't, and would put the build's step off until
+        it gave up. The setting accepts a platform known to verify no one, not one that may be verifying.
+
+        Where a step is verified, the deployment is refused too while its step runs in a namespace that is not
+        its own (:meth:`_check_step_namespace`).
+        """
+        if not platform_auth_enabled():
+            return
+        try:
+            verifiable = is_workload_identity_token_exchange_enabled()
+        except WorkloadIdentityConfigError as exc:
+            raise BackendRejectedError(
+                "the platform's auth configuration can't be read, so nothing says whether the completion of a "
+                "remote build could be verified, and none would be let through"
+            ) from exc
+        if verifiable:
+            self._check_step_namespace(profile)
+        elif not self._remote.allow_unverified_completion:
+            raise BackendRejectedError(
+                "platform auth is on without workload token exchange, so nothing shows which job a caller "
+                "completing an image is a step of, and a remote build could not be recorded. Turn workload "
+                "token exchange on, or set builder.remote.allow_unverified_completion, which accepts that "
+                "anything able to reach the platform's API can make a pending image ready at a digest of its "
+                "choosing"
+            )
+
+    def _check_step_namespace(self, profile: ExecutionProfile) -> None:
+        """Refuse every request while the step runs where a step of the in-cluster build may create pods.
+
+        Under workload token exchange, a completion's caller is shown to be the build's step by the platform's
+        record of its pod. That record is as sure as the step's namespace is closed: the check holds as far as
+        nothing but Jobs creates pods there. The build step of an in-cluster build may create pods in its own
+        namespace (`control_profile`), so a remote-build profile in that namespace is refused while Jobs lists
+        that profile. What else may create pods where the step runs is the deployment's to see to: the
+        builder can't read it.
+        """
+        name = self._config.control_profile
+        control = next((p for p in self._profiles if (p.provider, p.profile) == ("cpu", name)), None)
+        if not isinstance(control, KubernetesJobExecutionProfile) or not isinstance(
+            profile, KubernetesJobExecutionProfile
+        ):
+            return
+        if control.config.namespace == profile.config.namespace:
+            raise BackendRejectedError(
+                f"Jobs execution profile cpu/{self._remote.profile} runs the remote-build step in the namespace of "
+                f"cpu/{name}, whose steps may create pods there. Under workload token exchange the builder relies "
+                "on nothing but Jobs creating pods where the remote-build step runs. Run the remote-build step "
+                "in a namespace of its own, where only Jobs creates pods"
             )
 
     def check(self, plan: BuildPlan) -> None:

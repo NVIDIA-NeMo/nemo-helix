@@ -10,13 +10,13 @@ from nemo_builder_plugin import completion as completion_module
 from nemo_builder_plugin.completion import Caller, CompletionConflict, caller_refusal, complete, current_caller
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance, UpstreamImage
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 
 DIGEST = "sha256:" + "d" * 64
 STEP = Caller(auth=True, actor="job-step", submitter="alice")
 
 
-def _row(*, submitter: str | None = "alice") -> ContainerImage:
+def _row(*, submitter: str | None = "alice", entity_id: str | None = None) -> ContainerImage:
     row = ContainerImage(
         name="build-1-0",
         workspace="ws-a",
@@ -26,18 +26,30 @@ def _row(*, submitter: str | None = "alice") -> ContainerImage:
     )
     # What the entity store records for whoever created the row: the submit's effective principal.
     row._created_by = submitter
+    # And the ID it gave the row, which no row created under the name later is given.
+    row._id = entity_id
     return row
 
 
 class FakeRows:
+    """The one row under a name. It is read by the name, and written by its ID at the version it was read at."""
+
     def __init__(self, row: ContainerImage) -> None:
         self.row = row
         self.version = 1
+        self.reads = 0
         self.writes = 0
         self.interfere: ContainerImage | None = None
+        #: The row that has taken the name by the time it is read after a write was refused: the first was
+        #: deleted meanwhile.
+        self.replaced_by: ContainerImage | None = None
+        self._refused = False
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage:
         assert (name, workspace) == (self.row.name, self.row.workspace)
+        if self.replaced_by is not None and self._refused:
+            self.row, self.replaced_by, self.version = self.replaced_by, None, 1
+        self.reads += 1
         copy = self.row.model_copy(deep=True)
         copy._db_version = self.version
         return copy
@@ -47,7 +59,10 @@ class FakeRows:
             # Someone else writes between this completion's read and its write.
             self.row, self.interfere = self.interfere, None
             self.version += 1
+        if entity.id != self.row.id:
+            raise EntityNotFoundError("no row has that ID any more")
         if entity.db_version != self.version:
+            self._refused = True
             raise EntityConflictError("version mismatch")
         self.writes += 1
         self.version += 1
@@ -140,6 +155,111 @@ class TestComplete:
         twin = await _complete(FakeRows(_row()))
         rows.interfere = twin
         assert (await _complete(rows)).status == "ready"
+
+
+class Refused(Exception):
+    """What a route's checks raise for a caller who may not complete a row."""
+
+
+class Checks:
+    """The route's checks, as it hands them to ``complete``: which rows they were asked about."""
+
+    def __init__(self, refuse: bool = False) -> None:
+        self.asked: list[ContainerImage] = []
+        self.refuse = refuse
+
+    async def __call__(self, row: ContainerImage) -> None:
+        self.asked.append(row)
+        if self.refuse:
+            raise Refused(f"{row.name}, as it is now, is not this caller's to complete")
+
+
+class TestTheRowThatIsWritten:
+    """A route decides who may complete a row, of the row it read. The write is of that row."""
+
+    async def _complete(self, rows: FakeRows, row: ContainerImage | None, admit: Checks | None) -> ContainerImage:
+        return await complete(rows, workspace="ws-a", name="build-1-0", digest=DIGEST, row=row, admit=admit)
+
+    async def _read(self, rows: FakeRows) -> ContainerImage:
+        """The row as a route reads it before it decides. Not counted among the completion's own reads."""
+        row = await rows.get(ContainerImage, name="build-1-0", workspace="ws-a")
+        rows.reads = 0
+        return row
+
+    @pytest.mark.asyncio
+    async def test_the_row_handed_in_is_written_and_the_name_is_not_read_again(self) -> None:
+        rows, admit = FakeRows(_row(entity_id="image-1")), Checks()
+        ready = await self._complete(rows, await self._read(rows), admit)
+        assert (ready.status, ready.digest, ready.id) == ("ready", DIGEST, "image-1")
+        assert (rows.reads, rows.writes) == (0, 1)
+        # It was asked about before it was handed in: nothing is asked again of the same row at the same version.
+        assert admit.asked == []
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_took_the_name_since_is_not_written(self) -> None:
+        """The write is by the ID of the row that was decided of, and the store has no row under it any more.
+        Read by its name again, the completion would have made someone else's row ready."""
+        rows = FakeRows(_row(entity_id="image-1"))
+        decided_of = await self._read(rows)
+        rows.interfere = _row(submitter="bob", entity_id="image-2")
+        with pytest.raises(EntityNotFoundError):
+            await self._complete(rows, decided_of, Checks())
+        assert (rows.reads, rows.writes) == (0, 0)
+        assert (rows.row.status, rows.row.created_by) == ("pending", "bob")
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_changed_is_read_again_and_asked_about_again_before_it_is_written(self) -> None:
+        rows, admit = FakeRows(_row(entity_id="image-1")), Checks()
+        decided_of = await self._read(rows)
+        rows.interfere = _row(entity_id="image-1")
+        ready = await self._complete(rows, decided_of, admit)
+        assert (ready.status, rows.reads, rows.writes) == ("ready", 1, 1)
+        # Of the row as it was read the second time: the same one, at its next version.
+        assert [(row.id, row.db_version) for row in admit.asked] == [("image-1", 2)]
+
+    @pytest.mark.asyncio
+    async def test_a_row_that_changed_and_is_no_longer_the_callers_to_complete_is_not_written(self) -> None:
+        """What the checks raise is what the completion ends with: a route turns it into its own answer."""
+        rows = FakeRows(_row(entity_id="image-1"))
+        decided_of = await self._read(rows)
+        rows.interfere = _row(entity_id="image-1")
+        with pytest.raises(Refused, match="as it is now"):
+            await self._complete(rows, decided_of, Checks(refuse=True))
+        assert (rows.reads, rows.writes, rows.row.status) == (1, 0, "pending")
+
+    @pytest.mark.asyncio
+    async def test_a_row_replaced_before_it_is_read_again_ends_the_completion(self) -> None:
+        """The first write is refused because the row changed. By the time the name is read again the row is
+        gone, and another is under its name: nothing was decided of that one, and it is not asked about."""
+        rows, admit = FakeRows(_row(entity_id="image-1")), Checks()
+        decided_of = await self._read(rows)
+        rows.interfere = _row(entity_id="image-1")
+        rows.replaced_by = _row(submitter="bob", entity_id="image-2")
+        with pytest.raises(CompletionConflict, match="build-1-0 was replaced while it was being completed"):
+            await self._complete(rows, decided_of, admit)
+        assert (rows.reads, rows.writes, admit.asked) == (1, 0, [])
+        assert (rows.row.id, rows.row.status) == ("image-2", "pending")
+
+    @pytest.mark.asyncio
+    async def test_without_a_row_the_name_is_read_and_every_row_read_is_asked_about(self) -> None:
+        rows, admit = FakeRows(_row(entity_id="image-1")), Checks()
+        rows.interfere = _row(entity_id="image-1")
+        ready = await self._complete(rows, None, admit)
+        assert (ready.status, rows.reads, rows.writes) == ("ready", 2, 1)
+        assert [row.db_version for row in admit.asked] == [1, 2]
+        # And the row the first read found is the one it stays with.
+        rows = FakeRows(_row(entity_id="image-1"))
+        rows.interfere = _row(entity_id="image-1")
+        rows.replaced_by = _row(submitter="bob", entity_id="image-2")
+        with pytest.raises(CompletionConflict, match="was replaced"):
+            await self._complete(rows, None, None)
+
+    @pytest.mark.asyncio
+    async def test_a_repeat_returns_the_row_handed_in_as_it_is(self) -> None:
+        rows = FakeRows(_row(entity_id="image-1"))
+        await self._complete(rows, None, None)
+        again = await self._complete(rows, await self._read(rows), Checks())
+        assert (again.status, again.digest, rows.reads, rows.writes) == ("ready", DIGEST, 0, 1)
 
 
 class TestCompletingACopy:
