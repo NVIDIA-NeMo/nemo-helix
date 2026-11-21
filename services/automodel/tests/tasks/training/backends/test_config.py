@@ -331,14 +331,18 @@ class TestConfigureRetrievalDataset:
             def can_generate(cls) -> bool:
                 return True
 
-        monkeypatch.setattr(
-            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
-            lambda _config: NewCausalReranker,
-        )
+        dispatched: list[tuple[Path, bool]] = []
+
+        def dispatch(model_path: Path, *, trust_remote_code: bool) -> type:
+            dispatched.append((model_path, trust_remote_code))
+            return NewCausalReranker
+
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class", dispatch)
         base = tmp_path / "base"
         base.mkdir()
         (base / "config.json").write_text('{"model_type": "new_model", "architectures": ["NewModelForCausalLM"]}')
         mock_customizer_config.model.path = str(base)
+        mock_customizer_config.model.trust_remote_code = True
         train_file = tmp_path / "train.jsonl"
         train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
 
@@ -352,6 +356,8 @@ class TestConfigureRetrievalDataset:
                 retrieval_config=RetrievalConfig(),
                 recipe=TrainingRecipe.CROSS_ENCODER,
             )
+        # The dispatch loads the checkpoint with the job's flag, as Automodel's loader does.
+        assert dispatched == [(base, True)]
 
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,

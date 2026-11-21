@@ -12,7 +12,9 @@ and keep their references to the stub.
 
 import importlib
 import importlib.util
+import json
 import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -52,8 +54,12 @@ class LlamaBidirectionalForSequenceClassification:
         return False
 
 
-def _automodel_cross_encoder_class(config: dict[str, Any]) -> type | None:
-    """Automodel v0.7.0's cross-encoder dispatch: ``SUPPORTED_BACKBONES`` plus ``supports_config``."""
+def _automodel_cross_encoder_class(model_path: Path, *, trust_remote_code: bool) -> type | None:
+    """Automodel v0.7.0's cross-encoder dispatch: ``SUPPORTED_BACKBONES`` plus ``supports_config``.
+
+    Like ``AutoConfig.from_pretrained``, a missing ``config.json`` raises ``OSError`` and bad JSON ``ValueError``.
+    """
+    config: dict[str, Any] = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
     model_type = str(config.get("model_type", "")).lower()
     if model_type in ("llama", "llama_bidirec"):
         return LlamaBidirectionalForSequenceClassification

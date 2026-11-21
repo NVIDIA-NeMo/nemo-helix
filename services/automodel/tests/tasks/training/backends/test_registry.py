@@ -16,9 +16,24 @@ from nhx.automodel.tasks.training.backends.registry import causal_reranker_class
         ({"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}, "Qwen3RerankerForCausalReranking"),
         ({"model_type": "qwen3", "architectures": ["Qwen3ForSequenceClassification"]}, None),
         ({"model_type": "llama_bidirec", "architectures": ["LlamaBidirectionalForSequenceClassification"]}, None),
+        (
+            {
+                "model_type": "llama",
+                "architectures": ["LlamaForCausalLM"],
+                "max_position_embeddings": 131072,
+                "rope_scaling": {
+                    "rope_type": "llama3",
+                    "factor": 32.0,
+                    "low_freq_factor": 1.0,
+                    "high_freq_factor": 4.0,
+                    "original_max_position_embeddings": 8192,
+                },
+            },
+            None,
+        ),
         (None, None),
     ],
-    ids=["qwen3-causal-lm", "qwen3-converted-classifier", "score-head-reranker", "no-config"],
+    ids=["qwen3-causal-lm", "qwen3-converted-classifier", "score-head-reranker", "llama3-rope-scaling", "no-config"],
 )
 def test_causal_reranker_class_follows_automodel_dispatch(
     tmp_path: Path, config: dict[str, object] | None, expected: str | None
@@ -27,7 +42,7 @@ def test_causal_reranker_class_follows_automodel_dispatch(
     if config is not None:
         (tmp_path / "config.json").write_text(json.dumps(config))
 
-    reranker = causal_reranker_class(tmp_path)
+    reranker = causal_reranker_class(tmp_path, trust_remote_code=False)
 
     assert (reranker.__name__ if reranker is not None else None) == expected
 
