@@ -16,6 +16,7 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.image_builds.builder import (
+    BuildRefused,
     HttpImageBuilder,
     adopt_or_build,
     archive_source,
@@ -137,6 +138,36 @@ async def test_ensure_build_raises_what_builder_refuses_outright(code: str) -> N
     """A refusal says so in its code: the next revision would be refused the same way, so it isn't tried."""
     builder = _Builder(["ready"], conflicting=frozenset({1, 2}), code=code)
 
+    with pytest.raises(BuildRefused, match="Builder refused build harbor-env-0123456789ab-1: a revision") as refused:
+        await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert refused.value.detail == "a revision names one request"
+    assert builder.submitted == [1]
+
+
+@pytest.mark.parametrize("existing", [[], ["failed"]], ids=["the-first-revision", "after-a-failed-one"])
+async def test_ensure_build_raises_a_refusal_of_a_revision_nothing_holds_yet(
+    existing: list[Literal["pending", "ready", "failed"]],
+) -> None:
+    """A deployment that can't take the request refuses its first submit too, where there is no revision to rejoin."""
+    revision = len(existing) + 1
+    builder = _Builder(existing, conflicting=frozenset({revision}), code="backend_rejected")
+
+    with pytest.raises(BuildRefused) as refused:
+        await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert refused.value.detail == "a revision names one request"
+    assert builder.submitted == [revision]
+
+
+async def test_ensure_build_raises_a_409_that_names_no_code_as_builder_answered_it() -> None:
+    """Only the code is read here: no row is looked for at the revision, as :func:`adopt_or_build` looks for one.
+
+    So whether another request took the revision meanwhile or an older Builder refused the request, the 409 is the
+    client's error it always was, not a refusal.
+    """
+    builder = _Builder([], conflicting=frozenset({1}))
+
     with pytest.raises(ConflictError):
         await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
@@ -214,9 +245,12 @@ async def test_adopt_or_build_reports_a_refusal_that_wrote_no_build() -> None:
     """Builder answers 409 for a deployment it can't build on too; with no winner's build to read, that is not a race."""
     builder = _Builder([], conflicting=frozenset({1}))
 
-    with pytest.raises(RuntimeError, match="a revision names one request"):
+    with pytest.raises(BuildRefused, match="a revision names one request") as refused:
         await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
+    assert refused.value.detail == "a revision names one request"
+    # A caller that took it for the RuntimeError it was before it had a type of its own still does.
+    assert isinstance(refused.value, RuntimeError)
     assert builder.submitted == [1]
 
 
@@ -231,9 +265,26 @@ async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_t
         return _container_image(name, "ready") if revision == 1 and builder.submitted else None
 
     builder.get_image = race  # ty: ignore[invalid-assignment]
-    with pytest.raises(RuntimeError, match="Builder refused build harbor-env-0123456789ab-1: a revision names"):
+    with pytest.raises(BuildRefused, match="Builder refused build harbor-env-0123456789ab-1: a revision") as refused:
         await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    assert refused.value.detail == "a revision names one request"
     assert builder.submitted == [1]
+
+
+async def test_adopt_or_build_giving_up_on_a_build_others_keep_submitting_is_not_a_refusal() -> None:
+    """Every submit lost its revision to another request, whose build then failed. Builder refused nothing."""
+    builder = _Builder(["failed"], conflicting=frozenset({2, 3, 4}))
+
+    async def lost(name: str) -> ContainerImage | None:
+        # Each submit of ours is answered 409, and the revision it asked for is there, failed, when read.
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "failed") if revision <= 1 + len(builder.submitted) else None
+
+    builder.get_image = lost  # ty: ignore[invalid-assignment]
+    with pytest.raises(RuntimeError, match="kept being submitted by other requests") as gave_up:
+        await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    assert not isinstance(gave_up.value, BuildRefused)
+    assert builder.submitted == [2, 3, 4]
 
 
 @pytest.mark.parametrize(

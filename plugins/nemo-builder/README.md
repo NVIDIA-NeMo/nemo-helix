@@ -371,8 +371,11 @@ digest is the upstream one; the push step and `complete` both refuse any other. 
 like a build. Copies skip the build step, so a set of nothing but copies runs no sandbox.
 
 Only registries in the deployment's `import_registries` can be copied from, and only public images.
-A copy from any other registry is a `409`. A reference that doesn't resolve, or names no image for
-the platform, is a `400`; a registry that can't be reached is a `502`.
+A copy from any other registry is a `409`. Evals fails a task's image build on that answer, with its
+`detail` in the refused image's `error`. It asks for a task's copies before its Dockerfile builds and
+submits nothing more of the task after a refusal, so none of the task's Dockerfile images is
+submitted: they stay `pending` on the failed build. A reference that doesn't resolve, or names no
+image for the platform, is a `400`; a registry that can't be reached is a `502`.
 
 Every image goes to the deployment's one registry. With an `output`, it goes to
 `<registry>/<repository_prefix>/<workspace>/<output.repository>:<output.tag>`. Without one, it goes
@@ -607,7 +610,11 @@ What differs for a caller:
   `platforms` and a set of more than `max_specs_per_set` images. The answer's `code` is
   `backend_rejected`; a revision another request holds is a `409` with no `code`. Evals asks for
   two of these: it builds agent layers with `mounts` and copies prebuilt task images, so this
-  backend refuses those builds.
+  backend refuses those builds. A task's image build that is refused fails, and the refused image's
+  `error` is `Builder refused the build:` followed by the answer's `detail`. Evals asks for a
+  task's copies before its Dockerfile builds and submits nothing more of the task after a refusal,
+  so a task that names a prebuilt image starts no build on this backend: its other images stay
+  `pending` on the failed build.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
   it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
