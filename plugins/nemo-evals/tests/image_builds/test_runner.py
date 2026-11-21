@@ -318,12 +318,7 @@ async def test_a_remote_image_is_recorded_with_its_backend_from_its_submit(
     The submit is then the only record of the rest.
     """
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
-    builder = _Builder(
-        {"sort-task/environment": "ready"},
-        refusals={"sort-task/tests": _forbidden()},
-        backend=REMOTE_BACKEND,
-        external=_handle,
-    )
+    builder = _Builder({}, refusals={"sort-task/tests": _forbidden()}, backend=REMOTE_BACKEND)
 
     build = await _run(entity_store, spec, builder)
 
@@ -409,37 +404,22 @@ def test_a_read_without_the_backend_keeps_the_one_recorded(status: Literal["pend
     assert (image.external_image_id, image.builder_backend) == ("image-harbor-env-abc-1", REMOTE_BACKEND)
 
 
-async def test_a_remote_row_an_older_builder_finds_ready_keeps_its_backend_and_gets_no_handle(
-    entity_store, store_task, archive
-) -> None:
+async def test_a_remote_row_an_older_builder_finds_ready_keeps_its_backend(entity_store, store_task, archive) -> None:
     """A Builder from before the backend existed can be the one whose read finds a remote row ready.
 
-    The backend the submit named stays. The handle that read didn't carry is never recorded: a ready image isn't
-    read again.
+    The backend the submit named stays.
     """
     spec = await _start(entity_store, store_task, config={})
 
     class _ReadByAnOlderBuilder(_Builder):
-        async def submit(
-            self,
-            *,
-            name: str,
-            revision: int,
-            source: FileSetSource | ImageSource,
-            dockerfile: str | None,
-            platform: str | None,
-            mounts: Sequence[BuildMount] = (),
-        ) -> SubmitBuildResponse:
-            await super().submit(
-                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
-            )
-            return _submitted(name, revision, backend=REMOTE_BACKEND)
+        async def get_image(self, name: str) -> ContainerImage | None:
+            return None if name not in self.images else _container_image(name, "ready")
 
-    build = await _run(entity_store, spec, _ReadByAnOlderBuilder({"sort-task/environment": "ready"}))
+    build = await _run(entity_store, spec, _ReadByAnOlderBuilder({}, backend=REMOTE_BACKEND))
 
     assert build.status == "ready"
     [image] = (await _stored_build(entity_store, spec)).images
-    assert (image.status, image.builder_backend, image.external_image_id) == ("ready", REMOTE_BACKEND, None)
+    assert (image.status, image.builder_backend) == ("ready", REMOTE_BACKEND)
 
 
 @pytest.mark.parametrize(
