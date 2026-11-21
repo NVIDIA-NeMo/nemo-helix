@@ -298,8 +298,13 @@ async def test_adopt_or_build_resubmits_a_pending_build_whose_job_ended() -> Non
     assert builder.submitted == [2]
 
 
-async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() -> None:
-    """Another task submitted the same content first: Builder refuses ours, and theirs is read and used."""
+@pytest.mark.parametrize("backend", [None, IN_CLUSTER_BACKEND], ids=["none-named", "builders-named"])
+async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race(backend: str | None) -> None:
+    """Another task submitted the same content first: Builder refuses ours, and theirs is read and used.
+
+    A task image's Job names the backend its build expects, and an agent layer's Job names none. Where Builder
+    builds with the backend named, a lost race is settled as it is with none named.
+    """
     builder = _Builder([], conflicting=frozenset({1}))
 
     async def race(name: str) -> ContainerImage | None:
@@ -308,7 +313,9 @@ async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() ->
         return _container_image(name, "pending") if revision == 1 and builder.submitted else None
 
     builder.get_image = race  # ty: ignore[invalid-assignment]
-    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    image = await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=backend
+    )
 
     assert builder.submitted == [1]
     assert image.name == "harbor-env-0123456789ab-1"
@@ -377,8 +384,15 @@ async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_t
     assert builder.submitted == [1]
 
 
-async def test_adopt_or_build_giving_up_on_a_build_others_keep_submitting_is_not_a_refusal() -> None:
-    """Every submit lost its revision to another request, whose build then failed. Builder refused nothing."""
+@pytest.mark.parametrize("backend", [None, IN_CLUSTER_BACKEND], ids=["none-named", "builders-named"])
+async def test_adopt_or_build_giving_up_on_a_build_others_keep_submitting_is_not_a_refusal(
+    backend: str | None,
+) -> None:
+    """Every submit lost its revision to another request, whose build then failed. Builder refused nothing.
+
+    A winner's build under the backend the caller names is read again like any other: failed, it gets the next
+    revision. Only one under another backend is returned as it is.
+    """
     builder = _Builder(["failed"], conflicting=frozenset({2, 3, 4}))
 
     async def lost(name: str) -> ContainerImage | None:
@@ -388,7 +402,9 @@ async def test_adopt_or_build_giving_up_on_a_build_others_keep_submitting_is_not
 
     builder.get_image = lost  # ty: ignore[invalid-assignment]
     with pytest.raises(RuntimeError, match="kept being submitted by other requests") as gave_up:
-        await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+        await adopt_or_build(
+            builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=backend
+        )
     assert not isinstance(gave_up.value, BuildRefused)
     assert builder.submitted == [2, 3, 4]
 
@@ -609,7 +625,8 @@ class _RacingBuilder:
         return []
 
 
-async def test_a_hundred_tasks_sharing_one_context_submitted_at_once_make_one_build() -> None:
+@pytest.mark.parametrize("backend", [None, IN_CLUSTER_BACKEND], ids=["none-named", "builders-named"])
+async def test_a_hundred_tasks_sharing_one_context_submitted_at_once_make_one_build(backend: str | None) -> None:
     """Every task's archive is a different source, so all but one submit are refused; each uses the one build."""
     builder = _RacingBuilder()
     sources = [
@@ -618,7 +635,10 @@ async def test_a_hundred_tasks_sharing_one_context_submitted_at_once_make_one_bu
     ]
 
     images = await asyncio.gather(
-        *(adopt_or_build(builder, name="harbor-env-0123456789ab", source=s, dockerfile="Dockerfile") for s in sources)
+        *(
+            adopt_or_build(builder, name="harbor-env-0123456789ab", source=s, dockerfile="Dockerfile", backend=backend)
+            for s in sources
+        )
     )
 
     assert builder.builds == ["harbor-env-0123456789ab-1"]

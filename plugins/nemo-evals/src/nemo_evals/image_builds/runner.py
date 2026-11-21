@@ -295,8 +295,10 @@ def backends_disagree(actual: str, expected: str) -> str:
     """The error of an image Builder answered for under its ``actual`` backend, in a build that expects ``expected``.
 
     A build requested before a deployment switched ``builder.backend``, and run after, differs this way once: the
-    next request reads the new backend. A deployment whose evals API reads another ``builder.backend`` than its
-    Builder does differs on every request. The Job can't tell which, so the sentence says what to do in that order.
+    next request reads the new backend. So does one requested while the API could tell no backend, which expects
+    the in-cluster one, when its Job submits after Builder's section is repaired to name another. A deployment
+    whose evals API reads another ``builder.backend`` than its Builder does differs on every request. The Job
+    can't tell which, so the sentence says what to do in that order.
     """
     return (
         f"Builder builds with the {actual!r} backend, and this build was requested for {expected!r}: request the "

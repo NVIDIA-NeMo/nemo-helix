@@ -138,7 +138,7 @@ def get_image_build_service(
     """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
 
     It takes task images from the backend the deployment's Builder is configured to build with
-    (``builder.backend``), and holds no build to a backend while that one can't be told.
+    (``builder.backend``), and turns down no ready build for its backend while that one can't be told.
     """
     return ImageBuildService(
         entity_client,

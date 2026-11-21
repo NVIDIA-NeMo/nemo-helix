@@ -1336,10 +1336,13 @@ async def test_a_copy_builder_took_under_another_backend_fails_its_image_the_sam
 async def test_a_rebuild_builder_answers_under_another_backend_fails_its_image_without_a_reference(
     entity_store, store_task, archive
 ) -> None:
-    """A rebuild rejoins the newest revision, which may be ready: its reference is not this build's to record."""
+    """A rebuild rejoins the newest revision, which may be ready: its reference is not this build's to record.
+
+    The newest revision is one Builder's own backend made, so Builder answers with it and starts no build.
+    """
     spec = await _start(entity_store, store_task, config={}, backend=REMOTE_BACKEND)
     builder = _Builder({"sort-task/environment": "ready"}, backend=REMOTE_BACKEND, external=_handle)
-    await _run(entity_store, spec, builder)
+    first = await _run(entity_store, spec, builder)
     again = await _request_again(entity_store, spec, backend=IN_CLUSTER_BACKEND, rebuild=True)
 
     rebuilt = await _run(entity_store, again, builder)
@@ -1348,4 +1351,38 @@ async def test_a_rebuild_builder_answers_under_another_backend_fails_its_image_w
     assert (again.attempt, rebuilt.status, image.status) == (2, "failed", "failed")
     assert image.error == backends_disagree(REMOTE_BACKEND, IN_CLUSTER_BACKEND)
     assert (image.image_ref, image.runtime_config, image.external_image_id) == (None, None, None)
-    assert (image.builder_image is not None, image.built_by) == (True, REMOTE_BACKEND)
+    assert (image.builder_image, image.built_by) == (first.images[0].builder_image, REMOTE_BACKEND)
+    assert list(builder.built_by) == [image.builder_image]
+
+
+@pytest.mark.parametrize(
+    ("expected", "builders"),
+    [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["evals-not-told-of-the-remote-service", "builder-not-switched"],
+)
+async def test_a_rebuild_over_a_build_of_the_backend_evals_expects_starts_one_more_builder_build_and_fails(
+    entity_store, store_task, archive, expected: str, builders: str
+) -> None:
+    """Builder now builds with another backend than evals expects, and the image's newest build is the expected one's.
+
+    A rebuild submits that revision again. Builder refuses a revision its other backend holds, so the Job submits
+    the next one, which Builder takes under its own backend: one more Builder build, and the image fails on the
+    answer. A rebuild after it finds that build the newest, and rejoins it as in the test above.
+    """
+    spec = await _start(entity_store, store_task, config={}, backend=expected)
+    builder = _Builder({"sort-task/environment": "ready"}, backend=expected, external=_handle)
+    first = await _run(entity_store, spec, builder)
+    assert (first.status, first.images[0].built_by) == ("ready", expected)
+
+    builder.backend = builders
+    again = await _request_again(entity_store, spec, backend=expected, rebuild=True)
+    rebuilt = await _run(entity_store, again, builder)
+
+    [image] = rebuilt.images
+    assert (again.attempt, rebuilt.status, image.status) == (2, "failed", "failed")
+    assert (image.error, image.built_by) == (backends_disagree(builders, expected), builders)
+    assert (image.image_ref, image.runtime_config, image.external_image_id) == (None, None, None)
+    assert image.builder_image == (first.images[0].builder_image or "").removesuffix("-1") + "-2"
+    # Builder holds two builds of the image now, one under each backend. The refused resubmit is not one.
+    assert builder.built_by == {first.images[0].builder_image: expected, image.builder_image: builders}
+    assert len(builder.submits) == 2

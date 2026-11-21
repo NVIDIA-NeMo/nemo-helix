@@ -355,11 +355,7 @@ BUILD_READ_FAILURES = 5
 
 
 def request_builds(evaluator: Evaluator, refs: Sequence[str]) -> dict[str, ImageBuild]:
-    """Request every task's image build once; each answer is the build that's ready or in progress.
-
-    That is the next attempt, just started, after a failed build, and over a ready build that holds an image
-    another Builder backend than the deployment's built.
-    """
+    """Request every task's image build once; each answer is the build that's ready or in progress."""
     builds: dict[str, ImageBuild] = {}
     for ref in refs:
         workspace, name, digest = _split_ref(ref)
@@ -404,7 +400,8 @@ def wait_for_builds(
     Returns the last builds. A task whose newest build is already ready gets no request: a request costs the API a
     build check per task, on every submit of the same tasks. Between polls only reads go out. A request goes out again only to start a task's one retry, or after
     ``BUILD_REPAIR_SECONDS`` without a request, since only a request notices a build whose Job died. A request
-    that answers with another id means the followed attempt ended. A failed attempt prints its error; a task's
+    that answers with another id means the followed attempt ended, or turned ready holding an image of another
+    Builder backend than the deployment's, which is handled the same way. A failed attempt prints its error; a task's
     second failure settles it ``failed``. A read error keeps the last known state, ``BUILD_READ_FAILURES`` in a
     row raise.
     """
@@ -450,7 +447,9 @@ def wait_for_builds(
                 ):
                     requested_at[ref] = clock()
                     answer = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
-                    if answer.id != build.id:  # the request found this attempt's Job ended and started the next
+                    # The request found this attempt's Job ended, or the attempt ready with an image of another
+                    # Builder backend than the deployment's, and started the next.
+                    if answer.id != build.id:
                         current = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
                         ended(ref, current, answer)
                         continue

@@ -12,7 +12,6 @@ from typing import Protocol
 from urllib.parse import quote
 
 from fastapi import HTTPException, status
-from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import (
@@ -114,8 +113,9 @@ class ImageBuildService:
 
     ``builder_backend`` is the Builder backend this deployment's task images must come from: the one its Builder
     is configured to build with (``builder.backend``), which the API resolves
-    (``nemo_evals.config.expected_builder_backend``). It is the in-cluster one when none is given. None says the
-    backend can't be told, as while Builder's configuration can't be read: no build is then held to a backend.
+    (``nemo_evals.config.expected_builder_backend``). None, the default, says the backend can't be told, as while
+    Builder's configuration can't be read, or that the caller only reads builds. A request then returns a ready
+    build whichever backend built it, and an attempt it starts names no backend.
     """
 
     def __init__(
@@ -124,7 +124,7 @@ class ImageBuildService:
         jobs: BuildJobs,
         authorize_builds: AuthorizeBuilds,
         *,
-        builder_backend: str | None = IN_CLUSTER_BACKEND,
+        builder_backend: str | None = None,
     ) -> None:
         self.entity_client = entity_client
         self.jobs = jobs

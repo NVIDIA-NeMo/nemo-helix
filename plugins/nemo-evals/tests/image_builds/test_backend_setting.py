@@ -141,7 +141,7 @@ def test_the_routes_service_of_a_deployment_that_names_no_backend_takes_the_in_c
 
 
 def test_the_routes_service_is_given_no_backend_while_builders_cant_be_told(entity_store, monkeypatch) -> None:
-    """Not the in-cluster one, which the service takes when it is given nothing."""
+    """Not the in-cluster one: the service then turns down no ready build for the backend that built it."""
     _builder_reads(monkeypatch, {"backend": "remot"})
 
     assert _routes_service(entity_store).builder_backend is None

@@ -115,7 +115,7 @@ def _routes(service: ImageBuildService) -> TestClient:
 @pytest.fixture
 def client(entity_store, jobs, authorizer) -> TestClient:
     """The routes of a deployment that names no Builder backend: its task images come from the in-cluster one."""
-    return _routes(ImageBuildService(entity_store, jobs, authorizer))
+    return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=IN_CLUSTER_BACKEND))
 
 
 @pytest.fixture
@@ -645,3 +645,8 @@ def test_while_the_backend_cant_be_told_an_attempt_names_none_and_its_build_answ
     _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
     assert untold_client.post(f"{_BASE}/{digest}/image-builds").json()["id"] == "1"
     assert len(jobs.created) == 1
+
+
+def test_a_service_given_no_backend_is_one_whose_backend_cant_be_told(entity_store, jobs, authorizer) -> None:
+    """As a run's preparer builds it, only to read builds. The routes' service is given the deployment's backend."""
+    assert ImageBuildService(entity_store, jobs, authorizer).builder_backend is None

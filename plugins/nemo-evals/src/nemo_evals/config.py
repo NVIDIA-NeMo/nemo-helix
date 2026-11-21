@@ -431,10 +431,9 @@ def expected_builder_backend() -> str | None:
     A deployment whose evals API reads another sets ``builder.backend`` there to the backend its Builder builds with.
 
     None when the backend can't be told: the ``builder`` section can't be read, or names a backend Builder doesn't
-    have. Builder refuses every submit then, and its refusal says why, so no backend is expected meanwhile: a ready
-    build answers a request whichever backend built it. An attempt started over it could have nothing built, and
-    one that failed would be the task's newest build, which a run doesn't take. An attempt that submits an image to
-    Builder meanwhile fails with Builder's refusal, and reading a build doesn't fail.
+    have. Builder refuses every submit then, and its refusal says why. The build service then turns down no ready
+    build for the backend that built it, and an attempt it starts names no backend
+    (``nemo_evals.image_builds.service.ImageBuildService``). Reading a build doesn't fail.
 
     For the API only. A Job worker doesn't read the platform config file: a build's Job takes the backend from the
     build's record, where the API wrote it.
