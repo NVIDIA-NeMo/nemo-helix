@@ -371,11 +371,16 @@ def build_fabric_agent_image(
     push: bool = False,
     on_progress: ProgressCallback | None = None,
     wheel: Path | None = None,
+    contract_version: str | None = None,
 ) -> str:
     """Build a Fabric-backed NeMo agent image.
 
     *wheel* installs a local nemo-helix wheel instead of resolving the pinned
     contract version, which is the only way to package from a source checkout.
+
+    *contract_version* pins the image to that published nemo-helix release
+    instead of the build host's installed version. It cannot be combined with
+    a wheel.
 
     This is intentionally separate from ``build_nat_agent_image`` so Fabric
     packaging can grow without inheriting NAT-specific args such as
@@ -438,9 +443,15 @@ def build_fabric_agent_image(
         if wheel.suffix != ".whl":
             raise ValueError(f"not a wheel: {wheel}")
 
+    if contract_version is not None and wheel is not None:
+        raise ValueError(
+            f"{WHEEL_ENV} installs {wheel.name} instead of a published release, so it cannot be "
+            f"combined with pinning nemo-helix {contract_version}; unset {WHEEL_ENV}."
+        )
     # A wheel is what the image actually installs, so it — not the build host —
     # decides the version the image advertises and hashes into its id.
-    contract_version = wheel_contract_version(wheel) if wheel is not None else get_contract_version()
+    if contract_version is None:
+        contract_version = wheel_contract_version(wheel) if wheel is not None else get_contract_version()
     if wheel is not None and contract_version != get_contract_version():
         # Not fatal: the wheel is installed instead of the pin, so the pin never resolves.
         emit_progress(

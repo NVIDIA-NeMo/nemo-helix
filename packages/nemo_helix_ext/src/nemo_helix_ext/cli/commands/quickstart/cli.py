@@ -287,6 +287,21 @@ cluster_info_app = typer.Typer(help="Show information about the connected platfo
 quickstart_app = typer.Typer(help="Quickstart commands for managing the NeMo Helix container.")
 
 
+def _print_platform_info(base_url: str) -> None:
+    """Print the platform version and architecture from ``/cluster-info``; older servers omit the architecture."""
+    try:
+        response = http_get(f"{base_url.rstrip('/')}/cluster-info", timeout=5.0)
+        info = response.json() if response.status_code == 200 else {}
+    except Exception:
+        return
+    if not isinstance(info, dict):
+        return
+    if info.get("platform_version"):
+        console.print(f"• Platform Version: {info['platform_version']}")
+    if info.get("architecture"):
+        console.print(f"• Architecture: {info['architecture']}")
+
+
 @cluster_info_app.callback(invoke_without_command=True)
 def cluster_info(ctx: typer.Context) -> None:
     """Show information about the connected platform cluster."""
@@ -334,6 +349,7 @@ def cluster_info(ctx: typer.Context) -> None:
         else "[red]✗[/red]"
     )
     console.print(f"{status_icon} Status: {overall}")
+    _print_platform_info(base_url)
 
     services = data.get("services", {})
     ready = services.get("ready", [])

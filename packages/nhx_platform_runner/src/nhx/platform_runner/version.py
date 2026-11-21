@@ -8,9 +8,16 @@ from __future__ import annotations
 import os
 import re
 from importlib.metadata import PackageNotFoundError, version
+from platform import machine
 
 _UNSTAMPED_VERSION = "0.0.0"
 _RELEASE_VERSION_PATTERN = re.compile(r"v?\d+(\.\d+)+\S*")
+_DOCKER_PLATFORMS = {
+    "x86_64": "linux/amd64",
+    "amd64": "linux/amd64",
+    "aarch64": "linux/arm64",
+    "arm64": "linux/arm64",
+}
 
 
 def _resolve_version() -> str:
@@ -35,3 +42,8 @@ def get_platform_version() -> str:
 
 def get_revision() -> str:
     return os.environ.get("NHX_CODE_REVISION", "dev").strip() or "dev"
+
+
+def get_architecture() -> str | None:
+    """The Docker platform of the host serving the API, e.g. ``linux/amd64``; ``None`` when unrecognized."""
+    return _DOCKER_PLATFORMS.get(machine().lower())

@@ -25,6 +25,10 @@ class HealthNotReadyDetail(BaseModel):
 class ClusterInfo(BaseModel):
     platform_version: str = Field(description="Platform version from package metadata or environment.")
     revision: str = Field(description='Code revision, or "dev" when unset.')
+    architecture: str | None = Field(
+        default=None,
+        description="Docker platform of the node serving the API, e.g. linux/amd64; null when unrecognized.",
+    )
 
 
 class NotReadyServiceInfo(BaseModel):

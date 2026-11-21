@@ -2617,6 +2617,7 @@ class TestPackageCommand:
         with (
             patch("nemo_agents_plugin.container.builder.build_nat_agent_image") as mock_build,
             patch("nemo_agents_plugin.container.publisher.docker_push") as mock_push,
+            patch("nemo_agents_plugin.container.registry.registry_has_credentials", return_value=True),
         ):
             mock_build.return_value = "my-agent:1.0"
             mock_push.return_value = "nvcr.io/my-org/my-agent:1.0"
@@ -2644,6 +2645,102 @@ class TestPackageCommand:
         mock_push.assert_called_once_with(
             local_tag="my-agent:1.0", registry="nvcr.io/my-org", push_tag=None, on_progress=typer.echo
         )
+
+    def test_publish_rejects_a_registry_url_before_building(self, package_cli, fabric_agent_config: Path) -> None:
+        app, runner = package_cli
+
+        with patch("nemo_agents_plugin.container.builder.build_fabric_agent_image") as mock_build:
+            result = runner.invoke(
+                app,
+                ["package", "--agent", str(fabric_agent_config), "--publish", "--registry", "http://nvcr.io/my-org/"],
+            )
+
+        assert result.exit_code == 1
+        assert "Use: --registry nvcr.io/my-org" in result.stderr
+        mock_build.assert_not_called()
+
+    def test_publish_without_registry_credentials_fails_before_building(
+        self, package_cli, fabric_agent_config: Path
+    ) -> None:
+        app, runner = package_cli
+
+        with (
+            patch("nemo_agents_plugin.container.builder.build_fabric_agent_image") as mock_build,
+            patch("nemo_agents_plugin.container.registry.registry_has_credentials", return_value=False),
+        ):
+            result = runner.invoke(
+                app, ["package", "--agent", str(fabric_agent_config), "--publish", "--registry", "nvcr.io/my-org"]
+            )
+
+        assert result.exit_code == 1
+        assert "docker login nvcr.io -u '$oauthtoken'" in result.stderr
+        mock_build.assert_not_called()
+
+    def test_publish_defaults_to_a_unique_push_tag(self, package_cli, fabric_agent_config: Path) -> None:
+        app, runner = package_cli
+
+        with (
+            patch("nemo_agents_plugin.container.builder.build_fabric_agent_image", return_value="triage-abc:1.0"),
+            patch("nemo_agents_plugin.container.publisher.docker_push", side_effect=lambda **kw: kw["push_tag"]),
+            patch("nemo_agents_plugin.container.registry.registry_has_credentials", return_value=True),
+            patch("nemo_agents_plugin.cli.datetime") as clock,
+        ):
+            clock.now.return_value.strftime.return_value = "20261120120000"
+            result = runner.invoke(
+                app, ["package", "--agent", str(fabric_agent_config), "--publish", "--registry", "nvcr.io/my-org/"]
+            )
+
+        assert result.exit_code == 0, result.stderr
+        assert "Published: nvcr.io/my-org/triage-abc:1.0-20261120120000" in result.stdout
+
+    def test_nemo_version_pins_the_build(self, package_cli, fabric_agent_config: Path) -> None:
+        app, runner = package_cli
+
+        with patch(
+            "nemo_agents_plugin.container.builder.build_fabric_agent_image", return_value="triage-abc:1.0"
+        ) as mock_build:
+            result = runner.invoke(app, ["package", "--agent", str(fabric_agent_config), "--nemo-version", "v0.10.0"])
+
+        assert result.exit_code == 0, result.stderr
+        assert mock_build.call_args.kwargs["contract_version"] == "0.10.0"
+
+    def test_nemo_version_pins_the_rendered_dockerfile(
+        self, package_cli, fabric_agent_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nemo_agents_plugin.container.template as template
+
+        monkeypatch.setattr(template, "get_contract_version", lambda: "0.11.0.post3.dev0+5d62bc7400")
+        app, runner = package_cli
+        output = tmp_path / "Dockerfile"
+
+        result = runner.invoke(
+            app,
+            [
+                "package",
+                "--agent",
+                str(fabric_agent_config),
+                "--no-build",
+                "--output",
+                str(output),
+                "--nemo-version",
+                "0.10.0",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert '"nemo-helix[nemo-agents-plugin-deepagents]==0.10.0"' in output.read_text()
+
+    def test_nemo_version_is_refused_for_nat(self, package_cli, agent_config: Path) -> None:
+        app, runner = package_cli
+
+        with patch("nemo_agents_plugin.container.builder.build_nat_agent_image") as mock_build:
+            result = runner.invoke(
+                app, ["package", "--agent", str(agent_config), "--nat-version", "1.5.0", "--nemo-version", "0.10.0"]
+            )
+
+        assert result.exit_code == 1
+        assert "--nemo-version is only valid for Fabric" in result.stderr
+        mock_build.assert_not_called()
 
     def test_publish_without_registry_fails(self, package_cli, agent_config: Path) -> None:
         """``--publish`` without ``--registry`` is rejected before any build runs."""
@@ -3706,3 +3803,63 @@ class TestFabricWheelInstall:
             build_fabric_agent_image(fabric_agent_config, wheel=wheel, skip_validation=True)
 
         assert collision.read_text() == "USER OWNED"
+
+
+class TestFabricContractVersionPin:
+    """``package-deploy`` packages from a source checkout for a platform running a release,
+    so the build pins that release instead of the host's unpublished version."""
+
+    @patch("nemo_agents_plugin.container.builder.docker_build")
+    def test_pinned_release_replaces_the_host_version(
+        self, mock_build: MagicMock, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nemo_agents_plugin.container.template as template
+        from nemo_agents_plugin.container.builder import build_fabric_agent_image
+
+        monkeypatch.setattr(template, "get_contract_version", lambda: "0.11.0.post3.dev0+5d62bc7400")
+        rendered: dict[str, str] = {}
+        mock_build.side_effect = lambda **kwargs: rendered.setdefault(
+            "dockerfile", (fabric_agent_config.parent / "Dockerfile.generated").read_text()
+        )
+
+        build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x", contract_version="0.10.0")
+
+        assert '"nemo-helix[nemo-agents-plugin-deepagents]==0.10.0"' in rendered["dockerfile"]
+        assert 'com.nemo.agent.contract-version="0.10.0"' in rendered["dockerfile"]
+
+    @patch("nemo_agents_plugin.container.builder.docker_build")
+    def test_pinned_release_with_a_wheel_is_refused_before_building(
+        self, mock_build: MagicMock, fabric_agent_config: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from nemo_agents_plugin.container.builder import build_fabric_agent_image
+        from nemo_agents_plugin.container.template import WHEEL_ENV
+
+        wheel = tmp_path / "nemo_helix-0.4.0-py3-none-any.whl"
+        wheel.write_bytes(b"wheel")
+        monkeypatch.setenv(WHEEL_ENV, str(wheel))
+
+        with pytest.raises(ValueError, match=f"unset {WHEEL_ENV}"):
+            build_fabric_agent_image(
+                fabric_agent_config, skip_validation=True, agent_author="x", contract_version="0.10.0"
+            )
+        mock_build.assert_not_called()
+
+    def test_shared_params_follow_the_pinned_release(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nemo_agents_plugin.container.template as template
+
+        monkeypatch.setattr(template, "get_contract_version", lambda: "0.11.0.post3.dev0+5d62bc7400")
+
+        pinned = template.resolve_shared_render_params(fabric_agent_config, contract_version="0.10.0")
+        unpinned = template.resolve_shared_render_params(fabric_agent_config)
+
+        assert pinned.contract_version == "0.10.0"
+        assert unpinned.contract_version == "0.11.0.post3.dev0+5d62bc7400"
+
+    @pytest.mark.parametrize("version", ["dev", "0.11.0.dev0", "0.11.0+abc"])
+    def test_unpublished_versions_are_not_installable(self, version: str) -> None:
+        from nemo_agents_plugin.container.template import require_installable_contract_version
+
+        with pytest.raises(ValueError, match="no package index serves it"):
+            require_installable_contract_version(version)

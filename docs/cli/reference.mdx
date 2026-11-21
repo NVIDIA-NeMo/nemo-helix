@@ -7665,8 +7665,9 @@ nemo agents package [OPTIONS]
 * `--dockerfile <FILE>`: Use an existing Dockerfile instead of rendering (skips render stage).
 * `--tag, -t`: Image tag.  Defaults to '&lt;agent-name>-&lt;agent-id>:&lt;agent-version>'.
 * `--platform`: Target platform (e.g. 'linux/amd64' or 'linux/arm64'). When omitted, defaults to the local daemon's native platform. Multi-arch builds via buildx are not yet implemented; pass at most one value.
-* `--registry, -r`: Remote registry URL (required when `--publish` is set).
-* `--push-tag`: Fully-qualified remote tag.  Defaults to '&lt;registry>/&lt;tag>'.
+* `--registry, -r`: Registry to push to, without a URL scheme, e.g. nvcr.io/my-org (required when `--publish` is set).
+* `--push-tag`: Fully-qualified remote tag.  Defaults to '&lt;registry>/&lt;tag>', with a UTC timestamp appended to the tag when `--tag` is also omitted, so every push is unique.
+* `--nemo-version`: Published nemo-helix release the image pins, e.g. the one the target platform runs (shown by `nemo cluster-info`). Defaults to this CLI's installed version. Fabric agents only.
 * `--output, -o <PATH>`: Output path for rendered Dockerfile (only used with `--no-build`). Defaults to 'Dockerfile' next to `--pyproject` when given (project root, so COPY statements resolve), otherwise next to the agent config.
 * `--base-image-url`: [env: NEMO_AGENTS_BASE_IMAGE_URL=]
 * `--base-image-tag`: [env: NEMO_AGENTS_BASE_IMAGE_TAG=]
