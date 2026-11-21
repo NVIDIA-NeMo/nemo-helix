@@ -356,7 +356,8 @@ def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> Non
     handle for the image. A ready image may have no handle, so the backend is what says who built it.
 
     Neither is ever cleared once recorded: a Builder from before the backend existed reports every row as this
-    cluster's and without a handle, and the row an image names doesn't change backend.
+    cluster's and without a handle, and the row an image names doesn't change backend. A handle that the read
+    which finds the row ready didn't carry isn't picked up later: a ready image isn't read again.
     """
     backend = builder_image.provenance.backend
     if backend != IN_CLUSTER_BACKEND:
