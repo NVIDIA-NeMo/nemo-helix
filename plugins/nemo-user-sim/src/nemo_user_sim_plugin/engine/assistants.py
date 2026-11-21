@@ -132,6 +132,8 @@ class FabricAssistant:
         self._root: tempfile.TemporaryDirectory | None = None
 
     async def start(self, tools: list[dict], system: str | None, mcp_url: str | None) -> None:
+        if mcp_url is None:
+            raise ValueError("An agent reaches UserSim's tools over MCP, so it needs the bridge's URL.")
         self._usersim_tools = {tool["function"]["name"] for tool in tools}
         own = self._config.mcp.servers if self._keep_own_tools and self._config.mcp else {}
         own_blocked = self._config.tools.blocked if self._config.tools else []
@@ -194,8 +196,8 @@ class ModelAssistant:
         self._model = model
         self._bridge = bridge
         self._max_tool_rounds = max_tool_rounds
-        self._history: list[dict] = []
-        self._tools: list[dict] = []
+        self._history: list[Any] = []
+        self._tools: list[Any] = []
 
     async def start(self, tools: list[dict], system: str | None, mcp_url: str | None) -> None:
         self._tools = tools
@@ -204,7 +206,7 @@ class ModelAssistant:
 
     async def invoke(self, user_text: str) -> str:
         self._history.append({"role": "user", "content": user_text})
-        tools = self._tools or openai.NOT_GIVEN
+        tools = self._tools or openai.omit
         for _ in range(self._max_tool_rounds):
             completion = await self._client.chat.completions.create(
                 model=self._model, messages=self._history, tools=tools
@@ -214,6 +216,8 @@ class ModelAssistant:
             if not message.tool_calls:
                 return message.content or ""
             for call in message.tool_calls:
+                if call.type != "function":  # the model is only ever given function tools
+                    raise RuntimeError(f"the model made a {call.type} tool call, which it has no tool for")
                 arguments = json.loads(call.function.arguments or "{}")
                 result = await self._bridge.handle_tool_call(call.function.name, arguments)
                 self._history.append({"role": "tool", "tool_call_id": call.id, "content": result})

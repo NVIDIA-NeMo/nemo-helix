@@ -11,11 +11,15 @@ from nemo_user_sim_plugin.studio import get_studio_spec
 from usersim.engine.core.probes import known_probes
 
 
-def _client() -> TestClient:
+def _app() -> FastAPI:
     app = FastAPI()
     for spec in UserSimService().get_routers():
         app.include_router(spec.router, prefix=f"/apis/user-sim{spec.prefix}")
-    return TestClient(app)
+    return app
+
+
+def _client() -> TestClient:
+    return TestClient(_app())
 
 
 def test_healthz_names_the_jobs():
@@ -25,12 +29,14 @@ def test_healthz_names_the_jobs():
 
 def test_job_routes_are_mounted():
     # Evaluation runs only as a simulate job's second step, so it has no collection of its own.
-    jobs = {path.split("/")[7] for path in _client().app.openapi()["paths"] if "/jobs/" in path}
+    jobs = {path.split("/")[7] for path in _app().openapi()["paths"] if "/jobs/" in path}
     assert jobs == {"simulate", "export"}
 
 
 def test_studio_bundle_is_built():
-    assert get_studio_spec().bundle_path.is_file()
+    bundle = get_studio_spec().bundle_path
+
+    assert bundle is not None and bundle.is_file()
 
 
 def test_probe_catalog_covers_every_probe_a_job_accepts():

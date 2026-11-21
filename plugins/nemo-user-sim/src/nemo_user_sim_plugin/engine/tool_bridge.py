@@ -106,6 +106,11 @@ class ToolBridge:
         ended = asyncio.ensure_future(self._ended.wait())
         try:
             await asyncio.wait({turn, ended}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:  # the turn was cut short, as by its timeout: don't leave the agent running
+            turn.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await turn
+            raise
         finally:
             ended.cancel()
         if not turn.done():  # UserSim finished during the turn, so nothing the agent says now is recorded

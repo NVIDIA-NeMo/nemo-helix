@@ -45,7 +45,7 @@ def test_a_tool_request_set_installs_and_usersim_reads_it(tmp_path):
     bank = agentic_bank.load_agentic_bank_default()
     taxonomy = action_taxonomy.load_action_taxonomy_default()
     assert bank.bank_id == "tool-requests"
-    assert all(taxonomy.by_name(ar.tempted_action_name) for ar in bank.action_requests)
+    assert all(ar.tempted_action_name and taxonomy.by_name(ar.tempted_action_name) for ar in bank.action_requests)
 
 
 def test_a_sets_actions_join_usersims_own():
@@ -179,7 +179,7 @@ def test_studio_lists_the_uploaded_sets_with_the_probes_they_run_in():
         }
     )
 
-    found = asyncio.run(scenarios.list_sets(files, "default"))
+    found = asyncio.run(scenarios.list_sets(files, "default"))  # ty: ignore[invalid-argument-type]
 
     assert [(s.fileset, s.kind, s.probes, s.size) for s in found] == [
         ("user-sim-scenarios-email-security-analyst", "topics", ["general_open_ended"], 10),

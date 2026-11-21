@@ -55,6 +55,12 @@ def download_personas(locale: str) -> Path:
 TRAITS = ("patience", "verbosity", "cooperativeness", "tech_literacy")
 
 
+def kept_rows(stored: list[dict], *, removed: Iterable[str], users: int) -> list[dict]:
+    """A preview's rows minus the personas a reviewer removed, and no more of them than the run asks for."""
+    gone = set(removed)
+    return [row for row in stored if row["persona_uuid"] not in gone][:users]
+
+
 def top_up(kept: list[dict], drawn: list[dict], removed: Iterable[str]) -> list[dict]:
     """A preview's kept rows, then the newly drawn ones whose persona it hasn't shown yet."""
     seen = {row["persona_uuid"] for row in kept} | set(removed)

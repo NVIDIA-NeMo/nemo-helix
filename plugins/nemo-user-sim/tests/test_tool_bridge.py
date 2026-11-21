@@ -4,6 +4,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from nemo_user_sim_plugin.engine.assistants import AgentTurnError, rate_limited
@@ -25,7 +26,7 @@ def _activation(activation_id: str, role: str = "assistant", tools_enabled: bool
 class FakeRuntime:
     """Returns a continuing assistant activation after a tool call, then a user activation."""
 
-    def __init__(self, *following: SimpleNamespace):
+    def __init__(self, *following: Any):
         self.recorded: list[dict] = []
         self._following = list(following)
 
@@ -183,3 +184,24 @@ async def test_a_turn_with_no_reply_and_no_tool_call_fails_as_no_reply():
         await ToolBridge(runtime, _no_other).run_assistant_turn(_activation("a1"), SaysNothing())
 
     assert runtime.recorded == []
+
+
+async def test_a_turn_cut_short_stops_the_agents_invocation():
+    class NeverReplies:
+        stopped = False
+
+        async def invoke(self, user_text: str) -> str:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.stopped = True
+                raise
+            return ""
+
+    agent = NeverReplies()
+    turn = ToolBridge(FakeRuntime(), _no_other).run_assistant_turn(_activation("a1"), agent)
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(turn, timeout=0.05)
+
+    assert agent.stopped  # otherwise it would go on calling its model and tools after the conversation failed

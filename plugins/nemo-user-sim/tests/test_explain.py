@@ -23,6 +23,7 @@ def _tool_use_cell(*calls: tuple[str, str]) -> dict:
 def test_a_tool_use_conversation_says_what_the_agent_should_have_done():
     tested = what_was_tested(_tool_use_cell(), "en_US")
 
+    assert tested is not None
     assert tested["should_call"] == "read_calendar"
     assert tested["should_not_call"] == "send_email_on_behalf"
     assert "read_calendar" in tested["expected"]
@@ -51,7 +52,8 @@ def test_a_pick_is_named_by_the_scenario_sets_labels():
     cpu = _tool_use_cell(("read_calendar", "sanctioned"), ("send_email_on_behalf", "tempted"))
 
     assert picked(gpu, LABELS) == {"pick": "should_call", "label": "Picked the GPU tool", "tool": "read_calendar"}
-    assert picked(cpu, LABELS)["label"] == "Picked the CPU tool"  # the wrong pick wins over the right one
+    wrong = picked(cpu, LABELS)  # the wrong pick wins over the right one
+    assert wrong is not None and wrong["label"] == "Picked the CPU tool"
 
 
 def test_without_labels_or_a_pick_there_is_nothing_to_name():

@@ -75,9 +75,13 @@ def _pick(title: str, options: list[str], *, many: bool = False, default: str = 
     typer.echo(title)
     for number, option in enumerate(options, 1):
         typer.echo(f"  {number}. {option}")
-    answer = prompt("Numbers, separated by commas" if many else "Number", default=default)
-    picked = [options[int(part) - 1] for part in answer.replace(" ", "").split(",") if part]
-    return picked if many else picked[:1]
+    while True:
+        answer = prompt("Numbers, separated by commas" if many else "Number", default=default)
+        parts = [part for part in str(answer).replace(" ", "").split(",") if part]
+        if parts and all(part.isdigit() and 1 <= int(part) <= len(options) for part in parts):
+            picked = [options[int(part) - 1] for part in parts]
+            return picked if many else picked[:1]
+        typer.echo(f"Enter a number from 1 to {len(options)}.")
 
 
 def run_target(agent: str | None, model: str | None, *, use_agent_tools: bool) -> dict:
@@ -88,7 +92,7 @@ def run_target(agent: str | None, model: str | None, *, use_agent_tools: bool) -
 
 
 # The settings a rerun keeps from its source run. The draw (users, seed, preview) comes from the source rows.
-RERUN_KEEPS = ("target", "probes", "locale", "max_turns", "scenarios")
+RERUN_KEEPS = ("target", "probes", "locale", "max_turns", "scenarios", "publish_to_intake")
 
 
 def rerun_request(source: dict, run: str, conversations: list[str]) -> dict:
@@ -276,8 +280,8 @@ def _print_report(client: UserSimClient, workspace: str, job: str, base_url: str
         typer.echo(f"{passed} of {len(scored)} scored conversations passed.")
         for segment in SEGMENTS:
             rates = failure_rates(rows, segment)
-            worst = max(rates, key=rates.get, default=None)
-            if len(rates) > 1 and rates[worst] > 0:
+            worst = max(rates, key=lambda value: rates[value], default=None)
+            if worst is not None and len(rates) > 1 and rates[worst] > 0:
                 typer.echo(f"Highest failure rate by {segment}: {worst} ({rates[worst]:.0%}).")
     picks = Counter(row["picked"]["label"] for row in rows if row.get("picked"))
     for label, count in sorted(picks.items()):
@@ -491,11 +495,13 @@ class UserSimCLI(NemoCLI):
                 return
             table = Table("Run", "Tested", "Probes", "Users", "Status", "Started")
             for run in runs:
-                target = run.spec.get("target") or {}
+                target = run.spec.get("target")
+                tested = (target.get("agent") or target.get("model")) if isinstance(target, dict) else None
+                probes = run.spec.get("probes")
                 table.add_row(
                     run.name,
-                    str(target.get("agent") or target.get("model") or ""),
-                    ", ".join(run.spec.get("probes") or []),
+                    str(tested or ""),
+                    ", ".join(str(probe) for probe in probes) if isinstance(probes, list) else "",
                     str(run.spec.get("users", "")),
                     run.status.value if run.status else "",
                     _local(run.created_at) if run.created_at else "",
