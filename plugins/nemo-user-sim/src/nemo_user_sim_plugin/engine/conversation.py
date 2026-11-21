@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import socket
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -49,7 +49,7 @@ def simulator_failure(row: dict) -> str | None:
 
 
 @asynccontextmanager
-async def _serve_tools(bridge: ToolBridge) -> AsyncIterator[str]:
+async def _serve_tools(bridge: ToolBridge) -> AsyncGenerator[str]:
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]

@@ -104,7 +104,7 @@ class SimulateJob(NemoJob):
             preview = FilesClient.from_client(client).download_file(
                 workspace=ctx.workspace, name=PREVIEWS_FILESET, path=f"{spec.preview}.json"
             )
-            rows = json.loads(preview.read())
+            rows = preview_rows(json.loads(preview.read()), token=uuid.uuid4().hex[:6])
         else:
             require_personas(spec.locale)
             rows = materialize_episode_inputs(
@@ -201,6 +201,15 @@ def rerun_rows(source: list[dict], conversations: list[str], *, token: str) -> l
     if missing:
         raise ValueError(f"The run has no conversation {', '.join(missing)}.")
     return [{**by_id[conversation], "trajectory_id": f"{conversation}-r{token}"} for conversation in conversations]
+
+
+def preview_rows(rows: list[dict], *, token: str) -> list[dict]:
+    """A preview's rows under conversation IDs of this run's own.
+
+    Two runs can start from one preview. With the preview's IDs they would publish to the same Intake
+    sessions, and a reviewer's feedback on one run would count for the other. ``token`` is shared by one run.
+    """
+    return [{**row, "trajectory_id": f"{row['trajectory_id']}-p{token}"} for row in rows]
 
 
 def approved_rows(rows: list[dict], spec: SimulateSpec) -> list[dict]:

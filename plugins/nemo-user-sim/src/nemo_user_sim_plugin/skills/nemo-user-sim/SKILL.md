@@ -74,7 +74,7 @@ nemo user-sim run --agent bank-support --users 20
 
 - Use `--model <name>` instead of `--agent` to test a bare model, never both.
 - Start with `--users 20` for a first run. The maximum is 2000.
-- The same `--seed` doesn't guarantee the same personas. To compare an agent before and after a fix on the same personas, preview the personas in Studio and start both runs from that preview.
+- The same `--seed` doesn't guarantee the same personas. To compare an agent before and after a fix on the same personas, rerun the earlier run's conversations with `nemo user-sim rerun <run> --conversation <id> --conversation <id>`. A rerun keeps each conversation's persona and topic and runs the agent as it's registered now.
 - `--max-turns` caps the simulated user's turns per conversation (default 5).
 - When the user wants simulated users asking about their own domain, or wants to test the agent's tool use on their own situations (their tools, the action it should take, the one it shouldn't), use `--scenarios <folder or fileset>`. See "Custom scenarios" in [references/scenarios.md](references/scenarios.md).
 - The command waits and prints the report. It exits with code 1 if the job outlives `--timeout` (default 7200 seconds); that isn't a failure, so run `nemo user-sim report <job>` later. For long runs, pass `--no-wait` and do the same.
@@ -90,12 +90,11 @@ Summarize for the user in this order: overall pass rate, the weakest segments, t
 Only offer this after a run with passing conversations. Read [references/training-data.md](references/training-data.md) first, then ask whether to require Studio review and which quality gate to use.
 
 ```bash
-nemo user-sim export --job <job> --fileset bank-support-sft
-nemo user-sim export --job <job> --fileset bank-support-sft --require-review
-nemo jobs watch <export-job>
+nemo user-sim training-data <run> --fileset bank-support-sft
+nemo user-sim training-data <run> --fileset bank-support-sft --require-review
 ```
 
-`export` submits a job and prints its name. Watch it with `nemo jobs watch`; the fileset is complete when the job is. Then hand the fileset to the Helix post-training plugin for the fine-tune.
+`training-data` starts an export job and waits for it, so the fileset is complete when the command returns. Add `--generous` to keep borderline conversations. Don't use the generated `export` command: it has no flag for the run. Then hand the fileset to the Helix post-training plugin for the fine-tune.
 
 ## Gotchas
 

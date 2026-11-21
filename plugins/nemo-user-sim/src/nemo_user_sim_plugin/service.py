@@ -30,7 +30,7 @@ from nemo_user_sim_plugin.jobs.export import ExportJob
 from nemo_user_sim_plugin.jobs.simulate import SimulateJob
 from nemo_user_sim_plugin.jobs.spec import SimulateRequest, SimulateSpec
 from nemo_user_sim_plugin.model_check import ModelStatus, check_plugin_models
-from nemo_user_sim_plugin.personas import MANAGED_ASSETS_ENV, managed_assets_path, persona_card, top_up
+from nemo_user_sim_plugin.personas import MANAGED_ASSETS_ENV, kept_rows, managed_assets_path, persona_card, top_up
 from nemo_user_sim_plugin.probes import PROBES, Probe
 from nemo_user_sim_plugin.suggestions import probes_for_agent
 from nemo_user_sim_plugin.types.endpoints import ProbeSuggestions, SuggestionRequest
@@ -159,8 +159,7 @@ class UserSimService(NemoService):
                 stored = await files.download_file(
                     workspace=workspace, name=PREVIEWS_FILESET, path=f"{body.preview}.json"
                 )
-                removed = set(body.exclude_personas)
-                kept = [row for row in json.loads(await stored.read()) if row["persona_uuid"] not in removed]
+                kept = kept_rows(json.loads(await stored.read()), removed=body.exclude_personas, users=body.users)
             missing = body.users - len(kept)
             rows = kept
             if missing > 0:

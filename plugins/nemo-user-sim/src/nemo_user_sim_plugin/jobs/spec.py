@@ -3,7 +3,7 @@
 
 """Job specs. ``SimulateRequest`` is what users submit; ``SimulateSpec`` adds what the platform resolves."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from usersim.engine.core.probes import known_probes
@@ -40,7 +40,9 @@ class RerunSource(BaseModel):
 
     job: str = Field(description="The earlier simulate run the conversations come from.")
     conversations: list[str] = Field(
-        min_length=1, description="Trajectory IDs of the conversations to run again, with the same persona and topic."
+        min_length=1,
+        max_length=2000,  # a rerun sets users to this many, so it takes the same limit
+        description="Trajectory IDs of the conversations to run again, with the same persona and topic.",
     )
 
 
@@ -80,7 +82,7 @@ class SimulateRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _a_rerun_runs_its_conversations(self) -> "SimulateRequest":
+    def _a_rerun_runs_its_conversations(self) -> Self:
         if self.rerun is not None:
             if self.preview is not None:
                 raise ValueError("A rerun runs an earlier run's personas, so it can't also run a preview.")
@@ -88,7 +90,7 @@ class SimulateRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _scenarios_need_their_probe(self) -> "SimulateRequest":
+    def _scenarios_need_their_probe(self) -> Self:
         if self.scenarios and not {"safety_agentic", "general_open_ended"} & set(self.probes):
             raise ValueError(
                 "Custom scenarios run in the safety_agentic or general_open_ended probe, so probes must include one."

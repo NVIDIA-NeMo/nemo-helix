@@ -34,7 +34,7 @@ class RoleAnswerer:
 
     async def answer(self, event: Any) -> dict:
         params = {k: v for k, v in (event.parameters or {}).items() if k in _SAMPLING_KEYS and v is not None}
-        tools = event.tools if event.tools_enabled and event.tools else openai.NOT_GIVEN
+        tools = event.tools if event.tools_enabled and event.tools else openai.omit
         completion = await self._client.chat.completions.create(
             model=self.models.for_role(event.role), messages=event.messages, tools=tools, **params
         )
