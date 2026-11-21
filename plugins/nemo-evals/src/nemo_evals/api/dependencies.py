@@ -135,11 +135,15 @@ def get_image_build_service(
     async_client: AsyncNemoClient = Depends(get_nemo_client),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
 ) -> ImageBuildService:
-    """Provide an ImageBuildService whose task-builder Jobs are created as the caller."""
+    """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
+
+    It takes task images from the Builder backend the deployment names (``evals.image_builds.builder_backend``).
+    """
     return ImageBuildService(
         entity_client,
         JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
         builder_authorizer(authorize),
+        builder_backend=get_config().image_builds.builder_backend,
     )
 
 

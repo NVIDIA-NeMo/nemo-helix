@@ -196,6 +196,7 @@ async def adopt_or_build(
     mounts: Sequence[BuildMount] = (),
     platform: str | None = None,
     built_after: datetime | None = None,
+    backend: str | None = None,
 ) -> ContainerImage:
     """The newest usable build of ``name``, submitting one only when there is none.
 
@@ -205,10 +206,15 @@ async def adopt_or_build(
     that loses that race reads the winner's build instead. A 409 by which Builder refuses the request itself
     is raised as a :class:`BuildRefused`, with Builder's own detail, whether it says so by its code or leaves no row
     at the revision. Giving up on a build other requests keep submitting is not one.
+
+    When the caller names a ``backend``, a build another backend made gets the next revision too: its image is
+    where that backend published it. A build returned under another backend is then one Builder took just now, so
+    Builder builds with another backend than the caller expects. With no ``backend`` named, a build is used
+    whichever backend made it.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)
-        if newest is not None and not await _unusable(builder, newest, built_after):
+        if newest is not None and not await _unusable(builder, newest, built_after, backend):
             return newest
         try:
             submitted = await builder.submit(
@@ -228,14 +234,14 @@ async def adopt_or_build(
 
 
 async def usable_build(
-    builder: ImageBuilder, name: str, *, built_after: datetime | None = None
+    builder: ImageBuilder, name: str, *, built_after: datetime | None = None, backend: str | None = None
 ) -> ContainerImage | None:
     """The newest build of ``name`` that is ready, or still building; None when there is none to use.
 
     What :func:`adopt_or_build` would use without submitting, so a caller can skip preparing a source it won't need.
     """
     newest, _ = await _newest(builder, name)
-    return newest if newest is not None and not await _unusable(builder, newest, built_after) else None
+    return newest if newest is not None and not await _unusable(builder, newest, built_after, backend) else None
 
 
 async def _newest(builder: ImageBuilder, name: str) -> tuple[ContainerImage | None, int]:
@@ -248,7 +254,11 @@ async def _newest(builder: ImageBuilder, name: str) -> tuple[ContainerImage | No
     return newest, revision
 
 
-async def _unusable(builder: ImageBuilder, image: ContainerImage, built_after: datetime | None) -> bool:
+async def _unusable(
+    builder: ImageBuilder, image: ContainerImage, built_after: datetime | None, backend: str | None = None
+) -> bool:
+    if backend is not None and image.provenance.backend != backend:
+        return True
     if built_after is not None and (image.created_at is None or _utc(image.created_at) < built_after):
         return True
     return await _abandoned(builder, image)

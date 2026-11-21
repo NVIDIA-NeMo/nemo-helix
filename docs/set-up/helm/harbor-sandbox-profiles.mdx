@@ -3,13 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Configure Harbor Taskset Runs"
-description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs)."
+description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs), and the Builder backend task images must come from (platformConfig.evals.image_builds)."
 ---
 
-This page configures Harbor taskset runs on Kubernetes ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)), all under `platformConfig.evals.runs`:
+This page configures Harbor taskset runs on Kubernetes ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)). The first two groups are under `platformConfig.evals.runs`, the third beside it:
 
 - **Sandbox profiles** (`evals.runs.harbor`): named rules for every OpenSandbox sandbox in a run: egress, resource ceilings, lifetime and client settings.
 - **Run limits and controller** (`evals.runs`): concurrency caps, run time limits and how often the run controller creates and settles task Jobs. See [Run limits and controller](#run-limits-and-controller).
+- **Task image builds** (`evals.image_builds`): which Builder backend task images must come from. See [Task image builds](#task-image-builds).
 
 About sandbox profiles:
 
@@ -192,6 +193,38 @@ A config change restarts the API and core-controller pods. Then:
 - Concurrency caps → open runs use them from the next cycle. Lowering a cap cancels nothing; new task Jobs wait until the count is below it.
 - `default_timeout_seconds`, `queue_timeout_seconds`, `finalization_grace_seconds` → new runs only. A run keeps the values it was accepted with, even while it's still queued.
 - `max_timeout_seconds` → checked at submit only.
+
+## Task image builds
+
+This key sits beside `runs`, under `platformConfig.evals.image_builds`. It applies to every task image build, whether or not the deployment runs tasksets.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `builder_backend` | `execution` | The Builder backend task images must come from, as `platformConfig.builder.backend` names it: `execution` builds in this cluster, `remote` through a build service outside it. Keep the two keys equal |
+
+- A request for a task's image build returns the task's ready build only when this backend built every image of it. Otherwise the request starts the next attempt, which uses no build another backend made and builds each image again.
+- An image recorded before a build could name its backend counts as `execution`.
+- A build that is still running is returned as it is. The request after it ends applies the rule.
+- Agent layers aren't held to the key: a layer uses the build Builder has, whichever backend made it.
+
+### Switch the Builder backend
+
+Set both keys in the same change. The recipe shows only the two keys that must agree: the remote backend's own settings, under `builder.remote`, are in the Builder plugin's README.
+
+```yaml
+platformConfig:
+  builder:
+    backend: remote
+  evals:
+    image_builds:
+      builder_backend: remote
+```
+
+- A config change restarts the API and core-controller pods. The key is read when a build is requested and stored on the build, where the build's Job reads it. A build requested before the change keeps the backend it was requested for.
+- Then request each taskset's builds once, without `--wait`: `nemo evals tasksets build-images <taskset>`. With `--wait`, and in `nemo evals runs submit`, a task whose newest build is ready gets no request, so it keeps that build. Follow the new builds with `nemo evals tasksets build-images <taskset> --wait`.
+- Until a new build of a task is requested, a run takes the task's ready build, whichever backend built it. From that request on, a run takes only the new attempt, once it's ready. A failed attempt leaves the task without a build a run takes.
+- On `remote`, a task that names a prebuilt image (for main, the verifier or a compose service) can't be built: that backend copies no image. Requesting the task's build leaves a failed attempt as its newest build, and runs then refuse the task. Leave a taskset that holds such a task out of the request, or expect its runs to be refused. The Builder plugin's README says more under "Building through a service outside the cluster".
+- If the two keys disagree, the first image of a build that Builder takes fails, and nothing more of the task is submitted. The image's error names both keys: `Builder builds with the 'remote' backend (builder.backend), and this build's images must come from 'execution' (evals.image_builds.builder_backend): set both to the same backend`. Builder has taken that image by then: its build keeps running, and nothing uses or cancels it. Every request made while the keys disagree fails the same way, and starts one more Builder build of an image built from a Dockerfile. `--wait` and `nemo evals runs submit` request a failed task's build a second time by themselves, so one command starts two. Set the keys to the same backend before you request the build again.
 
 ## Recipes
 

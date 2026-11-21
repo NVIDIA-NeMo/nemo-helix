@@ -664,7 +664,12 @@ class TasksetRunService:
     def _image_builds(self, workspace: str) -> ImageBuildService:
         """The image build service for tasks in ``workspace``; the preparer only reads builds through it."""
         jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=workspace)
-        return ImageBuildService(self._entities, jobs, builder_authorizer(self._authorizer))
+        return ImageBuildService(
+            self._entities,
+            jobs,
+            builder_authorizer(self._authorizer),
+            builder_backend=self._config.image_builds.builder_backend,
+        )
 
     async def _resolve_publication(
         self, req: TasksetRunInput, workspace: str, spec: AgentEvalSpec, *, taskset_ref: str

@@ -12,6 +12,7 @@ from typing import Protocol
 from urllib.parse import quote
 
 from fastapi import HTTPException, status
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.models import (
@@ -20,6 +21,7 @@ from nemo_evals.image_builds.models import (
     TaskImageBuildEntity,
     build_entity_name,
     build_job_name,
+    recorded_backend,
 )
 from nemo_evals.image_builds.planning import parse_task_config
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
@@ -109,20 +111,33 @@ class ImageBuildService:
     """Image builds of task revisions, stored under the task and keyed by revision digest.
 
     Revisions with the same contents share builds: their images are the same.
+
+    ``builder_backend`` is the Builder backend this deployment's task images must come from
+    (``evals.image_builds.builder_backend``): the in-cluster one unless the deployment says otherwise.
     """
 
-    def __init__(self, entity_client: EntityClient, jobs: BuildJobs, authorize_builds: AuthorizeBuilds) -> None:
+    def __init__(
+        self,
+        entity_client: EntityClient,
+        jobs: BuildJobs,
+        authorize_builds: AuthorizeBuilds,
+        *,
+        builder_backend: str = IN_CLUSTER_BACKEND,
+    ) -> None:
         self.entity_client = entity_client
         self.jobs = jobs
         self.authorize_builds = authorize_builds
+        self.builder_backend = builder_backend
 
     async def request_build(
         self, workspace: str, name: str, revision: str, request: ImageBuildRequest
     ) -> ImageBuild | None:
         """Start a build of a revision, or return the one already running or done.
 
-        A new attempt starts only when none for the requested platform is pending, running or ready. Returns
-        ``None`` when the task doesn't exist.
+        A new attempt starts only when none for the requested platform is pending, running or ready. A ready build
+        is the answer only when this deployment's Builder backend built every image of it: one that holds an image
+        another backend built is followed by the next attempt, which builds the images again. Returns ``None``
+        when the task doesn't exist.
 
         Raises:
             RevisionNotFoundError: ``revision`` names no revision of the task.
@@ -146,7 +161,7 @@ class ImageBuildService:
         latest = first_page.data[0] if first_page.data else None
         # Another platform's build is no answer to this request, so only builds for this one are reused.
         newest = await self._newest_for(head, task_revision.content_hash, request.platform)
-        if newest is not None and newest.status == "ready" and not request.rebuild:
+        if newest is not None and newest.status == "ready" and not request.rebuild and self._built_here(newest):
             return ImageBuild.from_entity(newest)
         if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
@@ -170,6 +185,8 @@ class ImageBuildService:
             allowed_registries=request.allowed_registries,
             platform=request.platform,
             rebuild=request.rebuild,
+            # The Job that runs the attempt reads the backend here: Job workers don't read the platform config file.
+            builder_backend=recorded_backend(self.builder_backend),
         )
         build._parent = head.id
         try:
@@ -220,6 +237,13 @@ class ImageBuildService:
         except NemoEntityNotFoundError:
             return None
         return ImageBuild.from_entity(build)
+
+    def _built_here(self, build: TaskImageBuildEntity) -> bool:
+        """Whether this deployment's Builder backend built every image of ``build``.
+
+        An image that names no backend is the in-cluster backend's, as every image was before there was another.
+        """
+        return all(image.built_by == self.builder_backend for image in build.images)
 
     async def _revision(self, workspace: str, name: str, revision: str) -> tuple[TaskEntity, TaskRevisionEntity] | None:
         try:

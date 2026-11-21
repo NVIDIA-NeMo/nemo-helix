@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, Self
 
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -288,6 +289,31 @@ class TasksetRunsConfig(BaseModel):
         return self
 
 
+class ImageBuildsConfig(BaseModel):
+    """Operator settings for task image builds, under evals.image_builds.
+
+    They don't depend on ``runs.harbor``: a task's images build in a deployment that runs no tasksets.
+
+    From the environment, the section is one JSON value, ``NEMO_EVALS_IMAGE_BUILDS``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    builder_backend: str = Field(
+        default=IN_CLUSTER_BACKEND,
+        min_length=1,
+        max_length=64,
+        description=(
+            "The Builder backend this deployment's task images must come from, as `builder.backend` names it: "
+            "`execution`, in this cluster, or `remote`, through a build service outside it. Keep it equal to "
+            "`builder.backend`. A request for a task's image build returns the task's ready build only when this "
+            "backend built every image of it; otherwise it starts the next attempt, which builds the images again. "
+            "While the two settings disagree, a build that submits an image to Builder fails, and its error names "
+            "both."
+        ),
+    )
+
+
 class EvaluatorConfig(NemoConfig):
     """Configuration namespace for the evals plugin."""
 
@@ -297,6 +323,11 @@ class EvaluatorConfig(NemoConfig):
     runs: TasksetRunsConfig = Field(
         default_factory=TasksetRunsConfig,
         description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
+    )
+
+    image_builds: ImageBuildsConfig = Field(
+        default_factory=ImageBuildsConfig,
+        description="Which Builder backend this deployment's task images must come from.",
     )
 
     container_image_ref: str | None = Field(

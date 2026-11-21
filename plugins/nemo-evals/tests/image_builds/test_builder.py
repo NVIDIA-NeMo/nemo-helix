@@ -13,7 +13,7 @@ from typing import Literal
 
 import httpx
 import pytest
-from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage, Provenance
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.image_builds.builder import (
     BuildRefused,
@@ -23,15 +23,22 @@ from nemo_evals.image_builds.builder import (
     builder_name,
     copy_builder_name,
     ensure_build,
+    usable_build,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
 
 _SOURCE = FileSetSource(fileset="default/harbor-tasks", archive="sort/abc/task_archive", context_path="sort/tests")
+# The backend of a deployment that builds through a build service outside the cluster.
+_REMOTE_BACKEND = "remote"
 
 
 def _container_image(
-    name: str, status: Literal["pending", "ready", "failed"] = "pending", *, detail: str | None = None
+    name: str,
+    status: Literal["pending", "ready", "failed"] = "pending",
+    *,
+    detail: str | None = None,
+    backend: str = IN_CLUSTER_BACKEND,
 ) -> ContainerImage:
     return ContainerImage(
         name=name,
@@ -46,6 +53,7 @@ def _container_image(
             revision=int(name.rsplit("-", 1)[1]),
             job=f"default/builder-{name}",
             request_digest="sha256:" + "a" * 64,
+            backend=backend,
         ),
     )
 
@@ -62,8 +70,11 @@ class _Builder:
         job: str | None = "active",
         conflicting: frozenset[int] = frozenset(),
         code: str | None = None,
+        built_by: str = IN_CLUSTER_BACKEND,
     ) -> None:
         self.statuses = revisions
+        #: The backend every revision there is was submitted under.
+        self.built_by = built_by
         self.job = job
         #: Revisions Builder holds for another request.
         self.conflicting = conflicting
@@ -77,7 +88,7 @@ class _Builder:
         revision = int(name.rsplit("-", 1)[1])
         if revision > len(self.statuses):
             return None
-        return _container_image(name, self.statuses[revision - 1])
+        return _container_image(name, self.statuses[revision - 1], backend=self.built_by)
 
     async def job_status(self, job: str) -> str | None:
         return self.job
@@ -215,6 +226,68 @@ async def test_adopt_or_build_uses_a_usable_build_and_submits_only_without_one(
 
     assert builder.submitted == submitted
     assert image.name == f"harbor-env-0123456789ab-{revision}"
+
+
+@pytest.mark.parametrize("existing", ["ready", "pending"])
+@pytest.mark.parametrize(
+    ("built_by", "wanted"),
+    [(IN_CLUSTER_BACKEND, _REMOTE_BACKEND), (_REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["the-cluster-built-it", "a-remote-service-built-it"],
+)
+async def test_adopt_or_build_submits_the_next_revision_past_a_build_another_backend_made(
+    existing: Literal["pending", "ready"], built_by: str, wanted: str
+) -> None:
+    """The deployment's backend changed: the build is where the old backend published it, ready or still building."""
+    builder = _Builder([existing], built_by=built_by)
+
+    assert await usable_build(builder, "harbor-env-0123456789ab", backend=wanted) is None
+    image = await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=wanted
+    )
+
+    assert builder.submitted == [2]
+    assert image.name == "harbor-env-0123456789ab-2"
+
+
+@pytest.mark.parametrize("existing", ["ready", "pending"])
+@pytest.mark.parametrize("backend", [IN_CLUSTER_BACKEND, _REMOTE_BACKEND])
+async def test_adopt_or_build_uses_a_build_the_backend_it_names_made(
+    existing: Literal["pending", "ready"], backend: str
+) -> None:
+    builder = _Builder([existing], built_by=backend)
+
+    image = await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=backend
+    )
+
+    assert builder.submitted == []
+    assert image.name == "harbor-env-0123456789ab-1"
+    usable = await usable_build(builder, "harbor-env-0123456789ab", backend=backend)
+    assert usable is not None and usable.name == "harbor-env-0123456789ab-1"
+
+
+@pytest.mark.parametrize("built_by", [IN_CLUSTER_BACKEND, _REMOTE_BACKEND])
+async def test_adopt_or_build_naming_no_backend_uses_a_build_whichever_backend_made_it(built_by: str) -> None:
+    """As an agent layer's build asks: it names no backend, and takes the build that is there."""
+    builder = _Builder(["ready"], built_by=built_by)
+
+    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == []
+    assert image.provenance.backend == built_by
+    usable = await usable_build(builder, "harbor-env-0123456789ab")
+    assert usable is not None and usable.name == "harbor-env-0123456789ab-1"
+
+
+async def test_adopt_or_build_still_submits_past_a_failed_build_of_the_backend_it_names() -> None:
+    builder = _Builder(["failed"], built_by=_REMOTE_BACKEND)
+
+    assert await usable_build(builder, "harbor-env-0123456789ab", backend=_REMOTE_BACKEND) is None
+    await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=_REMOTE_BACKEND
+    )
+
+    assert builder.submitted == [2]
 
 
 async def test_adopt_or_build_resubmits_a_pending_build_whose_job_ended() -> None:

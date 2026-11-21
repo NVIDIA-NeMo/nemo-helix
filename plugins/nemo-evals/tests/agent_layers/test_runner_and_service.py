@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.agent_layers.dockerfile import AGENT_MOUNT, INSTALLER_MOUNT
 from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
@@ -75,7 +75,7 @@ async def _allow(workspace: str) -> None:
     pass
 
 
-def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
+def _ready(name: str, created_at: datetime | None = None, *, backend: str = IN_CLUSTER_BACKEND) -> ContainerImage:
     image = ContainerImage(
         name=name,
         workspace="default",
@@ -89,6 +89,7 @@ def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
             revision=int(name.rsplit("-", 1)[1]),
             job=f"default/builder-{name}",
             request_digest="sha256:" + "a" * 64,
+            backend=backend,
         ),
     )
     image._created_at = created_at or datetime.now(timezone.utc)
@@ -364,6 +365,32 @@ async def test_tasks_whose_environments_hold_the_same_files_share_one_build(
     assert layer.status == "ready"
     assert len(builder.submits) == 1
     assert files.upload_calls == 2  # the first task's context and mounts; the second task found the build
+
+
+@pytest.mark.parametrize("backend", [IN_CLUSTER_BACKEND, "remote"])
+async def test_a_layers_build_is_used_whichever_backend_made_it(
+    entity_store, store_task, monkeypatch, tmp_path, backend: str
+) -> None:
+    """A layer asks for its build without naming a backend, so the deployment's backend setting doesn't reach it.
+
+    The second task finds the build that is there and uploads nothing, as it did before task images could be held
+    to one backend.
+    """
+    builder, files = _Builder(), _Files()
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    first, _ = await _requested(entity_store, store_task, "sort-a")
+    await _run(entity_store, first, builder, files, tmp_path)
+    ((name, _, _),) = builder.submits
+    builder.rows[f"{name}-1"] = _ready(f"{name}-1", backend=backend)
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Reverse.\n"})
+    second, _ = await _requested(entity_store, store_task, "sort-b")
+
+    layer = await _run(entity_store, second, builder, files, tmp_path)
+
+    assert layer.status == "ready" and layer.image is not None
+    assert (layer.image.builder_image, layer.image.built_by) == (f"{name}-1", backend)
+    assert len(builder.submits) == 1
+    assert files.upload_calls == 2  # the first task's context and mounts
 
 
 async def test_a_compose_task_gets_no_layer(entity_store, store_task, monkeypatch, tmp_path) -> None:

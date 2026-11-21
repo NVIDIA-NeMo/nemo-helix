@@ -69,7 +69,8 @@ async def request_task_image_build(
     """Build every container image a Harbor task revision needs.
 
     Repeating the request while a build is running, or after it succeeded, returns that build.
-    After a failed build, it starts the next attempt.
+    After a failed build, it starts the next attempt. It also starts the next attempt after a build that succeeded
+    when another Builder backend than the deployment's built one of that build's images.
     """
     try:
         build = await service.request_build(workspace, name, revision, request or ImageBuildRequest())

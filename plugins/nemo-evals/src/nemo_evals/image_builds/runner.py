@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage
+from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -39,6 +39,7 @@ from nemo_evals.image_builds.models import (
     BuildImage,
     TaskImageBuildEntity,
     build_entity_name,
+    recorded_backend,
 )
 from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
 from nemo_evals.revisions import get_revision
@@ -131,8 +132,9 @@ async def _build(
     build.status = "running"
     build.images = images
     for image in _in_submit_order(images):
-        if not await _submit(builder, image, definition, rebuild=build.rebuild):
-            # The refused image has failed the build: the images left are not submitted, and stay pending.
+        # The backend comes from the record: a Job worker doesn't read the platform config file.
+        if not await _submit(builder, image, definition, rebuild=build.rebuild, backend=build.expected_backend):
+            # That image has failed the build: the images left are not submitted, and stay pending.
             break
     build = await entities.update(build)
 
@@ -248,18 +250,20 @@ async def downloaded_archive(files: AsyncFilesClient, source: HarborArchiveSourc
 
 
 async def _submit(
-    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool = False
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool, backend: str
 ) -> bool:
-    """Submit one image's build or copy and record where it stands; False when Builder refused the request itself.
+    """Submit one image's build or copy and record where it stands; False when the caller is to submit nothing more.
 
-    The image then fails with Builder's own sentence, and the caller submits nothing more. Any other error from
-    Builder fails this image alone.
+    That is when Builder refused the request itself: the image then fails with Builder's own sentence. And it is
+    when Builder took the request under another backend than ``backend``, the one the build's images must come
+    from: the image then fails with a sentence that names the two settings that disagree, as every image after it
+    would. Any other error from Builder fails this image alone.
     """
     try:
         if image.image is not None:
             builder_image = await _submit_copy(builder, image)
         else:
-            builder_image = await _submit_build(builder, image, definition, rebuild=rebuild)
+            builder_image = await _submit_build(builder, image, definition, rebuild=rebuild, backend=backend)
     except BuildRefused as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc.detail}"
@@ -270,8 +274,28 @@ async def _submit(
         return True
     image.builder_image = builder_image.name
     image.build_job = builder_image.provenance.job.rpartition("/")[2]
+    built_by = builder_image.provenance.backend
+    if built_by != backend:
+        # A build of another backend is never adopted, and a submit is answered under Builder's own backend. So this
+        # is a row Builder took just now: the deployment's two settings disagree, and the next attempt would get the
+        # same answer. The image names the row and its backend, and nothing else of it: it is not this build's.
+        image.builder_backend = recorded_backend(built_by)
+        image.status = "failed"
+        image.error = backends_disagree(built_by, backend)
+        return False
     apply_builder_image(image, builder_image)
     return True
+
+
+def backends_disagree(builders: str, expected: str) -> str:
+    """The error of an image Builder took under its ``builders`` backend for a build that expects ``expected``.
+
+    It names the setting each value comes from, so an operator knows which two to make equal.
+    """
+    return (
+        f"Builder builds with the {builders!r} backend (builder.backend), and this build's images must come from "
+        f"{expected!r} (evals.image_builds.builder_backend): set both to the same backend"
+    )
 
 
 async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerImage:
@@ -293,9 +317,12 @@ async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerIma
 
 
 async def _submit_build(
-    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool, backend: str
 ) -> ContainerImage:
     """Use the build of a context with the same files when there is one, from any task; submit this task's otherwise.
+
+    Only a build ``backend`` made is used: one another backend made is where that backend published it, so this
+    task's request is submitted as the next revision.
 
     A rebuild submits this task's request whatever is there: a ready build of a request naming no platform may be for
     the default platform before it changed, and only Builder knows the default now.
@@ -308,7 +335,9 @@ async def _submit_build(
             builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform
         )
         return submitted.images[0]
-    return await adopt_or_build(builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform)
+    return await adopt_or_build(
+        builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform, backend=backend
+    )
 
 
 async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> bool:
@@ -355,8 +384,7 @@ def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> Non
     An image a remote build service builds also gets the backend that builds it and, once ready, the service's
     handle for the image. A ready image may have no handle, so the backend is what says who built it.
     """
-    backend = builder_image.provenance.backend
-    image.builder_backend = None if backend == IN_CLUSTER_BACKEND else backend
+    image.builder_backend = recorded_backend(builder_image.provenance.backend)
     if builder_image.status == "ready":
         image.status = "ready"
         image.image_ref = builder_image.image_ref

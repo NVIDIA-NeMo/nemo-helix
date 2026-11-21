@@ -343,7 +343,8 @@ def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
 # --- Image builds -----------------------------------------------------------------------------------------
 # Prebuilt images go through a build too: it copies them into the platform's registry (#2986). A request is
 # idempotent per task revision: it returns the build that's ready or in progress, and starts the next attempt
-# only after a failure, or once it finds the build's Job ended. Reads never start or repair a build.
+# only after a failure, once it finds the build's Job ended, or over a ready build that holds an image another
+# Builder backend than the deployment's built. Reads never start or repair a build.
 
 BUILD_REPAIR_SECONDS = 300.0
 """How long ``--wait`` follows a build by reads alone before requesting it again, which repairs a dead Job."""
@@ -354,7 +355,11 @@ BUILD_READ_FAILURES = 5
 
 
 def request_builds(evaluator: Evaluator, refs: Sequence[str]) -> dict[str, ImageBuild]:
-    """Request every task's image build once; each answer is the build that's ready or in progress."""
+    """Request every task's image build once; each answer is the build that's ready or in progress.
+
+    That is the next attempt, just started, after a failed build, and over a ready build that holds an image
+    another Builder backend than the deployment's built.
+    """
     builds: dict[str, ImageBuild] = {}
     for ref in refs:
         workspace, name, digest = _split_ref(ref)

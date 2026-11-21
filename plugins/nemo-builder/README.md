@@ -770,11 +770,38 @@ build timeouts plus two minutes, or a `default_platform` the service doesn't bui
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
 under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
 the next revision), and otherwise as any request it can't take is, under any revision
-(`backend_rejected` or `missing_secrets`, for example). Evals goes on using the
-task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.
-On `remote`, a task that names a prebuilt image keeps the build it has but can't be built again, by
+(`backend_rejected` or `missing_secrets`, for example).
+
+Evals has a setting of its own for the backend its task images must come from,
+`evals.image_builds.builder_backend`. It defaults to `execution`, as `backend` does. Set both to the
+same backend, in the same change. A request for a task's image build then returns the task's ready
+build only when that backend built every image of it. Otherwise the request starts the next
+attempt, which uses no build the other backend made and submits each Dockerfile image as the next
+revision. So after a switch a task is built again, on the new backend, the next time its build is
+requested, with or without `rebuild`. A build still running when the setting changes is returned as
+it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
+`nemo evals runs submit` nor `nemo evals tasksets build-images --wait` sends a request for a task
+whose newest build is ready: request each taskset's builds once with
+`nemo evals tasksets build-images <taskset>`. Until a new build of a task is requested, a run takes
+the task's ready build, whichever backend built it. From that request on, a run takes only the new
+attempt, once it is ready, and a failed attempt leaves the task without a build a run takes. Agent
+layers aren't held to the setting: a layer uses the build that is there.
+
+If the two settings disagree, the first image of a build that the builder takes fails with an error
+that names both, and Evals submits nothing more of that task. That is one failed build for each
+request. Taking the image would make a ready build that no request accepts, so every request would
+build the task again without saying why. The builder has taken the image by then: its build goes on
+running, under the backend Evals doesn't expect, and nothing uses or cancels it. Each request made
+while the settings disagree fails the same way, and submits an image built from a Dockerfile once
+more, as the next revision, which the builder builds too. `nemo evals runs submit` and
+`nemo evals tasksets build-images --wait` request a failed task's build a second time by
+themselves, so one command makes two. Set both settings to the same backend before requesting
+again. A deployment that sets `backend: remote` and leaves the Evals setting out gets this error
+from every task build that submits an image.
+
+On `remote`, a task that names a prebuilt image can't be built, by a request after the switch, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
-failed attempt is then the task's newest build. Upgrade every API pod and
+failed attempt is then the task's newest build, which a run doesn't take. Upgrade every API pod and
 the `builder-settle` controller before setting `backend: remote`: an API pod from before the
 setting existed ignores it and builds in this cluster, and refuses a remote step's completion, and
 an older controller writes a row back without the backend that built it. Upgrade Evals before then
@@ -782,6 +809,9 @@ too, with the `nhx-tasks` image its build Jobs run in and users' SDK and CLI: Ev
 backend on each image of a remote build from the moment it is submitted, and the service's handle
 once the image is ready, and an older Evals, SDK or CLI can't read a build recorded with either.
 For the same reason, don't go back to an older release once a remote build is recorded.
+An `nhx-tasks` image from before the Evals setting existed doesn't read the setting from its build:
+its Job uses the other backend's build, the attempt ends ready with images no request accepts, and
+every request starts another.
 
 ## Publishing and signing
 
