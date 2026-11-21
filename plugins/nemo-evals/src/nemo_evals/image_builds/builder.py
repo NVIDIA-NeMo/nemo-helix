@@ -208,9 +208,10 @@ async def adopt_or_build(
     at the revision. Giving up on a build other requests keep submitting is not one.
 
     When the caller names a ``backend``, a build another backend made gets the next revision too: its image is
-    where that backend published it. A build returned under another backend is then one Builder took just now, so
-    Builder builds with another backend than the caller expects. With no ``backend`` named, a build is used
-    whichever backend made it.
+    where that backend published it. A build returned under another backend is then one Builder took just now, for
+    this request or for the one that won the race for the revision: either way Builder builds with another backend
+    than the caller expects, and would take the next revision the same way, so none is submitted. With no
+    ``backend`` named, a build is used whichever backend made it.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)
@@ -225,8 +226,14 @@ async def adopt_or_build(
             # execution profiles, missing secrets). What it says is read first, by its code: a row another request
             # wrote meanwhile must not hide a refusal of this one. A Builder that gives no code leaves no row
             # either: a lost race leaves the winner's revision behind; a refusal doesn't.
-            if _refuses_the_request(exc) or await builder.get_image(f"{name}-{revision}") is None:
+            winner = None if _refuses_the_request(exc) else await builder.get_image(f"{name}-{revision}")
+            if winner is None:
                 raise BuildRefused(f"{name}-{revision}", exc.detail) from exc
+            if backend is not None and winner.provenance.backend != backend:
+                # Read again, the winner's build would be passed over and the revision after it submitted, which
+                # Builder would take under the same backend: one more build for each request that loses.
+                logger.info("Another request submitted %s-%d first, under another backend", name, revision)
+                return winner
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
             continue
         return submitted.images[0]
@@ -239,6 +246,7 @@ async def usable_build(
     """The newest build of ``name`` that is ready, or still building; None when there is none to use.
 
     What :func:`adopt_or_build` would use without submitting, so a caller can skip preparing a source it won't need.
+    ``backend`` is as that function takes it.
     """
     newest, _ = await _newest(builder, name)
     return newest if newest is not None and not await _unusable(builder, newest, built_after, backend) else None
@@ -255,7 +263,7 @@ async def _newest(builder: ImageBuilder, name: str) -> tuple[ContainerImage | No
 
 
 async def _unusable(
-    builder: ImageBuilder, image: ContainerImage, built_after: datetime | None, backend: str | None = None
+    builder: ImageBuilder, image: ContainerImage, built_after: datetime | None, backend: str | None
 ) -> bool:
     if backend is not None and image.provenance.backend != backend:
         return True

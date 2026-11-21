@@ -124,6 +124,12 @@ def remote_client(entity_store, jobs, authorizer) -> TestClient:
     return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=REMOTE_BACKEND))
 
 
+@pytest.fixture
+def untold_client(entity_store, jobs, authorizer) -> TestClient:
+    """The routes of a deployment whose Builder backend can't be told, as while Builder's section can't be read."""
+    return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=None))
+
+
 def _store(store_task, **kwargs) -> str:
     return asyncio.run(store_task(**kwargs))
 
@@ -556,8 +562,9 @@ def test_the_attempt_a_remote_deployment_starts_names_the_backend_on_its_record_
     started = remote_client.post(f"{_BASE}/{digest}/image-builds").json()
 
     record = _stored(entity_store, digest, int(started["id"]))
-    assert (record.attempt, record.builder_backend, record.expected_backend) == (2, REMOTE_BACKEND, REMOTE_BACKEND)
-    assert record._get_data_fields()["builder_backend"] == REMOTE_BACKEND
+    assert (record.attempt, record.expected_builder_backend) == (2, REMOTE_BACKEND)
+    assert record.expected_backend == REMOTE_BACKEND
+    assert record._get_data_fields()["expected_builder_backend"] == REMOTE_BACKEND
     # The build that answers names it nowhere but on its images, once they are built.
     assert list(started) == BUILD_KEYS
 
@@ -571,7 +578,7 @@ def test_a_deployment_that_names_no_backend_stores_and_returns_a_build_key_for_k
     started = client.post(f"{_BASE}/{digest}/image-builds").json()
 
     record = _stored(entity_store, digest, 1)
-    assert (record.builder_backend, record.expected_backend) == (None, IN_CLUSTER_BACKEND)
+    assert (record.expected_builder_backend, record.expected_backend) == (None, IN_CLUSTER_BACKEND)
     assert list(record._get_data_fields()) == RECORD_KEYS
     assert list(started) == BUILD_KEYS
     assert list(client.get(f"{_BASE}/{digest}/image-builds/1").json()) == BUILD_KEYS
@@ -602,4 +609,39 @@ def test_a_rebuild_starts_a_new_attempt_over_a_ready_build_of_the_deployments_ba
 
     assert (rebuilt["id"], rebuilt["status"]) == ("2", "pending")
     record = _stored(entity_store, digest, 2)
-    assert (record.rebuild, record.builder_backend) == (True, REMOTE_BACKEND)
+    assert (record.rebuild, record.expected_builder_backend) == (True, REMOTE_BACKEND)
+
+
+@pytest.mark.parametrize("built_by", ["client", "remote_client"], ids=["in-cluster", "remote"])
+def test_while_the_backend_cant_be_told_a_ready_build_answers_whichever_backend_built_it(
+    request, untold_client, store_task, entity_store, jobs, built_by: str
+) -> None:
+    """Builder refuses every submit then, so an attempt started over the build could have nothing built.
+
+    One that failed would be the task's newest build, and a run takes no failed one.
+    """
+    digest = _store(store_task)
+    request.getfixturevalue(built_by).post(f"{_BASE}/{digest}/image-builds")
+    backend = REMOTE_BACKEND if built_by == "remote_client" else None
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=backend)])
+
+    again = untold_client.post(f"{_BASE}/{digest}/image-builds")
+
+    assert (again.status_code, again.json()["id"], again.json()["status"]) == (202, "1", "ready")
+    assert len(jobs.created) == 1
+
+
+def test_while_the_backend_cant_be_told_an_attempt_names_none_and_its_build_answers_the_next_request(
+    untold_client, store_task, entity_store, jobs
+) -> None:
+    """The attempt's Job expects the in-cluster backend, as for a record that could name none: not one attempt a request."""
+    digest = _store(store_task)
+
+    started = untold_client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    record = _stored(entity_store, digest, 1)
+    assert (started["id"], record.expected_builder_backend, record.expected_backend) == ("1", None, IN_CLUSTER_BACKEND)
+    assert list(record._get_data_fields()) == RECORD_KEYS
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
+    assert untold_client.post(f"{_BASE}/{digest}/image-builds").json()["id"] == "1"
+    assert len(jobs.created) == 1

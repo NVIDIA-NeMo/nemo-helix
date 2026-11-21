@@ -27,7 +27,7 @@ from nemo_evals.api.taskset_run_schemas import (
     to_status,
     to_task,
 )
-from nemo_evals.config import EvaluatorConfig, HarborTaskJobsConfig, expected_builder_backend, platform_config
+from nemo_evals.config import EvaluatorConfig, HarborTaskJobsConfig, platform_config
 from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
 from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.harbor.remote.preparation import (
@@ -664,12 +664,7 @@ class TasksetRunService:
     def _image_builds(self, workspace: str) -> ImageBuildService:
         """The image build service for tasks in ``workspace``; the preparer only reads builds through it."""
         jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=workspace)
-        return ImageBuildService(
-            self._entities,
-            jobs,
-            builder_authorizer(self._authorizer),
-            builder_backend=expected_builder_backend(self._config),
-        )
+        return ImageBuildService(self._entities, jobs, builder_authorizer(self._authorizer))
 
     async def _resolve_publication(
         self, req: TasksetRunInput, workspace: str, spec: AgentEvalSpec, *, taskset_ref: str

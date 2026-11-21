@@ -138,13 +138,13 @@ def get_image_build_service(
     """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
 
     It takes task images from the backend the deployment's Builder is configured to build with
-    (``builder.backend``), or from the one ``evals.image_builds.builder_backend`` names when that is set.
+    (``builder.backend``), and holds no build to a backend while that one can't be told.
     """
     return ImageBuildService(
         entity_client,
         JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
         builder_authorizer(authorize),
-        builder_backend=expected_builder_backend(get_config()),
+        builder_backend=expected_builder_backend(),
     )
 
 

@@ -142,15 +142,16 @@ class TaskImageBuildEntity(EntityBase):
         ),
     )
     # Left out of the record when unset, so a deployment that builds in-cluster stores the record it always stored.
-    builder_backend: str | None = Field(
+    # Not `builder_backend`, which on each image of the record is the backend that built the image: the two differ
+    # on a build that failed because Builder builds with another backend than the one expected.
+    expected_builder_backend: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
         description=(
-            "The Builder backend this attempt's images must come from, when it isn't the in-cluster one: the "
-            "backend the evals API expected when the build was requested, which is `builder.backend` as that API "
-            "read it, or `evals.image_builds.builder_backend` when that was set. The task-builder Job reads it here, "
-            "because Job workers don't read the platform config file. Left out for the in-cluster backend, and on "
-            "any record made before this field existed."
+            "The Builder backend this attempt's images must come from, when it isn't the in-cluster one: "
+            "`builder.backend` as the evals API read it when the build was requested. The task-builder Job reads it "
+            "here, because Job workers don't read the platform config file. Left out for the in-cluster backend, "
+            "when the API could read no backend there, and on any record made before this field existed."
         ),
     )
     images: list[BuildImage] = Field(default_factory=list)
@@ -159,7 +160,7 @@ class TaskImageBuildEntity(EntityBase):
     @property
     def expected_backend(self) -> str:
         """The Builder backend this attempt's images must come from: the in-cluster one when the record names none."""
-        return self.builder_backend or IN_CLUSTER_BACKEND
+        return self.expected_builder_backend or IN_CLUSTER_BACKEND
 
 
 class ImageBuildRequest(BaseModel):

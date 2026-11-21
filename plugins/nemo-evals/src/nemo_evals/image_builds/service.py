@@ -113,8 +113,9 @@ class ImageBuildService:
     Revisions with the same contents share builds: their images are the same.
 
     ``builder_backend`` is the Builder backend this deployment's task images must come from: the one its Builder
-    is configured to build with (``builder.backend``), unless ``evals.image_builds.builder_backend`` names another.
-    The API resolves it (``nemo_evals.config.expected_builder_backend``); the in-cluster one when none is given.
+    is configured to build with (``builder.backend``), which the API resolves
+    (``nemo_evals.config.expected_builder_backend``). It is the in-cluster one when none is given. None says the
+    backend can't be told, as while Builder's configuration can't be read: no build is then held to a backend.
     """
 
     def __init__(
@@ -123,7 +124,7 @@ class ImageBuildService:
         jobs: BuildJobs,
         authorize_builds: AuthorizeBuilds,
         *,
-        builder_backend: str = IN_CLUSTER_BACKEND,
+        builder_backend: str | None = IN_CLUSTER_BACKEND,
     ) -> None:
         self.entity_client = entity_client
         self.jobs = jobs
@@ -137,8 +138,9 @@ class ImageBuildService:
 
         A new attempt starts only when none for the requested platform is pending, running or ready. A ready build
         is the answer only when this deployment's Builder backend built every image of it: one that holds an image
-        another backend built is followed by the next attempt, which builds the images again. Returns ``None``
-        when the task doesn't exist.
+        another backend built is followed by the next attempt, which builds the images again. While that backend
+        can't be told, a ready build is the answer whichever backend built it. Returns ``None`` when the task
+        doesn't exist.
 
         Raises:
             RevisionNotFoundError: ``revision`` names no revision of the task.
@@ -162,7 +164,7 @@ class ImageBuildService:
         latest = first_page.data[0] if first_page.data else None
         # Another platform's build is no answer to this request, so only builds for this one are reused.
         newest = await self._newest_for(head, task_revision.content_hash, request.platform)
-        if newest is not None and newest.status == "ready" and not request.rebuild and self._built_here(newest):
+        if newest is not None and newest.status == "ready" and not request.rebuild and self._from_backend(newest):
             return ImageBuild.from_entity(newest)
         if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
@@ -186,8 +188,10 @@ class ImageBuildService:
             allowed_registries=request.allowed_registries,
             platform=request.platform,
             rebuild=request.rebuild,
-            # The Job that runs the attempt reads the backend here: Job workers don't read the platform config file.
-            builder_backend=recorded_backend(self.builder_backend),
+            # When the backend can't be told, none is recorded, and the attempt's Job expects the in-cluster one as
+            # for a record from before it could name one. Builder, reading the same configuration, refuses what
+            # that Job submits and says why.
+            expected_builder_backend=None if self.builder_backend is None else recorded_backend(self.builder_backend),
         )
         build._parent = head.id
         try:
@@ -239,11 +243,16 @@ class ImageBuildService:
             return None
         return ImageBuild.from_entity(build)
 
-    def _built_here(self, build: TaskImageBuildEntity) -> bool:
+    def _from_backend(self, build: TaskImageBuildEntity) -> bool:
         """Whether this deployment's Builder backend built every image of ``build``.
 
         An image that names no backend is the in-cluster backend's, as every image was before there was another.
+        While the deployment's backend can't be told, no build is turned down for the backend that built it:
+        Builder refuses every submit then, so the attempt that followed could have nothing built, and one that
+        failed would be the task's newest build.
         """
+        if self.builder_backend is None:
+            return True
         return all(image.built_by == self.builder_backend for image in build.images)
 
     async def _revision(self, workspace: str, name: str, revision: str) -> tuple[TaskEntity, TaskRevisionEntity] | None:

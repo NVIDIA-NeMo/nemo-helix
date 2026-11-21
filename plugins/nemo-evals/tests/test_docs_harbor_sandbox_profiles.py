@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Keep the Harbor sandbox profiles admin guide on the ``evals.runs`` and ``evals.image_builds`` config contract.
+"""Keep the Harbor sandbox profiles admin guide on the ``evals.runs`` config contract and the task image build rule.
 
 Offline: nothing here renders the chart or contacts a deployment.
 """
@@ -14,10 +14,8 @@ import pytest
 import yaml
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_evals.config import (
-    EvaluatorConfig,
     HarborSandboxProfileConfig,
     HarborTaskJobsConfig,
-    ImageBuildsConfig,
     RunControllerConfig,
     TasksetRunsConfig,
     expected_builder_backend,
@@ -94,7 +92,7 @@ def _rows(text: str) -> dict[str, str]:
 
 
 def _profile_rows() -> dict[str, str]:
-    return _rows(GUIDE.read_text().replace(_limits_section(), "").replace(_image_builds_section(), ""))
+    return _rows(GUIDE.read_text().replace(_limits_section(), ""))
 
 
 def _yaml_blocks(text: str) -> list[dict[str, Any]]:
@@ -148,12 +146,6 @@ def test_every_run_limit_is_documented_with_its_default() -> None:
     _assert_defaults(rows, _run_fields())
 
 
-def test_every_image_builds_key_is_documented_with_its_default() -> None:
-    rows = _rows(_image_builds_section())
-    assert rows.keys() == ImageBuildsConfig.model_fields.keys()
-    _assert_defaults(rows, dict(ImageBuildsConfig.model_fields))
-
-
 def test_the_backend_switch_recipe_sets_builders_key_alone_and_evals_expects_that_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,10 +157,10 @@ def test_the_backend_switch_recipe_sets_builders_key_alone_and_evals_expects_tha
         assert config.keys() == {"builder"}, "the recipe sets a key outside builder"
         builder = BuilderConfig.model_validate(config["builder"])
         monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls, builder=builder: builder))
-        assert expected_builder_backend(EvaluatorConfig.model_validate({})) == builder.backend == "remote"
+        assert expected_builder_backend() == builder.backend == "remote"
 
 
-def test_the_guide_quotes_the_error_of_a_build_whose_backend_settings_disagree() -> None:
+def test_the_guide_quotes_the_error_of_a_build_whose_backends_differ() -> None:
     """An admin searches the guide for the error a failed build shows, so the two must read the same."""
     quoted = re.search(r"`(Builder builds with [^`]+)`", _image_builds_section())
     assert quoted, "the guide doesn't quote the error"

@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -290,34 +289,6 @@ class TasksetRunsConfig(BaseModel):
         return self
 
 
-class ImageBuildsConfig(BaseModel):
-    """Operator settings for task image builds, under evals.image_builds.
-
-    They don't depend on ``runs.harbor``: a task's images build in a deployment that runs no tasksets.
-
-    From the environment, the section is one JSON value, ``NEMO_EVALS_IMAGE_BUILDS``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    builder_backend: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=64,
-        description=(
-            "The Builder backend this deployment's task images must come from, as `builder.backend` names it: "
-            "`execution`, in this cluster, or `remote`, through a build service outside it. Unset, it is the backend "
-            "`builder.backend` names in the configuration the evals API reads: leave it unset where the evals API "
-            "and Builder read one configuration. Set, it is used in place of that `builder.backend`: set it only "
-            "where the evals API reads another configuration than Builder does, to the backend Builder builds with. "
-            "A request for a task's image build returns the task's ready build only when this backend built every "
-            "image of it; otherwise it starts the next attempt, which builds the images again. While it is another "
-            "backend than Builder builds with, each build that submits an image to Builder fails with an error that "
-            "names both settings, and leaves a Builder build of that image that nothing uses."
-        ),
-    )
-
-
 class EvaluatorConfig(NemoConfig):
     """Configuration namespace for the evals plugin."""
 
@@ -327,14 +298,6 @@ class EvaluatorConfig(NemoConfig):
     runs: TasksetRunsConfig = Field(
         default_factory=TasksetRunsConfig,
         description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
-    )
-
-    image_builds: ImageBuildsConfig = Field(
-        default_factory=ImageBuildsConfig,
-        description=(
-            "Which Builder backend this deployment's task images must come from, where that isn't the one "
-            "`builder.backend` names."
-        ),
     )
 
     container_image_ref: str | None = Field(
@@ -459,31 +422,34 @@ def get_config() -> EvaluatorConfig:
     return EvaluatorConfig.get()
 
 
-def expected_builder_backend(config: EvaluatorConfig) -> str:
+def expected_builder_backend() -> str | None:
     """The Builder backend this deployment's task images must come from, which the evals API gives a build service.
 
-    It is ``evals.image_builds.builder_backend`` when ``config`` sets it, and Builder's configuration is then not
-    read. Otherwise it is the backend ``builder.backend`` names in the configuration this process reads, through
-    Builder's own config class: Builder's default when the section names none, and Builder's environment
-    variables as Builder reads them. Where the evals API and Builder read one configuration, that is the backend
-    Builder builds with.
+    It is the backend ``builder.backend`` names in the configuration this process reads, through Builder's own
+    config class: Builder's default when the section names none, and Builder's environment variables as Builder
+    reads them. Where the evals API and Builder read one configuration, that is the backend Builder builds with.
+    A deployment whose evals API reads another sets ``builder.backend`` there to the backend its Builder builds with.
 
-    A ``builder`` section that can't be read gives the in-cluster backend, as a section that names none does.
-    Builder refuses every submit while it can't read its section, and its refusal says so: a build requested
-    meanwhile fails with that sentence, and reading a build or submitting a run doesn't fail.
+    None when the backend can't be told: the ``builder`` section can't be read, or names a backend Builder doesn't
+    have. Builder refuses every submit then, and its refusal says why, so no backend is expected meanwhile: a ready
+    build answers a request whichever backend built it. An attempt started over it could have nothing built, and
+    one that failed would be the task's newest build, which a run doesn't take. An attempt that submits an image to
+    Builder meanwhile fails with Builder's refusal, and reading a build doesn't fail.
 
     For the API only. A Job worker doesn't read the platform config file: a build's Job takes the backend from the
     build's record, where the API wrote it.
     """
-    backend = config.image_builds.builder_backend
-    if backend is not None:
-        return backend
+    # Imported here: the module loads both backends, which nothing else in evals needs.
+    from nemo_builder_plugin.backends import BACKENDS
+
     try:
-        return BuilderConfig.get().backend
+        backend = BuilderConfig.get().backend
     except ValueError:
-        # Nothing of the error is logged here: it may quote the value it refused, and a setting may hold a
-        # credential. Builder logs it, without the value, when it refuses a submit.
-        return IN_CLUSTER_BACKEND
+        # Nothing of the error is logged here: it may quote what it couldn't read, and a setting may hold a
+        # credential. Builder logs it when it refuses a submit, and takes the refused value out of a validation
+        # message.
+        return None
+    return backend if backend in BACKENDS else None
 
 
 config = get_config()

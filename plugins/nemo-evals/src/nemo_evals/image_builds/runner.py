@@ -132,7 +132,6 @@ async def _build(
     build.status = "running"
     build.images = images
     for image in _in_submit_order(images):
-        # The backend comes from the record: a Job worker doesn't read the platform config file.
         if not await _submit(builder, image, definition, rebuild=build.rebuild, backend=build.expected_backend):
             # That image has failed the build: the images left are not submitted, and stay pending.
             break
@@ -255,11 +254,11 @@ async def _submit(
     """Submit one image's build or copy and record where it stands; False when the caller is to submit nothing more.
 
     That is when Builder refused the request itself: the image then fails with Builder's own sentence. And it is
-    when Builder took the request under another backend than ``backend``, the one the build's images must come
-    from: the image then fails with a sentence that names the setting each backend comes from, as every image after
-    it would. Any other error the client reports (a :class:`NemoClientError`) fails this image alone. Giving up
-    on a build other requests keep submitting (:func:`adopt_or_build`) is not caught: it is raised, and the build
-    then fails as a ``task-builder error`` with no images recorded.
+    when Builder answered the request with a row under another backend than ``backend``, the one the build's images
+    must come from: the image then fails with a sentence that names both backends (:func:`backends_disagree`), as
+    every image after it would. Any other error the client reports (a :class:`NemoClientError`) fails this image
+    alone. Giving up on a build other requests keep submitting (:func:`adopt_or_build`) is not caught: it is raised,
+    and the build then fails as a ``task-builder error`` with no images recorded.
     """
     try:
         if image.image is not None:
@@ -280,9 +279,10 @@ async def _submit(
     built_by = builder_image.provenance.backend
     if built_by != backend:
         # A build of another backend is never adopted, and a submit is answered under Builder's own backend. So this
-        # is a row Builder took just now: it builds with another backend than this build was requested for, and the
-        # next attempt would get the same answer. The image names the row and its backend, and nothing else of it:
-        # it is not this build's.
+        # is a row under the backend Builder builds with: one it took just now, for this request or for another
+        # that asked for the revision first, or one a copy or a rebuild submitted again. Builder builds with another
+        # backend than this build was requested for, and the next image would get the same answer. The image names
+        # the row and its backend, and nothing else of it: it is not this build's.
         image.builder_backend = recorded_backend(built_by)
         image.status = "failed"
         image.error = backends_disagree(built_by, backend)
@@ -291,20 +291,17 @@ async def _submit(
     return True
 
 
-def backends_disagree(builders: str, expected: str) -> str:
-    """The error of an image Builder took under its ``builders`` backend for a build that expects ``expected``.
+def backends_disagree(actual: str, expected: str) -> str:
+    """The error of an image Builder answered for under its ``actual`` backend, in a build that expects ``expected``.
 
-    It names the setting each value comes from, and says what to do with the evals one in either deployment where
-    the two differ: one that sets it to another backend than Builder's, and one that leaves it unset while its evals
-    API reads another configuration than Builder does. The Job can't tell which: the build's record holds the
-    backend, not where the API took it from. A build requested before a deployment switched its backend, and run
-    after, differs too, and needs only the last thing the sentence asks for.
+    A build requested before a deployment switched ``builder.backend``, and run after, differs this way once: the
+    next request reads the new backend. A deployment whose evals API reads another ``builder.backend`` than its
+    Builder does differs on every request. The Job can't tell which, so the sentence says what to do in that order.
     """
     return (
-        f"Builder builds with the {builders!r} backend (builder.backend), and this build was requested for "
-        f"{expected!r} (evals.image_builds.builder_backend, or the builder.backend the evals API reads when that key "
-        "is unset): leave evals.image_builds.builder_backend unset if the evals API reads the configuration Builder "
-        "reads, or set it to Builder's backend if the evals API reads another, then request the build again"
+        f"Builder builds with the {actual!r} backend, and this build was requested for {expected!r}: request the "
+        "build again; if it fails the same way, the evals API reads another builder.backend than Builder does, so "
+        "set both to one backend"
     )
 
 

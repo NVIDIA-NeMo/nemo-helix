@@ -159,8 +159,13 @@ def real_preparer(service, monkeypatch):
     return service
 
 
-async def build(entity_store, task: str, status: str, *, rebuild: bool = False) -> None:
-    """Start the next build of ``task``'s newest revision, as the CLI does before submit, and record ``status``."""
+async def build(
+    entity_store, task: str, status: str, *, rebuild: bool = False, builder_backend: str | None = None
+) -> None:
+    """Start the next build of ``task``'s newest revision, as the CLI does before submit, and record ``status``.
+
+    A ready build's image names ``builder_backend`` as the backend that built it; none is the in-cluster one.
+    """
     head = await entity_store.get(TaskEntity, name=task, workspace="default")
     digest = (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
 
@@ -178,7 +183,13 @@ async def build(entity_store, task: str, status: str, *, rebuild: bool = False) 
         ref = f"registry.invalid/{task}@sha256:{'d' * 64}"
         record.images = [
             BuildImage(
-                type="main", source="dockerfile", status="ready", image_ref=ref, builder_image="b", build_job="j"
+                type="main",
+                source="dockerfile",
+                status="ready",
+                image_ref=ref,
+                builder_image="b",
+                build_job="j",
+                builder_backend=builder_backend,
             )
         ]
     await entity_store.update(record)
@@ -225,25 +236,24 @@ async def test_a_rebuild_in_flight_is_rejected_although_an_older_build_is_ready(
     assert not await runs(entity_store)
 
 
-async def test_the_build_service_a_run_reads_through_is_given_the_backend_builder_is_configured_with(
-    service, monkeypatch
+@pytest.mark.parametrize(
+    ("configured", "built_by"),
+    [("remote", None), (IN_CLUSTER_BACKEND, "remote")],
+    ids=["switched-to-remote", "switched-back"],
+)
+async def test_a_run_takes_a_ready_build_another_backend_than_the_deployments_built(
+    real_preparer, request_body, entity_store, run_store, fake_task_jobs, monkeypatch, configured, built_by
 ):
-    """Submit only reads builds through it. It is told the backend as the service of the build routes is."""
-    remote = BuilderConfig.model_validate({"backend": "remote"})
-    monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls: remote))
-    assert service._config.image_builds.builder_backend is None
+    """Only a request for a task's build holds the build to the deployment's Builder backend. A run reads no backend."""
+    builder_config = BuilderConfig.model_validate({"backend": configured})
+    monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls: builder_config))
+    await build(entity_store, "task-1", "ready", builder_backend=built_by)
 
-    assert service._image_builds("default").builder_backend == "remote"
+    outcome = await submit(real_preparer, request_body)
 
-
-async def test_the_build_service_a_run_reads_through_is_given_the_backend_the_evals_key_names_over_builders(
-    service, monkeypatch
-):
-    remote = BuilderConfig.model_validate({"backend": "remote"})
-    monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls: remote))
-    service._config.image_builds.builder_backend = IN_CLUSTER_BACKEND
-
-    assert service._image_builds("default").builder_backend == IN_CLUSTER_BACKEND
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert outcome.created
+    assert [env.agent.image_ref for env in plan.task_environments] == [f"registry.invalid/task-1@sha256:{'d' * 64}"]
 
 
 async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(

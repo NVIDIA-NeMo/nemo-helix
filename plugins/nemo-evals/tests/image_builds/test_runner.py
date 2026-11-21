@@ -23,6 +23,7 @@ from nemo_builder_plugin.entities import (
     Provenance,
 )
 from nemo_builder_plugin.schema import (
+    CODE_BACKEND_CHANGED,
     CODE_BACKEND_REJECTED,
     BuildMount,
     FileSetSource,
@@ -43,6 +44,7 @@ from nemo_evals.image_builds.models import (
 from nemo_evals.image_builds.runner import (
     TaskImageBuildSpec,
     apply_builder_image,
+    backends_disagree,
     read_task_archive,
     run_task_image_build,
 )
@@ -201,7 +203,7 @@ class _Builder:
         row = f"{name}-{revision}"
         existing = await self.get_image(row)
         if existing is not None and existing.provenance.backend != self.backend:
-            body = {"detail": f"{row} was already submitted under another backend", "code": "backend_changed"}
+            body = {"detail": f"{row} was already submitted under another backend", "code": CODE_BACKEND_CHANGED}
             raise ConflictError(httpx.Response(409, json=body))
         self.submits.append(source)
         self.images[row] = what
@@ -1096,14 +1098,14 @@ async def test_a_build_of_a_deployment_that_names_no_backend_is_recorded_key_for
     """Its images must come from the in-cluster backend, which the record leaves out: when requested and when done."""
     spec = await _start(entity_store, store_task, config={})
     requested = await _stored_build(entity_store, spec)
-    assert (requested.builder_backend, requested.expected_backend) == (None, IN_CLUSTER_BACKEND)
+    assert (requested.expected_builder_backend, requested.expected_backend) == (None, IN_CLUSTER_BACKEND)
     assert list(requested._get_data_fields()) == BUILD_RECORD_KEYS
 
     build = await _run(entity_store, spec, _Builder({"sort-task/environment": "ready"}))
 
     assert build.status == "ready"
     assert list((await _stored_build(entity_store, spec))._get_data_fields()) == BUILD_RECORD_KEYS
-    assert "builder_backend" not in json.loads(build.model_dump_json())
+    assert "expected_builder_backend" not in json.loads(build.model_dump_json())
 
 
 async def test_a_build_requested_for_a_remote_backend_names_it_on_its_record(entity_store, store_task) -> None:
@@ -1112,10 +1114,10 @@ async def test_a_build_requested_for_a_remote_backend_names_it_on_its_record(ent
 
     stored = await _stored_build(entity_store, spec)
 
-    assert (stored.builder_backend, stored.expected_backend) == (REMOTE_BACKEND, REMOTE_BACKEND)
+    assert (stored.expected_builder_backend, stored.expected_backend) == (REMOTE_BACKEND, REMOTE_BACKEND)
     sent = stored._get_data_fields()
-    assert set(sent) == {*BUILD_RECORD_KEYS, "builder_backend"}
-    assert sent["builder_backend"] == REMOTE_BACKEND
+    assert set(sent) == {*BUILD_RECORD_KEYS, "expected_builder_backend"}
+    assert sent["expected_builder_backend"] == REMOTE_BACKEND
 
 
 def test_a_build_recorded_before_it_could_name_a_backend_still_loads_and_is_saved_unchanged() -> None:
@@ -1136,7 +1138,7 @@ def test_a_build_recorded_before_it_could_name_a_backend_still_loads_and_is_save
     build = TaskImageBuildEntity.model_validate({"name": "build.abc.1", "workspace": "default", **recorded})
 
     # Every build was the in-cluster backend's then, so that is what such a record's Job expects.
-    assert (build.builder_backend, build.expected_backend) == (None, IN_CLUSTER_BACKEND)
+    assert (build.expected_builder_backend, build.expected_backend) == (None, IN_CLUSTER_BACKEND)
     assert build._get_data_fields() == recorded
 
 
@@ -1201,13 +1203,12 @@ async def test_a_deployment_that_did_not_switch_uses_the_build_another_task_made
     assert (second.images[0].built_by, second.images[0].external_image_id) == (REMOTE_BACKEND, handle)
 
 
-def _settings_disagree(builders: str, expected: str) -> str:
-    """The error of an image Builder took under ``builders`` backend for a build that expects ``expected``."""
-    return (
-        f"Builder builds with the {builders!r} backend (builder.backend), and this build was requested for "
-        f"{expected!r} (evals.image_builds.builder_backend, or the builder.backend the evals API reads when that key "
-        "is unset): leave evals.image_builds.builder_backend unset if the evals API reads the configuration Builder "
-        "reads, or set it to Builder's backend if the evals API reads another, then request the build again"
+def test_the_error_of_a_build_whose_backends_differ_names_both_and_says_what_to_do() -> None:
+    """The one place the sentence is spelt out: the tests below, and the operator guide's, compare with the function."""
+    assert backends_disagree("remote", "execution") == (
+        "Builder builds with the 'remote' backend, and this build was requested for 'execution': request the build "
+        "again; if it fails the same way, the evals API reads another builder.backend than Builder does, so set both "
+        "to one backend"
     )
 
 
@@ -1216,10 +1217,10 @@ def _settings_disagree(builders: str, expected: str) -> str:
     [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
     ids=["evals-not-told-of-the-remote-service", "builder-not-switched"],
 )
-async def test_a_builder_set_to_another_backend_than_evals_fails_the_image_naming_both_settings(
-    entity_store, store_task, archive, expected: str, builders: str
+async def test_a_builder_that_builds_with_another_backend_than_expected_fails_the_image_naming_both(
+    entity_store, store_task, archive, build_image_keys, expected: str, builders: str
 ) -> None:
-    """Builder answers a submit with a row under its own backend, so one under another says the settings disagree.
+    """Builder answers a submit with a row under its own backend, so one under another says the two differ.
 
     Taken, the image would make a ready build that no request accepts, and every request would build the task
     again without saying why. The request gets one failed build instead, and nothing more of the task is submitted.
@@ -1229,7 +1230,7 @@ async def test_a_builder_set_to_another_backend_than_evals_fails_the_image_namin
 
     build = await _run(entity_store, spec, builder)
 
-    sentence = _settings_disagree(builders, expected)
+    sentence = backends_disagree(builders, expected)
     assert (build.status, build.error) == ("failed", f"main: {sentence}")
     main, verifier = build.images
     assert (main.status, main.error, main.image_ref) == ("failed", sentence, None)
@@ -1238,7 +1239,15 @@ async def test_a_builder_set_to_another_backend_than_evals_fails_the_image_namin
     assert main.built_by == builders
     assert _submitted_in_order(builder) == ["sort-task/environment"]
     assert (verifier.status, verifier.builder_image) == ("pending", None)
-    assert await _stored_build(entity_store, spec) == build
+    stored = await _stored_build(entity_store, spec)
+    assert stored == build
+    # An in-cluster row's backend is left out, as on any image: an older reader refuses a key it doesn't know.
+    assert main.builder_backend == (None if builders == IN_CLUSTER_BACKEND else builders)
+    sent = stored._get_data_fields()["images"][0]
+    if builders == IN_CLUSTER_BACKEND:
+        assert list(sent) == build_image_keys
+    else:
+        assert set(sent) == {*build_image_keys, "builder_backend"}
 
 
 @pytest.mark.parametrize(
@@ -1246,14 +1255,13 @@ async def test_a_builder_set_to_another_backend_than_evals_fails_the_image_namin
     [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
     ids=["evals-not-told-of-the-remote-service", "builder-not-switched"],
 )
-async def test_each_request_while_the_settings_disagree_fails_the_same_way_and_submits_the_image_once_more(
+async def test_each_request_while_the_backends_differ_fails_the_same_way_and_submits_the_image_once_more(
     entity_store, store_task, archive, expected: str, builders: str
 ) -> None:
     """The row Builder took stays at Builder, under its backend, so the next attempt uses it no more than the first.
 
     The attempt submits the image as the next revision, which Builder takes too, and fails on the answer as the
-    first did. So each request costs one failed attempt and one Builder build that nothing uses, until the two
-    settings agree.
+    first did. So each request costs one failed attempt and one more Builder build, until the two backends agree.
     """
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=expected)
     builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"}, backend=builders)
@@ -1264,7 +1272,7 @@ async def test_each_request_while_the_settings_disagree_fails_the_same_way_and_s
     assert again.attempt == 2
     second = await _run(entity_store, again, builder)
 
-    sentence = _settings_disagree(builders, expected)
+    sentence = backends_disagree(builders, expected)
     assert (second.status, second.error) == ("failed", f"main: {sentence}")
     main, verifier = second.images
     assert (main.status, main.error, main.built_by) == ("failed", sentence, builders)
@@ -1273,8 +1281,37 @@ async def test_each_request_while_the_settings_disagree_fails_the_same_way_and_s
     assert (verifier.status, verifier.builder_image) == ("pending", None)
 
 
+@pytest.mark.parametrize(
+    ("expected", "builders"),
+    [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["evals-not-told-of-the-remote-service", "builder-not-switched"],
+)
+async def test_once_evals_expects_builders_backend_the_next_request_uses_the_build_builder_took(
+    entity_store, store_task, archive, expected: str, builders: str
+) -> None:
+    """What the error asks for: the build is requested again, by an evals API that now reads Builder's backend.
+
+    The build Builder took for the failed attempt is then the newest one of its name, under the backend the new
+    attempt expects: the attempt uses it, and submits only the image the failed attempt never reached.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=expected)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"}, backend=builders)
+    failed = await _run(entity_store, spec, builder)
+    assert failed.status == "failed"
+
+    again = await _request_again(entity_store, spec, backend=builders)
+    assert again.attempt == 2
+    built = await _run(entity_store, again, builder)
+
+    assert (built.status, built.error) == ("ready", None)
+    assert [image.built_by for image in built.images] == [builders, builders]
+    assert built.images[0].builder_image == failed.images[0].builder_image
+    assert _submitted_in_order(builder) == ["sort-task/environment", "sort-task/tests"]
+    assert await _request_again(entity_store, again, backend=builders) == again
+
+
 async def test_a_copy_builder_took_under_another_backend_fails_its_image_the_same_way(
-    entity_store, store_task, archive
+    entity_store, store_task, archive, build_image_keys
 ) -> None:
     """A copy is asked of Builder each time, so the row it answers with is under Builder's own backend.
 
@@ -1286,10 +1323,12 @@ async def test_a_copy_builder_took_under_another_backend_fails_its_image_the_sam
 
     build = await _run(entity_store, spec, builder)
 
-    sentence = _settings_disagree(IN_CLUSTER_BACKEND, REMOTE_BACKEND)
+    sentence = backends_disagree(IN_CLUSTER_BACKEND, REMOTE_BACKEND)
     assert (build.status, build.error) == ("failed", f"main: {sentence}")
     main, verifier = build.images
     assert (main.source, main.status, main.error) == ("prebuilt", "failed", sentence)
+    assert (main.built_by, main.builder_backend) == (IN_CLUSTER_BACKEND, None)
+    assert list((await _stored_build(entity_store, spec))._get_data_fields()["images"][0]) == build_image_keys
     assert builder.submits == [ImageSource(image="ghcr.io/org/sort:1")]
     assert (verifier.status, verifier.builder_image) == ("pending", None)
 
@@ -1301,13 +1340,12 @@ async def test_a_rebuild_builder_answers_under_another_backend_fails_its_image_w
     spec = await _start(entity_store, store_task, config={}, backend=REMOTE_BACKEND)
     builder = _Builder({"sort-task/environment": "ready"}, backend=REMOTE_BACKEND, external=_handle)
     await _run(entity_store, spec, builder)
-    service = ImageBuildService(entity_store, _Jobs(), _allow)
-    await service.request_build("default", "sort-task", spec.revision_digest, ImageBuildRequest(rebuild=True))
+    again = await _request_again(entity_store, spec, backend=IN_CLUSTER_BACKEND, rebuild=True)
 
-    rebuilt = await _run(entity_store, spec.model_copy(update={"attempt": 2}), builder)
+    rebuilt = await _run(entity_store, again, builder)
 
     [image] = rebuilt.images
-    assert (rebuilt.status, image.status) == ("failed", "failed")
-    assert image.error == _settings_disagree(REMOTE_BACKEND, IN_CLUSTER_BACKEND)
+    assert (again.attempt, rebuilt.status, image.status) == (2, "failed", "failed")
+    assert image.error == backends_disagree(REMOTE_BACKEND, IN_CLUSTER_BACKEND)
     assert (image.image_ref, image.runtime_config, image.external_image_id) == (None, None, None)
     assert (image.builder_image is not None, image.built_by) == (True, REMOTE_BACKEND)

@@ -268,7 +268,7 @@ async def test_adopt_or_build_uses_a_build_the_backend_it_names_made(
 
 @pytest.mark.parametrize("built_by", [IN_CLUSTER_BACKEND, _REMOTE_BACKEND])
 async def test_adopt_or_build_naming_no_backend_uses_a_build_whichever_backend_made_it(built_by: str) -> None:
-    """As an agent layer's build asks: it names no backend, and takes the build that is there."""
+    """The default. An agent layer's Job asks this way, and then refuses a build this cluster didn't make itself."""
     builder = _Builder(["ready"], built_by=built_by)
 
     image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
@@ -312,6 +312,39 @@ async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() ->
 
     assert builder.submitted == [1]
     assert image.name == "harbor-env-0123456789ab-1"
+
+
+@pytest.mark.parametrize(
+    ("builders", "wanted"),
+    [(IN_CLUSTER_BACKEND, _REMOTE_BACKEND), (_REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["builder-builds-in-cluster", "builder-builds-remotely"],
+)
+async def test_adopt_or_build_returns_the_build_that_won_the_race_under_another_backend(
+    builders: str, wanted: str
+) -> None:
+    """Builder builds with another backend than the caller names, and another request took the next revision first.
+
+    Tasks that share a build context share its name, and their Jobs start together. The winner's build is under
+    Builder's backend, as the loser's own would have been, so it is returned for the caller to see that. Passed
+    over, it would cost each Job that loses one more Builder build, or after three losses an error that names no
+    backend.
+    """
+    builder = _Builder(["ready"], conflicting=frozenset({2}), built_by=builders)
+
+    async def race(name: str) -> ContainerImage | None:
+        # The winner's revision appears once our submit has lost to it.
+        revision = int(name.rsplit("-", 1)[1])
+        if revision == 1 or (revision == 2 and builder.submitted):
+            return _container_image(name, "ready" if revision == 1 else "pending", backend=builders)
+        return None
+
+    builder.get_image = race  # ty: ignore[invalid-assignment]
+    image = await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=wanted
+    )
+
+    assert builder.submitted == [2]
+    assert (image.name, image.provenance.backend) == ("harbor-env-0123456789ab-2", builders)
 
 
 async def test_adopt_or_build_reports_a_refusal_that_wrote_no_build() -> None:
