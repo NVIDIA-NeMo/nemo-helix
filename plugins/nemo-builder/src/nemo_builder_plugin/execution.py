@@ -32,6 +32,8 @@ class ExecutionBackend:
     """:class:`~nemo_builder_plugin.backend.Backend` for builds in this cluster."""
 
     name = IN_CLUSTER_BACKEND
+    #: Its rows, its submit and its completion are as they were before a row could record its job.
+    binds_rows_to_job = False
 
     def __init__(self, config: BuilderConfig, profiles: Sequence[ExecutionProfile]) -> None:
         """``profiles`` are the platform's Jobs execution profiles, which say where the build's steps run."""

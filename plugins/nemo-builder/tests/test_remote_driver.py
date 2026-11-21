@@ -6,30 +6,36 @@
 from __future__ import annotations
 
 import collections
+import errno
 import filecmp
 import io
+import itertools
 import json
 import logging
 import os
 import pickle
 import shutil
 import signal
+import stat
 import sys
 import tarfile
 import tempfile
 import time
 import tracemalloc
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from types import SimpleNamespace
-from typing import Any, NamedTuple, TypeVar
+from types import FrameType, SimpleNamespace
+from typing import Any, NamedTuple, TypeVar, cast
 
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
+from nemo_builder_plugin.run import fetch as fetch_step
 from nemo_builder_plugin.run import remote as driver
-from nemo_builder_plugin.run.fetch import MAX_UNPACKED_BYTES, MAX_UNPACKED_ENTRIES, ArchiveRefused
+from nemo_builder_plugin.run.fetch import MAX_UNPACKED_BYTES, MAX_UNPACKED_ENTRIES, ArchiveRefused, unpack
 from nemo_builder_plugin.run.remote import (
     CANCEL_PAUSE_SECONDS,
     CANCEL_SECONDS,
@@ -53,6 +59,7 @@ from nemo_builder_plugin.run.remote import (
     RemoteBuildStatus,
     RemoteImage,
     RetryableError,
+    fetch_context,
     idempotency_key,
     run_remote_build,
     sleep_unless,
@@ -69,6 +76,7 @@ from nemo_builder_plugin.steps import (
     WorkLayout,
 )
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.files.client import FilesClient
 
 DESTINATION = "registry.example.com/team/images"
 #: What follows a reason when the build was to be cancelled and the service couldn't be told.
@@ -1680,6 +1688,16 @@ class TestTheContext:
         with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'services/fixture'"):
             stage_context(context, "Dockerfile")
 
+    def test_a_link_to_a_directory_whose_name_only_begins_as_the_contexts_does_is_refused(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """`context-data`, beside `context`. It is not in the context for sharing the start of its name."""
+        (tmp_path / "context-data").mkdir()
+        (tmp_path / "context-data" / "answer.txt").write_text("not this build's\n")
+        (context / "fixture").symlink_to("../context-data/answer.txt")
+        with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'fixture'"):
+            stage_context(context, "Dockerfile")
+
     @pytest.mark.parametrize(
         ("link", "target"),
         [("round", "."), ("services/feed/up", ".."), ("services/feed/top", "../..")],
@@ -1737,6 +1755,17 @@ class TestTheContext:
         (context / "Dockerfile.b").symlink_to("Dockerfile.a")
         with pytest.raises(ImageFailed, match="dockerfile 'Dockerfile.a' is not a file inside the build context"):
             stage_context(context, "Dockerfile.a")
+
+    def test_a_link_that_comes_back_to_itself_and_then_steps_back_is_a_way_to_the_directory_it_is_in(
+        self, context: Path
+    ) -> None:
+        """`again -> again/..`. The system gives up on it. A path is read here as `os.path.realpath` reads
+        one, which leaves a link it has come back to in the path as a name and goes on: so read, this one
+        leads to the directory it is in, and a packager that follows links that way would go round it for
+        ever."""
+        (context / "services" / "again").symlink_to("again/..")
+        with pytest.raises(ImageFailed, match="back to a directory it is in: 'services/again'"):
+            stage_context(context, "Dockerfile")
 
     def test_links_that_go_round_in_a_loop_lead_nowhere_and_are_left(self, context: Path) -> None:
         """They reach no file, inside the context or out of it."""
@@ -1916,7 +1945,8 @@ class TestTheContext:
             stage_context(context, "Dockerfile")
 
     def test_a_context_with_no_links_is_not_measured(self, context: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """No link makes more of it than was fetched, and what bounds a fetch is the fetch's to say."""
+        """No link makes more of it than was fetched, and what bounds a fetch is the fetch's to say. Nor does
+        staging: its Dockerfile is at the root already, and nothing is written."""
         monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", 1)
         monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", 1)
         assert stage_context(context, "Dockerfile") == context
@@ -2241,9 +2271,43 @@ class TestTheImagesOfOneSet:
             assert fetched.resolve().is_relative_to(root.resolve())
             assert fetched.name == (context_path or fetched.name)
 
+    @pytest.mark.parametrize("leads_to", ["a-file", "nothing", "a-loop-of-links"])
+    def test_a_context_path_that_leads_to_no_directory_is_refused_as_one_that_matches_none_wherever_it_leads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, leads_to: str
+    ) -> None:
+        """One image's own download. The system is asked whether the path is a directory before the step
+        follows its links for itself, as it is of a download that is shared: only a directory is followed,
+        to see that it is inside its source. What is no directory is no context, wherever its links lead:
+        a file beside the source, nothing there, or round to itself. It is refused as a context path that
+        matches nothing is, and nothing of where it led is handed on."""
+        outside = tmp_path / "mounted"
+        outside.mkdir()
+        (outside / "answer.txt").write_text("not this build's\n")
+        written = {"a-file": str(outside / "answer.txt"), "nothing": str(outside / "no-such"), "a-loop-of-links": "up"}
+
+        def fetch_source(files_client: object, layout: WorkLayout, source: ContextSource, *, workspace: str) -> None:
+            unpacked = Path(layout.context(source.model_copy(update={"context_path": None})))
+            unpacked.mkdir(parents=True)
+            (unpacked / "up").symlink_to(written[leads_to])
+
+        def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+            return driver.fetch_context(object(), image, workspace="default", root=directory / "fetched")  # ty: ignore[invalid-argument-type]
+
+        monkeypatch.setattr(driver, "fetch_source", fetch_source)
+        config = self._set({"fileset": "default/fs-a", "archive": "task.tar.gz", "context_path": "up"})
+        builder, service = FakeBuilder(), FakeService([DONE])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, tmp_path, tmp_path, fetch=fetch, config=config) == 1
+        assert (service.started, builder.completed) == ([], [])
+        assert (
+            f"{FAILURE_MARKER} a: its build context is not a directory in what was fetched: its context path "
+            "matches none"
+        ) in caplog.text
+
     def test_a_link_that_comes_back_by_the_directories_above_it_leads_inside_the_copy_too(self, tmp_path: Path) -> None:
-        """`services/api/shared -> ../../services/api/lib`. The copy made for a set is placed as the directory
-        was in the download, so such a link builds from a set as it does alone."""
+        """`services/api/shared -> ../../services/api/lib`. Where it leads is decided where the download is,
+        with the directories above the context still there, so such a link builds from a set as it does
+        alone."""
 
         def fetch(image: RemoteBuildImage, directory: Path) -> Path:
             for name in ("api", "web"):
@@ -2389,6 +2453,1315 @@ class TestTheImagesOfOneSet:
         service = FakeService([DONE])
         assert _run(service, FakeBuilder(), context, tmp_path) == 0
         assert service.started[0].context == context
+
+
+class LinkReads:
+    """Every read of a link on this thread while this is entered, whoever makes it.
+
+    Counted by a profile hook, which Python calls for each call of ``os.readlink``: the driver's own, and any
+    the standard library makes for it. Nothing is patched.
+    """
+
+    def __init__(self) -> None:
+        self.total = 0
+        self._previous: Any = None
+
+    def _see(self, frame: FrameType, event: str, arg: Any) -> None:
+        if event == "c_call" and arg is os.readlink:
+            self.total += 1
+
+    def __enter__(self) -> LinkReads:
+        self._previous = sys.getprofile()
+        sys.setprofile(self._see)
+        return self
+
+    def __exit__(self, *raised: object) -> None:
+        sys.setprofile(self._previous)
+
+
+class TestFollowingAContextsLinks:
+    """What it costs to learn where a context's links lead. An archive is small for the links it holds: a
+    chain of a hundred thousand, each written as the name of the next, is under a megabyte."""
+
+    #: The chains that are staged. Followed from scratch for each link, they took 1,056 reads of a link,
+    #: 4,160, 16,512 and 65,792: their length times one more.
+    CHAINS = (32, 64, 128, 256)
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        """Where the contexts are made, with no link in its own path: one there would be read on the way to
+        each context, and counted."""
+        return tmp_path.resolve()
+
+    @staticmethod
+    def _name(number: int) -> str:
+        return f"link-{number:03d}"
+
+    @classmethod
+    def _chain(cls, directory: Path, links: int, *, ends_at: str = "payload") -> Path:
+        """A build context, ``directory``, whose links are one chain: each is written as the name of the next,
+        and the last as ``ends_at``."""
+        directory.mkdir()
+        (directory / "Dockerfile").write_text("FROM scratch\n")
+        (directory / "payload").write_bytes(b"x")
+        for number in range(links):
+            (directory / cls._name(number)).symlink_to(cls._name(number + 1) if number + 1 < links else ends_at)
+        return directory
+
+    @staticmethod
+    def _staged(context: Path) -> int:
+        """How many times a link is read to stage ``context``, which is staged as it is."""
+        with LinkReads() as reads:
+            assert stage_context(context, "Dockerfile") == context
+        return reads.total
+
+    @pytest.mark.parametrize("links", CHAINS)
+    def test_a_link_is_read_once_however_many_links_lead_through_it(self, links: int, root: Path) -> None:
+        """Each link of a chain is read once to learn where it leads, though every link before it leads
+        through it, once to see how it is written, and once more when the staged context is measured."""
+        context = self._chain(root / "context", links)
+
+        assert self._staged(context) <= 3 * links
+        # Staged as it was: every link is still what it was written as.
+        assert [os.readlink(context / self._name(number)) for number in range(links)] == [
+            *(self._name(number) for number in range(1, links)),
+            "payload",
+        ]
+
+    def test_reading_links_grows_no_faster_than_the_links(self, root: Path) -> None:
+        """Twice the links is no more than twice the reads. It was four times, less a little: eight times
+        the links took sixty-two times the reads."""
+        reads = {links: self._staged(self._chain(root / f"context-{links}", links)) for links in self.CHAINS}
+
+        for links in self.CHAINS[:-1]:
+            assert reads[2 * links] <= 2 * reads[links]
+        assert reads[256] <= 8 * reads[32]
+
+    def test_a_chain_past_a_limit_is_refused_after_one_read_of_each_link(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A chain is as many entries as it has links, and as many copies of the file it ends at. What says
+        it comes to too much is asked once every link is followed, and that is no more than a read of each."""
+        links = 128
+        context = self._chain(root / "context", links)
+
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", links + 1)
+        with LinkReads() as reads, pytest.raises(ImageFailed, match=f"more than {links + 1} entries"):
+            stage_context(context, "Dockerfile")
+        assert reads.total <= links
+
+    def test_a_build_from_a_chain_is_started_after_no_more_reads_than_that(self, root: Path) -> None:
+        """Through the driver. The links are followed before the image's build timeout starts, and nothing
+        looks at a stop meanwhile, so what they cost is the step's to bound."""
+        links = 64
+        context = self._chain(root / "context", links)
+        read_by_the_start: list[int] = []
+
+        with LinkReads() as reads:
+
+            class Counting(FakeService):
+                def start(self, build: RemoteBuild) -> str:
+                    read_by_the_start.append(reads.total)
+                    return super().start(build)
+
+            builder = FakeBuilder()
+            assert _run(Counting([DONE]), builder, context, root) == 0
+
+        assert [image for image, _, _ in builder.completed] == ["demo-1"]
+        assert read_by_the_start == [reads.total] and reads.total <= 3 * links
+
+    def test_a_chain_longer_than_the_system_follows_is_staged_as_it_was(self, root: Path) -> None:
+        """The system gives up on a path after a few tens of links. The driver gives up on none, as before:
+        what it remembers of each link is what keeps a long chain cheap, not a limit on its length."""
+        context = self._chain(root / "context", 128)
+        with pytest.raises(OSError) as gave_up:
+            os.stat(context / self._name(0))
+        assert gave_up.value.errno == errno.ELOOP
+
+        assert stage_context(context, "Dockerfile") == context
+        assert os.readlink(context / self._name(127)) == "payload"
+
+    @pytest.mark.parametrize("reached", ["the-dockerfile", "its-directory"])
+    def test_a_dockerfile_behind_more_links_than_the_system_follows_is_refused(self, reached: str, root: Path) -> None:
+        """Whether the Dockerfile's path leads to a file is asked of the system, which follows a few tens of
+        links and no more: forty on Linux. A Dockerfile that is itself the first of more is no file to it,
+        nor to anything else that opens a path through it. One in a directory behind more is no file to
+        it either, and neither is the ignore file written for that Dockerfile, which is looked for beside
+        the same path: found by a longer way, the Dockerfile would have been put at the root without it.
+        One rule refuses both, and nothing is written into such a context."""
+        if reached == "the-dockerfile":
+            context = self._chain(root / "context", 64, ends_at="Dockerfile.real")
+            (context / "Dockerfile.real").write_text("FROM real\n")
+            (context / "Dockerfile").unlink()
+            (context / "Dockerfile").symlink_to(self._name(0))
+            dockerfile = "Dockerfile"
+        else:
+            context = self._chain(root / "context", 64, ends_at="real")
+            (context / "real").mkdir()
+            (context / "real" / "Dockerfile").write_text("FROM real\n")
+            (context / "real" / "Dockerfile.dockerignore").write_text(".env\n")
+            dockerfile = self._name(0) + "/Dockerfile"
+        before = sorted(os.listdir(context))
+
+        with pytest.raises(ImageFailed, match=f"dockerfile '{dockerfile}' is not a file inside the build context"):
+            stage_context(context, dockerfile)
+        assert sorted(os.listdir(context)) == before
+        assert os.readlink(context / self._name(0)) == self._name(1)
+
+    @pytest.mark.parametrize("reached", ["the-dockerfile", "its-directory"])
+    def test_a_dockerfile_reached_by_a_few_links_is_staged_with_its_own_ignore_file(
+        self, reached: str, root: Path
+    ) -> None:
+        """A chain the system follows: the Dockerfile it leads to goes to the root, and so does the ignore
+        file beside the path the build names, which is what leaves the build's secrets out."""
+        if reached == "the-dockerfile":
+            context = self._chain(root / "context", 8, ends_at="Dockerfile.real")
+            (context / "Dockerfile.real").write_text("FROM real\n")
+            (context / "docker").mkdir()
+            (context / "docker" / "Dockerfile").symlink_to("../" + self._name(0))
+            (context / "docker" / "Dockerfile.dockerignore").write_text(".env\n")
+            dockerfile = "docker/Dockerfile"
+        else:
+            context = self._chain(root / "context", 8, ends_at="real")
+            (context / "real").mkdir()
+            (context / "real" / "Dockerfile").write_text("FROM real\n")
+            (context / "real" / "Dockerfile.dockerignore").write_text(".env\n")
+            dockerfile = self._name(0) + "/Dockerfile"
+
+        assert stage_context(context, dockerfile) == context
+        assert ((context / "Dockerfile").is_symlink(), (context / "Dockerfile").read_text()) == (False, "FROM real\n")
+        staged_ignore = context / "Dockerfile.dockerignore"
+        assert (staged_ignore.is_symlink(), staged_ignore.read_text()) == (False, ".env\n")
+
+    def test_a_small_archive_of_many_links_costs_no_more_to_stage_than_its_links(self, root: Path) -> None:
+        """Unpacked as the step unpacks one: under four kilobytes of archive, 256 links, and no more than
+        three reads of each."""
+        links = 256
+        archive = root / "context.tar.gz"
+        with tarfile.open(archive, "w:gz") as packed:
+            for name, content in (("Dockerfile", b"FROM scratch\n"), ("payload", b"x")):
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                packed.addfile(member, io.BytesIO(content))
+            for number in range(links):
+                member = tarfile.TarInfo(self._name(number))
+                member.type = tarfile.SYMTYPE
+                member.linkname = self._name(number + 1) if number + 1 < links else "payload"
+                packed.addfile(member)
+        context = root / "unpacked"
+        context.mkdir()
+
+        assert archive.stat().st_size < 4096
+        assert unpack(archive, context) == links + 2
+        assert self._staged(context) <= 3 * links
+
+    def test_a_path_leads_to_the_same_place_whichever_link_was_followed_first(self, root: Path) -> None:
+        """`into -> round`, `round -> about`, `about -> round`, and `through -> into`. A link that is come
+        back to while it is followed is left in the path as a name, so where a loop's links end rests on
+        which of them is come to first. Nothing of that is remembered from one path to the next: a directory
+        lists its entries in no promised order, and a context must not be staged one way or another by it."""
+        written = {"into": "round", "round": "about", "about": "round", "through": "into"}
+        for name, leads_to in written.items():
+            (root / name).symlink_to(leads_to)
+
+        led: set[tuple[str, ...]] = set()
+        for order in itertools.permutations(written):
+            follower = driver._Follower()
+            ends = {name: follower.end(str(root), name) for name in order}
+            led.add(tuple(ends[name] for name in written))
+
+        assert led == {tuple(str(root / name) for name in ("round", "round", "about", "round"))}
+
+    @pytest.mark.parametrize(
+        ("costly", "limit"), [("many-links", 100), ("long-paths", 100), ("a-chain-that-ends-in-a-loop", 1000)]
+    )
+    def test_links_that_take_too_many_steps_to_follow_fail_the_image(
+        self, costly: str, limit: int, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What is remembered bounds how often a link is read, not how long the paths are that links are
+        written as. And nothing is remembered of a link that ends in a loop of links, whose end rests on
+        which link of the loop is come to first: every link of a chain that ends in one is followed to the
+        loop again. So every name the driver takes is counted, and past a limit the image fails and says
+        so. At the limit as it ships, each of these is staged, as it was."""
+        if costly == "many-links":
+            context = self._chain(root / "context", 64)
+        elif costly == "long-paths":
+            context = self._chain(root / "context", 0)
+            for number in range(8):
+                (context / f"alias-{number}").symlink_to("./" * 100 + "payload")
+        else:
+            context = self._chain(root / "context", 64, ends_at="round")
+            (context / "round").symlink_to("about")
+            (context / "about").symlink_to("round")
+
+        monkeypatch.setattr(driver, "MAX_LINK_STEPS", limit)
+        with pytest.raises(ImageFailed, match=f"the build context's links take more than {limit} steps to follow"):
+            stage_context(context, "Dockerfile")
+        if costly == "a-chain-that-ends-in-a-loop":
+            # As long a chain that ends at a file is within this limit: each of its links is followed once.
+            assert self._staged(self._chain(root / "ends-at-a-file", 64)) <= 3 * 64
+        monkeypatch.undo()
+
+        assert driver.MAX_LINK_STEPS == 100 * MAX_UNPACKED_ENTRIES
+        assert stage_context(context, "Dockerfile") == context
+        assert os.readlink(context / "alias-0" if costly == "long-paths" else context / self._name(63)) == (
+            {"many-links": "payload", "long-paths": "./" * 100 + "payload"}.get(costly, "round")
+        )
+
+    def test_an_image_whose_links_take_too_long_to_follow_is_failed_before_any_build_is_started(
+        self, root: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Through the driver. The links are followed before the image's build timeout starts, and nothing
+        looks at a stop meanwhile: the limit is what ends it."""
+        context = self._chain(root / "context", 64)
+        monkeypatch.setattr(driver, "MAX_LINK_STEPS", 100)
+        service, builder = FakeService([DONE]), FakeBuilder()
+
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, root) == 1
+
+        assert (service.started, builder.completed) == ([], [])
+        assert f"{FAILURE_MARKER} demo-1: the build context's links take more than 100 steps to follow" in caplog.text
+
+    def test_the_names_of_a_chain_are_counted_before_they_are_held(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each link is written as the next one, then a hundred names. The next link is the first name
+        taken, so every link of the chain is read before any of the names after one is: counted only as
+        they were taken, sixty-four links' names were all held by the sixty-fourth step. Counted as each
+        link is read, the limit is reached at the tenth link, and no more are read."""
+        context = self._chain(root / "context", 0)
+        for number in range(64):
+            (context / self._name(number)).symlink_to(self._name(number + 1) + "/." * 100)
+
+        monkeypatch.setattr(driver, "MAX_LINK_STEPS", 1000)
+        with (
+            LinkReads() as reads,
+            pytest.raises(ImageFailed, match="the build context's links take more than 1000 steps to follow"),
+        ):
+            stage_context(context, "Dockerfile")
+        assert reads.total <= 10
+
+    #: Names that are not there, as a link is written with them after the link it leads to: 800 characters.
+    NOT_THERE = "/missing" * 100
+
+    def test_links_that_each_add_names_that_are_not_there_fail_the_image_before_their_paths_grow(
+        self, root: Path
+    ) -> None:
+        """Each link is written as the next one, then a hundred names that are not there. A name that isn't
+        there stays in the path, so the first link ends at every link's names, one after another, and each
+        name costs the path so far to take: sixty-four links are 6,400 steps, far inside the limit on steps,
+        over a path that comes to fifty thousand characters, and a thousand links would be hours of it.
+        Nothing is at a path the system can't read, so the image fails once one is longer than any one link
+        leads to, and where a link ended is never remembered as more than that."""
+        context = self._chain(root / "context", 0)
+        for number in range(64):
+            (context / self._name(number)).symlink_to(self._name(number + 1) + self.NOT_THERE)
+        too_long = f"links lead to a path of more than {driver.MAX_LINK_PATH_CHARS} characters, where nothing can be"
+
+        follower = driver._Follower()
+        with pytest.raises(ImageFailed, match=too_long):
+            follower.end(str(context), self._name(0))
+        # Every link was read, and its names counted: the first link's own name, and 101 for each. Given up
+        # while the path was short, on the way back from the last link, with only the last few links ended.
+        assert follower.steps == 1 + 64 * 101
+        assert 0 < len(follower._ends) < 64
+        assert max(map(len, follower._ends.values())) <= driver.MAX_LINK_PATH_CHARS
+
+        with pytest.raises(ImageFailed, match=too_long):
+            stage_context(context, "Dockerfile")
+
+    @pytest.fixture
+    def looked_at(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """How long each path is that is looked at, a name at a time, to learn where links lead, from here
+        on: by the driver's own following, and by the standard library's. Both ask ``os.lstat``."""
+        lengths: list[int] = []
+        lstat = os.lstat
+
+        def looked(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            lengths.append(len(os.fspath(path)))
+            return lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", looked)
+        return lengths
+
+    def test_a_dockerfile_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
+        self, root: Path, looked_at: list[int]
+    ) -> None:
+        """The Dockerfile's path is a submitter's, and so is every link on the way to it. Whether it leads
+        to a file is asked of the system, which gives up on a chain after a few tens of links, before the
+        step follows the path for itself to see that it stays inside the context: followed first, with no
+        limit, the path came to twelve thousand characters to learn that no file is there, and each name
+        of it cost the path so far. Each link adds few names, and the links are many, so that it is the
+        links the system gives up for."""
+        links, not_there = 512, "/missing" * 3
+        context = self._chain(root / "context", 0)
+        (context / "Dockerfile").unlink()
+        (context / "Dockerfile").symlink_to(self._name(0) + not_there)
+        for number in range(links):
+            (context / self._name(number)).symlink_to(self._name(number + 1) + not_there)
+        assert links * len(not_there) > driver.MAX_LINK_PATH_CHARS
+
+        with LinkReads() as reads, pytest.raises(ImageFailed, match="dockerfile 'Dockerfile' is not a file inside"):
+            stage_context(context, "Dockerfile")
+        assert reads.total == 0
+        assert max(looked_at, default=0) <= driver.MAX_LINK_PATH_CHARS
+
+    def test_a_path_the_system_refuses_outright_is_no_file_and_no_directory(self, root: Path) -> None:
+        """A name longer than the system allows: it answers with an error, not that nothing is there. The
+        image fails as for any path that leads to no file, or to no directory, and not in the words of
+        the system's error, which a path's own `is_file` raises on some Pythons and not on others."""
+        context = self._chain(root / "context", 0)
+        too_long = "a" * 300
+        with pytest.raises(OSError) as refused:
+            os.stat(context / too_long)
+        assert refused.value.errno == errno.ENAMETOOLONG
+
+        with pytest.raises(ImageFailed, match="is not a file inside the build context"):
+            stage_context(context, f"{too_long}/Dockerfile")
+        with pytest.raises(ImageFailed, match="its build context is not a directory in what was fetched"):
+            stage_context(context / too_long, "Dockerfile")
+        assert sorted(os.listdir(context)) == ["Dockerfile", "payload"]
+
+    def test_a_context_path_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
+        self, root: Path, caplog: pytest.LogCaptureFixture, looked_at: list[int]
+    ) -> None:
+        """One image's own download, unpacked as the step unpacks it, whose context path names the first
+        link of the chain. Whether that is a directory is asked of the system, which gives up on a chain
+        after a few tens of links, before the step follows the path for itself to see that it stays
+        inside its source: followed first, with no limit, the path came to twelve thousand characters to
+        learn that nothing is there. Each link adds few names, and the links are many: followed, the path
+        would come to more than the longest the step follows."""
+        links, not_there = 512, "/missing" * 3
+        entries: Entries = {"app": Link(self._name(0) + not_there)}
+        entries |= {self._name(number): Link(self._name(number + 1) + not_there) for number in range(links)}
+        fetch, _ = _fetching(entries)
+
+        outcome = _built(root, caplog, fetch, "app")
+
+        assert (outcome.exit, outcome.handed, outcome.completed) == (1, {}, [])
+        assert outcome.reasons == {
+            "a": "its build context is not a directory in what was fetched: its context path matches none"
+        }
+        assert max(looked_at) <= driver.MAX_LINK_PATH_CHARS
+
+    def test_a_path_within_what_one_link_can_lead_to_is_followed_though_nothing_is_there(self, root: Path) -> None:
+        """What is refused is a path no one link could be written as. A link that leads nowhere, by as many
+        names as its own path holds, is handed on as it was, and so is a short chain of them."""
+        context = self._chain(root / "context", 0)
+        (context / "alone").symlink_to("nowhere" + self.NOT_THERE)
+        for number in range(4):
+            (context / self._name(number)).symlink_to(self._name(number + 1) + self.NOT_THERE)
+        assert len(str(context)) + 5 * len(self._name(0) + self.NOT_THERE) < driver.MAX_LINK_PATH_CHARS
+
+        assert stage_context(context, "Dockerfile") == context
+        assert os.readlink(context / "alone") == "nowhere" + self.NOT_THERE
+        assert os.readlink(context / self._name(0)) == self._name(1) + self.NOT_THERE
+
+    def test_no_one_link_leads_to_a_path_as_long_as_the_longest_followed(self) -> None:
+        """The system reads no path longer than 4,096 characters, so a link's directory and the path it is
+        written as are each within that: twice it is more than any one link comes to."""
+        assert driver.MAX_LINK_PATH_CHARS == 2 * 4096
+
+
+@dataclass(frozen=True)
+class Link:
+    """A symbolic link in an archive, with its path as the archive writes it."""
+
+    to: str
+
+
+@dataclass(frozen=True)
+class SameFileAs:
+    """A hard link in an archive: another name for the member ``to``, a path from the archive's root."""
+
+    to: str
+
+
+Entries = dict[str, bytes | Link | SameFileAs]
+
+FILESET = "default/fs-a"
+ARCHIVE = "task.tar"
+#: Why staging refuses a context for one of its links, before the link's name.
+LEADS_OUT = "the build context has a link that leads out of it, or back to a directory it is in: "
+
+
+def _archive(entries: Entries) -> bytes:
+    """A tar of ``entries``: what a submitter puts in a fileset."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, content in entries.items():
+            info = tarfile.TarInfo(name)
+            if isinstance(content, Link):
+                info.type, info.linkname = tarfile.SYMTYPE, content.to
+                tar.addfile(info)
+            elif isinstance(content, SameFileAs):
+                info.type, info.linkname = tarfile.LNKTYPE, content.to
+                tar.addfile(info)
+            else:
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+class FakeFiles:
+    """The one call the step makes of Files for an archive, with each download noted."""
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.files = files
+        self.downloads: list[str] = []
+
+    def download_file(self, *, workspace: str, name: str, path: str) -> Any:
+        self.downloads.append(path)
+        content = self.files[path]
+
+        class _Body:
+            @contextmanager
+            def stream(self, chunk_size: int | None = None) -> Generator[Iterator[bytes], None, None]:
+                size = chunk_size or 7
+                yield iter([content[i : i + size] for i in range(0, len(content), size)])
+
+        return _Body()
+
+
+def _fetching(entries: Entries) -> tuple[Callable[[RemoteBuildImage, Path], Path], FakeFiles]:
+    """The step's own fetch, as ``step_main`` passes it, of an archive that holds ``entries``."""
+    files = FakeFiles({ARCHIVE: _archive(entries)})
+
+    def fetch(image: RemoteBuildImage, directory: Path) -> Path:
+        return fetch_context(cast(FilesClient, files), image, workspace="default", root=directory / "fetched")
+
+    return fetch, files
+
+
+def _archive_set(*contexts: str | None, dockerfile: str = "Dockerfile") -> RemoteBuildStepConfig:
+    """A set with one image, named a, b, c..., for each of ``contexts``: directories of the one archive."""
+    return RemoteBuildStepConfig.model_validate(
+        {
+            "images": [
+                {
+                    "image": name,
+                    "source": {"fileset": FILESET, "archive": ARCHIVE, "context_path": context},
+                    "dockerfile": dockerfile,
+                    "platform": "linux/amd64",
+                }
+                for name, context in zip("abcdef", contexts, strict=False)
+            ],
+            "registry": "registry.example.com",
+            "repository": "team/images",
+            "build_timeout_seconds": 600,
+        }
+    )
+
+
+@dataclass(frozen=True)
+class Handed:
+    """A build context as the build service was handed it."""
+
+    #: Every name in it, from its root.
+    names: tuple[str, ...]
+    #: Each link in it, with the path it is written as.
+    links: dict[str, str]
+    #: What each file reads as, through a link too. None for a link that leads to nothing.
+    reads: dict[str, bytes | None]
+
+    @classmethod
+    def of(cls, context: Path) -> Handed:
+        paths = sorted(context.rglob("*"))
+        names = tuple(path.relative_to(context).as_posix() for path in paths)
+        links = {name: os.readlink(path) for name, path in zip(names, paths, strict=True) if path.is_symlink()}
+        reads: dict[str, bytes | None] = {}
+        for name, path in zip(names, paths, strict=True):
+            if path.is_file():
+                reads[name] = path.read_bytes()
+            elif path.is_symlink() and not path.exists():
+                reads[name] = None
+        return cls(names, links, reads)
+
+
+class Inspecting(FakeService):
+    """A build service that looks at each context it is handed, and builds it."""
+
+    def __init__(self) -> None:
+        super().__init__([DONE])
+        self.handed: dict[str, Handed] = {}
+
+    def start(self, build: RemoteBuild) -> str:
+        self.handed[build.labels["image"]] = Handed.of(build.context)
+        return super().start(build)
+
+
+@dataclass
+class Outcome:
+    """What one run of the step came to."""
+
+    #: 0 if every image was built.
+    exit: int
+    #: Each context the service was handed, by its image.
+    handed: dict[str, Handed]
+    #: The images whose rows were completed, in order.
+    completed: list[str]
+    #: Why each image that failed did, as its failure line says it.
+    reasons: dict[str, str]
+
+
+def _built(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    fetch: Callable[[RemoteBuildImage, Path], Path],
+    *contexts: str | None,
+    service: Inspecting | None = None,
+) -> Outcome:
+    """Build a set with one image for each of ``contexts``, directories of one archive, through the driver."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    service, builder = service or Inspecting(), FakeBuilder()
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        code = _run(service, builder, tmp_path, tmp_path, fetch=fetch, config=_archive_set(*contexts))
+    reasons: dict[str, str] = {}
+    for record in caplog.records:
+        message = record.getMessage()
+        if message.startswith(FAILURE_MARKER + " "):
+            image, _, reason = message.removeprefix(FAILURE_MARKER + " ").partition(": ")
+            reasons.setdefault(image, reason)
+    return Outcome(code, service.handed, [image for image, _, _ in builder.completed], reasons)
+
+
+#: `app/cached -> ../beside/alias -> ../app/payload`: a link of the context that reaches a file of the context
+#: by way of a link beside it. `tools` is a second directory of the archive, for a second spec to build.
+BY_A_LINK_BESIDE_IT: Entries = {
+    "app/Dockerfile": b"FROM scratch\nCOPY . /app\n",
+    "app/payload": b"the payload\n",
+    "beside/alias": Link("../app/payload"),
+    "app/cached": Link("../beside/alias"),
+    "tools/Dockerfile": b"FROM scratch\n",
+}
+#: What a build service is handed for `app` when nothing shares the download: the link leads where it did, by
+#: a path that stays inside the context wherever the context is unpacked.
+BUILT_ALONE = Handed(
+    names=("Dockerfile", "cached", "payload"),
+    links={"cached": "payload"},
+    reads={"Dockerfile": b"FROM scratch\nCOPY . /app\n", "cached": b"the payload\n", "payload": b"the payload\n"},
+)
+
+#: A second directory of each archive below, for the spec that is added.
+TOOLS: Entries = {"tools/Dockerfile": b"FROM scratch\n"}
+APP: Entries = {"app/Dockerfile": b"FROM scratch\n", "app/payload": b"the payload\n"} | TOOLS
+
+#: Contexts built alone and from a set: the archive, the first spec's context path, and why the first image is
+#: refused, or None if it is built.
+ALONE_AND_FROM_A_SET: dict[str, tuple[Entries, str | None, str | None]] = {
+    # A link that never leaves the context.
+    "a-link-inside-the-context": (APP | {"app/cached": Link("payload")}, "app", None),
+    # One that comes back by the context's own name.
+    "back-by-the-contexts-own-name": (APP | {"app/cached": Link("../app/payload")}, "app", None),
+    # One that comes back by the archive's own directory.
+    "back-by-the-downloads-own-name": (APP | {"app/cached": Link(f"../../{ARCHIVE}/app/payload")}, "app", None),
+    # One that climbs past the archive's own directory and comes back by the names the step unpacks under: the
+    # fileset's and the archive's. Unpacking lets it through, since it ends inside the archive.
+    "back-by-the-names-above-the-download": (
+        APP | {"app/cached": Link(f"../../../fs-a/{ARCHIVE}/app/payload")},
+        "app",
+        None,
+    ),
+    # The same of an image that builds the whole archive.
+    "back-by-the-names-above-the-download-in-the-whole-archive": (
+        {
+            "Dockerfile": b"FROM scratch\n",
+            "payload": b"the payload\n",
+            "cached": Link(f"../../fs-a/{ARCHIVE}/payload"),
+        }
+        | TOOLS,
+        None,
+        None,
+    ),
+    # One that passes a link to a directory, beside the context, that leads back to the context.
+    "by-way-of-a-link-to-a-directory-beside-it": (
+        APP | {"beside/up": Link("../app"), "app/cached": Link("../beside/up/payload")},
+        "app",
+        None,
+    ),
+    # A link to a directory of the context, by way of a link beside the context.
+    "a-link-to-a-directory-by-way-of-one-beside-it": (
+        APP | {"app/vendor/lib.py": b"", "beside/libs": Link("../app/vendor"), "app/lib": Link("../beside/libs")},
+        "app",
+        None,
+    ),
+    # The Dockerfile itself is such a link.
+    "the-dockerfile-by-way-of-a-link-beside-it": (
+        {
+            "app/Dockerfile.real": b"FROM scratch\n",
+            "app/payload": b"the payload\n",
+            "beside/dockerfile": Link("../app/Dockerfile.real"),
+            "app/Dockerfile": Link("../beside/dockerfile"),
+        }
+        | TOOLS,
+        "app",
+        None,
+    ),
+    # The context's own ignore file is such a link.
+    "the-ignore-file-by-way-of-a-link-beside-it": (
+        APP
+        | {
+            "app/rules": b"payload\n",
+            "beside/rules": Link("../app/rules"),
+            "app/.dockerignore": Link("../beside/rules"),
+        },
+        "app",
+        None,
+    ),
+    # The context path names a link to the directory, and a link in it comes back by that name.
+    "back-by-the-link-the-context-path-names": (
+        {
+            "v2/Dockerfile": b"FROM scratch\n",
+            "v2/payload": b"the payload\n",
+            "current": Link("v2"),
+            "v2/cached": Link("../current/payload"),
+        }
+        | TOOLS,
+        "current",
+        None,
+    ),
+    # Two links that lead to each other, one of them beside the context. The one in the context leads nowhere,
+    # and is handed on as a link to itself.
+    "a-loop-by-way-of-a-link-beside-it": (
+        APP | {"beside/round": Link("../app/round"), "app/round": Link("../beside/round")},
+        "app",
+        None,
+    ),
+    # One that leads nowhere, inside the context: left as it is.
+    "a-link-to-nothing-inside-the-context": (APP | {"app/cached": Link("nothing-here")}, "app", None),
+    # Another name for a file beside the context, not a link to it: the copy has the file's bytes.
+    "one-file-under-a-name-beside-the-context": (
+        APP | {"beside/big": b"shared bytes\n", "app/cached": SameFileAs("beside/big")},
+        "app",
+        None,
+    ),
+    # A link to a file beside the context: refused, as it must be.
+    "a-link-to-a-file-beside-the-context": (
+        APP | {"beside/answer": b"not this build's\n", "app/cached": Link("../beside/answer")},
+        "app",
+        LEADS_OUT + "'cached'",
+    ),
+    # A link to nothing beside the context: refused too.
+    "a-link-to-nothing-beside-the-context": (
+        APP | {"app/cached": Link("../beside/nothing")},
+        "app",
+        LEADS_OUT + "'cached'",
+    ),
+    # A Dockerfile that is a link to a file beside the context: refused before its links are looked at.
+    "a-dockerfile-that-links-to-a-file-beside-the-context": (
+        {"beside/Dockerfile": b"FROM beside\n", "app/Dockerfile": Link("../beside/Dockerfile")} | TOOLS,
+        "app",
+        "dockerfile 'Dockerfile' is not a file inside the build context",
+    ),
+}
+
+
+class TestAContextFromASharedDownload:
+    """A download only one image names is staged where it was unpacked, with the rest of an archive still
+    beside the image's directory. One that several images name is unpacked once, and each image stages a copy
+    of its own directory. An image is handed the same context either way."""
+
+    def test_an_image_that_shares_its_download_is_handed_the_context_it_is_handed_alone(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`cached` reaches the context's own `payload` by way of a link beside the context, which a copy of
+        the directory alone does not hold. Where each link leads is decided where the archive was unpacked,
+        so adding a second spec of the same archive does not fail the first."""
+        alone = _built(tmp_path / "alone", caplog, _fetching(BY_A_LINK_BESIDE_IT)[0], "app")
+        fetch, files = _fetching(BY_A_LINK_BESIDE_IT)
+
+        shared = _built(tmp_path / "set", caplog, fetch, "app", "tools")
+
+        assert (alone.exit, alone.completed, alone.reasons) == (0, ["a"], {})
+        assert alone.handed == {"a": BUILT_ALONE}
+        # One download, of the archive whole, served both images.
+        assert files.downloads == [ARCHIVE]
+        assert (shared.exit, shared.completed, shared.reasons) == (0, ["a", "b"], {})
+        assert shared.handed["a"] == BUILT_ALONE
+
+    def test_two_images_of_one_directory_are_each_handed_it_as_one_is_alone(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Two specs that build `app` itself, for two platforms say, name one download too."""
+        twice = _built(tmp_path, caplog, _fetching(BY_A_LINK_BESIDE_IT)[0], "app", "app")
+
+        assert (twice.exit, twice.completed, twice.reasons) == (0, ["a", "b"], {})
+        assert twice.handed == {"a": BUILT_ALONE, "b": BUILT_ALONE}
+
+    def test_the_download_is_as_it_was_unpacked_for_the_image_that_builds_all_of_it(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The first image's link is rewritten in its own copy. The second builds the whole archive, in which
+        the same link stays inside the context as it is written: had the download been rewritten for the
+        first, the second would be handed the first image's link."""
+        entries = BY_A_LINK_BESIDE_IT | {"Dockerfile": b"FROM scratch\n"}
+
+        shared = _built(tmp_path, caplog, _fetching(entries)[0], "app", None)
+
+        assert (shared.exit, shared.completed, shared.reasons) == (0, ["a", "b"], {})
+        assert shared.handed["a"] == BUILT_ALONE
+        assert shared.handed["b"].links == {"app/cached": "../beside/alias", "beside/alias": "../app/payload"}
+        assert shared.handed["b"].reads["app/cached"] == b"the payload\n"
+
+    def test_an_images_copy_is_of_its_directory_alone_and_nothing_is_written_where_it_was_unpacked(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """What the first image's build is started with, and what the download is at that moment."""
+        scratch = (tmp_path / "scratch").resolve()
+        #: Where the context is, what the image's directory holds, and each link of the download as written.
+        seen: dict[str, Any] = {}
+
+        class Noting(Inspecting):
+            def start(self, build: RemoteBuild) -> str:
+                if build.labels["image"] == "a":
+                    (download,) = scratch.glob(f"source-*/fetched/unpacked/{FILESET}/{ARCHIVE}")
+                    seen["where"] = build.context.relative_to(scratch).parts
+                    seen["copied"] = sorted(
+                        path.relative_to(build.context.parent).as_posix() for path in build.context.parent.rglob("*")
+                    )
+                    seen["download"] = Handed.of(download)
+                return super().start(build)
+
+        shared = _built(tmp_path, caplog, _fetching(BY_A_LINK_BESIDE_IT)[0], "app", "tools", service=Noting())
+
+        assert shared.handed["a"] == BUILT_ALONE
+        # The copy is in the image's own directory, under the download's name and then the directory's.
+        image_directory, *placed = seen["where"]
+        assert image_directory.startswith("image-") and placed == [ARCHIVE, "app"]
+        # It holds the directory, and nothing of the rest of the archive.
+        assert seen["copied"] == ["app", "app/Dockerfile", "app/cached", "app/payload"]
+        # The download is as it was unpacked: the link that was rewritten in the copy is as the archive wrote it.
+        assert seen["download"].links == {"app/cached": "../beside/alias", "beside/alias": "../app/payload"}
+        assert seen["download"].names == (
+            "app",
+            "app/Dockerfile",
+            "app/cached",
+            "app/payload",
+            "beside",
+            "beside/alias",
+            "tools",
+            "tools/Dockerfile",
+        )
+
+    @pytest.mark.parametrize("case", list(ALONE_AND_FROM_A_SET))
+    def test_a_context_is_handed_on_or_refused_the_same_alone_and_from_a_set(
+        self, case: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Built with a second spec of the same archive, each of these contexts is handed to the service
+        exactly as it is alone, the same names, links and contents, or is refused for the same reason."""
+        entries, context, refused = ALONE_AND_FROM_A_SET[case]
+
+        alone = _built(tmp_path / "alone", caplog, _fetching(entries)[0], context)
+        shared = _built(tmp_path / "set", caplog, _fetching(entries)[0], context, "tools")
+
+        assert alone.reasons == shared.reasons == ({} if refused is None else {"a": refused})
+        assert (alone.completed, shared.completed) == ((["a"], ["a", "b"]) if refused is None else ([], ["b"]))
+        assert ("a" in alone.handed) is (refused is None)
+        assert shared.handed.get("a") == alone.handed.get("a")
+        # No link that is handed on climbs out of the context to come back.
+        for written in shared.handed["a"].links.values() if refused is None else ():
+            assert PurePosixPath(written).parts[0] != ".."
+
+    @pytest.mark.parametrize("unpacked", ["as-the-archive-wrote-it", "as-the-step-unpacks-it"])
+    def test_a_link_that_leads_beside_the_context_by_a_step_back_from_a_link_is_refused_from_a_set_too(
+        self, unpacked: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`app/cached -> ../beside/far/../../app/payload`, where `beside/far` is a link to a directory three
+        levels down. Followed where the archive was unpacked, the path ends at `other/app/payload`, a file
+        beside the context. In a copy of `app` alone, `beside/far` is a name with nothing behind it, the two
+        steps back are taken from the name, and the path ends at the context's own `payload`: checked there,
+        the context was built from a set, with the link made one to a file it never led to.
+
+        An interpreter that shortens a link's path as it unpacks leaves `cached -> ../app/payload`, which
+        leads to the context's own file wherever it is. So the files are also written here as unpacking
+        leaves them with each path kept as the archive wrote it. Either way, the two ways agree."""
+        files: Entries = APP | {
+            "app/payload": b"the context's own\n",
+            "other/app/payload": b"another directory's\n",
+            "other/deep/deeper/keep": b"",
+            "beside/far": Link("../other/deep/deeper"),
+            "app/cached": Link("../beside/far/../../app/payload"),
+        }
+
+        def as_written(image: RemoteBuildImage, directory: Path) -> Path:
+            root = Path(WorkLayout(PurePosixPath(directory / "fetched")).archive(FILESET, ARCHIVE))
+            for name, content in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                if isinstance(content, Link):
+                    (root / name).symlink_to(content.to)
+                elif isinstance(content, bytes):
+                    (root / name).write_bytes(content)
+            return root / image.source.context_path if image.source.context_path else root
+
+        fetch = as_written if unpacked == "as-the-archive-wrote-it" else _fetching(files)[0]
+
+        alone = _built(tmp_path / "alone", caplog, fetch, "app")
+        shared = _built(tmp_path / "set", caplog, fetch, "app", "tools")
+
+        assert shared.completed[-1:] == ["b"]
+        assert (shared.reasons, shared.handed.get("a")) == (alone.reasons, alone.handed.get("a"))
+        if unpacked == "as-the-archive-wrote-it":
+            assert alone.reasons == {"a": LEADS_OUT + "'cached'"}
+        elif alone.reasons == {}:
+            assert alone.handed["a"].reads["cached"] == b"the context's own\n"
+
+
+def _regular_bytes(root: Path) -> int:
+    """The bytes of the regular files under ``root``, with no link followed: what a packager that packs a
+    link as a link sends in file content."""
+    total = 0
+    for directory, _, names in os.walk(root):
+        for name in names:
+            status = os.lstat(Path(directory, name))
+            if stat.S_ISREG(status.st_mode):
+                total += status.st_size
+    return total
+
+
+def _followed_bytes(root: Path) -> int:
+    """The bytes a packager that follows links sends: a link to a file counts as the file, each time the walk
+    comes to it. A link that leads nowhere counts for nothing."""
+    total = 0
+    for directory, _, names in os.walk(root, followlinks=True):
+        for name in names:
+            try:
+                status = os.stat(Path(directory, name))
+            except OSError:
+                continue
+            if stat.S_ISREG(status.st_mode):
+                total += status.st_size
+    return total
+
+
+def _names(root: Path) -> list[str]:
+    """Every name under ``root``, from it."""
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+def _sized(first_line: bytes, size: int) -> bytes:
+    """``size`` bytes that start with ``first_line``. The rest is one comment line."""
+    content = first_line + b"\n" + b"#" * (size - len(first_line) - 2) + b"\n"
+    assert len(content) == size
+    return content
+
+
+class TestWhatStagingAdds:
+    """The limits a source is held to as it is unpacked hold for the context a service is handed. Staging adds
+    to a context: the named Dockerfile at its root, its ignore file beside it, and what any link to either
+    then leads to. The limit on bytes is scaled to 100 here, as the tests of the measure scale it."""
+
+    LIMIT = 100
+    #: The Dockerfile the spec names, which is not at the context's root, and its own ignore file.
+    NAMED = "services/feed/Dockerfile"
+    NAMED_IGNORE = NAMED + ".dockerignore"
+    #: A context of exactly the limit: 40 bytes of Dockerfile, 20 of its ignore file, and 40 of anything else.
+    WITH_IGNORE: dict[str, bytes] = {
+        NAMED: _sized(b"FROM scratch", 40),
+        NAMED_IGNORE: _sized(b"*.log", 20),
+        "payload.bin": b"\0" * 40,
+    }
+    #: Five links to the root Dockerfile, which the context doesn't hold: they lead nowhere until it is staged.
+    LINKS = {f"images/{name}/Dockerfile": "../../Dockerfile" for name in ("api", "web", "worker", "cron", "docs")}
+
+    @staticmethod
+    def _context(directory: Path, files: dict[str, bytes], links: dict[str, str] | None = None) -> Path:
+        """A build context, ``directory``, of ``files`` and of ``links`` as symbolic links."""
+        for name, content in files.items():
+            (directory / name).parent.mkdir(parents=True, exist_ok=True)
+            (directory / name).write_bytes(content)
+        for name, leads_to in (links or {}).items():
+            (directory / name).parent.mkdir(parents=True, exist_ok=True)
+            (directory / name).symlink_to(leads_to)
+        return directory
+
+    @pytest.fixture
+    def limit(self, monkeypatch: pytest.MonkeyPatch) -> Callable[[int], None]:
+        """Sets the limit on bytes, under both names the code reads it by: the fetch's own, and the driver's."""
+
+        def scale(size: int) -> None:
+            monkeypatch.setattr(fetch_step, "MAX_UNPACKED_BYTES", size)
+            monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size)
+
+        return scale
+
+    @pytest.mark.parametrize("built", ["alone", "from-a-set"])
+    @pytest.mark.parametrize(
+        ("files", "staged"),
+        [
+            pytest.param({NAMED: _sized(b"FROM scratch", 60), "payload.bin": b"\0" * 40}, 160, id="its-dockerfile"),
+            pytest.param(WITH_IGNORE, 160, id="its-dockerfile-and-ignore-file"),
+        ],
+    )
+    def test_a_context_that_its_named_dockerfile_carries_past_the_limit_is_refused_before_anything_is_written(
+        self, files: dict[str, bytes], staged: int, built: str, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """A hundred bytes of files, within a limit of a hundred, and no link. Staged, the named Dockerfile is
+        at the root as well, and its ignore file beside it: 160 bytes, which the sizes of the files to be
+        written tell before any is. So does a context staged in a copy, for an image of a set."""
+        context = self._context(tmp_path / "fetched", files)
+        into = tmp_path / "copy" / "context" if built == "from-a-set" else None
+        before = _names(context)
+        assert _regular_bytes(context) == self.LIMIT
+
+        limit(staged - 1)
+        with pytest.raises(ImageFailed, match=f"the build context comes to more than {staged - 1} bytes"):
+            stage_context(context, self.NAMED, into=into)
+        # Nothing was written where a Dockerfile goes, nor left behind.
+        for directory in (context, *([into] if into is not None else [])):
+            assert _names(directory) == before
+
+        limit(staged)
+        handed = stage_context(context, self.NAMED, into=None if into is None else tmp_path / "again" / "context")
+        assert (handed / "Dockerfile").read_bytes() == files[self.NAMED]
+        assert (_regular_bytes(handed), _followed_bytes(handed)) == (staged, staged)
+        # Staged where it was fetched, when it is the image's alone. Where it is not, that is as it was.
+        assert (handed == context.resolve()) is (into is None)
+        assert into is None or _names(context) == before
+
+    @pytest.mark.parametrize(
+        ("files", "links", "before", "after"),
+        [
+            pytest.param(WITH_IGNORE, LINKS, (100, 100), (160, 360), id="links-that-lead-nowhere-until-it-is-staged"),
+            pytest.param(
+                {
+                    "Dockerfile": b"FROM tiny\n",
+                    NAMED: _sized(b"FROM scratch", 40),
+                    NAMED_IGNORE: _sized(b"*.log", 20),
+                    "payload.bin": b"\0" * 10,
+                },
+                {"images/api/Dockerfile": "../../Dockerfile", "images/web/Dockerfile": "../../Dockerfile"},
+                (80, 100),
+                (130, 210),
+                id="links-to-a-root-dockerfile-that-is-replaced",
+            ),
+            pytest.param(
+                {
+                    "docker/Dockerfile.prod": b"FROM tiny\n",
+                    NAMED: _sized(b"FROM scratch", 40),
+                    NAMED_IGNORE: _sized(b"*.log", 20),
+                    "payload.bin": b"\0" * 10,
+                },
+                # The root Dockerfile is a link itself. Followed to its end, the link to it leads to another
+                # file than the root one before it is staged, and to the root one after.
+                {"Dockerfile": "docker/Dockerfile.prod", "images/api/Dockerfile": "../../Dockerfile"},
+                (80, 100),
+                (140, 180),
+                id="a-link-to-a-root-dockerfile-that-was-a-link-itself",
+            ),
+        ],
+    )
+    def test_what_a_link_to_the_root_dockerfile_leads_to_once_it_is_staged_is_counted(
+        self,
+        files: dict[str, bytes],
+        links: dict[str, str],
+        before: tuple[int, int],
+        after: tuple[int, int],
+        tmp_path: Path,
+        limit: Callable[[int], None],
+    ) -> None:
+        """A context that comes to a hundred bytes with its links followed, as a packager that follows them
+        would send it. Its links to the root `Dockerfile` lead to nothing, or to a few bytes, until the named
+        Dockerfile is written there: then each of them is another copy of it.
+
+        The files to be written do not tell this by their sizes: with them, the context's own files come to
+        the first number of ``after``, and a limit of as much lets it through to be staged. Only the measure
+        of what was staged finds the second."""
+        regular, followed = after
+        for name, size in (("as-its-files-alone-allow", regular), ("one-byte-short", followed - 1)):
+            context = self._context(tmp_path / name, files, links)
+            assert (_regular_bytes(context), _followed_bytes(context)) == before
+            limit(size)
+            with pytest.raises(ImageFailed, match=f"more than {size} bytes with its links followed"):
+                stage_context(context, self.NAMED)
+
+        context = self._context(tmp_path / "at-the-limit", files, links)
+        limit(followed)
+        staged = stage_context(context, self.NAMED)
+        assert (_regular_bytes(staged), _followed_bytes(staged)) == after
+        # The root Dockerfile is a file, the named one, and each link elsewhere is still a link, and leads to it.
+        assert not (staged / "Dockerfile").is_symlink()
+        for link in links:
+            assert (staged / link).read_bytes() == files[self.NAMED]
+            assert (staged / link).is_symlink() or link == "Dockerfile"
+
+    def test_every_file_staging_writes_is_counted_in_place_of_what_it_replaces(
+        self, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """Three files are written here. The named Dockerfile, over the context's own root one. Its ignore
+        file, over the root one's. And the context's `.dockerignore`, a link to the ignore file that goes,
+        as a copy of what it led to. The context comes to 100 bytes with its link followed, and to 145 staged:
+        told before any of the three is written."""
+        files = {
+            self.NAMED: _sized(b"FROM scratch", 40),
+            self.NAMED_IGNORE: _sized(b"*.log", 20),
+            "payload.bin": b"\0" * 20,
+            "Dockerfile": b"FROM tiny\n",
+            "Dockerfile.dockerignore": b"*.md\n",
+        }
+        context = self._context(tmp_path / "context", files, {".dockerignore": "Dockerfile.dockerignore"})
+        before = Handed.of(context)
+        assert (_regular_bytes(context), _followed_bytes(context)) == (95, self.LIMIT)
+
+        limit(144)
+        with pytest.raises(ImageFailed, match="more than 144 bytes with its links followed"):
+            stage_context(context, self.NAMED)
+        assert Handed.of(context) == before
+
+        limit(145)
+        staged = stage_context(context, self.NAMED)
+        assert (_regular_bytes(staged), _followed_bytes(staged)) == (145, 145)
+        assert Handed.of(staged).links == {}
+        assert (staged / ".dockerignore").read_bytes() == b"*.md\n"
+
+    def test_an_ignore_file_that_is_all_staging_writes_is_counted_too(
+        self, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """`Dockerfile.slim` is the root `Dockerfile` itself, under another name, so no Dockerfile is copied.
+        Built by that name, its own ignore file is written at the root, and that is thirty bytes more."""
+        files = {"Dockerfile": b"FROM tiny\n", "Dockerfile.slim.dockerignore": _sized(b"*.md", 30), "app.py": b"#" * 60}
+        for name, fits in (("over", False), ("within", True)):
+            context = self._context(tmp_path / name, files)
+            os.link(context / "Dockerfile", context / "Dockerfile.slim")
+            before = _names(context)
+            limit(130 if fits else 129)
+            if fits:
+                # Counted here for each name, the Dockerfile's ten bytes twice: the driver counts one file once.
+                assert _followed_bytes(stage_context(context, "Dockerfile.slim")) == 130 + len(files["Dockerfile"])
+            else:
+                with pytest.raises(ImageFailed, match="more than 129 bytes with its links followed"):
+                    stage_context(context, "Dockerfile.slim")
+                assert _names(context) == before
+
+    def test_the_ignore_file_that_goes_with_a_replaced_dockerfile_is_not_counted(
+        self, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """The named Dockerfile has no ignore file of its own, so the replaced root Dockerfile's goes. A
+        hundred bytes before, and a hundred staged: thirty more of Dockerfile, and thirty fewer of rules."""
+        files = {
+            self.NAMED: _sized(b"FROM scratch", 40),
+            "payload.bin": b"\0" * 20,
+            "Dockerfile": b"FROM tiny\n",
+            "Dockerfile.dockerignore": _sized(b"*.md", 30),
+        }
+        context = self._context(tmp_path / "context", files)
+        assert _regular_bytes(context) == self.LIMIT
+
+        limit(self.LIMIT)
+        staged = stage_context(context, self.NAMED)
+
+        assert not (staged / "Dockerfile.dockerignore").exists()
+        assert (_regular_bytes(staged), _followed_bytes(staged)) == (self.LIMIT, self.LIMIT)
+
+    def test_a_link_that_what_staging_takes_away_leaves_leading_out_of_the_context_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """`Dockerfile.slim` is the root `Dockerfile` under another name, with no ignore file of its own, so
+        the root one's goes: here a link to a directory two levels down. `fixture` is written as a path
+        through it and two steps back, which led to the context's own `app.py`. With the link gone, the two
+        steps are taken from a name with nothing behind it, and the path leads to a file beside the context.
+
+        Nothing was written into this context, and no link of it was rewritten. It is still looked at again
+        as it is handed on, because it holds links, and what they lead to is only known then."""
+        files = {"Dockerfile": b"FROM scratch\n", "app.py": b"the context's own\n", "a/b/keep": b""}
+        context = self._context(tmp_path / "fetched" / "app", files)
+        (tmp_path / "fetched" / "app.py").write_bytes(b"not this build's\n")
+        (context / "Dockerfile.slim").symlink_to("Dockerfile")
+        (context / "Dockerfile.dockerignore").symlink_to("a/b")
+        (context / "a" / "fixture").symlink_to("../Dockerfile.dockerignore/../../app.py")
+        assert (context / "a" / "fixture").read_bytes() == b"the context's own\n"
+        # Built by the root Dockerfile's own name, nothing is taken away, and the link is handed on as it is.
+        assert os.readlink(stage_context(context, "Dockerfile") / "a" / "fixture") == (
+            "../Dockerfile.dockerignore/../../app.py"
+        )
+
+        with pytest.raises(ImageFailed, match="a link that leads out of it, or back .*: 'a/fixture'"):
+            stage_context(context, "Dockerfile.slim")
+
+    def test_a_replaced_dockerfile_that_the_context_holds_under_another_name_is_still_counted(
+        self, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """The root `Dockerfile` and `docker/Dockerfile.default` are one file, as an archive may hold one. The
+        named Dockerfile takes the root one's place, and the file stays, under its other name. Before it is
+        written, a file that is replaced is taken to go, so this context is let through: it is the measure of
+        what was staged that refuses it, though it holds no link."""
+        files = {"docker/Dockerfile.default": _sized(b"FROM default", 60), self.NAMED: _sized(b"FROM scratch", 40)}
+        for name, fits in (("over", False), ("within", True)):
+            context = self._context(tmp_path / name, files)
+            os.link(context / "docker/Dockerfile.default", context / "Dockerfile")
+            # A hundred bytes of files: the one of sixty has two names.
+            assert _regular_bytes(context) == self.LIMIT + 60
+            limit(140 if fits else 139)
+            if fits:
+                assert _followed_bytes(stage_context(context, self.NAMED)) == 140
+            else:
+                with pytest.raises(ImageFailed, match="more than 139 bytes with its links followed"):
+                    stage_context(context, self.NAMED)
+
+    def test_the_names_staging_adds_are_counted_as_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same of the limit beside it. Five entries, and the root `Dockerfile` and its ignore file are
+        two more."""
+        context = self._context(tmp_path / "context", self.WITH_IGNORE)
+        before = _names(context)
+        assert len(before) == 5
+
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", 6)
+        with pytest.raises(ImageFailed, match="the build context comes to more than 6 entries"):
+            stage_context(context, self.NAMED)
+        assert _names(context) == before
+
+        monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", 7)
+        assert _names(stage_context(context, self.NAMED)) == sorted([*before, "Dockerfile", "Dockerfile.dockerignore"])
+
+    @pytest.mark.parametrize("built", ["alone", "from-a-set"])
+    @pytest.mark.parametrize("past", ["its-bytes", "its-entries"])
+    def test_a_context_with_no_links_that_was_past_a_limit_as_it_was_fetched_is_staged_all_the_same(
+        self, past: str, built: str, tmp_path: Path, limit: Callable[[int], None], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fileset that is not an archive has no limit as it is fetched, and holds no link. Here it is a
+        hundred bytes in five names, under a limit of ninety-nine bytes, or of four entries. It was never
+        within the limit, so it is not staging that carries it past, and whether it builds does not rest on
+        where its Dockerfile is: built by a `Dockerfile` at its root it is not measured, and built by one
+        elsewhere it is staged as any context is, with that Dockerfile and its ignore file at the root.
+
+        A context that is within the limits as it was fetched is still held to them: at a limit of exactly
+        what it holds, the same context is refused for what staging adds."""
+        files = self.WITH_IGNORE
+        context = self._context(tmp_path / "fetched", files)
+        into = tmp_path / "copy" / "context" if built == "from-a-set" else None
+        before = _names(context)
+        assert (_regular_bytes(context), len(before)) == (self.LIMIT, 5)
+
+        def scale(by: int) -> None:
+            if past == "its-bytes":
+                limit(self.LIMIT + by)
+            else:
+                monkeypatch.setattr(driver, "MAX_UNPACKED_ENTRIES", 5 + by)
+
+        scale(0)
+        with pytest.raises(ImageFailed, match="the build context comes to more than"):
+            stage_context(context, self.NAMED, into=into)
+        assert _names(context) == before
+
+        scale(-1)
+        handed = stage_context(context, self.NAMED, into=None if into is None else tmp_path / "again" / "context")
+        assert (handed / "Dockerfile").read_bytes() == files[self.NAMED]
+        assert (handed / "Dockerfile.dockerignore").read_bytes() == files[self.NAMED_IGNORE]
+        assert (_regular_bytes(handed), len(_names(handed))) == (160, 7)
+
+    def test_a_link_makes_a_context_one_that_is_measured_whatever_it_came_to_as_fetched(
+        self, tmp_path: Path, limit: Callable[[int], None]
+    ) -> None:
+        """What is left unmeasured is a context with no link, which is as large as it was fetched. The same
+        hundred bytes with one link among them are measured with the link followed, as they always were."""
+        context = self._context(tmp_path / "fetched", self.WITH_IGNORE, {"alias": "payload.bin"})
+        limit(self.LIMIT - 1)
+        with pytest.raises(ImageFailed, match=f"more than {self.LIMIT - 1} bytes with its links followed"):
+            stage_context(context, self.NAMED)
+
+    def test_an_archive_that_lists_no_directories_is_not_refused_for_the_names_it_comes_to_on_disk(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Through the driver, with the step's own fetch. Unpacking counts the entries an archive lists, and
+        an archive need not list its directories: four files, under five directories it doesn't name, are
+        four entries, within a limit of four, and nine names on disk. The measure counts names, so staged
+        with a Dockerfile that is not at its root this context was refused for entries it was never held
+        to. It holds no link, and was past the limit before anything was written into it: it is built."""
+        entries: Entries = {self.NAMED: b"FROM scratch\n", "a/one": b"1", "b/two": b"2", "c/three": b"3"}
+        for module in (fetch_step, driver):
+            monkeypatch.setattr(module, "MAX_UNPACKED_ENTRIES", 4)
+
+        # One entry more is refused where it is unpacked: the limit is the one this archive was held to.
+        with caplog.at_level(logging.ERROR):
+            code = _run(
+                Inspecting(),
+                FakeBuilder(),
+                tmp_path,
+                tmp_path,
+                fetch=_fetching(entries | {"d/four": b"4"})[0],
+                config=_archive_set(None, dockerfile=self.NAMED),
+            )
+        assert code == 1 and "it holds more than 4 entries" in caplog.text
+
+        service, builder = Inspecting(), FakeBuilder()
+        code = _run(
+            service,
+            builder,
+            tmp_path,
+            tmp_path,
+            fetch=_fetching(entries)[0],
+            config=_archive_set(None, dockerfile=self.NAMED),
+        )
+        assert (code, [image for image, _, _ in builder.completed]) == (0, ["a"])
+        assert len(service.handed["a"].names) == 10
+        assert service.handed["a"].reads["Dockerfile"] == b"FROM scratch\n"
+
+    def test_such_an_archive_with_a_link_in_it_is_measured_by_its_names_on_disk(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A context with links is measured with them followed, as it always was, and the measure counts
+        names: five entries to unpack, within a limit of five, are eight names on disk and one more for
+        the file the link leads to. So this one fails for entries it was unpacked within, wherever its
+        Dockerfile is. The README says so."""
+        entries: Entries = {"Dockerfile": b"FROM scratch\n", "a/one": b"1", "b/two": b"2", "c/three": b"3"}
+        for module in (fetch_step, driver):
+            monkeypatch.setattr(module, "MAX_UNPACKED_ENTRIES", 5)
+
+        service = Inspecting()
+        with caplog.at_level(logging.ERROR):
+            code = _run(
+                service,
+                FakeBuilder(),
+                tmp_path,
+                tmp_path,
+                fetch=_fetching(entries | {"alias": Link("a/one")})[0],
+                config=_archive_set(None),
+            )
+        assert (code, service.started) == (1, [])
+        assert f"{FAILURE_MARKER} a: the build context comes to more than 5 entries with its links followed" in (
+            caplog.text
+        )
+
+    def test_the_step_starts_no_build_for_a_context_that_is_past_the_limit_once_it_is_staged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, limit: Callable[[int], None]
+    ) -> None:
+        """Through the driver, with the step's own fetch. The archive unpacks to exactly the limit, and one
+        byte more is refused there. Staged, it would be 160 bytes of files, 360 with its links followed: the
+        image fails with the limit's own reason, and the service is not started."""
+        entries: Entries = {**self.WITH_IGNORE, **{name: Link(leads_to) for name, leads_to in self.LINKS.items()}}
+        limit(self.LIMIT)
+
+        over = Inspecting()
+        with caplog.at_level(logging.ERROR):
+            code = _run(
+                over,
+                FakeBuilder(),
+                tmp_path,
+                tmp_path,
+                fetch=_fetching(entries | {"payload.bin": b"\0" * 41})[0],
+                config=_archive_set(None, dockerfile=self.NAMED),
+            )
+        assert (code, over.started) == (1, [])
+        assert f"it unpacks to more than {self.LIMIT} bytes" in caplog.text
+
+        caplog.clear()
+        service, builder = Inspecting(), FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            code = _run(
+                service,
+                builder,
+                tmp_path,
+                tmp_path,
+                fetch=_fetching(entries)[0],
+                config=_archive_set(None, dockerfile=self.NAMED),
+            )
+        assert (code, service.started, builder.completed) == (1, [], [])
+        assert (
+            f"{FAILURE_MARKER} a: the build context comes to more than {self.LIMIT} bytes with its links followed"
+        ) in caplog.text
 
 
 class TestIdentity:

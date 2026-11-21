@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_builder_plugin.config import BuilderConfig
+from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
 from pydantic import ValidationError
 
 
@@ -71,6 +71,27 @@ class TestTheSandbox:
     def test_a_misspelt_setting_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="imgae"):
             BuilderConfig.model_validate({"sandbox": {"imgae": "kaniko:1"}})
+
+
+class TestCompletionsNothingVerifies:
+    """`remote.allow_unverified_completion`: whether a remote build runs where nothing shows who completes it."""
+
+    def test_they_are_refused_unless_the_operator_says_otherwise(self) -> None:
+        assert BuilderConfig().remote.allow_unverified_completion is False
+        accepted = BuilderConfig.model_validate({"remote": {"allow_unverified_completion": True}})
+        assert accepted.remote.allow_unverified_completion is True
+
+    def test_the_setting_can_come_from_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEMO_BUILDER_REMOTE", '{"allow_unverified_completion": true}')
+        assert BuilderConfig().remote.allow_unverified_completion is True
+
+    def test_it_is_yes_or_no(self) -> None:
+        with pytest.raises(ValidationError, match="allow_unverified_completion"):
+            BuilderConfig.model_validate({"remote": {"allow_unverified_completion": "perhaps"}})
+
+    def test_its_description_says_what_turning_it_on_accepts(self) -> None:
+        described = RemoteConfig.model_fields["allow_unverified_completion"].description or ""
+        assert "anything able to reach the API can make a `pending` image `ready`" in described
 
 
 class TestTheDefaultArchitecture:
