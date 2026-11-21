@@ -160,6 +160,19 @@ def test_only_a_fully_scored_conversation_can_be_exported(failed_gates, axis_sco
     assert fully_scored(row) is scored
 
 
+def test_a_score_computed_without_the_judge_doesnt_stand_in_for_the_judges():
+    # Every judge call failed, so its axes are empty, while a rate UserSim computes itself still scored.
+    judged = {"helpfulness": {"evaluator_model": {"score": 4}}}
+    row = {
+        "selection_failed_gates": "[]",
+        "selection_axis_scores": json.dumps({"language.requested_language_match_rate": 1.0}),
+    }
+
+    assert fully_scored({**row, "assistant_eval": json.dumps({"axes": judged})})
+    assert not fully_scored({**row, "assistant_eval": json.dumps({"axes": {"helpfulness": {}, "accuracy": {}}})})
+    assert agent_verdict({**row, "assistant_eval": {"axes": {"helpfulness": {}}}})["passed"] is None
+
+
 def test_a_run_drops_the_personas_a_reviewer_removed_in_the_preview():
     spec = SimulateSpec(target=MODEL_TARGET, assistant_model="m", preview="pv-1", exclude_personas=["p2"])
     rows = [{"persona_uuid": "p1"}, {"persona_uuid": "p2"}, {"persona_uuid": "p3"}]
