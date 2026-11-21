@@ -898,9 +898,12 @@ configuration than the builder does sets `backend` there too, to the backend the
 with. A request for a task's image build returns the
 task's ready build only when that backend built every image of it. Otherwise the request starts the
 next attempt, which uses no build the other backend made and submits, as the next revision, each
-Dockerfile image the named backend has no usable build of.
+Dockerfile image whose newest build at the builder is the other backend's, or has failed.
 So after a switch a task is built again, on the new backend, the next time its build
-is requested, with or without `rebuild`. A build still running when the setting changes is returned
+is requested, with or without `rebuild`. Only the newest build of an image is read, so that holds
+after a switch back too: an image the other backend built in between is built again, although the
+first backend's older build is still there.
+A build still running when the setting changes is returned
 as it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
 `nemo evals runs submit` nor `nemo evals tasksets build-images --wait` sends a request for a task
 whose newest build is ready: request each taskset's builds once with

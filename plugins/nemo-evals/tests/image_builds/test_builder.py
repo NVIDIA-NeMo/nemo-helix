@@ -290,6 +290,37 @@ async def test_adopt_or_build_still_submits_past_a_failed_build_of_the_backend_i
     assert builder.submitted == [2]
 
 
+@pytest.mark.parametrize(
+    ("wanted", "other"),
+    [(IN_CLUSTER_BACKEND, _REMOTE_BACKEND), (_REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["back-to-the-cluster", "back-to-a-remote-service"],
+)
+async def test_adopt_or_build_reads_only_the_newest_build_not_an_older_one_of_the_backend_it_names(
+    wanted: str, other: str
+) -> None:
+    """The deployment switched its backend and then switched back, and the other backend built the image in between.
+
+    The first backend's build is still there, ready, behind the other's. Only the newest build is read, so the image
+    is submitted as the next revision, as the operator guide and Builder's README say.
+    """
+    made = {1: wanted, 2: other}
+    builder = _Builder(["ready", "ready"])
+
+    async def switched(name: str) -> ContainerImage | None:
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "ready", backend=made[revision]) if revision in made else None
+
+    builder.get_image = switched  # ty: ignore[invalid-assignment]
+
+    assert await usable_build(builder, "harbor-env-0123456789ab", backend=wanted) is None
+    image = await adopt_or_build(
+        builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", backend=wanted
+    )
+
+    assert builder.submitted == [3]
+    assert image.name == "harbor-env-0123456789ab-3"
+
+
 async def test_adopt_or_build_resubmits_a_pending_build_whose_job_ended() -> None:
     builder = _Builder(["pending"], job="error")
 
