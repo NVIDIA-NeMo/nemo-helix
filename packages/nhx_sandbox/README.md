@@ -7,6 +7,15 @@
 
 Shared sandbox semantics for NeMo Helix components that create sandboxes.
 
+## The backend protocol
+
+One interface for every sandbox backend, so Harbor environments and Gym brokers can run on any of them. Nothing implements it yet. A local test backend and a conformance suite come next, then OpenSandbox and OpenShell, and the interface also fits a managed service such as Astra Sandbox Runtime.
+
+- `nhx_sandbox.core.backend`: `SandboxBackend` (check, create, get, list, delete, exec, files and directories), plus `EgressControl` for changing a running sandbox's egress. Callers describe what they want in a `SandboxSpec`, and each backend declares what it supports, including how strongly it isolates workloads, in `Capabilities`. `check` reports why a task won't fit before anything is created, and backends raise `UnsupportedOperation` rather than quietly doing less. A task that accepts the platform's own network rules says so with `PlatformEgress`.
+- `nhx_sandbox.core.errors`: the errors backends raise in place of their SDKs' own, and how a runner should treat each one: retry the call (`TransientBackendError`), retry the trial (`SandboxLost`, `ExecInterrupted`) or refuse the task (`UnsupportedOperation`).
+
+## Egress and OpenSandbox
+
 - `nhx_sandbox.egress`: provider-neutral, deny-by-default egress policy built from an allow-only list (`EgressAllowlist`, `EgressPolicy`, `build_egress_policy`).
 - `nhx_sandbox.opensandbox_policy`: renders that policy into OpenSandbox's create options and verifies the policy a live sandbox reports (`to_opensandbox_policy`, `create_options_with_policy`, `verify_applied_egress`).
 
