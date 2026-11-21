@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_builder_plugin.identity import normalize_reference
 from nemo_builder_plugin.schema import BuildMount, FileSetSource
 from nemo_evals.agent_layers.dockerfile import (
@@ -176,6 +177,13 @@ async def _submit(
                 platform=main.platform,
                 built_after=layer.built_after,
             )
+    if built.provenance.backend != IN_CLUSTER_BACKEND:
+        # A layer needs its agent's mount, which only this cluster's backend builds with: a row another backend
+        # built under the layer's name was built without it, so it isn't the layer.
+        raise ImagePlanError(
+            "layer_not_built_in_cluster",
+            f"Builder image {built.name} was built by the {built.provenance.backend} backend, without the agent's mount",
+        )
     image = BuildImage(
         type=MAIN_SERVICE,
         source="dockerfile",
