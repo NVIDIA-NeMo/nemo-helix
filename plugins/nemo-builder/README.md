@@ -375,8 +375,8 @@ A copy from any other registry is a `409`. A reference that doesn't resolve, or 
 the platform, is a `400`; a registry that can't be reached is a `502`. Evals fails a task's image
 build on that `409`: on its own record of the build, the refused image is `failed` with the answer's
 `detail` in its `error`. It asks for a task's copies before its Dockerfile builds and submits nothing
-more of the task after a refusal, so none of the task's Dockerfile images is submitted: the builder
-has no row for them, and they stay `pending` on Evals' record of the failed build.
+more of the task after a refusal, so none of the task's Dockerfile images is submitted: they stay
+`pending`, with no `builder_image`, on Evals' record of the failed build.
 
 Every image goes to the deployment's one registry. With an `output`, it goes to
 `<registry>/<repository_prefix>/<workspace>/<output.repository>:<output.tag>`. Without one, it goes
@@ -615,8 +615,8 @@ What differs for a caller:
   the build, the refused image's `error` is `Builder refused the build:` followed by the answer's
   `detail`. Evals asks for a task's copies before its Dockerfile builds and submits nothing more of
   the task after a refusal, so a task that names a prebuilt image starts no build on this backend:
-  its other images are never submitted, the builder has no row for them, and they stay `pending` on
-  that record.
+  its other images are never submitted, and they stay `pending`, with no `builder_image`, on that
+  record.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
   it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
