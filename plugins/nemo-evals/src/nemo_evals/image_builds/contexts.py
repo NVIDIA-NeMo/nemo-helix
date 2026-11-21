@@ -35,8 +35,9 @@ async def upload_context(
     it is there already. A second archive for a fileset an earlier call made passes ``create_fileset=False``, so
     Files isn't asked for the fileset again.
 
-    ``archive`` is a path in the fileset, so it may name a folder there. The source is made before anything else:
-    one Builder would refuse is refused here before Files is asked for anything and before anything is written.
+    ``fileset`` is the fileset's name in ``workspace``. ``archive`` is a path in the fileset, so it may name a folder
+    there. The source is made before anything else: one Builder would refuse is refused here before Files is asked
+    for anything and before anything is written.
 
     The archive is packed in a temporary directory of its own, removed before the upload; nothing is written beside
     ``directory``. It is read whole into memory to upload it. Nothing deletes the fileset afterwards.

@@ -5,7 +5,7 @@
 
 The context is the task's environment context, or nothing for a prebuilt image. The generated Dockerfile, the agent
 to install, and the agent installer the Job's first step put on job storage are the build's mounts, apart from the
-context. Each goes up as a tar archive in a fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
+context. Each goes up as a tar archive of its own, both in one fileset named for the build. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
 the agent install, the installer and the platform), so tasks with the same environment share one build.
 """
 
@@ -286,7 +286,8 @@ async def _upload_context(
     source = await upload_context(
         files, workspace, name, scratch / CONTEXT_ROOT, archive=CONTEXT_ARCHIVE, root=CONTEXT_ROOT
     )
-    # The context's upload made the fileset: the mounts go into it without asking Files for it again.
+    # The context's upload made the fileset: the mounts go into it without asking Files for it again. The source
+    # this returns isn't used: each mount names a directory inside the archive.
     await upload_context(
         files, workspace, name, scratch / MOUNTS_ROOT, archive=MOUNTS_ARCHIVE, root=MOUNTS_ROOT, create_fileset=False
     )

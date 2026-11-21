@@ -117,9 +117,11 @@ async def test_a_second_archive_goes_into_the_fileset_without_asking_for_it_agai
     }
 
 
-@pytest.mark.parametrize("archive", ["context.tar.gz", "layers/context.tar.gz"])
+@pytest.mark.parametrize(
+    ("archive", "recorded"), [("context.tar.gz", b"context.tar"), ("layers/mounts.tar.gz", b"mounts.tar")]
+)
 async def test_the_archive_is_packed_under_its_own_file_name(
-    files_service: InMemoryFilesService, files_client: AsyncFilesClient, tmp_path: Path, archive: str
+    files_service: InMemoryFilesService, files_client: AsyncFilesClient, tmp_path: Path, archive: str, recorded: bytes
 ) -> None:
     """Gzip records the name of the file it wrote, less ``.gz``: the archive's, in whichever folder of the fileset."""
     source = await upload_context(
@@ -128,7 +130,7 @@ async def test_the_archive_is_packed_under_its_own_file_name(
 
     uploaded = files_service.filesets[("default", "harbor-build")]
     assert list(uploaded) == [archive]
-    assert _gzip_name(uploaded[archive]) == b"context.tar"
+    assert _gzip_name(uploaded[archive]) == recorded
     assert "context/Dockerfile" in _members(uploaded[archive])
     assert source.archive == archive
 
@@ -136,7 +138,7 @@ async def test_the_archive_is_packed_under_its_own_file_name(
 async def test_nothing_is_left_on_disk_whether_or_not_the_upload_goes_through(
     files_service: InMemoryFilesService, files_client: AsyncFilesClient, tmp_path: Path
 ) -> None:
-    """The archive is packed in a temporary directory of its own, gone by the upload, and never beside the context."""
+    """The temporary directory is empty by the upload and after it, and nothing is left beside the context."""
     directory = _generated(tmp_path)
     # The suite's conftest points tempfile at a directory of this test's own, so anything left there is this call's.
     scratch = Path(tempfile.gettempdir())
@@ -175,7 +177,7 @@ async def test_a_source_builder_would_refuse_is_refused_before_anything_is_made(
     archive: str,
     root: str,
 ) -> None:
-    """Not after the upload: Files is asked for nothing, and no archive is written, in the scratch or outside it."""
+    """Not after the upload: Files is asked for nothing, and nothing is left on disk."""
     directory = _generated(tmp_path)
 
     with pytest.raises(ValidationError):

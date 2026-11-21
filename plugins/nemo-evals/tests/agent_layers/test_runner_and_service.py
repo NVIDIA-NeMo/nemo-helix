@@ -258,7 +258,7 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
 async def test_a_layers_two_archives_go_into_one_fileset_named_for_its_build(
     entity_store, store_task, monkeypatch, tmp_path, files_service, files_client
 ) -> None:
-    """Against Files itself: the fileset is asked for once, and Builder's source and mounts name what went up."""
+    """With the real Files client: the fileset is asked for once, and Builder's source and mounts name what went up."""
     _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
     spec, _ = await _requested(entity_store, store_task)
     builder = _Builder()
