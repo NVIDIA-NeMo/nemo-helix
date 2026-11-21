@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_user_sim_plugin.jobs.spec import UNSUPPORTED_PROBES
 from nemo_user_sim_plugin.service import UserSimService, run_name
+from nemo_user_sim_plugin.studio import get_studio_spec
 from usersim.engine.core.probes import known_probes
 
 
@@ -30,6 +31,12 @@ def test_job_routes_are_mounted():
     # Evaluation runs only as a simulate job's second step, so it has no collection of its own.
     jobs = {path.split("/")[7] for path in _app().openapi()["paths"] if "/jobs/" in path}
     assert jobs == {"simulate", "export"}
+
+
+def test_studio_bundle_is_built():
+    bundle = get_studio_spec().bundle_path
+
+    assert bundle is not None and bundle.is_file()
 
 
 def test_probe_catalog_covers_every_probe_a_job_accepts():

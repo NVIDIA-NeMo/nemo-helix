@@ -35,6 +35,9 @@ user_sim = "nemo_user_sim_plugin.sdk:user_sim_sdk_resources"
 [project.entry-points."nemo.skills"]
 user-sim = "nemo_user_sim_plugin.skills:get_skills_path"
 
+[project.entry-points."nemo.studio"]
+user-sim = "nemo_user_sim_plugin.studio:get_studio_spec"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
