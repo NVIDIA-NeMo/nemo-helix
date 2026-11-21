@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.api.fields import TaskRef
 from nemo_evals.api.service.taskset_run_service import MAX_CONCURRENT_IMAGE_PREPARATIONS, TasksetRunResolutionError
@@ -224,11 +225,25 @@ async def test_a_rebuild_in_flight_is_rejected_although_an_older_build_is_ready(
     assert not await runs(entity_store)
 
 
-async def test_the_build_service_a_run_reads_through_is_given_the_deployments_builder_backend(service):
+async def test_the_build_service_a_run_reads_through_is_given_the_backend_builder_is_configured_with(
+    service, monkeypatch
+):
     """Submit only reads builds through it. It is told the backend as the service of the build routes is."""
-    assert service._image_builds("default").builder_backend == IN_CLUSTER_BACKEND
-    service._config.image_builds.builder_backend = "remote"
+    remote = BuilderConfig.model_validate({"backend": "remote"})
+    monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls: remote))
+    assert service._config.image_builds.builder_backend is None
+
     assert service._image_builds("default").builder_backend == "remote"
+
+
+async def test_the_build_service_a_run_reads_through_is_given_the_backend_the_evals_key_names_over_builders(
+    service, monkeypatch
+):
+    remote = BuilderConfig.model_validate({"backend": "remote"})
+    monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls: remote))
+    service._config.image_builds.builder_backend = IN_CLUSTER_BACKEND
+
+    assert service._image_builds("default").builder_backend == IN_CLUSTER_BACKEND
 
 
 async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(

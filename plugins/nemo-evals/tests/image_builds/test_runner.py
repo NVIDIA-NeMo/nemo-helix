@@ -1174,7 +1174,7 @@ def test_a_build_recorded_before_it_could_name_a_backend_still_loads_and_is_save
 async def test_after_a_deployment_switches_backend_the_next_request_builds_the_task_again(
     entity_store, store_task, archive, before: str, after: str, rebuild: bool
 ) -> None:
-    """Builder and evals are both set to the new backend, and the task's ready build is the old backend's.
+    """Builder builds with the new backend and evals expects it, and the task's ready build is the old backend's.
 
     That build is no answer to the request, so the next attempt starts. Its Job reads the new backend from the
     attempt's record: it uses neither image's ready build at Builder, which the old backend published, and submits
@@ -1229,8 +1229,10 @@ async def test_a_deployment_that_did_not_switch_uses_the_build_another_task_made
 def _settings_disagree(builders: str, expected: str) -> str:
     """The error of an image Builder took under ``builders`` backend for a build that expects ``expected``."""
     return (
-        f"Builder builds with the {builders!r} backend (builder.backend), and this build's images must come from "
-        f"{expected!r} (evals.image_builds.builder_backend): set both to the same backend"
+        f"Builder builds with the {builders!r} backend (builder.backend), and this build was requested for "
+        f"{expected!r} (evals.image_builds.builder_backend, or the builder.backend the evals API reads when that key "
+        "is unset): leave evals.image_builds.builder_backend unset if the evals API reads the configuration Builder "
+        "reads, or set it to Builder's backend if the evals API reads another, then request the build again"
     )
 
 

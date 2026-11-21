@@ -256,8 +256,8 @@ async def _submit(
 
     That is when Builder refused the request itself: the image then fails with Builder's own sentence. And it is
     when Builder took the request under another backend than ``backend``, the one the build's images must come
-    from: the image then fails with a sentence that names the two settings that disagree, as every image after it
-    would. Any other error from Builder fails this image alone.
+    from: the image then fails with a sentence that names the setting each backend comes from, as every image after
+    it would. Any other error from Builder fails this image alone.
     """
     try:
         if image.image is not None:
@@ -277,8 +277,9 @@ async def _submit(
     built_by = builder_image.provenance.backend
     if built_by != backend:
         # A build of another backend is never adopted, and a submit is answered under Builder's own backend. So this
-        # is a row Builder took just now: the deployment's two settings disagree, and the next attempt would get the
-        # same answer. The image names the row and its backend, and nothing else of it: it is not this build's.
+        # is a row Builder took just now: it builds with another backend than this build was requested for, and the
+        # next attempt would get the same answer. The image names the row and its backend, and nothing else of it:
+        # it is not this build's.
         image.builder_backend = recorded_backend(built_by)
         image.status = "failed"
         image.error = backends_disagree(built_by, backend)
@@ -290,11 +291,17 @@ async def _submit(
 def backends_disagree(builders: str, expected: str) -> str:
     """The error of an image Builder took under its ``builders`` backend for a build that expects ``expected``.
 
-    It names the setting each value comes from, so an operator knows which two to make equal.
+    It names the setting each value comes from, and says what to do with the evals one in either deployment where
+    the two differ: one that sets it to another backend than Builder's, and one that leaves it unset while its evals
+    API reads another configuration than Builder does. The Job can't tell which: the build's record holds the
+    backend, not where the API took it from. A build requested before a deployment switched its backend, and run
+    after, differs too, and needs only the last thing the sentence asks for.
     """
     return (
-        f"Builder builds with the {builders!r} backend (builder.backend), and this build's images must come from "
-        f"{expected!r} (evals.image_builds.builder_backend): set both to the same backend"
+        f"Builder builds with the {builders!r} backend (builder.backend), and this build was requested for "
+        f"{expected!r} (evals.image_builds.builder_backend, or the builder.backend the evals API reads when that key "
+        "is unset): leave evals.image_builds.builder_backend unset if the evals API reads the configuration Builder "
+        "reads, or set it to Builder's backend if the evals API reads another, then request the build again"
     )
 
 

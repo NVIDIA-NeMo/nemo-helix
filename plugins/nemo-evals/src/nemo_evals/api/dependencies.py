@@ -15,7 +15,7 @@ from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
 from nemo_evals.api.service.taskset_run_service import TasksetRunService, normalize_run_caller
 from nemo_evals.api.service.taskset_service import TasksetService
-from nemo_evals.config import get_config
+from nemo_evals.config import expected_builder_backend, get_config
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.auth import current_auth_context
@@ -137,13 +137,14 @@ def get_image_build_service(
 ) -> ImageBuildService:
     """Provide an ImageBuildService whose task-builder Jobs are created as the caller.
 
-    It takes task images from the Builder backend the deployment names (``evals.image_builds.builder_backend``).
+    It takes task images from the backend the deployment's Builder is configured to build with
+    (``builder.backend``), or from the one ``evals.image_builds.builder_backend`` names when that is set.
     """
     return ImageBuildService(
         entity_client,
         JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
         builder_authorizer(authorize),
-        builder_backend=get_config().image_builds.builder_backend,
+        builder_backend=expected_builder_backend(get_config()),
     )
 
 

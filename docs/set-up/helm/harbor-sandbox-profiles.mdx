@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Configure Harbor Taskset Runs"
-description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs), and the Builder backend task images must come from (platformConfig.evals.image_builds)."
+description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs), and see which Builder backend task images must come from (platformConfig.builder.backend, platformConfig.evals.image_builds)."
 ---
 
 This page configures Harbor taskset runs on Kubernetes ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)). The first two groups are under `platformConfig.evals.runs`, the third beside it:
 
 - **Sandbox profiles** (`evals.runs.harbor`): named rules for every OpenSandbox sandbox in a run: egress, resource ceilings, lifetime and client settings.
 - **Run limits and controller** (`evals.runs`): concurrency caps, run time limits and how often the run controller creates and settles task Jobs. See [Run limits and controller](#run-limits-and-controller).
-- **Task image builds** (`evals.image_builds`): which Builder backend task images must come from. See [Task image builds](#task-image-builds).
+- **Task image builds** (`evals.image_builds`): which Builder backend task images must come from, and the one key that overrides it. See [Task image builds](#task-image-builds).
 
 About sandbox profiles:
 
@@ -196,35 +196,34 @@ A config change restarts the API and core-controller pods. Then:
 
 ## Task image builds
 
-This key sits beside `runs`, under `platformConfig.evals.image_builds`. It applies to every task image build, whether or not the deployment runs tasksets.
+Task images must come from the backend Builder builds with, which `platformConfig.builder.backend` sets: `execution` builds in this cluster, `remote` through a build service outside it. Evals reads that key from the configuration its API reads, so a switch of `builder.backend` switches evals too. This applies to every task image build, whether or not the deployment runs tasksets.
+
+- A request for a task's image build returns the task's ready build only when that backend built every image of it. Otherwise the request starts the next attempt, which uses no build another backend made and builds each image again.
+- An image recorded before a build could name its backend counts as `execution`.
+- A build that is still running is returned as it is. The request after it ends applies the rule.
+- Agent layers aren't held to the rule: a layer uses the build Builder has, whichever backend made it.
+
+One key, beside `runs` under `platformConfig.evals.image_builds`, overrides the backend evals takes from `builder.backend`:
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `builder_backend` | `execution` | The Builder backend task images must come from, as `platformConfig.builder.backend` names it: `execution` builds in this cluster, `remote` through a build service outside it. Keep the two keys equal |
-
-- A request for a task's image build returns the task's ready build only when this backend built every image of it. Otherwise the request starts the next attempt, which uses no build another backend made and builds each image again.
-- An image recorded before a build could name its backend counts as `execution`.
-- A build that is still running is returned as it is. The request after it ends applies the rule.
-- Agent layers aren't held to the key: a layer uses the build Builder has, whichever backend made it.
+| `builder_backend` | unset | The Builder backend task images must come from, in place of the one `platformConfig.builder.backend` names. Leave it unset where the evals API and Builder read one configuration, as they do with this chart. Set it only where the evals API reads another configuration than Builder does, to the backend Builder builds with |
 
 ### Switch the Builder backend
 
-Set both keys in the same change. The recipe shows only the two keys that must agree: the remote backend's own settings, under `builder.remote`, are in the Builder plugin's README.
+Change `builder.backend` and nothing under `evals`. The recipe shows only that key: the remote backend's own settings, under `builder.remote`, are in the Builder plugin's README.
 
 ```yaml
 platformConfig:
   builder:
     backend: remote
-  evals:
-    image_builds:
-      builder_backend: remote
 ```
 
-- A config change restarts the API and core-controller pods. The key is read when a build is requested and stored on the build, where the build's Job reads it. A build requested before the change keeps the backend it was requested for.
+- A config change restarts the API and core-controller pods. The backend is read when a build is requested and stored on the build, where the build's Job reads it. A build requested before the change keeps the backend it was requested for.
 - Then request each taskset's builds once, without `--wait`: `nemo evals tasksets build-images <taskset>`. With `--wait`, and in `nemo evals runs submit`, a task whose newest build is ready gets no request, so it keeps that build. Follow the new builds with `nemo evals tasksets build-images <taskset> --wait`.
 - Until a new build of a task is requested, a run takes the task's ready build, whichever backend built it. From that request on, a run takes only the new attempt, once it's ready. A failed attempt leaves the task without a build a run takes.
 - On `remote`, a task that names a prebuilt image (for main, the verifier or a compose service) can't be built: that backend copies no image. Requesting the task's build leaves a failed attempt as its newest build, and runs then refuse the task. Leave a taskset that holds such a task out of the request, or expect its runs to be refused. The Builder plugin's README says more under "Building through a service outside the cluster".
-- If the two keys disagree, the first image of a build that Builder takes fails, and nothing more of the task is submitted. The image's error names both keys: `Builder builds with the 'remote' backend (builder.backend), and this build's images must come from 'execution' (evals.image_builds.builder_backend): set both to the same backend`. Builder has taken that image by then: its build keeps running, and nothing uses or cancels it. Every request made while the keys disagree fails the same way, and starts one more Builder build of an image built from a Dockerfile. `--wait` and `nemo evals runs submit` request a failed task's build a second time by themselves, so one command starts two. Set the keys to the same backend before you request the build again.
+- If a build was requested for another backend than Builder builds with, the first image of it that Builder takes fails, and nothing more of the task is submitted. That is so while `evals.image_builds.builder_backend` names another backend than `builder.backend`, and while it is unset in a deployment whose evals API reads another configuration than Builder does. A build requested before a switch, whose Job submits an image after it, fails this way once and needs only to be requested again. The image's error names both keys: `Builder builds with the 'remote' backend (builder.backend), and this build was requested for 'execution' (evals.image_builds.builder_backend, or the builder.backend the evals API reads when that key is unset): leave evals.image_builds.builder_backend unset if the evals API reads the configuration Builder reads, or set it to Builder's backend if the evals API reads another, then request the build again`. Builder has taken that image by then: its build keeps running, and nothing uses or cancels it. Every request made while the two backends differ fails the same way, and starts one more Builder build of an image built from a Dockerfile. `--wait` and `nemo evals runs submit` request a failed task's build a second time by themselves, so one command starts two. Do what the error says for `evals.image_builds.builder_backend` before you request the build again.
 
 ## Recipes
 

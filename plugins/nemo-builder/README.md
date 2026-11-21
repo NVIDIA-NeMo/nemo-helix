@@ -772,32 +772,40 @@ under the other backend, and whose rows are still there, is refused: with `code`
 the next revision), and otherwise as any request it can't take is, under any revision
 (`backend_rejected` or `missing_secrets`, for example).
 
-Evals has a setting of its own for the backend its task images must come from,
-`evals.image_builds.builder_backend`. It defaults to `execution`, as `backend` does. Set both to the
-same backend, in the same change. A request for a task's image build then returns the task's ready
-build only when that backend built every image of it. Otherwise the request starts the next
-attempt, which uses no build the other backend made and submits each Dockerfile image as the next
-revision. So after a switch a task is built again, on the new backend, the next time its build is
-requested, with or without `rebuild`. A build still running when the setting changes is returned as
-it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
+Evals takes its task images from the backend `backend` names. It reads the setting from the
+configuration its API reads: where that is the builder's own, switching `backend` switches Evals
+too, and there is nothing to set under `evals`. A request for a task's image build returns the
+task's ready build only when that backend built every image of it. Otherwise the request starts the
+next attempt, which uses no build the other backend made and submits each Dockerfile image as the
+next revision. So after a switch a task is built again, on the new backend, the next time its build
+is requested, with or without `rebuild`. A build still running when the setting changes is returned
+as it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
 `nemo evals runs submit` nor `nemo evals tasksets build-images --wait` sends a request for a task
 whose newest build is ready: request each taskset's builds once with
 `nemo evals tasksets build-images <taskset>`. Until a new build of a task is requested, a run takes
 the task's ready build, whichever backend built it. From that request on, a run takes only the new
 attempt, once it is ready, and a failed attempt leaves the task without a build a run takes. Agent
-layers aren't held to the setting: a layer uses the build that is there.
+layers aren't held to the backend: a layer uses the build that is there.
 
-If the two settings disagree, the first image of a build that the builder takes fails with an error
-that names both, and Evals submits nothing more of that task. That is one failed build for each
-request. Taking the image would make a ready build that no request accepts, so every request would
-build the task again without saying why. The builder has taken the image by then: its build goes on
-running, under the backend Evals doesn't expect, and nothing uses or cancels it. Each request made
-while the settings disagree fails the same way, and submits an image built from a Dockerfile once
-more, as the next revision, which the builder builds too. `nemo evals runs submit` and
-`nemo evals tasksets build-images --wait` request a failed task's build a second time by
-themselves, so one command makes two. Set both settings to the same backend before requesting
-again. A deployment that sets `backend: remote` and leaves the Evals setting out gets this error
-from every task build that submits an image.
+Evals has a setting of its own, `evals.image_builds.builder_backend`, which is unset by default.
+Set, it names the backend Evals takes its task images from, whatever `backend` the Evals API reads.
+It is for a deployment whose Evals API reads another configuration than the builder does: set it
+there to the backend the builder builds with, and leave it unset everywhere else.
+
+If a task's build was requested for another backend than the builder builds with, the first image of
+it that the builder takes fails with an error that names both settings, and Evals submits nothing
+more of that task. That is one failed build for each request. Taking the image would make a ready
+build that no request accepts, so every request would build the task again without saying why. The
+builder has taken the image by then: its build goes on running, under the backend Evals doesn't
+expect, and nothing uses or cancels it. It happens while the Evals setting names another backend
+than `backend`, and while it is unset and the Evals API reads another `backend` than the builder
+does. Each request made while the two backends differ fails the same way, and submits an image built
+from a Dockerfile once more, as the next revision, which the builder builds too.
+`nemo evals runs submit` and `nemo evals tasksets build-images --wait` request a failed task's
+build a second time by themselves, so one command makes two. Before requesting again, remove the
+Evals setting, or, where the Evals API reads another configuration than the builder does, set it to
+the builder's backend. A build requested before a switch, whose Job submits an image after it, fails
+this way once, and needs only to be requested again.
 
 On `remote`, a task that names a prebuilt image can't be built, by a request after the switch, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
@@ -814,9 +822,9 @@ rebuild of it and submitting a taskset run that includes it all fail, and an old
 `tasksets build-images`, and its `runs submit` when it builds images from a Harbor source, fail for
 the whole taskset. For the same reason, don't go back to an older release once a remote build is
 recorded.
-An `nhx-tasks` image from before the Evals setting existed doesn't read the setting from its build:
-its Job uses the other backend's build, the attempt ends ready with images no request accepts, and
-every request starts another.
+An `nhx-tasks` image from before Evals recorded, on a build, the backend its images must come from
+doesn't read it there: its Job uses the other backend's build, the attempt ends ready with images no
+request accepts, and every request starts another.
 
 ## Publishing and signing
 
@@ -933,8 +941,13 @@ key under `remote` or `sandbox`, refuses every submit with `409` `backend_reject
 names the setting, or `builder` for a check made on the section as a whole (one that spans settings,
 or the scheme of `registry`); a section that can't be read at all is answered without a name. The
 API log has the check's own sentence.
-A key directly under `builder` that isn't a setting is ignored, with a warning in the API log at the
-first submit: a misspelt `backend` leaves builds in this cluster.
+Evals reads `backend` from the section too, unless `evals.image_builds.builder_backend` is set. While
+the section is invalid or can't be read, it takes its task images from `execution`, as with no
+`backend` set: a request for a task whose ready build the `remote` backend made then starts an
+attempt, which fails with the builder's refusal.
+A key directly under `builder` that isn't a setting is ignored, with a warning in the API log the
+first time the section is read, which is at the first submit, or before it when Evals first reads
+`backend`: a misspelt `backend` leaves builds in this cluster.
 
 ```yaml
 builder:

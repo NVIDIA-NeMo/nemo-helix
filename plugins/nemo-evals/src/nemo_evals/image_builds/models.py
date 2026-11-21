@@ -146,10 +146,11 @@ class TaskImageBuildEntity(EntityBase):
         default=None,
         exclude_if=lambda value: value is None,
         description=(
-            "The Builder backend this attempt's images must come from, when it isn't the in-cluster one: "
-            "`evals.image_builds.builder_backend` as it was when the build was requested. The task-builder Job reads "
-            "it here, because Job workers don't read the platform config file. Left out for the in-cluster backend, "
-            "and on any record made before this field existed."
+            "The Builder backend this attempt's images must come from, when it isn't the in-cluster one: the "
+            "backend the evals API expected when the build was requested, which is `builder.backend` as that API "
+            "read it, or `evals.image_builds.builder_backend` when that was set. The task-builder Job reads it here, "
+            "because Job workers don't read the platform config file. Left out for the in-cluster backend, and on "
+            "any record made before this field existed."
         ),
     )
     images: list[BuildImage] = Field(default_factory=list)

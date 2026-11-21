@@ -10,7 +10,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_evals.config import (
     EvaluatorConfig,
     HarborSandboxProfileConfig,
@@ -18,6 +20,7 @@ from nemo_evals.config import (
     ImageBuildsConfig,
     RunControllerConfig,
     TasksetRunsConfig,
+    expected_builder_backend,
 )
 from nemo_evals.harbor.remote.profile import OpenSandboxClientSettings
 from nemo_evals.image_builds.runner import backends_disagree
@@ -151,13 +154,18 @@ def test_every_image_builds_key_is_documented_with_its_default() -> None:
     _assert_defaults(rows, dict(ImageBuildsConfig.model_fields))
 
 
-def test_the_backend_switch_recipe_validates_and_sets_evals_and_builder_to_one_backend() -> None:
+def test_the_backend_switch_recipe_sets_builders_key_alone_and_evals_expects_that_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An admin who follows the recipe changes one key. Evals, reading the same configuration, follows it."""
     recipes = _yaml_blocks(_image_builds_section())
     assert recipes, "no backend switch recipe"
     for recipe in recipes:
         config = recipe["platformConfig"]
-        evals = EvaluatorConfig.model_validate(config["evals"])
-        assert evals.image_builds.builder_backend == config["builder"]["backend"]
+        assert config.keys() == {"builder"}, "the recipe sets a key outside builder"
+        builder = BuilderConfig.model_validate(config["builder"])
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls, builder=builder: builder))
+        assert expected_builder_backend(EvaluatorConfig.model_validate({})) == builder.backend == "remote"
 
 
 def test_the_guide_quotes_the_error_of_a_build_whose_backend_settings_disagree() -> None:

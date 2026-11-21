@@ -112,8 +112,9 @@ class ImageBuildService:
 
     Revisions with the same contents share builds: their images are the same.
 
-    ``builder_backend`` is the Builder backend this deployment's task images must come from
-    (``evals.image_builds.builder_backend``): the in-cluster one unless the deployment says otherwise.
+    ``builder_backend`` is the Builder backend this deployment's task images must come from: the one its Builder
+    is configured to build with (``builder.backend``), unless ``evals.image_builds.builder_backend`` names another.
+    The API resolves it (``nemo_evals.config.expected_builder_backend``); the in-cluster one when none is given.
     """
 
     def __init__(
