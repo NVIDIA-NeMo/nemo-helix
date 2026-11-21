@@ -6,6 +6,7 @@ export const SIDE_NAV_OPEN_KEY = 'side-nav-open';
 export const ASSISTANT_ACTIVE_SESSION_KEY_PREFIX = 'claude-code-active-session';
 export const ASSISTANT_HISTORY_OPEN_KEY = 'claude-code-history-open';
 export const ASSISTANT_OPEN_FLOATING_PANEL_KEY = 'claude-code-open-floating-panel';
+export const FELIX_POSITION_KEY = 'felix-assistant-position';
 export const WORKSPACE_DROPDOWN_RECENT_KEY = 'workspace-dropdown-recent';
 export const UI_THEME = 'ui-theme';
 export const SELECTED_WORKSPACE_KEY = 'selected-workspace';

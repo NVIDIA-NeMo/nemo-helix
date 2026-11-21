@@ -8,7 +8,10 @@ import {
   ASSISTANT_THINKING_TOOL_NAME,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
-import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
+import {
+  AssistantToolCallPart,
+  CompactAssistantToolCallPart,
+} from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
 import {
   ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME,
   ASSISTANT_JOB_PROGRESS_TOOL_NAME,
@@ -331,4 +334,37 @@ describe('AssistantToolCallPart', () => {
       expect(screen.queryByTestId('assistant-work-tool-call')).not.toBeInTheDocument();
     }
   );
+});
+
+describe('CompactAssistantToolCallPart', () => {
+  const renderCompact = (toolName: string, args: PartProps['args']) =>
+    render(
+      <MockToastProvider>
+        <CompactAssistantToolCallPart
+          addResult={vi.fn()}
+          args={args}
+          argsText={JSON.stringify(args)}
+          resume={vi.fn()}
+          status={{ type: 'complete' }}
+          toolCallId={`toolu_${toolName}`}
+          toolName={toolName}
+          type="tool-call"
+        />
+      </MockToastProvider>
+    );
+
+  it('hides the collapsed work details block', () => {
+    renderCompact(ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME, {
+      parts: [{ type: 'text', text: 'Looking at your jobs.' }],
+    });
+
+    expect(screen.queryByText('Looking at your jobs.')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-work-tool-call')).not.toBeInTheDocument();
+  });
+
+  it('still renders an ordinary tool call as a step', () => {
+    renderCompact('SomeTool', { query: 'x' });
+
+    expect(screen.getByTestId('assistant-work-tool-call')).toBeInTheDocument();
+  });
 });

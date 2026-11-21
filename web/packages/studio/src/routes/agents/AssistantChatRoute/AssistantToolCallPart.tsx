@@ -31,6 +31,8 @@ interface AssistantToolCallPartContentProps {
   readonly result?: unknown;
   readonly running?: boolean;
   readonly toolName: string;
+  /** Quieter rendering for small surfaces: the collapsed work-details block is hidden. */
+  readonly compact?: boolean;
 }
 
 type CollapsedDetailsPart =
@@ -143,6 +145,7 @@ const AssistantToolCallPartContent = ({
   result,
   running,
   toolName,
+  compact = false,
 }: AssistantToolCallPartContentProps) => {
   if (
     toolName === ASSISTANT_THINKING_TOOL_NAME ||
@@ -159,6 +162,10 @@ const AssistantToolCallPartContent = ({
   }
 
   if (toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME) {
+    // Hidden on small surfaces (Felix's pop-out); the answer itself stays visible.
+    if (compact) {
+      return null;
+    }
     return (
       <>
         {getCollapsedDetailsParts(args.parts).map((part, index) => (
@@ -194,6 +201,22 @@ export const AssistantToolCallPart: ToolCallMessagePartComponent<AssistantToolAr
   toolName,
 }) => (
   <AssistantToolCallPartContent
+    args={args}
+    argsText={argsText}
+    isError={isError}
+    result={result}
+    running={status.type === 'running'}
+    toolName={toolName}
+  />
+);
+
+/** The quieter variant used by Felix's pop-out: no collapsed work-details block. */
+export const CompactAssistantToolCallPart: ToolCallMessagePartComponent<
+  AssistantToolArgs,
+  unknown
+> = ({ args, argsText, isError, result, status, toolName }) => (
+  <AssistantToolCallPartContent
+    compact
     args={args}
     argsText={argsText}
     isError={isError}

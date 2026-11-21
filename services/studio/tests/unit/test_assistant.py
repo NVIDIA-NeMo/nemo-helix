@@ -5,7 +5,6 @@
 
 import asyncio
 import json
-import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -21,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError
 from nhx.common.service.dependencies import get_entity_client
-from nhx.studio import assistant, assistant_artifacts, assistant_skills, studio_links
+from nhx.studio import assistant, assistant_artifacts, studio_links
 from nhx.studio.config import StudioConfig
 from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
 from nhx.studio.service import StudioService
@@ -94,13 +93,11 @@ class FakeEntityStore:
 @pytest.fixture(autouse=True)
 def reset_assistant_state():
     """Reset module-level bridge state between tests."""
-    assistant._initialized_sessions.clear()
     assistant._session_streams.clear()
     assistant._pending_permissions.clear()
     assistant._pending_agent_inputs.clear()
     assistant._session_workspace_cache.clear()
     yield
-    assistant._initialized_sessions.clear()
     assistant._session_streams.clear()
     assistant._pending_permissions.clear()
     assistant._pending_agent_inputs.clear()
@@ -255,51 +252,6 @@ def _inference_source_dir(root: Path) -> Path:
     return source_dir
 
 
-def _inference_skill(source_dir: Path) -> assistant_skills.Skill:
-    return assistant_skills.Skill(
-        name="inference",
-        description="Use NeMo Helix inference.",
-        version="0.1",
-        content="# Inference",
-        raw="# Inference",
-        source_dir=source_dir,
-        source_plugin="platform",
-        source_dist="nemo-helix-ext",
-    )
-
-
-def _expected_inference_skill_response(*, installed: bool) -> dict[str, Any]:
-    return {
-        "name": "inference",
-        "claude_name": "nemo-inference",
-        "description": "Use NeMo Helix inference.",
-        "source": "nemo-helix",
-        "source_path": "packages/nemo_helix_ext/skills/inference",
-        "install_path": ".claude/skills/nemo-inference/SKILL.md",
-        "installed": installed,
-    }
-
-
-def test_vendored_load_skills_from_root_loads_selected_root_without_registry_private_helper(tmp_path: Path):
-    source_dir = _inference_source_dir(tmp_path)
-    (source_dir / "SKILL.md").write_text(
-        "---\nname: inference\ndescription: Use NeMo Helix inference.\nversion: 2\n---\n# Inference\n",
-        encoding="utf-8",
-    )
-
-    loaded = assistant_skills.load_skills_from_root(
-        tmp_path / "packages" / "nemo_helix_ext" / "skills",
-        source_plugin="platform",
-        source_dist="nemo-helix-ext",
-    )
-
-    assert list(loaded) == ["inference"]
-    assert loaded["inference"].description == "Use NeMo Helix inference."
-    assert loaded["inference"].version == "2"
-    assert loaded["inference"].source_plugin == "platform"
-    assert loaded["inference"].source_dist == "nemo-helix-ext"
-
-
 def test_create_session_returns_uuid(service_client: TestClient):
     response = service_client.post("/v2/assistant/sessions")
 
@@ -342,11 +294,15 @@ def test_recent_conversation_messages_caps_model_context_without_mutating_histor
 
 
 def test_recent_conversation_messages_removes_legacy_studio_context():
-    contextual_prompt = assistant._build_claude_prompt(
-        "create a guardrail",
-        "default",
-        "https://studio.test",
-        "/workspaces/default/guardrails",
+    contextual_prompt = "\n".join(
+        [
+            assistant.STUDIO_CONTEXT_START,
+            assistant._build_studio_system_prompt("default", "https://studio.test", "/workspaces/default/guardrails"),
+            assistant.STUDIO_CONTEXT_END,
+            "",
+            assistant.STUDIO_CONTEXT_USER_REQUEST_PREFIX,
+            "create a guardrail",
+        ]
     )
     conversation = [AssistantMessage(role="user", content=contextual_prompt)]
 
@@ -588,453 +544,11 @@ def test_assistant_turn_is_persisted_and_reused_as_context(
     ]
 
 
-def test_build_claude_argv_uses_new_session_then_resume_flag():
-    session_id = str(uuid.uuid4())
-
-    argv = assistant._build_claude_argv(session_id, "hello", "http://test/mcp", "Studio context")
-    assert argv[:3] == ["claude", "-p", "hello"]
-    assert "--output-format" in argv
-    assert "stream-json" in argv
-    mcp_config = json.loads(argv[argv.index("--mcp-config") + 1])
-    assert mcp_config["mcpServers"][assistant.CLAUDE_MCP_SERVER_NAME] == {
-        "type": "http",
-        "url": "http://test/mcp",
-        "timeout": assistant.CLAUDE_MCP_TOOL_TIMEOUT_MS,
-    }
-    assert "--allowedTools" in argv
-    allowed_tools = argv[argv.index("--allowedTools") + 1].split(",")
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__select_agent" in allowed_tools
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__select_eval_config" in allowed_tools
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__select_dataset_file" in allowed_tools
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__select_model" in allowed_tools
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__job_progress" in allowed_tools
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__studio_link" in allowed_tools
-    assert "--disallowedTools" not in argv
-    assert "--append-system-prompt" in argv
-    assert argv[argv.index("--append-system-prompt") + 1] == assistant.STUDIO_ASSISTANT_CONTEXT
-    assert "--permission-prompt-tool" in argv
-    assert f"mcp__{assistant.CLAUDE_MCP_SERVER_NAME}__approval_prompt" in argv
-    assert "--append-system-prompt" in argv
-    assert "Studio context" in argv
-    assert "--session-id" in argv
-    assert session_id in argv
-
-    assistant._initialized_sessions.add(session_id)
-    resumed_argv = assistant._build_claude_argv(session_id, "again", "http://test/mcp", "Studio context")
-    assert "-r" in resumed_argv
-    assert "--session-id" not in resumed_argv
-    assert "--append-system-prompt" in resumed_argv
-
-
-def test_history_list_excludes_disk_only_sessions_but_direct_get_remains_available(
-    service_client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    workdir = tmp_path / "repo"
-    projects_dir = tmp_path / "claude-projects"
-    project_dir = projects_dir / str(workdir).replace("/", "-")
-    project_dir.mkdir(parents=True)
-    session_id = str(uuid.uuid4())
-    history = project_dir / f"{session_id}.jsonl"
-    first_prompt = assistant._build_claude_prompt(
-        "first prompt",
-        "default",
-        "https://studio.test/studio",
-        "/workspaces/default/dashboard/assistant",
-    )
-    history.write_text(
-        "\n".join(
-            [
-                json.dumps({"type": "user", "message": {"content": first_prompt}}),
-                json.dumps(
-                    {
-                        "type": "assistant",
-                        "message": {
-                            "id": "msg_1",
-                            "model": "claude-sonnet-4-5",
-                            "content": [
-                                {"type": "thinking", "thinking": "checking"},
-                                {"type": "text", "text": "done"},
-                                {
-                                    "type": "tool_use",
-                                    "id": "toolu_1",
-                                    "name": "Bash",
-                                    "input": {"command": "pwd"},
-                                },
-                            ],
-                            "usage": {
-                                "input_tokens": 10,
-                                "cache_creation_input_tokens": 2,
-                                "cache_read_input_tokens": 3,
-                                "output_tokens": 4,
-                            },
-                        },
-                        "requestId": "req_1",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "assistant",
-                        "message": {
-                            "id": "msg_2",
-                            "model": "claude-sonnet-4-6",
-                            "content": [
-                                {
-                                    "type": "tool_use",
-                                    "id": "toolu_write",
-                                    "name": "Write",
-                                    "input": {"file_path": "agents/beach-finder.yml", "content": "name: beach-finder"},
-                                },
-                                {
-                                    "type": "tool_use",
-                                    "id": "toolu_link",
-                                    "name": "mcp__nemo_studio__studio_link",
-                                    "input": {"destination": "agents", "label": "Agents"},
-                                },
-                                {
-                                    "type": "tool_use",
-                                    "id": "toolu_job",
-                                    "name": "mcp__nemo_studio__job_progress",
-                                    "input": {
-                                        "job_name": "agent-eval-1",
-                                        "job_type": "agent_evaluation",
-                                        "source": "evaluator",
-                                    },
-                                },
-                                {
-                                    "type": "tool_use",
-                                    "id": "toolu_question",
-                                    "name": "AskUserQuestion",
-                                    "input": {
-                                        "questions": [
-                                            {
-                                                "question": "Which agent should be used?",
-                                                "header": "Agent",
-                                                "options": [{"label": "beach-finder"}],
-                                            }
-                                        ]
-                                    },
-                                },
-                            ],
-                        },
-                        "requestId": "req_2",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "user",
-                        "message": {
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": "toolu_question",
-                                    "content": (
-                                        'Your question has been answered: "Which agent should be used?"='
-                                        '"beach-finder". You can now continue with this answer in mind.'
-                                    ),
-                                }
-                            ]
-                        },
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "assistant",
-                        "message": {
-                            "id": "msg_3",
-                            "model": "claude-sonnet-4-6",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "\n".join(
-                                        [
-                                            "Draft Spec: `cat-identifier`",
-                                            "Name: `cat-identifier`",
-                                            "",
-                                            "Model",
-                                            "`cloud, nvidia/llama-3.3-nemotron-super-49b-v1` - default, good reasoning",
-                                            "",
-                                            "Framework",
-                                            "langgraph-nat",
-                                        ]
-                                    ),
-                                }
-                            ],
-                        },
-                        "requestId": "req_3",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "user",
-                        "message": {
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": "toolu_1",
-                                    "content": "done",
-                                }
-                            ]
-                        },
-                        "toolUseResult": {"totalTokens": 11},
-                    }
-                ),
-                json.dumps({"type": "user", "isSidechain": True, "message": {"content": "ignored"}}),
-                "not-json",
-            ]
-        )
-    )
-
-    monkeypatch.setattr(assistant, "SERVER_CWD", workdir)
-    monkeypatch.setattr(assistant, "CLAUDE_PROJECTS_DIR", projects_dir)
-
-    list_response = service_client.get("/v2/assistant/history/sessions")
-
-    assert list_response.status_code == 200
-    assert list_response.json() == []
-
-    history_response = service_client.get(f"/v2/assistant/history/sessions/{session_id}")
-
-    assert history_response.status_code == 200
-    assert history_response.json() == {
-        "session_id": session_id,
-        "items": [
-            {"kind": "user", "text": "first prompt"},
-            {
-                "kind": "assistant",
-                "parts": [
-                    {"type": "thinking", "thinking": "checking"},
-                    {"type": "text", "text": "done"},
-                    {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "pwd"}},
-                ],
-            },
-            {
-                "kind": "assistant",
-                "parts": [
-                    {
-                        "type": "tool_use",
-                        "id": "toolu_write",
-                        "name": "Write",
-                        "input": {"file_path": "agents/beach-finder.yml", "content": "name: beach-finder"},
-                    },
-                    {
-                        "type": "tool_use",
-                        "id": "toolu_link",
-                        "name": "mcp__nemo_studio__studio_link",
-                        "input": {"destination": "agents", "label": "Agents"},
-                    },
-                    {
-                        "type": "tool_use",
-                        "id": "toolu_job",
-                        "name": "mcp__nemo_studio__job_progress",
-                        "input": {
-                            "job_name": "agent-eval-1",
-                            "job_type": "agent_evaluation",
-                            "source": "evaluator",
-                        },
-                    },
-                    {
-                        "type": "tool_use",
-                        "id": "toolu_question",
-                        "name": "AskUserQuestion",
-                        "input": {
-                            "questions": [
-                                {
-                                    "question": "Which agent should be used?",
-                                    "header": "Agent",
-                                    "options": [{"label": "beach-finder"}],
-                                }
-                            ]
-                        },
-                    },
-                ],
-            },
-            {"kind": "user", "text": "Which agent should be used?\nbeach-finder"},
-            {
-                "kind": "assistant",
-                "parts": [
-                    {
-                        "type": "text",
-                        "text": "\n".join(
-                            [
-                                "Draft Spec: `cat-identifier`",
-                                "Name: `cat-identifier`",
-                                "",
-                                "Model",
-                                "`cloud, nvidia/llama-3.3-nemotron-super-49b-v1` - default, good reasoning",
-                                "",
-                                "Framework",
-                                "langgraph-nat",
-                            ]
-                        ),
-                    }
-                ],
-            },
-        ],
-        "chat_artifacts": {
-            "agent": "cat-identifier",
-            "model": "cloud, nvidia/llama-3.3-nemotron-super-49b-v1",
-            "model_source": "spec",
-            "assistant_model": "claude-sonnet-4-6",
-            "workspace": "default",
-            "selections": [{"label": "Agent", "value": "beach-finder"}],
-            "files": [{"action": "Wrote", "path": "agents/beach-finder.yml"}],
-            "links": [{"label": "Agents", "destination": "agents", "href": "/workspaces/default/agents"}],
-            "jobs": [
-                {
-                    "name": "agent-eval-1",
-                    "job_type": "agent_evaluation",
-                    "source": "evaluator",
-                    "href": None,
-                }
-            ],
-            "tools": [
-                "Bash",
-                "Write",
-                "mcp__nemo_studio__studio_link",
-                "mcp__nemo_studio__job_progress",
-                "AskUserQuestion",
-            ],
-        },
-    }
-    assert session_id in assistant._initialized_sessions
-
-
-def test_list_claude_skills_returns_claude_install_metadata(
-    service_client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    source_dir = _inference_source_dir(tmp_path)
-    installed_skill = tmp_path / ".claude" / "skills" / "nemo-inference" / "SKILL.md"
-    installed_skill.parent.mkdir(parents=True)
-    installed_skill.write_text("# Installed")
-    skill = _inference_skill(source_dir)
-
-    monkeypatch.setattr(assistant, "SERVER_CWD", tmp_path)
-    monkeypatch.setattr(assistant_skills, "load_skills", lambda: {"inference": skill})
-
-    response = service_client.get("/v2/assistant/skills")
-
-    assert response.status_code == 200
-    assert response.json() == [_expected_inference_skill_response(installed=True)]
-
-
-@pytest.mark.parametrize(
-    ("tool_name", "tool_input", "result", "expected"),
-    [
-        (
-            "mcp__nemo_studio__select_agent",
-            {},
-            '{"status":"submitted","agent":"beach-finder"}',
-            "Selected agent: beach-finder",
-        ),
-        (
-            "mcp__nemo_studio__select_model",
-            {"display_label": "Fallback model", "output_key": "fallback_model"},
-            '{"status":"submitted","fallback_model":"nemotron"}',
-            "Fallback model: nemotron",
-        ),
-        (
-            "mcp__nemo_studio__select_dataset_file",
-            {},
-            '{"status":"submitted","dataset_fileset":"eval-data","dataset_path":"input.jsonl"}',
-            "Selected dataset: eval-data/input.jsonl",
-        ),
-        (
-            "mcp__nemo_studio__select_eval_config",
-            {},
-            '{"status":"submitted","needs_eval_config":true}',
-            "I don't have an evaluation config yet",
-        ),
-    ],
-)
-def test_history_interaction_text_restores_studio_picker_submissions(
-    tool_name: str,
-    tool_input: dict[str, Any],
-    result: str,
-    expected: str,
-):
-    assert (
-        assistant._history_interaction_text(
-            assistant.HistoryToolUse(name=tool_name, input=tool_input),
-            result,
-        )
-        == expected
-    )
-
-
-def test_load_claude_skills_falls_back_on_duplicate_skill_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-):
-    skill = _inference_skill(_inference_source_dir(tmp_path))
-    fallback_called = False
-
-    def fallback() -> dict[str, assistant_skills.Skill]:
-        nonlocal fallback_called
-        fallback_called = True
-        return {"inference": skill}
-
-    monkeypatch.setattr(
-        assistant_skills,
-        "load_skills",
-        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("vendored drift")),
-    )
-    monkeypatch.setattr(assistant_skills, "_load_skills_from_preferred_entry_points", fallback)
-
-    with caplog.at_level(logging.WARNING):
-        loaded = assistant_skills._load_claude_skills()
-
-    assert loaded == {"inference": skill}
-    assert fallback_called
-    assert "vendored drift" in caplog.text
-
-
-def test_list_claude_skills_returns_500_when_fallback_also_fails(
-    service_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(
-        assistant_skills,
-        "load_skills",
-        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("registry drift")),
-    )
-    monkeypatch.setattr(
-        assistant_skills,
-        "_load_skills_from_preferred_entry_points",
-        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("fallback drift")),
-    )
-
-    response = service_client.get("/v2/assistant/skills")
-
-    assert response.status_code == 500
-    assert response.json()["detail"] == "fallback drift"
-
-
 def test_invalid_session_id_returns_400(service_client: TestClient):
     response = service_client.get("/v2/assistant/history/sessions/not-a-uuid")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "session_id must be a UUID"
-
-
-async def test_stream_claude_hides_startup_oserror(monkeypatch: pytest.MonkeyPatch):
-    session_id = str(uuid.uuid4())
-
-    async def fail_start(*args: Any, **kwargs: Any):
-        raise OSError("secret local path")
-
-    monkeypatch.setattr(assistant, "which", lambda name: "/usr/bin/claude")
-    monkeypatch.setattr(assistant, "create_subprocess_exec", fail_start)
-
-    chunks = [chunk async for chunk in assistant._stream_claude(session_id, "hello", "http://test/mcp")]
-
-    assert chunks == ['event: error\ndata: {"exit_code": null, "stderr": "Failed to start Claude Code process"}\n\n']
-    assert "secret local path" not in chunks[0]
-    assert session_id not in assistant._session_streams
 
 
 def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
@@ -1067,6 +581,7 @@ def test_mcp_initialize_and_tools_list(monkeypatch: pytest.MonkeyPatch):
         "select_dataset_file",
         "select_model",
         "job_progress",
+        "studio_docs",
         "studio_link",
     }
     studio_link_tool = next(tool for tool in tools if tool["name"] == "studio_link")
@@ -1103,11 +618,70 @@ def test_mcp_tools_list_includes_feature_flag_enabled_destinations(monkeypatch: 
     assert "chat with or try a model" in studio_link_tool["description"]
 
 
-def test_assistant_studio_flag_enables_assistant_and_dashboard_destinations():
+def test_studio_link_tool_lists_each_enabled_destination_with_its_label():
+    tool = studio_links.tool_for_destinations(
+        studio_links.enabled_destinations({"experiment": True, "evals_enabled": True})
+    )
+
+    description = tool["description"]
+    assert "Choose the destination whose label matches the page the user asked about" in description
+    assert "experiment: Experiments" in description
+    assert "evaluation_results: Evaluation results" in description
+    # Placeholders read as required arguments rather than raw template braces.
+    assert "agent: Agent <name>" in description
+    assert "experiment_detail: Experiment <experiment_name>" in description
+    assert "{" not in description.partition("Enabled destinations and the page each opens")[2]
+
+
+def test_studio_link_tool_omits_disabled_destinations_from_the_labels():
+    tool = studio_links.tool_for_destinations(
+        studio_links.enabled_destinations({"experiment": False, "evals_enabled": True})
+    )
+
+    labels = tool["description"].partition("Enabled destinations and the page each opens")[2]
+    assert "experiment:" not in labels
+    assert "experiment_detail:" not in labels
+    assert "evaluation_results:" in labels
+
+
+def test_studio_link_labels_keep_the_schema_destination_list_parseable():
+    destinations = studio_links.enabled_destinations({"experiment": True})
+    tool = studio_links.tool_for_destinations(destinations)
+
+    description = tool["inputSchema"]["properties"]["destination"]["description"]
+    assert supported_destinations_from_description(description) == set(destinations)
+
+
+@pytest.mark.parametrize(
+    "requested", ["experiment", "experiments", "experiment_list", "experiments_page", "Experiments"]
+)
+def test_experiment_list_destination_accepts_plural_and_list_names(requested: str):
+    result = studio_links.build_studio_link_result(
+        "default",
+        "https://studio.test",
+        {"destination": requested},
+        studio_links.enabled_destinations({"experiment": True}),
+    )
+
+    assert result["destination"] == "experiment"
+    assert result["path"] == "/workspaces/default/experiment"
+
+
+def test_assistant_studio_flag_enables_dashboard_destination():
     enabled_destinations = studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
-    assert "assistant" in enabled_destinations
     assert "dashboard" in enabled_destinations
+
+
+def test_assistant_has_no_link_destination():
+    """The assistant is a top-bar pop-out with no page of its own, so there is nothing to link to."""
+    assert "assistant" not in studio_links.STUDIO_LINK_DESTINATIONS
+    assert not any(
+        alias in {"claude_code", "claude_code_chat", "assistant_chat"}
+        for destination in studio_links.STUDIO_LINK_DESTINATIONS.values()
+        for alias in destination.aliases
+    )
+    assert "assistant" not in studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
 
 def test_evals_feature_flags_gate_assistant_destinations():
@@ -1123,7 +697,6 @@ def test_dashboard_destination_follows_the_sandbox_dashboard_flag():
     enabled_destinations = studio_links.enabled_destinations({"dashboard_sandbox_enabled": True})
 
     assert "dashboard" in enabled_destinations
-    assert "assistant" not in enabled_destinations
 
 
 def test_build_studio_system_prompt_preserves_empty_enabled_destinations():
@@ -1158,7 +731,7 @@ def test_build_studio_system_prompt_includes_message_summary_contract():
     assert "behind a 'worked for <time>' accordion" in prompt
     assert "Never end a message with only a plain-text question" in prompt
     assert "call the matching select_* tool before completing the message" in prompt
-    assert "you MUST call AskUserQuestion to render a selectable options picker" in prompt
+    assert "you MUST call ask_user_question to render a selectable options picker" in prompt
     assert "Only ask a concise plain-text question for genuinely open-ended" in prompt
     assert "A timeout, disconnect, or other interactive-tool error is not permission to continue" in prompt
     assert "summary's final sentence MUST state the exact unresolved selection or action" in prompt
@@ -1183,45 +756,100 @@ def test_build_assistant_system_prompt_uses_assistant_identity():
         {},
     )
 
-    assert "Your identity in this interface is NeMo Assistant." in prompt
+    assert "Your identity in this interface is NeMo Assistant, known as Felix, a cat." in prompt
     assert "Claude" not in prompt
 
 
-def test_history_summary_reads_model_generated_session_title(tmp_path: Path):
-    history = tmp_path / "session.jsonl"
-    history.write_text(
-        "\n".join(
-            [
-                json.dumps({"type": "user", "message": {"content": "A long initial request"}}),
-                json.dumps(
-                    {
-                        "type": "assistant",
-                        "message": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "\n".join(
-                                        [
-                                            assistant.STUDIO_MESSAGE_SUMMARY_START,
-                                            "title: Create Spam Detector Agent",
-                                            "worked_for: unknown",
-                                            "summary: Created the requested agent.",
-                                            "details_label: worked for unknown",
-                                            assistant.STUDIO_MESSAGE_SUMMARY_END,
-                                        ]
-                                    ),
-                                }
-                            ]
-                        },
-                    }
-                ),
-            ]
-        )
+def test_assistant_context_gives_felix_his_name_and_species():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "Your name is Felix, and you are a cat." in context
+    assert "Never say you have no name or that you are not a cat." in context
+    # The playful tone is bounded: never in errors or technical content.
+    assert "Never use cat flavor in error messages, technical steps, commands, code" in context
+
+
+def test_assistant_context_sends_product_questions_to_the_docs_tool():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "call studio_docs" in context
+    assert "mcp__nemo_studio__" not in context
+    assert "from memory" in context
+    assert "say so rather than guessing" in context
+
+
+def test_assistant_context_hides_the_docs_source_but_allows_a_small_link():
+    context = assistant.STUDIO_ASSISTANT_CONTEXT
+
+    assert "Never say or imply where the information came from" in context
+    assert "'according to the documentation'" in context
+    assert "do not mention the studio_docs tool" in context
+    assert "[NeMo docs](https://docs.nvidia.com/nemo-helix)" in context
+    assert "Never invent deeper docs URLs" in context
+
+
+def test_deployed_prompt_names_the_docs_tool_without_the_mcp_prefix():
+    prompt = assistant._build_assistant_system_prompt(str(uuid.uuid4()), "default", None, None, {})
+
+    assert "Your name is Felix, and you are a cat." in prompt
+    assert "call studio_docs (no path to list pages" in prompt
+    assert "mcp__nemo_studio__studio_docs" not in prompt
+    assert "studio_docs, and ask_user_question call, pass studio_session_id=" in prompt
+
+
+def test_mcp_studio_docs_lists_pages_when_called_without_a_path(service_client: TestClient):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "studio_docs", "arguments": {}}},
     )
 
-    summary = assistant._summarize_history_session(history)
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert "isError" not in result
+    assert "- studio/index:" in result["content"][0]["text"]
 
-    assert summary.title == "Create Spam Detector Agent"
+
+def test_mcp_studio_docs_reads_a_page_by_path(service_client: TestClient):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "studio_docs", "arguments": {"path": "studio/index"}},
+        },
+    )
+
+    result = response.json()["result"]
+    assert "isError" not in result
+    assert "NeMo Studio" in result["content"][0]["text"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"path": "studio/does-not-exist"},
+        {"path": "../../etc/passwd"},
+        {"path": "studio/index", "offset": -1},
+        {"path": "studio/index", "offset": "0"},
+        {"path": "studio/index", "offset": True},
+    ],
+)
+def test_mcp_studio_docs_reports_bad_requests_as_tool_errors(service_client: TestClient, arguments: dict[str, Any]):
+    response = service_client.post(
+        f"/v2/assistant/mcp/{uuid.uuid4()}",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "studio_docs", "arguments": arguments},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "error" not in body
+    assert body["result"]["isError"] is True
 
 
 def test_studio_link_destinations_cover_registered_workspace_routes():
@@ -1237,7 +865,6 @@ def test_studio_link_destinations_cover_registered_workspace_routes():
         "agentsList": "agents",
         "baseModels": "base_models",
         "baseModelsModel": "base_model",
-        "claudeCodeChat": "assistant",
         "customizationJobDetails": "customization",
         "customizationJobList": "customizations",
         "dashboard": "dashboard",
@@ -2090,16 +1717,31 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert "when a Studio view, Studio link, or Studio progress card is available" in captured["studio_system_prompt"]
     assert "Default to trying to include a Studio link in Studio-related responses" in captured["studio_system_prompt"]
     assert "link to the closest list page for the current workspace" in captured["studio_system_prompt"]
-    assert "Base Models or available base models use destination='base_models'" in captured["studio_system_prompt"]
-    assert "never use customizations for Base Models" in captured["studio_system_prompt"]
+    # The two safeguards that labels alone cannot enforce stay in the prompt.
+    assert "never link the customizations destination for Base Models" in captured["studio_system_prompt"]
+    assert (
+        "Do not list agents or ask the user to choose an agent for model-chat intent"
+        in captured["studio_system_prompt"]
+    )
     assert "Enabled Studio link destinations for this Studio instance" in captured["studio_system_prompt"]
     assert "Only call studio_link with one of the enabled destinations above" in captured["studio_system_prompt"]
     assert "Do not invent Studio route paths manually" in captured["studio_system_prompt"]
-    assert "/workspaces/{workspace}/evaluation/..." in captured["studio_system_prompt"]
-    assert "never nest evaluation links under /dashboard/evaluations/" in captured["studio_system_prompt"]
-    assert "destination='evaluation_results'" in captured["studio_system_prompt"]
-    assert "/workspaces/{workspace}/evaluation/results" in captured["studio_system_prompt"]
-    assert "use destination='model_chat'" in captured["studio_system_prompt"]
+    # Routing is label-driven: general rules replace the per-resource "use destination=X" bullets.
+    assert "Choose the studio_link destination whose label best matches the page" in captured["studio_system_prompt"]
+    assert "send questions about experiments to the experiment pages" in captured["studio_system_prompt"]
+    assert "check mcp__nemo_studio__studio_docs" not in captured["studio_system_prompt"]
+    assert "check studio_docs before choosing a destination" in captured["studio_system_prompt"]
+    for removed in (
+        "destination='evaluation_results'",
+        "destination='data_designer_job'",
+        "destination='safe_synthesizer_job'",
+        "destination='base_models'",
+        "destination='fileset'",
+        "destination='agents'",
+    ):
+        assert removed not in captured["studio_system_prompt"]
+    # Route paths live in the studio_link destination table, not hardcoded in the prompt.
+    assert "/dashboard/evaluations/" not in captured["studio_system_prompt"]
     assert "Direct Studio link requests are mandatory tool-use requests" in captured["studio_system_prompt"]
     assert "Never answer a Studio link request by saying you cannot generate URLs" in captured["studio_system_prompt"]
     assert (
@@ -2113,10 +1755,10 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
     assert f"studio_session_id='{session_id}'" in captured["studio_system_prompt"]
     assert "The approval context for nemo_api is injected by Studio" in captured["studio_system_prompt"]
     assert "mutating calls will automatically pause for the user's approval" in captured["studio_system_prompt"]
-    assert (
-        "For a newly created agent, use studio_link with destination='agent_chat'" in captured["studio_system_prompt"]
-    )
-    assert "destination='agent_chat'" in captured["studio_system_prompt"]
+    # After-action agent_chat guidance now lives in the studio_link tool description, not the prompt.
+    assert "For a newly created agent, use studio_link" not in captured["studio_system_prompt"]
+    assert "destination='agent_chat'" not in captured["studio_system_prompt"]
+    assert "Choose the studio_link destination whose label best matches the page" in captured["studio_system_prompt"]
 
 
 def test_platform_route_stream_infers_studio_url_from_browser_headers(monkeypatch: pytest.MonkeyPatch):
@@ -2389,17 +2031,6 @@ def test_nemo_agent_timeout_detail_explains_where_to_find_late_results():
     )
 
 
-def test_parse_tool_step_input_extracts_python_repr_dict():
-    payload = "**Input:**\n```json\n{'action': 'list', 'resource': 'secrets'}\n```\n**Output:** ..."
-    assert assistant._parse_tool_step_input(payload) == {"action": "list", "resource": "secrets"}
-
-
-def test_parse_tool_step_input_returns_empty_on_unparseable():
-    assert assistant._parse_tool_step_input("no dict here") == {}
-    assert assistant._parse_tool_step_input(None) == {}
-    assert assistant._parse_tool_step_input("**Input:** [1, 2, 3]") == {}
-
-
 def test_tool_use_stream_event_shape():
     event_type, payload = assistant._tool_use_stream_event("nemo_api", {"resource": "secrets"})
     assert event_type == "agent"
@@ -2572,6 +2203,7 @@ def test_public_mcp_route_is_mounted_before_static_fallback():
         "select_dataset_file",
         "select_model",
         "job_progress",
+        "studio_docs",
         "studio_link",
     ]
     assert get_response.status_code == 405
@@ -2606,148 +2238,3 @@ def test_assistant_routes_are_available_by_default(service_client: TestClient):
 
     assert response.status_code == 200
     uuid.UUID(response.json()["session_id"])
-
-
-def test_parse_reasoning_step_output_extracts_the_trace():
-    payload = "**Input:**\n```python\nchain of thought\n```\n\n**Output:** The user asked a math question."
-    assert assistant._parse_reasoning_step_output(payload) == "The user asked a math question."
-
-
-def test_parse_reasoning_step_output_ignores_a_start_step():
-    # The paired start step has no Output block yet.
-    assert assistant._parse_reasoning_step_output("**Input:**\n```python\nchain of thought\n```") == ""
-    assert assistant._parse_reasoning_step_output(None) == ""
-
-
-def test_reasoning_stream_event_shape():
-    event_type, payload = assistant._reasoning_stream_event("thinking out loud")
-    assert event_type == "agent"
-    block = json.loads(payload)["message"]["content"][0]
-    assert block == {"type": "reasoning", "text": "thinking out loud"}
-
-
-@pytest.mark.asyncio
-async def test_invoke_assistant_relays_reasoning_despite_shared_step_id(monkeypatch: pytest.MonkeyPatch):
-    """A reasoning step is a start/end pair sharing one id. The tool dedup must not
-    claim that id on the start, or the end -- which carries the trace -- is dropped.
-    """
-    session_id = str(uuid.uuid4())
-    queue: asyncio.Queue = asyncio.Queue()
-    assistant._session_streams[session_id] = queue
-
-    start = json.dumps({"id": "step-1", "name": "Reasoning: model", "payload": "**Input:**\n```python\nx\n```"})
-    end = json.dumps(
-        {
-            "id": "step-1",
-            "name": "Reasoning: model",
-            "payload": "**Input:**\n```python\nx\n```\n\n**Output:** I thought about it.",
-        }
-    )
-    lines = [
-        f"intermediate_data: {start}",
-        f"intermediate_data: {end}",
-        'data: {"choices":[{"delta":{"content":"done"}}]}',
-        "data: [DONE]",
-    ]
-
-    class _Response:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        async def aiter_lines(self):
-            for line in lines:
-                yield line
-
-    class _Stream:
-        async def __aenter__(self):
-            return _Response()
-
-        async def __aexit__(self, *args):
-            return False
-
-    class _Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        def stream(self, *args, **kwargs):
-            return _Stream()
-
-    monkeypatch.setattr(assistant, "AsyncClient", lambda **kwargs: _Client())
-
-    text, _ = await assistant._invoke_assistant("https://a.test", {}, [], session_id)
-
-    assert text == "done"
-    events = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
-    reasoning = [json.loads(payload) for _, payload in events]
-    blocks = [b for message in reasoning for b in message["message"]["content"]]
-    assert {"type": "reasoning", "text": "I thought about it."} in blocks
-
-
-@pytest.mark.asyncio
-async def test_invoke_assistant_emits_a_repeated_reasoning_step_once(monkeypatch: pytest.MonkeyPatch):
-    """A repeated completed step must not render the same trace twice, while the
-    start of the pair -- which shares its id -- must never claim that id."""
-    session_id = str(uuid.uuid4())
-    queue: asyncio.Queue = asyncio.Queue()
-    assistant._session_streams[session_id] = queue
-
-    start = json.dumps({"id": "step-1", "name": "Reasoning: model", "payload": "**Input:**\n```python\nx\n```"})
-    end = json.dumps(
-        {
-            "id": "step-1",
-            "name": "Reasoning: model",
-            "payload": "**Input:**\n```python\nx\n```\n\n**Output:** I thought about it.",
-        }
-    )
-    lines = [
-        f"intermediate_data: {start}",
-        f"intermediate_data: {end}",
-        f"intermediate_data: {end}",
-        'data: {"choices":[{"delta":{"content":"done"}}]}',
-        "data: [DONE]",
-    ]
-
-    class _Response:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        async def aiter_lines(self):
-            for line in lines:
-                yield line
-
-    class _Stream:
-        async def __aenter__(self):
-            return _Response()
-
-        async def __aexit__(self, *args):
-            return False
-
-    class _Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        def stream(self, *args, **kwargs):
-            return _Stream()
-
-    monkeypatch.setattr(assistant, "AsyncClient", lambda **kwargs: _Client())
-
-    await assistant._invoke_assistant("https://a.test", {}, [], session_id)
-
-    blocks = []
-    while not queue.empty():
-        _, payload = queue.get_nowait()
-        blocks.extend(json.loads(payload)["message"]["content"])
-    reasoning_blocks = [b for b in blocks if b.get("type") == "reasoning"]
-    assert reasoning_blocks == [{"type": "reasoning", "text": "I thought about it."}]
