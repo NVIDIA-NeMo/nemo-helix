@@ -30,6 +30,7 @@ from nemo_builder_plugin.schema import (
 )
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+from nemo_evals.harbor.archive import pack_task
 from nemo_evals.image_builds.builder import builder_name, copy_builder_name
 from nemo_evals.image_builds.models import (
     BuildImage,
@@ -47,11 +48,13 @@ from nemo_evals.image_builds.runner import (
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
-from nemo_helix_plugin.client.errors import ConflictError, NemoClientError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import ConflictError, NemoClientError, NemoTransportError, PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 Outcome = Literal["ready", "failed"]
 _SEPARATE_VERIFIER = {"verifier": {"environment_mode": "separate"}}
+# A task whose main image is built from its Dockerfile and whose verifier runs in an image the task names.
+_PREBUILT_VERIFIER = {"verifier": {"environment": {"docker_image": "ghcr.io/org/verify:1"}}}
 
 
 # How every ready image starts, as Builder records it from the image's config.
@@ -60,6 +63,9 @@ RUNTIME_CONFIG = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], workin
 
 # A Builder backend other than this cluster's. Evals records whichever name a row carries.
 REMOTE_BACKEND = "remote"
+
+# What Builder says when it refuses a request itself, as a backend that can't build this one request does.
+REFUSAL = "the backend can't build this request"
 
 
 def _handle(name: str) -> ExternalImage:
@@ -72,11 +78,9 @@ def _no_handle(name: str) -> ExternalImage:
     return ExternalImage(build_id=f"build-{name}")
 
 
-def _refused(code: str | None = None) -> NemoClientError:
-    """Builder refusing a build: by permission, or with a 409 that names ``code``."""
-    if code is None:
-        return PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
-    return ConflictError(httpx.Response(409, json={"detail": "the backend refuses it", "code": code}))
+def _forbidden() -> PermissionDeniedError:
+    """Builder's 403 for a caller who may not build. It turns the caller away, not the request: see ``_refusal``."""
+    return PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
 
 
 def _container_image(
@@ -117,6 +121,11 @@ def _submitted(name: str, revision: int, *, backend: str = IN_CLUSTER_BACKEND) -
     )
 
 
+def _refusal(code: str | None = CODE_BACKEND_REJECTED) -> ConflictError:
+    """Builder's 409 that refuses the request itself. It says so by its ``code``; an older Builder gives none."""
+    return ConflictError(httpx.Response(409, json={"detail": REFUSAL} | ({"code": code} if code else {})))
+
+
 class _Jobs:
     async def create(self, request: CreateHelixJobRequest) -> None:
         pass
@@ -129,8 +138,8 @@ class _Builder:
     """Builder whose images finish with ``outcomes[context_path]`` on the first read after submit.
 
     It builds in-cluster unless ``backend`` names another; ``external`` then gives what its build service calls the
-    image of each row, by the row's name. ``refusals`` is how Builder refuses the submit of each image it names, by
-    context path or prebuilt image.
+    image of each row, by the row's name. ``refusals`` is what Builder answers the submit of each image it names,
+    by context path or prebuilt image, in place of taking it: a refusal, or another error.
     """
 
     def __init__(
@@ -236,7 +245,7 @@ async def _start(
 
 async def _stored_build(entity_store, spec: TaskImageBuildSpec) -> TaskImageBuildEntity:
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-    name = build_entity_name(spec.revision_digest, 1)
+    name = build_entity_name(spec.revision_digest, spec.attempt)
     return await entity_store.get(TaskImageBuildEntity, name=name, workspace="default", parent=head.id)
 
 
@@ -248,6 +257,15 @@ async def _stored_task_definition(entity_store, spec: TaskImageBuildSpec) -> Har
 
 
 async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwargs) -> TaskImageBuildEntity:
+    """Run a build to its end. ``_Builder``'s images finish on the first read after their submit.
+
+    Unless a test brings its own, the clock moves 100 seconds each time it is read and the build is given 250.
+    A build left unsettled, as by an image that was never submitted, then ends as timed out instead of being
+    waited for on the real clock.
+    """
+    ticks = iter(range(0, 10_000, 100))
+    kwargs.setdefault("timeout", 250)
+    kwargs.setdefault("clock", lambda: next(ticks))
     return await run_task_image_build(
         spec, entities=entity_store, files=Mock(), builder=builder, sleep=_no_sleep, **kwargs
     )
@@ -300,7 +318,7 @@ async def test_a_remote_image_is_recorded_with_its_backend_from_its_submit(
     The submit is then the only record of the rest.
     """
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
-    builder = _Builder({}, refusals={"sort-task/tests": _refused()}, backend=REMOTE_BACKEND)
+    builder = _Builder({}, refusals={"sort-task/tests": _forbidden()}, backend=REMOTE_BACKEND)
 
     build = await _run(entity_store, spec, builder)
 
@@ -405,17 +423,18 @@ async def test_a_remote_row_an_older_builder_finds_ready_keeps_its_backend(entit
 
 
 @pytest.mark.parametrize(
-    ("config", "refusal"),
+    ("config", "refusal", "error"),
     [
-        # This cluster refuses a user who may not build.
-        ({}, _refused()),
-        # A remote build service can't copy a prebuilt image, so Builder refuses it by the backend.
-        ({"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refused(CODE_BACKEND_REJECTED)),
+        # This cluster turns away a user who may not build. A 403 is recorded as the client reports it.
+        ({}, _forbidden(), "Builder refused the build: HTTP 403: not allowed to build"),
+        # A remote build service can't copy a prebuilt image, so Builder refuses it by the backend. A 409 that
+        # refuses the request is recorded as Builder's own sentence.
+        ({"environment": {"docker_image": "ghcr.io/org/sort:1"}}, _refusal(), f"Builder refused the build: {REFUSAL}"),
     ],
     ids=["in-cluster", "remote"],
 )
 async def test_an_image_builder_refused_names_no_backend_whichever_backend_refused_it(
-    entity_store, store_task, archive, build_image_keys, config: dict, refusal: NemoClientError
+    entity_store, store_task, archive, build_image_keys, config: dict, refusal: NemoClientError, error: str
 ) -> None:
     """The backend is read from the Builder row an image names, and an image whose submit Builder refused names none.
 
@@ -430,7 +449,7 @@ async def test_an_image_builder_refused_names_no_backend_whichever_backend_refus
 
     [image] = build.images
     assert (build.status, image.status, image.builder_image) == ("failed", "failed", None)
-    assert image.error is not None and image.error.startswith("Builder refused the build: HTTP")
+    assert image.error == error
     assert image.builder_backend is None
     [stored] = (await _stored_build(entity_store, spec))._get_data_fields()["images"]
     assert list(stored) == build_image_keys
@@ -506,8 +525,7 @@ async def test_an_image_whose_builder_job_ended_without_it_fails(entity_store, s
         async def get_image(self, name: str) -> ContainerImage | None:
             return None if name not in self.images else _container_image(name)
 
-    ticks = iter(range(0, 10_000, 100))
-    build = await _run(entity_store, spec, _Abandoned({}, job="error"), timeout=250, clock=lambda: next(ticks))
+    build = await _run(entity_store, spec, _Abandoned({}, job="error"))
 
     assert build.status == "failed"
     assert build.error is not None and build.error.startswith("main: Builder job builder-harbor-env-")
@@ -527,10 +545,199 @@ async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store
 async def test_builder_refusing_a_build_fails_the_image(entity_store, store_task, archive) -> None:
     spec = await _start(entity_store, store_task, config={})
 
-    build = await _run(entity_store, spec, _Builder({}, refusals={"sort-task/environment": _refused()}))
+    build = await _run(entity_store, spec, _Builder({}, refusals={"sort-task/environment": _forbidden()}))
 
     assert build.status == "failed"
     assert build.error is not None and "not allowed to build" in build.error
+
+
+@pytest.mark.parametrize("code", ["backend_rejected", "missing_secrets", None], ids=["rejected", "secrets", "no-code"])
+async def test_a_dockerfile_build_builder_refuses_fails_its_image_with_builders_sentence(
+    entity_store, store_task, archive, code: str | None
+) -> None:
+    """The record is stored with its images: the refused one says why, and the one submitted before it is named.
+
+    An older Builder gives its refusal no code and writes no row for it, which reads the same.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready"}, refusals={"sort-task/tests": _refusal(code)})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert (build.status, build.error) == ("failed", f"verifier: Builder refused the build: {REFUSAL}")
+    main, verifier = build.images
+    assert (verifier.type, verifier.status, verifier.builder_image) == ("verifier", "failed", None)
+    assert verifier.error == f"Builder refused the build: {REFUSAL}"
+    # The build submitted before the refusal goes on at Builder, and the record says which it is.
+    assert (main.type, main.status) == ("main", "building")
+    assert main.builder_image is not None and main.build_job is not None
+    assert await _stored_build(entity_store, spec) == build
+
+
+async def test_nothing_is_submitted_after_a_refusal(entity_store, store_task, archive) -> None:
+    """The build has failed, so an image not yet submitted is left as it was planned."""
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({}, refusals={"sort-task/environment": _refusal()})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert builder.submits == []
+    assert build.error == f"main: Builder refused the build: {REFUSAL}"
+    assert [(image.type, image.status, image.builder_image) for image in build.images] == [
+        ("main", "failed", None),
+        ("verifier", "pending", None),
+    ]
+    assert await _stored_build(entity_store, spec) == build
+
+
+async def test_a_task_whose_copy_builder_refuses_starts_no_dockerfile_build(entity_store, store_task, archive) -> None:
+    """A deployment that copies no image can't build a task that names one.
+
+    The copy is asked for first, so the refusal comes before the task's Dockerfile image is submitted.
+    """
+    spec = await _start(entity_store, store_task, config=_PREBUILT_VERIFIER)
+    builder = _Builder({}, refusals={"ghcr.io/org/verify:1": _refusal()})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert builder.submits == []
+    assert (build.status, build.error) == ("failed", f"verifier: Builder refused the build: {REFUSAL}")
+    assert [(image.type, image.status, image.builder_image) for image in build.images] == [
+        ("main", "pending", None),
+        ("verifier", "failed", None),
+    ]
+    assert await _stored_build(entity_store, spec) == build
+
+
+async def test_a_rebuild_builder_refuses_fails_its_image_and_submits_nothing_after_it(
+    entity_store, store_task, archive
+) -> None:
+    """A rebuild takes each Dockerfile image to Builder again, so a refusal is that submit's own answer.
+
+    It is recorded as a refused copy is: Builder's sentence on the image, and nothing asked of Builder after it.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+    await _run(entity_store, spec, builder)
+    service = ImageBuildService(entity_store, _Jobs(), _allow)
+    await service.request_build("default", "sort-task", spec.revision_digest, ImageBuildRequest(rebuild=True))
+    builder.refusals = {"sort-task/environment": _refusal()}
+    again = spec.model_copy(update={"attempt": 2})
+
+    rebuilt = await _run(entity_store, again, builder)
+
+    assert len(builder.submits) == 2
+    assert (rebuilt.status, rebuilt.error) == ("failed", f"main: Builder refused the build: {REFUSAL}")
+    main, verifier = rebuilt.images
+    assert (main.status, main.builder_image, main.error) == ("failed", None, f"Builder refused the build: {REFUSAL}")
+    # The verifier's build of the first attempt is ready at Builder. It is not read either: the image stays as planned.
+    assert (verifier.status, verifier.builder_image, verifier.image_ref) == ("pending", None, None)
+    assert await _stored_build(entity_store, again) == rebuilt
+
+
+@pytest.fixture
+def compose_archive(monkeypatch, tmp_path) -> None:
+    """A task whose compose file adds a service it builds and a service it names an image for.
+
+    A compose task is extracted to be planned, so its archive is a whole task, packed as publishing packs one.
+    """
+    root = tmp_path / "sort-task"
+    for name, text in {
+        "task.toml": "",
+        "instruction.md": "Sort the list.\n",
+        "environment/Dockerfile": "FROM python:3.12\n",
+        "environment/docker-compose.yaml": "services:\n  db:\n    build: ./db\n  cache:\n    image: redis:7\n",
+        "environment/db/Dockerfile": "FROM postgres:16\n",
+        "tests/test.sh": "exit 0\n",
+    }.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    packed = tmp_path / "task_archive"
+    pack_task(root, packed)
+
+    async def download(files_client, ref, output, **kwargs) -> None:
+        output.write(packed.read_bytes())
+
+    monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", download)
+
+
+#: Every image of ``compose_archive``'s task with a prebuilt verifier, by what Builder is sent for it, in plan order.
+_COMPOSE_IMAGES = {
+    "sort-task/environment": ("main", "dockerfile"),
+    "sort-task/environment/db": ("service/db", "dockerfile"),
+    "docker.io/library/redis:7": ("service/cache", "prebuilt"),
+    "ghcr.io/org/verify:1": ("verifier", "prebuilt"),
+}
+
+
+def _submitted_in_order(builder: _Builder) -> list[str | None]:
+    """What each submit Builder took was of: an image to copy, or a context path."""
+    return [s.image if isinstance(s, ImageSource) else s.context_path for s in builder.submits]
+
+
+async def test_prebuilt_images_are_submitted_before_dockerfile_images(
+    entity_store, store_task, compose_archive
+) -> None:
+    """Each kind goes in the order the task plans it."""
+    spec = await _start(entity_store, store_task, config=_PREBUILT_VERIFIER)
+    builder = _Builder(dict.fromkeys(_COMPOSE_IMAGES, "ready"))
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    assert _submitted_in_order(builder) == [
+        "docker.io/library/redis:7",
+        "ghcr.io/org/verify:1",
+        "sort-task/environment",
+        "sort-task/environment/db",
+    ]
+
+
+async def test_the_record_lists_images_in_the_order_the_task_plans_them(
+    entity_store, store_task, compose_archive
+) -> None:
+    """Only the order of submitting changes: a reader finds ``main`` first and the verifier last, as before."""
+    spec = await _start(entity_store, store_task, config=_PREBUILT_VERIFIER)
+
+    build = await _run(entity_store, spec, _Builder(dict.fromkeys(_COMPOSE_IMAGES, "ready")))
+
+    assert build.status == "ready"
+    assert [(image.type, image.source) for image in build.images] == list(_COMPOSE_IMAGES.values())
+    stored = await _stored_build(entity_store, spec)
+    assert [(image.type, image.source) for image in stored.images] == list(_COMPOSE_IMAGES.values())
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed"})), "HTTP 403: not allowed"),
+        (ConflictError(httpx.Response(409, json={"detail": "held by another"})), "HTTP 409: held by another"),
+        (NemoTransportError(httpx.ConnectError("no route to Builder")), "no route to Builder"),
+    ],
+    ids=["forbidden", "a-409-with-no-code", "unreachable"],
+)
+async def test_an_error_that_is_no_refusal_fails_its_image_alone_and_the_rest_are_submitted(
+    entity_store, store_task, archive, error: NemoClientError, reason: str
+) -> None:
+    """Only a 409 by which Builder refuses the request itself ends the submitting, and a copy's says so by its code.
+
+    A copy's 409 that names no code stays the client error it was. Another request may have taken the revision
+    meanwhile, or an older Builder may have refused the copy: no row is read to tell them apart, as one is for a
+    Dockerfile build that is not a rebuild, so the task's Dockerfile images are still submitted.
+    """
+    config = {"environment": {"docker_image": "ghcr.io/org/sort:1"}, "verifier": {"environment": {"cpus": 1}}}
+    spec = await _start(entity_store, store_task, config=config)
+    builder = _Builder({}, refusals={"ghcr.io/org/sort:1": error})
+
+    build = await _run(entity_store, spec, builder)
+
+    main, verifier = build.images
+    assert (main.status, main.builder_image) == ("failed", None)
+    assert main.error == f"Builder refused the build: {reason}"
+    assert _submitted_in_order(builder) == ["sort-task/tests"]
+    assert (verifier.status, verifier.builder_image is not None) == ("building", True)
+    assert (build.status, build.error) == ("failed", f"main: Builder refused the build: {reason}")
 
 
 async def test_an_unexpected_error_fails_the_build_instead_of_leaving_it_running(
@@ -557,8 +764,7 @@ async def test_a_build_that_never_finishes_times_out(entity_store, store_task, a
         async def get_image(self, name: str) -> ContainerImage | None:
             return None if name not in self.images else _container_image(name)
 
-    ticks = iter(range(0, 10_000, 100))
-    build = await _run(entity_store, spec, _Stuck({}), timeout=250, clock=lambda: next(ticks))
+    build = await _run(entity_store, spec, _Stuck({}), timeout=250)
 
     assert build.status == "failed"
     assert build.error == "main: no result from Builder within 250 seconds"
