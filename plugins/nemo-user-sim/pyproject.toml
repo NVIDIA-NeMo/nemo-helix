@@ -10,7 +10,7 @@ dependencies = [
     "nemo-helix-plugin",
     "nemo-helix",
     "nemo-agents-plugin[deepagents]",
-    "usersim==0.2.0",
+    "usersim==0.3.2",
     "nemo-fabric>=0.6.0,<0.7.0",
     "mcp>=1.28.1,<2",
     "openai>=1.0",

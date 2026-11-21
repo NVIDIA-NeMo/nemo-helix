@@ -13,9 +13,10 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_user_sim_plugin import scenarios
 from nemo_user_sim_plugin.jobs.spec import SimulateRequest
-from usersim.engine.core import action_taxonomy, agentic_bank
 from usersim.engine.core.seeds import load_seeds
 from usersim.engine.probes.general_open_ended.prompts import user_agent_system_prompt
+from usersim.engine.probes.safety_agentic import action_taxonomy
+from usersim.engine.probes.safety_agentic import bank as agentic_bank
 
 EXAMPLES = Path(__file__).parents[1] / "examples"
 EXAMPLE = Path(__file__).parent / "fixtures" / "tool-requests"

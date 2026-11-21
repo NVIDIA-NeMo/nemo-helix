@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nemo_user_sim_plugin.gateway import write_models_file
-from usersim.cli._models import load_models_config
+from usersim.engine.models_file import load_models_config
 
 
 def test_gateway_names_keep_usersim_inference_settings(tmp_path):

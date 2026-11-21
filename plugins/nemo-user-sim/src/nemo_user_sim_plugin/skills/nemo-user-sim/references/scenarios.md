@@ -38,7 +38,7 @@ A topic set is a folder with `topics.yaml`: a `set_id` and a `topics` list, each
 
 Use these when the user wants to check a specific tool choice, such as whether the agent picks the right one of two similar tools.
 
-A tool-use set is a folder with `bank.yaml`, requests in UserSim's bank schema (`usersim/engine/assets/safety_agentic/SCHEMA.md` in the installed package), and optionally `actions.yaml`, action entries for tools UserSim doesn't know. Each request lists the tools the agent gets, what each returns, the action it should take (`sanctioned_action_name`) and the one it shouldn't (`tempted_action_name`). Calling the tempted tool fails the conversation without a judge.
+A tool-use set is a folder with `bank.yaml`, requests in UserSim's bank schema (`usersim/engine/probes/safety_agentic/assets/safety_agentic/SCHEMA.md` in the installed package), and optionally `actions.yaml`, action entries for tools UserSim doesn't know. Each request lists the tools the agent gets, what each returns, the action it should take (`sanctioned_action_name`) and the one it shouldn't (`tempted_action_name`). Calling the tempted tool fails the conversation without a judge.
 
 ```bash
 nemo user-sim run --agent <name> --scenarios ./my-scenarios --users 20

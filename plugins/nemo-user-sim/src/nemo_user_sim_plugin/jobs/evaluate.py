@@ -28,8 +28,8 @@ from nemo_user_sim_plugin.jobs._common import (
 )
 from nemo_user_sim_plugin.jobs.spec import EvaluateSpec
 from pydantic import BaseModel
-from usersim.cli._models import load_models_config
 from usersim.cli._pipeline import evaluate_dataframe
+from usersim.engine.models_file import load_models_config
 from usersim.selection import select_trajectories
 from usersim.selection.engine import COL_AXIS_SCORES, COL_FAILED_GATES, COL_QUALITY, score_from_eval_cell
 
