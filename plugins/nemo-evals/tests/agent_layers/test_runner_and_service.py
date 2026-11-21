@@ -205,7 +205,9 @@ async def _requested(entity_store, store_task, name: str = "sort-task") -> tuple
     return spec, jobs
 
 
-async def _run(entity_store, spec: AgentLayerBuildSpec, builder: _Builder, files: _Files, tmp_path: Path):
+async def _run(
+    entity_store, spec: AgentLayerBuildSpec, builder: _Builder, files: _Files | AsyncFilesClient, tmp_path: Path
+):
     return await run_agent_layer_build(
         spec,
         entities=entity_store,
@@ -251,6 +253,31 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
         "mounts/nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu": "cpython-3.12.15-linux-x86_64-gnu",
         "mounts/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
     }
+
+
+async def test_a_layers_two_archives_go_into_one_fileset_named_for_its_build(
+    entity_store, store_task, monkeypatch, tmp_path, files_service, files_client
+) -> None:
+    """Against Files itself: the fileset is asked for once, and Builder's source and mounts name what went up."""
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    spec, _ = await _requested(entity_store, store_task)
+    builder = _Builder()
+
+    await _run(entity_store, spec, builder, files_client, tmp_path)
+
+    ((name, source, _),) = builder.submits
+    assert files_service.calls == [
+        ("create", "default", name),
+        ("upload", "default", name),
+        ("upload", "default", name),
+    ]
+    assert list(files_service.filesets[("default", name)]) == ["context.tar.gz", "mounts.tar.gz"]
+    assert source == FileSetSource(fileset=f"default/{name}", archive="context.tar.gz", context_path="context")
+    (mounts,) = builder.mounts
+    assert [mount.source for mount in mounts] == [
+        FileSetSource(fileset=f"default/{name}", archive="mounts.tar.gz", context_path="mounts/nhx-agent-installer"),
+        FileSetSource(fileset=f"default/{name}", archive="mounts.tar.gz", context_path="mounts/nhx-agent-layer"),
+    ]
 
 
 async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
