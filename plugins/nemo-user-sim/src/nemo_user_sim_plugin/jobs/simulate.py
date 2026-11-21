@@ -99,12 +99,12 @@ class SimulateJob(NemoJob):
             )
         if spec.rerun:  # the same personas and topics as the earlier run, under new conversation IDs
             source = source_rows(client, ctx.workspace, spec.rerun, work)
-            rows = rerun_rows(source, spec.rerun.conversations, token=uuid.uuid4().hex[:6])
+            rows = rerun_rows(source, spec.rerun.conversations, token=run_token())
         elif spec.preview:  # UserSim's draw isn't repeatable, so a previewed run reads the rows it showed
             preview = FilesClient.from_client(client).download_file(
                 workspace=ctx.workspace, name=PREVIEWS_FILESET, path=f"{spec.preview}.json"
             )
-            rows = preview_rows(json.loads(preview.read()), token=uuid.uuid4().hex[:6])
+            rows = preview_rows(json.loads(preview.read()), token=run_token())
         else:
             require_personas(spec.locale)
             rows = materialize_episode_inputs(
@@ -179,6 +179,11 @@ async def _converse(
     results = await asyncio.gather(*(one(index, row) for index, row in enumerate(rows)))
     await progress.flush()
     return results
+
+
+def run_token() -> str:
+    """What sets one run's conversation IDs apart from another's. Long enough that two runs won't draw the same."""
+    return uuid.uuid4().hex[:12]
 
 
 def source_rows(client: NemoClient, workspace: str, rerun: RerunSource, work: Path) -> list[dict]:
