@@ -356,27 +356,32 @@ describe('PackageAgentControl', () => {
       platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'], withoutImage: [] };
     });
 
-    const commandSnippets = async () => {
+    const commandSnippet = async () => {
       const dialog = screen.getByRole('dialog');
       return waitFor(() => {
         const snippets = within(dialog).getAllByRole('code');
-        expect(snippets).toHaveLength(2);
-        return snippets.map((code) => code.textContent);
+        expect(snippets).toHaveLength(1);
+        return snippets[0].textContent;
       });
     };
 
-    it('disables the build and shows build and deploy as separate steps', async () => {
+    it('disables the build and shows one package command pinned to this platform', async () => {
       await openControl();
       const dialog = screen.getByRole('dialog');
 
       expect(within(dialog).getByText(/can't build images/)).toBeInTheDocument();
       expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
       expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
-      expect(await commandSnippets()).toEqual([
-        'nemo agents package --agent agent.yaml --publish --registry REGISTRY',
-        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode k8s --image IMAGE`,
-      ]);
-      expect(dialog).toHaveTextContent(/replacing REGISTRY with your registry/);
+      expect(await commandSnippet()).toBe(
+        'nemo agents package --agent agent.yaml --platform linux/amd64 --nemo-version 0.10.0 --publish --registry REGISTRY'
+      );
+      expect(dialog).toHaveTextContent(
+        /replacing REGISTRY with your registry, without https:\/\/:/
+      );
+      expect(dialog).toHaveTextContent(
+        /Then deploy it with Deploy, using the image the build printed after Published:/
+      );
+      expect(dialog).not.toHaveTextContent(/nemo agents deploy/);
       expect(dialog).not.toHaveTextContent(/[<>]/);
     });
 
@@ -384,10 +389,9 @@ describe('PackageAgentControl', () => {
       platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'], withoutImage: [] };
       await openControl();
 
-      expect(await commandSnippets()).toEqual([
-        'nemo agents package --agent agent.yaml',
-        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode docker --image IMAGE`,
-      ]);
+      expect(await commandSnippet()).toBe(
+        'nemo agents package --agent agent.yaml --platform linux/amd64 --nemo-version 0.10.0'
+      );
       expect(screen.getByRole('dialog')).not.toHaveTextContent(/REGISTRY/);
     });
 
@@ -400,12 +404,20 @@ describe('PackageAgentControl', () => {
       expect(dialog).not.toHaveTextContent(/nemo agents/);
     });
 
-    it('leaves the mode to the user when the deployment modes cannot be read', async () => {
-      platform.modes = { status: 'unknown' };
+    it('asks for the version and platform when this platform runs an unpublished build', async () => {
+      server.use(
+        http.get(`${PLATFORM_BASE_URL}/cluster-info`, () =>
+          HttpResponse.json({ platform_version: 'dev', revision: 'abc' })
+        )
+      );
       await openControl();
 
-      expect((await commandSnippets())[1]).toMatch(/--mode MODE --image IMAGE$/);
-      expect(screen.getByRole('dialog')).toHaveTextContent(/and MODE with docker or k8s/);
+      expect(await commandSnippet()).toBe(
+        'nemo agents package --agent agent.yaml --platform PLATFORM --nemo-version VERSION --publish --registry REGISTRY'
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/PLATFORM with your nodes' platform, e.g. linux\/amd64/);
+      expect(dialog).toHaveTextContent(/VERSION with the published nemo-helix release closest/);
     });
 
     it('keeps the Platform-managed message for agents that cannot be packaged', async () => {

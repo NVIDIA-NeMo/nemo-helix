@@ -54,7 +54,7 @@ from pathlib import Path
 from pkgutil import resolve_name
 from subprocess import run as run_command
 from time import monotonic, sleep
-from typing import Annotated, Any, ClassVar, NoReturn, Optional, TypeVar, cast
+from typing import Annotated, Any, ClassVar, Optional, TypeVar, cast
 
 import click
 import httpx
@@ -531,12 +531,23 @@ def _register_local_commands(app: typer.Typer) -> None:
             None,
             "--registry",
             "-r",
-            help="Remote registry URL (required when --publish is set).",
+            help="Registry to push to, without a URL scheme, e.g. nvcr.io/my-org (required when --publish is set).",
         ),
         push_tag: Optional[str] = typer.Option(
             None,
             "--push-tag",
-            help="Fully-qualified remote tag.  Defaults to '<registry>/<tag>'.",
+            help=(
+                "Fully-qualified remote tag.  Defaults to '<registry>/<tag>', with a UTC timestamp "
+                "appended to the tag when --tag is also omitted, so every push is unique."
+            ),
+        ),
+        nemo_version: Optional[str] = typer.Option(
+            None,
+            "--nemo-version",
+            help=(
+                "Published nemo-helix release the image pins, e.g. the one the target platform runs "
+                "(shown by `nemo cluster-info`). Defaults to this CLI's installed version. Fabric agents only."
+            ),
         ),
         output: Optional[Path] = typer.Option(
             None,
@@ -626,6 +637,10 @@ def _register_local_commands(app: typer.Typer) -> None:
                 err=True,
             )
             raise typer.Exit(code=1)
+        if config_format == NAT_WORKFLOW_CONFIG_FORMAT and nemo_version is not None:
+            typer.echo("Error: --nemo-version is only valid for Fabric agent packaging.", err=True)
+            raise typer.Exit(code=1)
+        contract_version = nemo_version.removeprefix("v") if nemo_version else None
 
         if no_build:
             _package_render_only(
@@ -645,8 +660,22 @@ def _register_local_commands(app: typer.Typer) -> None:
                 python_version=python_version,
                 nat_version=nat_version,
                 uv_version=uv_version,
+                contract_version=contract_version,
             )
             return
+
+        if publish:
+            from nemo_agents_plugin.container.registry import registry_has_credentials, registry_login_hint
+
+            assert registry is not None  # guaranteed by _validate_package_flags
+            has_credentials = registry_has_credentials(registry)
+            if has_credentials is False:
+                typer.echo(
+                    f"Error: Docker has no credentials for {registry}. {registry_login_hint(registry)}", err=True
+                )
+                raise typer.Exit(code=1)
+            if has_credentials is None:
+                typer.echo(f"Warning: could not read Docker's credential store to check {registry}.", err=True)
 
         from nemo_agents_plugin.container.builder import build_fabric_agent_image, build_nat_agent_image
         from nemo_agents_plugin.container.errors import AgentPackagingError
@@ -671,6 +700,7 @@ def _register_local_commands(app: typer.Typer) -> None:
                     generate_ignore=generate_ignore,
                     platforms=platform,
                     on_progress=typer.echo,
+                    contract_version=contract_version,
                 )
             else:
                 result_tag = build_nat_agent_image(
@@ -703,12 +733,19 @@ def _register_local_commands(app: typer.Typer) -> None:
             return
 
         from nemo_agents_plugin.container.publisher import docker_push
+        from nemo_agents_plugin.container.registry import registry_login_hint
 
         assert registry is not None  # guaranteed by _validate_package_flags
+        if push_tag is None and tag is None:
+            repository, _, version_tag = result_tag.rpartition(":")
+            if not repository or "/" in version_tag:
+                repository, version_tag = result_tag, "latest"
+            timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+            push_tag = f"{registry.rstrip('/')}/{repository}:{version_tag}-{timestamp}"
         try:
             remote = docker_push(local_tag=result_tag, registry=registry, push_tag=push_tag, on_progress=typer.echo)
         except AgentPackagingError as exc:
-            typer.echo(f"Error: {exc}", err=True)
+            typer.echo(f"Error: {exc}\n{registry_login_hint(registry)}", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"Published: {remote}")
 
@@ -742,6 +779,14 @@ def _validate_package_flags(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    if registry:
+        from nemo_agents_plugin.container.registry import registry_scheme_error
+
+        scheme_error = registry_scheme_error(registry)
+        if scheme_error:
+            typer.echo(f"Error: {scheme_error}", err=True)
+            raise typer.Exit(code=1)
 
     if format not in {"docker", "whl"}:
         typer.echo(f"Error: --format must be 'docker' or 'whl' (got '{format}').", err=True)
@@ -817,6 +862,7 @@ def _package_render_only(
     python_version: Optional[str],
     nat_version: Optional[str],
     uv_version: Optional[str],
+    contract_version: Optional[str] = None,
 ) -> None:
     """Implements the ``--no-build`` path: render files and exit."""
     # ``--format whl`` is rejected globally by ``_validate_package_flags``
@@ -843,6 +889,7 @@ def _package_render_only(
                 agent_version=agent_version,
                 agent_author=agent_author,
                 template_path=template,
+                contract_version=contract_version,
             )
         else:
             content = render_nat_dockerfile(
@@ -1287,168 +1334,30 @@ def _register_platform_commands(app: typer.Typer) -> None:
             payload["use_image_entrypoint"] = True
         if environment is not None:
             payload["environment"] = environment
-        _create_deployment(client, workspace, payload, wait=wait, timeout=timeout)
-
-    @app.command("package-deploy", rich_help_panel="Agent Resources")
-    def package_deploy(
-        agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent registered on the target platform."),
-        agent_config: Path = typer.Option(
-            ...,
-            "--agent-config",
-            "-c",
-            exists=True,
-            dir_okay=False,
-            help="Path to the local Fabric agent YAML to package (its directory is the build context).",
-        ),
-        target_url: str = typer.Option(
-            ..., "--target-url", help="Base URL of the platform to deploy to, e.g. https://nemo.example.com."
-        ),
-        workspace: str = typer.Option(..., "--workspace", help="Workspace of the agent on the target platform."),
-        registry: str = typer.Option(
-            ...,
-            "--registry",
-            "-r",
-            help="Registry to push the image to, without a URL scheme, e.g. nvcr.io/my-org/my-team.",
-        ),
-        mode: str = typer.Option("k8s", "--mode", help="Container runtime on the target: k8s, docker, or openshell."),
-        platform: Optional[str] = typer.Option(
-            None,
-            "--platform",
-            help=(
-                "Docker platform of the target's nodes, e.g. linux/amd64. Defaults to the architecture the "
-                "target reports; required when it reports none."
+        resp = _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(
+                client.create_deployment(workspace=workspace, body=CreateDeploymentRequest.model_validate(payload))
             ),
-        ),
-        nemo_version: Optional[str] = typer.Option(
-            None,
-            "--nemo-version",
-            help=(
-                "Published nemo-helix release the image pins. Defaults to the target's release; required "
-                "when the target runs an unreleased build."
-            ),
-        ),
-        no_browser: bool = typer.Option(
-            False, "--no-browser", help="Print the login URL and code instead of opening a browser."
-        ),
-        wait: bool = typer.Option(
-            True, "--wait/--no-wait", help="Wait for the deployment to reach running or failed before returning."
-        ),
-        timeout: int = typer.Option(
-            300, "--timeout", "-t", help="Maximum seconds to wait for a terminal status (only with --wait)."
-        ),
-    ) -> None:
-        """Package a local agent, push it, and deploy it to a remote platform, in one command.
-
-        Every check runs before the image is built: the registry has no URL
-        scheme and Docker holds credentials for it, you can sign in to the
-        target, and the agent exists there. The image pins the target's
-        nemo-helix release and is built for its architecture, under a tag
-        unique to this build.
-
-        Your CLI config and active context are never changed. A saved context
-        for the same URL is reused while its login is valid; otherwise you sign
-        in through the browser for this run only.
-
-        Requires Docker and the nemo-agents plugin dependencies: a source
-        checkout has them; a released CLI needs nemo-helix installed with its
-        nemo-agents-plugin extra.
-        """
-        from nemo_agents_plugin.container.builder import build_fabric_agent_image, detect_agent_config_format
-        from nemo_agents_plugin.container.errors import AgentPackagingError
-        from nemo_agents_plugin.container.publisher import docker_push
-        from nemo_agents_plugin.package_deploy import (
-            PreflightError,
-            connect_to_target,
-            fetch_cluster_info,
-            registry_has_credentials,
-            registry_login_hint,
-            resolve_contract_version,
-            resolve_platform,
-            validate_registry,
         )
-        from nemo_helix_ext.auth.helpers import AuthError
+        if not wait:
+            typer.echo(json.dumps(resp, indent=2))
+            return
 
-        def fail(message: str, code: int = 1) -> NoReturn:
-            typer.echo(f"Error: {message}", err=True)
-            raise typer.Exit(code=code)
-
-        if mode not in CONTAINER_DEPLOYMENT_MODES:
-            fail(f"Invalid --mode {mode!r}; expected {', '.join(sorted(CONTAINER_DEPLOYMENT_MODES))}.", code=2)
-        try:
-            registry = validate_registry(registry)
-        except PreflightError as exc:
-            fail(str(exc), code=2)
-        try:
-            if detect_agent_config_format(agent_config) != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-                fail(f"{agent_config} is not a Fabric agent spec; package-deploy builds Fabric agents only.")
-        except ValueError as exc:
-            fail(str(exc))
-
-        has_credentials = registry_has_credentials(registry)
-        if has_credentials is False:
-            fail(f"Docker has no credentials for {registry}. {registry_login_hint(registry)}")
-        if has_credentials is None:
-            typer.echo(f"Warning: could not read Docker's credential store to check {registry}.", err=True)
-
-        target_url = target_url.rstrip("/")
-        with httpx.Client(timeout=30.0, follow_redirects=True) as http_client:
-            try:
-                connection = connect_to_target(target_url, workspace, http_client=http_client, no_browser=no_browser)
-                cluster_info = fetch_cluster_info(target_url, http_client)
-            except httpx.HTTPError as exc:
-                fail(f"Could not reach {target_url}: {exc}")
-            except AuthError as exc:
-                fail(f"Could not sign in to {target_url}: {exc}")
-        typer.echo(f"Target: {target_url} ({connection.description})")
-
-        client = AgentsClient.from_client(connection.client)
-        try:
-            client.get_agent(workspace=workspace, name=agent)
-        except PluginNotFoundError:
-            fail(
-                f"Agent '{agent}' not found in workspace '{workspace}' on {target_url}. "
-                "Register it there first (e.g. through Studio), or check --agent and --workspace."
+        # The API returns the pending entity; wait for it to settle before exiting.
+        deployment_name = resp.get("name") if isinstance(resp, dict) else None
+        if not deployment_name:
+            # Defensive: should never happen if the API contract holds.
+            typer.echo(json.dumps(resp, indent=2))
+            typer.echo(
+                "Warning: deployment created but its name was missing from the response; "
+                "skipping --wait. Use `nemo agents deployments list` to find it.",
+                err=True,
             )
-        except (NemoHTTPError, NemoTransportError) as exc:
-            fail(f"Could not look up agent '{agent}' on {target_url}: {exc}")
+            return
 
-        try:
-            contract_version = resolve_contract_version(
-                cluster_info.platform_version, nemo_version, target_url=target_url
-            )
-            docker_platform = resolve_platform(cluster_info.architecture, platform, target_url=target_url)
-        except PreflightError as exc:
-            fail(str(exc))
-        typer.echo(f"Building for {docker_platform}, pinned to nemo-helix {contract_version}")
-
-        try:
-            local_tag = build_fabric_agent_image(
-                agent_config,
-                platforms=[docker_platform],
-                contract_version=contract_version,
-                on_progress=typer.echo,
-            )
-        except (ValueError, AgentPackagingError) as exc:
-            fail(str(exc))
-        typer.echo(f"Image ready: {local_tag}")
-
-        repository, _, tag = local_tag.rpartition(":")
-        if not repository or "/" in tag:
-            repository, tag = local_tag, "latest"
-        push_tag = f"{registry}/{repository}:{tag}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
-        try:
-            image = docker_push(local_tag=local_tag, registry=registry, push_tag=push_tag, on_progress=typer.echo)
-        except AgentPackagingError as exc:
-            fail(f"{exc}\n{registry_login_hint(registry)}")
-        typer.echo(f"Published: {image}")
-
-        _create_deployment(
-            client,
-            workspace,
-            {"agent": agent, "deployment_mode": mode, "image": image},
-            wait=wait,
-            timeout=timeout,
-        )
+        success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
+        raise typer.Exit(code=0 if success else 1)
 
     @app.command(rich_help_panel="Agent Resources")
     def redeploy(
@@ -2494,36 +2403,6 @@ def _project_deployment_display_endpoints(response: Any) -> None:
             address = _deployment_address(item.model_dump(mode="json"))
             if address:
                 item.endpoint = address
-
-
-def _create_deployment(
-    client: AgentsClient, workspace: str, payload: dict[str, Any], *, wait: bool, timeout: int
-) -> None:
-    """Create a deployment, then print it (``--no-wait``) or exit with its terminal status."""
-    resp = _run_sdk(
-        "POST agent API",
-        lambda: _json_from_response(
-            client.create_deployment(workspace=workspace, body=CreateDeploymentRequest.model_validate(payload))
-        ),
-    )
-    if not wait:
-        typer.echo(json.dumps(resp, indent=2))
-        return
-
-    # The API returns the pending entity; wait for it to settle before exiting.
-    deployment_name = resp.get("name") if isinstance(resp, dict) else None
-    if not deployment_name:
-        # Defensive: should never happen if the API contract holds.
-        typer.echo(json.dumps(resp, indent=2))
-        typer.echo(
-            "Warning: deployment created but its name was missing from the response; "
-            "skipping --wait. Use `nemo agents deployments list` to find it.",
-            err=True,
-        )
-        return
-
-    success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
-    raise typer.Exit(code=0 if success else 1)
 
 
 def _wait_for_deployment(

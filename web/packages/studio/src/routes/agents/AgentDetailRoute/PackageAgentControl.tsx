@@ -29,6 +29,7 @@ import {
 } from '@studio/api/agents/useDeploymentModes';
 import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
+import { useClusterInfo } from '@studio/api/clusterInfo';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { useEffect, useState, type FC } from 'react';
@@ -47,29 +48,42 @@ const CommandSnippet: FC<{ command: string }> = ({ command }) => (
 );
 
 // `mode` is undefined when the platform's modes couldn't be read.
-const LocalBuildSteps: FC<{ workspace: string; agentName: string; mode?: DeploymentMode }> = ({
-  workspace,
-  agentName,
-  mode,
-}) => {
+const LocalBuildSteps: FC<{ mode?: DeploymentMode }> = ({ mode }) => {
+  const { data: clusterInfo, isPending } = useClusterInfo();
+  if (isPending) return null;
+
   const publishes = mode !== 'docker';
+  const architecture = clusterInfo?.architecture;
+  const releaseVersion = clusterInfo?.releaseVersion;
+  const replacements = [
+    publishes ? 'REGISTRY with your registry, without https://' : undefined,
+    architecture ? undefined : "PLATFORM with your nodes' platform, e.g. linux/amd64",
+    releaseVersion
+      ? undefined
+      : "VERSION with the published nemo-helix release closest to this platform's",
+  ].filter((replacement) => replacement !== undefined);
+  const command = [
+    'nemo agents package --agent agent.yaml',
+    `--platform ${architecture ?? 'PLATFORM'}`,
+    `--nemo-version ${releaseVersion ?? 'VERSION'}`,
+    publishes ? '--publish --registry REGISTRY' : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(' ');
+
   return (
     <Stack gap="density-sm">
       <Text className="text-secondary" kind="body/regular/sm">
         This platform can&apos;t build images: builds run on the platform host under a subprocess
         job profile, and this platform doesn&apos;t register one. Build the image yourself, from the
-        agent&apos;s directory{publishes ? ', replacing REGISTRY with your registry' : ''}:
+        agent&apos;s directory
+        {replacements.length > 0 ? `, replacing ${replacements.join('; ')}` : ''}:
       </Text>
-      <CommandSnippet
-        command={`nemo agents package --agent agent.yaml${publishes ? ' --publish --registry REGISTRY' : ''}`}
-      />
+      <CommandSnippet command={command} />
       <Text className="text-secondary" kind="body/regular/sm">
-        Then deploy it, replacing IMAGE with the tag the build printed
-        {mode ? '' : ' and MODE with docker or k8s'}:
+        Then deploy it with Deploy, using the image the build printed
+        {publishes ? ' after Published:' : ' after Image ready:'}
       </Text>
-      <CommandSnippet
-        command={`nemo agents deploy --agent ${agentName} --workspace ${workspace} --mode ${mode ?? 'MODE'} --image IMAGE`}
-      />
     </Stack>
   );
 };
@@ -218,9 +232,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           </Text>
         ) : null}
 
-        {showLocalBuild ? (
-          <LocalBuildSteps workspace={workspace} agentName={agentName} mode={knownDeployMode} />
-        ) : null}
+        {showLocalBuild ? <LocalBuildSteps mode={knownDeployMode} /> : null}
 
         {submitError ? (
           <Text kind="body/regular/sm" className="text-feedback-danger">
