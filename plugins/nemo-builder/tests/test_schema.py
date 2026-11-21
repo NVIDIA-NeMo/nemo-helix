@@ -293,6 +293,40 @@ class TestContainerImage:
     def test_the_unnamed_spec_has_no_spec_name(self) -> None:
         assert _provenance(spec=None).spec is None
 
+    def test_a_row_records_no_job_instance_until_its_submit_writes_one(self) -> None:
+        """Its job's name is known before the job exists. The ID Jobs gives the job, and its first attempt,
+        are known only once the submit has created it."""
+        provenance = _provenance()
+        assert (provenance.job, provenance.job_uid, provenance.job_attempt_id) == ("default/s-1", None, None)
+        recorded = _provenance(job_uid="platform-job-1", job_attempt_id="platform-job-attempt-1")
+        assert (recorded.job_uid, recorded.job_attempt_id) == ("platform-job-1", "platform-job-attempt-1")
+
+    def test_a_row_that_records_no_job_instance_is_stored_and_answered_as_it_always_was(self) -> None:
+        """A row from before a row could record one, and every row this cluster builds: nothing new is
+        written into them, and they read back the same."""
+        row = self._pending()
+        before = {"build_set", "revision", "spec", "job", "request_digest", "upstream", "backend"}
+        assert set(row._get_data_fields()["provenance"]) == before
+        assert set(row.model_dump(mode="json")["provenance"]) == before
+        again = ContainerImage.model_validate(row.model_dump(mode="json"))
+        assert (again.provenance.job_uid, again.provenance.job_attempt_id) == (None, None)
+
+    def test_the_job_instance_a_row_records_is_stored_and_answered_with_it(self) -> None:
+        row = self._pending()
+        row.provenance = _provenance(job_uid="platform-job-1", job_attempt_id="platform-job-attempt-1")
+        for written in (row._get_data_fields(), row.model_dump(mode="json")):
+            assert (written["provenance"]["job_uid"], written["provenance"]["job_attempt_id"]) == (
+                "platform-job-1",
+                "platform-job-attempt-1",
+            )
+        again = ContainerImage.model_validate(row.model_dump(mode="json"))
+        assert again.provenance == row.provenance
+
+    @pytest.mark.parametrize("field", ["job_uid", "job_attempt_id"])
+    def test_an_empty_id_is_not_an_id(self, field: str) -> None:
+        with pytest.raises(ValidationError, match=field):
+            _provenance(**{field: ""})
+
 
 class TestImageSources:
     def test_a_spec_can_copy_an_image(self) -> None:

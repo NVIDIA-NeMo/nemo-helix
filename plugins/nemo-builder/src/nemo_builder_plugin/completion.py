@@ -119,8 +119,9 @@ def caller_refusal(row: ContainerImage, caller: Caller) -> str | None:
     That doesn't show the caller is that step. Without workload token exchange the platform takes a request's
     identity from its headers, which anything inside the cluster, a build's own ``RUN`` included, can set. With
     it, a step's token says whom the step acts for and which ServiceAccount its pod runs as, and any other
-    workload acting for the submitter passes this too. Which job the caller is a step of is asked next, of a
-    row a build service built (:func:`step_refusal`).
+    workload acting for the submitter passes this too, as does a platform service acting for them. Whether the
+    caller is a step of the row's build job is asked next, of a row a build service built
+    (:func:`step_refusal`).
     """
     if not caller.auth:
         return None
@@ -131,32 +132,94 @@ def caller_refusal(row: ContainerImage, caller: Caller) -> str | None:
     return None
 
 
-#: ``<workspace>/<name>`` of the job that the workload delegation with this ID was made for a step of. None if
-#: the platform has no such delegation on record any more, or it is not a job step's.
-JobOf = Callable[[str], Awaitable[str | None]]
+@dataclass(frozen=True, slots=True)
+class RecordedStep:
+    """What the platform has on record of the job step a workload delegation was made for."""
+
+    workspace: str
+    #: The job's name. Another job can take it once this one is deleted, or before it exists.
+    job: str
+    #: The ID of the attempt of the job the step is a step of. A rerun of the job is another attempt.
+    attempt_id: str
+    #: The job's own ID, where the platform records one for a step. None where it doesn't.
+    job_uid: str | None = None
 
 
-async def step_refusal(row: ContainerImage, delegation: str | None, job_of: JobOf) -> str | None:
-    """Why a caller whose token names ``delegation`` is not a step of the job that builds ``row``, or None if
-    it is, or nothing verified says.
+#: What the platform has on record of the workload delegation with this ID. None if it has no such delegation on
+#: record any more, or it was not made for a step of a job's attempt.
+JobOf = Callable[[str], Awaitable[RecordedStep | None]]
+
+
+class JobNotRecorded(Exception):
+    """The row doesn't yet record the job its submit created, so nothing shows whose step may complete it (503).
+
+    The submit that created the job may still be writing it: a step waits this out.
+    """
+
+
+async def step_refusal(
+    row: ContainerImage,
+    caller: Caller,
+    delegation: str | None,
+    job_of: JobOf,
+    *,
+    token_exchange: Callable[[], bool],
+    allow_unverified: Callable[[], bool],
+) -> str | None:
+    """Why ``caller``, whose token names ``delegation``, is not shown to be a step of the job that builds
+    ``row``, or None if it is, or no caller is asked.
 
     Asked of a row a build service built: its completion records the digest, the build and the runtime
-    configuration the caller sends, and the builder can check none of them against the service. Where the
-    request came with a token that names its workload's delegation, the job on that record must be the row's.
-    The record names a job as the row does, by workspace and name, so a job put under the name of a build's
-    job passes: once that job is deleted, or before the build is submitted, where the submit takes it for its own.
+    configuration the caller sends, and the builder can check none of them against the service. What stands
+    for them is that the caller is a step of the attempt of the job the row's submit created, which runs the
+    request as the builder compiled it. How that is shown depends on how the platform authenticates a caller:
 
-    A caller whose token names no delegation is not asked. Without workload token exchange no caller has one,
-    and with it only a platform service's own token is without. A row built in this cluster is completed as it
-    was before the builder asked this.
+    - With platform auth off no caller is checked, here or anywhere.
+    - With workload token exchange (``token_exchange``), a step's token names the platform's record of its
+      pod. A caller whose token names none is refused: a platform service acting for the submitter, and a
+      step Jobs runs outside Kubernetes, are such callers, and neither is the build's step. The record must be
+      a job step's (``job_of``), of the row's job, by workspace and name, and of the attempt the row records.
+      A name is not enough: a job put under the build job's name once that is deleted, or a rerun of the build
+      job with a specification changed since, is a step of another attempt.
+    - With platform auth on and no token exchange, the platform takes a request's identity from headers that
+      anything able to reach its API can set. Nothing shows who is calling, and no secret the builder could
+      hand a step is out of such a caller's reach. The completion is refused, unless the operator has
+      accepted exactly that (``allow_unverified``).
+
+    A row built in this cluster is completed as it was before the builder asked any of this.
+
+    Raises :class:`JobNotRecorded` for a row that records no attempt yet, and whatever ``token_exchange``,
+    ``allow_unverified`` or ``job_of`` raise when the deployment, or the platform's record, can't be read. No
+    one is admitted on either.
     """
-    if row.provenance.backend == IN_CLUSTER_BACKEND or delegation is None:
+    if row.provenance.backend == IN_CLUSTER_BACKEND or not caller.auth:
         return None
-    job = await job_of(delegation)
-    if job is None:
-        return f"only a step of its build job may complete {row.name}: the caller is not on record as a job step"
-    if job != row.provenance.job:
-        return f"only a step of its build job may complete {row.name}: the caller is a step of another job"
+    if not token_exchange():
+        if allow_unverified():
+            return None
+        return (
+            f"{row.name} is built by a build service, and nothing here shows which job a caller is a step of: "
+            "platform auth is on without workload token exchange, and "
+            "builder.remote.allow_unverified_completion is not set"
+        )
+    only = f"only a step of its build job may complete {row.name}"
+    if delegation is None:
+        return f"{only}: the caller's token names no workload, as a job step's does"
+    step = await job_of(delegation)
+    if step is None:
+        return f"{only}: the caller is not on record as a job step"
+    if f"{step.workspace}/{step.job}" != row.provenance.job:
+        return f"{only}: the caller is a step of another job"
+    if row.provenance.job_attempt_id is None:
+        raise JobNotRecorded(f"{row.name} does not record its build job yet")
+    if step.job_uid is not None and step.job_uid != row.provenance.job_uid:
+        return f"{only}: the caller is a step of another job, created under its build job's name"
+    if step.attempt_id != row.provenance.job_attempt_id:
+        # Which of the two, the record doesn't say where it names a job only by its name.
+        return (
+            f"{only}: the caller is a step of another run than the one its submit created, a rerun of its build "
+            "job or a job created under that job's name since"
+        )
     return None
 
 
@@ -244,6 +307,10 @@ def settled(
     return False
 
 
+#: Raise unless the caller may complete this row: what the route answers one who may not.
+Admit = Callable[[ContainerImage], Awaitable[None]]
+
+
 async def complete(
     rows: _Rows,
     *,
@@ -252,6 +319,8 @@ async def complete(
     digest: str,
     runtime_config: ImageRuntimeConfig | None = None,
     external: ExternalImage | None = None,
+    row: ContainerImage | None = None,
+    admit: Admit | None = None,
 ) -> ContainerImage:
     """Write the row ``name`` ``ready`` at ``digest``, conditional on the version it was read at.
 
@@ -259,12 +328,27 @@ async def complete(
     what a remote build service calls the image. A row already ``ready`` as these would have written it is
     returned as it is.
 
+    ``row`` is the row the caller read and decided may be completed. It is the one written, so the store's
+    condition is that row at that version, and no other row that has since taken its name. Without it the name
+    is read here. If the store refuses the write because the row changed, the name is read again, once: the
+    completion goes on only if that is still the same row, by the store's ID for it, and ``admit`` lets it
+    through, as it must every row read here.
+
     Raises :class:`CompletionConflict` if the row settled otherwise (it failed, or is ``ready`` at another digest,
-    as another build's image or with another runtime configuration) or the request doesn't fit the row (its
-    backend, or the digest it copies), or the store's not-found error.
+    as another build's image or with another runtime configuration), if the request doesn't fit the row (its
+    backend, or the digest it copies) or if the row was replaced meanwhile; the store's not-found error; and
+    whatever ``admit`` raises.
     """
+    first: str | None = None
     for _ in range(2):
-        row = await rows.get(ContainerImage, name=name, workspace=workspace)
+        if row is None:
+            row = await rows.get(ContainerImage, name=name, workspace=workspace)
+            if first is not None and row.id != first:
+                # Another row under the name: whoever was let complete the first was not asked about this one.
+                raise CompletionConflict(f"{name} was replaced while it was being completed")
+            if admit is not None:
+                await admit(row)
+        first = row.id
         in_cluster = row.provenance.backend == IN_CLUSTER_BACKEND
         if external is not None and in_cluster:
             raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
@@ -285,5 +369,6 @@ async def complete(
         try:
             return await rows.update(row)
         except EntityConflictError:
-            continue
+            # It changed since it was read: what was decided of it was decided of an earlier version.
+            row = None
     raise CompletionConflict(f"{name} kept changing while it was being completed")

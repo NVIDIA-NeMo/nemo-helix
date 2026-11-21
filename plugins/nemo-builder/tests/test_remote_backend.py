@@ -6,13 +6,14 @@ submit path with it."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
 import pytest
-from nemo_builder_plugin import remote
+from nemo_builder_plugin import remote, submit
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
 from nemo_builder_plugin.backends import load_backend
 from nemo_builder_plugin.completion import CompleteRequest, CompletionConflict, complete
@@ -27,14 +28,18 @@ from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildStepConf
 from nemo_builder_plugin.submit import (
     BackendChanged,
     BuildConflict,
+    CreatedJob,
+    ExistingJob,
     InvalidBuildRequest,
     MissingSecrets,
     SubmitResult,
     referenced_secrets,
+    request_digest,
     submit_build_set,
 )
 from nemo_helix_plugin.auth import workload_identity
-from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.auth.workload_identity import WorkloadIdentityConfigError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
 from nemo_helix_plugin.jobs.execution_profiles import (
@@ -116,6 +121,8 @@ class TestSelection:
         assert (defaults.platforms, defaults.max_specs_per_set) == (["linux/amd64"], 1)
         assert (defaults.build_timeout_seconds, defaults.credential_secret) == (3600, None)
         assert defaults.allow_dockerfile_path is True
+        # Nothing the builder can't verify is taken unless the operator says so.
+        assert defaults.allow_unverified_completion is False
 
 
 class TestWhatItRefuses:
@@ -249,16 +256,124 @@ class TestADeploymentThatCannotBuild:
 
     def test_a_credential_secret_is_taken_under_workload_token_exchange(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Jobs' launcher fetches a step's secrets there too, with a token for the job's creator, so the backend
-        doesn't ask how the platform authenticates a step."""
+        doesn't refuse a credential for how the platform authenticates a step."""
         # The platform uses exchange, wherever that is asked: where the platform answers it, and under the name
-        # the backend once read the answer by, and refused on. Nothing in the backend asks now.
+        # the backend reads the answer by. It once refused a credential on it. With platform auth on or off.
         monkeypatch.setattr(workload_identity, "is_workload_identity_token_exchange_enabled", lambda: True)
-        monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", lambda: True, raising=False)
+        monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", lambda: True)
+        monkeypatch.setattr(remote, "platform_auth_enabled", lambda: True)
         backend = RemoteBackend(_config(credential_secret="system/remote-credential"), PROFILES)
         plan = _plan()
         backend.check(plan)
         # And the step is still given the secret to read, as it is without exchange.
         assert referenced_secrets(backend.compile(plan), "default") == [("system", "remote-credential")]
+
+
+def _cant_be_read() -> bool:
+    raise WorkloadIdentityConfigError("Could not resolve auth config for workload identity token exchange")
+
+
+def _platform(monkeypatch: pytest.MonkeyPatch, *, auth: bool, token_exchange: Callable[[], bool]) -> None:
+    """How the platform authenticates a caller, as the backend asks it."""
+    monkeypatch.setattr(remote, "platform_auth_enabled", lambda: auth)
+    monkeypatch.setattr(remote, "is_workload_identity_token_exchange_enabled", token_exchange)
+
+
+class TestAPlatformThatCannotShowWhoCompletesAnImage:
+    """With platform auth on and workload token exchange off, a request's identity is whatever its headers say.
+    A completion would be refused there, so the submit is: no build is made that could not be recorded."""
+
+    async def test_every_submit_is_refused_and_nothing_is_written(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _platform(monkeypatch, auth=True, token_exchange=lambda: False)
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        with pytest.raises(BackendRejectedError) as refused:
+            await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
+        # The sentence names the setting, and what turning it on accepts.
+        assert "platform auth is on without workload token exchange" in str(refused.value)
+        assert "builder.remote.allow_unverified_completion, which accepts that anything able to reach" in str(
+            refused.value
+        )
+        assert client.events == [] and jobs.jobs == {}
+
+    def test_the_operator_can_accept_completions_nothing_verifies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _platform(monkeypatch, auth=True, token_exchange=lambda: False)
+        RemoteBackend(_config(allow_unverified_completion=True), PROFILES).check(_plan())
+
+    @pytest.mark.parametrize(
+        ("auth", "token_exchange"),
+        [(False, lambda: False), (False, _cant_be_read), (True, lambda: True)],
+        ids=["auth-off", "auth-off-and-no-readable-exchange-setting", "token-exchange"],
+    )
+    def test_a_platform_that_checks_no_caller_or_verifies_each_builds(
+        self, auth: bool, token_exchange: Callable[[], bool], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With auth off no caller is checked at all, as the README says of that mode, and how workloads
+        would be authenticated is not asked. With token exchange a step's token says which job it is of."""
+        _platform(monkeypatch, auth=auth, token_exchange=token_exchange)
+        RemoteBackend(_config(), PROFILES).check(_plan())
+
+    @pytest.mark.parametrize("unverified", [False, True], ids=["by-default", "though-the-operator-accepts-unverified"])
+    def test_a_platform_whose_auth_settings_cant_be_read_is_refused(
+        self, unverified: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing then says a completion could be verified, and the submit doesn't end as a server error.
+        Whatever the operator accepted: the completion route reads how the platform authenticates a workload
+        before it reads that setting, and admits no one where it can't, so the build's step would be put off
+        until it gave up. What the operator accepts is a platform known to verify no one."""
+        _platform(monkeypatch, auth=True, token_exchange=_cant_be_read)
+        with pytest.raises(BackendRejectedError, match="the platform's auth configuration can't be read"):
+            RemoteBackend(_config(allow_unverified_completion=unverified), PROFILES).check(_plan())
+
+    def test_the_setting_changes_nothing_where_a_step_is_verified(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _platform(monkeypatch, auth=True, token_exchange=lambda: True)
+        RemoteBackend(_config(allow_unverified_completion=True), PROFILES).check(_plan())
+
+    def test_it_is_the_last_thing_a_deployment_is_refused_for(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A deployment with nowhere to publish is told that, in any mode."""
+        _platform(monkeypatch, auth=True, token_exchange=lambda: False)
+        with pytest.raises(BackendRejectedError, match="builder.remote.registry and builder.remote.repository"):
+            RemoteBackend(_config(repository=None), PROFILES).check(_plan())
+
+
+class TestWhereTheStepMayRun:
+    """Under workload token exchange a completion's caller is the build's step by the platform's record of
+    its pod. That record is as sure as the step's namespace is closed, so the check holds as far as nothing
+    but Jobs creates pods there."""
+
+    @pytest.mark.parametrize("namespace", ["builds", None], ids=["named", "left-to-jobs"])
+    def test_under_token_exchange_the_step_may_not_run_where_an_in_cluster_build_step_creates_pods(
+        self, namespace: str | None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The build step of an in-cluster build may create pods in its own namespace, so the remote-build
+        step may not share it."""
+        _platform(monkeypatch, auth=True, token_exchange=lambda: True)
+        shared: list[ExecutionProfile] = [_profile(namespace=namespace), _profile("build-control", namespace=namespace)]
+        with pytest.raises(BackendRejectedError) as refused:
+            RemoteBackend(_config(), shared).check(_plan())
+        assert "cpu/build-remote runs the remote-build step in the namespace of cpu/build-control" in str(refused.value)
+        assert "Run the remote-build step in a namespace of its own, where only Jobs creates pods" in str(refused.value)
+
+        # In a namespace of its own it builds, and so it does where Jobs lists no such profile.
+        apart: list[ExecutionProfile] = [_profile(namespace="remote-builds"), shared[1]]
+        RemoteBackend(_config(), apart).check(_plan())
+        RemoteBackend(_config(), shared[:1]).check(_plan())
+        # The profile looked for is the one the deployment names for that step.
+        renamed = BuilderConfig.model_validate(_config().model_dump() | {"control_profile": "sandboxes"})
+        RemoteBackend(renamed, shared).check(_plan())
+        with pytest.raises(BackendRejectedError, match="in the namespace of cpu/sandboxes"):
+            RemoteBackend(renamed, [shared[0], _profile("sandboxes", namespace=namespace)]).check(_plan())
+
+    @pytest.mark.parametrize(
+        ("auth", "unverified"), [(False, False), (True, True)], ids=["auth-off", "the-operator-accepts-unverified"]
+    )
+    def test_where_no_step_is_verified_the_steps_namespace_is_not_asked(
+        self, auth: bool, unverified: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing there rests on which pod is calling."""
+        _platform(monkeypatch, auth=auth, token_exchange=lambda: False)
+        shared: list[ExecutionProfile] = [_profile(), _profile("build-control")]
+        RemoteBackend(_config(allow_unverified_completion=unverified), shared).check(_plan())
 
 
 class TestDestination:
@@ -365,45 +480,108 @@ class TestTheJob:
 
 
 class FakeEntityClient:
+    """The entity store, as far as a submit and a completion meet it. A row is found by its name, and written
+    by its ID on condition of the version it was read at: each create makes a row with an ID of its own."""
+
     def __init__(self) -> None:
         self.rows: dict[str, ContainerImage] = {}
         self.events: list[str] = []
+        #: The names read, in order.
+        self.reads: list[str] = []
+        #: What happens elsewhere just before the next write is answered, or the nth read from now.
+        self.before_write: Callable[[], object] | None = None
+        self.before_read: dict[int, Callable[[], object]] = {}
+        self._made = 0
 
     async def create(self, entity: ContainerImage) -> ContainerImage:
         if entity.name in self.rows:
             raise EntityConflictError(f"{entity.name} exists")
         self.events.append(f"create:{entity.name}")
+        self._made += 1
+        entity._id = f"container-image-{self._made}"
         self.rows[entity.name] = entity
         return entity
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage:
+        self.reads.append(name)
+        if (happens := self.before_read.pop(len(self.reads), None)) is not None:
+            happens()
         if name not in self.rows:
             raise EntityNotFoundError(f"{name} not found")
         return self.rows[name]
 
     async def update(self, entity: ContainerImage) -> ContainerImage:
+        if self.before_write is not None:
+            happens, self.before_write = self.before_write, None
+            happens()
+        stored = self.rows.get(entity.name)
+        if stored is None or stored.id != entity.id:
+            raise EntityNotFoundError(f"{entity.name} not found")
+        if stored.db_version != entity.db_version:
+            self.events.append(f"update_conflict:{entity.name}")
+            raise EntityConflictError(f"{entity.name} changed")
         self.events.append(f"update:{entity.name}:{entity.status}")
+        entity._db_version += 1
         self.rows[entity.name] = entity
         return entity
 
+    def written_elsewhere(self, name: str, **changes: object) -> ContainerImage:
+        """Any other write of the row: it is then at the next version, with ``changes``."""
+        row = self.rows[name].model_copy(update=changes, deep=True)
+        row._db_version += 1
+        self.rows[name] = row
+        return row
+
+    def replaced(self, name: str) -> ContainerImage:
+        """The row is deleted, and another is created under its name: a row with an ID of its own."""
+        row = self.rows[name].model_copy(deep=True)
+        self._made += 1
+        row._id, row._db_version = f"container-image-{self._made}", 1
+        self.rows[name] = row
+        return row
+
 
 class FakeJobs:
+    """Jobs, as far as a submit meets it: a name holds one job at a time, and every create makes a new job,
+    with an ID and a first attempt of its own, which it answers with."""
+
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.jobs: dict[str, CreateHelixJobRequest] = {}
+        #: What Jobs answered the create of the job now under each name.
+        self.answered: dict[str, CreatedJob] = {}
+        self._made = 0
 
-    async def create_job(self, request: CreateHelixJobRequest) -> CreateHelixJobRequest:
+    def create(self, request: CreateHelixJobRequest) -> CreatedJob:
+        """A create through Jobs' own API, by whoever may create a job in the workspace."""
         assert request.name is not None
         if request.name in self.jobs:
             raise ConflictError(
                 httpx.Response(409, json={"detail": "exists"}, request=httpx.Request("POST", "http://j"))
             )
-        self.events.append("create_job")
+        self._made += 1
         self.jobs[request.name] = request
-        return request
+        self.answered[request.name] = CreatedJob(uid=f"platform-job-{self._made}", attempt_id=f"attempt-{self._made}")
+        return self.answered[request.name]
 
-    async def get_job_fields(self, name: str) -> Mapping[str, Any]:
-        return self.jobs[name].custom_fields or {}
+    def delete(self, name: str) -> None:
+        del self.jobs[name], self.answered[name]
+
+    @classmethod
+    def sharing(cls, other: FakeJobs) -> FakeJobs:
+        """The same Jobs, as another request meets it: one that answers a create at once."""
+        jobs = cls(other.events)
+        jobs.jobs, jobs.answered = other.jobs, other.answered
+        return jobs
+
+    async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
+        """The create a submit makes."""
+        created = self.create(request)
+        self.events.append("create_job")
+        return created
+
+    async def get_job(self, name: str) -> ExistingJob:
+        return ExistingJob(uid=self.answered[name].uid, custom_fields=self.jobs[name].custom_fields or {})
 
 
 async def _submit(
@@ -427,14 +605,14 @@ async def _submit(
         workspace=workspace,
         entity_client=entity_client,
         create_job=jobs.create_job,
-        get_job_fields=jobs.get_job_fields,
+        get_job=jobs.get_job,
         secret_readable=secret_readable,
         resolve_upstream=resolve_upstream,
         default_platform="linux/amd64",
     )
 
 
-async def _submit_in_cluster(client: FakeEntityClient) -> None:
+async def _submit_in_cluster(client: FakeEntityClient, jobs: FakeJobs | None = None) -> None:
     """Submit the set to a deployment that builds in this cluster."""
     profiles: list[ExecutionProfile] = [
         _profile(name, storage={"pvc_name": "work"}) for name in ("build-fetch", "build-control", "build-push")
@@ -442,7 +620,7 @@ async def _submit_in_cluster(client: FakeEntityClient) -> None:
     config = BuilderConfig.model_validate(
         {"registry": "reg.example.com", "sandbox": {"image": "kaniko.example.com/executor:debug"}}
     )
-    await _submit(client, FakeJobs(client.events), ExecutionBackend(config, profiles))
+    await _submit(client, jobs or FakeJobs(client.events), ExecutionBackend(config, profiles))
 
 
 class TestSubmitting:
@@ -469,7 +647,8 @@ class TestSubmitting:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
         result = await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
-        assert client.events == ["create:demo-1", "create_job"]
+        # And the row is written once more, with the job that was created (below).
+        assert client.events == ["create:demo-1", "create_job", "update:demo-1:pending"]
         (row,) = result.images
         assert (row.status, row.registry, row.repository) == ("pending", "registry.example.com", "team/images")
         assert row.provenance.backend == "remote"
@@ -479,13 +658,17 @@ class TestSubmitting:
         assert [step.name for step in job.platform_spec.steps] == [STEP_NAME]
 
     async def test_the_same_request_again_adopts_the_row_and_the_job(self) -> None:
+        """The job under the build's name is the one the row records: the one the first submit created."""
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
         backend = RemoteBackend(_config(), PROFILES)
         first = await _submit(client, jobs, backend)
+        events = list(client.events)
         again = await _submit(client, jobs, backend)
         assert [image.name for image in again.images] == [image.name for image in first.images]
-        assert client.events.count("create_job") == 1
+        # Nothing is created, and nothing written: the row is returned as it is stored.
+        assert client.events == events
+        assert again.images[0].provenance.job_uid == jobs.answered["builder-demo-1"].uid
 
     async def test_a_row_another_backend_built_is_not_adopted(self) -> None:
         client = FakeEntityClient()
@@ -540,6 +723,577 @@ class TestSubmitting:
         with pytest.raises(MissingSecrets, match="the build job needs.*default/remote-credential$"):
             await _submit(client, FakeJobs(client.events), backend, unreadable=frozenset({"default/remote-credential"}))
         assert client.events == []
+
+
+JOB = "builder-demo-1"
+#: What a submit is answered when the job under its build's name is not one its rows record.
+NOT_RECORDED = f"a job named {JOB!r} already exists, and this request's images do not record it as their build job"
+
+
+def _recorded(row: ContainerImage) -> tuple[str | None, str | None]:
+    """The job, and the attempt of it, that ``row`` says its submit created."""
+    return row.provenance.job_uid, row.provenance.job_attempt_id
+
+
+def _carrying_the_requests_digest(*specs: BuildSpec) -> CreateHelixJobRequest:
+    """A job created through Jobs' own API under the name a submit of the request gives its job, with the
+    request's digest in metadata its creator writes: anyone who knows the request can work that out."""
+    build_set = BuildSet(name="demo", revision=1, build_specs=list(specs) or [_spec()])
+    digest = request_digest(build_set.with_default_platform("linux/amd64"))
+    return CreateHelixJobRequest.model_construct(
+        name=JOB, source="my-own-tool", custom_fields={"request_digest": digest}
+    )
+
+
+class _Unavailable(FakeJobs):
+    async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
+        raise RuntimeError("jobs unavailable")
+
+
+class _SlowToAnswer(FakeJobs):
+    """Jobs takes the name with its first write, and answers the create only once ``returns`` is set."""
+
+    def __init__(self, events: list[str], returns: asyncio.Event) -> None:
+        super().__init__(events)
+        self.returns = returns
+
+    async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
+        created = self.create(request)
+        self.events.append("create_job")
+        await self.returns.wait()
+        return created
+
+
+class TestTheJobARowRecords:
+    """A row a build service builds is completed on its caller's word, so it records which job its submit
+    created: by the ID Jobs gave that job and its first attempt, which no other job, and no rerun, is given."""
+
+    async def test_each_row_records_the_job_its_submit_created(self) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        result = await _submit(
+            client,
+            jobs,
+            RemoteBackend(_config(max_specs_per_set=2), PROFILES),
+            specs=[_spec(name="a"), _spec(name="b")],
+        )
+        created = jobs.answered[JOB]
+        assert client.events == [
+            "create:demo-1.a",
+            "create:demo-1.b",
+            "create_job",
+            "update:demo-1.a:pending",
+            "update:demo-1.b:pending",
+        ]
+        # What the submit answers with, and what is stored.
+        for row in (*result.images, *client.rows.values()):
+            assert _recorded(row) == (created.uid, created.attempt_id)
+            assert row.provenance.job == f"default/{JOB}"
+        stored = client.rows["demo-1.a"]._get_data_fields()["provenance"]
+        assert (stored["job_uid"], stored["job_attempt_id"]) == (created.uid, created.attempt_id)
+
+    async def test_a_job_put_under_the_builds_name_beforehand_is_not_the_builds_and_is_never_recorded(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Whoever may create a job in the workspace can make one under the name a build's job will have,
+        carrying the request's digest. The submit does not take it for its own on that, as it once did: the
+        job's creator wrote the digest. And nothing of a job found under a name is recorded on a row: only
+        what Jobs answered a create this submit made.
+
+        The row is left waiting, and records no job. Nothing tells this job from one that another submit of
+        the request has just created and is about to record, so the row is not failed for it: no step that
+        is verified completes a row that records no job, and the row fails once the job has ended."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        beforehand = jobs.create(_carrying_the_requests_digest())
+        with caplog.at_level(logging.INFO), pytest.raises(BuildConflict, match=NOT_RECORDED) as refused:
+            await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
+        # The answer says what to do: the same request once more, in case it is another submit's, then the next.
+        assert "submit the request again in a moment. If the answer is still this, submit the next revision" in str(
+            refused.value
+        )
+        row = client.rows["demo-1"]
+        assert (row.status, row.status_detail, _recorded(row)) == ("pending", None, (None, None))
+        assert beforehand.uid not in row.model_dump_json()
+        assert "adopting it" not in caplog.text
+        # The job is still the one made beforehand: the submit created none, and wrote nothing but its row.
+        assert jobs.answered == {JOB: beforehand} and client.events == ["create:demo-1"]
+
+    async def test_a_job_put_under_the_name_once_the_builds_own_is_deleted_is_not_adopted(self) -> None:
+        """The row records the job its submit created. Another under that name, though it says it is of the
+        same request, is another job, and the submit is answered a conflict.
+
+        The row is left waiting, and still records its own job. Nothing tells the job found from one that
+        another submit of the request has just created, and is about to record in place of the one that
+        is gone, so the row is not failed for it: no step that is verified completes a row that records
+        a job it is no step of, and the row fails once the job under the name has ended."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        await _submit(client, jobs, backend)
+        own = jobs.answered[JOB]
+        jobs.delete(JOB)
+        later = jobs.create(_carrying_the_requests_digest())
+        assert later.uid != own.uid
+        events = list(client.events)
+
+        with pytest.raises(BuildConflict, match=NOT_RECORDED) as refused:
+            await _submit(client, jobs, backend)
+        row = client.rows["demo-1"]
+        # Not failed, and not written: it waits as it did, still recording its own job.
+        assert (row.status, row.status_detail, _recorded(row)) == ("pending", None, (own.uid, own.attempt_id))
+        assert later.uid not in row.model_dump_json()
+        assert client.events == events
+        # Read a few times first: a submit that created the job found would record it on the row.
+        assert client.reads == ["demo-1"] * (1 + submit.ADOPT_READS)
+        # The answer says what to do, as it does for a row that records no job.
+        assert "submit the request again in a moment. If the answer is still this, submit the next revision" in str(
+            refused.value
+        )
+
+    async def test_a_job_is_the_builds_own_only_if_every_row_still_waiting_records_it(self) -> None:
+        """A set of two, submitted again. One row records the job under the build's name. The other records a
+        job that held the name before it: the job found is not the one that image's row says builds it, and
+        the submit is answered a conflict. Neither row is written. The one that records the job is left to
+        it: that job is its build, and is running. The other is left for a submit that may be about to
+        record the job on it, and is failed once the job has ended if none does."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(max_specs_per_set=2), PROFILES)
+        specs = [_spec(name="a"), _spec(name="b")]
+        await _submit(client, jobs, backend, specs=specs)
+        earlier = {"job_uid": "platform-job-earlier", "job_attempt_id": "attempt-earlier"}
+        held = client.rows["demo-1.b"]
+        client.written_elsewhere("demo-1.b", provenance=held.provenance.model_copy(update=earlier))
+        events = list(client.events)
+
+        with pytest.raises(BuildConflict, match=NOT_RECORDED + ". Another submit of the same request may be"):
+            await _submit(client, jobs, backend, specs=specs)
+        assert [row.status for row in client.rows.values()] == ["pending", "pending"]
+        assert _recorded(client.rows["demo-1.a"]) == (jobs.answered[JOB].uid, jobs.answered[JOB].attempt_id)
+        assert _recorded(client.rows["demo-1.b"]) == ("platform-job-earlier", "attempt-earlier")
+        assert client.events == events
+
+        # Once that row has settled, the same request finds nothing waiting on another job, and the one image
+        # still building: a row that has settled is not asked which job it records.
+        client.written_elsewhere("demo-1.b", status="failed", status_detail="abandoned")
+        again = await _submit(client, jobs, backend, specs=specs)
+        assert [row.status for row in again.images] == ["pending", "failed"]
+        assert client.events == events
+
+    async def test_a_resubmit_that_creates_the_job_anew_records_the_new_one(self) -> None:
+        """The build's job was deleted before it finished, and nothing is under its name. The same request
+        again creates a job, and the row, still waiting, is completed by that job's steps and no other's."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        await _submit(client, jobs, backend)
+        first = jobs.answered[JOB]
+        jobs.delete(JOB)
+
+        (row,) = (await _submit(client, jobs, backend)).images
+        second = jobs.answered[JOB]
+        assert second != first
+        assert _recorded(row) == _recorded(client.rows["demo-1"]) == (second.uid, second.attempt_id)
+
+    async def test_only_a_row_still_waiting_is_written(self) -> None:
+        """A row that has settled is never written again, and no step completes it now."""
+        client = FakeEntityClient()
+        backend = RemoteBackend(_config(max_specs_per_set=2), PROFILES)
+        specs = [_spec(name="a"), _spec(name="b")]
+        with pytest.raises(RuntimeError, match="jobs unavailable"):
+            await _submit(client, _Unavailable(client.events), backend, specs=specs)
+        # Neither row records a job: none was created.
+        assert [_recorded(row) for row in client.rows.values()] == [(None, None), (None, None)]
+        client.rows["demo-1.a"].status = "failed"
+        client.events.clear()
+
+        jobs = FakeJobs(client.events)
+        result = await _submit(client, jobs, backend, specs=specs)
+        assert client.events == ["create_job", "update:demo-1.b:pending"]
+        created = jobs.answered[JOB]
+        assert [_recorded(row) for row in result.images] == [(None, None), (created.uid, created.attempt_id)]
+
+    async def test_a_row_that_changed_meanwhile_is_read_once_more_and_written(self) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        client.before_write = lambda: client.written_elsewhere("demo-1")
+        (row,) = (await _submit(client, jobs, RemoteBackend(_config(), PROFILES))).images
+        assert client.events == ["create:demo-1", "create_job", "update_conflict:demo-1", "update:demo-1:pending"]
+        assert client.reads == ["demo-1"]
+        created = jobs.answered[JOB]
+        assert _recorded(row) == _recorded(client.rows["demo-1"]) == (created.uid, created.attempt_id)
+
+    async def test_a_row_that_settled_meanwhile_is_left_as_it_settled(self) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        client.before_write = lambda: client.written_elsewhere("demo-1", status="failed", status_detail="abandoned")
+        (row,) = (await _submit(client, jobs, RemoteBackend(_config(), PROFILES))).images
+        assert client.events == ["create:demo-1", "create_job", "update_conflict:demo-1"]
+        assert (row.status, row.status_detail, _recorded(row)) == ("failed", "abandoned", (None, None))
+
+    @pytest.mark.parametrize(
+        "meanwhile",
+        ["replaced", "changed-then-replaced", "recorded-by-a-later-create", "keeps-changing", "the-store-fails"],
+    )
+    async def test_a_row_that_cant_be_written_is_logged_by_name_and_the_submit_still_answers(
+        self, meanwhile: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The log says what then becomes of the image, which goes by how the platform authenticates a
+        caller: a step that is verified is not let complete a row that doesn't record its job, and where no
+        caller is verified the step completes it all the same."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        later = {"job_uid": "platform-job-later", "job_attempt_id": "attempt-later"}
+
+        def happens() -> None:
+            if meanwhile == "replaced":
+                client.replaced("demo-1")
+            elif meanwhile == "changed-then-replaced":
+                # The write is refused for the row's version. Read again, the name holds another row.
+                client.written_elsewhere("demo-1")
+                client.before_read[1] = lambda: client.replaced("demo-1")
+            elif meanwhile == "recorded-by-a-later-create":
+                held = client.rows["demo-1"]
+                client.written_elsewhere("demo-1", provenance=held.provenance.model_copy(update=later))
+            elif meanwhile == "keeps-changing":
+                client.written_elsewhere("demo-1")
+                client.before_write = lambda: client.written_elsewhere("demo-1")
+            else:
+                raise RuntimeError("entity store down")
+
+        client.before_write = happens
+        with caplog.at_level(logging.WARNING):
+            result = await _submit(client, jobs, RemoteBackend(_config(), PROFILES))
+        assert result.job == JOB
+        assert "image default/demo-1" in caplog.text
+        # A row that changed is left as it is, and may record another job by then. One that couldn't be
+        # written records what it did: no job, or an earlier one, and the log says how each then ends.
+        said = (
+            "no step of this job completes it;"
+            if meanwhile in ("recorded-by-a-later-create", "keeps-changing", "changed-then-replaced")
+            else (
+                "no step of this job completes it, and the image then fails: its completion is put off until "
+                "its step gives up, or refused at once where the row records an earlier job;"
+            )
+        )
+        assert f"under workload token exchange {said}" in caplog.text
+        assert "where no caller is verified, the step completes it all the same" in caplog.text
+        stored = client.rows["demo-1"]
+        created = jobs.answered[JOB]
+        assert _recorded(stored) == (
+            ("platform-job-later", "attempt-later") if "recorded" in meanwhile else (None, None)
+        )
+        assert created.uid not in stored.model_dump_json()
+        assert not [event for event in client.events if event.startswith("update:")]
+
+    async def test_a_create_that_names_no_attempt_is_not_recorded(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A row records both or neither: a row that named a job and no attempt would wait on one for good."""
+
+        class _NoAttempt(FakeJobs):
+            async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
+                return CreatedJob(uid=(await super().create_job(request)).uid, attempt_id=None)
+
+        client = FakeEntityClient()
+        with caplog.at_level(logging.ERROR):
+            (row,) = (await _submit(client, _NoAttempt(client.events), RemoteBackend(_config(), PROFILES))).images
+        assert _recorded(row) == (None, None)
+        assert client.events == ["create:demo-1", "create_job"]
+        assert f"Jobs created job {JOB} and named no ID, or no attempt, for it" in caplog.text
+        assert "its completion is put off until its step gives up" in caplog.text
+
+    async def test_a_submit_made_at_the_same_moment_adopts_the_job_once_the_other_has_recorded_it(self) -> None:
+        """Two submits of one request, at once. One creates the job; the other finds it under the build's
+        name a moment before the first has written it on the row. It reads the row again, and adopts the job
+        once the row records it, where failing the row would have failed the first submit's build."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        # The first submit, up to its create: the row is written, and the job exists.
+        with pytest.raises(RuntimeError, match="jobs unavailable"):
+            await _submit(client, _Unavailable(client.events), backend)
+        created = jobs.create(_carrying_the_requests_digest())
+        held = client.rows["demo-1"]
+
+        def the_first_submit_records_its_job() -> None:
+            recorded = {"job_uid": created.uid, "job_attempt_id": created.attempt_id}
+            client.written_elsewhere("demo-1", provenance=held.provenance.model_copy(update=recorded))
+
+        # The second reads the row to adopt it, then twice to see whether it records the job.
+        client.before_read[3] = the_first_submit_records_its_job
+        (row,) = (await _submit(client, jobs, backend)).images
+        assert (row.status, _recorded(row)) == ("pending", (created.uid, created.attempt_id))
+        assert client.reads == ["demo-1"] * 3
+        assert not [event for event in client.events if event.startswith("update")]
+
+    async def test_a_job_no_row_comes_to_record_is_refused_after_a_few_reads_and_the_row_is_left(self) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        with pytest.raises(RuntimeError, match="jobs unavailable"):
+            await _submit(client, _Unavailable(client.events), backend)
+        jobs.create(_carrying_the_requests_digest())
+        events = list(client.events)
+
+        with pytest.raises(BuildConflict, match=NOT_RECORDED + ". Another submit of the same request may be"):
+            await _submit(client, jobs, backend)
+        assert client.reads == ["demo-1"] * (1 + submit.ADOPT_READS)
+        # Not failed: the job may be one that a submit of this request created, and has yet to record.
+        assert client.rows["demo-1"].status == "pending" and client.events == events
+
+    async def test_a_submit_that_records_its_job_after_another_found_it_still_builds(self) -> None:
+        """Two submits of one request: a client that sends it again after a timeout, say. The first is
+        still inside Jobs' create when the second finds the job under the build's name, on a row that
+        records nothing. The second waits a few reads, answers a conflict, and leaves the row. The first's
+        create then returns, and it records its job on the row, which a step of that job completes.
+
+        Failed by the second, the row would have been found failed by the first, and by the first's job:
+        the build was lost to a retry of its own request."""
+        client = FakeEntityClient()
+        backend = RemoteBackend(_config(), PROFILES)
+        returns = asyncio.Event()
+        jobs = _SlowToAnswer(client.events, returns)
+        first = asyncio.create_task(_submit(client, jobs, backend))
+        while JOB not in jobs.jobs:
+            await asyncio.sleep(0)
+
+        with pytest.raises(BuildConflict, match=NOT_RECORDED + ". Another submit of the same request may be"):
+            await _submit(client, FakeJobs.sharing(jobs), backend)
+        assert (client.rows["demo-1"].status, _recorded(client.rows["demo-1"])) == ("pending", (None, None))
+
+        returns.set()
+        (row,) = (await first).images
+        created = jobs.answered[JOB]
+        assert (row.status, _recorded(row)) == ("pending", (created.uid, created.attempt_id))
+        assert client.events == ["create:demo-1", "create_job", "update:demo-1:pending"]
+        # And the same request once more now finds the job its row records.
+        (again,) = (await _submit(client, FakeJobs.sharing(jobs), backend)).images
+        assert _recorded(again) == (created.uid, created.attempt_id)
+
+    async def test_a_resubmit_that_records_its_job_over_an_earlier_one_after_another_found_it_still_builds(
+        self,
+    ) -> None:
+        """The row records the job its first submit created, which was cancelled and deleted before the row
+        was failed for it. The same request again finds the name free and creates a job, and is still
+        inside Jobs' create when a retry of it finds that job under the build's name, on a row that
+        records the earlier one. The retry waits a few reads, answers a conflict, and leaves the row. The
+        resubmit's create then returns, and it records its job on the row in place of the earlier one,
+        which a step of that job completes.
+
+        Failed by the retry, the row would have been found failed by the resubmit, and by the resubmit's
+        job: the build was lost to a retry of its own request, as one whose row records no job was."""
+        client = FakeEntityClient()
+        backend = RemoteBackend(_config(), PROFILES)
+        returns = asyncio.Event()
+        returns.set()
+        jobs = _SlowToAnswer(client.events, returns)
+        await _submit(client, jobs, backend)
+        earlier = jobs.answered[JOB]
+        jobs.delete(JOB)
+        client.events.clear()
+
+        returns.clear()
+        resubmit = asyncio.create_task(_submit(client, jobs, backend))
+        while JOB not in jobs.jobs:
+            await asyncio.sleep(0)
+        assert jobs.answered[JOB].uid != earlier.uid
+
+        with pytest.raises(BuildConflict, match=NOT_RECORDED) as refused:
+            await _submit(client, FakeJobs.sharing(jobs), backend)
+        row = client.rows["demo-1"]
+        assert (row.status, row.status_detail, _recorded(row)) == ("pending", None, (earlier.uid, earlier.attempt_id))
+        assert client.reads == ["demo-1"] * (2 + submit.ADOPT_READS)
+        assert "Another submit of the same request may be recording it now" in str(refused.value)
+
+        returns.set()
+        (row,) = (await resubmit).images
+        created = jobs.answered[JOB]
+        assert (row.status, _recorded(row)) == ("pending", (created.uid, created.attempt_id))
+        assert client.events == ["create_job", "update:demo-1:pending"]
+        # The row is there for the new job's step to complete: failed, it would have refused the completion.
+        built = await complete(
+            client,
+            workspace="default",
+            name="demo-1",
+            digest="sha256:" + "c" * 64,
+            external=ExternalImage(build_id="build-1"),
+        )
+        assert (built.status, _recorded(built)) == ("ready", (created.uid, created.attempt_id))
+
+    async def test_a_submit_adopts_the_job_once_another_has_recorded_it_over_an_earlier_one(self) -> None:
+        """The row records an earlier job of the request, deleted since, and a resubmit has created another
+        under the build's name. A retry of the resubmit finds that job a moment before the resubmit writes
+        it on the row. It reads the row again, and adopts the job once the row records it."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        await _submit(client, jobs, backend)
+        earlier = jobs.answered[JOB]
+        jobs.delete(JOB)
+        # The resubmit, up to its create: the job exists, and the row still records the earlier one.
+        created = jobs.create(_carrying_the_requests_digest())
+        held = client.rows["demo-1"]
+        assert _recorded(held) == (earlier.uid, earlier.attempt_id) != (created.uid, created.attempt_id)
+        events = list(client.events)
+
+        def the_resubmit_records_its_job() -> None:
+            recorded = {"job_uid": created.uid, "job_attempt_id": created.attempt_id}
+            client.written_elsewhere("demo-1", provenance=held.provenance.model_copy(update=recorded))
+
+        # The retry reads the row to adopt it, then twice to see whether it records the job.
+        client.before_read[3] = the_resubmit_records_its_job
+        (row,) = (await _submit(client, jobs, backend)).images
+        assert (row.status, _recorded(row)) == ("pending", (created.uid, created.attempt_id))
+        assert client.reads == ["demo-1"] * 3
+        # The retry wrote nothing, and created nothing.
+        assert client.events == events
+
+    @pytest.mark.parametrize("meanwhile", ["replaced", "deleted"])
+    async def test_a_row_that_will_never_record_the_job_is_not_waited_for(self, meanwhile: str) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        with pytest.raises(RuntimeError, match="jobs unavailable"):
+            await _submit(client, _Unavailable(client.events), backend)
+        jobs.create(_carrying_the_requests_digest())
+
+        def happens() -> None:
+            if meanwhile == "replaced":
+                client.replaced("demo-1")
+            else:
+                del client.rows["demo-1"]
+
+        client.before_read[2] = happens
+        with pytest.raises(BuildConflict, match=NOT_RECORDED + "$"):
+            await _submit(client, jobs, backend)
+        assert client.reads == ["demo-1"] * 2
+        # A row that is no longer the one this submit read is not written: it is someone else's now.
+        assert not [event for event in client.events if event.startswith("update:")]
+
+    @pytest.mark.parametrize("settled", ["ready", "failed"])
+    @pytest.mark.parametrize("records", ["a-job-since-deleted", "no-job"])
+    async def test_rows_that_have_all_settled_are_returned_whichever_job_holds_the_name(
+        self, settled: str, records: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A finished build, submitted again. Its job was deleted, which Jobs allows once a job has ended,
+        and another job has its name: one a resubmit created, which wrote nothing on a row that had settled,
+        or anyone's. The row records the first job, or none: it settled before one was recorded, or was
+        written before rows recorded their job.
+
+        No step completes a settled row, so whose job holds the name decides nothing. The row is returned as
+        it is, as a build in this cluster returns its rows: answered with a conflict, a caller would build
+        an image that is already ready under the next revision."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        if records == "no-job":
+            with pytest.raises(RuntimeError, match="jobs unavailable"):
+                await _submit(client, _Unavailable(client.events), backend)
+        else:
+            await _submit(client, jobs, backend)
+            jobs.delete(JOB)
+        row = client.rows["demo-1"]
+        recorded = _recorded(row)
+        if settled == "ready":
+            row.status, row.digest, row.external = "ready", "sha256:" + "c" * 64, ExternalImage(build_id="build-1")
+        else:
+            row.status, row.status_detail = "failed", "its job ended without completing it"
+        jobs.create(_carrying_the_requests_digest())
+        events = list(client.events)
+
+        with caplog.at_level(logging.INFO):
+            result = await _submit(client, jobs, backend)
+        assert result.job == JOB
+        assert [(image.name, image.status, _recorded(image)) for image in result.images] == [
+            ("demo-1", settled, recorded)
+        ]
+        # Nothing is written, nothing is created, and the job is not said to be the build's.
+        assert client.events == events
+        assert "no image of this request still waits on a job" in caplog.text and "adopting it" not in caplog.text
+
+    async def test_a_finished_build_is_returned_however_often_it_is_submitted_again(self) -> None:
+        """The row is ready, and its job is deleted. The same request again finds the name free and creates
+        a job, which writes nothing on a row that has settled: the row still records the first. Once more,
+        and the job found is one the row doesn't record. Both are answered with the ready row."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        await _submit(client, jobs, backend)
+        first = jobs.answered[JOB]
+        await complete(
+            client,
+            workspace="default",
+            name="demo-1",
+            digest="sha256:" + "c" * 64,
+            external=ExternalImage(build_id="build-1"),
+        )
+        jobs.delete(JOB)
+        client.events.clear()
+
+        for created in (["create_job"], []):
+            (row,) = (await _submit(client, jobs, backend)).images
+            assert (row.status, _recorded(row)) == ("ready", (first.uid, first.attempt_id))
+            assert client.events == created
+            client.events.clear()
+        assert jobs.answered[JOB] != first
+
+    async def test_a_row_that_settled_while_the_rows_were_read_again_ends_the_wait(self) -> None:
+        """The one row still waiting, on a job it doesn't record, fails meanwhile: abandoned, say. Nothing
+        is left for a job to complete, and the row is returned as it settled."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        with pytest.raises(RuntimeError, match="jobs unavailable"):
+            await _submit(client, _Unavailable(client.events), backend)
+        jobs.create(_carrying_the_requests_digest())
+        client.before_read[3] = lambda: client.written_elsewhere("demo-1", status="failed", status_detail="abandoned")
+
+        (row,) = (await _submit(client, jobs, backend)).images
+        assert (row.status, row.status_detail) == ("failed", "abandoned")
+        assert client.reads == ["demo-1"] * 3
+
+    async def test_a_create_refused_for_a_job_that_cant_then_be_read_ends_as_jobs_ended_it(self) -> None:
+        """A 409 from Jobs is not proof that a job of that name exists: it refuses a create for other reasons
+        too. The submit ends with Jobs' own error, and the row is left waiting, for settling to fail."""
+
+        class _RefusedForAnotherReason(FakeJobs):
+            async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
+                raise ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://j")))
+
+            async def get_job(self, name: str) -> ExistingJob:
+                raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://j")))
+
+        client = FakeEntityClient()
+        with pytest.raises(NotFoundError):
+            await _submit(client, _RefusedForAnotherReason(client.events), RemoteBackend(_config(), PROFILES))
+        assert client.events == ["create:demo-1"]
+        assert (client.rows["demo-1"].status, _recorded(client.rows["demo-1"])) == ("pending", (None, None))
+
+    async def test_a_backend_says_itself_whether_its_rows_record_their_job(self) -> None:
+        """The submit asks the backend, not its name: a row completed on its caller's word records its job."""
+        assert RemoteBackend.binds_rows_to_job is True
+        assert ExecutionBackend.binds_rows_to_job is False
+
+        class Renamed(RemoteBackend):
+            name = "another-service"
+
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        (row,) = (await _submit(client, jobs, Renamed(_config(), PROFILES))).images
+        assert row.provenance.backend == "another-service"
+        assert _recorded(row) == (jobs.answered[JOB].uid, jobs.answered[JOB].attempt_id)
+
+    async def test_a_build_in_this_cluster_takes_the_job_by_its_digest_and_records_nothing(self) -> None:
+        """The same job made beforehand, met by a build in this cluster: taken for the build's own, as it
+        always was, and the row is not written again."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        jobs.create(_carrying_the_requests_digest())
+        await _submit_in_cluster(client, jobs)
+        row = client.rows["demo-1"]
+        assert (row.status, row.provenance.backend, _recorded(row)) == ("pending", "execution", (None, None))
+        assert client.events == ["create:demo-1"]
+        assert client.reads == []
 
 
 class TestTheRecord:

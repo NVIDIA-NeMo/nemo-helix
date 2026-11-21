@@ -172,6 +172,19 @@ class RemoteConfig(BaseModel):
             "service that enforces one ends a build whose step was killed."
         ),
     )
+    allow_unverified_completion: bool = Field(
+        default=False,
+        description=(
+            "Build where nothing can show who completes an image: with platform auth on and workload token "
+            "exchange off. The platform then takes a request's identity from headers that anything able to reach "
+            "its API can set, so the builder cannot tell an image's own remote-build step from any other caller, "
+            "and by default it refuses every submit and every completion of a remote build. True accepts "
+            "exactly that: anything able to reach the API can make a `pending` image `ready` at a digest, with a "
+            "build and a runtime configuration, of its choosing. It changes nothing with platform auth off, "
+            "where no caller is checked, nor with workload token exchange on, where only a step of the job the "
+            "image's submit created completes it."
+        ),
+    )
 
     @field_validator("registry")
     @classmethod
