@@ -31,7 +31,15 @@ class _CompilableJob(Protocol):
     """The ``compile`` signature this plugin's jobs share (``NemoJob.compile`` itself is typed loosely)."""
 
     async def compile(
-        self, *, workspace: str, spec: BaseModel, entity_client: object, job_name: str | None, async_sdk: object
+        self,
+        *,
+        workspace: str,
+        spec: BaseModel,
+        entity_client: object,
+        job_name: str | None,
+        async_sdk: object,
+        profile: str | None = None,
+        options: dict | None = None,
     ) -> HelixJobSpec: ...
 
 
@@ -45,6 +53,9 @@ def _compiler_for(job_type: _CompilableJob) -> Callable[..., Awaitable[HelixJobS
         entity_client: EntityClient,
         job_name: str | None,
         sdk: AsyncHelixClient,
+        *,
+        profile: str | None = None,
+        options: dict | None = None,
     ) -> HelixJobSpec:
         del original_spec
         return await job_type.compile(
@@ -53,6 +64,8 @@ def _compiler_for(job_type: _CompilableJob) -> Callable[..., Awaitable[HelixJobS
             entity_client=entity_client,
             job_name=job_name,
             async_sdk=sdk,
+            profile=profile,
+            options=options,
         )
 
     return compile_submission
