@@ -30,6 +30,7 @@ Served over HTTP by ``server.py``; this module is just the graph and its tools.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
 import subprocess
@@ -68,6 +69,10 @@ SYSTEM_PROMPT = (
 #: stops answering holds the request open until garak's 600s turn timeout fails the whole attacker.
 MODEL_TIMEOUT_SECONDS = 90
 MODEL_MAX_RETRIES = 1
+#: Longest one model call may take in all, retry included. ``MODEL_TIMEOUT_SECONDS`` is the HTTP read
+#: timeout, which applies between received chunks, so a provider that keeps sending a little can hold a
+#: call past it; this deadline bounds the whole call and is answered like any other timeout.
+MODEL_DEADLINE_SECONDS = MODEL_TIMEOUT_SECONDS * (MODEL_MAX_RETRIES + 1)
 #: The model errors that are answered instead of raised: the ones that pass on their own (a timeout, a
 #: dropped connection, a 5xx such as a model that is temporarily down). A 429 is not one of them: the
 #: server answers it with its own 429, which garak backs off on and resends instead of scoring a fake
@@ -75,6 +80,7 @@ MODEL_MAX_RETRIES = 1
 #: the request, so a misconfigured agent stops the run with a clear error instead of answering every
 #: attack with an error message.
 _TRANSIENT_MODEL_ERRORS = (
+    TimeoutError,  # MODEL_DEADLINE_SECONDS ran out
     openai.APITimeoutError,
     openai.APIConnectionError,
     openai.InternalServerError,
@@ -156,7 +162,8 @@ def _model_failure(exc: Exception) -> AIMessage:
     it retries, then raises and fails the whole attacker. Answered, the turn ends with this text and
     is scored like any other reply.
     """
-    return AIMessage(content=f"the model call failed: {type(exc).__name__}: {exc}")
+    detail = str(exc) or f"no reply within {MODEL_DEADLINE_SECONDS}s"
+    return AIMessage(content=f"the model call failed: {type(exc).__name__}: {detail}")
 
 
 def build_agent() -> CompiledStateGraph:
@@ -191,7 +198,9 @@ def build_agent() -> CompiledStateGraph:
             # Read the messages back off the request rather than closing over them, so a rewrite by a
             # request intercept is what actually reaches the provider.
             try:
-                reply = await llm.ainvoke(messages_from_dict(request.content["messages"]))
+                reply = await asyncio.wait_for(
+                    llm.ainvoke(messages_from_dict(request.content["messages"])), MODEL_DEADLINE_SECONDS
+                )
             except _TRANSIENT_MODEL_ERRORS as exc:
                 reply = _model_failure(exc)
             return {LANGCHAIN_MODEL_RESPONSE_KEY: {"messages": messages_to_dict([reply])}}
