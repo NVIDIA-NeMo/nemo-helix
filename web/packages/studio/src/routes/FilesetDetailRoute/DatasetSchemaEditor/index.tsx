@@ -54,6 +54,7 @@ export const DatasetSchemaEditor: FC<DatasetSchemaEditorProps> = ({
     handleInferFromExisting,
     isSaving,
     validation,
+    saveError,
     sharedReferrerCount,
     pendingShareConfirm,
     setPendingShareConfirm,
@@ -162,15 +163,29 @@ export const DatasetSchemaEditor: FC<DatasetSchemaEditorProps> = ({
       {!validation.valid && validation.errors.length > 0 && (
         <Stack gap="density-xs" className="shrink-0" data-testid="dataset-schema-editor-errors">
           {validation.errors.map((err, i) => (
-            <Text key={i} kind="body/regular/sm">
+            <Text key={i} kind="body/regular/sm" className="text-feedback-danger">
               {err}
             </Text>
           ))}
         </Stack>
       )}
 
+      {saveError && (
+        <Text
+          kind="body/regular/sm"
+          className="text-feedback-danger shrink-0"
+          data-testid="dataset-schema-save-error"
+        >
+          {saveError}
+        </Text>
+      )}
+
       {inferError && (
-        <Text kind="body/regular/sm" className="shrink-0" data-testid="dataset-schema-infer-error">
+        <Text
+          kind="body/regular/sm"
+          className="text-feedback-danger shrink-0"
+          data-testid="dataset-schema-infer-error"
+        >
           {inferError}
         </Text>
       )}

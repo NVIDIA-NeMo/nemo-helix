@@ -10,6 +10,7 @@ import { DatasetSchemaEditor } from '@studio/routes/FilesetDetailRoute/DatasetSc
 import { render, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { AxiosError, type AxiosResponse } from 'axios';
 import { useState } from 'react';
 
 const { mutateAsync, invalidateQueries } = vi.hoisted(() => ({
@@ -463,5 +464,98 @@ describe('DatasetSchemaEditor', () => {
         'Show All'
       )
     );
+  });
+
+  it('Show All flags a payload that does not match the API shape and blocks Save', async () => {
+    const user = userEvent.setup();
+    render(
+      <DatasetSchemaEditor
+        {...propsBase}
+        fileset={buildFileset({ schema_defs: { schema_1: { type: 'object' } } })}
+      />
+    );
+    await user.click(screen.getByRole('combobox', { name: /selected schema/i }));
+    await user.click(await screen.findByRole('option', { name: 'Show All' }));
+
+    fireEvent.change(screen.getByTestId('code-editor'), {
+      target: { value: '{"schemas_by_path": 5}' },
+    });
+
+    expect(await screen.findByTestId('dataset-schema-editor-errors')).toHaveTextContent(
+      'schemas_by_path'
+    );
+    expect(screen.getByTestId('dataset-schema-save-button')).toBeDisabled();
+  });
+
+  it('shows the backend rejection in the editor when Save fails', async () => {
+    const user = userEvent.setup();
+    const detail = [
+      {
+        loc: ['body', 'metadata', 'dataset'],
+        msg: "Value error, dataset metadata field 'schema' contains invalid JSON Schema",
+        type: 'value_error',
+      },
+    ];
+    mutateAsync.mockRejectedValueOnce(
+      new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 422,
+        data: { detail },
+      } as AxiosResponse)
+    );
+    render(
+      <DatasetSchemaEditor
+        {...propsBase}
+        fileset={buildFileset({ schema_defs: { schema_1: { type: 'object' } } })}
+      />
+    );
+    await user.click(screen.getByRole('combobox', { name: /selected schema/i }));
+    await user.click(await screen.findByRole('option', { name: 'Show All' }));
+
+    fireEvent.change(screen.getByTestId('code-editor'), {
+      target: { value: '{"schema": {"type": "foobar"}}' },
+    });
+    const saveButton = screen.getByTestId('dataset-schema-save-button');
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    await user.click(saveButton);
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByTestId('dataset-schema-save-error')).toHaveTextContent(
+      'contains invalid JSON Schema'
+    );
+    expect(invalidateQueries).not.toHaveBeenCalled();
+    expect(screen.getByTestId('code-editor')).toHaveValue('{"schema": {"type": "foobar"}}');
+  });
+
+  it('ignores a save failure for an edit the user has since changed', async () => {
+    const user = userEvent.setup();
+    let rejectSave: (err: unknown) => void = () => {};
+    mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectSave = reject;
+        })
+    );
+    render(
+      <DatasetSchemaEditor
+        {...propsBase}
+        fileset={buildFileset({ schema_defs: { schema_1: { type: 'object' } } })}
+      />
+    );
+    await user.click(screen.getByRole('combobox', { name: /selected schema/i }));
+    await user.click(await screen.findByRole('option', { name: 'Show All' }));
+
+    const editor = screen.getByTestId('code-editor');
+    fireEvent.change(editor, { target: { value: '{"schema": {"type": "foobar"}}' } });
+    const saveButton = screen.getByTestId('dataset-schema-save-button');
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    await user.click(saveButton);
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(editor, { target: { value: '{"schema": {"type": "object"}}' } });
+    rejectSave(new Error('stale failure'));
+
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    expect(screen.queryByTestId('dataset-schema-save-error')).not.toBeInTheDocument();
+    expect(editor).toHaveValue('{"schema": {"type": "object"}}');
   });
 });

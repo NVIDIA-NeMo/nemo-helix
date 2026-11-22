@@ -1,37 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  parseAndValidate,
-  validateJsonSchemaDocument,
-} from '@nemo/common/src/utils/jsonSchema/validate';
-
-describe('validateJsonSchemaDocument', () => {
-  it('accepts a minimal valid Draft 2020-12 schema', () => {
-    const result = validateJsonSchemaDocument({
-      $schema: 'https://json-schema.org/draft/2020-12/schema',
-      type: 'object',
-      properties: { name: { type: 'string' } },
-    });
-    expect(result.valid).toBe(true);
-    expect(result.errors).toEqual([]);
-  });
-
-  it('accepts a bare {} (no constraints)', () => {
-    expect(validateJsonSchemaDocument({}).valid).toBe(true);
-  });
-
-  it('rejects an unknown primitive type', () => {
-    const result = validateJsonSchemaDocument({ type: 'foobar' });
-    expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
-  it('rejects a non-object schema document', () => {
-    expect(validateJsonSchemaDocument('not a schema').valid).toBe(false);
-    expect(validateJsonSchemaDocument(42).valid).toBe(false);
-  });
-});
+import { parseAndValidate } from '@nemo/common/src/utils/jsonSchema/validate';
 
 describe('parseAndValidate', () => {
   it('returns the parsed object when the text is valid JSON + valid schema', () => {
@@ -55,10 +25,5 @@ describe('parseAndValidate', () => {
     expect(arr.valid).toBe(false);
     const prim = parseAndValidate('42');
     expect(prim.valid).toBe(false);
-  });
-
-  it('forwards schema-validity errors from validateJsonSchemaDocument', () => {
-    const result = parseAndValidate('{"type": "foobar"}');
-    expect(result.valid).toBe(false);
   });
 });
