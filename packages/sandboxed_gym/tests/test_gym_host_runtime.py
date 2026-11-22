@@ -2535,7 +2535,6 @@ def _extras_only_wheels_package(tmp_path, monkeypatch):
     monkeypatch.setattr(
         runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
     )
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
