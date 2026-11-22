@@ -63,7 +63,8 @@ Check the machine before anything else. On a clean VM, or when any check below f
 services, OpenShell, the model key, `setup`) and come back here with `doctor` green.
 
 ```bash
-which nemo                         # must end in nemo-helix/.venv/bin/nemo (a source install)
+which nemo                         # a source checkout's .venv/bin/nemo
+nemo agent-hardener --help         # lists setup, doctor, init, synth-benign, run, status (else not a source install)
 nemo services status               # Health: healthy, on port 8080
 openshell --version                # 0.1.4 or later
 # `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
@@ -171,6 +172,8 @@ nemo agent-hardener init \
 | `--egress integrate.api.nvidia.com` | the sandbox is default-deny; without it the agent cannot reach its model |
 | `--start-command "/usr/local/bin/python /app/server.py"` | absolute: OpenShell replaces `PATH`, and the Dockerfile's `CMD` uses a bare `python` |
 | `--binary "/usr/local/bin/python*"` | which process the egress rule applies to; the image has no venv, so the default does not match |
+
+The steps below write `my-agent` for the manifest name: use yours (`langgraph-victim` for this example).
 
 ### Route C — a `claude` / `codex` gateway agent
 

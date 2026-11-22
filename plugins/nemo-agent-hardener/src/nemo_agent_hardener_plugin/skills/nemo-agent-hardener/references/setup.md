@@ -52,8 +52,8 @@ nemo agent-hardener --help
 
 | What you see | Meaning | Next |
 |---|---|---|
-| a path ending in `nemo-helix/.venv/bin/nemo`, and the help lists `setup`, `doctor`, `init`, `synth-benign`, `run`, `status` | installed from source | skip to **Start the Helix services** |
-| any other path (for example `~/.local/bin/nemo`), or `No such command 'agent-hardener'` | a PyPI install | ask the user, then remove it, then install from source |
+| the help lists `setup`, `doctor`, `init`, `synth-benign`, `run`, `status` (the path is usually `<checkout>/.venv/bin/nemo`, whatever the checkout is called) | installed from source | skip to **Start the Helix services** |
+| `No such command 'agent-hardener'` (for example from `~/.local/bin/nemo`) | a PyPI install, which has no Agent Hardener plugin | ask the user, then remove it, then install from source |
 | nothing | not installed | install from source |
 
 Remove a PyPI install:
