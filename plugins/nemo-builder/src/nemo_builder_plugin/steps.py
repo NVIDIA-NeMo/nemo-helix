@@ -207,6 +207,10 @@ class RemoteBuildImage(BaseModel):
     source: ContextSource
     dockerfile: str = Field(description="Dockerfile path, relative to the context.")
     platform: str
+    #: The spec's `role`, for the service's client. Unset in a config from before roles existed, and for an image
+    #: whose spec names none. Any text: a step image passes on a role a later builder names, and one from before
+    #: this field reads past it, as every step config reads past a key it doesn't know.
+    role: str | None = None
 
 
 class RemoteBuildStepConfig(BaseModel):

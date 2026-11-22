@@ -6,8 +6,11 @@ for a build in this cluster."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 import httpx
 import pytest
@@ -143,6 +146,18 @@ def _set(n: int = 2, *, tag: str | None = "v1", fileset: str = "fs-a", names: li
     )
 
 
+def _with_a_helper(build_set: BuildSet) -> BuildSet:
+    """``build_set`` with its last image marked a helper, and nothing else of it changed."""
+    *others, last = build_set.build_specs
+    return build_set.model_copy(update={"build_specs": [*others, last.model_copy(update={"role": "helper"})]})
+
+
+def _digest_of_the_record(job: CreateHelixJobRequest) -> str:
+    """sha256 of the canonical JSON of the request as ``job`` records it, in its ``spec``."""
+    canonical = json.dumps(job.spec, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Case:
     """One backend, as the tests of what every backend's submit keeps need it: requests it takes, and what a
@@ -269,6 +284,29 @@ class TestOrdering:
         assert (provenance.job, provenance.spec) == ("default/builder-demo-1", "img0")
 
     @pytest.mark.asyncio
+    async def test_a_set_that_marks_an_image_a_helper_is_submitted_as_any_other(self, case: Case) -> None:
+        """Either backend takes a role, and the job a submit creates records the request with it. What the
+        job's steps are told of one is the backend's own, and shown with each: for a build in this cluster
+        below, with the job's request, and for a build service with the remote backend's submits."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        helper = _with_a_helper(case.build_set)
+        expected = request_digest(helper.with_default_platform("linux/amd64"))
+        result = await _submit(client, jobs, helper, backend=case.backend)
+        assert client.events == [
+            "create:demo-1.img0",
+            "create:demo-1.img1",
+            "create_job",
+            *case.written_after_the_job,
+        ]
+        assert all(image.provenance.request_digest == expected for image in result.images)
+        job = jobs.jobs["builder-demo-1"]
+        plain, marked = job.spec["build_specs"]
+        assert (plain["name"], "role" in plain) == ("img0", False)
+        assert (marked["name"], marked["role"]) == ("img1", "helper")
+        assert _digest_of_the_record(job) == expected
+
+    @pytest.mark.asyncio
     async def test_a_row_built_in_this_cluster_is_written_once_and_records_no_more_of_its_job(self) -> None:
         """Only a row that is completed on its caller's word records which job its submit created. Jobs answers
         this submit's create with an ID and an attempt too, and the row is as it was before a row could hold
@@ -355,6 +393,41 @@ class TestResubmission:
         with pytest.raises(BuildConflict, match="new revision"):
             await _submit(client, jobs, case.different, backend=case.backend)
         assert client.events == ["conflict:demo-1.img0", "get:demo-1.img0"]
+
+    @pytest.mark.asyncio
+    async def test_the_same_set_with_and_without_a_helper_are_two_requests_at_one_revision(self, case: Case) -> None:
+        """An image's role is part of the request, on either backend: a caller that starts to mark a helper in
+        a set it has already submitted needs the next revision, and so does one that stops."""
+        plain, helper = case.build_set, _with_a_helper(case.build_set)
+        for first, second in ((plain, helper), (helper, plain)):
+            client = FakeEntityClient()
+            jobs = FakeJobs(client.events)
+            await _submit(client, jobs, first, backend=case.backend)
+            client.events.clear()
+
+            with pytest.raises(BuildConflict, match="new revision"):
+                await _submit(client, jobs, second, backend=case.backend)
+            assert client.events == ["conflict:demo-1.img0", "get:demo-1.img0"]
+
+    @pytest.mark.asyncio
+    async def test_a_set_with_a_helper_sent_again_is_the_same_request(self, case: Case) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        helper = _with_a_helper(case.build_set)
+        await _submit(client, jobs, helper, backend=case.backend)
+        client.events.clear()
+
+        again = await _submit(client, jobs, _with_a_helper(case.build_set), backend=case.backend)
+        assert client.events == [
+            "conflict:demo-1.img0",
+            "get:demo-1.img0",
+            "conflict:demo-1.img1",
+            "get:demo-1.img1",
+            "job_conflict",
+            "get_job:builder-demo-1",
+            *case.read_after_the_job,
+        ]
+        assert [image.status for image in again.images] == ["pending", "pending"]
 
     @pytest.mark.asyncio
     async def test_rows_written_before_a_collision_are_failed(self, case: Case) -> None:
@@ -475,6 +548,36 @@ class TestTheJobRequest:
             "images": ["demo-1.img0", "demo-1.img1"],
             "request_digest": request_digest(_set().with_default_platform("linux/amd64")),
         }
+
+    @pytest.mark.asyncio
+    async def test_the_job_records_the_request_its_digest_is_taken_over(self, case: Case) -> None:
+        """A job's `spec` is the request as it is built, and the digest the job and its rows carry is the sha256
+        of that record's canonical JSON. A request that names no role is recorded with none, null or
+        otherwise: the record a builder from before roles wrote of the same request."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        result = await _submit(client, jobs, case.build_set, backend=case.backend)
+        job = jobs.jobs["builder-demo-1"]
+        assert [spec["name"] for spec in job.spec["build_specs"]] == ["img0", "img1"]
+        assert not any("role" in spec for spec in job.spec["build_specs"])
+        assert job.custom_fields is not None
+        assert _digest_of_the_record(job) == job.custom_fields["request_digest"]
+        assert all(image.provenance.request_digest == _digest_of_the_record(job) for image in result.images)
+
+    @pytest.mark.asyncio
+    async def test_a_helper_built_in_this_cluster_is_the_job_it_is_without_the_role(self) -> None:
+        """From the request to the job a submit creates for it. No step of a build in this cluster is told of
+        a role, so the steps the job is given are the ones the same set is given unmarked, as Jobs is sent
+        them."""
+        sent = []
+        for build_set in (_set(), _with_a_helper(_set())):
+            client = FakeEntityClient()
+            jobs = FakeJobs(client.events)
+            await _submit(client, jobs, build_set)
+            sent.append(jobs.jobs["builder-demo-1"].platform_spec.model_dump(mode="json", exclude_unset=True))
+        unmarked, marked = sent
+        assert [step["name"] for step in marked["steps"]] == ["fetch", "build", "push"]
+        assert marked == unmarked
 
     @pytest.mark.asyncio
     async def test_each_row_resolves_the_tag_its_own_image_pushes_and_no_other(self) -> None:
@@ -770,3 +873,75 @@ class TestTheRequestDigest:
         assert request_digest(spelt_out) == digest
         # As a submit computes it: over the request with the deployment's default platform filled in.
         assert request_digest(as_sent.with_default_platform("linux/amd64")) == digest
+
+    def test_a_role_given_as_null_is_the_request_that_names_none(self) -> None:
+        """A spec's role is left out of the digest where it has no value, which is what keeps the digests written
+        out above where they were when a spec gained the field. Left out by its value, and not by whether the
+        request named the field: null is no role, and the two spellings are one request."""
+        left_out = BuildSet(name="demo", revision=1, build_specs=[BuildSpec(source=FileSetSource(fileset="fs-a"))])
+        as_null = BuildSet(
+            name="demo", revision=1, build_specs=[BuildSpec(source=FileSetSource(fileset="fs-a"), role=None)]
+        )
+        assert "role" in as_null.build_specs[0].model_fields_set
+        assert "role" not in left_out.build_specs[0].model_fields_set
+        assert request_digest(as_null) == request_digest(left_out)
+        # As a submit computes it.
+        filled = as_null.with_default_platform("linux/amd64")
+        assert "role" in filled.build_specs[0].model_fields_set
+        assert request_digest(filled) == request_digest(left_out.with_default_platform("linux/amd64"))
+
+    def test_a_set_of_two_images_keeps_the_digest_it_had_before_a_spec_could_name_a_role(self) -> None:
+        """Each request written out above is for one image. This one is for two, and neither names a role.
+        Beside its digest is the text the digest is taken over, as it was before a spec could name a role: no
+        `role` key, in either spec. A role left out of one spec's dump and written as null in the next would
+        leave the digests above where they are, and move that of every request for more than one image."""
+        two = BuildSet(
+            name="demo",
+            revision=1,
+            build_specs=[
+                BuildSpec(name="main", source=FileSetSource(fileset="fs-a")),
+                BuildSpec(name="sidecar", source=FileSetSource(fileset="fs-b")),
+            ],
+        )
+        canonical = (
+            '{"build_specs":['
+            '{"dockerfile":"Dockerfile","mounts":[],"name":"main","output":null,"platform":"linux/amd64",'
+            '"source":{"archive":null,"context_path":null,"fileset":"fs-a"}},'
+            '{"dockerfile":"Dockerfile","mounts":[],"name":"sidecar","output":null,"platform":"linux/amd64",'
+            '"source":{"archive":null,"context_path":null,"fileset":"fs-b"}}'
+            '],"name":"demo","revision":1}'
+        )
+        digest = "sha256:a9e8005e65bb34ac00b822602ab036f7cc88a7073e9192ce6001fda0eb176487"
+        assert "sha256:" + hashlib.sha256(canonical.encode()).hexdigest() == digest
+        assert request_digest(two.with_default_platform("linux/amd64")) == digest
+
+    def test_a_helper_is_another_request_than_the_same_set_without_the_role(self) -> None:
+        """Which image is the helper is part of the request too."""
+
+        def two(main: Literal["helper"] | None = None, sidecar: Literal["helper"] | None = None) -> BuildSet:
+            specs = [
+                BuildSpec(name="main", source=FileSetSource(fileset="fs-a"), role=main),
+                BuildSpec(name="sidecar", source=FileSetSource(fileset="fs-b"), role=sidecar),
+            ]
+            return BuildSet(name="demo", revision=1, build_specs=specs)
+
+        digests = [request_digest(build_set) for build_set in (two(), two(sidecar="helper"), two(main="helper"))]
+        assert len(set(digests)) == 3
+
+    def test_a_helper_keeps_the_digest_its_rows_record(self) -> None:
+        """Written out as the two above are, and for the same reason: nothing else holds the digest of a request
+        that marks a helper, and a row records it. Beside it, the text the digest is taken over, so that what
+        a role adds to it can be read here: its own key in its spec, as any other field."""
+        helper = BuildSet(
+            name="demo",
+            revision=1,
+            build_specs=[BuildSpec(name="sidecar", source=FileSetSource(fileset="fs-a"), role="helper")],
+        )
+        canonical = (
+            '{"build_specs":[{"dockerfile":"Dockerfile","mounts":[],"name":"sidecar","output":null,'
+            '"platform":"linux/amd64","role":"helper",'
+            '"source":{"archive":null,"context_path":null,"fileset":"fs-a"}}],"name":"demo","revision":1}'
+        )
+        digest = "sha256:aac161d7feeb9d016bd812eea42b4733be0719d66614139f4f453e6d03962dd3"
+        assert "sha256:" + hashlib.sha256(canonical.encode()).hexdigest() == digest
+        assert request_digest(helper.with_default_platform("linux/amd64")) == digest

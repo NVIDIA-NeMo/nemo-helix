@@ -188,6 +188,11 @@ class RemoteBuild:
     #: build's ID is only in the step's memory and its log. The row is then failed once its job has ended, and
     #: the build runs until the service ends it.
     timeout_seconds: int | None = None
+    #: What the request says the image is for: ``helper`` for one that is not the image a workload runs as its
+    #: main container, such as a sidecar, and None for every other. A field of its own, not one of ``labels``:
+    #: those are for the service's records, and this may change what a client asks of the service. See
+    #: :meth:`RemoteBuildService.start`.
+    role: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +244,12 @@ class RemoteBuildService(Protocol):
         The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
         nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
         ends the build.
+
+        ``build.role`` is ``helper`` for an image its request marked as one: an image that is not the one a
+        workload runs as its main container. For such an image a client may leave out a check that starts the
+        image as a main container, which a sidecar need not pass. None is every other image, and a role the
+        client does not know is built as None is. A client that reads no role builds a helper as any other
+        image, and nothing says so.
 
         ``build.context`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
         An implementation that sends the context anywhere first applies the ignore file at the context's
@@ -1193,6 +1204,7 @@ def _build_one(
         platform=image.platform,
         labels={"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid},
         timeout_seconds=config.build_timeout_seconds,
+        role=image.role,
     )
     # The row was written with the service's repository at submit. An image anywhere else isn't the row's.
     destination = f"{row.registry}/{row.repository}"

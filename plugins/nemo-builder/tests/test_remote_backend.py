@@ -162,6 +162,9 @@ class TestWhatItRefuses:
         backend = RemoteBackend(_config(allow_dockerfile_path=False), PROFILES)
         backend.check(_plan(_spec(dockerfile="./Dockerfile")))
 
+    def test_an_image_marked_a_helper_is_taken(self) -> None:
+        RemoteBackend(_config(), PROFILES).check(_plan(_spec(role="helper")))
+
 
 class TestADeploymentThatCannotBuild:
     """Rows are written before the job is created, so a deployment whose step couldn't run refuses every submit."""
@@ -430,6 +433,26 @@ class TestTheJob:
         # Qualified with the submitting workspace, as the fetch helpers need it.
         assert (image.source.fileset, image.source.context_path) == ("default/fs-a", "tests")
 
+    def test_the_step_is_told_which_image_is_a_helper(self) -> None:
+        """For the service's client, which may leave out a check that starts the image. No image has a role
+        unless its spec names one."""
+        spec = self._compile(_config(max_specs_per_set=2), _spec(name="main"), _spec(name="sidecar", role="helper"))
+        config = RemoteBuildStepConfig.model_validate(spec.steps[0].config)
+        assert [(image.image, image.role) for image in config.images] == [
+            ("demo-1.main", None),
+            ("demo-1.sidecar", "helper"),
+        ]
+
+    def test_a_role_survives_the_jobs_clients_serialization(self) -> None:
+        """A step's config is a plain mapping, so the Jobs client's `exclude_unset` leaves none of it out: each
+        image travels with its role, and with a null where its spec names none. A step image from before roles
+        reads past the key either way (see the driver's tests), so the null costs it nothing."""
+        spec = self._compile(_config(max_specs_per_set=2), _spec(name="main"), _spec(name="sidecar", role="helper"))
+        sent = spec.model_dump(mode="json", exclude_unset=True)
+        assert [image["role"] for image in sent["steps"][0]["config"]["images"]] == [None, "helper"]
+        received = RemoteBuildStepConfig.model_validate(HelixJobSpec.model_validate(sent).steps[0].config)
+        assert [image.role for image in received.images] == [None, "helper"]
+
     def test_the_step_has_no_time_limit_of_its_own(self) -> None:
         """Jobs counts a step's limit from the job's creation: one sized to the build would end every build that
         had waited for a slot. The profile's limit applies, and the step enforces each image's timeout itself."""
@@ -656,6 +679,20 @@ class TestSubmitting:
         job = jobs.jobs["builder-demo-1"]
         assert job.platform_spec is not None
         assert [step.name for step in job.platform_spec.steps] == [STEP_NAME]
+
+    async def test_the_jobs_step_is_told_which_image_the_request_marks_a_helper(self) -> None:
+        """From the request to the job a submit creates for it, not only from a plan to its job: the role is
+        in the config of the job's one step, for the service's client, beside an image that names none."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        specs = [_spec(name="main"), _spec(name="sidecar", role="helper")]
+        await _submit(client, jobs, RemoteBackend(_config(max_specs_per_set=2), PROFILES), specs=specs)
+        (step,) = jobs.jobs["builder-demo-1"].platform_spec.steps
+        config = RemoteBuildStepConfig.model_validate(step.config)
+        assert [(image.image, image.role) for image in config.images] == [
+            ("demo-1.main", None),
+            ("demo-1.sidecar", "helper"),
+        ]
 
     async def test_the_same_request_again_adopts_the_row_and_the_job(self) -> None:
         """The job under the build's name is the one the row records: the one the first submit created."""

@@ -116,7 +116,11 @@ def _row(
     )
 
 
-def _config(*images: str, timeout: int = 600, dockerfile: str = "Dockerfile") -> RemoteBuildStepConfig:
+def _config(
+    *images: str, timeout: int = 600, dockerfile: str = "Dockerfile", roles: Mapping[str, str] | None = None
+) -> RemoteBuildStepConfig:
+    """``roles`` is the role of each image that has one. An image it doesn't name is written without the key,
+    as every image was by a builder from before roles."""
     return RemoteBuildStepConfig.model_validate(
         {
             "images": [
@@ -126,6 +130,7 @@ def _config(*images: str, timeout: int = 600, dockerfile: str = "Dockerfile") ->
                     "dockerfile": dockerfile,
                     "platform": "linux/amd64",
                 }
+                | ({"role": roles[name]} if roles and name in roles else {})
                 for name in images or ("demo-1",)
             ],
             "registry": "registry.example.com",
@@ -331,6 +336,31 @@ class TestABuildThatSucceeds:
         assert build.labels == {"workspace": "default", "image": "demo-1", "job": "job-uid-1"}
         # For a service that can end a build by itself: a step killed outright cancels nothing.
         assert build.timeout_seconds == 600
+        # No role, for an image whose config names none: every image of a job from before roles.
+        assert build.role is None
+
+    def test_the_service_is_told_which_image_is_a_helper(self, context: Path, tmp_path: Path) -> None:
+        """A client may leave out, for a helper, a check that starts the image. The role is the build's own
+        field: the labels are for the service's records, and stay what they were."""
+        service = FakeService([DONE])
+        config = _config("main", "sidecar", roles={"sidecar": "helper"})
+        assert _run(service, FakeBuilder(), context, tmp_path, config=config) == 0
+        assert [(build.labels["image"], build.role) for build in service.started] == [
+            ("main", None),
+            ("sidecar", "helper"),
+        ]
+        assert [set(build.labels) for build in service.started] == [{"workspace", "image", "job"}] * 2
+
+    def test_a_role_this_step_image_does_not_know_is_handed_on_as_it_was_written(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """The step is not what refuses a role: the API is, at submit. A step image older than its builder
+        hands the client whatever role the job names, and the client builds one it doesn't know as it builds
+        an image with none."""
+        service = FakeService([DONE])
+        config = _config(roles={"demo-1": "a-role-of-a-later-release"})
+        assert _run(service, FakeBuilder(), context, tmp_path, config=config) == 0
+        assert [build.role for build in service.started] == ["a-role-of-a-later-release"]
 
     @pytest.mark.parametrize("build_id", ["", "  ", None], ids=["empty", "blank", "none"])
     def test_a_build_the_client_doesnt_name_fails_and_is_said_to_maybe_be_running(
@@ -3861,6 +3891,28 @@ class TestTheStepProgram:
         assert workspace == "default"
         assert (tmp_path / "task-storage") in root.parents
         assert list((tmp_path / "task-storage").iterdir()) == []
+
+    def test_a_role_in_the_steps_config_reaches_the_client(self, step: dict[str, list], tmp_path: Path) -> None:
+        config = _config(roles={"demo-1": "helper"}).model_copy(update={"credential_in_environment": True})
+        (tmp_path / "job_step_config.json").write_text(json.dumps(config.model_dump(mode="json")))
+        service = FakeService([DONE])
+        assert step_main(lambda config, credential: service) == 0
+        assert [build.role for build in service.started] == ["helper"]
+
+    def test_a_job_from_a_later_builder_is_built_past_what_this_step_image_does_not_know(
+        self, step: dict[str, list], tmp_path: Path
+    ) -> None:
+        """A step image is upgraded apart from the API that compiles its job, and its config refuses no key:
+        what a later builder adds, to the step or to an image, is read past without a word. So a step image
+        from before roles builds a helper as any other image, and nothing says that it did."""
+        config = _config().model_copy(update={"credential_in_environment": True}).model_dump(mode="json")
+        config["added_by_a_later_builder"] = True
+        config["images"][0]["added_by_a_later_builder"] = "helper"
+        (tmp_path / "job_step_config.json").write_text(json.dumps(config))
+        service = FakeService([DONE])
+        assert step_main(lambda config, credential: service) == 0
+        (builder,) = step["builder"]
+        assert [image for image, _, _ in builder.completed] == ["demo-1"]
 
     def test_a_signal_from_jobs_cancels_the_build_without_waiting_out_a_sleep(
         self, step: dict[str, list], monkeypatch: pytest.MonkeyPatch

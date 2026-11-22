@@ -234,6 +234,22 @@ class BuildSpec(BaseModel):
 
     _platform_name = field_validator("platform", mode="before")(platform_name)
 
+    # No value for the main image: it would be a second spelling of naming none, and another request by its digest.
+    # Left out of every dump where it has no value, however the spec was built, so a request that names no role
+    # is what it was before the field: at the digest its rows record, in the request its job records, and as the
+    # typed client sends it, to an API from before the field that would refuse a null.
+    role: Literal["helper"] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "`helper` for an image that isn't the one a workload runs as its main container, such as a sidecar. "
+            "With `backend: remote` the build service's client is handed the role, and may leave out a check that "
+            "starts the image as a main container; nothing else acts on it, and a build in this cluster is the "
+            "same either way. Leave it out for every other image: an API from before the field existed refuses a "
+            "request that carries it, even as null."
+        ),
+    )
+
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:
         path = PurePosixPath(self.dockerfile)
