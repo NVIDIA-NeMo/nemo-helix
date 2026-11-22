@@ -369,11 +369,8 @@ class TestDeleteSession:
 
         assert response.status_code == 204
         mock_entity_client.get.assert_awaited_once_with(AgentSession, name="session-one", workspace="default")
-        mock_entity_client.delete.assert_awaited_once_with(
-            AgentSession,
-            name="session-one",
-            workspace="default",
-            expected_db_version=session.db_version,
+        mock_entity_client.delete_by_id.assert_awaited_once_with(
+            AgentSession, session.id, expected_db_version=session.db_version
         )
         cleanup.assert_awaited_once_with(mock_entity_client, session)
 
@@ -383,7 +380,7 @@ class TestDeleteSession:
         response = client.delete(f"{BASE}/missing")
 
         assert response.status_code == 404
-        mock_entity_client.delete.assert_not_awaited()
+        mock_entity_client.delete_by_id.assert_not_awaited()
 
     def test_delete_returns_404_for_session_owned_by_another_principal(
         self, client: TestClient, mock_entity_client: AsyncMock
@@ -393,11 +390,11 @@ class TestDeleteSession:
         response = client.delete(f"{BASE}/session-one")
 
         assert response.status_code == 404
-        mock_entity_client.delete.assert_not_awaited()
+        mock_entity_client.delete_by_id.assert_not_awaited()
 
     def test_delete_returns_409_for_concurrent_update(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.get.return_value = _make_session()
-        mock_entity_client.delete.side_effect = NemoEntityConflictError("conflict")
+        mock_entity_client.delete_by_id.side_effect = NemoEntityConflictError("conflict")
 
         response = client.delete(f"{BASE}/session-one")
 
@@ -441,7 +438,7 @@ class TestNoAuthSessionLifecycle:
         delete_response = client.delete(f"{BASE}/session-one")
 
         assert delete_response.status_code == 204
-        mock_entity_client.delete.assert_awaited_once()
+        mock_entity_client.delete_by_id.assert_awaited_once()
 
 
 class TestFabricRuntimeCleanup:

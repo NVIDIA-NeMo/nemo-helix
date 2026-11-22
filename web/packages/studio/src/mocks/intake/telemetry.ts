@@ -1,23 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  FeedbackAnnotationInputKind,
-  LabelAnnotationInputKind,
-  MetadataAnnotationInputKind,
-  NoteAnnotationInputKind,
-  type Annotation,
-  type AnnotationInput,
-  type AnnotationsPage,
-  type Session,
-  type Span,
-  type SpansPage,
-  type Trace,
-  type TraceMetricBucketParam,
-  type TraceMetricPointResponse,
-  type TraceMetrics,
-  type TracesPage,
+import type {
+  Annotation,
+  AnnotationInput,
+  AnnotationsPage,
+  Session,
+  Span,
+  SpansPage,
+  Trace,
+  TraceMetricBucketParam,
+  TraceMetricPointResponse,
+  TraceMetrics,
+  TracesPage,
 } from '@nemo/sdk/generated/platform/schema';
+import { FeedbackAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/FeedbackAnnotationInputKind';
+import { LabelAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/LabelAnnotationInputKind';
+import { MetadataAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/MetadataAnnotationInputKind';
+import { NoteAnnotationInputKind } from '@nemo/sdk/generated/platform/schema/NoteAnnotationInputKind';
 
 const trace1: Trace = {
   id: 'trace-agent-run-001',

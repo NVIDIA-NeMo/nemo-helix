@@ -14,7 +14,7 @@ import {
   IconClipboard,
   Link,
 } from '@nemo/icons/icons';
-import { SpanKind } from '@nemo/sdk/generated/platform/schema';
+import { SpanKind } from '@nemo/sdk/generated/platform/schema/SpanKind';
 import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 

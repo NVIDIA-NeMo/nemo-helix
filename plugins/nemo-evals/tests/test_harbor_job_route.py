@@ -63,11 +63,9 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     await entity_store.create(suite)
     await publish_revision(entity_store, entity_store, suite, TasksetRevisionEntity)
     if invalid == "missing-member":
-        await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+        await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     elif invalid == "missing-revision":
-        await entity_store.delete(
-            TaskRevisionEntity, revision.name, workspace=revision.workspace, parent=revision.parent
-        )
+        await entity_store.delete_by_id(TaskRevisionEntity, revision.id, expected_db_version=revision.db_version)
     captured = []
 
     class Jobs:

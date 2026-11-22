@@ -55,6 +55,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
 )
 from nemo_helix_plugin.functions.routes import add_function_routes
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import PaginationData
 from nemo_helix_plugin.service import NemoService, RouterSpec
 
@@ -480,7 +481,10 @@ def _build_items_router() -> APIRouter:
     ) -> None:
         """Delete an ExampleItem by name.  Returns 204 on success."""
         try:
-            await entity_client.delete(ExampleItem, name=name, workspace=workspace)
+            _delete_target = await entity_client.get(ExampleItem, name=name, workspace=workspace)
+            await entity_client.delete_by_id(
+                ExampleItem, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
@@ -496,6 +500,41 @@ def _build_items_router() -> APIRouter:
             ) from exc
         except Exception as exc:
             logger.exception("Failed to delete item '%s'", name)
+            raise HTTPException(status_code=500, detail="Failed to delete item.") from exc
+
+    @router.delete(
+        "/items/by-id/{entity_id}",
+        status_code=204,
+        summary="Delete ExampleItem by ID",
+        responses={
+            404: {"description": "Entity not found in this workspace."},
+            409: {"description": "Entity version conflict."},
+        },
+    )
+    @scope.write
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ExampleItemPerms.DELETE])
+    async def delete_item_by_id(
+        workspace: str,
+        entity_id: str,
+        expected_db_version: int | None = Query(default=None, ge=1, description="Delete only this entity version."),
+        entity_client: NemoEntitiesClient = Depends(_get_entity_client),
+    ) -> None:
+        """Delete the selected ID in this workspace; never fall back to its name."""
+        try:
+            selected = await entity_client.get_by_id(ExampleItem, entity_id)
+            if selected.workspace != workspace:
+                raise NemoEntityNotFoundError(entity_id)
+            await entity_client.delete_by_id(
+                ExampleItem,
+                entity_id,
+                expected_db_version=selected.db_version if expected_db_version is None else expected_db_version,
+            )
+        except NemoEntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Item not found in this workspace.") from exc
+        except NemoEntityConflictError as exc:
+            raise HTTPException(status_code=409, detail="Item was modified concurrently; refresh and retry.") from exc
+        except Exception as exc:
+            logger.exception("Failed to delete item by ID '%s'", sanitize_for_log(entity_id))
             raise HTTPException(status_code=500, detail="Failed to delete item.") from exc
 
     return router

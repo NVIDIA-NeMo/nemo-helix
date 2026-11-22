@@ -35,6 +35,7 @@ from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
+    NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
@@ -295,11 +296,16 @@ async def delete_run(
 ) -> None:
     """Delete a war-game run record. The underlying platform job is cancelled/deleted separately."""
     try:
-        await entity_client.delete(AgentHardenerRun, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            AgentHardenerRun, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail=f"AgentHardenerRun '{name}' not found in workspace '{workspace}'."
         ) from exc
+    except NemoEntityConflictError as exc:
+        raise HTTPException(status_code=409, detail="Run changed during deletion; refresh and retry.") from exc
     except Exception as exc:
         logger.exception("Failed to delete agent-hardener run '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete agent-hardener run.") from exc

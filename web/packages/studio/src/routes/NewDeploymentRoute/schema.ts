@@ -12,7 +12,7 @@
 
 import { resourceRefSchema } from '@nemo/common/src/types';
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
-import { Engine } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 import {
   modelsCreateDeploymentBodyNameMax,
   modelsCreateDeploymentBodyNameRegExp,

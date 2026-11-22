@@ -194,7 +194,8 @@ async def delete_target(
 ) -> None:
     """Delete an audit target by name."""
     try:
-        await entity_client.delete(AuditTarget, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(AuditTarget, name=name, workspace=workspace)
+        await entity_client.delete_by_id(AuditTarget, _delete_target.id, expected_db_version=_delete_target.db_version)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

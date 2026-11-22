@@ -157,11 +157,11 @@ class AgentHardenerConfig(NemoConfig):
         ),
     )
     spec: str = Field(
-        default="nvidia-agent-hardener>=0.0.17",
+        default="nvidia-agent-hardener>=0.0.18",
         description=(
             "Package spec `nemo agent-hardener setup` installs into the venv (e.g. 'agent-hardener', "
             "'agent-hardener==0.0.1', or a local path/VCS URL for development). The floor is the release "
-            "whose guardrail judge reads its own endpoint and key (AGENT_HARDENER_SAFETY_BASE_URL / _API_KEY)."
+            "whose guardrail plugin no longer crashes a CPython 3.14 victim under concurrent streaming."
         ),
     )
     index_url: str | None = Field(

@@ -18,15 +18,15 @@ import {
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   useSecretsDeleteSecret,
   useSecretsListSecrets,
 } from '@nemo/sdk/generated/platform/secrets';
-import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -44,8 +44,6 @@ type SecretWithId = HelixSecretResponse & { id: string };
 type ModalState = 'delete' | 'edit' | 'none';
 
 export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate, attributes }) => {
-  const toast = useToast();
-
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
@@ -74,7 +72,9 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   // Filter secrets by search text (API does not support server-side search)
   const searchBar = dataViewState.searchBar.state;
   const filteredSecrets = useMemo(() => {
-    if (!searchBar) return secrets;
+    if (!searchBar) {
+      return secrets;
+    }
     return secrets.filter((secret: HelixSecretResponse) =>
       secret.name?.toLowerCase().includes(searchBar.toLowerCase())
     );
@@ -91,19 +91,16 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   );
 
   const handleDeleteSecret = async () => {
-    if (!modalSecret) return false;
-
-    try {
-      await deleteSecretMutation.mutateAsync({
-        workspace,
-        name: modalSecret.name!,
-      });
-      refetch();
-      return true;
-    } catch {
-      toast.error('Failed to delete secret');
+    if (!modalSecret) {
       return false;
     }
+
+    await deleteSecretMutation.mutateAsync({
+      workspace,
+      name: modalSecret.name!,
+    });
+    refetch();
+    return true;
   };
 
   const handleModalClose = () => {
@@ -146,23 +143,25 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
         rowActionsColumn({
           size: ROW_ACTIONS_COLUMN_SIZE,
           enableResizing: false,
-          rowActions: (secret: SecretWithId): DropdownEntry[] => [
-            {
-              children: 'Edit',
-              onSelect: () => {
-                setModalSecret(secret);
-                setModalOpen('edit');
-              },
-            },
-            {
-              children: 'Delete',
-              danger: true,
-              onSelect: () => {
-                setModalSecret(secret);
-                setModalOpen('delete');
-              },
-            },
-          ],
+          cell: ({ row: { original: secret } }) => (
+            <QuickActionsMenuRoot
+              actions={[
+                {
+                  label: 'Edit',
+                  onSelect: () => {
+                    setModalSecret(secret);
+                    setModalOpen('edit');
+                  },
+                },
+              ]}
+              deleteAction={{
+                onSelect: () => {
+                  setModalSecret(secret);
+                  setModalOpen('delete');
+                },
+              }}
+            />
+          ),
         }),
       ],
       []
@@ -206,10 +205,10 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
       {modalOpen === 'delete' && modalSecret && (
         <DeleteConfirmationModal
           open
-          simpleConfirm
+          entity="secret"
+          ids={[modalSecret.name ?? 'unnamed']}
+          description="Anything that uses this secret loses access to its value."
           onDelete={handleDeleteSecret}
-          title={`Delete: ${modalSecret.name}`}
-          description="Are you sure you want to delete?"
           onClose={handleModalClose}
         />
       )}

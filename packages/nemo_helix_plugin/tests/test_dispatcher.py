@@ -49,6 +49,7 @@ def _setup_env(
     monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(config_path))
     monkeypatch.setenv("NEMO_JOB_WORKSPACE", workspace)
     monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+    monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
     monkeypatch.setenv("NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH", str(tmp_path / "p"))
     monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "e"))
     if job_id is None:
@@ -308,6 +309,7 @@ class TestBuildCtxFromEnv:
     @pytest.fixture(autouse=True)
     def _attempt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_JOB_ATTEMPT_ID", "attempt-a")
+        monkeypatch.setenv("NEMO_JOB_FILESET", "job-fileset")
 
     @staticmethod
     def _patch_results(monkeypatch: pytest.MonkeyPatch) -> MagicMock:

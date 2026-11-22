@@ -9,11 +9,8 @@ import {
   type ModelWorkspaceGroup,
 } from '@nemo/common/src/api/models/modelPages';
 import { groupModelsByWorkspace } from '@nemo/common/src/utils/models';
-import {
-  type ModelEntity,
-  ModelEntitySortField,
-  type ModelEntityFilter,
-} from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntity, ModelEntityFilter } from '@nemo/sdk/generated/platform/schema';
+import { ModelEntitySortField } from '@nemo/sdk/generated/platform/schema/ModelEntitySortField';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -107,6 +104,7 @@ export const useModelSearchCore = ({
     isFetchNextPageError,
     isFetchingNextPage,
     isLoading,
+    isPending,
   } = useInfiniteQuery({
     queryKey: getQueryKeyInfiniteModels(queryWorkspace, query),
     queryFn: ({ pageParam }) => listModels(queryWorkspace, { ...query, page: pageParam }),
@@ -157,7 +155,8 @@ export const useModelSearchCore = ({
     groups,
     search,
     error,
-    loading: isLoading,
+    // An enabled initial query remains pending when offline, even while it is not fetching.
+    loading: isEnabled && isPending,
     onSearchChange: setSearch,
     onLoadMore,
     hasMore,

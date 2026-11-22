@@ -35,12 +35,12 @@ import {
   modelsCreateModel,
   modelsGetModel,
 } from '@nemo/sdk/generated/platform/models';
-import {
-  Engine,
-  type ContainerExecutorConfig,
-  type CreateFilesetRequest,
-  type ModelDeploymentConfig,
+import type {
+  ContainerExecutorConfig,
+  CreateFilesetRequest,
+  ModelDeploymentConfig,
 } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
   HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,

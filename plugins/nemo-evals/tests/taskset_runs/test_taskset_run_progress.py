@@ -6,11 +6,17 @@
 import pytest
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunMemberEntity
 from nemo_evals.taskset_runs.progress import build_progress
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 
 def member(
-    index: int, phase: MemberPhase, *, job: bool = False, job_status: HelixJobStatus | None = None
+    index: int,
+    phase: MemberPhase,
+    *,
+    job: bool = False,
+    job_status: HelixJobStatus | None = None,
+    trial_counts: TrialCounts | None = None,
 ) -> TasksetRunMemberEntity:
     return TasksetRunMemberEntity(
         name=f"task-{index}",
@@ -19,6 +25,7 @@ def member(
         phase=phase,
         task_job=f"run-x-task-{index}" if job else None,
         job_status=job_status,
+        trial_counts=trial_counts,
     )
 
 
@@ -55,8 +62,41 @@ def test_task_jobs_count_registered_members_by_job_status():
         "members": {"registered": 4, "succeeded": 1, "failed": 1, "image_ready": 1},
         "queued": 1,
         "task_jobs": {"active": 2, "pending": 1},
+        "trial_counts": None,
     }
 
 
+def _counted(succeeded: int, reward: float) -> TrialCounts:
+    return TrialCounts(total=succeeded, phases={TrialPhase.SUCCEEDED: succeeded}, rewarded=succeeded, reward=reward)
+
+
+def test_trial_counts_sum_across_tasks_when_every_task_has_them():
+    progress = build_progress(
+        [
+            member(0, MemberPhase.SUCCEEDED, trial_counts=_counted(3, 1.0)),
+            member(1, MemberPhase.REGISTERED, trial_counts=_counted(3, 0.0)),
+        ]
+    )
+    assert progress.trial_counts == TrialCounts(total=6, phases={TrialPhase.SUCCEEDED: 6}, rewarded=6, reward=0.5)
+
+
+def test_trial_counts_are_withheld_when_a_task_has_none():
+    """A run already going when counts were added: its settled task never gets them, so a total would be partial."""
+    progress = build_progress(
+        [
+            member(0, MemberPhase.SUCCEEDED),  # settled before counts existed
+            member(1, MemberPhase.REGISTERED, trial_counts=_counted(3, 1.0)),
+        ]
+    )
+    assert progress.tasks == 2
+    assert progress.trial_counts is None
+
+
 def test_no_members_counts_nothing():
-    assert build_progress(iter([])).model_dump() == {"tasks": 0, "members": {}, "queued": 0, "task_jobs": {}}
+    assert build_progress(iter([])).model_dump() == {
+        "tasks": 0,
+        "members": {},
+        "queued": 0,
+        "task_jobs": {},
+        "trial_counts": None,
+    }

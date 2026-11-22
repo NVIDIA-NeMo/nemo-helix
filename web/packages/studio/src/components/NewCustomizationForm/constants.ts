@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  AutomodelTrainingSpecPrecision,
-  AutomodelTrainingSpecRecipe,
-  AutomodelTrainingSpecTeacherPrecision,
-  OptimizerType,
-  UnslothHardwareSpecPrecision,
-  UnslothOptimizerSpecOptim,
-  UnslothScheduleSpecLrSchedulerType,
-  UnslothTrainingSpecUseGradientCheckpointing,
-} from '@nemo/sdk/generated/customizer/schema';
+import { AutomodelTrainingSpecPrecision } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecPrecision';
+import { AutomodelTrainingSpecRecipe } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecRecipe';
+import { AutomodelTrainingSpecTeacherPrecision } from '@nemo/sdk/generated/customizer/schema/AutomodelTrainingSpecTeacherPrecision';
+import { OptimizerType } from '@nemo/sdk/generated/customizer/schema/OptimizerType';
+import { UnslothHardwareSpecPrecision } from '@nemo/sdk/generated/customizer/schema/UnslothHardwareSpecPrecision';
+import { UnslothOptimizerSpecOptim } from '@nemo/sdk/generated/customizer/schema/UnslothOptimizerSpecOptim';
+import { UnslothScheduleSpecLrSchedulerType } from '@nemo/sdk/generated/customizer/schema/UnslothScheduleSpecLrSchedulerType';
+import { UnslothTrainingSpecUseGradientCheckpointing } from '@nemo/sdk/generated/customizer/schema/UnslothTrainingSpecUseGradientCheckpointing';
 import { selectItems } from '@studio/util/forms/selectItems';
 
 export const OPTIMIZER_TYPE_ITEMS = selectItems(OptimizerType);

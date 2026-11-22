@@ -488,7 +488,7 @@ describe('FilesetNewRoute close behavior', () => {
     // The `routes` option builds a data router, which is the only path that honors
     // `flushSync`; the declarative MemoryRouter fallback drops the option.
     renderRouteWithRouter(undefined, {
-      history: `/workspaces/${workspace1.workspace}/filesets/new`,
+      history: `/workspaces/${workspace1.workspace}/filesets/~new`,
       routes: [
         { path: ROUTES.workspace.filesetNew, element: <FilesetNewRoute /> },
         { path: ROUTES.workspace.filesets, element: <div>Filesets list</div> },

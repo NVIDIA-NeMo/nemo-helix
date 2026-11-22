@@ -31,7 +31,7 @@ import logging
 import re
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -251,6 +251,19 @@ def detect_custom_components(agent_config: dict[str, Any]) -> list[str]:
     return sorted({str(path) for path in paths if isinstance(path, str)}) if isinstance(paths, list) else []
 
 
+def _declared_models(agent_config: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield model declarations from shared and harness-specific configuration."""
+    models = agent_config.get("models")
+    for model in models.values() if isinstance(models, dict) else ():
+        if isinstance(model, dict):
+            yield model
+    harnesses = agent_config.get("harnesses")
+    for harness in harnesses.values() if isinstance(harnesses, dict) else ():
+        model = harness.get("model") if isinstance(harness, dict) else None
+        if isinstance(model, dict):
+            yield model
+
+
 def derive_secret_names(agent_config: dict[str, Any], extra: list[str] | None = None) -> list[str]:
     """Collect the env-var names the victim needs at run time.
 
@@ -263,9 +276,8 @@ def derive_secret_names(agent_config: dict[str, Any], extra: list[str] | None = 
     """
     found: set[str] = set(extra or [])
 
-    models = agent_config.get("models")
-    for model_cfg in models.values() if isinstance(models, dict) else ():
-        if isinstance(model_cfg, dict) and isinstance(model_cfg.get("api_key_env"), str):
+    for model_cfg in _declared_models(agent_config):
+        if isinstance(model_cfg.get("api_key_env"), str):
             found.add(model_cfg["api_key_env"])
 
     servers = agent_config.get("mcp", {}).get("servers") if isinstance(agent_config.get("mcp"), dict) else None
@@ -334,9 +346,12 @@ def derive_egress(agent_config: dict[str, Any]) -> list[str]:
         if isinstance(url, str) and "://" in url:
             found.extend(_egress_host_entries(url))
 
-    models = agent_config.get("models")
-    for model_cfg in models.values() if isinstance(models, dict) else ():
-        base_url = model_cfg.get("base_url") if isinstance(model_cfg, dict) else None
+    for model_cfg in _declared_models(agent_config):
+        base_url = model_cfg.get("base_url")
+        # Match Fabric's legacy endpoint promotion without mutating the inspected config.
+        if base_url is None:
+            settings = model_cfg.get("settings")
+            base_url = settings.get("base_url") if isinstance(settings, dict) else None
         if isinstance(base_url, str) and "://" in base_url:
             found.extend(_egress_host_entries(base_url))
 

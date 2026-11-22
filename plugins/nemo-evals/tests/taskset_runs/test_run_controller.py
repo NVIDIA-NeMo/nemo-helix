@@ -44,6 +44,7 @@ from nemo_evals.taskset_runs.specs import (
 )
 from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunStore
 from nemo_evals.taskset_runs.task_jobs import member_environment, task_job_request
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -91,7 +92,7 @@ class FakeRunJobs:
     """In-memory Jobs (and the run's records) with scripted failures.
 
     ``script(op, *outcomes)`` queues outcomes for the next calls of ``op`` ("create", "get", "cancel",
-    "has_steps", "result"): an exception to raise, or a callable run before the call.
+    "has_job_steps", "result"): an exception to raise, or a callable run before the call.
     Cancel moves a running Job to ``cancelling``; ``finish`` ends it, as Jobs does later. Every saved Job gets a
     new id, and a result names the id of the Job it was saved under.
     """
@@ -105,6 +106,7 @@ class FakeRunJobs:
         self.records: list[AgentEvalResultEntity] = []
         self.cancelled: list[str] = []
         self.stepless: set[str] = set()
+        self.stepless_attempts: set[str] = set()
         self.calls: list[str] = []
         self.scripted: dict[str, list[Any]] = {}
         self.broken: dict[str, Exception] = {}  # Job name -> what every get of it raises
@@ -171,11 +173,14 @@ class FakeRunJobs:
     def active(self, prefix: str = "") -> list[str]:
         return [n for n, j in self.jobs.items() if n.startswith(prefix) and j.status.value not in TERMINAL_JOB_STATUSES]
 
+    def _name(self, reference: str) -> str:
+        return next((job.name for job in self.jobs.values() if job.id == reference), reference)
+
     async def get(self, name):
         await self._scripted("get")
         if name in self.broken:
             raise self.broken[name]
-        return self.jobs.get(name)
+        return self.jobs.get(self._name(name))
 
     async def list_named(self, names):
         assert len(names) <= LIST_CHUNK, "GuardedRunJobs chunks the names"
@@ -187,7 +192,7 @@ class FakeRunJobs:
 
     async def result(self, job, name):
         await self._scripted("result")
-        return self.results.get((job, name))
+        return self.results.get((self._name(job), name))
 
     async def create(self, request):
         self.creates.append(request.name)
@@ -197,9 +202,12 @@ class FakeRunJobs:
         self.created.append(request)
         return self.put(request, "created")
 
-    async def has_steps(self, name):
-        await self._scripted("has_steps")
-        return name not in self.stepless
+    async def has_job_steps(self, job_id):
+        await self._scripted("has_job_steps")
+        return self._name(job_id) not in self.stepless
+
+    async def has_attempt_steps(self, job_id, attempt_id):
+        return attempt_id not in self.stepless_attempts and await self.has_job_steps(job_id)
 
     async def read_summary(self, bundle_ref):
         return SUMMARY
@@ -215,6 +223,7 @@ class FakeRunJobs:
 
     async def cancel(self, name):
         await self._scripted("cancel")
+        name = self._name(name)
         self.cancelled.append(name)
         if name in self.jobs and self.jobs[name].status.value not in TERMINAL_JOB_STATUSES:
             self.jobs[name] = self.jobs[name].model_copy(update={"status": HelixJobStatus.CANCELLING})
@@ -383,6 +392,86 @@ async def test_job_status_is_written_only_when_it_changes(harness, harbor_plan, 
     m0, m1 = await harness.members(run)
     assert m0.job_status is HelixJobStatus.ACTIVE and m0.db_version == versions[0] + 1
     assert m1.job_status is HelixJobStatus.CREATED and m1.phase is MemberPhase.REGISTERED  # last read kept
+
+
+async def test_members_carry_their_tasks_id_and_planned_trials_from_the_plan(harness, harbor_plan):
+    attempts = harbor_plan.spec.target.model_copy(update={"n_attempts": 3})
+    plan = harbor_plan.model_copy(update={"spec": harbor_plan.spec.model_copy(update={"target": attempts})})
+    run = await harness.submit(plan, name="run-a")
+
+    await harness.cycle()
+
+    members = await harness.members(run)
+    assert [m.task_name for m in members] == [t.id for t in harbor_plan.spec.tasks]
+    # Before any task Job reports, each task counts its planned trials as pending.
+    planned = TrialCounts(total=3, phases={TrialPhase.PENDING: 3})
+    assert [m.trial_counts for m in members] == [planned] * len(members)
+
+
+def reports_trials(jobs: FakeRunJobs, name: str, *phases: str, reward: float | None = None) -> None:
+    """Job ``name`` reports one trial per phase in its status details, as the task Job does while Harbor runs."""
+    trials = [{"trial": f"t{i}", "phase": phase, "reward": reward} for i, phase in enumerate(phases)]
+
+    details = {**(jobs.jobs[name].status_details or {}), "trials": trials}
+    jobs.jobs[name] = jobs.jobs[name].model_copy(update={"status_details": details})
+
+
+async def test_a_running_tasks_trial_counts_are_written_only_when_they_change(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running", "pending")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.AGENT_RUNNING: 1, TrialPhase.PENDING: 1}
+    version = member.db_version
+
+    await harness.cycle()
+
+    assert (await harness.members(run))[0].db_version == version  # same counts: no write
+
+    reports_trials(jobs, task(run, 0), "succeeded", "verifying", reward=1.0)
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.VERIFYING: 1}
+    assert member.trial_counts.reward == 1.0
+    assert member.db_version == version + 1
+
+
+async def test_a_settled_task_keeps_its_jobs_last_trial_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+
+    reports_trials(jobs, task(run, 0), "succeeded", "errored", reward=0.5)
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.SUCCEEDED
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.ERRORED: 1}
+
+
+async def test_a_job_that_stops_reporting_trials_keeps_the_last_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running")
+    await harness.cycle()
+
+    jobs.jobs[task(run, 0)] = jobs.jobs[task(run, 0)].model_copy(update={"status_details": {"trials": "unreadable"}})
+    jobs.finish(task(run, 0), "error")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.FAILED
+    assert member.trial_counts is not None and member.trial_counts.total == 1
 
 
 async def test_finished_tasks_get_one_bundle_then_a_ready_result(harness, harbor_plan, jobs):
@@ -1111,13 +1200,13 @@ async def test_a_result_saved_under_another_job_is_never_used(harness, harbor_pl
         jobs.finish(task(run, 0), "completed")
 
     jobs.script("result", replaced_and_finished)
-    (before,) = await harness.members(run)
     await harness.cycle()
     (member,) = await harness.members(run)
-    assert member.db_version == before.db_version and member.bundle_ref is None  # nothing written this cycle
+    assert member.phase is MemberPhase.FAILED and member.bundle_ref is None
+    assert member.error == "no_result"  # the retained ID cannot read the replacement's result
     await harness.cycle()
     (member,) = await harness.members(run)
-    assert (member.phase, member.error) == (MemberPhase.FAILED, "job_missing")  # the next read sees the new id
+    assert (member.phase, member.error) == (MemberPhase.FAILED, "no_result")
 
 
 async def test_spec_drift_keeps_registered_jobs_and_settles_them_by_their_end_state(harness, harbor_plan, jobs):
@@ -2098,3 +2187,98 @@ async def test_a_run_stopped_while_its_tasks_wait_for_layers_settles_them(harnes
     assert all(m.error == "run cancelled before it started" for m in members)
     assert jobs.created == []
     assert (await harness.run(run)).phase is TasksetRunPhase.CANCELLED
+
+
+async def test_stalled_detection_uses_current_attempt_without_changing_job_wide_steps():
+    from datetime import timedelta
+
+    from nemo_evals.taskset_runs.controller import STALLED_CREATE_SECONDS, _stalled
+
+    jobs = FakeRunJobs()
+    request = CreateHelixJobRequest(
+        name="bundle-history",
+        source="test",
+        spec={},
+        platform_spec={"steps": [{"name": "run", "executor": {"provider": "cpu", "container": {"image": "test"}}}]},
+    )
+    job = jobs.put(request, "created")
+    assert job.attempt_id is not None
+    jobs.stepless_attempts.add(job.attempt_id)
+    assert await jobs.has_job_steps(job.id)
+    assert await _stalled(job, jobs, job.created_at + timedelta(seconds=STALLED_CREATE_SECONDS + 1))
+
+
+@pytest.mark.parametrize("outcome", ["history", "missing_job", "missing_attempt", "forbidden"])
+async def test_job_step_lookup_uses_only_id_and_preserves_attempt_history(harbor_plan, harbor_run, outcome):
+    fake = FakeRunJobs()
+    body = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    job = fake.put(body, "created")
+    from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobStepWithContext
+
+    seen: list[str] = []
+
+    def page(data):
+        return {
+            "data": data,
+            "pagination": {
+                "page": 1,
+                "page_size": 100,
+                "current_page_size": len(data),
+                "total_pages": 1,
+                "total_results": len(data),
+            },
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        root = f"/apis/jobs/v2/workspaces/default/jobs/{job.id}/attempts"
+        assert request.url.path.startswith(root)
+        if request.url.path == root:
+            if outcome in {"missing_job", "forbidden"}:
+                return httpx.Response(404 if outcome == "missing_job" else 403, json={"detail": outcome})
+            attempts = [
+                HelixJobAttemptResponse(
+                    id=identifier,
+                    name=identifier,
+                    job=job.id,
+                    workspace="default",
+                    seq=seq,
+                    platform_spec=job.platform_spec,
+                    status=job.status,
+                    created_at=T0,
+                    updated_at=T0,
+                ).model_dump(mode="json")
+                for seq, identifier in enumerate(["current-attempt", "older-attempt"])
+            ]
+            return httpx.Response(200, json=page(attempts))
+        assert request.url.params["page_size"] == "1"
+        if outcome == "missing_attempt":
+            return httpx.Response(404, json={"detail": "Attempt disappeared"})
+        if request.url.path == root + "/current-attempt/steps":
+            return httpx.Response(200, json=page([]))
+        assert request.url.path == root + "/older-attempt/steps"
+        step = HelixJobStepWithContext(
+            id="step-original",
+            name="run",
+            job=job.name,
+            job_id=job.id,
+            fileset=job.fileset,
+            attempt_id="older-attempt",
+            workspace="default",
+            created_at=T0,
+            updated_at=T0,
+        )
+        return httpx.Response(200, json=page([step.model_dump(mode="json")]))
+
+    async with AsyncNemoClient(
+        base_url="http://platform.test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as client:
+        jobs = JobsServiceRunJobs(client, None, "default")
+        if outcome in {"missing_attempt", "forbidden"}:
+            with pytest.raises(NotFoundError if outcome == "missing_attempt" else PermissionDeniedError):
+                await jobs.has_job_steps(job.id)
+        else:
+            assert await jobs.has_job_steps(job.id) is (outcome == "history")
+    assert seen
+    assert all(f"/jobs/{job.id}/attempts" in path for path in seen)

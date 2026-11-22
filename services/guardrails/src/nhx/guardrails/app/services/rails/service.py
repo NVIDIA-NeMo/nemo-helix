@@ -36,17 +36,25 @@ class RailsService:
         engine = model.engine or "nim"
         model_name = model.model or "main"
 
-        if cached_rails_entry := self._rails_registry.get_cache_entry(
-            config_ids, engine, model_name, req_headers_cache_key
-        ):
-            cached_config_entry = self._config_registry.get_cache_entry(config_ids)
-            if cached_config_entry and cached_rails_entry.created_at >= cached_config_entry.created_at:
-                logger.debug(
-                    f"Found cached rails entry for config_ids {config_ids}, engine {engine}, model_name {model_name}, req_headers_cache_key {req_headers_cache_key}"
-                )
-                return cached_rails_entry.llm_rails
+        # Fetch the configs on every request, as the caller. This is the access check: a cached engine
+        # must never go to someone who can't read its config. It's one entity lookup per config, which
+        # is much cheaper than building an engine.
+        entities = await self._config_registry.fetch_entities(config_ids)
+        config_versions = tuple((entities[cid].id, entities[cid].db_version) for cid in config_ids)
 
-        base_config = await self.get_config(config_ids)
+        # Only reuse the engine if it was built from these exact config versions. Comparing versions
+        # instead of timestamps also picks up updates made on other replicas.
+        if (
+            cached_rails_entry := self._rails_registry.get_cache_entry(
+                config_ids, engine, model_name, req_headers_cache_key
+            )
+        ) and cached_rails_entry.config_versions == config_versions:
+            logger.debug(
+                f"Found cached rails entry for config_ids {config_ids}, engine {engine}, model_name {model_name}, req_headers_cache_key {req_headers_cache_key}"
+            )
+            return cached_rails_entry.llm_rails
+
+        base_config = self._config_registry.build_config(config_ids, entities)
         rails_config = configure_rails_config(base_config, model)
 
         # Set the main model into context, so we can extract relevant information (ex. base URL) at inference time
@@ -61,6 +69,8 @@ class RailsService:
             logger.error(f"Failed to instantiate LLMRails instance for config {config_ids} and model {model_name}")
             raise e
 
-        self._rails_registry.add(config_ids, engine, model_name, req_headers_cache_key, llm_rails)
+        self._rails_registry.add(
+            config_ids, engine, model_name, req_headers_cache_key, llm_rails, config_versions=config_versions
+        )
 
         return llm_rails

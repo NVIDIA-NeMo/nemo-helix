@@ -97,6 +97,7 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
@@ -654,13 +655,37 @@ def _execute_job_body(
     return AgentJobRequest.model_validate(payload)
 
 
-def _execute_jobs_query(agents: Sequence[str] | None) -> ListAgentJobsQueryParams:
+#: The workspace value that lists across every workspace the caller can read.
+ALL_WORKSPACES = "-"
+
+
+def qualify_agent_refs(agents: Sequence[str], *, workspace: str) -> list[str]:
+    """Return *agents* as ``workspace/name`` refs, the form execute jobs record in ``spec.agent_ref``.
+
+    A bare name is qualified with *workspace*, the workspace being listed, the same way a bare
+    name is qualified when the job is created. When listing every workspace (``-``) there is no
+    workspace to qualify with, so bare names are rejected.
+    """
+    refs: list[str] = []
+    for agent in agents:
+        if "/" not in agent and workspace == ALL_WORKSPACES:
+            raise ValueError(
+                f"Agent {agent!r} needs a workspace when listing all workspaces; pass it as 'workspace/{agent}'."
+            )
+        parsed = parse_entity_ref(agent, default_workspace=workspace)
+        refs.append(f"{parsed.workspace}/{parsed.name}")
+    return refs
+
+
+def agent_refs_filter(agents: Sequence[str], *, workspace: str) -> dict[str, object]:
+    """The jobs filter matching execute jobs that ran one of *agents* (see :func:`qualify_agent_refs`)."""
+    return {"spec.agent_ref": {"$in": qualify_agent_refs(agents, workspace=workspace)}}
+
+
+def _execute_jobs_query(agents: Sequence[str] | None, *, workspace: str) -> ListAgentJobsQueryParams:
     if not agents:
         return {}
-    for ref in agents:
-        if ref.count("/") != 1:
-            raise ValueError(f"Agent ref {ref!r} must be a 'workspace/name' ref.")
-    return {"filter": json.dumps({"spec.agent_ref": {"$in": list(agents)}})}
+    return {"filter": json.dumps(agent_refs_filter(agents, workspace=workspace))}
 
 
 class _ExecuteJobsResource:
@@ -693,12 +718,17 @@ class _ExecuteJobsResource:
     def list(self, workspace: str | None = None, *, agents: Sequence[str] | None = None) -> JsonMap:
         """List execute-agent jobs in *workspace*, optionally only runs of *agents*.
 
-        *agents* are ``workspace/name`` Agent refs. A job matches when it ran one
-        of them, including a job in *workspace* that ran another workspace's
-        agent. Jobs that ran an inline agent definition match no ref.
+        *agents* are Agent refs, ``workspace/name`` or a bare name in *workspace*.
+        A job matches when it ran one of them, including a job in *workspace*
+        that ran another workspace's agent. Jobs that ran an inline agent
+        definition match no ref. With *workspace* ``"-"`` (every workspace the
+        caller can read), each ref must name its workspace.
         """
+        resolved_workspace = self._client.resolve_workspace(workspace)
         response = self._client.list_agent_jobs(
-            workspace=workspace, collection="execute", query_params=_execute_jobs_query(agents)
+            workspace=resolved_workspace,
+            collection="execute",
+            query_params=_execute_jobs_query(agents, workspace=resolved_workspace),
         )
         return _json_map_from_page(response)
 
@@ -751,8 +781,11 @@ class _AsyncExecuteJobsResource:
 
     async def list(self, workspace: str | None = None, *, agents: Sequence[str] | None = None) -> JsonMap:
         """List execute-agent jobs in *workspace*, optionally only runs of *agents*. See the sync resource."""
+        resolved_workspace = self._client.resolve_workspace(workspace)
         response = await self._client.list_agent_jobs(
-            workspace=workspace, collection="execute", query_params=_execute_jobs_query(agents)
+            workspace=resolved_workspace,
+            collection="execute",
+            query_params=_execute_jobs_query(agents, workspace=resolved_workspace),
         )
         return _json_map_from_page(response)
 

@@ -7,6 +7,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { hasModelProvider } from '@nemo/common/src/utils/models';
 import { PageHeader, Tabs } from '@nvidia/foundations-react-core';
 import { ChatEmptyState } from '@studio/components/chat/ChatEmptyState';
+import { Loading } from '@studio/components/Layouts/Loading';
 import { ComparePlayground } from '@studio/components/ModelCompareChat/ComparePlayground';
 import { ModelComparePrompts } from '@studio/components/ModelComparePrompts';
 import { useCompareModels } from '@studio/hooks/useCompareModels';
@@ -19,11 +20,6 @@ type CompareView = 'compare' | 'prompts';
 export const ModelCompareRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const availableModels = useModelSearch({ workspace, include: hasModelProvider });
-  const hasNoModels =
-    !availableModels.loading &&
-    !availableModels.error &&
-    !availableModels.hasMore &&
-    availableModels.models.length === 0;
 
   const [searchParams] = useSearchParams();
   const [activeView, setActiveView] = useState<CompareView>('compare');
@@ -65,8 +61,11 @@ export const ModelCompareRoute: FC = () => {
     return <ErrorMessage header="Couldn't load models" message={availableModels.error.message} />;
   }
 
-  // Empty state when the workspace has no servable models and we're not still loading.
-  if (hasNoModels) {
+  // Wait for a servable model or an exhausted search, including automatically fetched pages.
+  if (availableModels.models.length === 0) {
+    if (availableModels.loading || availableModels.hasMore) {
+      return <Loading description="Checking available models..." />;
+    }
     return <ChatEmptyState hasModels={false} />;
   }
 

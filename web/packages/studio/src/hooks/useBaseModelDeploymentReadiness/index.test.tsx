@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
 import { useBaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import { renderHook } from '@testing-library/react';
 

@@ -155,6 +155,18 @@ class FakeStore:
         self.records[key] = saved
         return saved
 
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.records.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return await self.delete(
+                    entity_type,
+                    entity.name,
+                    workspace=entity.workspace,
+                    parent=entity._parent,
+                    expected_db_version=expected_db_version,
+                )
+        raise NemoEntityNotFoundError(entity_id)
+
     async def delete(self, entity_type, name, *, workspace, parent=None, expected_db_version=None) -> object:
         """Part of the standard client surface, so the fake carries it even though publishing and
         resolving never delete — a stand-in that omits it would not be substitutable."""

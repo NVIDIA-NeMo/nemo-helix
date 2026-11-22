@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { TanstackTable } from '@nemo/common/src/components/DataView/internal';
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
+import { getIntakeTraceRowId } from '@studio/components/IntakeLists/intakeTraceRowId';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
@@ -19,6 +21,47 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 describe('IntakeTracesTable', () => {
+  it('keeps reused trace IDs distinct in table rows, cells and row lookup', async () => {
+    const traces = ['session-a', 'session-b'].map((sessionId) => ({
+      ...mockTracesPage.data[0],
+      id: 'shared-trace',
+      session_id: sessionId,
+      name: `Trace in ${sessionId}`,
+    }));
+    const table = TanstackTable.createTable({
+      data: traces,
+      columns: [{ accessorKey: 'name' }, { accessorKey: 'session_id' }],
+      getRowId: getIntakeTraceRowId,
+      getCoreRowModel: TanstackTable.getCoreRowModel(),
+      state: {},
+      onStateChange: () => {},
+      renderFallbackValue: null,
+    });
+    const rows = table.getRowModel().rows;
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    expect(new Set(rows.flatMap((row) => row.getAllCells().map((cell) => cell.id))).size).toBe(4);
+    for (const [index, row] of rows.entries()) {
+      expect(table.getRow(row.id).original).toBe(traces[index]);
+    }
+
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          ...mockTracesPage,
+          data: traces,
+          pagination: { ...mockTracesPage.pagination, total_results: traces.length },
+        })
+      )
+    );
+    renderRoute(<IntakeTracesTable workspace={DEFAULT_WORKSPACE} />, {
+      history: getIntakeTracesRoute(DEFAULT_WORKSPACE),
+    });
+    const firstRow = await screen.findByRole('row', { name: /Trace in session-a/ });
+    const secondRow = screen.getByRole('row', { name: /Trace in session-b/ });
+    expect(firstRow).toHaveAttribute('data-row-id', rows[0].id);
+    expect(secondRow).toHaveAttribute('data-row-id', rows[1].id);
+  });
+
   it('loads trace rows in preview mode for bounded payloads and aggregate metrics', async () => {
     const requestedModes: Array<string | null> = [];
     server.use(

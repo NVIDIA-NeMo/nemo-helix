@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type Span, SpanStatus, type Trace } from '@nemo/sdk/generated/platform/schema';
+import type { Span, Trace } from '@nemo/sdk/generated/platform/schema';
+import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
 import { useGetSession } from '@nemo/sdk/generated/platform/sessions';
 import { useListSpans } from '@nemo/sdk/generated/platform/spans';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';

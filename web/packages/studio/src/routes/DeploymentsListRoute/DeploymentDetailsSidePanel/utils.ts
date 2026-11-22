@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Engine } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 
 export function formatDeploymentEngine(engine: string | undefined): string {
   if (!engine) return '-';

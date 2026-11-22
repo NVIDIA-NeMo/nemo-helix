@@ -158,7 +158,7 @@ class SafeSynthesizerJobBuilder:
             spec=self._build_job_spec(),
             **kwargs,
         )
-        return SafeSynthesizerJob(response.name, self._client, workspace=self._workspace)
+        return SafeSynthesizerJob(response.name, self._client, workspace=self._workspace, job_id=response.id)
 
     def _resolve_datasource(self, **kwargs: Any) -> None:
         if self._data_source_path is not None:

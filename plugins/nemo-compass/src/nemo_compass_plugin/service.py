@@ -293,13 +293,7 @@ def _build_insights_router() -> APIRouter:
         """Delete an Insight by its store-assigned id. Returns 204 on success."""
         insight = await _get_insight(entity_client, workspace=workspace, insight_id=insight_id)
         try:
-            await entity_client.delete(
-                Insight,
-                insight.name,
-                workspace=workspace,
-                parent=insight.parent,
-                expected_db_version=insight.db_version,
-            )
+            await entity_client.delete_by_id(Insight, insight.id, expected_db_version=insight.db_version)
         except NemoEntityNotFoundError as exc:
             raise _insight_not_found(insight_id, workspace) from exc
         except NemoEntityConflictError as exc:

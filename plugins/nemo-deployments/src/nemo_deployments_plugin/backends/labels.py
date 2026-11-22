@@ -14,10 +14,14 @@ Deployment and volume resources use separate workspace label keys
 resource kind without ambiguous selectors, even though the workspace value is the same string.
 """
 
+import re
 from typing import Any
 
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
-from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
+from nemo_helix_plugin.k8s_naming import DNS_LABEL_MAX_LENGTH, k8s_safe_name, workspace_name_identity
+
+# A pod volume name is a DNS label: no dots, 63 characters.
+_DNS_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 MANAGED_BY_KEY = "managed-by"
 DEPLOYMENT_WORKSPACE_LABEL = "nemo.nvidia.com/deployment-workspace"
@@ -82,6 +86,18 @@ def k8s_volume_resource_name(workspace: str, volume_name: str) -> str:
         f"dep-vol-{workspace}-{volume_name}",
         hash_input=deployment_key(workspace, volume_name),
     )
+
+
+def k8s_pod_volume_name(name: str) -> str:
+    """In-pod volume and volumeMount name.
+
+    The logical volume name may contain dots (a model named ``qwen3-0.6b``
+    becomes ``sft-deploy-qwen3-0.6b-weights``). Pod volume names are DNS labels
+    and cannot. Names that are already labels are returned unchanged.
+    """
+    if len(name) <= DNS_LABEL_MAX_LENGTH and _DNS_LABEL.fullmatch(name):
+        return name
+    return k8s_safe_name(name, hash_input=name)
 
 
 def k8s_deployment_configmap_name(workspace: str, deployment_name: str) -> str:

@@ -754,8 +754,10 @@ describe('NewCustomizationForm', () => {
       });
 
       await user.click(await screen.findByRole('button', { name: /Delete template/ }));
-      expect(await screen.findByText('Delete my-sft-recipe?')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      expect(
+        await screen.findByRole('heading', { name: "Delete template 'my-sft-recipe'?" })
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Delete Template' }));
 
       expect(mockDeleteTemplate).toHaveBeenCalledWith({
         workspace: 'default',

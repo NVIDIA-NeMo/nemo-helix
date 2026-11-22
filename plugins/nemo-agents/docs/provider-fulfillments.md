@@ -59,9 +59,11 @@ gateway_credentials:
 
 The gateway ID and signing key must match the driver. Install profiles through OpenShell; `profile_workspace` must match the gateway workspace or be empty for a global profile. Profiles must target explicit external hosts and declare the approved credential slots. Platform destinations and profiles requiring gateway-minted refresh material are rejected. Signing keys and gateway administrator credentials stay outside sandboxes.
 
+For Helix renewal, configure profile credentials with `stable_placeholder: true` so a running process keeps using its startup reference as values change. OpenShell's profile client checks gateway support before enabling this option; raw API clients must check `LintProviderProfilesResponse.supports_stable_placeholder`. The gateway and supervisor must both support it. Expiry and provider detachment still block credential resolution.
+
 | Setting | Behavior |
 | --- | --- |
-| `renewal_mode: helix` | Jobs and Deployments controllers update active, attached providers with fresh tickets, including idle sandboxes. |
+| `renewal_mode: helix` | Jobs and Deployments controllers recheck access and trigger fresh credential resolution through existing provider handles, including idle sandboxes. |
 | `renewal_interval_seconds` | Minimum interval between successful updates; default 10 seconds, range 1–15. Controller polling and gateway propagation add delay. |
 | `renewal_mode: gateway` | Default; Helix sends no periodic updates. Requires renewal support in the selected gateway build. |
 | `credential_refresh_verified` | Defaults to false and blocks provider workloads until the operator verifies refresh behavior. It is an attestation, not automatic capability detection. |
@@ -78,4 +80,4 @@ In Helix renewal mode, confirmed permission denial or a missing secret records c
 
 Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Removing a provider leaves the underlying Helix secret intact. Source-service token revocation is separate. The Jobs and Deployments controllers retain responsibility for workload lifecycle.
 
-Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` cannot provision these credentials; mixed-version consumers are unsupported. The credential driver accepts registration tickets only, so its gateway cannot also serve unrelated raw provider credentials.
+Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` cannot provision these credentials; mixed-version consumers are unsupported. Provider credentials must be signed secret references; OpenShell-owned internal keys are stored separately. The gateway cannot also serve unrelated raw provider credentials.

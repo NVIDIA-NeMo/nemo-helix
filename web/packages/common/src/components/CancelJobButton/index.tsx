@@ -10,7 +10,7 @@ import {
   getJobsListJobsQueryKey,
   useJobsCancelJob,
 } from '@nemo/sdk/generated/platform/jobs';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { Button } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, type MouseEvent, useState } from 'react';

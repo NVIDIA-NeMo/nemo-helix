@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Literal
 
-import uvicorn
+from uvicorn import run as run_uvicorn
 
 from sandboxed_gym.netutil import get_node_ip
 from sandboxed_gym.orchestrator import SandboxedGymOrchestrator, SandboxedGymSession
@@ -94,7 +94,7 @@ def serve(
             )
             app = build_proxy_app(session)
             LOGGER.info("Orchestrator proxy listening on %s", bind)
-            uvicorn.run(app, host=host, port=port, log_level="info")
+            run_uvicorn(app, host=host, port=port, log_level="info")
         elif mode == "host-urls":
             if session_file is not None:
                 write_session_file(session_file, session, mode=mode)

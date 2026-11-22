@@ -871,6 +871,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoleBinding'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -908,6 +914,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Role binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1136,6 +1148,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1185,6 +1203,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDeletionStatus'
+        '404':
+          description: Workspace deletion not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1371,6 +1395,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1381,8 +1411,11 @@ paths:
       tags:
       - Entity Store
       summary: Update workspace
-      description: "Update a workspace's description.\n\nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n\
-        {\n    \"description\": \"Updated description for ML Team\"\n}\n```"
+      description: "Update a workspace's description and/or limits.\n\nSetting `limits`\
+        \ requires the Admin role on the workspace. Omitted fields are unchanged.\n\
+        \nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team\n{\n    \"description\"\
+        : \"Updated description for ML Team\",\n    \"limits\": {\"max_concurrent_jobs\"\
+        : 50}\n}\n```"
       operationId: update_workspace_apis_entities_v2_workspaces__name__put
       parameters:
       - name: name
@@ -1404,6 +1437,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1449,6 +1488,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1826,6 +1871,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to read entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1891,6 +1942,12 @@ paths:
                 $ref: '#/components/schemas/Entity'
         '403':
           description: Not allowed to update entities in the requested workspace.
+        '404':
+          description: Entity not found or workspace being deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Request validation error, or a referenced resource such as
             the workspace does not exist
@@ -1959,6 +2016,12 @@ paths:
                 $ref: '#/components/schemas/DeleteResponse'
         '403':
           description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity or workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2101,6 +2164,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceMember'
+        '404':
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2160,6 +2229,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Workspace or member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2384,6 +2459,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2425,6 +2506,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2493,7 +2580,7 @@ paths:
         required: false
         schema:
           allOf:
-          - $ref: '#/components/schemas/GenericSortField'
+          - $ref: '#/components/schemas/FilesetSortField'
           description: The field to sort by. To sort in decreasing order, use `-`
             in front of the field name.
           default: -created_at
@@ -2536,6 +2623,106 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutputsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
+    get:
+      tags:
+      - Files
+      summary: Get Fileset by ID
+      operationId: get_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Files
+      summary: Delete Fileset by ID
+      operationId: delete_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '409':
+          description: Fileset is referenced, changed concurrently, or deletion is
+            in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '503':
+          description: Fileset references could not be verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2618,6 +2805,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Fileset is referenced by a model or adapter entity
           content:
@@ -2674,6 +2867,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2800,6 +2999,15 @@ paths:
               schema:
                 type: string
                 format: binary
+        '409':
+          description: Upstream object changed; retry the request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2852,7 +3060,8 @@ paths:
       tags:
       - Files
       summary: Upload Fileset Content
-      description: Upload file content to a fileset.
+      description: Upload file content to a fileset. Read-only storage returns HTTP
+        409.
       operationId: upload_file_apis_files_v2_workspaces__workspace__filesets__name_____path__put
       parameters:
       - name: workspace
@@ -2880,6 +3089,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -2957,7 +3175,7 @@ paths:
 
         Permanently deletes the file from the storage backend.
 
-        Returns metadata about the deleted file.'
+        Returns metadata about the deleted file. Read-only storage returns HTTP 409.'
       operationId: delete_file_apis_files_v2_workspaces__workspace__filesets__name_____path__delete
       parameters:
       - name: workspace
@@ -2985,6 +3203,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetFileOutput'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3069,7 +3296,9 @@ paths:
       description: 'Upload OTLP logs to a specified fileset in JSON or Protobuf format.
 
 
-        Supports both application/json and application/x-protobuf content types.'
+        Supports both application/json and application/x-protobuf content types.
+
+        Read-only storage returns HTTP 409 before reading the request body.'
       operationId: upload_otlp_logs_apis_files_v2_workspaces__workspace__filesets__name__otlp_v1_logs_post
       parameters:
       - name: workspace
@@ -3106,6 +3335,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtelExportLogsServiceResponse'
+        '409':
+          description: Fileset storage is read-only
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -5709,6 +5947,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EvaluatorResult'
+        '404':
+          description: Evaluator result not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -6533,6 +6777,14 @@ paths:
         schema:
           type: string
           title: Span Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the span. Required for ambiguous span IDs.
+          title: Session Id
+          type: string
+        description: Session containing the span. Required for ambiguous span IDs.
       responses:
         '200':
           description: Successful Response
@@ -6540,6 +6792,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Span'
+        '404':
+          description: Span not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Span ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -6759,6 +7019,15 @@ paths:
         schema:
           type: string
           title: Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the trace. Required for ambiguous trace
+            IDs.
+          title: Session Id
+          type: string
+        description: Session containing the trace. Required for ambiguous trace IDs.
       - name: mode
         in: query
         required: false
@@ -6783,6 +7052,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Trace'
+        '404':
+          description: Trace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Trace ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -7238,6 +7515,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobStep'
+        '404':
+          description: Attempt step not found
         '422':
           description: Validation Error
           content:
@@ -7391,6 +7670,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt or step not found
         '422':
           description: Validation Error
           content:
@@ -7441,6 +7722,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '404':
+          description: Attempt step or task not found
         '422':
           description: Validation Error
           content:
@@ -8551,6 +8834,12 @@ paths:
         '204':
           description: Delete adapter by name. The entity store delete uses the adapter's
             stored parent (entity `parent` field).
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8631,6 +8920,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Adapter'
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8783,6 +9078,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeploymentConfig'
+        '404':
+          description: Deployment configuration version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9229,6 +9530,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeployment'
+        '404':
+          description: Deployment version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9959,6 +10266,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
       - Models
@@ -9984,6 +10297,12 @@ paths:
       responses:
         '204':
           description: Delete model entity
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10207,6 +10526,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Prompt'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10239,6 +10564,12 @@ paths:
       responses:
         '204':
           description: Delete a prompt
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10530,6 +10861,12 @@ paths:
       responses:
         '204':
           description: Delete a model provider
+        '404':
+          description: Model provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10806,6 +11143,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixSecretResponse'
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10834,6 +11177,12 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -15927,6 +16276,26 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FilesetSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      - name
+      - -name
+      - storage_type
+      - -storage_type
+      title: FilesetSortField
+      description: 'Sort options for listing filesets.
+
+
+        Extends the generic entity sorts with ``storage_type``, which orders by the
+
+        storage backend recorded on the fileset. Prefix a field with ``-`` for
+
+        descending order.'
     FinetuningType:
       type: string
       enum:
@@ -17296,8 +17665,8 @@ components:
           type: string
           title: Id
         attempt_id:
-          type: string
           title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -17329,7 +17698,7 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset ID for storing job artifacts
+          description: Fileset name for storing job artifacts
         output_location:
           title: Output Location
           description: Caller-supplied artifact fileset; None when the fileset was
@@ -17366,7 +17735,6 @@ components:
       type: object
       required:
       - id
-      - attempt_id
       - name
       - workspace
       - source
@@ -17518,6 +17886,8 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - creation_pending
+      - deletion_pending
       - created
       - queued
       - pending
@@ -21282,6 +21652,15 @@ components:
           items:
             type: string
           type: array
+        num_gpus:
+          title: Num Gpus
+          description: GPUs requested for a gpu step of this profile that does not
+            declare its own resources.num_gpus; a gpu step with neither asks for one.
+            cpu steps never request a GPU, as on the docker and k8s backends. A GPU
+            sandbox keeps the k8s default /dev/shm, since OpenShell has no shm sizing;
+            a step's shm_size is ignored.
+          type: integer
+          minimum: 1.0
         egress_proxy:
           title: Egress Proxy
           description: 'HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the
@@ -24824,6 +25203,10 @@ components:
           title: Description
           description: Optional description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace resource limits
         created_at:
           type: string
           format: date-time
@@ -24894,11 +25277,33 @@ components:
           title: Description
           description: Optional description of the workspace
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Optional per-workspace limits. Only persisted when provided;
+            requires a platform admin.
       type: object
       required:
       - name
       title: WorkspaceInput
       description: Schema for creating a new workspace.
+    WorkspaceLimits:
+      properties:
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          description: Maximum number of jobs the workspace may have admitted concurrently.
+            When unset, the Jobs service default applies.
+          type: integer
+          minimum: 1.0
+      additionalProperties: false
+      type: object
+      title: WorkspaceLimits
+      description: 'Optional per-workspace resource limits.
+
+
+        A field left unset means "use the platform default"; the consumer applies
+
+        that default, it is never written back to the workspace record.'
     WorkspaceMember:
       properties:
         principal:
@@ -24988,6 +25393,11 @@ components:
           title: Description
           description: Updated description
           type: string
+        limits:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceLimits'
+          description: Updated per-workspace limits. Omit to leave unchanged; requires
+            workspace Admin.
       type: object
       title: WorkspaceUpdate
       description: Schema for updating a workspace.
@@ -25019,8 +25429,9 @@ components:
     HelixBearer:
       type: http
       scheme: bearer
-      description: Supply a raw Helix access token. The Authorization header's Bearer
-        prefix is added automatically.
+      description: 'Send `Authorization: Bearer <token>` when setting the HTTP header
+        directly (for example, with curl). In a bearer-auth token field, supply only
+        the raw Helix access token; the client adds the Bearer prefix.'
       x-fern-bearer:
         name: accessToken
         env: NHX_ACCESS_TOKEN

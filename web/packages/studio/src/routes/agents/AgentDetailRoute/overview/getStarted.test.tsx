@@ -3,7 +3,6 @@
 
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'true');
-  vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'true');
 });
 

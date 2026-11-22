@@ -18,12 +18,12 @@ basic_mock_authz_data := {
     },
     "endpoints": {
         "/apis/models/v2/workspaces/{workspace}/models": {
-            "get": {"permissions": ["models.list"]},
-            "post": {"permissions": ["models.create"]}
+            "get": {"direct": {"actor_perms": ["models.list"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.list"]}},
+            "post": {"direct": {"actor_perms": ["models.create"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.create"]}}
         },
         "/apis/models/v2/workspaces/{workspace}/models/{name}": {
-            "get": {"permissions": ["models.read"]},
-            "patch": {"permissions": ["models.update"]}
+            "get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}},
+            "patch": {"direct": {"actor_perms": ["models.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.update"]}}
         }
     },
     "workspaces": {
@@ -42,7 +42,7 @@ basic_mock_authz_data := {
 
 # Test 1: Basic viewer permissions
 test_basic_viewer_can_read_models if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"

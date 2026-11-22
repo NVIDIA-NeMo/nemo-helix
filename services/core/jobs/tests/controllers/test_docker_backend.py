@@ -18,6 +18,7 @@ from nhx.common.auth import (
     NHX_PRINCIPAL_ENVVAR,
     AuthContext,
     Principal,
+    WorkloadDelegationEntity,
     docker_delegation_name,
     parse_opaque_docker_proof_token,
     verify_opaque_docker_proof_token_hash,
@@ -73,6 +74,7 @@ from nhx.core.jobs.controllers.backends.base import (
 from nhx.core.jobs.controllers.backends.docker import (
     DEFAULT_VOLUME_PERMISSIONS_IMAGE,
     DOCKER_CONTAINER_START_WORKERS,
+    DOCKER_WORKLOAD_DELEGATION_ID_LABEL,
     DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL,
     DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL,
     CPUDockerJobBackend,
@@ -132,8 +134,14 @@ def workload_token_exchange_auth_config(enabled: bool = True) -> SimpleNamespace
 
 def workload_delegation_store_mock() -> MagicMock:
     store = MagicMock()
-    store.register = MagicMock()
-    store.revoke = MagicMock()
+
+    def save(entity: WorkloadDelegationEntity, *, require_opaque_subject_token_hash: bool) -> WorkloadDelegationEntity:
+        saved = entity.model_copy()
+        saved._id = "workload-delegation-test"
+        return saved
+
+    store.register = MagicMock(side_effect=save)
+    store.revoke_by_id = MagicMock()
     return store
 
 
@@ -1106,6 +1114,26 @@ def test_docker_job_rejects_reserved_step_auth_env_vars(docker_job, test_job_ste
         docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
 
 
+@pytest.mark.parametrize(
+    ("name", "from_secret", "match"),
+    [
+        ("NHX_PRINCIPAL", None, "NHX_PRINCIPAL"),
+        ("NEMO_JOB_SECRETS", None, "NEMO_JOB_SECRETS"),
+        ('NHX_PRINCIPAL={"id":"service:jobs","x":"', None, "must not contain"),
+        ("X=default/a,NHX_PRINCIPAL", HelixJobSecretEnvironmentVariableRef(name="b"), "must match"),
+    ],
+)
+def test_docker_job_rejects_platform_injected_and_malformed_step_env_names(
+    docker_job, test_job_step, name, from_secret, match
+):
+    test_job_step.step_spec.environment.append(
+        HelixJobEnvironmentVariable(name=name, value=None if from_secret else "attacker", from_secret=from_secret)
+    )
+
+    with pytest.raises(ValueError, match=match):
+        docker_job.schedule(test_job_step.step_spec.executor, test_job_step)
+
+
 def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled(
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):
@@ -1174,6 +1202,7 @@ def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled
         f"task-workload-identity-{test_job_step_with_auth_context.workspace}-{test_job_step_with_auth_context.job}-"
     )
     assert workload_identity_mount["ReadOnly"] is True
+    assert kwargs["labels"][DOCKER_WORKLOAD_DELEGATION_ID_LABEL] == "workload-delegation-test"
     assert kwargs["labels"][DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
     assert kwargs["labels"][DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL] == workload_identity_mount["Source"]
     workload_token_write_call = next(
@@ -1263,19 +1292,14 @@ def test_docker_schedule_cleans_task_volumes_when_workload_identity_registration
         )
 
     write_token.assert_not_called()
-    workload_delegation_store.revoke.assert_not_called()
+    workload_delegation_store.revoke_by_id.assert_not_called()
     assert_created_task_volumes_cleaned_up(docker_client_mock)
 
 
 def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_workload_identity_write_fails(
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):
-    expected_delegation_name = docker_delegation_name(
-        workload_workspace=test_job_step_with_auth_context.workspace,
-        job_id=test_job_step_with_auth_context.job,
-        attempt_id=test_job_step_with_auth_context.attempt_id,
-        step_id=test_job_step_with_auth_context.id,
-    )
+    expected_delegation_id = "workload-delegation-test"
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
@@ -1293,14 +1317,14 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_workloa
         )
 
     workload_delegation_store.register.assert_called_once()
-    workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
+    workload_delegation_store.revoke_by_id.assert_called_once_with(expected_delegation_id)
     assert_created_task_volumes_cleaned_up(docker_client_mock)
 
 
 def test_docker_workload_delegation_revoke_failure_is_attached_to_primary_exception(docker_job):
     primary_error = RuntimeError("schedule failed")
     workload_delegation_store = workload_delegation_store_mock()
-    workload_delegation_store.revoke.side_effect = JobStorageError("revoke failed")
+    workload_delegation_store.revoke_by_id.side_effect = JobStorageError("revoke failed")
     docker_job._workload_delegation_store = workload_delegation_store
 
     docker_job._try_revoke_workload_delegation(
@@ -1309,7 +1333,7 @@ def test_docker_workload_delegation_revoke_failure_is_attached_to_primary_except
         cause=primary_error,
     )
 
-    workload_delegation_store.revoke.assert_called_once_with("job:prepared-delegation")
+    workload_delegation_store.revoke_by_id.assert_called_once_with("job:prepared-delegation")
     assert primary_error.__notes__ == [
         "Failed to revoke Docker workload delegation job:prepared-delegation "
         "after container scheduling failure: JobStorageError('revoke failed')"
@@ -1318,7 +1342,7 @@ def test_docker_workload_delegation_revoke_failure_is_attached_to_primary_except
 
 def test_docker_workload_delegation_revoke_unexpected_error_propagates(docker_job):
     workload_delegation_store = workload_delegation_store_mock()
-    workload_delegation_store.revoke.side_effect = TypeError("bug")
+    workload_delegation_store.revoke_by_id.side_effect = TypeError("bug")
     docker_job._workload_delegation_store = workload_delegation_store
 
     with pytest.raises(TypeError, match="bug"):
@@ -1331,12 +1355,7 @@ def test_docker_workload_delegation_revoke_unexpected_error_propagates(docker_jo
 def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_configure_fails(
     docker_job, docker_client_mock, test_job_step_with_auth_context
 ):
-    expected_delegation_name = docker_delegation_name(
-        workload_workspace=test_job_step_with_auth_context.workspace,
-        job_id=test_job_step_with_auth_context.job,
-        attempt_id=test_job_step_with_auth_context.attempt_id,
-        step_id=test_job_step_with_auth_context.id,
-    )
+    expected_delegation_id = "workload-delegation-test"
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
@@ -1352,7 +1371,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_configu
 
     workload_delegation_store.register.assert_called_once()
     write_token.assert_called_once()
-    workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
+    workload_delegation_store.revoke_by_id.assert_called_once_with(expected_delegation_id)
     assert_created_task_volumes_cleaned_up(docker_client_mock)
 
 
@@ -1361,12 +1380,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_submit_
 ):
     docker_job._container_run_threadpool = MagicMock()
     docker_job._container_run_threadpool.submit.side_effect = RuntimeError("submit failed")
-    expected_delegation_name = docker_delegation_name(
-        workload_workspace=test_job_step_with_auth_context.workspace,
-        job_id=test_job_step_with_auth_context.job,
-        attempt_id=test_job_step_with_auth_context.attempt_id,
-        step_id=test_job_step_with_auth_context.id,
-    )
+    expected_delegation_id = "workload-delegation-test"
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
@@ -1381,7 +1395,7 @@ def test_docker_schedule_cleans_task_volumes_and_revokes_delegation_when_submit_
 
     workload_delegation_store.register.assert_called_once()
     write_token.assert_called_once()
-    workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
+    workload_delegation_store.revoke_by_id.assert_called_once_with(expected_delegation_id)
     assert_created_task_volumes_cleaned_up(docker_client_mock)
     assert docker_job._container_start_admission.acquire(blocking=False)
     docker_job._container_start_admission.release()
@@ -1404,6 +1418,7 @@ def test_docker_sync_does_not_restore_opaque_workload_token_refresher_from_conta
             JOB_TASK_ID_LABEL: "task-restored",
             JOB_TYPE_LABEL: JOB_TYPE_JOB,
             DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL: WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
+            DOCKER_WORKLOAD_DELEGATION_ID_LABEL: "workload-delegation-test",
             DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL: volume_name,
         }
     )
@@ -2934,10 +2949,10 @@ def test_failed_schedule_revokes_prepared_workload_delegation(docker_job, test_j
 
     docker_job.run_container(
         test_job_step,
-        {"_nhx_workload_delegation_name": "job:prepared-delegation"},
+        {"_nhx_workload_delegation_id": "job:prepared-delegation"},
     )
 
-    workload_delegation_store.revoke.assert_called_once_with("job:prepared-delegation")
+    workload_delegation_store.revoke_by_id.assert_called_once_with("job:prepared-delegation")
     assert docker_job._container_start_admission.acquire(blocking=False)
     docker_job._container_start_admission.release()
 
@@ -2945,17 +2960,15 @@ def test_failed_schedule_revokes_prepared_workload_delegation(docker_job, test_j
 def test_terminal_step_update_revokes_workload_delegation(docker_job, test_job_step_with_auth_context):
     container = MagicMock()
     container.name = "job-test-job-id-test-step"
-    container.labels = {JOB_TASK_ID_LABEL: "task-success"}
+    container.labels = {
+        JOB_TASK_ID_LABEL: "task-success",
+        DOCKER_WORKLOAD_DELEGATION_ID_LABEL: "workload-delegation-test",
+    }
     docker_job.map_docker_container_status_to_platform_status = MagicMock(
         return_value=(HelixJobStatus.COMPLETED, {}, "")
     )
     docker_job.docker_state_debug_fields = MagicMock(return_value={})
-    expected_delegation_name = docker_delegation_name(
-        workload_workspace=test_job_step_with_auth_context.workspace,
-        job_id=test_job_step_with_auth_context.job,
-        attempt_id=test_job_step_with_auth_context.attempt_id,
-        step_id=test_job_step_with_auth_context.id,
-    )
+    expected_delegation_id = "workload-delegation-test"
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
@@ -2963,7 +2976,7 @@ def test_terminal_step_update_revokes_workload_delegation(docker_job, test_job_s
         update = docker_job.create_step_update(test_job_step_with_auth_context, container)
 
     assert update.status == HelixJobStatus.COMPLETED
-    workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
+    workload_delegation_store.revoke_for_docker_container.assert_called_once_with(expected_delegation_id, container.id)
     docker_job._jobs.update_attempt_step_task.assert_called_once()
 
 
@@ -3691,23 +3704,21 @@ def test_cleanup_single_container_revokes_workload_delegation_from_labels(docker
         JOB_STEP_NAME_LABEL: "test-step",
         JOB_TASK_ID_LABEL: "task-success",
         DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL: WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
+        DOCKER_WORKLOAD_DELEGATION_ID_LABEL: "workload-delegation-test",
         JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
         JOB_CONTROLLER_INSTANCE_ID_LABEL: TEST_JOBS_CONTROLLER_INSTANCE_ID,
     }
     mock_volume = MagicMock()
     docker_client_mock.volumes.get.return_value = mock_volume
-    expected_delegation_name = docker_delegation_name(
-        workload_workspace="default",
-        job_id="test-job-id",
-        attempt_id="test-attempt-id",
-        step_id="test-step-id",
-    )
+    expected_delegation_id = "workload-delegation-test"
     workload_delegation_store = workload_delegation_store_mock()
     docker_job._workload_delegation_store = workload_delegation_store
 
     docker_job.cleanup_single_container(mock_container)
 
-    workload_delegation_store.revoke.assert_called_once_with(expected_delegation_name)
+    workload_delegation_store.revoke_for_docker_container.assert_called_once_with(
+        expected_delegation_id, mock_container.id
+    )
     assert mock_container.remove.call_count == 1
     assert docker_client_mock.volumes.get.call_count == 3
 
@@ -3868,3 +3879,123 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(docker_job, 
     # Verify persistent storage cleanup was NOT called
     # because the job is not terminal yet (step 2 still running)
     docker_job.cleanup_job_persistent_storage.assert_not_called()
+
+
+def test_terminal_container_without_delegation_id_does_not_revoke_by_reused_name(docker_job):
+    container = MagicMock()
+    container.labels = {
+        JOB_TASK_ID_LABEL: "old-task",
+        JOB_WORKSPACE_ID_LABEL: "default",
+        JOB_ID_LABEL: "same-job",
+        JOB_ATTEMPT_ID_LABEL: "same-attempt",
+        JOB_STEP_ID_LABEL: "same-step",
+        DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL: WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
+    }
+    store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = store
+    with patch.object(docker_job, "_should_enable_workload_identity_for_step", return_value=True):
+        docker_job._update_container_task(MagicMock(), container, HelixJobStatus.COMPLETED, {}, {}, "")
+    store.revoke_by_id.assert_not_called()
+    store.revoke_for_docker_container.assert_not_called()
+    store.revoke.assert_not_called()
+
+
+def test_delayed_container_cleanup_uses_its_saved_grant_after_controller_restart(docker_job):
+    container = MagicMock()
+    container.labels = {
+        JOB_TASK_ID_LABEL: "old-task",
+        JOB_WORKSPACE_ID_LABEL: "default",
+        JOB_ID_LABEL: "same-job",
+        DOCKER_WORKLOAD_DELEGATION_ID_LABEL: "old-grant",
+    }
+    store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = store
+    with (
+        patch.object(docker_job, "cleanup_container"),
+        patch.object(docker_job, "cleanup_task_storage_volumes"),
+        patch.object(docker_job, "_is_container_owned_by_this_controller", return_value=False),
+    ):
+        docker_job.cleanup_single_container(container)
+    store.revoke_for_docker_container.assert_called_once_with("old-grant", container.id)
+    store.revoke.assert_not_called()
+
+
+@pytest.mark.parametrize("bind_fails", [False, True])
+def test_container_binding_must_succeed_before_start(docker_job, test_job_step, bind_fails: bool):
+    store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = store
+    container = MagicMock(id="docker-assigned-id")
+    events: list[str] = []
+
+    def bind(delegation_id: str, container_id: str) -> None:
+        assert (delegation_id, container_id) == ("grant", "docker-assigned-id")
+        events.append("bind")
+        if bind_fails:
+            raise RuntimeError("persist failed")
+
+    store.bind_docker_container.side_effect = bind
+    container.start.side_effect = lambda: events.append("start")
+    with (
+        patch.object(docker_job, "cancel_scheduling", return_value=False),
+        patch.object(docker_job, "get_container", return_value=None),
+        patch.object(docker_job, "get_jobs_launcher_binary", return_value=None),
+        patch.object(docker_job, "_create_job_step_container", return_value=container),
+    ):
+        if bind_fails:
+            with pytest.raises(
+                FailedToScheduleError, match="Failed to persist Docker workload delegation binding"
+            ) as failure:
+                docker_job._run_container_in_thread(test_job_step, {"_nhx_workload_delegation_id": "grant"})
+            assert isinstance(failure.value.__cause__, RuntimeError)
+        else:
+            docker_job._run_container_in_thread(test_job_step, {"_nhx_workload_delegation_id": "grant"})
+    assert events == (["bind"] if bind_fails else ["bind", "start"])
+
+
+def test_interrupted_setup_cannot_adopt_unbound_existing_container(docker_job, test_job_step):
+    store = workload_delegation_store_mock()
+    store.get_by_id.return_value = WorkloadDelegationEntity(
+        name="grant",
+        workspace="system",
+        workload_subject="grant",
+        workload_audience="nemo-helix",
+        workload_workspace="default",
+        auth_context=AuthContext(principal_id="creator"),
+        expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+    )
+    docker_job._workload_delegation_store = store
+    container = MagicMock(id="actual-container-id", status="created")
+    with (
+        patch.object(docker_job, "cancel_scheduling", return_value=False),
+        patch.object(docker_job, "get_container", return_value=container),
+        pytest.raises(FailedToScheduleError, match="Refusing to adopt an existing container"),
+    ):
+        docker_job._run_container_in_thread(test_job_step, {"_nhx_workload_delegation_id": "grant"})
+    store.bind_docker_container.assert_not_called()
+    container.start.assert_not_called()
+
+
+def test_binding_failure_records_error_and_cleans_prepared_grant(docker_job, test_job_step):
+    assert docker_job._container_start_admission.acquire(blocking=False)
+    store = workload_delegation_store_mock()
+    store.bind_docker_container.side_effect = RuntimeError("persist failed")
+    docker_job._workload_delegation_store = store
+    container = MagicMock(id="docker-assigned-id")
+    with (
+        patch.object(docker_job, "cancel_scheduling", return_value=False),
+        patch.object(docker_job, "get_container", return_value=None),
+        patch.object(docker_job, "get_jobs_launcher_binary", return_value=None),
+        patch.object(docker_job, "_create_job_step_container", return_value=container),
+        patch.object(docker_job, "_remove_container_after_failed_schedule", return_value=True) as remove,
+        patch.object(docker_job, "_release_step_resources"),
+    ):
+        docker_job.run_container(test_job_step, {"_nhx_workload_delegation_id": "grant"})
+
+    request = docker_job._jobs.update_job_step_status.call_args.kwargs["body"]
+    assert request.status == HelixJobStatus.ERROR
+    assert request.error_details == {"message": "Failed to persist Docker workload delegation binding"}
+    store.revoke_by_id.assert_called_once_with("grant")
+    remove.assert_called_once_with(test_job_step, reason="scheduling_error")
+    container.start.assert_not_called()
+    assert docker_job._container_start_admission.acquire(blocking=False)
+    docker_job._container_start_admission.release()

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { FilesCreateFilesetBody } from '@nemo/sdk/generated/platform/zod/files';
 import { z } from 'zod';
 

@@ -3,7 +3,6 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ROUTES } from '@studio/constants/routes';
-import { gateInferenceProviderRoutes } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -13,10 +12,10 @@ const InferenceProvidersListRoute = lazy(() =>
   }))
 );
 
-export const inferenceProviderRoutes: RouteObject[] = gateInferenceProviderRoutes([
+export const inferenceProviderRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.inferenceProviders,
     element: <InferenceProvidersListRoute />,
     errorElement: <RouteErrorPanel title="Inference Providers" />,
   },
-]);
+];

@@ -68,6 +68,7 @@ class _WatchOptions:
 class _WatchState:
     history_seen: bool
     log_cursor: str | None
+    job_id: str | None = None
     last_status: str | None = None
     previous_drain_seen_logs: dict[_LogKey, int] = field(default_factory=dict)
     current_drain_seen_logs: dict[_LogKey, int] = field(default_factory=dict)
@@ -287,8 +288,11 @@ def _watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = jobs.status.get_job_status(workspace=options.workspace, name=name)
-            status_event = _status_event(status_response.data(), name)
+            status_response = jobs.status.get_job_status(workspace=options.workspace, name=state.job_id or name)
+            status_info = status_response.data()
+            if state.job_id is None:
+                state.job_id = status_info.id
+            status_event = _status_event(status_info, name)
         except Exception as exc:
             if not _is_transient_failure(exc):
                 raise
@@ -355,8 +359,11 @@ async def _async_watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = await jobs.status.get_job_status(workspace=options.workspace, name=name)
-            status_event = _status_event(status_response.data(), name)
+            status_response = await jobs.status.get_job_status(workspace=options.workspace, name=state.job_id or name)
+            status_info = status_response.data()
+            if state.job_id is None:
+                state.job_id = status_info.id
+            status_event = _status_event(status_info, name)
         except Exception as exc:
             if not _is_transient_failure(exc):
                 raise
@@ -501,7 +508,7 @@ def _drain_logs(
         deadline.raise_if_expired()
         page = jobs.list_job_logs(
             workspace=options.workspace,
-            name=name,
+            name=state.job_id or name,
             query_params=_log_query_params(options, page_cursor=current_cursor),
         ).page()
         yield from _new_log_events(
@@ -537,7 +544,7 @@ async def _async_drain_logs(
         deadline.raise_if_expired()
         page_response = await jobs.list_job_logs(
             workspace=options.workspace,
-            name=name,
+            name=state.job_id or name,
             query_params=_log_query_params(options, page_cursor=current_cursor),
         )
         page = page_response.page()

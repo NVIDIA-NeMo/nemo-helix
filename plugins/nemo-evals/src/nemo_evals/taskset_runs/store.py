@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol, Self, cast
 
+from nemo_evals._fileset_receipt import FilesetReceipt
+from nemo_evals.schema_migrations import migrate_schema_taskset_run
 from nemo_evals.taskset_runs.entities import (
     TERMINAL_RUN_PHASES,
     MemberPhase,
@@ -23,6 +25,7 @@ from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorage
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.submission import resolve_deadlines
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
@@ -108,7 +111,7 @@ class RunAcceptance:
     timeout_seconds: int
     execution_deadline_at: datetime
     finalization_deadline_at: datetime
-    discard_on_loss: tuple[str, ...] = ()
+    discard_on_loss: tuple[FilesetReceipt, ...] = ()
     auth_context: AuthContext | None = None
 
 
@@ -303,15 +306,15 @@ class TasksetRunStore:
             return AcceptedRun(run=run, created=True)
         except NemoEntityConflictError:
             existing = await self.entity_client.get(TasksetRunEntity, name=plan.run_id, workspace=plan.workspace)
-        if existing.plan_ref == stored.ref:
+        if existing.plan_fileset_id == stored.fileset_id:
             return AcceptedRun(run=existing, created=True)
-        await delete_fileset_ref(self.files_client, stored.ref)
+        await delete_fileset_ref(self.files_client, stored.ref, fileset_id=stored.fileset_id)
         await self._discard(acceptance.discard_on_loss)
         if existing.request_digest != acceptance.request_digest:
             raise RunRequestConflict(existing.name) from None
         return AcceptedRun(run=existing, created=False)
 
-    async def _discard(self, refs: tuple[str, ...]) -> None:
+    async def _discard(self, refs: tuple[FilesetReceipt, ...]) -> None:
         """Delete losing-request filesets without masking the acceptance outcome.
 
         Args:
@@ -322,7 +325,7 @@ class TasksetRunStore:
             attempts to proceed; cancellation still propagates.
         """
         for ref in refs:
-            await delete_fileset_ref(self.files_client, ref)
+            await delete_fileset_ref(self.files_client, ref.ref, fileset_id=ref.fileset_id)
 
     @staticmethod
     def _new_run(acceptance: RunAcceptance, plan: TasksetRunPlan, stored: StoredPlan) -> TasksetRunEntity:
@@ -341,6 +344,7 @@ class TasksetRunStore:
             name=plan.run_id,
             workspace=plan.workspace,
             plan_ref=stored.ref,
+            plan_fileset_id=stored.fileset_id,
             plan_digest=stored.digest,
             taskset_ref=plan.taskset_ref,
             idempotency_key=acceptance.idempotency_key,
@@ -491,6 +495,11 @@ class TasksetRunStore:
                 return runs
             page += 1
 
+    async def _update_run(self, run: TasksetRunEntity) -> TasksetRunEntity:
+        """Pin a legacy plan's allocation in the same versioned write as the mutation."""
+        run = await migrate_schema_taskset_run(run, files_client=self.files_client)
+        return await self.entity_client.update(run)
+
     async def set_state(
         self,
         run: TasksetRunEntity,
@@ -517,7 +526,7 @@ class TasksetRunStore:
             update["error"] = error
         if not update:
             return run
-        return await self.entity_client.update(run.model_copy(update=update))
+        return await self._update_run(run.model_copy(update=update))
 
     async def start(self, run: TasksetRunEntity, *, now: datetime) -> TasksetRunEntity:
         """The run's first slot: start its execution clock; one versioned write, before its first create intent.
@@ -536,7 +545,7 @@ class TasksetRunStore:
             "execution_deadline_at": execution,
             "finalization_deadline_at": finalization,
         }
-        return await self.entity_client.update(run.model_copy(update=update))
+        return await self._update_run(run.model_copy(update=update))
 
     async def request_cancel(self, workspace: str, run_id: str, *, now: datetime) -> TasksetRunEntity:
         """Record the intent to cancel: one versioned write of ``cancel_requested_at``, and nothing else.
@@ -561,7 +570,7 @@ class TasksetRunStore:
             if run.phase in TERMINAL_RUN_PHASES:
                 raise RunAlreadyFinished(run_id, run.phase)
             try:
-                return await self.entity_client.update(run.model_copy(update={"cancel_requested_at": now}))
+                return await self._update_run(run.model_copy(update={"cancel_requested_at": now}))
             except NemoEntityConflictError:
                 continue  # the controller wrote first; re-read and keep its fields
         raise CancelContended(run_id)
@@ -605,6 +614,27 @@ class TasksetRunStore:
         )
         return _to_page(result, sort="task_index")
 
+    async def find_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
+        """Read the member of ``run`` for task ``task_index``; None when the controller hasn't created it.
+
+        No plan or Jobs reads occur; storage failures propagate.
+        """
+        conditions: list[FilterOperation] = [
+            ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),
+            ComparisonOperation(field="data.task_index", operator=FilterOperator.EQ, value=task_index),
+        ]
+
+        member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        result = await member_client.list(
+            TasksetRunMemberEntity,
+            workspace=run.workspace,
+            filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions),
+            page=1,
+            page_size=1,
+        )
+
+        return result.data[0] if result.data else None
+
     async def list_all_members(self, run: TasksetRunEntity) -> list[TasksetRunMemberEntity]:
         """Every member of ``run`` in task-index order, reading every page; any failed page raises.
 
@@ -622,10 +652,20 @@ class TasksetRunStore:
             page += 1
 
     async def create_member(
-        self, run: TasksetRunEntity, task_index: int, *, phase: MemberPhase = MemberPhase.IMAGE_READY
+        self,
+        run: TasksetRunEntity,
+        task_index: int,
+        task_name: str | None = None,
+        planned_trials: int | None = None,
+        *,
+        phase: MemberPhase = MemberPhase.IMAGE_READY,
     ) -> TasksetRunMemberEntity | None:
         """Create task ``task_index``'s member under ``run``: queued (``image_ready``), its images in the plan, or
         ``image_preparing`` while it waits for its agent layer.
+
+        ``task_name`` is the task's id in the plan, kept so readers can name the task without loading the plan.
+        ``planned_trials`` starts the member's trial counts at the trials its task Job will run, so a run's trial
+        total is right before its task Jobs start, instead of growing as each one reports.
 
         A named create, so a repeat is harmless.
 
@@ -633,7 +673,16 @@ class TasksetRunStore:
             The new member, or None when it already exists.
         """
         member = TasksetRunMemberEntity(
-            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=phase
+            name=member_name(task_index),
+            workspace=run.workspace,
+            task_index=task_index,
+            task_name=task_name,
+            phase=phase,
+            trial_counts=(
+                TrialCounts(total=planned_trials, phases={TrialPhase.PENDING: planned_trials})
+                if planned_trials
+                else None
+            ),
         )
         member._parent = run.id
         member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)

@@ -5,7 +5,7 @@ import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
 import { useEvalsGetEvalResult } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
 import { useEvalsGetEvaluateJobResult } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useQuery } from '@tanstack/react-query';

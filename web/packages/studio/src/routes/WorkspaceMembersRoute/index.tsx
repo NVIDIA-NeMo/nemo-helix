@@ -114,17 +114,17 @@ export const WorkspaceMembersRoute: FC = () => {
         existingMembers={membersData?.data ?? []}
       />
 
-      <DeleteConfirmationModal
-        open={Boolean(removingMember)}
-        onClose={() => setRemovingMember(null)}
-        title="Remove Workspace Member"
-        description={`Revoke all roles for ${removingMember?.principal ?? ''} in this workspace.`}
-        simpleConfirm
-        confirmationText={removingMember?.principal}
-        successText="Member removed."
-        errorText="Could not remove member."
-        onDelete={handleRemove}
-      />
+      {removingMember && (
+        <DeleteConfirmationModal
+          open
+          verb="remove"
+          entity="member"
+          ids={[removingMember.principal]}
+          description="All of their roles in this workspace are revoked."
+          onDelete={handleRemove}
+          onClose={() => setRemovingMember(null)}
+        />
+      )}
     </AccessibleTitle>
   );
 };

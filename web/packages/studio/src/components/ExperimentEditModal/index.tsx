@@ -18,8 +18,8 @@ import {
   type ExperimentSettingsValues,
   experimentSettingsFrom,
   experimentSettingsPayload,
-} from '@studio/components/evaluation/shared/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+} from '@studio/components/evaluation/experimentSettings';
+import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { AxiosError } from 'axios';
 import { type FC, type FormEvent, useEffect, useMemo } from 'react';

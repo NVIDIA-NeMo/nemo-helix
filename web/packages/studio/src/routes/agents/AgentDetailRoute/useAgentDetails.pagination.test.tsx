@@ -270,3 +270,37 @@ it('stops terminal 404 lookups even when another live job keeps refreshing histo
   await act(() => vi.advanceTimersByTimeAsync(2 * JOB_POLLING_INTERVAL_LONG));
   expect(missingLookups).toBe(settledLookups);
 });
+
+it('shows a running dataset job before Intake indexes its evaluation under the agent', async () => {
+  server.use(
+    http.get('*/apis/jobs/v2/workspaces/:workspace/jobs', () =>
+      HttpResponse.json({
+        data: [
+          makeEvaluatorJob({
+            id: 'running',
+            status: 'active',
+            spec: {
+              dataset: 'default/dataset#rows.jsonl',
+              target: { format: 'generic', url: 'http://agents/my-agent', name: agentName },
+              publication: { intake: { evaluation_id: 'running-eval', agent_name: agentName } },
+            },
+          }),
+        ],
+      })
+    ),
+    http.get(evaluationsUrl, () => HttpResponse.json({ data: [] })),
+    http.get(`${evaluationsUrl}/:name`, ({ params }) =>
+      HttpResponse.json(evaluation(String(params.name)))
+    )
+  );
+  const { result } = renderHook(
+    () => useAgentDetails({ workspace: DEFAULT_WORKSPACE, agentName }),
+    { wrapper: TestProviders }
+  );
+  await waitFor(() =>
+    expect(result.current.agentEvals.map((row) => row.name)).toEqual(['running-eval'])
+  );
+  expect(result.current.agentJobs).toEqual([
+    expect.objectContaining({ id: 'running', status: 'active', evaluationName: 'running-eval' }),
+  ]);
+});

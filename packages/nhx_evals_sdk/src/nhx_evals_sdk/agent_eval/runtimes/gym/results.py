@@ -18,13 +18,21 @@ from pathlib import Path
 from typing import Any
 
 from google.protobuf.json_format import MessageToDict
+from nhx_evals_sdk.agent_eval.reward_keys import GYM_REWARD_COMPONENTS_KEY, reward_key_rejection
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, model_call_capture_dir
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
+    FABRIC_RESULT_KEY,
     NG_ATTEMPT_INDEX,
     NG_ROLLOUT_INDEX,
     NG_TASK_INDEX,
     read_jsonl,
+)
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import (
+    ATIF_ARTIFACT_KIND,
+    OTLP_ARTIFACT_KIND,
+    declared_artifacts,
+    register_trace_evidence,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import (
@@ -47,6 +55,7 @@ from nhx_evals_sdk.agent_eval.usage_keys import (
     _first_nonnegative_int,
     _first_usage_details,
 )
+from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.ng_trajectory_otlp import rollout_to_resource_spans
 from nhx_evals_sdk.values.evidence import (
     EVIDENCE_FORMAT_OTLP,
@@ -281,41 +290,106 @@ def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: s
     )
 
 
+def _within_run_dir(candidate: str, run_dir: Path) -> bool:
+    """Whether ``candidate`` resolves inside ``run_dir``.
+
+    Relative paths are rejected: Fabric declares absolute host paths, and a relative one would
+    name a different file depending on where the evaluator was launched.
+    """
+    if not Path(candidate).is_absolute():
+        return False
+    try:
+        resolved = Path(candidate).resolve()
+    except (OSError, ValueError):  # ValueError: e.g. an embedded null byte in an odd record.
+        return False
+    root = run_dir.resolve()
+    return resolved == root or root in resolved.parents
+
+
+def _declared_fabric_trace(
+    fabric_result: object, *, run_dir: Path, trial: Mapping[str, object]
+) -> tuple[Path | None, Path | None]:
+    """``(otlp, atif)`` when the rollout declared exactly one non-empty trace inside ``run_dir``.
+
+    A declared OTLP that is not that one file is rejected with a warning, so the caller keeps
+    the model-call projection instead of dropping the trace silently. No declaration is not a
+    rejection. ``trial`` identifies the rollout in those warnings.
+    """
+    if not isinstance(fabric_result, Mapping):
+        return None, None
+    artifacts = declared_artifacts(fabric_result)
+    declared = [artifact for artifact in artifacts if artifact.kind == OTLP_ARTIFACT_KIND]
+    if not declared:
+        return None, None
+    contained = [artifact for artifact in declared if _within_run_dir(artifact.path, run_dir)]
+    if len(contained) != 1:
+        logger.warning(
+            "Declared otlp trace is not a single file inside the run directory; keeping the model-call projection.",
+            extra={**trial, "declared_count": len(declared), "contained_count": len(contained)},
+        )
+        return None, None
+    trace = Path(contained[0].path)
+    try:
+        readable = trace.is_file() and trace.stat().st_size > 0
+    except OSError:
+        readable = False
+    if not readable:
+        logger.warning(
+            "Declared otlp trace is missing or empty; keeping the model-call projection.",
+            extra={**trial, "path": str(trace)},
+        )
+        return None, None
+    atif = [
+        artifact
+        for artifact in artifacts
+        if artifact.kind == ATIF_ARTIFACT_KIND and _within_run_dir(artifact.path, run_dir)
+    ]
+    return trace, Path(atif[0].path) if len(atif) == 1 else None
+
+
 def _rollout_evidence(
     record: Mapping[str, Any],
     *,
     rollouts_path: Path,
     task_id: str,
     trial_id: str,
+    run_id: str,
     capture_dir: Path | None = None,
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
 
-    The trace is derived from the record rather than captured, so it is carried inline rather than
-    written beside the rollouts file. It is registered under the format-qualified key as well as the
-    plain one, so a metric asking for ``format="otlp"`` and one asking for whatever is primary reach
-    the same handle.
+    A declared trace file wins over the projection built from the rollout record. The trace is
+    registered under the format-qualified key as well as the plain one, so a metric asking for
+    ``format="otlp"`` and one asking for whatever is primary reach the same handle.
     """
     descriptors: dict[str, EvidenceDescriptor] = {
         "rollouts": EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     }
     capture_path = _capture_path(record, capture_dir)
+    if capture_path is not None:
+        # The capture stays even when a declared trace wins: a metric can still want the per-call source.
+        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
+            kind="filesystem", format="file", ref=str(capture_path)
+        )
     if capture_dir is not None and capture_path is None:
-        # Capture is switched on by the runner, so an absent one is Gym not doing what it was
-        # asked. The trial still scores; its trace just loses the timing capture exists to provide.
+        # Capture is requested by the runner, so a missing file is a misconfigured run whichever trace wins.
         logger.warning(
             "No model-call capture for trial %s under %s; its trace will carry no per-call timing.",
             trial_id,
             capture_dir,
         )
+    otlp, atif = _declared_fabric_trace(
+        record.get(FABRIC_RESULT_KEY),
+        run_dir=rollouts_path.parent,
+        trial={"task_index": record.get(NG_TASK_INDEX), "rollout_index": record.get(NG_ROLLOUT_INDEX)},
+    )
+    if otlp is not None:
+        register_trace_evidence(descriptors, atif=atif, otlp=otlp)
+        return CandidateEvidence(descriptors=descriptors)
     model_calls = _read_model_calls(capture_path, trial_id=trial_id)
-    if capture_path is not None:
-        # Kept as its own evidence, by reference: the OTLP view below is a projection of it, and a
-        # projection is not a reason to lose what it was projected from.
-        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
-            kind="filesystem", format="file", ref=str(capture_path)
-        )
-    resource_spans = _rollout_resource_spans(record, task_id=task_id, trial_id=trial_id, model_calls=model_calls)
+    resource_spans = _rollout_resource_spans(
+        record, task_id=task_id, trial_id=trial_id, run_id=run_id, model_calls=model_calls
+    )
     if resource_spans is not None:
         # Rendered to JSON here and only here, because an ``EvidenceDescriptor`` holds JSON.
         trace = EvidenceDescriptor(
@@ -329,15 +403,22 @@ def _rollout_evidence(
 
 
 def _rollout_resource_spans(
-    record: Mapping[str, Any], *, task_id: str, trial_id: str, model_calls: Sequence[Mapping[str, Any]] = ()
+    record: Mapping[str, Any],
+    *,
+    task_id: str,
+    trial_id: str,
+    run_id: str,
+    model_calls: Sequence[Mapping[str, Any]] = (),
 ) -> list[ResourceSpans] | None:
     """Project one rollout onto OTLP resource spans, or ``None`` when it will not convert.
 
-    Seeded on the trial id because span identity has to be unique per attempt: Gym does not always
-    record ``_ng_rollout_index``, and ``_rollout_trial_id`` is what already resolves that.
+    Seeded on the run and trial IDs so retries and republication retain identity without
+    colliding with independent runs.
     """
     try:
-        return rollout_to_resource_spans(record, rollout_id=trial_id, task_id=task_id, model_calls=model_calls)
+        return rollout_to_resource_spans(
+            record, run_id=run_id, rollout_id=trial_id, task_id=task_id, model_calls=model_calls
+        )
     except (TypeError, ValueError) as error:
         # A trace is a second view of a result Gym already reported; losing it must not lose the
         # trial, whose reward and output stand on their own.
@@ -449,8 +530,13 @@ _GYM_STAT_FAMILY = ("mean", "max", "min", "median", "std")
 _GYM_REDUNDANT_METRICS = frozenset({"reward"})
 
 
-def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[AggregateScore]:
+def aggregate_scores_from_gym(
+    aggregations: Mapping[str, Any] | None, *, scored_natively: frozenset[str] = frozenset()
+) -> list[AggregateScore]:
     """Map Gym's run-level ``agent_metrics`` onto typed aggregate scores named ``runner.gym.<metric>``.
+
+    ``scored_natively`` names further metrics to skip, like ``reward``: reward components the SDK scores
+    per trial as ``gym_reward.<component>`` and so already aggregates itself.
 
     Reads ``agent_metrics``, not ``key_metrics``: ``key_metrics`` is a *subset* of it chosen by the
     resources-server, and the default selection (``get_key_metrics``) keeps only the ``mean/*`` entries —
@@ -467,6 +553,7 @@ def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[Ag
     if not aggregations:
         return []
     multi_agent = len(aggregations) > 1
+    redundant = _GYM_REDUNDANT_METRICS | scored_natively
     scores: list[AggregateScore] = []
     for agent_name, payload in sorted(aggregations.items()):
         agent_metrics = payload.get("agent_metrics") if isinstance(payload, Mapping) else None
@@ -475,11 +562,13 @@ def aggregate_scores_from_gym(aggregations: Mapping[str, Any] | None) -> list[Ag
         # One agent per run is the norm, so `runner.gym.<metric>` reads cleanly; qualify by agent only
         # when a run really did produce several, where the unqualified names would collide.
         prefix = f"runner.gym.{agent_name}." if multi_agent else "runner.gym."
-        scores.extend(_scores_from_agent_metrics(agent_metrics, prefix=prefix))
+        scores.extend(_scores_from_agent_metrics(agent_metrics, prefix=prefix, redundant=redundant))
     return scores
 
 
-def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str) -> list[AggregateScore]:
+def _scores_from_agent_metrics(
+    agent_metrics: Mapping[str, Any], *, prefix: str, redundant: frozenset[str]
+) -> list[AggregateScore]:
     families: dict[str, dict[str, float]] = {}
     scalars: dict[str, float] = {}
     for key, value in agent_metrics.items():
@@ -498,7 +587,7 @@ def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str)
         # fallback below would let a partial `reward` family survive as `mean/reward` scalars, since the
         # scalar filter matches the bare name -- reintroducing the duplicate of `gym_reward.reward` that
         # skipping reward exists to prevent.
-        if metric in _GYM_REDUNDANT_METRICS:
+        if metric in redundant:
             continue
         if set(stats) < set(_GYM_STAT_FAMILY):
             # Not a distribution we can vouch for; keep each key as the standalone number it may well be.
@@ -523,7 +612,7 @@ def _scores_from_agent_metrics(agent_metrics: Mapping[str, Any], *, prefix: str)
     scores.extend(
         AggregateScalarScore(name=f"{prefix}{key}", count=None, nan_count=0, value=value)
         for key, value in sorted(scalars.items())
-        if key not in _GYM_REDUNDANT_METRICS
+        if key not in redundant
     )
     return scores
 
@@ -532,7 +621,11 @@ def _as_float(value: Any) -> float | None:
     """``float`` for a numeric Gym metric value; None for anything else (bools included: not measurements)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float, such as JSON's 1 followed by 400 zeros
+        return None
+    return number if math.isfinite(number) else None
 
 
 def ensure_fresh_output(rollouts_path: Path) -> None:
@@ -570,6 +663,79 @@ def _coerce_reward(value: Any) -> float | None:
     except (TypeError, ValueError):
         logger.warning("Gym rollout carried a non-numeric reward %r; recording the trial as unscored.", value)
         return None
+
+
+def _reward_components(record: Mapping[str, Any]) -> dict[str, float]:
+    """A multi-reward rollout's ``reward_components``, kept where the name is usable and the value a finite number.
+
+    A component that can't be kept is logged and left out, so its score is missing on that trial rather than
+    the whole trial failing; booleans are not read as 1/0, matching Gym's own metrics.
+    """
+    components = record.get(GYM_REWARD_COMPONENTS_KEY)
+    if components is None:
+        return {}
+    if not isinstance(components, Mapping):
+        logger.warning("Gym rollout carried reward_components that are not a mapping; ignoring them.")
+        return {}
+    kept: dict[str, float] = {}
+    for name, value in components.items():
+        number = _as_float(value)
+        if not isinstance(name, str) or reward_key_rejection(name) is not None or number is None:
+            logger.warning("Gym rollout carried an unusable reward component %r=%r; leaving it out.", name, value)
+            continue
+        kept[name] = number
+    return kept
+
+
+def reward_component_names(trials: Sequence[AgentEvalTrial]) -> frozenset[str]:
+    """The reward components any of ``trials`` reported."""
+    names: set[str] = set()
+    for trial in trials:
+        components = trial.metadata.get(GYM_REWARD_COMPONENTS_KEY)
+        if isinstance(components, Mapping):
+            names.update(name for name in components if isinstance(name, str))
+    return frozenset(names)
+
+
+def gym_scoring_metrics(task: AgentEvalTask, trials: Sequence[AgentEvalTrial]) -> list[Metric]:
+    """``task``'s metrics, with its Gym reward metric extended to the reward components ``trials`` reported.
+
+    The Gym runners' :class:`~nhx_evals_sdk.agent_eval.trials.TrialAwareMetricsProvider` hook: a
+    multi-reward resources-server's components are known only once rollouts exist, so they are added here,
+    as optional outputs, and each is scored per trial as ``gym_reward.<component>``. A task with no
+    component in its trials, or with no Gym reward metric, keeps its metrics unchanged.
+    """
+    from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric
+
+    found = reward_component_names(trials)
+    if not found:
+        return list(task.metrics)
+    metrics: list[Metric] = []
+    for metric in task.metrics:
+        if isinstance(metric, GymRewardMetric):
+            names = tuple(sorted((set(metric.reward_components) | found) - {metric.output_name}))
+            metric = GymRewardMetric.model_validate({**metric.model_dump(), "reward_components": names})
+        metrics.append(metric)
+    return metrics
+
+
+def natively_scored_components(tasks: Sequence[AgentEvalTask], trials: Sequence[AgentEvalTrial]) -> frozenset[str]:
+    """The reward components scored per trial as ``gym_reward.<component>``, so Gym's own aggregates are redundant.
+
+    They are the components :func:`gym_scoring_metrics` gives each task's Gym reward metric, from that task's
+    trials. A task with no Gym reward metric scores none, so its components keep their Gym aggregates.
+    """
+    from nhx_evals_sdk.metrics.runner_rewards import GymRewardMetric
+
+    trials_by_task: dict[str, list[AgentEvalTrial]] = {}
+    for trial in trials:
+        trials_by_task.setdefault(trial.task_id, []).append(trial)
+    names: set[str] = set()
+    for task in tasks:
+        for metric in gym_scoring_metrics(task, trials_by_task.get(task.id, [])):
+            if isinstance(metric, GymRewardMetric):
+                names.update(metric.reward_components)
+    return frozenset(names)
 
 
 def _resolve_task_id(
@@ -633,6 +799,7 @@ def trials_from_rollouts(
     tasks: Sequence[AgentEvalTask],
     index_to_task_id: Mapping[int, str],
     *,
+    run_id: str,
     reward_key: str = DEFAULT_REWARD_KEY,
     capture_dir: Path | None = None,
 ) -> list[AgentEvalTrial]:
@@ -643,6 +810,8 @@ def trials_from_rollouts(
     diagnosed rather than silently dropped). Every record is attributed to its task by
     ``_ng_task_index`` → ``index_to_task_id``, the map we stamped in :func:`materialize_dataset`.
     """
+    if not run_id:
+        raise ValueError("run_id must be nonempty when reading Gym evidence")
     if not rollouts_path.exists():
         # `ensure_fresh_output` removed any stale file before the run, and `_collect_rollouts`
         # already raised on a non-zero exit — so reaching here means Gym reported success and wrote
@@ -702,9 +871,15 @@ def trials_from_rollouts(
             status = AgentEvalTrialStatus.PARTIAL
         metadata: dict[str, Any] = {
             "reward": None if never_ran else reward,
+            "gym_run_id": run_id,
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
+        # Per-objective scores from a multi-reward resources-server. Like the reward, they don't count for
+        # an agent that never ran.
+        components = {} if never_ran else _reward_components(record)
+        if components:
+            metadata[GYM_REWARD_COMPONENTS_KEY] = components
         error: TrialError | None = None
         if never_ran:
             # Kept alongside the reward Gym reported, so the discarded value is still auditable.
@@ -727,6 +902,7 @@ def trials_from_rollouts(
                     rollouts_path=rollouts_path,
                     task_id=task_id,
                     trial_id=trial_id,
+                    run_id=run_id,
                     capture_dir=capture_dir,
                 ),
                 error=error,
@@ -779,6 +955,7 @@ def trials_from_rollouts(
                     measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
+                        "gym_run_id": run_id,
                         "gym_failure": next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None),
                         GYM_FAILURE_RECORD: {
                             key: value

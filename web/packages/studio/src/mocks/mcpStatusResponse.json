@@ -1,0 +1,57 @@
+{
+  "servers": [
+    {
+      "name": "calc",
+      "transport": "stdio",
+      "target": "calculator-server",
+      "args": ["--verbose"],
+      "state": "running",
+      "tools": [
+        {
+          "name": "add",
+          "description": "Add two numbers.",
+          "input_schema": {
+            "type": "object",
+            "properties": { "a": { "type": "integer" } },
+            "required": ["a"]
+          },
+          "exposed": true
+        },
+        { "name": "wipe", "description": null, "input_schema": {}, "exposed": false }
+      ],
+      "error": null,
+      "stderr": null
+    },
+    {
+      "name": "iocs",
+      "transport": "stdio",
+      "target": "email-security-triage-iocs",
+      "args": [],
+      "state": "unresolved",
+      "tools": [],
+      "error": "Command 'email-security-triage-iocs' was not found on the runtime PATH.",
+      "stderr": null
+    },
+    {
+      "name": "broken",
+      "transport": "streamable_http",
+      "target": "https://mcp.example.com/mcp",
+      "args": [],
+      "state": "failed",
+      "tools": [],
+      "error": "Connection closed",
+      "stderr": "ModuleNotFoundError: No module named foo"
+    },
+    {
+      "name": "legacy",
+      "transport": "websocket",
+      "target": "wss://mcp.example.com",
+      "args": [],
+      "state": "unsupported",
+      "tools": [],
+      "error": "Status probing does not support the 'websocket' transport.",
+      "stderr": null
+    }
+  ],
+  "checked_at": "2026-10-30T12:00:00Z"
+}

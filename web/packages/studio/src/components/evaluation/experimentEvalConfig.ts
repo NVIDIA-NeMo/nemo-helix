@@ -85,14 +85,18 @@ export const createRunEvaluation = async (
     name: explicitName,
     nameStem,
     filesetName,
+    datasetName = filesetName,
     parentEvaluationId,
+    metadata,
     signal,
   }: {
     experimentIds: string[];
     name?: string;
     nameStem: string;
     filesetName: string;
+    datasetName?: string;
     parentEvaluationId?: string;
+    metadata?: Record<string, string>;
     signal?: AbortSignal;
   }
 ): Promise<string> => {
@@ -102,8 +106,8 @@ export const createRunEvaluation = async (
     {
       name,
       experiment_ids: experimentIds,
-      dataset_name: filesetName,
-      metadata: { [EVAL_CONFIG_FILESET_KEY]: filesetName },
+      dataset_name: datasetName,
+      metadata: { ...metadata, [EVAL_CONFIG_FILESET_KEY]: filesetName },
       ...(parentEvaluationId ? { parent_evaluation_id: parentEvaluationId } : {}),
     },
     signal

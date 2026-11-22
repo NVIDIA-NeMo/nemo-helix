@@ -21,6 +21,7 @@ retaining ``explain`` as a schema subcommand::
 
     nemo <plugin> <job-name>          [--profile ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...]
+    nemo <plugin> list-jobs           [--type <job-name> ...] [--filter ...]
 
 Plugin authors do **not** call this themselves — it is called automatically
 by the platform's CLI loader. The platform comes from the global ``nemo --base-url`` /
@@ -35,6 +36,9 @@ Generated command interface
 
 ``explain``
     Print the job's spec / options schemas.
+
+``list-jobs``
+    List the plugin's jobs, optionally only some job types (one per plugin).
 
 Example
 -------
@@ -297,11 +301,14 @@ def add_job_commands(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Inject submit/explain commands for each job into *cli_app*.
+    """Inject submit/explain commands for each job, and one ``list-jobs`` command, into *cli_app*.
 
     Each entry in *jobs* produces one :class:`typer.Typer` sub-group
     registered under :attr:`~nemo_helix_plugin.job.NemoJob.name` in a ``"Jobs"``
     rich help panel. The sub-group owns ``submit`` / ``explain`` commands.
+    ``list-jobs`` lists the jobs of every type in *jobs* (see
+    :mod:`nemo_helix_plugin.cli_list_jobs`); it is skipped when *cli_app* already
+    has a ``list-jobs`` command, which is how a plugin supplies its own.
 
     Args:
         cli_app: The plugin's :class:`typer.Typer` group to inject
@@ -317,9 +324,12 @@ def add_job_commands(
             the sub-group is mounted, giving the plugin a chance to amend
             the auto-generated CLI surface.
     """
+    from nemo_helix_plugin.cli_list_jobs import add_list_jobs_command
+
     scheduler = NemoJobScheduler()
     for job_cls in jobs.values():
         _register_job_subgroup(cli_app, job_cls, scheduler, cli=cli)
+    add_list_jobs_command(cli_app, jobs)
 
 
 def _register_job_subgroup(

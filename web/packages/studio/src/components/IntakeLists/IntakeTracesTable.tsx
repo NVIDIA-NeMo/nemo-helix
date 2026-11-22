@@ -20,6 +20,7 @@ import {
 } from '@studio/components/IntakeLists/defaultStartedAtFilter';
 import { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
 import { makeIntakeTraceColumns } from '@studio/components/IntakeLists/intakeTraceColumns';
+import { getIntakeTraceRowId } from '@studio/components/IntakeLists/intakeTraceRowId';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
@@ -129,6 +130,7 @@ const SeededIntakeTracesTable: FC<
       attributes={{
         DataViewRoot: {
           data: tracesResponse?.data ?? [],
+          reactTableOptions: { getRowId: getIntakeTraceRowId },
           totalCount: tracesResponse?.pagination?.total_results,
           requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },

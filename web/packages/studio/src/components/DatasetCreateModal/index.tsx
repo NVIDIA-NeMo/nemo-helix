@@ -7,7 +7,6 @@ import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledT
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { FilesetFileUploadError } from '@nemo/common/src/datasets/constants';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { useFilesUpdateFilesetMetadata } from '@nemo/sdk/generated/platform/files';
@@ -25,7 +24,7 @@ import {
 import { DatasetFileUpload } from '@studio/components/DatasetFileUpload';
 import { CUSTOMIZATION_FILESET_FILE_PREFIXES } from '@studio/constants/customization';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getFilesetDetailsRoute } from '@studio/routes/utils';
+import { getFilesetDetailRoute } from '@studio/routes/utils';
 import { renameFile } from '@studio/util/files';
 import { type FC, useState } from 'react';
 import { Controller, type SubmitHandler, useForm } from 'react-hook-form';
@@ -75,7 +74,7 @@ export const DatasetCreateModal: FC<DatasetCreateModalProps> = ({
     onSuccess: (dataset: FilesetOutput) => {
       reset();
       onDatasetCreated?.(dataset);
-      navigate(getFilesetDetailsRoute(workspace, getEntityReference(dataset), undefined, true));
+      navigate(getFilesetDetailRoute(workspace, dataset.name));
     },
   });
 

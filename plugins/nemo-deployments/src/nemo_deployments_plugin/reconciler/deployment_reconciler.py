@@ -265,12 +265,7 @@ class DeploymentReconciler:
             logger.warning("No executor for delete of %s — removing entity only", dep_id)
 
         try:
-            await self._entities.delete(
-                Deployment,
-                name=deployment.name,
-                workspace=deployment.workspace,
-                expected_db_version=deployment.db_version,
-            )
+            await self._entities.delete_by_id(Deployment, deployment.id, expected_db_version=deployment.db_version)
             logger.info("Deleted deployment entity %s", dep_id)
         except NemoEntityNotFoundError:
             logger.debug("Deployment entity %s already deleted", dep_id)

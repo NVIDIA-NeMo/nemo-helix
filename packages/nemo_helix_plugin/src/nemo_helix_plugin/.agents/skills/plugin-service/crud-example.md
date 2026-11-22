@@ -263,12 +263,15 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> None:
         try:
-            await entity_client.delete(Widget, name=name, workspace=workspace)
+            selected = await entity_client.get(Widget, name=name, workspace=workspace)
+            await entity_client.delete_by_id(Widget, selected.id, expected_db_version=selected.db_version)
         except NemoEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
                 detail=f"Widget '{name}' not found in workspace '{workspace}'.",
             ) from exc
+        except NemoEntityConflictError as exc:
+            raise HTTPException(status_code=409, detail="Concurrent modification.") from exc
         except Exception as exc:
             logger.exception("Failed to delete widget '%s'", name)
             raise HTTPException(status_code=500, detail="Failed to delete widget.") from exc
@@ -370,7 +373,8 @@ def test_update_widget():
 
 def test_delete_widget():
     mock_client = AsyncMock()
-    mock_client.delete.return_value = None
+    mock_client.get.return_value = _make_widget("w1")
+    mock_client.delete_by_id.return_value = None
     client = TestClient(_make_app(mock_client))
     resp = client.delete("/v2/workspaces/default/widgets/w1")
     assert resp.status_code == 204

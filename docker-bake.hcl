@@ -134,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "54eefb873b8eeab3b2e3395711a54691895b78ec" # soluwalana/RL nhx/rl-20261107
+  default = "f34b91df909e4d9f8fa2faec66ce95fb746a07fa" # soluwalana/RL nhx/rl-20261110
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -142,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "3c0a56ca13e155e72e1bc3f3808caf915c13ea28"
+  default = "43f85ee63c23b2cc8bc45da20bde6b9306facf3f"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
@@ -388,7 +388,8 @@ group "docker-cpu" {
 }
 
 # CI extension that adds the colocated Gym task smoke-test stage to docker-cpu.
-# The larger sandbox-host image has a dedicated Platform-Deploy build job.
+# The sandboxed Gym host is published here, not in docker-cpu, so local and
+# unpublished PR builds do not load it.
 group "docker-cpu-ci" {
   targets = [
     "docker-cpu",
@@ -396,6 +397,8 @@ group "docker-cpu-ci" {
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
+    "nhx-gym-host-docker",
+    "nhx-gym-host-smoke-test",
     "nhx-agent-hardener-tasks-smoke-test",
     "nhx-builder-tasks-docker",
     "nhx-builder-tasks-smoke-test",
@@ -1131,6 +1134,9 @@ target "nhx-safe-synthesizer-tasks-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES
@@ -1148,6 +1154,9 @@ target "nhx-safe-synthesizer-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-safe-synthesizer-tasks"
+  contexts = {
+    nhx-jobs-launcher = "target:nhx-jobs-launcher"
+  }
   args = {
     CONTAINER_VARIANT    = "${SAFE_SYNTHESIZER_CONTAINER_VARIANT}"
     NHX_COLLECT_SOURCES  = NHX_COLLECT_SOURCES

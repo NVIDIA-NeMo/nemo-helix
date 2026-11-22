@@ -128,7 +128,7 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
 };
 
 /** What a platform with the Switchyard plugin installed reports, beside the built-in strategy. */
-export const mockOptimizationStrategies: OptimizationStrategyList = {
+const mockOptimizationStrategies: OptimizationStrategyList = {
   data: [
     {
       name: 'config-tuning',

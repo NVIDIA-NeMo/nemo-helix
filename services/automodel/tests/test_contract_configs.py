@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -24,7 +25,13 @@ EMBEDDING_CONFIG_STEMS = {"embed_1b_lora", "embed_1b_full_sft"}
 def test_generate_configs_import_path() -> None:
     """generate_configs.py must import compile_automodel_config from backends.config."""
     text = GENERATE_SCRIPT.read_text()
-    assert "backends.config import compile_automodel_config" in text
+    imported = {
+        alias.name
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.ImportFrom) and node.module == "nhx.automodel.tasks.training.backends.config"
+        for alias in node.names
+    }
+    assert "compile_automodel_config" in imported
     assert "backends.automodel.config" not in text
 
 

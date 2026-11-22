@@ -545,6 +545,9 @@ Usage:
 nemo-common.podSecurityContext merges global podSecurityContext with component-specific podSecurityContext.
 Component values override global values.
 
+Set "globalIds" to true for components whose runAsUser/runAsGroup are chart defaults rather
+than user choices: an explicit global runAsUser/runAsGroup then wins over the component's value.
+
 Usage:
   {{ include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext) }}
 */}}
@@ -552,6 +555,13 @@ Usage:
 {{- $global := .global | default dict -}}
 {{- $local := .local | default dict -}}
 {{- $merged := mergeOverwrite (deepCopy $global) $local -}}
+{{- if .globalIds }}
+{{- range $key := list "runAsUser" "runAsGroup" }}
+{{- if hasKey $global $key }}
+{{- $_ := set $merged $key (get $global $key) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if $merged }}
 {{- toYaml $merged }}
 {{- end }}

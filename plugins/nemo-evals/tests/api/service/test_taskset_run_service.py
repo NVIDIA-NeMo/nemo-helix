@@ -284,8 +284,9 @@ async def test_snapshot_cleanup_requires_proven_precreate_failure(
     pinned, spec = await service._resolve(request, "default")
     snapshot = FilesetRef("agents/request-snapshot")
     files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    files_service.allocations[("agents", "request-snapshot")] = "snapshot-id"
     spec.target = HarborRunnerTarget(
-        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot, fileset_id="snapshot-id"),
         agent_kwargs={"fabric_config": {"name": "coder"}},
     )
     monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=(pinned, spec)))
@@ -533,6 +534,7 @@ async def test_get_counts_progress_from_every_member_page_without_jobs(
         "members": {"image_ready": 2, "registered": 3, "succeeded": 1, "failed": 1},
         "queued": 1,
         "task_jobs": {"active": 2, "pending": 1},
+        "trial_counts": None,
     }
 
 
@@ -630,11 +632,13 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
         {
             "task": "task-10",
             "task_index": 10,
+            "task_name": None,
             "phase": "failed",
             "job": "recorded-job-10",
             "job_status": "error",
             "error": "saved diagnostic",
             "publication": None,
+            "trial_counts": None,
         }
     ]
     assert result.pagination.model_dump() == {
@@ -722,8 +726,9 @@ async def test_a_refused_registered_agent_does_not_leave_its_files_snapshot(
     request = TasksetRunInput.model_validate(request_body)
     snapshot = FilesetRef("agents/request-snapshot")
     files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    files_service.allocations[("agents", "request-snapshot")] = "snapshot-id"
     target = HarborRunnerTarget(
-        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot, fileset_id="snapshot-id"),
         agent_kwargs={"fabric_config": {"name": "coder"}},
         closed_book=True,
     )

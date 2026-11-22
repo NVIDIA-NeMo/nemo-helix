@@ -157,6 +157,7 @@ async def get_adapter(
 
 @router.delete(
     "/v2/workspaces/{workspace}/adapters/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Adapter not found"}},
     summary="Delete Adapter",
     response_description="Delete adapter by name. The entity store delete uses the adapter's stored parent (entity `parent` field).",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -184,6 +185,7 @@ async def delete_adapter(
 
 @router.patch(
     "/v2/workspaces/{workspace}/adapters/{name}",
+    responses={404: {"model": ErrorResponse, "description": "Adapter not found"}},
     summary="Update Adapter",
     response_description="Update adapter metadata. Updates are applied to the row identified by the adapter's stored parent (entity `parent` field).",
     status_code=status.HTTP_200_OK,

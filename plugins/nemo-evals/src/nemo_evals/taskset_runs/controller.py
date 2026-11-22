@@ -52,6 +52,7 @@ from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
+from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.result_persistence import agent_eval_result_entity
 from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
@@ -81,6 +82,7 @@ from nemo_evals.taskset_runs.task_jobs import (
     runs_request,
     task_job_request,
 )
+from nemo_evals.taskset_runs.trials import TrialCounts, count_trials, reported_trials
 from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
@@ -145,9 +147,11 @@ class RunJobs(Protocol):
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse: ...
 
-    async def has_steps(self, name: str) -> bool:
-        """True when Job ``name``'s current attempt has at least one step."""
+    async def has_job_steps(self, job_id: str) -> bool:
+        """True when the selected Job has a step in any attempt."""
         ...
+
+    async def has_attempt_steps(self, job_id: str, attempt_id: str) -> bool: ...
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary: ...
 
@@ -229,8 +233,11 @@ class GuardedRunJobs:
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
         return await self._jobs_call(lambda: self._inner.create(request))
 
-    async def has_steps(self, name: str) -> bool:
-        return await self._jobs_call(lambda: self._inner.has_steps(name), read=True)
+    async def has_job_steps(self, job_id: str) -> bool:
+        return await self._jobs_call(lambda: self._inner.has_job_steps(job_id), read=True)
+
+    async def has_attempt_steps(self, job_id: str, attempt_id: str) -> bool:
+        return await self._jobs_call(lambda: self._inner.has_attempt_steps(job_id, attempt_id), read=True)
 
     async def cancel(self, name: str) -> None:
         await self._jobs_call(lambda: self._inner.cancel(name))
@@ -592,7 +599,9 @@ class TasksetRunReconciler:
         for index in range(len(plan.spec.tasks)):
             if index in have:
                 continue
-            created = await self.store.create_member(state.run, index, phase=phase)
+            created = await self.store.create_member(
+                state.run, index, plan.spec.tasks[index].id, planned_trials=_planned_trials(plan), phase=phase
+            )
             if created is None:
                 raise MemberListingIncompleteError(
                     f"run {state.run.name}: member task-{index} exists but wasn't listed"
@@ -748,7 +757,7 @@ class TasksetRunReconciler:
         jobs: RunJobs,
         stop: TasksetRunPhase | None,
     ) -> None:
-        """P4: settle a registered member whose Job ended; record a changed ``job_status`` otherwise.
+        """P4: settle a registered member whose Job ended; record a changed ``job_status`` or trial counts otherwise.
 
         ``job`` is what the run's Jobs list read under the member's name (None: no Job there). Ours only when its
         id is ``member.job_id``: Jobs deletes only ended Jobs, so another id under the name means ours ended and
@@ -758,7 +767,9 @@ class TasksetRunReconciler:
         try:
             job = _ours(job, member)
             status = _status(job) if job is not None else None
-            result = await jobs.result(member.task_job, DEFAULT_RESULT_NAME) if status == "completed" else None
+            result = (
+                await jobs.result(job.id, DEFAULT_RESULT_NAME) if job is not None and status == "completed" else None
+            )
         except Exception as exc:
             logger.debug("Run %s: reading Job %s failed: %s", state.run.name, member.task_job, exc)
             return  # keeps its slot and its last job_status
@@ -767,8 +778,9 @@ class TasksetRunReconciler:
             state.replace(await self.store.update_member(member, phase=phase, error="job_missing"))
         elif status not in TERMINAL_JOB_STATUSES:
             state.matched.add(member.name)
-            if job.status != member.job_status:
-                state.replace(await self.store.update_member(member, job_status=job.status))
+            counts = _trial_counts(job) or member.trial_counts
+            if job.status != member.job_status or counts != member.trial_counts:
+                state.replace(await self.store.update_member(member, job_status=job.status, trial_counts=counts))
         elif result is not None and result.job != member.job_id:
             # The name changed hands between the two reads; the next read sees the other id and settles it.
             logger.info("Run %s: Job %s was replaced before its result was read", state.run.name, member.task_job)
@@ -780,6 +792,7 @@ class TasksetRunReconciler:
                     bundle_ref=result.artifact_url,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
         else:
@@ -793,6 +806,7 @@ class TasksetRunReconciler:
                     error=error,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
 
@@ -840,8 +854,9 @@ class TasksetRunReconciler:
         """
         assert member.task_job is not None
         if member.name in state.matched and member.job_status is not HelixJobStatus.CANCELLING:
+            assert member.job_id is not None
             try:
-                await jobs.cancel(member.task_job)
+                await jobs.cancel(member.job_id)
             except Exception as exc:
                 logger.info("Run %s: cancelling Job %s failed: %s", state.run.name, member.task_job, exc)
         if forced:
@@ -934,7 +949,12 @@ class TasksetRunReconciler:
                 ended = f"{error}; its Job ended {_status(job)}"
                 state.replace(
                     await self.store.update_member(
-                        member, phase=phase, error=ended, job_status=job.status, publication=_publication(job)
+                        member,
+                        phase=phase,
+                        error=ended,
+                        job_status=job.status,
+                        publication=_publication(job),
+                        trial_counts=_trial_counts(job) or member.trial_counts,
                     )
                 )
                 return
@@ -962,7 +982,7 @@ class TasksetRunReconciler:
                     elif _status(job) in TERMINAL_JOB_STATUSES:
                         gone = True
                     else:
-                        gone = entry.sent_at is not None and conclusive and not await jobs.has_steps(entry.name)
+                        gone = entry.sent_at is not None and conclusive and not await jobs.has_job_steps(job.id)
             except Exception as exc:
                 logger.debug("Reading stuck Job %s/%s failed: %s", entry.workspace, entry.name, exc)
                 continue
@@ -1182,7 +1202,7 @@ async def finalize_run(
     if bundle is None or _status(bundle) not in TERMINAL_JOB_STATUSES:
         return PassOutcome("bundling", bundle.name if bundle else "")
     if _status(bundle) == "completed":
-        result = await jobs.result(bundle.name, DEFAULT_RESULT_NAME)
+        result = await jobs.result(bundle.id, DEFAULT_RESULT_NAME)
         if result is not None and result.job != bundle.id:
             # The name changed hands between the two reads; the next pass sees the other Job and refuses it.
             return PassOutcome("bundling", f"{bundle.name} was replaced before its result was read")
@@ -1269,7 +1289,7 @@ async def _miss_finalization(
             if bundle is None or _status(bundle) in TERMINAL_JOB_STATUSES:
                 continue
             await _own_bundle_job(bundle, run, plan, accepted)
-            await jobs.cancel(name)
+            await jobs.cancel(bundle.id)
         except ForeignBundleJobError as exc:
             logger.warning("Run %s: not cancelling: %s", run.name, exc)
         except Exception as exc:
@@ -1349,8 +1369,9 @@ async def _create_bundle_job(
     """Create bundle Job ``name``; return the Job now under that name, if Jobs shows one."""
     request = await _bundle_request(run, plan, accepted, name, finished_at)
     try:
-        await jobs.create(request)
+        created = await jobs.create(request)
         logger.info("Created bundle Job %s for run %s (%d tasks)", name, run.name, len(accepted))
+        return created
     except ConflictError:
         pass  # another pass created it, or someone else did; the caller checks
     return await jobs.get(name)
@@ -1361,7 +1382,7 @@ async def _stalled(job: HelixJobResponse, jobs: RunJobs, now: datetime) -> bool:
     return (
         _status(job) == "created"
         and now - _utc(job.created_at) >= timedelta(seconds=STALLED_CREATE_SECONDS)
-        and not await jobs.has_steps(job.name)
+        and (job.attempt_id is None or not await jobs.has_attempt_steps(job.id, job.attempt_id))
     )
 
 
@@ -1447,6 +1468,18 @@ def _publication(job: HelixJobResponse) -> PublicationOutcome | None:
         return None
 
 
+def _planned_trials(plan: TasksetRunPlan) -> int | None:
+    """Trials each task Job runs: one task, ``n_attempts`` times; None for a target that isn't a Harbor runner."""
+    target = plan.spec.target
+    return target.n_attempts if isinstance(target, HarborRunnerTarget) else None
+
+
+def _trial_counts(job: HelixJobResponse) -> TrialCounts | None:
+    """The Job's trials counted by phase, as it last reported them; None when it reported none we can read."""
+    trials = reported_trials(job.status_details)
+    return count_trials(trials) if trials else None
+
+
 class JobsServiceRunJobs:
     """:class:`RunJobs` over the platform: reads, cancels and records as the evals service; creates for the creator.
 
@@ -1503,9 +1536,22 @@ class JobsServiceRunJobs:
             raise RuntimeError("this Jobs adapter only reads")
         return (await self._creating_jobs.create_job(workspace=self._workspace, body=request)).data()
 
-    async def has_steps(self, name: str) -> bool:
-        response = await self._jobs.list_steps(workspace=self._workspace, name=name, query_params={"page_size": 1})
-        return bool(response.page().items)
+    async def has_job_steps(self, job_id: str) -> bool:
+        attempts = await self._jobs.list_job_attempts(workspace=self._workspace, job=job_id)
+        if attempts.http_response.status_code == 404:
+            return False
+        async for attempt in attempts.items():
+            if await self.has_attempt_steps(job_id, attempt.id):
+                return True
+        return False
+
+    async def has_attempt_steps(self, job_id: str, attempt_id: str) -> bool:
+        page = (
+            await self._jobs.list_attempt_steps(
+                workspace=self._workspace, job=job_id, attempt=attempt_id, query_params={"page_size": 1}
+            )
+        ).page()
+        return bool(page.items)
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary:
         import tempfile

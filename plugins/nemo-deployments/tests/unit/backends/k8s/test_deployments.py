@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -45,7 +46,13 @@ from nemo_deployments_plugin.entities import (
     EnvVar,
     SecretRef,
 )
-from nemo_helix_plugin.auth.workload_delegations import KUBERNETES_POD_UID_REFERENCE_NAME, WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_delegations import (
+    KUBERNETES_POD_UID_REFERENCE_NAME,
+    WorkloadDelegationAlreadyActiveError,
+    WorkloadDelegationConflictError,
+    WorkloadDelegationError,
+    WorkloadDelegationScope,
+)
 from nemo_helix_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
@@ -166,7 +173,7 @@ async def test_create_deployment_registers_live_pod_uid_workload_delegation(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     pod = live_pod(
         "pod-uid-1",
         owner_kind="ReplicaSet",
@@ -227,7 +234,7 @@ async def test_create_deployment_fails_when_workload_identity_auth_context_missi
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
 
     with patch(
         "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
@@ -259,7 +266,7 @@ async def test_reconcile_pod_uid_delegations_scopes_shared_workload_id_by_deploy
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
 
     with patch(
         "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
@@ -304,7 +311,7 @@ async def test_reconcile_pod_uid_delegations_scopes_shared_workload_id_by_deploy
         "shared-logical",
     ]
     assert delegations[0].name != delegations[1].name
-    workload_store.revoke.assert_not_awaited()
+    workload_store.revoke_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -315,7 +322,7 @@ async def test_create_deployment_ignores_spoofed_pod_uid_workload_delegation(
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     pod = live_pod(
         "pod-uid-1",
         owner_kind="ReplicaSet",
@@ -356,7 +363,7 @@ async def test_create_deployment_ignores_pod_with_matching_replicaset_name_wrong
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     pod = live_pod(
         "pod-uid-1",
         owner_kind="ReplicaSet",
@@ -398,7 +405,7 @@ async def test_create_deployment_ignores_matching_prefix_replicaset_not_owned_by
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     pod = live_pod(
         "pod-uid-1",
         owner_kind="ReplicaSet",
@@ -447,7 +454,7 @@ async def test_read_deployment_status_skips_workload_delegation_for_foreign_iden
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     foreign = mock_deployment()
     foreign.metadata.labels = {**always_identity_labels(), DEPLOYMENT_WORKSPACE_LABEL: "other-workspace"}
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = foreign
@@ -478,8 +485,9 @@ async def test_read_deployment_status_skips_workload_delegation_for_foreign_iden
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_revoked", [False, True])
 async def test_read_deployment_status_revokes_stale_pod_uid_workload_delegation(
-    deployment_ops_clients: MagicMock, mock_k8s_clients: MagicMock
+    deployment_ops_clients: MagicMock, mock_k8s_clients: MagicMock, legacy_revoked: bool
 ) -> None:
     config = with_workload_identity(sample_always_config())
     auth_context = workload_auth_context()
@@ -499,9 +507,12 @@ async def test_read_deployment_status_revokes_stale_pod_uid_workload_delegation(
         ttl_seconds_active=900,
     )
     workload_store = MagicMock()
+    stale._id = "stale-pod-grant"
+    if legacy_revoked:
+        stale.revoked_at = datetime.now(timezone.utc)
     workload_store.list_by_workload = AsyncMock(return_value=[stale])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment()
     mock_k8s_clients.apps_v1.list_namespaced_replica_set.return_value = MagicMock(items=[_deployment_replicaset()])
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
@@ -536,7 +547,7 @@ async def test_read_deployment_status_revokes_stale_pod_uid_workload_delegation(
 
     assert update.status != "FAILED"
     workload_store.register.assert_awaited_once()
-    workload_store.revoke.assert_awaited_once_with(stale.name)
+    workload_store.revoke_by_id.assert_awaited_once_with(stale.id)
 
 
 @pytest.mark.asyncio
@@ -561,10 +572,11 @@ async def test_read_deployment_status_refreshes_active_pod_uid_before_expiry(
         ttl_seconds_active=900,
     ).model_copy(update={"expires_at": datetime.now(timezone.utc) + timedelta(seconds=60)})
     workload_store = MagicMock()
+    active._id = "live-pod-grant"
     workload_store.list_by_workload = AsyncMock(return_value=[active])
     workload_store.register = AsyncMock()
-    workload_store.update = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.renew = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment()
     mock_k8s_clients.apps_v1.list_namespaced_replica_set.return_value = MagicMock(items=[_deployment_replicaset()])
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
@@ -599,14 +611,14 @@ async def test_read_deployment_status_refreshes_active_pod_uid_before_expiry(
 
     assert update.status != "FAILED"
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_not_awaited()
-    workload_store.update.assert_awaited_once()
-    await_args = workload_store.update.await_args
+    workload_store.revoke_by_id.assert_not_awaited()
+    workload_store.renew.assert_awaited_once()
+    await_args = workload_store.renew.await_args
     assert await_args is not None
-    refreshed = await_args.args[0]
-    assert refreshed.name == active.name
-    assert refreshed.expires_at > active.expires_at
-    assert await_args.kwargs == {"expected_db_version": active.db_version}
+    assert await_args.args == (active.id,)
+    assert await_args.kwargs["expires_at"] > active.expires_at
+    assert await_args.kwargs["expected_db_version"] == active.db_version
+    assert "opaque_subject_token_hash" not in await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -631,9 +643,10 @@ async def test_read_deployment_status_revokes_stale_pod_uid_when_pod_list_is_con
         ttl_seconds_active=900,
     )
     workload_store = MagicMock()
+    stale._id = "stale-pod-grant"
     workload_store.list_by_workload = AsyncMock(return_value=[stale])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment()
     mock_k8s_clients.apps_v1.list_namespaced_replica_set.return_value = MagicMock(items=[])
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(items=[])
@@ -659,7 +672,7 @@ async def test_read_deployment_status_revokes_stale_pod_uid_when_pod_list_is_con
 
     assert update.status != "FAILED"
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_awaited_once_with(stale.name)
+    workload_store.revoke_by_id.assert_awaited_once_with(stale.id)
 
 
 @pytest.mark.asyncio
@@ -684,9 +697,10 @@ async def test_read_deployment_status_keeps_delegation_when_pod_list_fails(
         ttl_seconds_active=900,
     )
     workload_store = MagicMock()
+    stale._id = "stale-pod-grant"
     workload_store.list_by_workload = AsyncMock(return_value=[stale])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment()
     mock_k8s_clients.core_v1.list_namespaced_pod.side_effect = RuntimeError("apiserver unavailable")
 
@@ -712,7 +726,7 @@ async def test_read_deployment_status_keeps_delegation_when_pod_list_fails(
     assert update.status != "FAILED"
     workload_store.list_by_workload.assert_not_awaited()
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_not_awaited()
+    workload_store.revoke_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -723,7 +737,7 @@ async def test_read_deployment_status_with_missing_auth_context_keeps_ready_stat
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment(ready_replicas=1)
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(items=[])
 
@@ -749,7 +763,7 @@ async def test_read_deployment_status_with_missing_auth_context_keeps_ready_stat
     assert update.status == "READY"
     workload_store.list_by_workload.assert_not_awaited()
     workload_store.register.assert_not_awaited()
-    workload_store.revoke.assert_not_awaited()
+    workload_store.revoke_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -760,7 +774,7 @@ async def test_read_deployment_status_ignores_wrong_service_account_pod_uid_work
     workload_store = MagicMock()
     workload_store.list_by_workload = AsyncMock(return_value=[])
     workload_store.register = AsyncMock()
-    workload_store.revoke = AsyncMock()
+    workload_store.revoke_by_id = AsyncMock()
     mock_k8s_clients.apps_v1.read_namespaced_deployment.return_value = mock_deployment()
     mock_k8s_clients.apps_v1.list_namespaced_replica_set.return_value = MagicMock(items=[_deployment_replicaset()])
     mock_k8s_clients.core_v1.list_namespaced_pod.return_value = MagicMock(
@@ -1275,3 +1289,83 @@ async def test_delete_deployment_orphan_when_entity_missing(
         workspace="default",
         deployment_name="task",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_active", [False, True])
+async def test_pod_registration_conflict_log_distinguishes_active_grant(already_active, caplog):
+    store = MagicMock()
+    store.list_by_workload = AsyncMock(return_value=[])
+    error = WorkloadDelegationAlreadyActiveError if already_active else WorkloadDelegationConflictError
+    store.register = AsyncMock(side_effect=error("registration conflict"))
+    caplog.set_level(logging.DEBUG, logger="nemo_deployments_plugin.backends.k8s.workload_identity")
+    with patch(
+        "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+        return_value=True,
+    ):
+        await reconcile_pod_uid_delegations(
+            store,
+            config=with_workload_identity(sample_always_config()),
+            auth_context=workload_auth_context(),
+            workspace="default",
+            deployment_name="task",
+            namespace="nemo-deployments",
+            k8s_config=None,
+            pods=[live_pod("pod-uid")],
+        )
+    records = [
+        record for record in caplog.records if record.name == "nemo_deployments_plugin.backends.k8s.workload_identity"
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == (logging.DEBUG if already_active else logging.WARNING)
+    assert records[0].__dict__["delegation_name"]
+
+
+@pytest.mark.asyncio
+async def test_stale_pod_cleanup_attempts_siblings_after_failure() -> None:
+    config = with_workload_identity(sample_always_config())
+    auth_context = workload_auth_context()
+    grants = []
+    for pod_uid in ("expired", "stale-active", "live"):
+        grant = build_kubernetes_pod_uid_workload_delegation(
+            scope=WorkloadDelegationScope(
+                workload_workspace="default",
+                workload_kind="agent_deployment",
+                workload_instance_id=deployment_key("default", "task"),
+            ),
+            workload_audience="nemo-helix",
+            workload_generation=pod_uid,
+            namespace="dep-ns",
+            service_account_name="default",
+            pod_uid=pod_uid,
+            auth_context=auth_context,
+            ttl_seconds_active=900,
+        )
+        grant._id = f"grant-{pod_uid}"
+        grants.append(grant)
+    grants[0].expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    store = MagicMock()
+    store.list_by_workload = AsyncMock(return_value=grants)
+    store.revoke_by_id = AsyncMock(side_effect=[RuntimeError("entity service unavailable"), None])
+    with (
+        patch(
+            "nemo_deployments_plugin.backends.workload_identity.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        pytest.raises(WorkloadDelegationError, match="Some stale Pod grants") as failure,
+    ):
+        await reconcile_pod_uid_delegations(
+            store,
+            config=config,
+            auth_context=auth_context,
+            workspace="default",
+            deployment_name="task",
+            namespace="dep-ns",
+            k8s_config=None,
+            pods=[live_pod("live")],
+        )
+    assert [entry.args[0] for entry in store.revoke_by_id.await_args_list] == [
+        "grant-expired",
+        "grant-stale-active",
+    ]
+    assert isinstance(failure.value.__cause__, ExceptionGroup)

@@ -21,9 +21,9 @@ mock_multi_permission_data := {
     },
     "endpoints": {
         "/apis/models/v2/workspaces/{workspace}/models/{name}": {
-            "get": {"permissions": ["models.read"]},
-            "patch": {"permissions": ["models.read", "models.update"]},
-            "delete": {"permissions": ["models.read", "models.update", "models.delete"]}
+            "get": {"direct": {"actor_perms": ["models.read"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read"]}},
+            "patch": {"direct": {"actor_perms": ["models.read", "models.update"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read", "models.update"]}},
+            "delete": {"direct": {"actor_perms": ["models.read", "models.update", "models.delete"]}, "delegated": {"actor_perms": [], "subject_perms": ["models.read", "models.update", "models.delete"]}}
         }
     },
     "workspaces": {
@@ -49,7 +49,7 @@ mock_multi_permission_data := {
 
 # Test: Single permission requirement (should still work)
 test_single_permission_required if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -64,7 +64,7 @@ test_single_permission_required if {
 
 # Test: Multiple permissions - user has all required permissions
 test_multiple_permissions_all_satisfied if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "partial-editor@test.com",
         "method": "PATCH",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -79,7 +79,7 @@ test_multiple_permissions_all_satisfied if {
 
 # Test: Multiple permissions - user missing one permission (should fail)
 test_multiple_permissions_missing_one if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "PATCH",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -94,7 +94,7 @@ test_multiple_permissions_missing_one if {
 
 # Test: Three permissions required - user has all
 test_three_permissions_all_satisfied if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "full-editor@test.com",
         "method": "DELETE",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -109,7 +109,7 @@ test_three_permissions_all_satisfied if {
 
 # Test: Three permissions required - user has only two (should fail)
 test_three_permissions_missing_one if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "partial-editor@test.com",
         "method": "DELETE",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -124,7 +124,7 @@ test_three_permissions_missing_one if {
 
 # Test: User missing a permission that they don't have in their role
 test_missing_delete_permission if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "DELETE",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -164,7 +164,7 @@ test_all_permissions_satisfied_empty if {
 
 # Test: Wildcard principal with multiple permissions (should work if all are in Viewer role)
 test_public_workspace_multiple_permissions if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "anyone@test.com",
         "method": "GET",
         "path": "/apis/models/v2/workspaces/public-ns/models/123"
@@ -183,7 +183,7 @@ test_public_workspace_multiple_permissions if {
 
 # Test for allow with multiple permissions
 test_allow_multiple_permissions if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "partial-editor@test.com",
         "method": "PATCH",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"
@@ -198,7 +198,7 @@ test_allow_multiple_permissions if {
 
 # Test for allow with missing permissions
 test_allow_missing_permissions if {
-    result := authz.allow with input as {
+    result := data.authz.allow with input as {
         "principal_id": "viewer@test.com",
         "method": "PATCH",
         "path": "/apis/models/v2/workspaces/test-ns/models/123"

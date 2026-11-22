@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
-import {
-  type AtifIngestRequest,
-  AtifIngestRequestSchemaVersion,
-} from '@nemo/sdk/generated/platform/schema';
+import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
+import { AtifIngestRequestSchemaVersion } from '@nemo/sdk/generated/platform/schema/AtifIngestRequestSchemaVersion';
 
 const SCHEMA_VERSIONS = new Set<string>(Object.values(AtifIngestRequestSchemaVersion));
 

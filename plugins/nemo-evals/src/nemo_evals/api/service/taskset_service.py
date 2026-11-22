@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, cast
 
 from nemo_evals.api.schemas import (
@@ -34,6 +34,7 @@ from nemo_evals.revisions import (
     RevisionNotFoundError,
     apply_tag,
     get_revision,
+    is_digest,
     list_revisions,
     publish_revision,
 )
@@ -68,6 +69,8 @@ class _TaskService(Protocol):
     async def get_task(self, workspace: str, name: str) -> object | None: ...
 
     async def resolve_revision(self, workspace: str, name: str, fragment: str = "latest") -> str: ...
+
+    async def resolve_pinned_revisions(self, workspace: str, pins: Sequence[tuple[str, str]]) -> None: ...
 
 
 class TaskRefNotFoundError(ValueError):
@@ -268,14 +271,50 @@ class TasksetService:
             return sorted(pinned, key=lambda ref: ref.root)
         self._reject_duplicate_members(taskset_input.tasks, workspace=workspace)
         limit = asyncio.Semaphore(_MEMBER_RESOLUTION_CONCURRENCY)
+        # Members already pinned to a digest need no resolution, only verification, which batches:
+        # a few queries per workspace instead of two round trips per member. The rest (bare and
+        # tag-pinned refs) resolve one by one, as a tag can only be read off its own task.
+        by_digest: dict[str, list[tuple[str, str]]] = {}
+        unpinned: list[TaskRef] = []
+        for ref in taskset_input.tasks:
+            ref_workspace, name, fragment = parse_subentity_ref(ref.root, workspace)
+            if fragment and is_digest(fragment):
+                by_digest.setdefault(ref_workspace, []).append((name, fragment))
+            else:
+                unpinned.append(ref)
+
+        async def _authorized(ref_workspace: str, name: str) -> None:
+            async with limit:
+                await self.authorize_task_read(ref_workspace, name)
 
         async def _bounded(ref: TaskRef) -> TaskRef:
             async with limit:
                 return await self._pin_member(ref, workspace=workspace)
 
-        pending = [asyncio.create_task(_bounded(ref)) for ref in taskset_input.tasks]
+        pending = [
+            asyncio.create_task(_authorized(ref_workspace, name))
+            for ref_workspace, pins in by_digest.items()
+            for name, _ in pins
+        ]
         try:
-            return sorted(await asyncio.gather(*pending), key=lambda ref: ref.root)
+            await asyncio.gather(*pending)
+        except BaseException:
+            for task in pending:
+                task.cancel()
+            raise
+        pinned: list[TaskRef] = []
+        for ref_workspace, pins in by_digest.items():
+            try:
+                await self.task_service.resolve_pinned_revisions(ref_workspace, pins)
+            except NemoEntityNotFoundError as exc:
+                raise TaskRefNotFoundError(f"Task reference not found in workspace '{ref_workspace}': {exc}") from exc
+            except RevisionNotFoundError as exc:
+                raise TaskRefNotFoundError(f"Task reference names no published revision: {exc}") from exc
+            pinned.extend(TaskRef(f"{ref_workspace}/{name}#{digest}") for name, digest in pins)
+
+        pending = [asyncio.create_task(_bounded(ref)) for ref in unpinned]
+        try:
+            return sorted([*pinned, *await asyncio.gather(*pending)], key=lambda ref: ref.root)
         except BaseException:
             # ``gather`` propagates the first failure but leaves its siblings running. One bad
             # member in a large grouping would otherwise keep issuing reads long after the request
@@ -323,9 +362,7 @@ class TasksetService:
             try:
                 # Only the head as we created it: a publisher whose create lost to ours may have
                 # published onto it since, and deleting by name alone would remove their taskset.
-                await self.entity_client.delete(
-                    TasksetEntity, name=name, workspace=workspace, expected_db_version=created_db_version
-                )
+                await self.entity_client.delete_by_id(TasksetEntity, created.id, expected_db_version=created_db_version)
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it
                 # would hide why the publish failed and leave the caller debugging the cleanup.
@@ -468,7 +505,10 @@ class TasksetService:
     async def delete_taskset(self, workspace: str, name: str) -> bool:
         """Delete a stored taskset; ``False`` if absent."""
         try:
-            await self.entity_client.delete(TasksetEntity, name=name, workspace=workspace)
+            _delete_target = await self.entity_client.get(TasksetEntity, name=name, workspace=workspace)
+            await self.entity_client.delete_by_id(
+                TasksetEntity, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError:
             return False
         logger.info(

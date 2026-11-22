@@ -9,7 +9,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from nemo_evals.api.dependencies import get_metric_service
+from nemo_evals.api.dependencies import get_metric_files_metadata_client, get_metric_service
 from nemo_evals.api.schemas import (
     Metric,
     MetricFilter,
@@ -23,8 +23,10 @@ from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricsDisab
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.client.errors import AuthenticationError, PermissionDeniedError
 from nemo_helix_plugin.entities import EntityValidationError
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page
@@ -176,11 +178,12 @@ async def delete_metric(
     workspace: str,
     name: str,
     service: MetricService = Depends(get_metric_service),
+    files_metadata_client: AsyncFilesClient = Depends(get_metric_files_metadata_client),
 ):
     """Delete a stored metric by workspace and name."""
     logger.info(f"Deleting metric: {sanitize_for_log(workspace)}/{sanitize_for_log(name)}")
     try:
-        deleted = await service.delete_metric(workspace, name)
+        deleted = await service.delete_metric(workspace, name, files_metadata_client=files_metadata_client)
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -189,6 +192,8 @@ async def delete_metric(
         return None
     except HTTPException:
         raise
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Fileset lookup access denied") from exc
     except NemoEntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."

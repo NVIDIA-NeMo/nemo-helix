@@ -102,6 +102,20 @@ def test_the_build_steps_profiles_and_config() -> None:
         assert profile.config.ttl_seconds_before_active == 60 * 60
     # Build pods run in another namespace, so the platform's URL must name its own.
     assert config["platform"]["base_url"] == "http://nemo-helix-api.nhx.svc:8080"
+    # Builder has nothing to set: the dev registry is off.
+    assert "builder" not in config
+
+
+def test_jobs_caps_the_builds_on_each_build_profile() -> None:
+    profiles = _profiles(_platform_config(_helm_template(*ENABLED, "--set", "builder.maxConcurrentBuilds=5")))
+    assert {name: profiles[name].config.max_active_jobs for name in BUILD_PROFILES} == dict.fromkeys(BUILD_PROFILES, 5)
+
+
+def test_no_cap_leaves_the_build_profiles_at_the_jobs_default() -> None:
+    values = {"builder": {"enabled": True, "maxConcurrentBuilds": None}}
+    profiles = _profiles(_platform_config(_helm_template(values=values)))
+    default = KubernetesJobExecutionProfile.model_validate({"profile": "x", "config": {}}).config.max_active_jobs
+    assert {profiles[name].config.max_active_jobs for name in BUILD_PROFILES} == {default}
 
 
 def test_a_users_profiles_keep_the_builders() -> None:
@@ -218,9 +232,51 @@ class TestWithOpenSandboxOnTheCluster:
         pytest.param(
             ("--set", "builder.limitRange.enabled=false"), "builder.resourceQuota needs builder.limitRange", id="quota"
         ),
+        # Without builder-settle, an image whose job ended stays pending in listings.
+        pytest.param(
+            ("--set", "core.controller.controllers={jobs}"),
+            "needs the builder-settle controller",
+            id="controllers-without-settle",
+        ),
+        pytest.param(
+            ("--set", "core.controller.controllerGroup=core"),
+            "needs the builder-settle controller",
+            id="a-group-without-settle",
+        ),
     ],
 )
 def test_what_the_chart_refuses(args: tuple[str, ...], refusal: str) -> None:
     with pytest.raises(subprocess.CalledProcessError) as refused:
         _helm_template(*ENABLED, *args)
     assert refusal in refused.value.stderr
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        pytest.param(["--controllers=jobs"], id="controllers"),
+        pytest.param(["--controllers", "jobs"], id="controllers-as-two-args"),
+        pytest.param(["--controller-group=core"], id="group"),
+    ],
+)
+def test_a_selection_in_extra_args_without_settle_is_refused_too(extra_args: list[str]) -> None:
+    """It replaces core.controller's own selection, so the chart reads it instead."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(values={"builder": {"enabled": True}, "core": {"controller": {"extraArgs": extra_args}}})
+    assert "needs the builder-settle controller" in refused.value.stderr
+
+
+@pytest.mark.parametrize(
+    "controller",
+    [
+        pytest.param({"controllers": ["jobs", "builder-settle"]}, id="controllers"),
+        pytest.param({"extraArgs": ["--controllers=jobs,builder-settle"]}, id="extra-args"),
+        pytest.param({"extraArgs": ["--controllers", "jobs, builder-settle"]}, id="extra-args-as-two-args"),
+        pytest.param({"extraArgs": ["--controller-group=all"]}, id="extra-args-group"),
+        # Deprecated: 0.10's name for builder-settle, which it runs.
+        pytest.param({"controllers": ["jobs", "builder-queue"]}, id="deprecated-name"),
+    ],
+)
+def test_a_selection_with_settle_renders(controller: dict) -> None:
+    documents = _helm_template(values={"builder": {"enabled": True}, "core": {"controller": controller}})
+    assert any(document.get("kind") == "Namespace" for document in documents)

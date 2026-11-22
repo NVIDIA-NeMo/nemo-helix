@@ -5,6 +5,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { useGuardrailsDeleteConfig } from '@nemo/sdk/generated/platform/guardrails';
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
+import { getDeleteGuardrailConfigsDescription } from '@studio/constants/guardrails';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { CreateGuardrailModal } from '@studio/routes/guardrails/CreateGuardrailModal';
 import { getGuardrailsRoute } from '@studio/routes/utils';
@@ -56,9 +57,9 @@ export const GuardrailDetailActions: FC<GuardrailDetailActionsProps> = ({ config
       {showDeleteModal ? (
         <DeleteConfirmationModal
           open
-          simpleConfirm
-          title={`Delete guardrail config: ${config.name}`}
-          successText="Guardrail config deleted successfully."
+          entity="guardrail config"
+          ids={[config.name ?? 'unnamed']}
+          description={getDeleteGuardrailConfigsDescription(1)}
           onDelete={handleDelete}
           onClose={() => setShowDeleteModal(false)}
         />

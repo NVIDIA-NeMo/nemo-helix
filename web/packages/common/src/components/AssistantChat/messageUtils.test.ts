@@ -5,6 +5,7 @@ import type { AppendMessage, ThreadMessageLike } from '@assistant-ui/react';
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
   getFailedReply,
+  getFailedReplyExplanation,
   getOpenAIMessages,
   getUserMessageContent,
   modelSupportsImageAttachments,
@@ -138,5 +139,29 @@ describe('getFailedReply', () => {
 
     expect(parts[0].text).toBe('There was an error generating a response.');
     expect(status).toMatchObject({ error: 'Something nobody mapped' });
+  });
+});
+
+describe('getFailedReplyExplanation', () => {
+  it('reads the explanation from a failed reply built by getFailedReply', () => {
+    const { parts } = getFailedReply('Something nobody mapped');
+
+    expect(getFailedReplyExplanation(parts)).toBe('There was an error generating a response.');
+  });
+
+  it('takes the last text part, after the partial answer and before trailing images', () => {
+    const parts = [
+      { type: 'text', text: '## Partial answer' },
+      { type: 'tool-call', toolCallId: 'call_a', toolName: 'search', args: {} },
+      { type: 'text', text: 'NeMo Assistant stopped before completing.' },
+      { type: 'image', image: DATA_URL },
+    ];
+
+    expect(getFailedReplyExplanation(parts)).toBe('NeMo Assistant stopped before completing.');
+  });
+
+  it('returns undefined when no text part has content', () => {
+    expect(getFailedReplyExplanation([{ type: 'text', text: '  ' }])).toBeUndefined();
+    expect(getFailedReplyExplanation([])).toBeUndefined();
   });
 });

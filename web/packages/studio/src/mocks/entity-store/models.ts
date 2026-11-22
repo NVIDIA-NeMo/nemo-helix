@@ -130,10 +130,6 @@ export const emptyModelEntitysPage: ModelEntitysPage = {
   data: [],
 };
 
-export const mixedModelEntitysPage: ModelEntitysPage = {
-  data: [entityStoreBaseModel1, entityStorePromptTunedModel1, entityStoreCustomizedModel1],
-};
-
 export const getEntityStoreLlmModels = (query?: ModelsListModelsParams) => {
   const models = [entityStoreBaseModel1, entityStorePromptTunedModel1, entityStoreCustomizedModel1];
 

@@ -52,6 +52,7 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
+from nemo_evals.taskset_runs.task_jobs import TaskJobDetails
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
@@ -181,6 +182,18 @@ class FakeEntityStore(EntityClient):
         entity._updated_at = self._now()
         self.entities[key] = entity.model_copy(deep=True)
         return entity.model_copy(deep=True)
+
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.entities.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return await self.delete(
+                    entity_type,
+                    entity.name,
+                    workspace=entity.workspace,
+                    parent=entity._parent,
+                    expected_db_version=expected_db_version,
+                )
+        raise NemoEntityNotFoundError(entity_id)
 
     async def delete(
         self,
@@ -454,13 +467,30 @@ def fake_preparer() -> FakePreparer:
 
 
 class FakeTaskJobs:
-    """In-memory ``TaskJobs``: ``subprocess_profiles`` are the profiles Jobs would run as host subprocesses."""
+    """In-memory ``TaskJobs``.
+
+    - ``subprocess_profiles``: the profiles Jobs would run as host subprocesses.
+    - ``details``: status details by Job name; a missing name is a missing Job.
+    - ``job_ids``: the id of the Job under a name. A name without one holds a Job whose id is the name, which no
+      member registered unless its ``job_id`` says so.
+    - ``failures``: what reading a Job's status details raises, by Job name.
+    """
 
     def __init__(self) -> None:
         self.subprocess_profiles: set[str] = set()
+        self.details: dict[str, dict[str, Any]] = {}
+        self.job_ids: dict[str, str] = {}
+        self.failures: dict[str, Exception] = {}
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         return profile in self.subprocess_profiles
+
+    async def job_details(self, workspace: str, name: str) -> TaskJobDetails | None:
+        if name in self.failures:
+            raise self.failures[name]
+        if name not in self.details:
+            return None
+        return TaskJobDetails(job_id=self.job_ids.get(name, name), status_details=self.details[name])
 
 
 def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT:

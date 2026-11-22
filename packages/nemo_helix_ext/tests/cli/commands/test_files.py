@@ -371,15 +371,21 @@ def test_filesets_update_from_input_data() -> None:
     assert json.loads(recorder.last.content) == {"custom_fields": {"a": 1}, "project": "p"}
 
 
-def test_filesets_delete() -> None:
-    recorder = Recorder([httpx.Response(200, json=FILESET)])
+@pytest.mark.parametrize("workspace", ["default", "custom-workspace"])
+def test_filesets_delete_by_name_needs_no_read(workspace: str) -> None:
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(403, json={"detail": "Read access denied"})
+        assert request.method == "DELETE"
+        return httpx.Response(200, json=FILESET)
+
+    recorder = Recorder(handler=handle_request)
     runner, state = make_runner(recorder)
 
-    result = runner.invoke(app, ["files", "filesets", "delete", "my-fileset"], obj=state)
+    result = runner.invoke(app, ["files", "filesets", "delete", "my-fileset", "--workspace", workspace], obj=state)
 
     assert result.exit_code == 0, result.output
-    assert recorder.last.method == "DELETE"
-    assert recorder.last.url.path == "/apis/files/v2/workspaces/default/filesets/my-fileset"
+    assert recorder.calls() == [("DELETE", f"/apis/files/v2/workspaces/{workspace}/filesets/my-fileset")]
     assert "Deleted successfully" in result.stdout
 
 
@@ -1060,3 +1066,24 @@ def test_otlp_logs_create_code_output() -> None:
     assert recorder.requests == []
     assert "client.upload_otlp_logs(" in result.stdout
     assert 'query_params={"artifact_base_path": "runs/1"}' in result.stdout
+
+
+def test_filesets_delete_by_id_needs_no_name_read() -> None:
+    recorder = Recorder([httpx.Response(200, json=FILESET)])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["files", "filesets", "delete", "--id", FILESET["id"]], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert len(recorder.requests) == 1
+    assert recorder.last.method == "DELETE"
+    assert recorder.last.url.path.endswith(f"/filesets/by-id/{FILESET['id']}")
+
+
+@pytest.mark.parametrize("arguments", [[], ["name", "--id", "allocation-id"]])
+def test_filesets_delete_requires_exactly_one_selector(arguments: list[str]) -> None:
+    recorder = Recorder([])
+    runner, state = make_runner(recorder)
+    result = runner.invoke(app, ["files", "filesets", "delete", *arguments], obj=state)
+    assert result.exit_code != 0
+    assert not recorder.requests

@@ -46,6 +46,7 @@ class FakeEntityClient:
     async def create(self, entity: CustomizationJobTemplate) -> CustomizationJobTemplate:
         if entity.name in self.entities:
             raise NemoEntityConflictError(entity.name)
+        entity._id = f"template-{len(self.entities)}"
         self.entities[entity.name] = entity
         return entity
 
@@ -59,6 +60,12 @@ class FakeEntityClient:
             raise self.update_error
         self.entities[entity.name] = entity
         return entity
+
+    async def delete_by_id(self, model, entity_id, *, expected_db_version=None):
+        for entity in self.entities.values():
+            if entity.id == entity_id:
+                return await self.delete(model, entity.name, entity.workspace)
+        raise NemoEntityNotFoundError(entity_id)
 
     async def delete(self, _model: Any, name: str, workspace: str) -> None:
         if self.delete_error is not None:
@@ -122,6 +129,15 @@ class TestCrud:
 
         assert res.status_code == 200
         assert entities.entities["t1"].description == "first"
+
+    def test_delete_conflict_is_409(self, client: TestClient, entities: FakeEntityClient) -> None:
+        client.post(BASE, json=body())
+        entities.delete_error = NemoEntityConflictError("changed")
+
+        response = client.delete(f"{BASE}/t1")
+
+        assert response.status_code == 409
+        assert "t1" in entities.entities
 
     def test_update_conflict_is_409(self, client: TestClient, entities: FakeEntityClient) -> None:
         client.post(BASE, json=body())

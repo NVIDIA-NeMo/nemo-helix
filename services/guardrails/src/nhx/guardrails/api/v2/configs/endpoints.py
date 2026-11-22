@@ -256,7 +256,7 @@ async def delete_config(
         )
 
     try:
-        await entities_client.delete(GuardrailConfig, config.name, workspace=workspace)
+        await entities_client.delete_by_id(GuardrailConfig, config.id, expected_db_version=config.db_version)
     except EntityNotFoundError:
         raise HTTPException(status_code=404, detail="Guardrail config not found.")
     except EntityConflictError as exc:

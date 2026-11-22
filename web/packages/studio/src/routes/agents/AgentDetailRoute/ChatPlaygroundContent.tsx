@@ -3,7 +3,8 @@
 
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Block } from '@nvidia/foundations-react-core';
+import { Banner, Block, Stack } from '@nvidia/foundations-react-core';
+import { useMcpStatus } from '@studio/api/agents/useMcpStatus';
 import { ModelChat } from '@studio/components/ModelChat';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
@@ -38,9 +39,13 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
 }) => {
   const chatDeployment = deployment?.status === 'running' ? deployment : undefined;
   const showBanner = !isDeploymentsLoading && !chatDeployment;
+  const { data: mcpStatus } = useMcpStatus(workspace, chatDeployment?.name);
+  const downServers = mcpStatus?.servers.filter(
+    ({ state }) => state === 'failed' || state === 'unresolved'
+  );
 
   return (
-    <div ref={chatAreaRef} className="flex flex-col h-full min-h-0">
+    <Stack ref={chatAreaRef} className="h-full min-h-0 w-full">
       {showBanner && (
         <Block padding="4" className="shrink-0">
           <NoHealthyDeploymentsBanner
@@ -57,6 +62,13 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
           />
         </Block>
       )}
+      {downServers?.length ? (
+        <Block padding="4" className="shrink-0 pb-0">
+          <Banner kind="inline" status="error" className="[overflow-wrap:anywhere]">
+            {`MCP ${downServers.length === 1 ? 'server' : 'servers'} ${downServers.map(({ name }) => name).join(', ')} failed to start. The agent runs without ${downServers.length === 1 ? 'its' : 'their'} tools.`}
+          </Banner>
+        </Block>
+      ) : null}
       <Block className="flex-1 min-h-0" padding="4">
         <ModelChat
           model={chatDeployment?.name ?? agentName ?? ''}
@@ -70,6 +82,6 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
           describeError={describeChatError}
         />
       </Block>
-    </div>
+    </Stack>
   );
 };

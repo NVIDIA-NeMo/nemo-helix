@@ -30,7 +30,7 @@ def test_sdk_run_uses_run_job_collection_path() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, str(request.url)))
-        return httpx.Response(200, json={"name": "anonymizer-run-1"})
+        return httpx.Response(200, json={"id": "platform-job-original", "name": "anonymizer-run-1"})
 
     platform = NemoClient(
         base_url="https://platform.test",

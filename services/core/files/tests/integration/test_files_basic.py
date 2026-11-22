@@ -196,6 +196,23 @@ class TestFilesBasic:
                     if fs.id in [local_fileset1.id, local_fileset2.id]:
                         assert fs.storage.type == "local"
 
+    def test_fileset_list_sort_by_storage_type(self, client: NemoClient, no_hf_network):
+        """Test listing filesets sorted by storage backend type in both directions."""
+        files = FilesClient.from_client(client)
+        with create_fileset(files) as local_fileset:
+            with create_fileset(files, storage={"type": "huggingface", "repo_id": "org/sort-test"}) as hf_fileset:
+                ours = {local_fileset.id, hf_fileset.id}
+
+                def listed_types(sort: str) -> list[str]:
+                    filesets = files.list_filesets(
+                        workspace=DEFAULT_WORKSPACE_ID,
+                        query_params={"sort": sort, "page_size": 100},
+                    ).items()
+                    return [fs.storage.type for fs in filesets if fs.id in ours]
+
+                assert listed_types("storage_type") == ["huggingface", "local"]
+                assert listed_types("-storage_type") == ["local", "huggingface"]
+
     def test_fileset_list_pagination(self, client: NemoClient):
         """Test listing filesets with pagination."""
         files = FilesClient.from_client(client)

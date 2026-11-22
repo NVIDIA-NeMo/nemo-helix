@@ -75,6 +75,10 @@ func serviceURLEnvName(service string) string {
 	return "NHX_" + normalized + "_URL"
 }
 
+type unixSocketTransport struct {
+	*http.Transport
+}
+
 func (e Endpoint) HTTPClient() *http.Client {
 	if e.Transport != TransportUDS {
 		return http.DefaultClient
@@ -84,5 +88,5 @@ func (e Endpoint) HTTPClient() *http.Client {
 			return (&net.Dialer{}).DialContext(ctx, "unix", e.SocketPath)
 		},
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: &unixSocketTransport{Transport: transport}}
 }

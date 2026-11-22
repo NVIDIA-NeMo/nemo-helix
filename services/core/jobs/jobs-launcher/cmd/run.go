@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,14 +18,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 	"github.com/spf13/cobra"
 )
 
 const secretFetchTimeout = 30 * time.Second
-
-const stepConfigFetchTimeout = 30 * time.Second
 
 // fetchStepConfig makes the launcher download the step config from the jobs API
 // before starting the workload. Runtimes with no way to place a file in the
@@ -81,9 +79,7 @@ func writeStepConfigFromAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("jobs endpoint is not configured (NHX_JOBS_URL or NHX_BASE_URL): %w", err)
 	}
-	httpClient := *endpoint.HTTPClient()
-	httpClient.Timeout = stepConfigFetchTimeout
-	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), &httpClient)
+	client := launcherSession(ctx).JobStepClient(endpoint, nhxclient.PrincipalFromEnv())
 
 	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
 	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
@@ -186,25 +182,7 @@ func parseSecretReferences(secretsEnv string) ([]secretReference, error) {
 	return result, nil
 }
 
-// fetchSecrets retrieves secrets using the NeMo Helix API client and returns them as environment variables
-func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
-}
-
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
-		secretRefs,
-	)
-}
-
-func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
-	httpClient := *endpoint.HTTPClient()
-	httpClient.Timeout = secretFetchTimeout
-	return &httpClient
-}
-
-func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithContext(ctx context.Context, client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
 	if len(secretRefs) == 0 {
 		return nil, nil
 	}
@@ -213,7 +191,7 @@ func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretRe
 
 	for _, ref := range secretRefs {
 		logger.Printf("Fetching secret %s from workspace %s...\n", ref.secretName, ref.workspace)
-		secret, err := client.GetSecret(ref.workspace, ref.secretName)
+		secret, err := client.GetSecret(ctx, ref.workspace, ref.secretName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch secret %s/%s: %w", ref.workspace, ref.secretName, err)
 		}
@@ -243,6 +221,7 @@ func workloadEnvFromParent() []string {
 // runExecWithStdin sets up OTEL and runs the specified command with stdin
 func runExecWithStdin(args []string) (exitCode int, err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx = withLauncherSession(ctx)
 	defer stop()
 
 	otelShutdown, _, err := setupOTELSDK(ctx)
@@ -259,6 +238,7 @@ func runExecWithStdin(args []string) (exitCode int, err error) {
 
 // runExec runs the specified command with arguments, injecting secrets as environment variables if specified
 func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, error) {
+	ctx = withLauncherSession(ctx)
 	// Command and arguments
 	cmdName := args[0]
 	cmdArgs := []string{}
@@ -298,7 +278,13 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			session := launcherSession(ctx)
+			if !session.BearerMode() && (principal == nil || principal.ID == "") {
+				return 1, fmt.Errorf("NHX_PRINCIPAL with a creator is required for trusted Secret injection")
+			}
+			fetchCtx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
+			secretEnvVars, err := fetchSecretsWithContext(fetchCtx, session.SecretClient(secretEndpoint, principal), secretRefs)
+			cancel()
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err
@@ -350,12 +336,13 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 	// Function to tail output
 	tailOutput := func(reader io.Reader, level slog.Level) {
 		defer wg.Done()
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
+		// Keep reading until EOF. A bufio.Scanner stops at its 64KB token limit,
+		// and then the child blocks writing to a pipe nobody drains. Progress bars
+		// redraw with \r and no \n, so they hit that limit.
+		forEachLogLine(reader, func(line string) {
 			fmt.Println(line)                                           // Print to console without any extra formatting, so it can be captured by stdout logging collectors
 			slog.Log(context.Background(), logLevel(line, level), line) // Submit structured log to OTEL pipeline within the platform
-		}
+		})
 	}
 
 	// Stream stdout and stderr concurrently
@@ -395,6 +382,97 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 
 	logger.Printf("Process completed successfully.")
 	return exitCode, nil
+}
+
+// maxLogLineBytes caps one emitted log line. A longer run of bytes with no
+// line break is split so the reader never stops and the child cannot block
+// on a full pipe.
+const maxLogLineBytes = 64 * 1024
+
+// forEachLogLine calls fn for each line from r until EOF or a read error.
+// It never stops early, so the child process cannot block on a full pipe.
+//
+// A bare \r discards the text before it when another snapshot follows, as a
+// progress bar redraw does. The text still pending at the next \n, or at EOF
+// when nothing follows the \r, is logged. \r\n is one break.
+func forEachLogLine(r io.Reader, fn func(line string)) {
+	br := bufio.NewReaderSize(r, 32*1024)
+	pending := make([]byte, 0, 256)
+	replaced := false
+	emit := func(line []byte) {
+		if replaced {
+			line = trimRightSpace(line)
+		}
+		fn(string(line))
+		pending = pending[:0]
+		replaced = false
+	}
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if len(pending) > 0 {
+				emit(pending)
+			}
+			return
+		}
+		switch b {
+		case '\n':
+			emit(pending)
+		case '\r':
+			next, readErr := br.ReadByte()
+			if readErr == nil && next == '\n' {
+				emit(pending)
+				continue
+			}
+			if readErr != nil {
+				// No later snapshot replaces this one. A program that finishes
+				// on a carriage return, with no newline, would otherwise lose
+				// its last line.
+				if len(pending) > 0 {
+					emit(pending)
+				}
+				return
+			}
+			_ = br.UnreadByte()
+			// The following snapshot overwrites this one. Keep reading so the
+			// pipe drains, and log whichever snapshot a newline leaves in place.
+			pending = pending[:0]
+			replaced = true
+		default:
+			pending = append(pending, b)
+			if len(pending) >= maxLogLineBytes {
+				cut := splitAtRuneBoundary(pending)
+				fn(string(pending[:cut]))
+				rest := append([]byte(nil), pending[cut:]...)
+				pending = append(pending[:0], rest...)
+				replaced = false
+			}
+		}
+	}
+}
+
+// trimRightSpace drops the trailing spaces a carriage-return progress bar
+// appends so the next snapshot covers the previous one.
+func trimRightSpace(line []byte) []byte {
+	end := len(line)
+	for end > 0 && line[end-1] == ' ' {
+		end--
+	}
+	return line[:end]
+}
+
+// splitAtRuneBoundary returns a cut index at or before len(line) that does
+// not divide a UTF-8 sequence. A 64KB cap falling inside a multibyte
+// character would otherwise show up as a replacement glyph in the log.
+func splitAtRuneBoundary(line []byte) int {
+	cut := len(line)
+	for i := 0; i < utf8.UTFMax && cut > 0; i++ {
+		if utf8.Valid(line[:cut]) {
+			return cut
+		}
+		cut--
+	}
+	return len(line)
 }
 
 // logLevel preserves an application's explicit textual level even when the

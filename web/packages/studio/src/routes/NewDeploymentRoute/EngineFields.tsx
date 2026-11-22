@@ -5,7 +5,7 @@
 
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { Engine } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 import {
   engineRequiresImage,
   type WizardFormValues,

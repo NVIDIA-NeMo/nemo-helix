@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DetailPageTab } from '@studio/components/Layouts/DetailPageLayout';
-import {
-  AGENT_OPTIMIZATIONS_ENABLED,
-  AGENT_OVERVIEW_ENABLED,
-  OPTIMIZER_ENABLED,
-} from '@studio/constants/environment';
+import { AGENT_OPTIMIZATIONS_ENABLED, OPTIMIZER_ENABLED } from '@studio/constants/environment';
 
 export const TAB_SEARCH_PARAM = 'tab';
 
@@ -33,7 +29,6 @@ const TAB_LABELS: Record<AgentDetailTab, string> = {
 };
 
 const TAB_ENABLED: Partial<Record<AgentDetailTab, boolean>> = {
-  overview: AGENT_OVERVIEW_ENABLED,
   insights: OPTIMIZER_ENABLED,
   optimizations: AGENT_OPTIMIZATIONS_ENABLED,
 };
@@ -48,7 +43,7 @@ export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
   'optimizations',
 ]);
 
-export const DEFAULT_TAB: AgentDetailTab = AGENT_OVERVIEW_ENABLED ? 'overview' : 'deployments';
+export const DEFAULT_TAB: AgentDetailTab = 'overview';
 
 /**
  * Opens a modal on arrival, for callers elsewhere in Studio that link to an action rather than

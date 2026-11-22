@@ -25,7 +25,6 @@
  *   - Cell values accessed by column id from each row object
  *   - When `rowActionsColumn({ rowActions })` is used, an Actions control opens a simple
  *     `role="menu"` with `role="menuitem"` entries (dividers skipped)
- *   - When `rowActionsColumn({ cell })` is used instead, that cell renders with `{ row: { original } }`
  */
 
 import React, { useMemo, useState } from 'react';

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import { LIST_POLL_MS, runPollInterval } from '@studio/api/useLatestAnalysisRun';
 import { mockAnalysisRunWithJob } from '@studio/mocks/handlers/insights';

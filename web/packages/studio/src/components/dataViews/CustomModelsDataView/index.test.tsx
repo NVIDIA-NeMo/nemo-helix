@@ -14,6 +14,7 @@ import {
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { getCustomizationJobListRoute } from '@studio/routes/utils';
+import { menuFor } from '@studio/tests/util/menuFor';
 import { renderRoute } from '@studio/tests/util/render';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -60,16 +61,6 @@ vi.mock('@nemo/common/src/components/DataView/StudioDataView', async () => {
   const { studioDataViewMock } = await import('@studio/tests/util');
   return studioDataViewMock();
 });
-
-const menuFor = (trigger: HTMLElement) => {
-  const menu = screen
-    .getAllByRole('menu')
-    .find(({ id }) => id === trigger.getAttribute('aria-controls'));
-  if (!menu) {
-    throw new Error('menu for trigger not found');
-  }
-  return menu;
-};
 
 describe('CustomModelsDataView', () => {
   it('renders the empty state when no models are available', async () => {
@@ -137,8 +128,10 @@ describe('CustomModelsDataView', () => {
     await user.click(within(menu).getByRole('menuitem', { name: 'Delete Adapter' }));
 
     // Confirm deletion in the modal
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Delete Adapter');
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(
+      await screen.findByRole('heading', { name: `Delete adapter '${adapterName}'?` })
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete Adapter' }));
 
     await waitFor(() => {
       expect(adapterDeleteHandler).toHaveBeenCalledWith(

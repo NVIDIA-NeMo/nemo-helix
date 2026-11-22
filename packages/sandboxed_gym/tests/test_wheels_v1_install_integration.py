@@ -10,7 +10,8 @@ Docker or an external image.
 
 from __future__ import annotations
 
-import importlib
+import importlib.machinery
+import importlib.util
 import subprocess
 import sys
 import zipfile
@@ -72,43 +73,43 @@ def test_real_wheel_is_importable_by_host_and_child(tmp_path: Path, isolated_gym
         str(work_dir),
     )
 
-    try:
-        # sys.path is updated for the already-running Gym host process.
-        installed = importlib.import_module(_PACKAGE_NAME)
-        assert installed.VALUE == _EXPECTED_VALUE
+    # The host's import path now leads to the installed wheel. Resolve it through that path
+    # (the fixture's copy of sys.path) rather than importing into this test process.
+    spec = importlib.machinery.PathFinder.find_spec(_PACKAGE_NAME, runtime._import_path())
+    assert spec is not None and spec.loader is not None
+    installed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installed)
+    assert installed.VALUE == _EXPECTED_VALUE
 
-        # Gym creates a separate environment for each server from that server's requirements file.
-        # Reproduce that uv install and prove it resolves the named requirement from the staged
-        # wheelhouse. Package-index fallback remains available for Gym's core dependencies.
-        requirements_path = work_dir / "requirements.txt"
-        requirements_path.write_text(f"{_PACKAGE_NAME}==1.0\n", encoding="utf-8")
-        server_install_dir = work_dir / "server-site-packages"
-        subprocess.run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--target",
-                str(server_install_dir),
-                "--requirements",
-                str(requirements_path),
-            ],
-            check=True,
-            env=runtime.os.environ.copy(),
-        )
+    # Gym creates a separate environment for each server from that server's requirements file.
+    # Reproduce that uv install and prove it resolves the named requirement from the staged
+    # wheelhouse. Package-index fallback remains available for Gym's core dependencies.
+    requirements_path = work_dir / "requirements.txt"
+    requirements_path.write_text(f"{_PACKAGE_NAME}==1.0\n", encoding="utf-8")
+    server_install_dir = work_dir / "server-site-packages"
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--target",
+            str(server_install_dir),
+            "--requirements",
+            str(requirements_path),
+        ],
+        check=True,
+        env=runtime.os.environ.copy(),
+    )
 
-        # Assert a child process can import from the independently installed server environment.
-        child_env = runtime.os.environ.copy()
-        child_env["PYTHONPATH"] = str(server_install_dir)
-        subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                f"import {_PACKAGE_NAME}; assert {_PACKAGE_NAME}.VALUE == {_EXPECTED_VALUE}",
-            ],
-            check=True,
-            env=child_env,
-        )
-    finally:
-        # Avoid leaking the temporary package through Python's process-global module cache.
-        sys.modules.pop(_PACKAGE_NAME, None)
+    # Assert a child process can import from the independently installed server environment.
+    child_env = runtime.os.environ.copy()
+    child_env["PYTHONPATH"] = str(server_install_dir)
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import {_PACKAGE_NAME}; assert {_PACKAGE_NAME}.VALUE == {_EXPECTED_VALUE}",
+        ],
+        check=True,
+        env=child_env,
+    )

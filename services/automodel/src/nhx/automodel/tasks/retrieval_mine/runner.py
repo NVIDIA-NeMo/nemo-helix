@@ -46,6 +46,7 @@ class RetrievalMineJobConfig(BaseModel):
     attn_implementation: str = "sdpa"
     add_bos_token: bool | None = True
     add_eos_token: bool | None = False
+    tokenizer_backend: Literal["nemo_wrapped_auto", "nemo_auto"] = "nemo_wrapped_auto"
     dist_backend: str = "nccl"
     dist_timeout_minutes: int = Field(default=30, ge=1)
     mining: RetrievalMiningOptions = Field(default_factory=RetrievalMiningOptions)
@@ -76,6 +77,9 @@ class RetrievalMineJobConfig(BaseModel):
             "attn_implementation": self.attn_implementation,
             "add_bos_token": self.add_bos_token,
             "add_eos_token": self.add_eos_token,
+            # The miner's only tokenizer switch: true skips Automodel's model-type tokenizer registry
+            # for the checkpoint's Hugging Face tokenizer ('nemo_wrapped_auto').
+            "tokenizer_force_default": self.tokenizer_backend == "nemo_wrapped_auto",
         }
         mining.update(self.mining.model_dump(exclude_none=True))
         return {

@@ -642,7 +642,7 @@ async def test_delete_deployment_marks_deleting(deployment_service, mock_entity_
     assert result is not None
     assert result.status == ModelDeploymentStatus.DELETING
     mock_entity_client.update.assert_called_once()
-    mock_entity_client.delete.assert_not_called()
+    mock_entity_client.delete_by_id.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -687,18 +687,15 @@ async def test_delete_deployment_already_deleted_hard_deletes(deployment_service
     )
 
     mock_entity_client.get.return_value = deleted_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act
     result = await deployment_service.delete_deployment("default", "test-deployment", version=1)
 
     # Assert
     assert result is None  # Returns None for hard delete
-    mock_entity_client.delete.assert_called_once_with(
-        ModelDeploymentEntity,
-        deleted_entity.name,
-        workspace="default",
-        expected_db_version=deleted_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelDeploymentEntity, deleted_entity.id, expected_db_version=deleted_entity.db_version
     )
 
 

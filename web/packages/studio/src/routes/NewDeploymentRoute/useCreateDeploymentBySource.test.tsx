@@ -9,7 +9,7 @@ import {
 } from '@nemo/sdk/generated/platform/model-deployment-configs';
 import { modelsCreateDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import { modelsCreateModel, modelsGetModel } from '@nemo/sdk/generated/platform/models';
-import { Engine } from '@nemo/sdk/generated/platform/schema';
+import { Engine } from '@nemo/sdk/generated/platform/schema/Engine';
 import {
   defaultWizardValues,
   WORKSPACE_PICKER_FILESET,

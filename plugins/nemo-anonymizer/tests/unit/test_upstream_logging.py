@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
@@ -69,12 +70,14 @@ def test_make_anonymizer_preserves_root_logging_when_upstream_clobbers_it(monkey
         monkeypatch.setattr(
             worker_module,
             "build_gliner_anonymizer",
-            lambda *, model_configs_yaml, dd_providers: ClobberingAnonymizer(
-                model_configs=model_configs_yaml, model_providers=dd_providers
+            lambda *, model_configs_yaml, dd_providers, artifact_path: ClobberingAnonymizer(
+                model_configs=model_configs_yaml, model_providers=dd_providers, artifact_path=artifact_path
             ),
         )
 
-        anonymizer = worker_module._make_anonymizer(model_configs_yaml="model_configs: []", dd_providers=None)
+        anonymizer = worker_module._make_anonymizer(
+            model_configs_yaml="model_configs: []", dd_providers=None, artifact_path=Path("unused")
+        )
 
         assert isinstance(anonymizer, ClobberingAnonymizer)
         assert root.handlers == [sentinel_handler]
