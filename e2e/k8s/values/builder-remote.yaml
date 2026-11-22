@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The builder's remote backend with a stand-in for a remote build service, for the Kind builder e2e
+# (e2e/test_builder_remote.py). Layer it last: on kind.yaml and on builder.yaml, which deploys the development
+# registry the stand-in "publishes" to. The test creates the ConfigMap the step's profile mounts.
+#
+# For a platform with auth off. With auth on and no workload token exchange, the builder refuses every remote build
+# unless builder.remote.allow_unverified_completion is set, and this file doesn't set it.
+
+platformConfig:
+  builder:
+    backend: remote
+    remote:
+      # The chart's development registry. A bare host and port: this setting takes no scheme.
+      registry: '{{ include "nemo-helix.builder.devRegistryName" . }}.{{ .Release.Namespace }}.svc.cluster.local:5000'
+      repository: e2e-remote/images
+      # The release's own step image, unchanged: the stand-in's program is mounted into it.
+      image: '{{ dig "platform" "image_registry" "nvcr.io/nvidia/nemo-helix" .Values.platformConfig }}/nhx-builder-tasks:{{ dig "platform" "image_tag" .Chart.AppVersion .Values.platformConfig }}'
+      command:
+        - python
+        - /opt/nhx-e2e-remote-step/remote_build_step.py
+      # Longer than the test holds a build and then waits for its cancelled row, so that row is not one that timed out.
+      build_timeout_seconds: 600
+  jobs:
+    # Replaces kind.yaml's list, as Helm replaces any list. The chart still appends its own build-* profiles.
+    executors:
+      - provider: cpu
+        profile: build-remote
+        backend: kubernetes_job
+        config:
+          # Written in full: a profile added here inherits nothing from executor_defaults.
+          # No namespace, so the step runs in the release namespace, where the test creates the ConfigMap.
+          service_account_name: '{{ include "nhx-core.jobsServiceAccountName" . }}'
+          launcher_image: '{{ include "nhx-core.image" . }}'
+          ttl_seconds_image_pull: 30
+          # At least build_timeout_seconds for the one image a set may hold, plus the builder's two-minute margin.
+          ttl_seconds_active: 900
+          # Keep a step's pod once it has succeeded, which Jobs otherwise deletes at once: its log is what the CI job
+          # collects when a test fails.
+          cleanup_completed_jobs_immediately: false
+          storage:
+            additional_volumes:
+              - name: remote-build-step
+                config_map:
+                  name: nhx-e2e-remote-build-step
+            additional_volume_mounts:
+              - name: remote-build-step
+                mount_path: /opt/nhx-e2e-remote-step
+                read_only: true
