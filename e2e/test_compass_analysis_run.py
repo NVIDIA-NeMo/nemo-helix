@@ -10,7 +10,7 @@ needs to execute analysis in an operator's shell.
 
 The Compass's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline
-Compass, the ``insights.analysis`` post-run action persists the change-set and saves
+Compass, the ``compass.save-insights`` post-run action persists the change-set and saves
 the report — not whether a real model reaches a good conclusion. Two seeded
 Intake traces pass through Compass's evidence streams and compilation,
 with deterministic Nooa model responses.
@@ -63,7 +63,7 @@ INSIGHT_DESCRIPTION = (
 )
 TRACE_REF = "trace-compass-analysis-run-e2e"
 TRACE_REFS = [f"{TRACE_REF}-1", f"{TRACE_REF}-2"]
-# Sent inline on the run so the whole ethos chain — request, harness settings,
+# Sent inline on the run so the whole ethos chain — request, run context,
 # adapter, prompt — is exercised by a real job. We can't assert this makes it
 # in to the model prompt here, but we at least ensure it isn't rejected anywhere
 # along the way.

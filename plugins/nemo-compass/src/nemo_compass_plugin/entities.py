@@ -114,7 +114,7 @@ class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
     )
     fast_model: str = Field(
         default="",
-        description="Workspace-qualified Model Entity the run used for context summarization.",
+        description="Workspace-qualified fast Model Entity the run used for part of its analysis.",
     )
 
 

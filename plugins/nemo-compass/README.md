@@ -12,8 +12,8 @@ NeMo Helix supplies authenticated trace and model access and stores the resultin
 
 Use a running NeMo Helix with Intake, Compass, Jobs, and a configured
 `agents.execute` runtime. The target agent must already have traces in Intake.
-Run `nemo setup` to select default and fast Platform models, or supply
-`--default-model` and `--fast-model` when submitting analysis.
+Run `nemo setup` to select default and fast Platform models, or name the
+models in each run's context.
 
 For Compass analysis, use **NVIDIA Nemotron 3.5 Super VL** instead of Nemotron
 3.5 Lightning 30B, which has known tool-calling failures. Selecting Nemotron 3.5
@@ -41,30 +41,32 @@ analysis code and `trace_ingest` loaders. Compass execution requires Python
 
 ## CLI
 
-Submit analysis through NeMo Helix. Replace `<run-name>` with the name
-returned by `create`:
+Compass is a plugin-managed agent type, `compass.analyst`. Each workspace has
+one Compass agent, and each analysis is an `agents.execute` job of it whose
+context names the agent to analyze. Replace `<job-name>` with the name
+`execute` prints:
 
 ```bash
-uv run nemo compass analysis-runs create --agent research-agent --workspace default --wait
-uv run nemo compass analysis-runs list --agent research-agent
-uv run nemo compass analysis-runs get "<run-name>"
+uv run nemo agents create compass.analyst                    # once per workspace
+uv run nemo agents execute --agent compass-analyst \
+  --spec '{"context": {"agent": "research-agent"}}'
+uv run nemo jobs watch "<job-name>"
+uv run nemo agents list-jobs --agent compass-analyst --filter '{"spec.subject": "research-agent"}'
 ```
 
-AnalysisRuns execute through `agents.execute`; the Compass plugin stores the
-resulting insights in NeMo Helix. `--wait` exits non-zero unless the job
-completes successfully. A run and its backing job share one name.
+The CLI fills the context's `default_model` and `fast_model` from `nemo setup`
+when you leave them out. Add `since` (an ISO-8601 timestamp) to set a lower
+time bound, or `evaluation_id` to select one evaluation. The job's
+`compass.save-insights` post-run action stores the resulting insights in
+NeMo Helix and saves an `analysis-report` result. `nemo jobs watch` exits
+non-zero unless the job completes successfully.
 
-`create` uses those configured models unless you pass `--default-model` and
-`--fast-model`. Add `--ethos ETHOS.md` to supply the agent's intended behavior,
-`--since <ISO-8601 timestamp>` to set a lower time bound, or
-`--evaluation-id <id>` to select one evaluation.
-
-Provide `--agent` and pass the workspace and Ethos explicitly when needed.
-`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
+Compass reads the analyzed agent's Ethos from `ETHOS.md` in its
+`<agent>-ethos` fileset, when it has one.
 
 ### Telemetry requirement
 
-The normalized `agent_name` on the agent's traces must match `--agent`.
+The normalized `agent_name` on the agent's traces must match the context's `agent`.
 For OTLP, set `gen_ai.agent.name` on every span. Intake also normalizes
 `llm.agent.name` and `agent.name`; ATIF maps its required `agent.name` automatically.
 
@@ -73,8 +75,8 @@ For OTLP, set `gen_ai.agent.name` on every span. Intake also normalizes
 Compass only files insights for tool failures that recur. A tool issue must
 appear in at least 3 independent cases, where a case is the evaluation test
 case name or, without one, the trace ID. A failure pattern must appear in at
-least 3 traces. Runs over a few sessions, such as runs scoped by `--since` or
-`--evaluation-id`, can find a real failure that is below these thresholds.
+least 3 traces. Runs over a few sessions, such as runs scoped by `since` or
+`evaluation_id`, can find a real failure that is below these thresholds.
 
 When that happens, the run summary says some observations did not meet the
 thresholds. The `analysis-report` result lists the closest ones (up to 5) and
@@ -96,7 +98,8 @@ uv run nemo compass analysis disable --agent research-agent
 `analysis enable` stores the effective default/fast model pair for scheduled
 jobs. The pair comes from `nemo setup`; pass `--default-model` and `--fast-model`
 (Model Entity refs such as `default/<model>`) to set it without `nemo setup`, or
-to override it. Re-run `enable` after changing the pair.
+to override it. Re-run `enable` after changing the pair. `enable` also
+creates the workspace's Compass agent when it has none.
 
 ## API and SDK
 
@@ -110,8 +113,6 @@ The plugin SDK is available as `client.compass`, including:
 
 - `client.compass.insights`
 - `client.compass.analysis_configs`
-- `client.compass.analysis_runs` — `create`, `list_runs`, `get`, and `wait`
-  (polls a run until its backing job is terminal)
 - `client.compass.analysis_run_statuses`
 
 ## Configuration
@@ -130,7 +131,6 @@ environment wins. All settings live under `analysis`, with the
 | — (see below) | `analysis.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
 | — (see below) | `analysis.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
 | — (see below) | `analysis.job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
-| — (see below) | `analysis.base_url` | unset | NeMo Helix base URL passed to Compass jobs. When unset, jobs use their active platform context. |
 
 ```bash
 export NEMO_COMPASS_ANALYSIS_FREQUENCY=weekly

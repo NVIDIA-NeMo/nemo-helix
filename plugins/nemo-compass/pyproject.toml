@@ -33,8 +33,11 @@ compass = "nemo_compass_plugin.service:CompassService"
 [project.entry-points."nemo.controllers"]
 compass-analysis = "nemo_compass_plugin.controller:CompassAnalysisController"
 
+[project.entry-points."nemo.agents.plugin-managed-agent-types"]
+"compass.analyst" = "nemo_compass_plugin.analyst:CompassAnalyst"
+
 [project.entry-points."nemo.agents.post_run_actions"]
-"insights.analysis" = "nemo_compass_plugin.post_run_actions:CompassAnalysisAction"
+"compass.save-insights" = "nemo_compass_plugin.post_run_actions:SaveInsightsAction"
 
 [project.entry-points."nemo.sdk"]
 compass = "nemo_compass_plugin.sdk:compass_sdk_resources"

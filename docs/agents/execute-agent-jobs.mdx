@@ -431,7 +431,7 @@ helix_registration:
     required: [since]
     additionalProperties: false
   default_input: Analyze recent runs.
-  post_run_actions: [insights.analysis]
+  post_run_actions: [compass.save-insights]
 # ...harnesses, models, and the rest of the agent config
 ```
 
@@ -449,7 +449,7 @@ helix_registration:
     "additionalProperties": false
   },
   "default_input": "Analyze recent runs.",
-  "post_run_actions": ["insights.analysis"]
+  "post_run_actions": ["compass.save-insights"]
 }
 ```
 

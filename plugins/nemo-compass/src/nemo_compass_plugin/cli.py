@@ -93,7 +93,7 @@ class CompassCLI(NemoCLI):
             fast_model: str | None = typer.Option(
                 None,
                 "--fast-model",
-                help="Model Entity ref for context summarization. Default: the configured fast model.",
+                help="Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.",
             ),
             output_format: EntityOutputFormatOption = None,
         ) -> None:
@@ -222,7 +222,7 @@ class CompassCLI(NemoCLI):
             fast_model: str | None = typer.Option(
                 None,
                 "--fast-model",
-                help="Model Entity ref for context summarization. Default: the configured fast model.",
+                help="Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.",
             ),
             since: str | None = typer.Option(
                 None,

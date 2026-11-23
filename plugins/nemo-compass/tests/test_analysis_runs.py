@@ -27,6 +27,7 @@ from nemo_compass_plugin.analysis_runs import (
     mint_analysis_run_name,
     submit_analysis_run,
 )
+from nemo_compass_plugin.analyst import CompassAnalyst
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage
@@ -257,80 +258,54 @@ def test_minted_run_names_are_unique() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _job_config(request: CreateAnalysisRunRequest) -> ExecuteAgentJobConfig:
+    return ExecuteAgentJobConfig.model_validate(build_execute_agent_job_config(request))
+
+
 def test_execute_job_config_validates_against_the_real_job_schema() -> None:
-    spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
-
-    config = ExecuteAgentJobConfig.model_validate(spec)
+    config = _job_config(_request())
 
     assert config.post_run_action is not None
-    assert config.post_run_action.kind == "insights.analysis"
+    assert config.post_run_action.kind == "compass.save-insights"
 
 
-def test_the_post_run_action_is_scoped_to_the_agent_and_workspace() -> None:
-    """The post-run action needs no run identity: nothing it writes is stamped with one."""
-    spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
-
-    config = ExecuteAgentJobConfig.model_validate(spec)
+def test_the_post_run_action_needs_no_config() -> None:
+    """The action reads the analyzed agent from the run's context, and saves in the job's workspace."""
+    config = _job_config(_request())
 
     assert config.post_run_action is not None
-    assert config.post_run_action.config == {
+    assert config.post_run_action.config == {}
+
+
+def test_compass_is_submitted_inline_with_the_types_config() -> None:
+    """The run is inline but in compass.analyst's shape, so the adapter has one code path."""
+    config = _job_config(_request())
+
+    assert isinstance(config.agent, AgentInline)
+    assert config.agent.config == CompassAnalyst.config(name="compass")
+    assert config.input == CompassAnalyst.default_input
+
+
+def test_the_run_context_is_the_prepared_compass_context() -> None:
+    request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123", ethos="# Ethos")
+
+    config = _job_config(request)
+
+    assert config.context == {
         "agent": "demo-agent",
-        "workspace": "team-a",
+        "default_model": DEFAULT_MODEL,
+        "fast_model": FAST_MODEL,
+        "ethos": "# Ethos",
+        "since": "2026-08-01T00:00:00Z",
+        "evaluation_id": "eval-123",
     }
+    assert CompassAnalyst.parse_context(config.context).since == datetime(2026, 8, 1, tzinfo=timezone.utc)
 
 
-def test_compass_is_submitted_inline_with_the_requested_models() -> None:
-    """There is no Compass Agent entity; the request composes one per run."""
-    spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
+def test_an_unscoped_request_omits_the_optional_context_keys() -> None:
+    config = _job_config(_request())
 
-    config = ExecuteAgentJobConfig.model_validate(spec)
-
-    assert isinstance(config.agent, AgentInline)
-    assert config.agent.config["models"]["default"]["model"] == DEFAULT_MODEL
-    assert config.agent.config["models"]["fast"]["model"] == FAST_MODEL
-    assert config.agent.config["harnesses"]["compass"]["settings"]["agent"] == "demo-agent"
-
-
-def test_read_scope_reaches_the_job_context_not_the_compass_settings() -> None:
-    request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
-
-    config = ExecuteAgentJobConfig.model_validate(
-        build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
-    )
-
-    assert config.context == {"since": "2026-08-01T00:00:00+00:00", "evaluation_id": "eval-123"}
-    assert isinstance(config.agent, AgentInline)
-    settings = config.agent.config["harnesses"]["compass"]["settings"]
-    assert not {"since", "evaluation_id", "workspace"} & set(settings)
-
-
-def test_an_unscoped_request_sends_an_empty_context() -> None:
-    config = ExecuteAgentJobConfig.model_validate(
-        build_execute_agent_job_config(_request(), workspace="default", run_name=RUN_NAME)
-    )
-
-    assert config.context == {}
-
-
-def test_ethos_is_inlined_into_the_compass_harness_settings() -> None:
-    """The Fabric adapter has no Files access to resolve an Ethos reference."""
-    request = _request(ethos="# Ethos\n\nBe careful.")
-
-    config = ExecuteAgentJobConfig.model_validate(
-        build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
-    )
-
-    assert isinstance(config.agent, AgentInline)
-    assert config.agent.config["harnesses"]["compass"]["settings"]["ethos"] == "# Ethos\n\nBe careful."
-
-
-def test_ethos_is_omitted_when_unset() -> None:
-    config = ExecuteAgentJobConfig.model_validate(
-        build_execute_agent_job_config(_request(), workspace="default", run_name=RUN_NAME)
-    )
-
-    assert isinstance(config.agent, AgentInline)
-    assert "ethos" not in config.agent.config["harnesses"]["compass"]["settings"]
+    assert config.context == {"agent": "demo-agent", "default_model": DEFAULT_MODEL, "fast_model": FAST_MODEL}
 
 
 @pytest.mark.parametrize("field", ["agent", "evaluation_id", "ethos", "default_model", "fast_model"])
@@ -346,29 +321,19 @@ def test_blank_settings_are_rejected(field: str, blank: str) -> None:
 def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_job() -> None:
     request = _request(agent="  demo-agent  ", evaluation_id="  eval-123\n", ethos="\n# Ethos\n")
 
-    config = ExecuteAgentJobConfig.model_validate(
-        build_execute_agent_job_config(request, workspace="team-a", run_name=RUN_NAME)
-    )
+    config = _job_config(request)
 
-    assert isinstance(config.agent, AgentInline)
-    settings = config.agent.config["harnesses"]["compass"]["settings"]
-    assert settings["agent"] == "demo-agent"
-    assert settings["ethos"] == "# Ethos"
+    assert config.context["agent"] == "demo-agent"
+    assert config.context["ethos"] == "# Ethos"
     assert config.context["evaluation_id"] == "eval-123"
-    assert config.post_run_action is not None
-    assert config.post_run_action.config["agent"] == "demo-agent"
 
 
 def test_execute_job_config_omits_timeout_when_unset() -> None:
-    spec = build_execute_agent_job_config(_request(), workspace="default", run_name=RUN_NAME)
-
-    assert "timeout_seconds" not in spec
+    assert "timeout_seconds" not in build_execute_agent_job_config(_request())
 
 
 def test_execute_job_config_carries_timeout_when_set() -> None:
-    spec = build_execute_agent_job_config(_request(timeout_seconds=120.0), workspace="default", run_name=RUN_NAME)
-
-    assert ExecuteAgentJobConfig.model_validate(spec).timeout_seconds == 120.0
+    assert _job_config(_request(timeout_seconds=120.0)).timeout_seconds == 120.0
 
 
 def test_model_refs_are_required() -> None:
@@ -419,7 +384,7 @@ async def test_on_demand_submission_uses_configured_job_profile(profile: str) ->
         clear_nemo_config_override(CompassConfig)
 
 
-async def test_scheduler_submission_preserves_name_profile_and_platform_url() -> None:
+async def test_a_named_submission_keeps_its_name_and_profile() -> None:
     jobs = _StubExecuteJobs()
     entities = _StubEntities()
     name = "opt-analyze-default-demo-20260918120000"
@@ -431,16 +396,11 @@ async def test_scheduler_submission_preserves_name_profile_and_platform_url() ->
         entity_client=_entities(entities),
         name=name,
         profile="cpu-cluster",
-        base_url="https://platform.example.com",
     )
 
     assert response.run.name == name
     assert jobs.requests[0].name == name
     assert jobs.requests[0].profile == "cpu-cluster"
-    config = ExecuteAgentJobConfig.model_validate(jobs.requests[0].spec)
-    assert isinstance(config.agent, AgentInline)
-    settings = next(iter(config.agent.config["harnesses"].values()))["settings"]
-    assert settings["base_url"] == "https://platform.example.com"
 
 
 async def test_the_run_captures_the_request_scope() -> None:

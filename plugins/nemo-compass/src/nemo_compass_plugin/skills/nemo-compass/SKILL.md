@@ -46,9 +46,24 @@ Compass reads telemetry; it cannot create it. Confirm all three:
   or the submission supplies explicit model references. The Platform must have
   Jobs and an `agents.execute` runtime available to execute the analysis.
 
-An `ETHOS.md` file is optional. It gives Compass the agent's intent,
-constraints, and success criteria. Code and traces don't contain that context.
-Without it, Compass can only judge an agent against itself.
+Compass runs as the workspace's Compass agent, `compass-analyst`. Check that it
+exists, and create it if it doesn't:
+
+```bash
+nemo agents get compass-analyst --workspace "<workspace>" || \
+  nemo agents create compass.analyst --workspace "<workspace>"
+```
+
+An Ethos is optional. It gives Compass the agent's intent, constraints, and
+success criteria. Code and traces don't contain that context. Without it,
+Compass can only judge an agent against itself. Compass reads it from
+`ETHOS.md` in the analyzed agent's `<agent-name>-ethos` fileset, so put it there
+before running:
+
+```bash
+nemo files filesets create "<agent-name>-ethos" --workspace "<workspace>" --exist-ok
+nemo files upload ETHOS.md "<agent-name>-ethos" --workspace "<workspace>"
+```
 
 ## What it produces
 
@@ -76,16 +91,18 @@ worth more than ten vague ones, so a run that files nothing is a valid outcome.
 Replace the quoted placeholders below with the target agent and workspace.
 
 ```bash
-nemo compass analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
+nemo agents execute --agent compass-analyst --workspace "<workspace>" \
+  --spec '{"context": {"agent": "<agent-name>"}}'
+nemo jobs watch "<job-name>" --workspace "<workspace>"
 ```
 
-Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
-an ISO-8601 lower time bound, or `--evaluation-id` to select an evaluation.
-The command submits an AnalysisRun backed by an `agents.execute` job. Expect
-several minutes. `--wait` exits non-zero unless the job completes successfully.
+`execute` prints the created job; pass its `name` to `nemo jobs watch`. Add
+`"since"` (an ISO-8601 lower time bound) or `"evaluation_id"` (to select an
+evaluation) to the context. Expect several minutes. `nemo jobs watch` exits
+non-zero unless the job completes successfully.
 
-The CLI supplies the configured default and fast models. Run `nemo setup` if
-they are missing, or pass `--default-model` and `--fast-model` explicitly.
+The CLI fills in the configured default and fast models. Run `nemo setup` if
+they are missing, or set `"default_model"` and `"fast_model"` in the context.
 
 ## Where Insights are stored
 
@@ -94,10 +111,11 @@ Stored insights appear in Studio's optimizer view for the workspace.
 
 ## Verify
 
-Replace the quoted placeholders with the submitted run name and workspace:
+Replace the quoted placeholders with the job name and workspace:
 
 ```bash
-nemo compass analysis-runs get "<run-name>" --workspace "<workspace>"
+nemo jobs get-status "<job-name>" --workspace "<workspace>"
+nemo jobs results download analysis-report --job "<job-name>" --workspace "<workspace>" -o analysis-report.txt
 ```
 
 Confirm the job completed and inspect its analysis report. A completed run may
@@ -120,8 +138,8 @@ printf 'header = "Authorization: Bearer %s"' "$(nemo auth token)" | curl --fail-
 ## When it finds nothing
 
 Besides a real "nothing worth filing", three things produce an empty result.
-Scoping: Compass reads only what `--agent` and `--workspace` together
-select, and `agent_name` is carried on agent-level spans, not on their model and
+Scoping: Compass reads only what the context's `agent` and the job's workspace
+together select, and `agent_name` is carried on agent-level spans, not on their model and
 tool children. Volume: too few traces looks the same as a healthy agent. And
 telemetry that captures only the shape of a run, spans without the inputs and
 outputs, leaves nothing to judge however many spans there are.
