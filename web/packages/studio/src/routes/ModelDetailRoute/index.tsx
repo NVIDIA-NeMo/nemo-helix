@@ -140,7 +140,11 @@ export const ModelDetailRoute: FC<ModelDetailRouteProps> = ({ parent = 'fine-tun
         title={name}
         slotBadges={
           <>
-            <DeploymentStatusBadge state={lineage.deployment} isAdapter={Boolean(adapter)} />
+            <DeploymentStatusBadge
+              state={lineage.deployment}
+              isAdapter={Boolean(adapter)}
+              hideUnknown
+            />
             {tags.map((tag) => (
               <Badge key={tag} kind="solid" color="gray">
                 {tag}
