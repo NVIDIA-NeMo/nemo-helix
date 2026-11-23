@@ -11,7 +11,6 @@ cannot ride into user-supplied environment code.
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1004,11 +1003,11 @@ async def test_a_platform_run_scores_each_reward_component_per_trial(
 
 def test_the_host_env_reaches_the_built_spec() -> None:
     from sandboxed_gym.host.models import BROKER_URL_ENV
-    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
 
     spec = built_host_spec(capable_plan(), target(env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared"}))
 
-    assert json.loads(spec.bootstrap_env[JOB_ENV_ENV_KEY])["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
+    assert decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
     assert spec.bootstrap_env[BROKER_URL_ENV] == "http://10.0.0.5:51234"
 
 
@@ -1018,13 +1017,13 @@ def test_the_jobs_variables_are_not_the_hosts_container_environment() -> None:
     A job's PATH or LD_PRELOAD there would choose what root executes before the host drops privileges,
     so the job's variables reach the host only inside one JSON variable it applies afterwards.
     """
-    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
 
     job_env = {"PATH": "/job/environment/bin", "LD_PRELOAD": "/job/environment/hook.so", "PYTHONPATH": "/x"}
     spec = built_host_spec(capable_plan(), target(env_vars=job_env))
 
     assert not set(job_env) & set(spec.bootstrap_env)
-    carried = json.loads(spec.bootstrap_env[JOB_ENV_ENV_KEY])
+    carried = decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])
     assert {name: carried[name] for name in job_env} == job_env
 
 
@@ -1032,6 +1031,16 @@ def test_a_job_environment_too_large_for_one_variable_is_refused_before_the_host
     """Past Linux's 128 KiB limit on one environment string, the container could not start at all."""
     with pytest.raises(ValueError, match="the Gym host accepts at most"):
         built_host_spec(capable_plan(), target(env_vars={"A": "x" * 70_000, "B": "y" * 70_000}))
+
+
+def test_the_jobs_variables_pass_kubernetes_variable_expansion_unchanged() -> None:
+    """Kubernetes expands $(NAME) in a container's variables; inside one JSON string that could corrupt it."""
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY, decode_job_env
+
+    spec = built_host_spec(capable_plan(), target(env_vars={"PROMPT": 'say "$(NHX_GYM_GLOBAL_CONFIG)"'}))
+
+    assert "$(" not in spec.bootstrap_env[JOB_ENV_ENV_KEY]
+    assert decode_job_env(spec.bootstrap_env[JOB_ENV_ENV_KEY])["PROMPT"] == 'say "$(NHX_GYM_GLOBAL_CONFIG)"'
 
 
 def test_a_job_cannot_name_the_variable_that_carries_its_environment() -> None:

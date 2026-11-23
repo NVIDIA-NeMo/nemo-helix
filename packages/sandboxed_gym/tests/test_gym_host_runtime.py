@@ -2267,7 +2267,7 @@ def test_the_jobs_variables_apply_only_after_the_privileged_setup(monkeypatch):
     Output capture starts after the job's variables are applied, since it masks the secret values it finds then.
     """
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, json.dumps({"PATH": "/job/environment/bin"}))
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, runtime.encode_job_env({"PATH": "/job/environment/bin"}))
 
     seen = _run_main_recording(monkeypatch, setup=lambda: True)
 
@@ -2281,7 +2281,7 @@ def test_the_jobs_variables_apply_only_after_the_privileged_setup(monkeypatch):
 
 def test_a_failed_setup_never_applies_the_jobs_variables(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, json.dumps({"PATH": "/job/environment/bin"}))
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, runtime.encode_job_env({"PATH": "/job/environment/bin"}))
 
     def _fail() -> bool:
         raise RuntimeError("needs a Kata sandbox")
@@ -2297,8 +2297,23 @@ def test_a_failed_setup_never_applies_the_jobs_variables(monkeypatch):
 
 @pytest.mark.parametrize("payload", ["[1]", '{"A": 1}', "not json"])
 def test_a_malformed_job_environment_fails_the_bootstrap(payload):
+    import base64
+
     with pytest.raises(ValueError):
-        runtime._apply_job_env(payload, {})
+        runtime._apply_job_env(base64.b64encode(payload.encode()).decode(), {}, [])
+    with pytest.raises(ValueError):
+        runtime._apply_job_env("not base64 !", {}, [])
+
+
+def test_a_jobs_pythonpath_reaches_the_isolated_hosts_import_path():
+    """The host starts with python -I, which ignores PYTHONPATH; the job's entries are added when applied."""
+    environ: dict[str, str] = {}
+    import_path = ["/opt/gym-host-venv/lib"]
+
+    runtime._apply_job_env(runtime.encode_job_env({"PYTHONPATH": f"/job/a{os.pathsep}/job/b"}), environ, import_path)
+
+    assert environ["PYTHONPATH"] == f"/job/a{os.pathsep}/job/b"
+    assert import_path == ["/job/a", "/job/b", "/opt/gym-host-venv/lib"]
 
 
 def test_captured_output_masks_secret_env_values(monkeypatch):

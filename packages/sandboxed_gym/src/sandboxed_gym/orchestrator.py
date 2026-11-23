@@ -45,6 +45,7 @@ from sandboxed_gym.runtime.gym_host_runtime import (
     JOB_ENV_ENV_KEY,
     REUSE_IMAGE_GYM_INSTALL_ENV_KEY,
     UV_OFFLINE_ENV_KEY,
+    encode_job_env,
 )
 from sandboxed_gym.serve_config import (
     SandboxedGymServeConfig,
@@ -273,18 +274,18 @@ def build_gym_host_spec(
         # them through the same checks (reserved names, OpenSandbox credentials).
         extra={**cfg.host_env, **bootstrap_extra},
     )
-    # The job's variables then leave the container's environment for one JSON variable, which the host
+    # The job's variables then leave the container's environment for one encoded variable, which the host
     # applies only after its privileged setup. As the container's environment they would reach every
     # process that starts as root first: a job's PATH or LD_PRELOAD would choose what root runs.
     if JOB_ENV_ENV_KEY in cfg.host_env:
         raise ValueError(f"the job's environment must not set {JOB_ENV_ENV_KEY}; the platform uses it")
     job_env = {name: bootstrap_env.pop(name) for name in cfg.host_env if name not in bootstrap_extra}
     if job_env:
-        encoded = json.dumps(job_env, sort_keys=True)
+        encoded = encode_job_env(job_env)
         # Linux caps one environment string at 128 KiB (MAX_ARG_STRLEN); past it the container can't start at all.
-        if len(f"{JOB_ENV_ENV_KEY}={encoded}".encode()) > _JOB_ENV_MAX_BYTES:
+        if len(JOB_ENV_ENV_KEY) + 1 + len(encoded) > _JOB_ENV_MAX_BYTES:
             raise ValueError(
-                f"the job's environment variables total {len(encoded.encode())} bytes as JSON; "
+                f"the job's environment variables take {len(encoded)} bytes encoded; "
                 f"the Gym host accepts at most {_JOB_ENV_MAX_BYTES - len(JOB_ENV_ENV_KEY) - 1}"
             )
         bootstrap_env[JOB_ENV_ENV_KEY] = encoded

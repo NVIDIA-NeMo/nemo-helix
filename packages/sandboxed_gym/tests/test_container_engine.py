@@ -54,12 +54,20 @@ class _Host:
         monkeypatch.setattr(container_engine, "setgroups", lambda groups: self.calls.append(("setgroups", groups)))
         monkeypatch.setattr(container_engine, "setgid", lambda gid: self.calls.append(("setgid", gid)))
         monkeypatch.setattr(container_engine, "setuid", self._setuid)
-        monkeypatch.setattr(container_engine, "chown", lambda path, uid, gid, **_: self.calls.append(("chown", path)))
+        monkeypatch.setattr(container_engine, "chown", self._chown)
         monkeypatch.setattr(
             container_engine,
             "getpwnam",
             lambda name: SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_dir=f"/home/{name}"),
         )
+
+    def _chown(self, target: int | str, uid: int, gid: int, **kwargs: object) -> None:
+        # A directory arrives as its open descriptor; an entry as a name relative to one.
+        if isinstance(target, int):
+            self.calls.append(("chown", ("dir", os.stat(target).st_ino)))
+        else:
+            assert kwargs == {"dir_fd": kwargs["dir_fd"], "follow_symlinks": False}
+            self.calls.append(("chown", ("entry", target)))
 
     def _setuid(self, uid: int) -> None:
         self.calls.append(("setuid", uid))
@@ -107,10 +115,10 @@ def test_setup_runs_then_the_host_drops_to_the_container_user(monkeypatch: pytes
     names = [name for name, _ in host.calls]
     assert names[0] == "run" and host.calls[0][1] == [container_engine.SETUP_SCRIPT]
     # The work tree is handed over before the uid changes, and the groups go before the uid.
-    assert {path for name, path in host.calls if name == "chown"} == {
-        host.work,
-        os.path.join(host.work, "nested"),
-        os.path.join(host.work, "nested", "file"),
+    assert {target for name, target in host.calls if name == "chown"} == {
+        ("dir", host.work.stat().st_ino),
+        ("dir", (host.work / "nested").stat().st_ino),
+        ("entry", "file"),
     }
     assert names[-4:] == ["setgroups", "setgid", "setuid", "prctl"]
     # Non-dumpable after the uid change, whatever fs.suid_dumpable says.
@@ -132,6 +140,24 @@ def test_sys_admin_without_a_container_engine_is_refused(monkeypatch: pytest.Mon
     with pytest.raises(RuntimeError, match="SYS_ADMIN but no container engine"):
         host.prepare({})
     assert host.calls == []
+
+
+def test_the_workspace_handover_does_not_follow_links_out_of_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An earlier attempt could leave links in the workspace; root must not change ownership through them."""
+    host = _Host(monkeypatch, tmp_path)
+    outside = tmp_path / "outside"
+    (outside / "inner").mkdir(parents=True)
+    (outside / "inner" / "secret").write_text("x")
+    (host.work / "to-dir").symlink_to(outside / "inner")
+    (host.work / "to-file").symlink_to(outside / "inner" / "secret")
+
+    host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)})
+
+    chowned = {target for name, target in host.calls if name == "chown"}
+    assert ("dir", (outside / "inner").stat().st_ino) not in chowned
+    assert ("entry", "secret") not in chowned
 
 
 def test_a_non_kata_sandbox_is_refused_before_any_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

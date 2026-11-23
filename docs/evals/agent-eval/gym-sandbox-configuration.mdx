@@ -143,7 +143,8 @@ OpenSandbox credentials remain in the trusted Evaluator task. The Gym host recei
 tokens and the environment variables required by its selected Gym components.
 
 Each Gym host and episode sandbox also gets its own execd access token. execd, the command server in
-every OpenSandbox sandbox, then refuses any request without it, including requests through the
+every OpenSandbox sandbox, then refuses any request without it (execd v1.0.15 or later; an older execd
+ignores the token), including requests through the
 OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, the
 Evaluator task that created it holds the token, and like the job's `env_secrets` values it appears in
 the sandbox's pod spec, so anyone allowed to read pods in the sandbox namespace can read it. The Gym
@@ -238,7 +239,9 @@ to every container.
 The image's setup needs `SYS_ADMIN`, which only a Kata VM contains. Point the platform at an
 OpenSandbox server that creates every sandbox with a Kata runtime class: the `bootstrap.execd.isolation`
 extension grants `SYS_ADMIN` when the sandbox is created, before anything in it runs. The Gym host also
-checks for a Kata VM and fails the job instead of running the setup anywhere else.
+checks for a Kata VM and fails the job instead of running the setup anywhere else. The server's
+execd image must be v1.0.15 or later: execd keeps root, and only from that release does it require
+the per-sandbox token described under credentials.
 
 After setup, the Gym servers run as an unprivileged user with no capabilities, an empty capability
 bounding set and `no_new_privs`, so no setuid program in the image can give capabilities back. The
