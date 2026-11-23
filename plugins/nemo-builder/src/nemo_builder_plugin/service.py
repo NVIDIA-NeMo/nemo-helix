@@ -154,6 +154,18 @@ def _without_input(error: ErrorDetails) -> str:
     return message
 
 
+def _unreadable(exc: ValueError) -> str:
+    """What kind of error kept the section from being read, for the log, and which setting it names, if any.
+
+    Never the error's own sentence. A parser's quotes what it stopped at, and the configuration file holds every
+    section's settings: a value there may be a credential.
+    """
+    kinds = [type(error).__name__ for error in (exc, exc.__cause__) if error is not None]
+    # Only a name the builder gave a setting is repeated, where the error quotes one: which variable wasn't JSON.
+    named = [name for name in BuilderConfig.model_fields if f'"{name}"' in str(exc)]
+    return ", caused by ".join(kinds) + (f", for {', '.join(named)}" if named else "")
+
+
 def _load_config() -> BuilderConfig:
     try:
         return BuilderConfig.get()
@@ -172,14 +184,21 @@ def _load_config() -> BuilderConfig:
             + ("invalid value" if error["type"] in ("value_error", "assertion_error") else error["msg"])
             for error in errors
         )
-        raise BackendRejectedError(
-            f"the builder's configuration is invalid ({problems}); the API log says more"
-        ) from exc
+        refusal = BackendRejectedError(f"the builder's configuration is invalid ({problems}); the API log says more")
     except ValueError as exc:
         # Not a setting that fails its check, but a section that can't be read at all: `builder:` left empty, or
-        # an environment variable that isn't the JSON it must be. The message may quote what it couldn't read.
-        logger.error("the builder's configuration can't be read: %s", sanitize_for_log(str(exc)))
-        raise BackendRejectedError("the builder's configuration can't be read; the API log says why") from exc
+        # an environment variable that isn't the JSON it must be. The error's own sentence may quote what it
+        # couldn't read, so the log is given its kind instead.
+        logger.error(
+            "the builder's configuration can't be read (%s): the configuration file must be a YAML mapping with a "
+            "mapping under `builder`, and a NEMO_BUILDER_* variable that holds a list or a section must be JSON",
+            _unreadable(exc),
+        )
+        refusal = BackendRejectedError("the builder's configuration can't be read; the API log says why")
+    # Raised out here, where no error is being handled, so it carries none as its cause or its context. A caller
+    # may log the refusal with its traceback, as completing an image does, and the error under it would be
+    # printed there: a validation error's own text repeats each value it refused.
+    raise refusal
 
 
 #: ``image`` as it stands once settled: failed if its job abandoned it.

@@ -17,6 +17,7 @@ driver logs for an image, and nothing a submitter chooses is logged with a line 
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -108,6 +109,11 @@ MAX_LINK_STEPS = 100 * MAX_UNPACKED_ENTRIES
 MAX_LINK_PATH_CHARS = 2 * 4096
 #: What takes a credential's place in a text.
 REDACTED = "[credential]"
+#: Fails where a mark that is already in a text has begun and not yet ended, at each place in it. What is taken
+#: out of a text never ends there: the rest of the mark would be left beside the new one, as text.
+_NOT_IN_A_MARK = "".join(
+    f"(?!(?<={re.escape(REDACTED[:at])}){re.escape(REDACTED[at:])})" for at in range(1, len(REDACTED))
+)
 #: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this. By itself, it
 #: is the name of the context's own ignore file, which a builder reads for a Dockerfile that has none.
 _IGNORE_SUFFIX = ".dockerignore"
@@ -447,7 +453,8 @@ def stage_context(context: Path, dockerfile: str, *, into: Path | None = None) -
     ignore, staged_ignore = named.with_name(named.name + _IGNORE_SUFFIX), context / (ROOT_DOCKERFILE + _IGNORE_SUFFIX)
     if moved and staged_ignore.is_dir() and not staged_ignore.is_symlink():
         raise ImageFailed(f"the build context has a directory named {staged_ignore.name} at its root")
-    has_ignore = ignore.is_file()
+    # Not the path's own `is_file`: the name is the Dockerfile's with more added, and may be one no file can have.
+    has_ignore = _is_file(ignore)
     #: Each ignore file to write at the root, with the file whose content it gets.
     brought: dict[Path, Path] = {}
     if has_ignore and not (
@@ -535,6 +542,32 @@ def _dockerfile(context: Path, dockerfile: str) -> Path:
     if source is None or context not in source.parents:
         raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
     return source
+
+
+def _is_file(path: Path) -> bool:
+    """Whether ``path`` leads to a file, where a name too long for its directory is the name of no file.
+
+    For a path made by adding to a name a submitter chose, as a Dockerfile's own ignore file is looked for.
+    Asked of the system, so the answer is the same on any Python: a path's own ``is_file`` raises for what
+    the system refuses outright before Python 3.14, and takes all of it for no file from then on. Neither
+    is right here. A name longer than its directory holds is the name of no file: a Dockerfile named that
+    close to the limit has no ignore file of its own, and is built with the context's. A path that is too
+    long as a whole, though each of its names fits, may still lead to a file, which a builder that reads
+    from the context's root would find: taken for missing, the Dockerfile would be staged without its
+    ignore file. So that is raised, with whatever else the system refuses, and fails the image.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+            # Nothing is there, or a link that leads nowhere: as a path's own `is_file` has it on any Python.
+            return False
+        if exc.errno == errno.ENAMETOOLONG:
+            # The longest name the directory holds. Less than none where the system sets no limit.
+            longest = os.pathconf(path.parent, "PC_NAME_MAX")
+            if 0 <= longest < len(os.fsencode(path.name)):
+                return False
+        raise
 
 
 def _rewrite(context: Path, rewritten: Mapping[str, str]) -> None:
@@ -759,6 +792,11 @@ def _links(context: Path, follower: _Follower) -> _Links:
     #: counts it once. Counted for each name, a source that was let through could be refused here.
     counted: set[tuple[int, int]] = set()
     for directory, directories, files in os.walk(context):
+        # In the order of their names, which is then the order the walk takes them in. A file with more
+        # than one name is counted in the first directory the walk comes to that holds one, and a walk
+        # that follows links may come to one such directory more often than to another. A directory lists
+        # its entries in no promised order: by that, one context came to more on one disk than on another.
+        directories.sort()
         here = Path(directory)
         on = links.ways.setdefault(here, [])
         #: What the directory holds with each link to a file counted as the file, and of that, its own files.
@@ -838,7 +876,8 @@ def _kept_inside(root: Path, link: Path, follower: _Follower) -> str | None:
     Such a link leads inside the context only while the context is where it is, under the name it has. It
     becomes the way from its own directory to what its path names, with the links on the way there followed
     and that one not, should it be a link too: it still names the link it named. Where what it names is
-    beside the context, a link there that leads back in, it becomes the way to where that leads.
+    beside the context, a link there that leads back in, it becomes the way to where that leads. A path
+    that ends in a separator leads only to a directory, and is rewritten to end in one.
 
     One that leads nowhere is rewritten too, to where its path comes to. If that is out of the context, a
     path through a loop of links that climbs out after it, the context is refused: nothing says where such
@@ -856,7 +895,10 @@ def _kept_inside(root: Path, link: Path, follower: _Follower) -> str | None:
         to = follower.end(directory, link.name)
     if not _inside(context, to):
         raise _leads_out(link.relative_to(root).as_posix())
-    return os.path.relpath(to, directory)
+    rewritten = os.path.relpath(to, directory)
+    # A path that ends in a separator, or in `.` after one, leads to a directory or to nothing. Written
+    # without it, a link that led nowhere, for ending at a file, would lead to that file.
+    return rewritten + os.sep if written.rpartition(os.sep)[2] in ("", os.curdir) else rewritten
 
 
 def _stays_inside(root: str, directory: str, written: str, follower: _Follower) -> bool:
@@ -936,7 +978,8 @@ def _call(
     With ``at_the_deadline``, a wait that would pass the deadline is cut to end on it, and the call is made once
     more there: right for a read of a build that is running, which costs nothing and may find it done. Without,
     the call is given up as soon as its next try would come too late: right for a start, which would only be
-    cancelled.
+    cancelled. It is given up after a wait as well, if the wait ended at the deadline or past it: a sleep ends
+    no sooner than it was asked to, and on a busy node it ends later.
     """
     failures = waits = 0
     # Once a try has failed for no stated reason, the call may have happened: whoever gives it up is told so.
@@ -979,6 +1022,11 @@ def _call(
         wait = min(wait, remaining)
         logger.warning("%s failed (%s); trying again in %.0fs", what, _quoted(str(failure)), wait)
         clock.sleep(wait)
+        # The wait fitted when it began, and may have ended late. A stop is said first, as before any try.
+        if not at_the_deadline and clock.monotonic() >= deadline and not cancelled():
+            raise ImageFailed(
+                f"{what}: {failure}; the build timeout passed before it could be tried again", maybe_called=lost
+            ) from failure
 
 
 def _cancel(service: RemoteBuildService, build_id: str, *, clock: Clock) -> bool:
@@ -1141,7 +1189,9 @@ def _complete(
 ) -> ContainerImage:
     """Complete the row, trying for :data:`COMPLETION_SECONDS` while the builder can't be reached.
 
-    The image is built and published, and only this call is left; completing is safe to repeat.
+    The image is built and published, and only this call is left; completing is safe to repeat. The first try
+    is made even when the job has been told to stop. No other is made once it has: a pod told to stop has
+    seconds, and one try may take them all.
     """
     deadline = clock.monotonic() + COMPLETION_SECONDS
     waits = 0
@@ -1162,6 +1212,9 @@ def _complete(
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
         logger.warning("completing %s failed (%s); trying again in %.0fs", image, _quoted(failure), wait)
         clock.sleep(wait)
+        if cancelled():
+            # The stop cut the wait short. As before the wait, no other try is made.
+            raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
 
 
 def _build_one(
@@ -1337,16 +1390,26 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
 
     def longest_first(texts: set[str]) -> list[str]:
         # So that one form is never left as the remains of another.
-        return [re.escape(text) for text in sorted(texts - {""}, key=len, reverse=True)]
+        return sorted(texts - {""}, key=len, reverse=True)
 
-    # The whole secret before any one line of it: as it may be written, then as any URL holds it, since encoders
-    # differ in which characters they leave alone. Tried the other way round, a line would be taken out of the
-    # middle of the whole, and the rest left.
-    found = re.compile("|".join([*longest_first(forms), _in_a_url(secret), *longest_first(parts)]))
+    def ways(*, with_the_mark: bool) -> list[str]:
+        # The whole secret before any one line of it: as it may be written, then as any URL holds it, since
+        # encoders differ in which characters they leave alone. Tried the other way round, a line would be
+        # taken out of the middle of the whole, and the rest left.
+        written = [re.escape(form) for form in longest_first(forms) if (REDACTED in form) is with_the_mark]
+        in_a_url = [_in_a_url(secret)] if (REDACTED in secret) is with_the_mark else []
+        one_line = [re.escape(part) for part in longest_first(parts) if (REDACTED in part) is with_the_mark]
+        return [*written, *in_a_url, *one_line]
+
+    # A mark that is already in the text is found too, and its own text takes its place. So it is read past
+    # whole, and what it stands for is not read again: a short credential may be part of the mark itself.
+    # Before it come the ways of writing a secret that themselves hold the mark's text. Those are found only
+    # with the marks in them: read between the marks alone, such a secret was passed on whole.
+    tried = [*ways(with_the_mark=True), re.escape(REDACTED), *ways(with_the_mark=False)]
+    found = re.compile(f"(?:{'|'.join(tried)}){_NOT_IN_A_MARK}")
 
     def redact(text: str) -> str:
-        # What is already taken out is not read again: a short credential may be part of the mark itself.
-        return REDACTED.join(found.sub(REDACTED, part) for part in text.split(REDACTED))
+        return found.sub(REDACTED, text)
 
     return redact
 

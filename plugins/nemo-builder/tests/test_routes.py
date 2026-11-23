@@ -131,6 +131,22 @@ def _empty_page() -> MagicMock:
     return page
 
 
+def _logged(caplog: pytest.LogCaptureFixture) -> str:
+    """All that the captured records say or carry: each line with its traceback, as a handler writes them, and
+    every error under a logged one, by cause or by context, whether or not a formatter would print it."""
+    said = [caplog.text]
+    for record in caplog.records:
+        pending: list[BaseException | None] = [record.exc_info[1]] if record.exc_info else []
+        seen: set[int] = set()
+        while pending:
+            error = pending.pop()
+            if error is not None and id(error) not in seen:
+                seen.add(id(error))
+                said.append(f"{type(error).__name__}: {error}")
+                pending += [error.__cause__, error.__context__]
+    return "\n".join(said)
+
+
 class TestListingOneJobsImages:
     def test_a_job_and_a_status_filter_on_the_stored_fields(self) -> None:
         entities = AsyncMock()
@@ -351,6 +367,22 @@ class TestComplete:
         assert response.status_code == 422
         entities.update.assert_not_awaited()
 
+    @pytest.mark.parametrize("blank", [" ", "\t", "  \n "], ids=["a-space", "a-tab", "spaces-and-a-line-break"])
+    def test_a_remote_build_named_by_nothing_but_spaces_is_a_409(self, blank: str) -> None:
+        """It passes the field's own check, which refuses only an empty name, and names no build all the same."""
+        body = {"digest": DIGEST, "external": {"image_id": "img-1", "build_id": blank}}
+        response, entities = self._post(_row(backend="remote"), body=body)
+        assert response.status_code == 409
+        assert "its completion must name the build" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+
+    def test_a_remote_builds_name_is_recorded_as_it_was_sent(self) -> None:
+        """An ID is the service's own: one with spaces in it, or around it, is not trimmed."""
+        body = {"digest": DIGEST, "external": {"build_id": " build 1 "}}
+        response, entities = self._post(_row(backend="remote"), body=body)
+        assert (response.status_code, response.json()["external"]["build_id"]) == (200, " build 1 ")
+        entities.update.assert_awaited_once()
+
     def test_an_image_this_cluster_built_has_no_handle(self) -> None:
         response, _ = self._post(_row())
         assert response.json()["external"] is None
@@ -394,6 +426,27 @@ class TestComplete:
         row.runtime_config = ImageRuntimeConfig(entrypoint=["/altered"], user="")
         body = {"digest": DIGEST, "runtime_config": {"entrypoint": ["/bin/app"], "user": ""}}
         response, entities = self._post(row, body=body)
+        assert response.status_code == 409
+        assert "another runtime configuration" in response.json()["detail"]
+        entities.update.assert_not_awaited()
+
+    def test_a_repeat_that_names_only_the_digest_of_an_image_built_here_returns_it(self) -> None:
+        """A client that sends only the digest says nothing of how the image starts: it is returned the row
+        with what the push step recorded, as it was before a repeat was compared with the row."""
+        row = _row("ready", DIGEST)
+        row.runtime_config = ImageRuntimeConfig(entrypoint=["/bin/app"], user="")
+        response, entities = self._post(row)
+        assert (response.status_code, response.json()["runtime_config"]["entrypoint"]) == (200, ["/bin/app"])
+        entities.update.assert_not_awaited()
+        # A null is the same as leaving it out: a push step sends one for a config it could not read.
+        response, entities = self._post(row, body={"digest": DIGEST, "runtime_config": None})
+        assert response.status_code == 200
+        entities.update.assert_not_awaited()
+        # An image a build service built is still held to all of it, none included.
+        remote_row = _row("ready", DIGEST, backend="remote")
+        remote_row.external = ExternalImage(build_id="build-1")
+        remote_row.runtime_config = ImageRuntimeConfig(entrypoint=["/bin/app"], user="")
+        response, entities = self._post(remote_row, body={"digest": DIGEST, "external": {"build_id": "build-1"}})
         assert response.status_code == 409
         assert "another runtime configuration" in response.json()["detail"]
         entities.update.assert_not_awaited()
@@ -1032,6 +1085,51 @@ class TestWhichJobIsCalling:
         assert TestClient(app).post(f"{IMAGE}/complete", json=body).status_code == answer
 
     @pytest.mark.parametrize(
+        ("settings", "logged"),
+        [
+            (
+                {"remote": {"registry": "bot:t0ken@registry.example.com/team"}},
+                "remote.registry: Value error, remote.registry must be a host, optionally with a port",
+            ),
+            (
+                {"remote": {"repository": "bot:t0ken@registry.example.com/team"}},
+                "remote.repository: Value error, invalid repository path: <the value>",
+            ),
+            (
+                {"import_registries": ["ghcr.io", "bot:t0ken@registry.example.com"]},
+                "import_registries: Value error, import_registries must be registry hosts",
+            ),
+            ({"remote": {"credential": "t0ken-of-the-service"}}, "remote.credential: Extra inputs are not permitted"),
+        ],
+        ids=["a-registry-with-a-login", "a-check-that-quotes-it", "one-of-a-list", "under-a-key-that-is-no-setting"],
+    )
+    def test_a_completion_that_finds_a_setting_invalid_logs_no_value_it_refused(
+        self,
+        settings: dict[str, Any],
+        logged: str,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The route logs why it could not tell who is calling, with the error's traceback. The refusal it logs
+        has no validation error under it: that error's own text repeats each value it refused."""
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate(settings)
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        with pytest.raises(ValidationError, match="t0ken"):
+            BuilderConfig.get()
+        app = _app(_entities(_row(backend="remote")), SERVICE_STEP)
+        del app.dependency_overrides[get_allow_unverified]
+        body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
+        response = TestClient(app).post(f"{IMAGE}/complete", json=body)
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Couldn't check which job the caller is a step of; try again."
+        assert f"the builder's configuration is invalid: {logged}" in caplog.text
+        assert "could not tell which job is completing ws-a/build-1-0" in caplog.text
+        assert "t0ken" not in _logged(caplog) and "t0ken" not in response.text
+
+    @pytest.mark.parametrize(
         ("exchange", "answer"),
         [(lambda: True, 200), (lambda: False, 403), (_asked(WorkloadIdentityConfigError("unreadable")), 503)],
         ids=["on", "off", "unreadable"],
@@ -1482,8 +1580,88 @@ class TestSubmitting:
         assert response.status_code == 409
         assert response.json()["code"] == "backend_rejected"
         assert response.json()["detail"] == "the builder's configuration can't be read; the API log says why"
-        assert "hunter2" not in response.text
-        assert "must be a mapping" in caplog.text
+        # The log says what kind of error it was. Not the error's own sentence, which here quotes what it read.
+        assert "the builder's configuration can't be read (ValueError): " in caplog.text
+        assert "got 'hunter2'" not in caplog.text
+        assert "hunter2" not in _logged(caplog) and "hunter2" not in response.text
+
+    @pytest.mark.parametrize(
+        ("written", "sentence", "kind"),
+        [
+            ("builder:\n", "Settings for service 'builder' must be a mapping.", "ValueError"),
+            (
+                "builder:\n  registry_password_secret: *t0ken-typed-here\n",
+                "found undefined alias 't0ken-typed-here'",
+                "ValueError, caused by ComposerError",
+            ),
+        ],
+        ids=["a-section-left-empty", "a-file-that-is-not-yaml"],
+    )
+    def test_a_file_that_cant_be_read_is_logged_by_the_kind_of_error(
+        self,
+        written: str,
+        sentence: str,
+        kind: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Through the platform's own loader. Its sentence for a file that is not YAML is the parser's, which
+        quotes the name it stopped at: here a value written with a leading `*`."""
+        path = tmp_path / "config.yaml"
+        path.write_text(written)
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return Configuration.get_service_config_from_file(str(path), cls)
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        with pytest.raises(ValueError) as unread:
+            BuilderConfig.get()
+        assert sentence in str(unread.value)
+        response = self._post(monkeypatch)
+        assert (response.status_code, response.json()["code"]) == (409, "backend_rejected")
+        assert response.json()["detail"] == "the builder's configuration can't be read; the API log says why"
+        assert f"the builder's configuration can't be read ({kind}): " in caplog.text
+        assert sentence not in _logged(caplog) and "t0ken" not in _logged(caplog)
+        assert "t0ken" not in response.text
+
+    def test_a_variable_that_is_not_json_is_logged_by_the_setting_it_is_for(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """From the environment a section is one JSON value. One that isn't is named, and not repeated."""
+        monkeypatch.setenv("NEMO_BUILDER_REMOTE", '{"registry": "bot:t0ken@registry.example.com"')
+
+        def get(cls: type[BuilderConfig]) -> BuilderConfig:
+            return cls()
+
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+        response = self._post(monkeypatch)
+        assert (response.status_code, response.json()["code"]) == (409, "backend_rejected")
+        assert response.json()["detail"] == "the builder's configuration can't be read; the API log says why"
+        assert (
+            "the builder's configuration can't be read (SettingsError, caused by JSONDecodeError, for remote): "
+            in caplog.text
+        )
+        assert "t0ken" not in _logged(caplog) and "t0ken" not in response.text
+
+    def test_the_refusal_carries_no_error_under_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Whatever logs the refusal with its traceback would print an error under it too, and a validation
+        error's own text repeats each value it refused."""
+
+        def invalid(cls: type[BuilderConfig]) -> BuilderConfig:
+            return BuilderConfig.model_validate({"remote": {"registry": "bot:t0ken@registry.example.com/team"}})
+
+        def unreadable(cls: type[BuilderConfig]) -> BuilderConfig:
+            raise ValueError("Settings for service 'builder' must be a mapping, got 't0ken'.")
+
+        for get in (invalid, unreadable):
+            monkeypatch.setattr(BuilderConfig, "get", classmethod(get))
+            with pytest.raises(ValueError, match="t0ken"):
+                BuilderConfig.get()
+            with pytest.raises(BackendRejectedError) as refused:
+                service._load_config()
+            assert (refused.value.__cause__, refused.value.__context__) == (None, None)
+            assert "t0ken" not in str(refused.value)
 
     @pytest.mark.parametrize(
         ("failure", "code"),
@@ -1955,6 +2133,32 @@ class TestTheRowThatIsCompleted:
             f"read {alices.id}",
         ]
         assert job_of.await_count == 2
+
+    async def test_a_new_jobs_step_is_refused_until_the_resubmit_has_recorded_its_job(self) -> None:
+        """The build's job was deleted while its row still waited, and the same request created another. Until
+        that submit has written the new job on the row, the row records the earlier one, and a step of the
+        new job is refused as a step of any other run is: the platform's record names a job by its name, so
+        nothing tells it from a rerun of the earlier job, which is not to be kept waiting. The refusal
+        writes nothing, and once the submit has recorded its job the same step completes the row."""
+        store, jobs = Store(), Jobs()
+        alices = await _submit_remote(store, jobs, by="alice")
+        # What Jobs answers the resubmit's create with, and so the attempt its step's pod is on record for.
+        new_job, new_attempt = "platform-job-2", "attempt-2"
+        job_of = AsyncMock(return_value=RecordedStep(workspace="ws-a", job=DEMO_JOB, attempt_id=new_attempt))
+        how: dict[str, Any] = {"delegation": OWN, "job_of": job_of, "exchange": True}
+
+        refused = _complete_demo(store, EXCHANGED_STEP, **how)
+        assert refused.status_code == 403
+        assert "another run than the one its submit created" in refused.json()["detail"]
+        waiting = await store.now()
+        assert (waiting.status, waiting.db_version) == ("pending", alices.db_version)
+        assert store.trace == [f"read {alices.id}"]
+
+        # The resubmit's own write of the job it created.
+        store.touch(alices, job_uid=new_job, job_attempt_id=new_attempt)
+        completed = _complete_demo(store, EXCHANGED_STEP, **how)
+        assert (completed.status_code, completed.json()["id"]) == (200, alices.id)
+        assert _says_what_alices_step_sent(await store.now())
 
 
 def _a_job(

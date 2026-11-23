@@ -158,6 +158,19 @@ class FakeClock:
         return Clock(monotonic=self.monotonic, sleep=self.sleep, pause=self.pause)
 
 
+class LateClock(FakeClock):
+    """A clock whose sleeps end later than they were asked to, as a sleep does on a node that is busy."""
+
+    def __init__(self, late: float) -> None:
+        super().__init__()
+        #: How long after its time each sleep ends.
+        self.late = late
+
+    def sleep(self, seconds: float) -> None:
+        super().sleep(seconds)
+        self.now += self.late
+
+
 class FakeService:
     """Answers ``start``, ``status`` and ``cancel`` from scripts. The last entry of a script repeats."""
 
@@ -665,6 +678,47 @@ class TestRetrying:
         # Five tries, at 0, 2, 6, 14 and 30 seconds. The next wait, 32, would pass the minute: there is no sixth.
         assert (len(service.started), clock.now) == (5, 30.0)
 
+    def test_a_start_is_not_made_after_a_wait_that_ended_past_the_deadline(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A sleep ends no sooner than it was asked to, and may end later. The wait fitted before the deadline
+        when it began: the start after it would still be a build to cancel."""
+        clock = LateClock(late=30.0)
+        service = FakeService([DONE], start=[OverBudgetError("busy"), "build-1"])
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, tmp_path, config=_config(timeout=30), clock=clock) == 1
+        # One try, at 0. Its wait of 2 seconds ended at 32, past the 30 the build had: there is no second.
+        assert (len(service.started), clock.sleeps, clock.now) == (1, [2.0], 32.0)
+        assert (service.polled, service.cancelled, builder.completed) == ([], [], [])
+        assert f"{FAILURE_MARKER} demo-1: starting the build: busy; the build timeout passed before it could" in (
+            caplog.text
+        )
+        # The service answered, and not that it had started anything.
+        assert "a build may be running" not in caplog.text
+
+    def test_a_lost_start_given_up_after_a_late_wait_is_still_said_to_maybe_be_running(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Given up without another try, the build a lost start may have begun is still named by its key."""
+        clock = LateClock(late=30.0)
+        service = FakeService([DONE], start=[RetryableError("connection reset"), "build-1"])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=30), clock=clock) == 1
+        assert len(service.started) == 1
+        assert "connection reset; the build timeout passed before it could be tried again" in caplog.text
+        assert f"[a build may be running, started with key {idempotency_key(ATTEMPT, 'demo-1')}]" in caplog.text
+
+    def test_a_read_is_still_made_after_a_wait_that_ended_past_the_deadline(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        """A read costs nothing, and may find the build done: however late its wait ended, it is made."""
+        clock = LateClock(late=30.0)
+        service = FakeService([RetryableError("503"), DONE])
+        builder = FakeBuilder()
+        assert _run(service, builder, context, tmp_path, config=_config(timeout=30), clock=clock) == 0
+        assert (service.polled, service.cancelled, len(builder.completed)) == (["build-1"] * 2, [], 1)
+
     @pytest.mark.parametrize("failure", [RemoteBuildError("no subclass"), KeyError("state")], ids=["base", "a-bug"])
     def test_a_client_that_breaks_the_contract_fails_the_image_and_leaves_no_build_running(
         self, failure: Exception, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -963,6 +1017,31 @@ class TestABuildThatFails:
         assert (stopped, clock.sleeps, builder.completed) == (1, [], [])
         assert "it was built, but the builder could not be told" in caplog.text
 
+    def test_a_stop_during_the_wait_to_complete_again_ends_the_tries_too(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The step's sleep ends early once the job is told to stop. Another try would be made in the seconds
+        the pod has left, and one try may take them all."""
+        builder = FakeBuilder(failing=[_unreachable()])
+        clock = FakeClock()
+        with caplog.at_level(logging.ERROR):
+            # Told to stop during the first wait: not before it, when the failed try is judged.
+            stopped = _run(
+                FakeService([DONE]), builder, context, tmp_path, clock=clock, cancelled=lambda: bool(clock.sleeps)
+            )
+        # One try and one wait. No second try, though the builder would have taken it.
+        assert (stopped, clock.sleeps, builder.completed) == (1, [2.0], [])
+        assert "it was built, but the builder could not be told" in caplog.text
+        assert "[build build-1]" in caplog.text
+
+    def test_an_image_found_built_as_the_stop_came_is_still_completed(self, context: Path, tmp_path: Path) -> None:
+        """The stop is read before each call to the service, not after one. A build that the last read found
+        done is published, and its one completion is still made."""
+        service = FakeService([DONE])
+        builder = FakeBuilder()
+        assert _run(service, builder, context, tmp_path, stop_after_polls=1) == 0
+        assert (service.cancelled, len(builder.completed)) == ([], 1)
+
     def test_a_build_the_service_cancelled_fails(
         self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1092,6 +1171,16 @@ class TestABuildThatFails:
         with caplog.at_level(logging.ERROR):
             _run(service, FakeBuilder(), context, tmp_path, redact=driver._redactor(secret))
         assert "s3cr3t" not in caplog.text
+        assert "401: token [credential] is not valid" in caplog.text
+
+    def test_a_credential_that_holds_the_marks_own_text_stays_out_of_a_reason(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        secret = "k3y-[credential]-9f2a"
+        service = FakeService([DONE], start=[PermanentError(f"401: token {secret} is not valid")])
+        with caplog.at_level(logging.ERROR):
+            _run(service, FakeBuilder(), context, tmp_path, redact=driver._redactor(secret))
+        assert "k3y-" not in caplog.text and "-9f2a" not in caplog.text
         assert "401: token [credential] is not valid" in caplog.text
 
     @pytest.mark.parametrize(
@@ -1515,6 +1604,54 @@ class TestTheContext:
         assert (staged / "Dockerfile").read_text() == "FROM alpine\n"
         assert (staged / "Dockerfile.dockerignore").read_text() == "secrets\n"
 
+    def test_a_dockerfile_named_too_long_to_have_an_ignore_file_is_built_with_the_contexts_rules(
+        self, context: Path
+    ) -> None:
+        """A Dockerfile's own ignore file is named for it, with thirteen characters more. Under a name within
+        thirteen of the longest a directory holds, no file can have that name: asked for it, the system
+        answers with an error, not that nothing is there, and a path's own `is_file` raises that on some
+        Pythons and not on others. The image is staged as any whose Dockerfile has no ignore file of its
+        own: with the context's rules, and without the replaced root Dockerfile's."""
+        named = "Dockerfile." + "x" * 239
+        (context / named).write_text("FROM alpine\n")
+        (context / ".dockerignore").write_text("*.md\n")
+        (context / "Dockerfile.dockerignore").write_text("services\n")
+        with pytest.raises(OSError) as refused:
+            os.stat(context / (named + ".dockerignore"))
+        assert (len(named), refused.value.errno) == (250, errno.ENAMETOOLONG)
+
+        staged = stage_context(context, named)
+
+        assert (staged / "Dockerfile").read_text() == "FROM alpine\n"
+        assert not (staged / "Dockerfile.dockerignore").exists()
+        assert (staged / ".dockerignore").read_text() == "*.md\n"
+
+    def test_a_dockerfile_at_a_path_too_long_to_look_beside_is_not_staged_without_its_ignore_file(
+        self, context: Path
+    ) -> None:
+        """Every name here fits, and the path as a whole does not: the Dockerfile is six characters short of
+        the longest path the system reads, and its ignore file, thirteen characters on, is past it. That
+        file may be there all the same, for a builder that reads from the context's root to find. So the
+        system's error is not taken for a missing file, on any Python: the image fails, and nothing is
+        written into the context."""
+        context = context.resolve()
+        # Directories of a hundred characters, then a name that takes up what is left of the path.
+        room = os.pathconf(context, "PC_PATH_MAX") - 6 - len(os.fsencode(context)) - len("/Dockerfile.")
+        levels, more = divmod(room - 1, 101)
+        dockerfile = "/".join([*["d" * 100] * levels, "Dockerfile." + "x" * (more + 1)])
+        (context / dockerfile).parent.mkdir(parents=True, exist_ok=True)
+        (context / dockerfile).write_text("FROM alpine\n")
+        with pytest.raises(OSError) as refused:
+            os.stat(context / (dockerfile + ".dockerignore"))
+        assert (os.path.isfile(context / dockerfile), refused.value.errno) == (True, errno.ENAMETOOLONG)
+
+        with pytest.raises(OSError) as failed:
+            stage_context(context, dockerfile)
+
+        assert failed.value.errno == errno.ENAMETOOLONG
+        assert (context / "Dockerfile").read_text() == "FROM scratch\n"
+        assert not (context / "Dockerfile.dockerignore").exists()
+
     @pytest.mark.parametrize("linked", ["by-a-link", "by-a-hard-link"])
     def test_the_root_dockerfile_under_another_name_brings_that_names_ignore_file(
         self, linked: str, context: Path
@@ -1859,6 +1996,28 @@ class TestTheContext:
             "print('hello')\n"
         )
 
+    @pytest.mark.parametrize("ending", ["/", "/."], ids=["a-separator", "a-dot-after-one"])
+    def test_a_rewritten_link_that_led_only_to_a_directory_still_leads_only_to_one(
+        self, ending: str, tmp_path: Path
+    ) -> None:
+        """`cached -> ../app/payload/`, in a context named `app` whose `payload` is a file. A path that ends
+        in a separator leads to a directory or to nothing, so the link led nowhere. Rewritten without the
+        separator it would lead to the file: staging would have made a link that could not be read into one
+        that can. A link to a directory, written the same way, leads to it as before."""
+        source = tmp_path / "fetched" / "app"
+        (source / "vendor").mkdir(parents=True)
+        (source / "Dockerfile").write_text("FROM scratch\n")
+        (source / "payload").write_text("built once\n")
+        (source / "cached").symlink_to(f"../app/payload{ending}")
+        (source / "libs").symlink_to(f"../app/vendor{ending}")
+        assert not (source / "cached").exists()
+
+        staged = stage_context(source, "Dockerfile")
+
+        assert (os.readlink(staged / "cached"), os.readlink(staged / "libs")) == ("payload/", "vendor/")
+        assert not (staged / "cached").exists()
+        assert (staged / "libs").is_dir()
+
     def test_a_link_through_a_loop_that_climbs_out_of_the_context_after_it_is_refused(
         self, context: Path, tmp_path: Path
     ) -> None:
@@ -1942,6 +2101,34 @@ class TestTheContext:
         assert stage_context(context, "Dockerfile") == context
         monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size - 1)
         with pytest.raises(ImageFailed, match="bytes with its links followed"):
+            stage_context(context, "Dockerfile")
+
+    @pytest.mark.parametrize("made_first", ["a", "b"], ids=["a-made-first", "b-made-first"])
+    @pytest.mark.parametrize(("aliased", "times"), [("a", 2), ("b", 1)], ids=["a-link-to-a", "a-link-to-b"])
+    def test_one_file_named_in_two_directories_is_measured_the_same_whichever_a_listing_puts_first(
+        self, aliased: str, times: int, made_first: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`a/payload` and `b/payload` are one file, and `again` is a link to one of the two directories: a
+        walk that follows links comes to that one twice. The file is counted in the first of its
+        directories the walk comes to, and the walk takes directories in the order of their names: in `a`,
+        so twice when the link leads to `a`, and once when it leads to `b`. Taken in the order a directory
+        lists them, which no file system promises, the same context came to a thousand bytes more or
+        less by where it was unpacked. The two directories are made here in either order."""
+        context = tmp_path / "measured"
+        context.mkdir()
+        (context / "Dockerfile").write_text("FROM scratch\n")
+        other = "b" if made_first == "a" else "a"
+        for name in (made_first, other):
+            (context / name).mkdir()
+        (context / made_first / "payload").write_bytes(b"x" * 1000)
+        os.link(context / made_first / "payload", context / other / "payload")
+        (context / "again").symlink_to(aliased)
+        size = len("FROM scratch\n") + times * 1000
+
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size)
+        assert stage_context(context, "Dockerfile") == context
+        monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size - 1)
+        with pytest.raises(ImageFailed, match=f"more than {size - 1} bytes with its links followed"):
             stage_context(context, "Dockerfile")
 
     def test_a_context_with_no_links_is_not_measured(self, context: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3262,7 +3449,9 @@ class TestAContextFromASharedDownload:
 
         An interpreter that shortens a link's path as it unpacks leaves `cached -> ../app/payload`, which
         leads to the context's own file wherever it is. So the files are also written here as unpacking
-        leaves them with each path kept as the archive wrote it. Either way, the two ways agree."""
+        leaves them with each path kept as the archive wrote it. Either way, the two ways agree, and on the
+        one outcome the link allows as it was unpacked: read from each download, the archive's own path is
+        refused, and the shortened one is built with the context's own file."""
         files: Entries = APP | {
             "app/payload": b"the context's own\n",
             "other/app/payload": b"another directory's\n",
@@ -3282,16 +3471,34 @@ class TestAContextFromASharedDownload:
             return root / image.source.context_path if image.source.context_path else root
 
         fetch = as_written if unpacked == "as-the-archive-wrote-it" else _fetching(files)[0]
+        #: The path `app/cached` is written as in each download, read before anything is staged from it.
+        spelt: list[str] = []
 
-        alone = _built(tmp_path / "alone", caplog, fetch, "app")
-        shared = _built(tmp_path / "set", caplog, fetch, "app", "tools")
+        def noting(image: RemoteBuildImage, directory: Path) -> Path:
+            context = fetch(image, directory)
+            root = Path(WorkLayout(PurePosixPath(directory / "fetched")).archive(FILESET, ARCHIVE))
+            spelt.append(os.readlink(root / "app/cached"))
+            return context
 
-        assert shared.completed[-1:] == ["b"]
-        assert (shared.reasons, shared.handed.get("a")) == (alone.reasons, alone.handed.get("a"))
+        alone = _built(tmp_path / "alone", caplog, noting, "app")
+        shared = _built(tmp_path / "set", caplog, noting, "app", "tools")
+
+        as_archived, shortened = "../beside/far/../../app/payload", "../app/payload"
+        # One download for each run, with the link written the same way in both.
+        assert spelt in ([as_archived] * 2, [shortened] * 2)
         if unpacked == "as-the-archive-wrote-it":
-            assert alone.reasons == {"a": LEADS_OUT + "'cached'"}
-        elif alone.reasons == {}:
+            assert spelt[0] == as_archived
+        if spelt[0] == as_archived:
+            # Followed where it was unpacked, the path ends beside the context: refused, alone and from a set.
+            assert alone.reasons == shared.reasons == {"a": LEADS_OUT + "'cached'"}
+            assert (alone.completed, shared.completed) == ([], ["b"])
+            assert "a" not in alone.handed and "a" not in shared.handed
+        else:
+            # Shortened, it leads to the context's own file wherever it is: built, alone and from a set.
+            assert alone.reasons == shared.reasons == {}
+            assert (alone.completed, shared.completed) == (["a"], ["a", "b"])
             assert alone.handed["a"].reads["cached"] == b"the context's own\n"
+            assert shared.handed["a"] == alone.handed["a"]
 
 
 def _regular_bytes(root: Path) -> int:
@@ -4465,6 +4672,66 @@ class TestTheStepProgram:
         once = redact("refused: cred is not known")
         assert once == "refused: [credential] is not known"
         assert redact(once) == once
+
+    @pytest.mark.parametrize(
+        ("secret", "text", "redacted"),
+        [
+            ("k3y-[credential]-9f2a", "401: k3y-[credential]-9f2a was refused", "401: [credential] was refused"),
+            ("[credential]-9f2a", "401: [credential]-9f2a was refused", "401: [credential] was refused"),
+            ("k3y-[credential]", "401: k3y-[credential] was refused", "401: [credential] was refused"),
+            (
+                "k3y [credential] 9f2a",
+                "GET /builds?key=k3y%20[credential]+9f2a failed",
+                "GET /builds?key=[credential] failed",
+            ),
+            (
+                "first-line-k3y\n9f2a-[credential]-end",
+                "line 2 of the key is malformed: 9f2a-[credential]-end",
+                "line 2 of the key is malformed: [credential]",
+            ),
+            ("k3y-[cred\nential]-9f2a", "refused k3y-[credential]-9f2a", "refused [credential]"),
+        ],
+        ids=[
+            "in-its-middle",
+            "at-its-start",
+            "at-its-end",
+            "in-a-url-that-leaves-brackets-as-they-are",
+            "in-one-line-of-several",
+            "only-as-a-log-line-writes-it",
+        ],
+    )
+    def test_a_credential_that_holds_the_marks_own_text_is_taken_out_whole(
+        self, secret: str, text: str, redacted: str
+    ) -> None:
+        """Read between the marks alone, such a credential is never found: the mark's text in it ends what is
+        read, and the two halves are passed on with that text between them, which is the credential."""
+        redact = driver._redactor(secret)
+        assert redact(text) == redacted
+        # The mark that took its place is kept, as any other is.
+        assert redact(redacted) == redacted
+
+    @pytest.mark.parametrize(
+        ("secret", "text"),
+        [
+            ("cred", "401: [credential] was refused"),
+            ("]", "401: [credential] was refused"),
+            ("[credential]", "401: [credential] was refused"),
+            ("k3y-[cred", "401: k3y-[credential] was refused"),
+            ("ential]-9f2a", "401: [credential]-9f2a was refused"),
+        ],
+        ids=[
+            "part-of-the-mark",
+            "the-marks-last-character",
+            "the-mark-itself",
+            "ending-as-the-mark-begins",
+            "beginning-as-the-mark-ends",
+        ],
+    )
+    def test_a_mark_already_in_a_text_is_kept_whole_whatever_the_credential(self, secret: str, text: str) -> None:
+        """A text is redacted more than once, and by more than one secret. A mark in it stands for what was
+        taken out: nothing is taken out of the middle of it, nor from across its edge, which would leave a
+        piece of it beside a second mark."""
+        assert driver._redactor(secret)(text) == text
 
     def test_the_fields_a_log_call_attaches_are_redacted_too(self, signals: None) -> None:
         """A client that logs a failed request with its headers. `extra` fields reach a record after it is made,
