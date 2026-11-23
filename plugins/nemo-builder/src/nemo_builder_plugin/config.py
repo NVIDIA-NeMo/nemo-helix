@@ -92,14 +92,14 @@ class RemoteConfig(BaseModel):
     profile: str = Field(
         default="build-remote",
         description=(
-            "The Jobs execution profile, provider `cpu`, the remote-build step runs on. Its `max_active_jobs` caps "
-            "the builds in flight, so set it to what the service lets this deployment queue. Its "
-            "`ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when the build "
-            "was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for "
-            "each image. A profile whose limit is below the builds' own, plus two minutes, is refused. That check "
-            "is a floor: it "
-            "leaves out the time to fetch each build context and, once an image is built, up to five minutes of "
-            "reporting it to the builder."
+            "The Jobs execution profile, provider `cpu` on the `kubernetes_job` backend, the remote-build step runs "
+            "on. Its `max_active_jobs` caps the build jobs that run at once. A job is one set, built an image at a "
+            "time, so running jobs wait on at most that many builds at the service: set it to what the service lets "
+            "this deployment queue. Its `ttl_seconds_active` is the only time limit Jobs puts on the step once its "
+            "pod is running, and Jobs counts it from when the build was submitted: it must cover the longest a "
+            "build waits for a slot, then `build_timeout_seconds` for each image. A profile whose limit is below "
+            "the builds' own, plus two minutes, is refused. That check is a floor: it leaves out the time to fetch "
+            "each build context and, once an image is built, up to five minutes of reporting it to the builder."
         ),
     )
     image: str | None = Field(
@@ -140,9 +140,9 @@ class RemoteConfig(BaseModel):
             "The platform secret holding the service's credential, which Jobs fetches as the build's submitter and "
             "the step reads from its environment, whether or not the platform uses workload token exchange. Write "
             "it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read "
-            "from each submitter's own workspace, so every workspace would need its own. Every user who may build "
-            "must be able to read it. Null when the step's Jobs profile mounts the credential instead: any user "
-            "who may create a job can name that profile, and read a credential it mounts."
+            "from the workspace the build is submitted in, so every workspace that builds would need its own. Every "
+            "user who may build must be able to read it. Null when the step's Jobs profile mounts the credential "
+            "instead: any user who may create a job can name that profile, and read a credential it mounts."
         ),
     )
     platforms: list[str] = Field(
