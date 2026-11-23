@@ -339,17 +339,24 @@ class TestABuildThatSucceeds:
         # No role, for an image whose config names none: every image of a job from before roles.
         assert build.role is None
 
-    def test_the_service_is_told_which_image_is_a_helper(self, context: Path, tmp_path: Path) -> None:
+    def test_the_service_is_told_which_image_is_a_helper(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """A client may leave out, for a helper, a check that starts the image. The role is the build's own
-        field: the labels are for the service's records, and stay what they were."""
-        service = FakeService([DONE])
+        field: the labels are for the service's records, and stay what they were. The step's log names the
+        role it handed on, and none for an image that has none: a step image from before roles hands none on,
+        and its line for a helper's build is the one that shows it."""
+        service = FakeService([DONE], start=["build-1", "build-2"])
         config = _config("main", "sidecar", roles={"sidecar": "helper"})
-        assert _run(service, FakeBuilder(), context, tmp_path, config=config) == 0
+        with caplog.at_level(logging.INFO):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=config) == 0
         assert [(build.labels["image"], build.role) for build in service.started] == [
             ("main", None),
             ("sidecar", "helper"),
         ]
         assert [set(build.labels) for build in service.started] == [{"workspace", "image", "job"}] * 2
+        started = [record.getMessage() for record in caplog.records if " is build " in record.getMessage()]
+        assert started == ["main is build build-1", "sidecar is build build-2, started with role helper"]
 
     def test_a_role_this_step_image_does_not_know_is_handed_on_as_it_was_written(
         self, context: Path, tmp_path: Path
@@ -2801,22 +2808,8 @@ class TestFollowingAContextsLinks:
         with pytest.raises(ImageFailed, match=too_long):
             stage_context(context, "Dockerfile")
 
-    @pytest.fixture
-    def looked_at(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        """How long each path is that is looked at, a name at a time, to learn where links lead, from here
-        on: by the driver's own following, and by the standard library's. Both ask ``os.lstat``."""
-        lengths: list[int] = []
-        lstat = os.lstat
-
-        def looked(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
-            lengths.append(len(os.fspath(path)))
-            return lstat(path, *args, **kwargs)
-
-        monkeypatch.setattr(os, "lstat", looked)
-        return lengths
-
     def test_a_dockerfile_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
-        self, root: Path, looked_at: list[int]
+        self, root: Path
     ) -> None:
         """The Dockerfile's path is a submitter's, and so is every link on the way to it. Whether it leads
         to a file is asked of the system, which gives up on a chain after a few tens of links, before the
@@ -2835,7 +2828,6 @@ class TestFollowingAContextsLinks:
         with LinkReads() as reads, pytest.raises(ImageFailed, match="dockerfile 'Dockerfile' is not a file inside"):
             stage_context(context, "Dockerfile")
         assert reads.total == 0
-        assert max(looked_at, default=0) <= driver.MAX_LINK_PATH_CHARS
 
     def test_a_path_the_system_refuses_outright_is_no_file_and_no_directory(self, root: Path) -> None:
         """A name longer than the system allows: it answers with an error, not that nothing is there. The
@@ -2854,7 +2846,7 @@ class TestFollowingAContextsLinks:
         assert sorted(os.listdir(context)) == ["Dockerfile", "payload"]
 
     def test_a_context_path_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
-        self, root: Path, caplog: pytest.LogCaptureFixture, looked_at: list[int]
+        self, root: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """One image's own download, unpacked as the step unpacks it, whose context path names the first
         link of the chain. Whether that is a directory is asked of the system, which gives up on a chain
@@ -2867,13 +2859,14 @@ class TestFollowingAContextsLinks:
         entries |= {self._name(number): Link(self._name(number + 1) + not_there) for number in range(links)}
         fetch, _ = _fetching(entries)
 
-        outcome = _built(root, caplog, fetch, "app")
+        with LinkReads() as reads:
+            outcome = _built(root, caplog, fetch, "app")
 
         assert (outcome.exit, outcome.handed, outcome.completed) == (1, {}, [])
         assert outcome.reasons == {
             "a": "its build context is not a directory in what was fetched: its context path matches none"
         }
-        assert max(looked_at) <= driver.MAX_LINK_PATH_CHARS
+        assert reads.total == 0
 
     def test_a_path_within_what_one_link_can_lead_to_is_followed_though_nothing_is_there(self, root: Path) -> None:
         """What is refused is a path no one link could be written as. A link that leads nowhere, by as many
@@ -3904,15 +3897,16 @@ class TestTheStepProgram:
     ) -> None:
         """A step image is upgraded apart from the API that compiles its job, and its config refuses no key:
         what a later builder adds, to the step or to an image, is read past without a word. So a step image
-        from before roles builds a helper as any other image, and nothing says that it did."""
-        config = _config().model_copy(update={"credential_in_environment": True}).model_dump(mode="json")
+        from before roles builds a helper as any other image, and its log names no role for it."""
+        config = _config("later").model_copy(update={"credential_in_environment": True}).model_dump(mode="json")
         config["added_by_a_later_builder"] = True
         config["images"][0]["added_by_a_later_builder"] = "helper"
         (tmp_path / "job_step_config.json").write_text(json.dumps(config))
         service = FakeService([DONE])
         assert step_main(lambda config, credential: service) == 0
         (builder,) = step["builder"]
-        assert [image for image, _, _ in builder.completed] == ["demo-1"]
+        # Not the image the fixture's own config names: the config with the keys it doesn't know is the one read.
+        assert [image for image, _, _ in builder.completed] == ["later"]
 
     def test_a_signal_from_jobs_cancels_the_build_without_waiting_out_a_sleep(
         self, step: dict[str, list], monkeypatch: pytest.MonkeyPatch

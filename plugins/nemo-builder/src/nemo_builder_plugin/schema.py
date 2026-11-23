@@ -244,8 +244,9 @@ class BuildSpec(BaseModel):
         description=(
             "`helper` for an image that isn't the one a workload runs as its main container, such as a sidecar. "
             "With `backend: remote` the build service's client is handed the role, and may leave out a check that "
-            "starts the image as a main container; nothing else acts on it, and a build in this cluster is the "
-            "same either way. Leave it out for every other image: an API from before the field existed refuses a "
+            "starts the image as a main container; a build in this cluster is the same either way. It is part of "
+            "the request all the same: the same set with and without it are two requests, so changing it needs a "
+            "new revision. Leave it out for every other image: an API from before the field existed refuses a "
             "request that carries it, even as null."
         ),
     )

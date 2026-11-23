@@ -444,12 +444,15 @@ class TestTheJob:
         ]
 
     def test_a_role_survives_the_jobs_clients_serialization(self) -> None:
-        """A step's config is a plain mapping, so the Jobs client's `exclude_unset` leaves none of it out: each
-        image travels with its role, and with a null where its spec names none. A step image from before roles
-        reads past the key either way (see the driver's tests), so the null costs it nothing."""
+        """A step's config is a plain mapping, so the Jobs client's `exclude_unset` leaves none of it out: a
+        helper travels with its role. An image whose spec names none travels without the key, null or
+        otherwise, as every image did before roles: the step config leaves a role with no value out of its
+        own dump, so the job for a request that names no role is the job it was."""
         spec = self._compile(_config(max_specs_per_set=2), _spec(name="main"), _spec(name="sidecar", role="helper"))
         sent = spec.model_dump(mode="json", exclude_unset=True)
-        assert [image["role"] for image in sent["steps"][0]["config"]["images"]] == [None, "helper"]
+        main, sidecar = sent["steps"][0]["config"]["images"]
+        assert "role" not in main
+        assert sidecar["role"] == "helper"
         received = RemoteBuildStepConfig.model_validate(HelixJobSpec.model_validate(sent).steps[0].config)
         assert [image.role for image in received.images] == [None, "helper"]
 
