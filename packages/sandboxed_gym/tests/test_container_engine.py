@@ -44,15 +44,13 @@ class _Host:
         (self.work / "nested").mkdir(parents=True)
         (self.work / "nested" / "file").write_text("x")
         monkeypatch.setattr(container_engine, "SETUP_LOG", str(self.log))
-        monkeypatch.setattr(container_engine.os, "geteuid", lambda: self.euid)
-        monkeypatch.setattr(container_engine.os, "setgroups", lambda groups: self.calls.append(("setgroups", groups)))
-        monkeypatch.setattr(container_engine.os, "setgid", lambda gid: self.calls.append(("setgid", gid)))
-        monkeypatch.setattr(container_engine.os, "setuid", self._setuid)
+        monkeypatch.setattr(container_engine, "geteuid", lambda: self.euid)
+        monkeypatch.setattr(container_engine, "setgroups", lambda groups: self.calls.append(("setgroups", groups)))
+        monkeypatch.setattr(container_engine, "setgid", lambda gid: self.calls.append(("setgid", gid)))
+        monkeypatch.setattr(container_engine, "setuid", self._setuid)
+        monkeypatch.setattr(container_engine, "chown", lambda path, uid, gid, **_: self.calls.append(("chown", path)))
         monkeypatch.setattr(
-            container_engine.os, "chown", lambda path, uid, gid, **_: self.calls.append(("chown", path))
-        )
-        monkeypatch.setattr(
-            container_engine.pwd,
+            container_engine,
             "getpwnam",
             lambda name: SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_dir=f"/home/{name}"),
         )

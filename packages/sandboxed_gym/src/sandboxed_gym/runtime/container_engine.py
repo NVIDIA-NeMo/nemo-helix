@@ -11,10 +11,11 @@ nor anything an agent drives through them keeps root or SYS_ADMIN.
 """
 
 import os
-import pwd
 import subprocess
 from collections.abc import Callable, MutableMapping
+from os import chown, geteuid, setgid, setgroups, setuid
 from pathlib import Path
+from pwd import getpwnam
 
 ENGINE_ENV = "NHX_GYM_HOST_CONTAINER_ENGINE"
 ROOTLESS_PODMAN = "rootless-podman"
@@ -42,10 +43,10 @@ def _effective_capabilities(status: str) -> int:
 
 
 def _chown_tree(root: Path, uid: int, gid: int) -> None:
-    os.chown(root, uid, gid)
+    chown(root, uid, gid)
     for directory, dirnames, filenames in os.walk(root):
         for name in dirnames + filenames:
-            os.chown(os.path.join(directory, name), uid, gid, follow_symlinks=False)
+            chown(os.path.join(directory, name), uid, gid, follow_symlinks=False)
 
 
 def prepare_container_engine(
@@ -65,7 +66,7 @@ def prepare_container_engine(
         return False
     if engine != ROOTLESS_PODMAN:
         raise RuntimeError(f"{ENGINE_ENV}={engine!r} is not supported; expected {ROOTLESS_PODMAN!r}")
-    if os.geteuid() != 0:
+    if geteuid() != 0:
         raise RuntimeError(f"{ENGINE_ENV} needs the Gym host to start as root to run its setup")
     if not is_kata_guest(read_text("/proc/cmdline")):
         raise RuntimeError(
@@ -88,14 +89,14 @@ def prepare_container_engine(
         tail = read_text(SETUP_LOG).strip().splitlines()[-20:]
         raise RuntimeError(f"{SETUP_SCRIPT} exited {result.returncode}: " + " | ".join(tail))
 
-    user = pwd.getpwnam(CONTAINER_USER)
+    user = getpwnam(CONTAINER_USER)
     # The work directory is the only place the host writes; everything else it needs is read-only.
     _chown_tree(Path(environ.get("NHX_WORK_PATH", "/job/work")), user.pw_uid, user.pw_gid)
-    os.setgroups([])
-    os.setgid(user.pw_gid)
-    os.setuid(user.pw_uid)
+    setgroups([])
+    setgid(user.pw_gid)
+    setuid(user.pw_uid)
     capabilities = _effective_capabilities(read_text("/proc/self/status"))
-    if os.geteuid() == 0 or capabilities:
+    if geteuid() == 0 or capabilities:
         raise RuntimeError(f"still privileged after dropping to {CONTAINER_USER}: CapEff={capabilities:x}")
     environ.update(
         HOME=user.pw_dir,
