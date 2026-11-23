@@ -56,7 +56,7 @@ Choose `remote` when a build service outside the cluster must build and publish 
 
 Set `backend: remote` only once every part of the release already knows the backend. Do it in this order:
 
-1. Upgrade the release in a rollout of its own: every API pod, the controllers, `builder-settle` among them, and the `nhx-tasks` image evals' build Jobs run in.
+1. Upgrade the release in a rollout of its own, as [Upgrade the chart](/documentation/kubernetes-deployment/setup/helm/install#upgrade-the-chart) does: every API pod, the controllers, `builder-settle` among them, and the `nhx-tasks` image evals' build Jobs run in.
 2. Upgrade users' SDK and CLI.
 3. Then set `backend: remote` in a second rollout, with a step image built from the release you upgraded to.
 
@@ -491,9 +491,9 @@ Create what the chart doesn't before you upgrade:
 
 Then put every chart value from this page in one values file, here `builder-remote.yaml`: `platformConfig.builder`, the profile under `platformConfig.jobs.executors` and, where you set them, `platformConfig.platform.base_url` and `networkPolicies.api.extraIngress`.
 
-Helm replaces a list an earlier values file sets with the list a later file sets. So where the values files you installed with already set `platformConfig.jobs.executors` or `networkPolicies.api.extraIngress`, setting that key in `builder-remote.yaml` with this page's entry alone drops their entries at the upgrade: your other profiles, or the rules that let an ingress controller or a gateway in to the API. Copy their entries into the list in `builder-remote.yaml`, or add this page's entry to the list where it already is and leave that key out of `builder-remote.yaml`.
+Helm replaces a list an earlier values file sets with the list a later file sets. So where the values files the release runs with already set `platformConfig.jobs.executors` or `networkPolicies.api.extraIngress`, setting that key in `builder-remote.yaml` with this page's entry alone drops their entries at the upgrade: your other profiles, or the rules that let an ingress controller or a gateway in to the API. Copy their entries into the list in `builder-remote.yaml`, or add this page's entry to the list where it already is and leave that key out of `builder-remote.yaml`.
 
-1. Render the config and read the settings back. Pass the chart version and values files you installed with, then `builder-remote.yaml`:
+1. Render the config and read the settings back. Pass the chart version the release runs now and every values file it was last deployed with, then `builder-remote.yaml`:
 
    ```bash
    helm template "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f builder-remote.yaml \
@@ -501,6 +501,8 @@ Helm replaces a list an earlier values file sets with the list a later file sets
      | yq '.data["config.yaml"]' | yq '.builder, .jobs.executors, .platform.base_url'
    ```
 
+   - After [Upgrade before you switch](#upgrade-before-you-switch), the chart version is the one you upgraded to, not the one you first installed. `helm list -n "$NHX_NAMESPACE"` shows it in the `CHART` column, and `NHX_HELM_CHART_VERSION` must hold it. With an older version, the upgrade in the next step takes the release back to that chart, which may be from before the backend, with `backend: remote` set.
+   - The upgrade takes values only from the files it is passed. Pass a file added since the install too, such as `harbor-profiles.yaml`: left out, its settings go back to the chart's defaults.
    - `.jobs.executors` must hold `build-remote` and every other profile your values files define.
    - With `networkPolicies.enabled` and the API's policy on, read that policy's ingress rules back too. They must hold the rule for the step's namespace and every other `extraIngress` rule your values files set:
 
@@ -618,6 +620,7 @@ Other refusals:
 | --- | --- | --- |
 | `missing_secrets` | `the build job needs platform secrets that don't exist, or that you can't read: <workspace>/<name>` | Create the secret `credential_secret` names, or let the submitter read it |
 | `backend_changed` | `build set '<name>' revision <n> was already submitted under the 'execution' backend, and this deployment now builds with 'remote'. Submit a new revision.` | Submit the next revision |
+| none | `build set '<name>' revision <n> was already submitted with a different request. Submit a new revision; a revision names one request.` | Another request was already submitted under this name and revision, as when a request is changed and sent again at the same revision. Submit the next revision |
 | none | `a job named '<job>' already exists, and this request's images do not record it as their build job` | Another submit of the same request may be recording the job now. Submit the request again in a moment. If the answer is the same, submit the next revision |
 
 ### An image fails
@@ -636,6 +639,7 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 | `<reason>` | What to do |
 | --- | --- |
 | `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise `ttl_seconds_active` when it is the one named. For a step that never started, a longer `ttl_seconds_before_active` helps only a pod that would have started, such as one waiting for a node. A ServiceAccount the profile names, or a Secret it mounts, that isn't in the step's namespace also keeps the pod from starting, and ends in this same message. Jobs deletes the step's Kubernetes Job and its pod when it ends the step, so read the namespace's events while a new build's step is pending, with `kubectl get events -n nemo-helix-remote-builds` |
+| `Failed to create Kubernetes ConfigMap <name> for job step <job>/remote-build: <error>` | Jobs' controller was refused when it created the step's first object in the profile's namespace, so no pod was made. `<error>` is Kubernetes' answer, and the row may cut it off before it names the account and the namespace: `nemo jobs get-status <job> --workspace <workspace>` has all of it. With `(403)`, the controller's account as a rule has no Role in that namespace: the RoleBinding wasn't applied, or its subject doesn't name the account the core controller runs as and the release namespace, or the profile's `config.namespace` isn't the namespace the manifests were applied to. A namespace that doesn't exist is answered `(403)` too. Read the account again with the command under [Create the step's namespace](#create-the-steps-namespace), correct the RoleBinding or the profile, and submit the next revision |
 | `Image pull did not succeed within <n>s (<reasons>): <detail>` | Jobs gave up pulling an image of the step's pod: the step image, or the profile's `launcher_image`. `<detail>` is the kubelet's event, which as a rule names the image. `<n>` is the profile's `ttl_seconds_image_pull`, 600 if unset. Check `remote.image` or the profile's `default_task_image`, its `launcher_image`, and the image pull secrets in the step's namespace |
 | `Job has errored pods, check tasks for error details` | The step's pod failed, and what Jobs kept of its log holds no line for the image: the step program never started, or ended without giving a reason. The message may go on with `One or more tasks are in error state`. Read the step's task in `nemo jobs get-status <job> --workspace <workspace>`. Its `error_details` hold the kubelet's warning, when a container couldn't be created or started. Its `error_stack` holds the end of the container's log, with the lines of Jobs' launcher, which the step's log leaves out. `Error fetching secrets: failed to fetch secret <workspace>/<name>: <error>` is the launcher failing to fetch `credential_secret`. Where `<error>` is `failed to get secret: status code <n>`, the API answered and didn't return the secret: for a `403`, see [As a platform secret](#as-a-platform-secret). For any other `<error>`, check that the API can be reached from the step's namespace: `platform.base_url`, the API's NetworkPolicy and, on an HTTPS URL, that the step image's system certificates trust it. `Error starting command: <error>` is the launcher failing to run `remote.command`, as when the program isn't on the step image's `PATH`. A traceback is the step program's own |
 | `Job failed: <message>` | The same failure, as Kubernetes reports it for the step's Job. See the `Job has errored pods, check tasks for error details` row |

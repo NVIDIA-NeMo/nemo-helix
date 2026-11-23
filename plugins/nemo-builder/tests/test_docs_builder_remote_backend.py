@@ -55,8 +55,8 @@ README = ROOT / "plugins/nemo-builder/README.md"
 PLUGIN = ROOT / "plugins/nemo-builder/src/nemo_builder_plugin"
 JOBS_ON_KUBERNETES = ROOT / "services/core/jobs/src/nhx/core/jobs/controllers/backends/kubernetes"
 #: Where the sentences the guide quotes are spelt: the plugin, and the Jobs backend the step runs on, whose
-#: message for a step that ran out of time, whose image could not be pulled or whose pod failed, a failed
-#: image's row repeats.
+#: message for a step it could not schedule, that ran out of time, whose image could not be pulled or whose pod
+#: failed, a failed image's row repeats.
 SOURCES = (
     *sorted(PLUGIN.rglob("*.py")),
     JOBS_ON_KUBERNETES / "kubernetes_job.py",
@@ -113,7 +113,7 @@ MIN_SPELT = 12
 SPELT_SHARE = 2 / 3
 PLACEHOLDER = re.compile(r"<[^<>]+>")
 #: How many sentences the troubleshooting tables quote, each in a cell of its own.
-QUOTED_SENTENCES = 57
+QUOTED_SENTENCES = 59
 #: What the troubleshooting section quotes outside a cell of its own: the driver's line for an image it didn't
 #: build and what may end its reason, what Jobs may add to its message for a pod that failed, and the API's log
 #: lines for a completion it refused or put off.
@@ -525,7 +525,10 @@ def test_the_guide_lists_the_stages_the_driver_knows() -> None:
 def test_each_sentence_the_troubleshooting_tables_quote_is_spelt_by_the_sources() -> None:
     """An operator searches the guide for the sentence an answer or a row shows, so the two must read the same."""
     sentences = _quoted_sentences()
-    assert len(sentences) == QUOTED_SENTENCES, "the troubleshooting tables are not read as they were"
+    assert len(sentences) == QUOTED_SENTENCES, (
+        f"the troubleshooting tables quote {len(sentences)} sentences, not QUOTED_SENTENCES: update it if a row "
+        "was added or removed, otherwise a row is no longer read"
+    )
     shares = {sentence: _spelt_share(sentence) for sentence in sentences}
     unspelt = {sentence: f"{share:.0%}" for sentence, share in shares.items() if share < SPELT_SHARE}
     assert not unspelt, f"the guide quotes what the sources don't say: {unspelt}"
