@@ -133,6 +133,12 @@ def test_oidc_workload_profile_presence_enables_workload_configuration() -> None
     assert config.workload.audience == "nemo-helix"
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_oidc_workload_rejects_removed_token_review_toggle(enabled: bool) -> None:
+    with pytest.raises(ValidationError, match="kubernetes_token_review_enabled"):
+        OIDCWorkloadConfig.model_validate({"client_id": "nemo-workload", "kubernetes_token_review_enabled": enabled})
+
+
 @pytest.mark.parametrize(
     ("removed_field", "replacement"),
     [
@@ -140,6 +146,7 @@ def test_oidc_workload_profile_presence_enables_workload_configuration() -> None
         ("client_authentication", "public_client or confidential_client"),
         ("session_encryption_key_env_var", "server_sessions.encryption_key_env_var"),
         ("workload_client_id", "workload.client_id"),
+        ("workload_kubernetes_token_review_enabled", "workload (Kubernetes TokenReview is automatic)"),
     ],
 )
 def test_oidc_removed_flat_fields_have_exact_migration_error(removed_field: str, replacement: str) -> None:

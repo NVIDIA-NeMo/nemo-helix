@@ -6,8 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 {{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
 {{- $oidc := dig "auth" "oidc" (dict) $config | default dict -}}
 {{- $workload := $oidc.workload | default dict -}}
-{{- $enabled := dig "kubernetes_token_review_enabled" (get $oidc "workload_kubernetes_token_review_enabled") $workload -}}
-{{- if and .Values.api.enabled (include "nemo-helix.authEnabled" .) $enabled -}}
+{{- if and .Values.api.enabled (include "nemo-helix.authEnabled" .) $workload -}}
 {{- /* Cluster-scoped names must distinguish releases in different namespaces. */ -}}
 {{- $identity := printf "%s/%s" .Release.Namespace .Release.Name -}}
 {{- $name := printf "%s-token-reviewer-%s" (include "nemo-helix.fullname" . | trunc 39 | trimSuffix "-") ($identity | sha256sum | trunc 8) -}}

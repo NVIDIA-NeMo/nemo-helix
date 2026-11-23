@@ -391,7 +391,6 @@ nemo-helix:
           token_endpoint: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
           audience: "nemo-helix"
           scope: "openid email groups"
-          kubernetes_token_review_enabled: true
         subject_claim: "sub"
         email_claim: "email"
         groups_claim: "groups"

@@ -1747,15 +1747,14 @@ def test_subject_token_decoder_reports_all_validation_failures(
 ) -> None:
     subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
     _workload(exchange_config).subject_jwks_uri = None
-    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
 
     with pytest.raises(exchange.jwt.InvalidTokenError) as exc_info:
         asyncio.run(exchange_service.decode_subject_token(exchange_config, subject_token, "nemo-helix"))
 
     assert str(exc_info.value) == (
-        "JWT subject token: JWT subject token validation is disabled; "
-        "Kubernetes TokenReview subject token: Kubernetes service environment is unavailable"
+        "Kubernetes TokenReview subject token: Kubernetes service environment is unavailable; "
+        "JWT subject token: JWT subject token validation is disabled"
     )
 
 
@@ -1786,7 +1785,6 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
-    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setenv("KUBERNETES_SERVICE_PORT", "443")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
@@ -1851,9 +1849,10 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
 
 def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
     exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _workload(exchange_config).kubernetes_token_review_enabled = True
+    exchange_config.oidc.workload = OIDCWorkloadConfig(client_id="nemo-helix-workload")
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setenv("KUBERNETES_SERVICE_PORT", "443")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
@@ -1886,8 +1885,13 @@ def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
 
     monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
 
+    async def unexpected_jwt_decode(config: AuthConfig, subject_token: str) -> dict[str, Any]:
+        pytest.fail("Kubernetes tokens must retain the TokenReview pod UID instead of using generic JWT validation")
+
+    monkeypatch.setattr(exchange_service, "decode_jwt_subject_token", unexpected_jwt_decode)
+
     decoded = asyncio.run(
-        exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
+        exchange_service.decode_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
     )
 
     assert decoded.claims == {
@@ -1895,6 +1899,13 @@ def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
         "groups": ["system:serviceaccounts"],
     }
     assert decoded.bound_reference == _pod_uid_bound_reference()
+
+
+def test_kubernetes_subject_token_decoder_requires_workload_profile(exchange_config: AuthConfig) -> None:
+    exchange_config.oidc.workload = None
+
+    with pytest.raises(exchange.jwt.InvalidTokenError, match="validation is disabled"):
+        asyncio.run(exchange._decode_kubernetes_subject_token(exchange_config, "subject-token", "nemo-helix"))
 
 
 @pytest.mark.parametrize(
@@ -1909,7 +1920,6 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
     monkeypatch: pytest.MonkeyPatch,
     pod_uids: list[str],
 ) -> None:
-    _workload(exchange_config).kubernetes_token_review_enabled = True
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     monkeypatch.setattr(exchange, "_kubernetes_reviewer_credentials", lambda: ("reviewer-token", "/tmp/ca.crt"))
 

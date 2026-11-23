@@ -415,11 +415,13 @@ class WorkloadTokenExchangeService:
 
         errors: list[str] = []
         for decoder in (
-            _SubjectTokenDecoder("JWT subject token", decode_configured_jwt_subject_token),
+            # Preserve the verified pod reference even when JWKS validation
+            # would also accept a projected Kubernetes service-account token.
             _SubjectTokenDecoder(
                 "Kubernetes TokenReview subject token",
                 lambda: _decode_kubernetes_subject_token(config, subject_token, audience),
             ),
+            _SubjectTokenDecoder("JWT subject token", decode_configured_jwt_subject_token),
         ):
             try:
                 return await decoder.decode()
@@ -581,7 +583,7 @@ async def _decode_kubernetes_subject_token(
     audience: str,
 ) -> DecodedSubjectToken:
     workload = config.oidc.workload
-    if workload is None or not workload.kubernetes_token_review_enabled:
+    if workload is None:
         raise jwt.InvalidTokenError("Kubernetes TokenReview subject token validation is disabled")
 
     import os

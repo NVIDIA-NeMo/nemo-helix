@@ -15,4 +15,3 @@ platformConfig:
     oidc:
       workload:
         client_id: helix-workload
-        kubernetes_token_review_enabled: true

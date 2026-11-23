@@ -280,6 +280,27 @@ opensandbox_ext_no_capable=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER
 }
 grep -Fq "opensandbox.composeServices.enabled needs sandboxClusterCapable" <<<"${opensandbox_ext_no_capable}"
 
+# A workload client alone requires TokenReview, including for an existing account.
+for workload_values in 35-workload-token-review.yaml 36-workload-token-review-existing-account.yaml; do
+  workload_rbac=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+    -f "${HELM_FOLDER}/ci/${workload_values}" \
+    --show-only templates/api/token-reviewer-rbac.yaml)
+  grep -Fxq 'kind: ClusterRole' <<<"${workload_rbac}"
+  grep -Fxq 'kind: ClusterRoleBinding' <<<"${workload_rbac}"
+  if [ "${workload_values}" = 36-workload-token-review-existing-account.yaml ]; then
+    grep -Fq 'name: existing-helix-api' <<<"${workload_rbac}"
+  fi
+done
+
+for disabled_setting in platformConfig.auth.enabled=false api.enabled=false platformConfig.auth.oidc.workload=null; do
+  workload_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+    -f "${HELM_FOLDER}/ci/35-workload-token-review.yaml" --set "${disabled_setting}")
+  if grep -Fq '# Source: nemo-helix/templates/api/token-reviewer-rbac.yaml' <<<"${workload_output}"; then
+    echo "Unexpected TokenReview RBAC with ${disabled_setting}" >&2
+    exit 1
+  fi
+done
+
 # Validate the Helm chart by rendering templates with all values files in ci/ directory
 VAP_API_VERSION=admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy
 shopt -s nullglob

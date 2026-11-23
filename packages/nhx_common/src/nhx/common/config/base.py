@@ -128,7 +128,6 @@ class OIDCWorkloadConfig(BaseSettings):
     subject_jwks_uri: str | None = None
     subject_issuers: list[str] = Field(default_factory=list)
     subject_jwks_cache_ttl_seconds: int = Field(default=3600, ge=0)
-    kubernetes_token_review_enabled: bool = False
 
 
 class OIDCConfig(BaseSettings):
@@ -164,7 +163,7 @@ class OIDCConfig(BaseSettings):
         "workload_subject_jwks_uri": "workload.subject_jwks_uri",
         "workload_subject_issuers": "workload.subject_issuers",
         "workload_subject_jwks_cache_ttl_seconds": "workload.subject_jwks_cache_ttl_seconds",
-        "workload_kubernetes_token_review_enabled": "workload.kubernetes_token_review_enabled",
+        "workload_kubernetes_token_review_enabled": "workload (Kubernetes TokenReview is automatic)",
     }
 
     enabled: bool = Field(
