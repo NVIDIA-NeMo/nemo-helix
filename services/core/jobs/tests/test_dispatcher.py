@@ -12,7 +12,7 @@ import gc
 import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import Any, TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1013,6 +1013,29 @@ async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_re
         "step": 12,
         "pod": {"name": "pod-1", "phase": "Running"},
     }
+
+    # The controller re-sends the same pod details every pass. That write is not progress, so it
+    # leaves updated_at alone and a stalled task still reads as stale. Real progress is stored.
+    writes: list[HelixJobTask] = []
+    store_update = mock_store.update
+
+    async def recording_update(entity: Any) -> Any:
+        if isinstance(entity, HelixJobTask):
+            writes.append(entity)
+        return await store_update(entity)
+
+    mock_store.update = recording_update  # type: ignore[method-assign]
+    repeat = HelixJobTaskUpdate(
+        status=HelixJobStatus.ACTIVE, status_details={"pod": {"name": "pod-1", "phase": "Running"}}
+    )
+    progress = HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE, status_details={"step": 13})
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, repeat, step)
+    assert writes == []
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, progress, step)
+    assert len(writes) == 1
+    stored = await mock_dispatcher.get_task(step.id, task.name, workspace=DEFAULT_WORKSPACE)
+    assert stored is not None and stored.status_details["step"] == 13
 
 
 CLASSIFIED_ERROR = {
