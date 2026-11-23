@@ -720,7 +720,7 @@ def _build_export_module(
                 # Truncate to `dimensions`, then L2-renormalize.
                 keep = torch.arange(embeddings.shape[1], device=embeddings.device)[None, :] < dimensions[:, None]
                 embeddings = embeddings * keep.to(embeddings.dtype)
-            if self.normalize:
+            if dimensions is not None or self.normalize:
                 embeddings = F.normalize(embeddings, p=2, dim=1)
             return embeddings
 
