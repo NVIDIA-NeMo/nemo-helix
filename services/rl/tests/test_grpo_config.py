@@ -1578,6 +1578,21 @@ class TestGrpoPassthroughKnobs:
         with pytest.raises(ValueError, match="mm_processor_kwargs must be a dict"):
             compile_grpo_config(step, job_ctx)
 
+    @pytest.mark.parametrize("parser", ["hermes", None], ids=["model-declares-parser", "no-parser"])
+    def test_rollout_chat_server_gets_the_model_tool_parser(
+        self, tmp_path: Path, job_ctx: NHXJobContext, parser: str | None
+    ) -> None:
+        """vLLM rejects auto or named tool_choice when the rollout chat server has no tool parser."""
+        step, _ = _prepared_step(tmp_path, has_vision_tower=True)
+        step.model.tool_call_parser = parser
+
+        vllm_cfg = compile_grpo_config(step, job_ctx)["policy"]["generation"]["vllm_cfg"]
+
+        if parser is None:
+            assert "http_server_serving_chat_kwargs" not in vllm_cfg
+        else:
+            assert vllm_cfg["http_server_serving_chat_kwargs"] == {"tool_parser": parser}
+
     def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path)
 
