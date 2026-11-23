@@ -247,7 +247,35 @@ platformConfig:
 ```
 
 Container images are stored in a 30 GiB sparse file in the Gym host's ephemeral storage. GPU access
-and registry credentials for pulling private images are not supported yet.
+is not supported yet.
+
+To pull private images, create a NeMo Helix secret holding the registry token and pass it to the job
+through `env_secrets`, like any other job credential. Add the registry, and the host it redirects
+image layers to, to `sandbox_egress_allow`. For `nvcr.io`, that's `nvcr.io:443` and
+`layers.nvcr.io:443`.
+
+```yaml
+target:
+  kind: gym
+  # ...
+  env_vars:
+    REGISTRY_USER: $oauthtoken
+  env_secrets:
+    REGISTRY_PASSWORD: default/ngc-registry-token
+```
+
+The resource server logs in before it pulls:
+
+```python
+subprocess.run(
+    ["docker", "login", "nvcr.io", "-u", os.environ["REGISTRY_USER"], "--password-stdin"],
+    input=os.environ["REGISTRY_PASSWORD"].encode(),
+    check=True,
+)
+```
+
+The login is stored for the Gym host's container user, so every resource server in the host can pull
+with it.
 
 ## Local Docker provider
 
