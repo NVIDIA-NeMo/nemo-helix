@@ -65,7 +65,14 @@ SOURCES = (
 #: Where Jobs' launcher, which starts the step program, spells the lines it ends a step with before the program
 #: runs, and the errors those lines wrap. Go, so read as text, and apart from SOURCES.
 LAUNCHER = ROOT / "services/core/jobs/jobs-launcher"
-LAUNCHER_SOURCES = (LAUNCHER / "cmd/run.go", LAUNCHER / "nhxclient/client.go")
+LAUNCHER_RUN = LAUNCHER / "cmd/run.go"
+LAUNCHER_SOURCES = (
+    LAUNCHER_RUN,
+    LAUNCHER / "cmd/otel.go",
+    LAUNCHER / "nhxclient/client.go",
+    LAUNCHER / "nhxclient/session.go",
+    LAUNCHER / "nhxclient/workload_auth.go",
+)
 #: Where a deployment that builds with `remote` may raise a refusal a submit answers with `code`
 #: `backend_rejected`: anywhere in the plugin but the in-cluster backend, which such a deployment doesn't run.
 REFUSALS = tuple(path for path in sorted(PLUGIN.rglob("*.py")) if path.name != "execution.py")
@@ -112,8 +119,8 @@ MIN_SPELT = 12
 #: guide may name one, such as `kubernetes_job` or `RuntimeError`, and a quoted value keeps its quotation marks.
 SPELT_SHARE = 2 / 3
 PLACEHOLDER = re.compile(r"<[^<>]+>")
-#: How many sentences the troubleshooting tables quote, each in a cell of its own.
-QUOTED_SENTENCES = 59
+#: A cell of a table that is one code span: where a troubleshooting table quotes a sentence, a code or a status.
+QUOTING_CELL = re.compile(r"\| `([^`]+)` (?=\|)")
 #: What the troubleshooting section quotes outside a cell of its own: the driver's line for an image it didn't
 #: build and what may end its reason, what Jobs may add to its message for a pod that failed, and the API's log
 #: lines for a completion it refused or put off.
@@ -127,13 +134,24 @@ PROSE_QUOTES = (
     "completing <workspace>/<image> put off: its row records no build job yet",
     "could not tell which job is completing <workspace>/<image>",
 )
-#: The launcher's lines the guide tells an operator to look for at the end of a failed step's container log, and
-#: the error one of them ends with when the API answered.
+#: The launcher's lines the guide tells an operator to look for at the end of a failed step's container log, the
+#: error one of them ends with when the API answered, and the errors the guide tells a failed sign-in apart by.
 LAUNCHER_LINES = (
     "Error fetching secrets: failed to fetch secret <workspace>/<name>: <error>",
     "failed to get secret: status code <n>",
     "Error starting command: <error>",
+    "credentials require HTTPS or a loopback endpoint",
+    "auth discovery failed: status <n>",
+    "workload token exchange failed: status <n>",
 )
+#: How the launcher logs the error it gives up with before it fetches a secret or starts the step program. Too
+#: little fixed text for :func:`_launcher_formats` to take for a format, so looked for as the launcher spells it.
+LAUNCHER_GIVES_UP = "Error: %v"
+#: That error when the launcher's sign-in to the platform failed, which it makes only under workload token
+#: exchange, and before anything else it does for the step.
+LAUNCHER_SIGN_IN = "configure workload identity auth for OTLP logs: <error>"
+#: Where the README and the guide each say where the backend has run. The README is hard-wrapped.
+HAS_RUN = ("tests and on a Kind cluster", "both against a stand-in for a build service")
 #: A number as the guide writes it out in a sentence.
 NUMBERS = "zero one two three four five six seven eight nine ten eleven twelve".split()
 #: What the API answers a completion whose shape it doesn't know with. The framework's answer, not a refusal of
@@ -180,19 +198,28 @@ def _backend_recipe() -> dict[str, Any]:
     return recipe["platformConfig"]["builder"]
 
 
-def _profile_recipe() -> KubernetesJobExecutionProfile:
+def _profile_executor() -> dict[str, Any]:
+    """The profile the guide has an operator write, as its recipe writes it."""
     (recipe,) = _yaml_documents(_section(PROFILE))
     (executor,) = recipe["platformConfig"]["jobs"]["executors"]
+    return executor
+
+
+def _profile_recipe() -> KubernetesJobExecutionProfile:
+    executor = _profile_executor()
     assert executor["config"].keys() <= KubernetesJobExecutionProfileConfig.model_fields.keys()
     return KubernetesJobExecutionProfile.model_validate(executor)
 
 
-def _request_plan(config: BuilderConfig) -> BuildPlan:
-    """The build the guide's own request asks for, planned as a submit plans it (`submit_build_set`)."""
+def _request_plan(config: BuilderConfig, *, revision: int | None = None) -> BuildPlan:
+    """The build the guide's own request asks for, planned as a submit plans it (`submit_build_set`): at the
+    revision the request names, or at ``revision``."""
     section = _section(VERIFY)
     (workspace,) = set(re.findall(r"/workspaces/([a-z0-9-]+)/builds", section))
     (body,) = re.findall(r"-d '(\{.*\})'", section)
     build_set = BuildSet.model_validate_json(body)
+    if revision is not None:
+        build_set = build_set.model_copy(update={"revision": revision})
     return BuildPlan.resolve(build_set.with_default_platform(config.default_platform), workspace=workspace)
 
 
@@ -277,9 +304,26 @@ def _said_in_one_string(quote: str, strings: list[tuple[str | None, ...]]) -> bo
     return any(pattern.search("".join("\0" if part is None else part for part in parts)) for parts in strings)
 
 
+def _sentences(text: str) -> list[str]:
+    """Each sentence ``text`` quotes in a table cell of its own: not a code or a status, which has no space."""
+    return [cell for cell in QUOTING_CELL.findall(text) if " " in cell]
+
+
 def _quoted_sentences() -> list[str]:
-    """Each sentence a troubleshooting table quotes: a cell that is one code span, and not a code or a status."""
-    return [cell for cell in re.findall(r"\| `([^`]+)` (?=\|)", _section(TROUBLESHOOTING)) if " " in cell]
+    """Each sentence a troubleshooting table quotes."""
+    return _sentences(_section(TROUBLESHOOTING))
+
+
+def _table_rows(text: str) -> list[str]:
+    """Each row of the tables in ``text``, past a table's heading and the rule under it."""
+    tables = re.findall(r"((?:^\|[^\n]*\n)+)", text, re.MULTILINE)
+    return [row for table in tables for row in table.splitlines()[2:]]
+
+
+@cache
+def _launcher_strings() -> list[str]:
+    """Each string the launcher spells, as it is written between its quotation marks."""
+    return [literal for path in LAUNCHER_SOURCES for literal in re.findall(r'"((?:[^"\\]|\\.)*)"', _text(path))]
 
 
 @cache
@@ -287,18 +331,18 @@ def _launcher_formats() -> list[re.Pattern[str]]:
     """Each format the launcher spells, as a pattern: a group where a verb fills a value in. A format with less
     fixed text than :data:`MIN_SPELT` is left out: `%s=%s` would stand for any line."""
     formats: list[re.Pattern[str]] = []
-    for path in LAUNCHER_SOURCES:
-        for literal in re.findall(r'"((?:[^"\\]|\\.)*)"', _text(path)):
-            fixed = re.split(r"%[a-z]", literal.removesuffix(r"\n"))
-            if len(fixed) > 1 and sum(map(len, fixed)) >= MIN_SPELT:
-                formats.append(re.compile("(.+)".join(map(re.escape, fixed))))
+    for literal in _launcher_strings():
+        fixed = re.split(r"%[a-z]", literal.removesuffix(r"\n"))
+        if len(fixed) > 1 and sum(map(len, fixed)) >= MIN_SPELT:
+            formats.append(re.compile("(.+)".join(map(re.escape, fixed))))
     return formats
 
 
 def _launcher_says(line: str) -> bool:
-    """Whether the launcher's formats make ``line``: what a format fills in is a placeholder of the guide's or,
-    for an error it wraps, what another format makes."""
-    if PLACEHOLDER.fullmatch(line):
+    """Whether the launcher makes ``line``: a string it spells whole, or what one of its formats makes. What a
+    format fills in is a placeholder of the guide's or, for an error or a name it wraps, what the launcher
+    makes in turn. A string shorter than :data:`MIN_SPELT` is taken for no line."""
+    if PLACEHOLDER.fullmatch(line) or (len(line) >= MIN_SPELT and line in _launcher_strings()):
         return True
     made = [found for pattern in _launcher_formats() if (found := pattern.fullmatch(line))]
     return any(all(map(_launcher_says, found.groups())) for found in made)
@@ -382,9 +426,13 @@ def test_the_profile_recipe_takes_its_launcher_image_as_the_charts_profiles_do()
 def test_the_build_the_guide_submits_is_named_as_its_commands_name_it() -> None:
     """The commands that follow the submit name its fileset, job, image and step: each as a submit names it."""
     section = _section(VERIFY)
-    plan = _request_plan(BuilderConfig.model_validate(_backend_recipe()))
+    config = BuilderConfig.model_validate(_backend_recipe())
+    plan = _request_plan(config)
     (image,) = plan.images
     workspace, _, fileset = image.source.fileset.partition("/")
+    # A build that failed is built again at the next revision, under other names than the commands above hold.
+    again = _request_plan(config, revision=plan.build_set.revision + 1)
+    (rebuilt,) = again.images
     named = [
         f"nemo files filesets create {fileset} --workspace {workspace}",
         f'nemo files upload "$CTX/" {fileset} --workspace {workspace}',
@@ -392,6 +440,7 @@ def test_the_build_the_guide_submits_is_named_as_its_commands_name_it() -> None:
         f'/workspaces/{plan.workspace}/container-images/{image.name}"',
         f"nemo jobs get-status {plan.job_name} --workspace {plan.workspace}",
         f"nemo jobs tail {plan.job_name} --workspace {plan.workspace} --step-id {STEP_NAME}",
+        f'`"revision": {again.build_set.revision}`: its image is then `{rebuilt.name}` and its job `{again.job_name}`',
     ]
     missing = [text for text in named if text not in section]
     assert not missing, f"the guide's commands don't name what its request makes: {missing}"
@@ -403,6 +452,23 @@ def test_the_profile_table_names_real_keys_and_their_defaults() -> None:
     assert rows and rows.keys() <= fields.keys()
     for key in ("max_active_jobs", "ttl_seconds_active", "ttl_seconds_before_active"):
         assert re.search(rf"If unset, {fields[key].default}\b", rows[key]), key
+
+
+def test_a_profile_key_jobs_does_not_know_is_dropped_and_the_guide_reads_the_profile_back() -> None:
+    """Jobs takes a misspelt key without a word and leaves its setting at the default, which for the namespace
+    is the release's. No check of the builder's shows that, so the guide says it and has an operator read each
+    key it sets back from Jobs."""
+    executor = _profile_executor()
+    settings = {key if key != "namespace" else "namespce": value for key, value in executor["config"].items()}
+    misspelt = KubernetesJobExecutionProfile.model_validate({**executor, "config": settings, "namespce": "beside"})
+    assert misspelt.config.namespace is None
+    said = "Jobs ignores a key it doesn't know, directly under `config` or beside it, with no warning"
+    assert said in _section(PROFILE), "the guide no longer says what Jobs does with a key it doesn't know"
+    section = _section(VERIFY)
+    profile = _profile_recipe()
+    assert f'select(.provider == "{profile.provider}" and .profile == "{profile.profile}")' in section
+    read_back = set(re.findall(r"`config\.([a-z_]+)`", section))
+    assert "namespace" in read_back and read_back <= executor["config"].keys(), read_back
 
 
 def test_the_guide_states_the_numbers_the_code_holds() -> None:
@@ -502,6 +568,16 @@ def test_the_mounted_credential_recipe_validates_and_is_where_the_step_program_r
     assert f"here `{mount.mount_path}/{key}`" in _section(CREDENTIAL)
 
 
+def test_the_platform_secret_the_guide_creates_is_the_one_the_backend_recipe_names() -> None:
+    """A secret under another name, or in another workspace, is one the builder never looks for, and every
+    submit is then refused as missing it."""
+    workspace, _, name = _backend_recipe()["remote"]["credential_secret"].partition("/")
+    section = _section(CREDENTIAL)
+    assert workspace and name
+    assert f"nemo workspaces create {workspace}\n" in section
+    assert f"nemo secrets create {name} --workspace {workspace} --from-file " in section
+
+
 def test_the_step_program_parses_and_uses_what_the_plugin_has() -> None:
     (program,) = re.findall(r"```python\n(.*?)```", _section(STEP_IMAGE), re.DOTALL)
     imports = [node for node in ast.walk(ast.parse(program)) if isinstance(node, ast.ImportFrom)]
@@ -524,11 +600,10 @@ def test_the_guide_lists_the_stages_the_driver_knows() -> None:
 
 def test_each_sentence_the_troubleshooting_tables_quote_is_spelt_by_the_sources() -> None:
     """An operator searches the guide for the sentence an answer or a row shows, so the two must read the same."""
+    rows = _table_rows(_section(TROUBLESHOOTING))
+    unread = [row for row in rows if not _sentences(row)]
+    assert rows and not unread, f"a troubleshooting row quotes no sentence in a cell of its own: {unread}"
     sentences = _quoted_sentences()
-    assert len(sentences) == QUOTED_SENTENCES, (
-        f"the troubleshooting tables quote {len(sentences)} sentences, not QUOTED_SENTENCES: update it if a row "
-        "was added or removed, otherwise a row is no longer read"
-    )
     shares = {sentence: _spelt_share(sentence) for sentence in sentences}
     unspelt = {sentence: f"{share:.0%}" for sentence, share in shares.items() if share < SPELT_SHARE}
     assert not unspelt, f"the guide quotes what the sources don't say: {unspelt}"
@@ -589,6 +664,15 @@ def test_the_launchers_lines_the_guide_quotes_are_the_launchers() -> None:
         assert _launcher_says(line), f"the launcher's formats don't make {line!r}"
 
 
+def test_the_launchers_sign_in_line_the_guide_quotes_is_the_launchers() -> None:
+    """Under workload token exchange the launcher signs in to the platform before it fetches a secret or starts
+    the step program, so a platform URL the step can't use ends the step on this line and on no other."""
+    assert f'"{LAUNCHER_GIVES_UP}\\n"' in _text(LAUNCHER_RUN), "the launcher logs the error it gives up with otherwise"
+    line = LAUNCHER_GIVES_UP.replace("%v", LAUNCHER_SIGN_IN)
+    assert f"`{line}`" in _subsection(IMAGE_FAILS), f"the guide no longer quotes {line!r}"
+    assert _launcher_says(LAUNCHER_SIGN_IN), f"the launcher's formats don't make {LAUNCHER_SIGN_IN!r}"
+
+
 def test_a_row_the_guide_points_at_is_a_row_of_its_tables() -> None:
     """The guide sends a reader on to a row by the sentence the row quotes, which finds the row only while the
     two read the same. Not a row it names by a status, such as a `ready` one: that is an image's row."""
@@ -637,3 +721,11 @@ def test_the_readme_points_at_the_guide() -> None:
     assert pointers, "the README doesn't link the guide"
     for pointer in pointers:
         assert (README.parent / pointer).resolve() == GUIDE
+
+
+def test_the_readme_and_the_guide_say_the_same_of_where_the_backend_has_run() -> None:
+    """Each sends its reader to the other, so one that says the backend has run where the other says it hasn't
+    leaves an operator to pick."""
+    for said in HAS_RUN:
+        assert said in _text(), f"the guide doesn't say {said!r}"
+        assert said in " ".join(_text(README).split()), f"the README doesn't say {said!r}"

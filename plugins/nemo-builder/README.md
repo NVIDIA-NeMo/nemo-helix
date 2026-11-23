@@ -13,8 +13,9 @@ the cluster build its images: see
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
 listed below. That is the in-cluster build. Building through a service outside the cluster has run
-only in this plugin's tests, against a stand-in for a build service: this repository holds no
-service's client or step image, and that path has not been run on a cluster.
+in this plugin's tests and on a Kind cluster, with platform auth off, both against a stand-in for a
+build service: this repository holds no service's client or step image, and that path has not been
+run against a real build service.
 
 ## Quickstart (minikube)
 

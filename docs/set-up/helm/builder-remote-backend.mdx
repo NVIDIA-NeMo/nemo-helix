@@ -44,7 +44,7 @@ Choose `remote` when a build service outside the cluster must build and publish 
 
 ## Before you begin
 
-- The platform is installed as in [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install). This page reuses its variables `NHX_NAMESPACE`, `NHX_HELM_RELEASE` and `NHX_HELM_CHART_VERSION`, writes the chart reference you installed from as `<chart>`, and uses `FULLNAME` as [Configure Harbor Taskset Runs](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#before-you-begin) sets it. `<api-service>` is the API Service, `${FULLNAME:0:59}-api`.
+- The platform is installed as in [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install). This page reuses its variables `NHX_NAMESPACE`, `NHX_HELM_RELEASE` and `NHX_HELM_CHART_VERSION`, writes the reference to the chart the release runs now as `<chart>`, and uses `FULLNAME` as [Configure Harbor Taskset Runs](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#before-you-begin) sets it. `<api-service>` is the API Service, `${FULLNAME:0:59}-api`.
 - A build service the cluster can reach, which builds from a build context and publishes each image by digest to one repository of a registry.
 - That registry is one the cluster can pull from. Evals, for one, starts each task sandbox from the row's `image_ref`.
 - A step image that holds the service's client. You build it: see [Build the step image](#build-the-step-image).
@@ -331,12 +331,13 @@ platformConfig:
 - Keep `launcher_image` as written. Helm evaluates the template expressions in `platformConfig`, so the profile takes the release's own image, as the chart's profiles do, and follows it at every upgrade. An image name copied in would stay at the release it was copied from.
 - Jobs' built-in profiles and the chart's build profiles stay: Jobs adds its defaults to this list, and the chart adds its own after the merge.
 - Helm replaces a list one values file sets with the list a later file sets. Keep every profile you define in one list.
+- Jobs ignores a key it doesn't know, directly under `config` or beside it, with no warning. A misspelt or misplaced key leaves its setting at the default. For `namespace` that is the release namespace, which the [namespace rule](#create-the-steps-namespace) rules out, and Builder refuses no submit for it. [Apply and verify](#apply-and-verify) reads the profile back as Jobs holds it.
 
 | Key | Set it to |
 | --- | --- |
 | `provider`, `profile` | `cpu`, and the name `builder.remote.profile` holds |
 | `backend` | `kubernetes_job`. A submit is refused on any other backend |
-| `config.namespace` | The step's namespace |
+| `config.namespace` | The step's namespace. If unset, the release namespace, which is the core controller's own |
 | `config.service_account_name` | The ServiceAccount you created there. If unset, the namespace's `default` account |
 | `config.launcher_image` | The release's platform image, which ships `/tools/jobs-launcher`: the expression above. If unset, a profile written in full gets Jobs' own default, not the chart's |
 | `config.pod_security_context` | The pod security context for the step's pod: the chart's `podSecurityContext`, `{}` by default |
@@ -501,7 +502,7 @@ Helm replaces a list an earlier values file sets with the list a later file sets
      | yq '.data["config.yaml"]' | yq '.builder, .jobs.executors, .platform.base_url'
    ```
 
-   - After [Upgrade before you switch](#upgrade-before-you-switch), the chart version is the one you upgraded to, not the one you first installed. `helm list -n "$NHX_NAMESPACE"` shows it in the `CHART` column, and `NHX_HELM_CHART_VERSION` must hold it. With an older version, the upgrade in the next step takes the release back to that chart, which may be from before the backend, with `backend: remote` set.
+   - After [Upgrade before you switch](#upgrade-before-you-switch), the chart version is the one you upgraded to, not the one you first installed. `helm list -n "$NHX_NAMESPACE"` shows it in the `CHART` column, and `NHX_HELM_CHART_VERSION` must hold it. With an older version, the upgrade in the next step takes the release back to that chart, which may be from before the backend, with `backend: remote` set. Where `<chart>` is a chart archive, it must be the archive of that version: `--version` doesn't choose among local files.
    - The upgrade takes values only from the files it is passed. Pass a file added since the install too, such as `harbor-profiles.yaml`: left out, its settings go back to the chart's defaults.
    - `.jobs.executors` must hold `build-remote` and every other profile your values files define.
    - With `networkPolicies.enabled` and the API's policy on, read that policy's ingress rules back too. They must hold the rule for the step's namespace and every other `extraIngress` rule your values files set:
@@ -521,11 +522,16 @@ Helm replaces a list an earlier values file sets with the list a later file sets
 
    - A config change restarts the API and core-controller pods.
 
-3. Check that Jobs lists the profile. The list must hold provider `cpu`, profile `build-remote`, on backend `kubernetes_job`:
+3. Check that Jobs lists the profile, then read it back as Jobs holds it. The list must hold provider `cpu`, profile `build-remote`, on backend `kubernetes_job`:
 
    ```bash
    nemo jobs list-execution-profiles
+   nemo jobs list-execution-profiles -f json \
+     | jq '.[] | select(.provider == "cpu" and .profile == "build-remote")'
    ```
+
+   - Jobs drops a key it doesn't know without a warning, so the second command is the check that each key was read. `config.namespace`, `config.service_account_name`, `config.max_active_jobs`, `config.ttl_seconds_active` and `config.ttl_seconds_before_active` must be what you set, and `config.launcher_image` the release's platform image.
+   - A `config.namespace` of `null` means the key wasn't read: the step would run in the release namespace.
 
 4. Upload a build context:
 
@@ -578,7 +584,7 @@ Helm replaces a list an earlier values file sets with the list a later file sets
 
 7. Pull `image_ref` from where your consumers run. Builder doesn't read the registry: it records the digest the step names.
 
-To build again, submit with `"revision": 2`.
+To build again, submit with `"revision": 2`: its image is then `remote-check-2` and its job `builder-remote-check-2`, so name those in step 6's commands.
 
 ## Troubleshooting
 
@@ -641,18 +647,19 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 | `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise `ttl_seconds_active` when it is the one named. For a step that never started, a longer `ttl_seconds_before_active` helps only a pod that would have started, such as one waiting for a node. A ServiceAccount the profile names, or a Secret it mounts, that isn't in the step's namespace also keeps the pod from starting, and ends in this same message. Jobs deletes the step's Kubernetes Job and its pod when it ends the step, so read the namespace's events while a new build's step is pending, with `kubectl get events -n nemo-helix-remote-builds` |
 | `Failed to create Kubernetes ConfigMap <name> for job step <job>/remote-build: <error>` | Jobs' controller was refused when it created the step's first object in the profile's namespace, so no pod was made. `<error>` is Kubernetes' answer, and the row may cut it off before it names the account and the namespace: `nemo jobs get-status <job> --workspace <workspace>` has all of it. With `(403)`, the controller's account as a rule has no Role in that namespace: the RoleBinding wasn't applied, or its subject doesn't name the account the core controller runs as and the release namespace, or the profile's `config.namespace` isn't the namespace the manifests were applied to. A namespace that doesn't exist is answered `(403)` too. Read the account again with the command under [Create the step's namespace](#create-the-steps-namespace), correct the RoleBinding or the profile, and submit the next revision |
 | `Image pull did not succeed within <n>s (<reasons>): <detail>` | Jobs gave up pulling an image of the step's pod: the step image, or the profile's `launcher_image`. `<detail>` is the kubelet's event, which as a rule names the image. `<n>` is the profile's `ttl_seconds_image_pull`, 600 if unset. Check `remote.image` or the profile's `default_task_image`, its `launcher_image`, and the image pull secrets in the step's namespace |
-| `Job has errored pods, check tasks for error details` | The step's pod failed, and what Jobs kept of its log holds no line for the image: the step program never started, or ended without giving a reason. The message may go on with `One or more tasks are in error state`. Read the step's task in `nemo jobs get-status <job> --workspace <workspace>`. Its `error_details` hold the kubelet's warning, when a container couldn't be created or started. Its `error_stack` holds the end of the container's log, with the lines of Jobs' launcher, which the step's log leaves out. `Error fetching secrets: failed to fetch secret <workspace>/<name>: <error>` is the launcher failing to fetch `credential_secret`. Where `<error>` is `failed to get secret: status code <n>`, the API answered and didn't return the secret: for a `403`, see [As a platform secret](#as-a-platform-secret). For any other `<error>`, check that the API can be reached from the step's namespace: `platform.base_url`, the API's NetworkPolicy and, on an HTTPS URL, that the step image's system certificates trust it. `Error starting command: <error>` is the launcher failing to run `remote.command`, as when the program isn't on the step image's `PATH`. A traceback is the step program's own |
+| `Job has errored pods, check tasks for error details` | The step's pod failed, and what Jobs kept of its log holds no line for the image: the step program never started, or ended without giving a reason. The message may go on with `One or more tasks are in error state`. Read the step's task in `nemo jobs get-status <job> --workspace <workspace>`. Its `error_details` hold the kubelet's warning, when a container couldn't be created or started. Its `error_stack` holds the end of the container's log, with the lines of Jobs' launcher, which the step's log leaves out. Under workload token exchange the launcher first signs in to the platform, for its log upload, before it fetches a secret or starts `remote.command`: it reads the platform's auth settings at `platform.base_url`, then exchanges the pod's token. A sign-in that fails is `Error: configure workload identity auth for OTLP logs: <error>`. Where `<error>` is `credentials require HTTPS or a loopback endpoint`, `platform.base_url` isn't an HTTPS URL. Where it is `auth discovery failed: status <n>`, the URL answered with something other than the platform's auth settings: check that what serves it passes `/apis/auth/discovery` on to the API. Where it is `workload token exchange failed: status <n>`, the platform refused the pod's token: check the signing key and the TokenReview permission that [Deployment Secrets](/documentation/access-control/deployment/deployment-secrets) has you create. For any other `<error>`, such as a connection or certificate error, check that the URL resolves and can be reached from the step's namespace, and that the step image's system certificates trust it. `Error fetching secrets: failed to fetch secret <workspace>/<name>: <error>` is the launcher failing to fetch `credential_secret`. Where `<error>` is `failed to get secret: status code <n>`, the API answered and didn't return the secret: for a `403`, see [As a platform secret](#as-a-platform-secret). For any other `<error>`, check that the API can be reached from the step's namespace: `platform.base_url`, the API's NetworkPolicy and, on an HTTPS URL, that the step image's system certificates trust it. `Error starting command: <error>` is the launcher failing to run `remote.command`, as when the program isn't on the step image's `PATH`. A traceback is the step program's own |
 | `Job failed: <message>` | The same failure, as Kubernetes reports it for the step's Job. See the `Job has errored pods, check tasks for error details` row |
 | `Job reports <n> failure(s) but no Failed condition is True yet` | The same failure, read before Kubernetes marked the step's Job failed. See the `Job has errored pods, check tasks for error details` row |
+| `Job has pods in error state, check tasks for error details` | The same failure, for a pod that Kubernetes marked failed with no error from a container. See the `Job has errored pods, check tasks for error details` row |
 | `the step could not start: RuntimeError: NHX_BUILD_REMOTE_CREDENTIAL not set: the build service's credential did not reach this step` | `credential_secret` is set and the launcher fetched the secret, but the step found no value in it. Check the secret holds a value. A fetch that fails ends the step before this: see the `Job has errored pods, check tasks for error details` row |
 | `the step could not start: RuntimeError: the build service's credential is empty: the step's Jobs profile did not mount it` | The step program reads a mounted credential and found none. Mount it, or set `credential_secret` |
 | `the step could not start: RuntimeError: the build service's credential could not be read: <why>` | The step program's `read_credential` failed. Check the mount and its path |
-| `cannot read its row: <error>` | The step can't reach the platform's API, or isn't let in. Check `platform.base_url`, and the API's NetworkPolicy, from the step's namespace. On an HTTPS URL, check that the step trusts its certificate. With `credential_secret` set, the launcher calls the API before the step does, so an API that can't be reached at all ends in the `Job has errored pods, check tasks for error details` row instead |
+| `cannot read its row: <error>` | The step can't reach the platform's API, or isn't let in. Check `platform.base_url`, and the API's NetworkPolicy, from the step's namespace. On an HTTPS URL, check that the step trusts its certificate. With `credential_secret` set, or under workload token exchange, the launcher calls the API before the step does, so an API that can't be reached at all ends in the `Job has errored pods, check tasks for error details` row instead |
 | `cannot fetch its build context: <error>` | The step can't read the fileset as the submitter, or the context is refused |
 | `starting the build failed <n> times over <s>s: <error>` | The service's client couldn't start the build for ten minutes. Check the network path from the step's namespace, and what the profile's `env` points the client at |
 | `starting the build: <error>` | The service's client gave the start up. `<error>` is its own |
 | `timed out after <n>s, while <stage>` | The build ran past `build_timeout_seconds` and was cancelled |
-| `the build service reports it failed: <detail>` | The build failed at the service. Use the build ID to look further there |
+| `the build service reports it <stage>: <detail>` | The build ended at the service with no image. `<stage>` is `failed`, or `cancelled` where the build was cancelled at the service and not by this step, as at the service's own deadline. Use the build ID to look further there |
 | `the build service published '<reference>', not a digest in <registry>/<repository>` | `remote.registry` and `remote.repository` aren't where the service publishes |
 | `it was built, but the builder refused to complete it: <error>` | Builder answered the completion with a refusal. See the next table |
 | `it was built, but the builder could not be told: <error>` | The completion kept failing for five minutes. With a `503`, see the next table. With a `422`, the API was reached and refused the request's shape, which the step tries again in case an older API pod answered: the step image is from a newer release than the API pods. Finish the platform's upgrade, or rebuild the step image from the platform's release (see [Build the step image](#build-the-step-image)). Otherwise the API couldn't be reached |
