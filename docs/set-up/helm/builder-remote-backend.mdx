@@ -1,0 +1,665 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Build Images Through a Remote Build Service"
+description: "Set up a deployment whose Builder builds container images through a build service outside the cluster (platformConfig.builder.backend: remote): the settings, the step image, the Jobs profile and its namespace, the credential, who may complete an image, switching an existing deployment, verifying and troubleshooting."
+---
+
+This page sets up a deployment whose Builder builds container images through a build service outside the cluster instead of in the cluster. You select it with `platformConfig.builder.backend: remote`. Builder's API, its `ContainerImage` rows and callers' requests stay the same. What changes is who builds, where the image is published, and what the deployment provides:
+
+- **A step image** that holds your build service's client. Builder names no service.
+- **A Jobs execution profile** the step runs on, in a namespace of its own.
+- **A credential** for the build service, and a decision on how the platform shows who may complete an image.
+
+<Warning>
+
+The remote backend has run only in the Builder plugin's tests, against a stand-in for a build service. This repository holds no build service's client and no step image, and nothing on this page has been run on a cluster or against a real build service. That includes both ways of authenticating a step with platform auth on. Prove the setup on your own cluster with [one build](#apply-and-verify) before you rely on it.
+
+</Warning>
+
+## What the remote backend does
+
+- A submitted build set becomes one Jobs job with one step, `remote-build`, which runs the step image you name.
+- For each image, the step fetches the build context from Files, acting for the build's submitter, and has the build service build it. Then it completes the image's row with the digest the service published, the service's own handle for the image (`external`) and, when the service's client reported it, how the image starts (`runtime_config`).
+- No sandbox runs. The in-cluster build's push secrets, build namespace and work volume aren't used.
+- Builder doesn't push or sign these images. Whether an image is signed, and by whom, is the service's.
+- Every workspace's images go to the one repository the service publishes to. No tag is pushed: an image is told apart by its digest, so consumers pin the row's `image_ref`.
+
+### When to choose it
+
+The default backend, `execution`, builds in the cluster. kaniko runs each Dockerfile in a sandbox pod, and a push step publishes the image to the deployment's registry and signs it. That needs what the chart's `builder.enabled` creates: a build namespace at the `baseline` Pod Security standard, where the sandbox runs as root, and a work volume, `ReadWriteMany` by default.
+
+Choose `remote` when a build service outside the cluster must build and publish the images instead: for example, where the cluster can't admit that sandbox or provide that volume, or where images have to come from a service you already run.
+
+### What it can't do today
+
+- **Run on anything but Kubernetes Jobs.** The step runs only on a `kubernetes_job` profile.
+- **Publish where a request says.** A spec that names an `output` is refused: the service publishes to one repository, by digest.
+- **Copy a published image.** A spec whose source is an image (`source.image`) is refused.
+- **Mount files into a build.** A spec with `mounts` is refused: the service takes one build context.
+- **Show a build log.** A failed image's row carries the step's one-line reason and, once a build was started, the service's ID for it.
+- **Build an evals task that names a prebuilt image.** Evals copies a prebuilt image through Builder, and this backend refuses copies. A task that names a prebuilt image, for main, the verifier or a compose service, can't be built, and runs then refuse the task.
+- **Build an evals agent layer.** A layer build needs `mounts`. A layer this cluster built before a switch is used until it is too old for the run. Past that, the task runs on its own image and its trials install the agent during setup.
+
+## Before you begin
+
+- The platform is installed as in [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install). This page reuses its variables `NHX_NAMESPACE`, `NHX_HELM_RELEASE` and `NHX_HELM_CHART_VERSION`, writes the chart reference you installed from as `<chart>`, and uses `FULLNAME` as [Configure Harbor Taskset Runs](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#before-you-begin) sets it. `<api-service>` is the API Service, `${FULLNAME:0:59}-api`.
+- A build service the cluster can reach, which builds from a build context and publishes each image by digest to one repository of a registry.
+- That registry is one the cluster can pull from. Evals, for one, starts each task sandbox from the row's `image_ref`.
+- A step image that holds the service's client. You build it: see [Build the step image](#build-the-step-image).
+- A credential for the service, made for this deployment: one that can do no more than build into that repository, and that you can replace.
+- The `builder-settle` controller is running. It fails a `pending` image whose job ended without completing it; without it such an image stays `pending` in listings. The chart's default, `core.controller.controllerGroup: all`, runs it.
+- The `nemo` CLI is connected to the deployment, and you have `kubectl`, `helm`, `yq`, `jq` and `curl`.
+
+### Upgrade before you switch
+
+Set `backend: remote` only once every part of the release already knows the backend. Do it in two rollouts:
+
+1. Upgrade the release in a rollout of its own: every API pod, the controllers, `builder-settle` among them, and the `nhx-tasks` image evals' build Jobs run in.
+2. Upgrade users' SDK and CLI.
+3. Then set `backend: remote`.
+
+A part from before the backend existed doesn't treat a remote build as one. The last paragraphs of the [Builder plugin's README section](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/README.md#building-through-a-service-outside-the-cluster) say what each older part does, and why not to go back to an older release once a remote build is recorded. The evals side of the same order is in [Switch the Builder backend](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#switch-the-builder-backend).
+
+## Select the backend
+
+Builder's settings live under `platformConfig.builder`. Callers can't set any of them.
+
+```yaml
+platformConfig:
+  builder:
+    backend: remote
+    remote:
+      registry: registry.example.com
+      repository: team/images
+      image: registry.example.com/platform/remote-build-step:1.0.0
+      command: [remote-build]
+      profile: build-remote
+      credential_secret: builds/build-service-credential
+      platforms: [linux/amd64]
+      max_specs_per_set: 1
+      allow_dockerfile_path: true
+      build_timeout_seconds: 3600
+      allow_unverified_completion: false
+```
+
+`remote.registry` and `remote.repository` have no default, and `remote.image` has none unless the profile names a `default_task_image`. The other `remote` keys are shown at their defaults, except `credential_secret`, which is unset by default.
+
+| Key | Default | What it does | When it's wrong |
+| --- | --- | --- | --- |
+| `backend` | `execution` | Which backend builds: `execution`, in this cluster, or `remote` | Any other value refuses every submit. A misspelt key, such as `bakend`, is ignored with a warning in the API log, and builds stay in this cluster |
+| `remote.registry` | unset | Host of the registry the service publishes every image to, with an optional port. No scheme, path or login | Unset: every submit is refused. Not a host: the section is invalid. Not where the service publishes: each image fails once it's built |
+| `remote.repository` | unset | The one repository the service publishes to, for every workspace. A leading or trailing `/` is dropped | Unset: every submit is refused. Not a repository path: the section is invalid. Not where the service publishes: each image fails once it's built |
+| `remote.image` | unset | The image the `remote-build` step runs. If unset, the profile's `default_task_image` | Unset, on a profile with no `default_task_image`: every submit is refused. Blank: the section is invalid |
+| `remote.command` | `[remote-build]` | The step program in that image, and its arguments. The platform's own images ship no such program | An empty list or a blank entry: the section is invalid |
+| `remote.profile` | `build-remote` | The Jobs execution profile, provider `cpu`, the step runs on | A profile Jobs doesn't list, one that isn't on `kubernetes_job`, or one whose time limit is too low: every submit is refused. See [Add the Jobs profile](#add-the-jobs-profile) |
+| `remote.credential_secret` | unset | The platform secret that holds the service's credential, as `<workspace>/<name>`. Leave it unset when the profile mounts the credential instead | Not `<name>` or `<workspace>/<name>`: the section is invalid. A secret that doesn't exist, or that the submitter can't read: that submit is refused with `409` `missing_secrets`. A bare name is read from the workspace each build is submitted in |
+| `remote.platforms` | `[linux/amd64]` | The platforms the service builds, as `os/architecture` | A spec for any other platform is refused. An empty list: the section is invalid. A list without `builder.default_platform`: every submit is refused |
+| `remote.max_specs_per_set` | `1` | How many images one build set may hold | A larger set is refused. Below 1: the section is invalid |
+| `remote.allow_dockerfile_path` | `true` | Take a spec whose Dockerfile isn't `Dockerfile` at the context root. The step copies that file, and its own ignore file, to the root of the context it hands the service, in place of any `Dockerfile` already there | `false` refuses such a spec |
+| `remote.build_timeout_seconds` | `3600` | How long the step waits for one image, from when it asks the service to start, before it cancels the build and fails the image. The step gives the same limit to the service's client, to pass on as the build's own deadline | Below 60: the section is invalid. Too short for a build: the image fails with `timed out after <n>s`. Above what the profile's time limit covers: every submit is refused |
+| `remote.allow_unverified_completion` | `false` | Build where nothing can show who completes an image: with platform auth on and no workload token exchange | See [Decide who may complete an image](#decide-who-may-complete-an-image). It changes nothing in the other two modes |
+
+How the section is checked:
+
+- Builder reads the section when a build is submitted, not when the platform starts. A bad value doesn't stop the rollout: every submit then answers `409` with `code` `backend_rejected`.
+- The answer names the setting from `builder` down, such as `remote.registry`. The API log has the check's own sentence.
+- The whole section is checked, whichever backend is selected. A bad value in an in-cluster setting, such as one under `sandbox`, refuses every submit too.
+- An unknown key under `remote` makes the section invalid. An unknown key directly under `builder` is ignored, with a warning in the API log.
+- Of the other `builder` keys, the remote backend reads two: `default_platform`, which must be one of `remote.platforms`, and `control_profile`, for [the namespace rule](#create-the-steps-namespace). It doesn't use `registry`, `repository_prefix`, `import_registries`, `sandbox`, `fetch_profile`, `push_profile` or the push step's three secrets.
+
+## Build the step image
+
+Builder ships no step image. Yours needs three things:
+
+- **The Builder plugin's Python package**, `nemo-builder-plugin`, which holds the step's driver (`nemo_builder_plugin.run.remote`). The release's `nhx-builder-tasks` image, which the in-cluster steps run in, carries it. Build the step image from the same release as the platform, so the step and the API agree on the step's configuration and the completion request.
+- **Your service's client**, which implements `RemoteBuildService`: three calls, `start`, `status` and `cancel`, and three error types that tell the driver whether to repeat a call, wait, or fail the image.
+- **A step program**, which `remote.command` names: a few lines that call `step_main` with a factory for that client.
+
+A step program, with the client in a module of your own:
+
+```python
+"""The step program, installed in the step image as `remote-build`."""
+
+from pathlib import Path
+
+from my_build_service import MyBuildService
+from nemo_builder_plugin.run.remote import RemoteBuildService, step_main
+from nemo_builder_plugin.steps import RemoteBuildStepConfig
+
+
+def make_service(config: RemoteBuildStepConfig, credential: str | None) -> RemoteBuildService:
+    """Your client, with the credential the driver read for it."""
+    return MyBuildService(credential)
+
+
+def read_credential() -> str:
+    """The credential the profile mounts. Called only when `credential_secret` is unset."""
+    return Path("/var/run/build-service/credential").read_text()
+
+
+def main() -> int:
+    return step_main(make_service, read_credential=read_credential)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- Put the program on the image's `PATH`, as an executable under the name `remote.command` starts with: a console script of your Python package, for one. Jobs sets the step container's command to its own launcher and passes `remote.command` as the arguments. So the image's `ENTRYPOINT` isn't used, and the launcher looks a bare name up on `PATH`.
+- `make_service` gets the step's configuration and the credential: the one `credential_secret` names, or else what `read_credential` returns. The path above is where [the profile mounts it](#mounted-by-the-profile), in a file named for the Secret's key, here `credential`.
+
+One way to build the image, which hasn't been tried: start from the release's `nhx-builder-tasks` image and install your package into its Python environment. That image keeps the environment at `/app/.venv`, with its `bin` directory on `PATH`, and ships `uv`:
+
+```dockerfile
+FROM <image-registry>/nhx-builder-tasks:<image-tag>
+COPY . /src/my-build-service
+RUN uv pip install --python /app/.venv/bin/python /src/my-build-service
+```
+
+- `<image-registry>` and `<image-tag>` are the platform's `platform.image_registry` and `platform.image_tag`. With this chart those are `nvcr.io/nvidia/nemo-helix` and the chart's app version, unless your `platformConfig` sets them.
+- The build context is your Python package: the client, the step program, and a console script named `remote-build` that runs the program's `main`. The install puts the script in `/app/.venv/bin`.
+
+The driver does everything that is the same for every service: it fetches each context, keeps the deadline, polls, retries, cancels the build when the job is told to stop, and completes each row.
+
+What the client owes, in short:
+
+- `start` returns the service's ID for the build, which is never empty: the row names the build by it. It is safe to repeat with the same `build.key`, which starts one build: the driver calls again when a response is lost.
+- `status` reports one of six stages: `queued`, `building`, `verifying`, `done`, `failed` or `cancelled`. Any other fails the image. Once `done`, it carries the image as `<registry>/<repository>@sha256:<digest>`, in the registry and repository that `remote.registry` and `remote.repository` name.
+- It gives the service the build's time limit as the build's own deadline. A step that is killed outright cancels nothing, so only the service's deadline ends that build.
+- Each call bounds its own time, and `cancel` is safe to repeat.
+- It is handed the whole build context, ignored files included. It applies the ignore file at the context's root before anything leaves the step, and it follows no link in the context.
+- If it can read the published image's config, it reports how the image starts. The driver reads nothing from the registry.
+
+That is a summary. Two places hold the rest:
+
+- The driver's module, [`run/remote.py`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/src/nemo_builder_plugin/run/remote.py), is the authority for the calls: `step_main`, the `RemoteBuildService` protocol, what each call is given and returns (`RemoteBuild`, `RemoteBuildStatus`, `RemoteImage`), and the three error types.
+- The [Builder plugin's README](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/README.md#building-through-a-service-outside-the-cluster), under "What an operator sets up", is the reference for what the client owes, and for what is kept out of the step's log.
+
+## Create the step's namespace
+
+The remote backend uses none of what `builder.enabled` creates for the in-cluster build: the build namespace, its ServiceAccounts and RBAC, the work volume and the three build profiles. `builder.enabled` may stay on, and the chart enables Harbor taskset runs only when it is set, but the step doesn't run in the build namespace.
+
+On a remote deployment, `builder.enabled: true` still creates all of that, and nothing uses it. That includes the namespace, labelled for the `baseline` standard, and the work-volume claim, which is `ReadWriteMany` and 100Gi unless you change `builder.workVolume`. The chart has no switch for taskset runs alone: with `builder.enabled` off it renders no `evals.runs.harbor`, and taskset runs are off unless you set that block yourself under `platformConfig.evals.runs.harbor`, copying `harbor-standard` from the chart's `values.yaml`. That way hasn't been tried.
+
+The namespace rule:
+
+- With platform auth on and workload token exchange, a step is known as the build's own by the platform's record of its pod. That record is as sure as the step's namespace is closed. Run the step in a namespace where nothing but Jobs creates pods: no other workload, and no user.
+- Not the build namespace, `<release namespace>-builds` by default, while the in-cluster build profiles are deployed: the in-cluster build step may create pods there. In that auth mode Builder refuses every submit while the remote-build profile names the namespace of the `control_profile` profile (`build-control`) that Jobs lists.
+- Builder checks only that one namespace. It can't see what else may create pods where the step runs.
+- Not the release namespace either: the platform's own pods run there, and so do the model deployments it launches.
+- With platform auth off, or on without workload token exchange (where `allow_unverified_completion` lets builds through), nothing checks the namespace. A namespace of its own still lets you turn workload token exchange on later without moving the step.
+
+The chart creates none of this for the step. Create the namespace, the ServiceAccount the profile names, and a Role for the Jobs controller there, with the rules the chart gives it in the build namespace:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nemo-helix-remote-builds
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nhx-build-remote
+  namespace: nemo-helix-remote-builds
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-jobs-controller
+  namespace: nemo-helix-remote-builds
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-jobs-controller
+  namespace: nemo-helix-remote-builds
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-jobs-controller
+subjects:
+  - kind: ServiceAccount
+    name: <controller-service-account>
+    namespace: <release-namespace>
+```
+
+- `<controller-service-account>` is the account the core controller runs as. Read it from the cluster:
+
+  ```bash
+  kubectl get deploy "${FULLNAME:0:52}-core-controller" -n "$NHX_NAMESPACE" \
+    -o jsonpath='{.spec.template.spec.serviceAccountName}'
+  ```
+
+- The step's own ServiceAccount needs no Role. The driver makes no call to the Kubernetes API.
+
+A namespace other than the release's also needs:
+
+- **Image pull secrets.** Jobs gives the step's pod the platform's `imagePullSecrets` and the profile's `image_pull_secrets` by name. The chart doesn't copy them, so create them in the step's namespace.
+- **With `sandboxClusterCapable`, a Secret under the OpenSandbox key's name.** Jobs gives every job pod a reference to that Secret in the pod's own namespace. The step doesn't use the key, so a placeholder is enough, as the chart puts in the build namespace. The names are `opensandbox.apiKeySecret` and `opensandbox.apiKeySecretKey`:
+
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: opensandbox-server-api-key
+    namespace: nemo-helix-remote-builds
+  type: Opaque
+  stringData:
+    api-key: not-the-opensandbox-key
+  ```
+
+- **A platform URL the step can reach.** The step calls the platform at `platform.base_url`, and so does Jobs' launcher, which starts it. Which URL that is goes by how the platform authenticates:
+
+  - **Without workload token exchange** (platform auth off, or on without `auth.oidc.workload`), the in-cluster URL, namespace-qualified. With `builder.enabled: true` the chart sets `platform.base_url` to `http://<api-service>.<release namespace>.svc:<port>`, unless your own `platformConfig` sets the key: your value replaces the chart's. With `builder.enabled` off, or where your value isn't a name the step's namespace resolves, set it yourself:
+
+    ```yaml
+    platformConfig:
+      platform:
+        base_url: http://<api-service>.<release-namespace>.svc:8080
+    ```
+
+  - **With workload token exchange** (`auth.oidc.workload` is set), the HTTPS URL that mode needs: `platform.base_url` must then be an HTTPS endpoint that every platform pod can resolve and reach. Keep the one you set for that mode, and don't replace it with the in-cluster URL above. Check that its name resolves, and that it can be reached, from the step's namespace. Where its certificate is from a private CA, the step must trust that CA. The step image is yours, so add the CA to the image's system certificates, which Jobs' launcher goes by, and name a file that holds it in `NHX_CLIENT_SSL_CERT_FILE`, in the profile's `env`, for the step's own calls. [Credential Propagation](/documentation/access-control/deployment/credential-propagation) has the rule.
+
+- **With `networkPolicies.enabled`, a way in to the API.** This is for a step that reaches the API pods directly, at the in-cluster URL. One that comes in at an HTTPS URL is let in, or not, by whatever serves that URL. The chart's API ingress policy admits job pods from the release namespace and, with `builder.enabled`, from the build namespace. Admit the step's namespace too:
+
+  ```yaml
+  networkPolicies:
+    api:
+      extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: nemo-helix-remote-builds
+              podSelector:
+                matchLabels:
+                  app: nemo-job
+                  nhx.nvidia.com/managed_by: jobs-controller
+          ports:
+            - protocol: TCP
+              port: 8080
+  ```
+
+- **A network path to the build service.** A Jobs profile has no egress setting, so that path is the cluster's to open.
+
+## Add the Jobs profile
+
+A profile you add under `jobs.executors` inherits nothing from `jobs.executor_defaults`, so write it in full. Read what the chart gives its own Kubernetes profiles, and copy `launcher_image` and `pod_security_context` from it:
+
+```bash
+kubectl get configmap "$FULLNAME-config" -n "$NHX_NAMESPACE" \
+  -o jsonpath='{.data.config\.yaml}' | yq '.jobs.executor_defaults.kubernetes_job'
+```
+
+```yaml
+platformConfig:
+  jobs:
+    executors:
+      - provider: cpu
+        profile: build-remote
+        backend: kubernetes_job
+        config:
+          namespace: nemo-helix-remote-builds
+          service_account_name: nhx-build-remote
+          launcher_image: <launcher-image>
+          pod_security_context: {}
+          max_active_jobs: 4
+          ttl_seconds_active: 14400
+          ttl_seconds_before_active: 3600
+          env:
+            BUILD_SERVICE_URL: https://build.example.com
+```
+
+- Jobs' built-in profiles and the chart's build profiles stay: Jobs adds its defaults to this list, and the chart adds its own after the merge.
+- Helm replaces a list one values file sets with the list a later file sets. Keep every profile you define in one list.
+
+| Key | Set it to |
+| --- | --- |
+| `provider`, `profile` | `cpu`, and the name `builder.remote.profile` holds |
+| `backend` | `kubernetes_job`. A submit is refused on any other backend |
+| `config.namespace` | The step's namespace |
+| `config.service_account_name` | The ServiceAccount you created there. If unset, the namespace's `default` account |
+| `config.launcher_image` | An image that ships `/tools/jobs-launcher`, as the platform image does. If unset, a profile written in full gets Jobs' own default, not the chart's |
+| `config.pod_security_context` | The pod security context for the step's pod: the chart's `podSecurityContext`, `{}` by default |
+| `config.default_task_image` | The step image, only when `builder.remote.image` is unset |
+| `config.image_pull_secrets` | Secrets in the step's namespace for pulling the step image, as a list of `name` entries, on top of the platform's `imagePullSecrets` |
+| `config.max_active_jobs` | The most build jobs running at once. Jobs starts a step on the profile only while fewer than this many run on it, and queues the rest. Set it to what the service lets this deployment queue. If unset, 500 |
+| `config.ttl_seconds_active` | The only limit Jobs puts on the running step. If unset, 86400 (24 h). See below |
+| `config.ttl_seconds_before_active` | How long the step may stay pending before Jobs fails it. If unset, 1800 (30 min) |
+| `config.env` | Whatever the service's client reads from its environment, such as the service's address. Never the credential: Jobs returns a profile's settings, `env` included, to every user who lists the profiles |
+| `config.storage` | Only to mount the credential: see [Give the step its credential](#give-the-step-its-credential). The step needs no `pvc_name`: it keeps each build context on its pod's task storage, an `emptyDir` |
+
+Size `ttl_seconds_active`:
+
+- Jobs counts it from when the build was submitted, so it covers the wait for a slot as well as the build.
+- A submit checks a floor: `build_timeout_seconds` times the images one set may hold (`max_specs_per_set`, at most 100), plus 120 seconds. A profile below it refuses every submit.
+- The floor leaves out the longest a build waits for a slot, the time to fetch each context, and up to five minutes of reporting a built image. Set the limit above the floor by those.
+
+## Give the step its credential
+
+The credential is in reach of more than the step either way. Give the service one that can do no more than build into the one repository, and that you can replace.
+
+### As a platform secret
+
+Set `remote.credential_secret`, and create the secret:
+
+```bash
+nemo workspaces create builds
+nemo secrets create build-service-credential --workspace builds --from-file ./credential
+```
+
+- Jobs' launcher fetches the secret as the step starts, acting for the build's submitter, whether or not the platform uses workload token exchange. The step reads it from its environment, in `NHX_BUILD_REMOTE_CREDENTIAL`, and removes it from there.
+- Every user who may build must be able to read the secret. A submit from one who can't is refused with `409` `missing_secrets`. With platform auth on, Builder's check at submit takes `secrets.read` in the secret's workspace, which the Viewer role carries. Add each of those users to that workspace, or grant the role there to all users, as [Managing Access](/documentation/access-control/authorization/managing-access) shows.
+- The launcher's fetch is checked on its own. The Secrets service asks `secrets.read` of the submitter again, and the platform's rule for a secret's value also asks `secrets.access` of the identity the launcher calls with, which no user's role carries ([Security Model](/documentation/access-control/security-model#on-behalf-of-delegation)). That fetch hasn't been run with platform auth on. If a step then fails over the credential, start from the `NHX_BUILD_REMOTE_CREDENTIAL not set` row under [An image fails](#an-image-fails).
+- Each of those users can read the secret's value too, through a job of their own that names it.
+- Write the reference as `<workspace>/<name>` for one credential the whole deployment builds with. A bare name is read from the workspace each build is submitted in, so every workspace would need its own.
+
+### Mounted by the profile
+
+Leave `remote.credential_secret` unset, create the credential as a Kubernetes Secret in the step's namespace before the first build, and have the profile mount it:
+
+```bash
+kubectl create secret generic build-service-credential -n nemo-helix-remote-builds \
+  --from-file=credential=./credential
+```
+
+The Secret's key, `credential`, becomes the name of the file under the mount path. It must be the file the step program's `read_credential` opens: here `/var/run/build-service/credential`.
+
+```yaml
+platformConfig:
+  builder:
+    remote:
+      credential_secret: null
+  jobs:
+    executors:
+      - provider: cpu
+        profile: build-remote
+        backend: kubernetes_job
+        config:
+          # … the rest of the profile, as above
+          storage:
+            additional_volumes:
+              - name: build-service-credential
+                secret:
+                  secret_name: build-service-credential
+            additional_volume_mounts:
+              - name: build-service-credential
+                mount_path: /var/run/build-service
+                read_only: true
+```
+
+- This way the credential reaches further. Jobs gives whatever a profile carries to every step that names the profile, and doesn't restrict who may name one.
+- So any user who may create a job (`jobs.create`), in any workspace, can run their own image on `cpu/build-remote` and read the mounted credential, whether or not they may submit builds.
+- Mount a credential only where every such user is trusted with it, or where the deployment itself restricts who may create jobs. Otherwise use `credential_secret`.
+- Builder can't check that the profile mounts the credential. The step program passes `step_main` a function that reads it (`read_credential`). One that finds nothing fails every image and says so.
+- Never put the credential in the profile's `env`.
+
+## Decide who may complete an image
+
+Completing a remote build's row records what its caller sends: the digest, the service's handle and how the image starts. Builder holds no credential for the build service, so it checks none of that against the service. What stands for it is who is calling, and that goes by how the platform authenticates a caller.
+
+| Platform auth | Who may complete a `pending` image | What you set |
+| --- | --- | --- |
+| Off (`auth.enabled: false`, the chart's default) | Anything that reaches the API. No caller is checked, as for an image built in this cluster | Nothing |
+| On, with workload token exchange (`auth.oidc.workload` is set) | Only a step of the attempt the image's row records: the first attempt of the job its submit created | A namespace of its own for the step |
+| On, without workload token exchange | No one. Every submit is refused with `409` `backend_rejected`, and every completion with `403`. With `allow_unverified_completion: true`: any caller that says it acts for the image's submitter | Turn workload token exchange on, or set `allow_unverified_completion: true` |
+
+To turn workload token exchange on, set `auth.oidc.workload`:
+
+- [OIDC Workload Identity Exchange](/documentation/access-control/deployment#oidc-workload-identity-exchange) has the settings.
+- [Deployment Secrets](/documentation/access-control/deployment/deployment-secrets) has what to create before that: the signing key, and the TokenReview permission.
+- [Credential Propagation](/documentation/access-control/deployment/credential-propagation) says what the mode asks of `platform.base_url`, which [the step must then reach over HTTPS](#create-the-steps-namespace).
+
+With workload token exchange:
+
+- The caller must act for the image's submitter, and its token must name the platform's record of its workload, which Jobs keeps for each step's pod. That record must still stand, be a job step's, and name the row's workspace, its job's name and the attempt the row records.
+- Any other caller is answered `403`, and told which it was.
+- A row that doesn't record its job yet is answered `503`. The step waits that out for up to five minutes: the submit that created the job may still be writing it.
+- A rerun of the build's job completes nothing. Its steps belong to another attempt than the one the rows record. To build again, submit the next revision.
+
+Without workload token exchange:
+
+- The platform takes a request's identity from headers that anything able to reach its API can set. Nothing then shows who is calling.
+- `allow_unverified_completion: true` accepts exactly that: anything able to reach the platform's API can make a `pending` image `ready` at a digest, with a build and a `runtime_config`, of its choosing.
+
+In every mode, a `ready` row says what its first completion said. Builder compares none of `image_ref`, `external` or `runtime_config` with the build service or the registry. The README's [Security](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/README.md#security) section says what that leaves a consumer to trust.
+
+## What a caller sees differently
+
+- **Refusals.** These are refused with `409` and `code` `backend_rejected`, under any revision:
+  - a spec with `output`, with `mounts`, or with an image to copy;
+  - a platform outside `platforms`;
+  - a set of more than `max_specs_per_set` images;
+  - with `allow_dockerfile_path: false`, a Dockerfile that isn't `Dockerfile` at the context root.
+- **No output and no tag.** A row's `registry` and `repository` are the service's, the same for every workspace. Pin `image_ref`.
+- **Platforms.** A spec that names no platform builds for `builder.default_platform`.
+- **The build context.** A context with a link that leads out of it fails the image. So does one that comes to more than 4 GiB or 100,000 entries with its links followed.
+- **No build log.** When the step ends as a failed step, the row's `status_detail` ends with the step's one-line reason, which names the service's build once one was started.
+- **No signature from Builder.**
+- **`runtime_config`** is what the service's client reported for the image, and null when it reported none. With none, a consumer can't learn from the row how the image starts.
+- **The row** records `provenance.backend: remote`, the job its submit created (`provenance.job_uid` and `provenance.job_attempt_id`), and what the service calls the image (`external`: `image_id`, `build_id`, `attributes`).
+- **Resubmits.** The same request again returns its rows. If a job holds the build's name and the request's `pending` rows don't record it, the answer is `409`, and the rows are left as they are.
+- **Outages.** A build that starts while the service is unreachable is tried again for up to ten minutes, less if its timeout is sooner. One already running is waited on until its timeout.
+
+The README section has the rest: how a Dockerfile is moved to the context root, how links in a context are followed and limited, and how one download is shared by the images of a set.
+
+## Switch an existing deployment
+
+Add the step's namespace, the credential, the `remote` settings and the profile first, then change `backend`. What a switch does:
+
+- **Images don't move.** A `ready` row keeps the `image_ref` its backend published.
+- **A build keeps the backend it was submitted with.** Each row records its backend, and a completion goes by the row. An in-cluster build submitted before the switch still needs the build namespace and its profiles until it settles.
+- **A revision belongs to one backend.** A resubmit of a revision that was submitted under the other backend, whose rows are still there, is refused with `409`. The `code` is `backend_changed` when the new backend can take the request: submit the next revision. Otherwise the request is refused as any request the backend can't take.
+- **Switching back** works the same way.
+
+### What evals does after a switch
+
+Evals takes task images from the backend `builder.backend` names. It reads that key itself, from the configuration its API reads, which with this chart is the one Builder reads. There is nothing to set under `evals`. [Task image builds](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#task-image-builds) has the rule, and [Switch the Builder backend](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#switch-the-builder-backend) the steps. In short:
+
+- A request for a task's image build returns the task's ready build only when the current backend built every image of it. Otherwise it starts a new attempt on the current backend. So a task is built again the next time its build is requested.
+- Evals requests no build by itself. Once the rollout has finished, request each taskset's builds once: `nemo evals tasksets build-images <taskset>`.
+- Until a new build of a task is requested, a run takes the task's ready build, whichever backend built it.
+- Evals submits each image as a build set of one spec with no `output`, which the default `max_specs_per_set: 1` takes.
+- A task that names a prebuilt image can't be built on `remote`, and no agent layer can: see [What it can't do today](#what-it-cant-do-today).
+
+## Apply and verify
+
+Create what the chart doesn't before you upgrade:
+
+- Apply the manifests from [Create the step's namespace](#create-the-steps-namespace) with `kubectl apply -f`: the Namespace, the ServiceAccount, and the Jobs controller's Role and RoleBinding.
+- Create the image pull secrets in that namespace and, with `sandboxClusterCapable`, the OpenSandbox placeholder.
+- Create the credential, the way you chose under [Give the step its credential](#give-the-step-its-credential).
+
+Then put every chart value from this page in one values file, here `builder-remote.yaml`: `platformConfig.builder`, the profile under `platformConfig.jobs.executors` and, where you set them, `platformConfig.platform.base_url` and `networkPolicies.api.extraIngress`.
+
+1. Render the config and read the settings back. Pass the chart version and values files you installed with, then `builder-remote.yaml`:
+
+   ```bash
+   helm template "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f builder-remote.yaml \
+     --show-only templates/platform-configmap.yaml \
+     | yq '.data["config.yaml"]' | yq '.builder, .jobs.executors, .platform.base_url'
+   ```
+
+2. Upgrade the release with the same chart version and values files, and wait for it:
+
+   ```bash
+   helm upgrade "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f builder-remote.yaml --wait --timeout 10m
+   kubectl rollout status deploy/"${FULLNAME:0:59}-api" -n "$NHX_NAMESPACE" --timeout 5m
+   kubectl rollout status deploy/"${FULLNAME:0:52}-core-controller" -n "$NHX_NAMESPACE" --timeout 5m
+   ```
+
+   - A config change restarts the API and core-controller pods.
+
+3. Check that Jobs lists the profile. The list must hold provider `cpu`, profile `build-remote`, on backend `kubernetes_job`:
+
+   ```bash
+   nemo jobs list-execution-profiles
+   ```
+
+4. Upload a build context:
+
+   ```bash
+   CTX=$(mktemp -d)
+   printf 'FROM docker.io/library/busybox:1.36\nRUN echo "built remotely" > /hello.txt\n' > "$CTX/Dockerfile"
+   nemo files filesets create remote-check --workspace default
+   nemo files upload "$CTX/" remote-check --workspace default
+   ```
+
+5. Submit one build. Builder has no CLI command, so call its API. The spec names no `output`, no `mounts` and no platform. With platform auth on, the request must carry your credentials: one that names no one is answered `401`. Add `-H "Authorization: Bearer $(nemo auth token)"` to this request and to the one in the next step. [Using Authentication](/documentation/access-control/authentication/using-authentication) has the login that the token comes from.
+
+   - `curl` doesn't read the CLI's context. Both requests go to the URL in this shell's `NHX_BASE_URL`, if it holds the deployment's, and otherwise to `http://localhost:8080`. For the second, forward the API Service there first, as [Install](/documentation/kubernetes-deployment/setup/helm/install#verify-the-deployment) does: `kubectl port-forward svc/<api-service> 8080:8080 -n "$NHX_NAMESPACE"`.
+
+   ```bash
+   curl -s -X POST "${NHX_BASE_URL:-http://localhost:8080}/apis/builder/v2/workspaces/default/builds" \
+     -H 'Content-Type: application/json' \
+     -d '{"name": "remote-check", "revision": 1, "build_specs": [{"source": {"fileset": "remote-check"}}]}' \
+     | jq '{job, images: [.images[]? | {name, status}], code, detail}'
+   ```
+
+   - Accepted: `job` is `builder-remote-check-1`, and the one image, `remote-check-1`, is `pending`.
+   - Refused: `code` and `detail` say why. Look the sentence up under [Troubleshooting](#troubleshooting).
+
+6. Poll the image until it leaves `pending`:
+
+   ```bash
+   curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/builder/v2/workspaces/default/container-images/remote-check-1" \
+     | jq '{status, status_detail, image_ref, backend: .provenance.backend, external}'
+   ```
+
+   A finished build reads like this. The digest, the handle and the build ID are your service's:
+
+   ```json
+   {
+     "status": "ready",
+     "status_detail": null,
+     "image_ref": "registry.example.com/team/images@sha256:…",
+     "backend": "remote",
+     "external": {"image_id": "…", "build_id": "…", "attributes": {}}
+   }
+   ```
+
+   - `failed`: `status_detail` says why. To see more, read the job and its step's log:
+
+     ```bash
+     nemo jobs get-status builder-remote-check-1 --workspace default
+     nemo jobs tail builder-remote-check-1 --workspace default --step-id remote-build
+     ```
+
+7. Pull `image_ref` from where your consumers run. Builder doesn't read the registry: it records the digest the step names.
+
+To build again, submit with `"revision": 2`.
+
+## Troubleshooting
+
+### A submit is refused
+
+The answer is `409` with a `detail` and, for most, a `code`. Evals records the same `detail` on a task's build as `Builder refused the build: <detail>`.
+
+Refusals of the deployment, with `code` `backend_rejected`. Every submit gets the same answer until the setting is fixed:
+
+| `detail` | What to do |
+| --- | --- |
+| `builder.backend is '<value>', which is no backend; expected one of: execution, remote` | Set `backend` to one of the two |
+| `the builder's configuration is invalid (<setting>: <problem>); the API log says more` | Fix the setting it names, read from `builder` down: `remote.registry: invalid value` is `builder.remote.registry`. An unknown key reads `Extra inputs are not permitted` |
+| `the builder's configuration can't be read; the API log says why` | The `builder` section can't be read at all, as when it is left empty. Read the API log |
+| `builder.remote.registry and builder.remote.repository are not both configured; there is nowhere the build service publishes` | Set both |
+| `Jobs has no execution profile cpu/<profile> to run the remote-build step on` | Add the profile under `jobs.executors`, or point `remote.profile` at the one you added. Check with `nemo jobs list-execution-profiles` |
+| `Jobs execution profile cpu/<profile> runs on <backend>, which can't run the remote-build step; it needs one of: kubernetes_job` | Set the profile's `backend` to `kubernetes_job` |
+| `builder.remote.image is unset and Jobs execution profile cpu/<profile> names no default_task_image; there is no image that holds the remote-build step` | Set `remote.image`, or the profile's `default_task_image` |
+| `Jobs execution profile cpu/<profile> ends a step after <n>s (ttl_seconds_active), which is less than the <m>s one build set may take (builder.remote.build_timeout_seconds times <k>, the images one set may hold (builder.remote.max_specs_per_set, at most 100), plus a 120s margin)` | Raise the profile's `ttl_seconds_active` above `<m>`, or lower `build_timeout_seconds` or `max_specs_per_set` |
+| `builder.default_platform is <platform>, which is not one of builder.remote.platforms (<platforms>); a request that names no platform could never build` | Add the platform to `remote.platforms`, or change `default_platform` |
+| `the platform's auth configuration can't be read, so nothing says whether the completion of a remote build could be verified, and none would be let through` | Fix the platform's `auth` section |
+| `platform auth is on without workload token exchange, so nothing shows which job a caller completing an image is a step of, and a remote build could not be recorded. Turn workload token exchange on, or set builder.remote.allow_unverified_completion, which accepts that anything able to reach the platform's API can make a pending image ready at a digest of its choosing` | Do one of the two it names. [Decide who may complete an image](#decide-who-may-complete-an-image) says what each accepts, and links to how workload token exchange is turned on |
+| `Jobs execution profile cpu/<profile> runs the remote-build step in the namespace of cpu/<control profile>, whose steps may create pods there. Under workload token exchange the builder relies on nothing but Jobs creating pods where the remote-build step runs. Run the remote-build step in a namespace of its own, where only Jobs creates pods` | Move the profile to [a namespace of its own](#create-the-steps-namespace) |
+
+Refusals of the request, with `code` `backend_rejected`. `<image>` is the image's row name:
+
+| `detail` | What to do |
+| --- | --- |
+| `build_specs: <n> images in one set, and this deployment's build service takes <max>` | Submit fewer images per set, or raise `max_specs_per_set` |
+| `<image>: source.image: the build service publishes what it builds, so it cannot copy an image unchanged` | This backend copies no image |
+| `<image>: output: the build service publishes every image to one repository, told apart by digest; a request cannot name a repository or a tag` | Leave `output` out, and pin `image_ref` |
+| `<image>: mounts: the build service takes one build context` | This backend takes no mounts |
+| `<image>: platform: the build service builds <platforms>, not <platform>` | Name a platform in `remote.platforms` |
+| `<image>: dockerfile: the build service builds the Dockerfile at the context's root, not '<path>'` | Name the root `Dockerfile`, or set `allow_dockerfile_path: true` |
+
+Other refusals:
+
+| `code` | `detail` | What to do |
+| --- | --- | --- |
+| `missing_secrets` | `the build job needs platform secrets that don't exist, or that you can't read: <workspace>/<name>` | Create the secret `credential_secret` names, or let the submitter read it |
+| `backend_changed` | `build set '<name>' revision <n> was already submitted under the 'execution' backend, and this deployment now builds with 'remote'. Submit a new revision.` | Submit the next revision |
+| none | `a job named '<job>' already exists, and this request's images do not record it as their build job` | Another submit of the same request may be recording the job now. Submit the request again in a moment. If the answer is the same, submit the next revision |
+
+### An image fails
+
+A failed row's `status_detail` starts with one of these:
+
+| `status_detail` | What it means |
+| --- | --- |
+| `not built: its build job ended (<status>) without publishing it: <reason>` | The job ended and the image wasn't completed. `<reason>` is the step's line for the image, or else Jobs' own message. In a set of many images, some rows have no reason |
+| `not built: its build job was not found (never created, or deleted)` | The row is five minutes old and has no job. Submit the next revision |
+| `not built: <set> revision <n> was already submitted under another backend` | Part of this revision was already submitted under the other backend, so the rows this request wrote were failed. Submit the next revision |
+
+The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <reason>`. Once a build was started, the reason ends with `[build <id>]`, the service's ID for it.
+
+| `<reason>` | What to do |
+| --- | --- |
+| `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise the one it names |
+| `the step could not start: RuntimeError: NHX_BUILD_REMOTE_CREDENTIAL not set: the build service's credential did not reach this step` | `credential_secret` is set and the secret's value didn't reach the step. Check the secret holds a value |
+| `the step could not start: RuntimeError: the build service's credential is empty: the step's Jobs profile did not mount it` | The step program reads a mounted credential and found none. Mount it, or set `credential_secret` |
+| `the step could not start: RuntimeError: the build service's credential could not be read: <why>` | The step program's `read_credential` failed. Check the mount and its path |
+| `cannot read its row: <error>` | The step can't reach the platform's API, or isn't let in. Check `platform.base_url`, and the API's NetworkPolicy, from the step's namespace. On an HTTPS URL, check that the step trusts its certificate |
+| `cannot fetch its build context: <error>` | The step can't read the fileset as the submitter, or the context is refused |
+| `starting the build failed <n> times over <s>s: <error>` | The service's client couldn't start the build for ten minutes. Check the network path from the step's namespace, and what the profile's `env` points the client at |
+| `starting the build: <error>` | The service's client gave the start up. `<error>` is its own |
+| `timed out after <n>s, while <stage>` | The build ran past `build_timeout_seconds` and was cancelled |
+| `the build service reports it failed: <detail>` | The build failed at the service. Use the build ID to look further there |
+| `the build service published '<reference>', not a digest in <registry>/<repository>` | `remote.registry` and `remote.repository` aren't where the service publishes |
+| `it was built, but the builder refused to complete it: <error>` | Builder answered the completion with a refusal. See the next table |
+| `it was built, but the builder could not be told: <error>` | The completion kept failing for five minutes. With a `503`, see the next table. Otherwise the API couldn't be reached |
+| `cancelled: the job was told to stop` | The job was cancelled |
+
+If the reason ends with `the build service could not be told to stop it, it may still be running`, or with `a build may be running, started with key <key>`, a build may be left running at the service. Cancel it there.
+
+### A completion is refused
+
+The step's reason quotes Builder's answer. For a `403`, the API log has it too, as `completing <workspace>/<image> refused: <detail>`. A `503` is logged as `completing <workspace>/<image> put off: its row records no build job yet` or, with the error, as `could not tell which job is completing <workspace>/<image>`. Builder logs nothing for a `409`.
+
+| Status | `detail` | What it means |
+| --- | --- | --- |
+| `403` | `<image> is built by a build service, and nothing here shows which job a caller is a step of: platform auth is on without workload token exchange, and builder.remote.allow_unverified_completion is not set` | The platform verifies no caller, and `allow_unverified_completion` isn't set. A submit is refused in that mode too, so the mode changed after the build was submitted |
+| `403` | `only a step of its build job may complete <image>: the caller's token names no workload, as a job step's does` | The caller isn't a job step |
+| `403` | `only a step of its build job may complete <image>: the caller is not on record as a job step` | The platform has no standing record of a job step for the caller |
+| `403` | `only a step of its build job may complete <image>: the caller is a step of another job` | A step of some other job called |
+| `403` | `only a step of its build job may complete <image>: the caller is a step of another run than the one its submit created, a rerun of its build job or a job created under that job's name since` | The build's job was rerun, or replaced. Submit the next revision |
+| `403` | `only a job step acting for the image's submitter may complete it` | The caller acts for no one |
+| `403` | `<image> was submitted by someone else` | The caller acts for another user than the image's submitter |
+| `503` | `<image> does not record its build job yet; try again.` | The submit hasn't written its job on the row. If it never does, the step gives up after five minutes and the row fails once the job has ended. Submit the next revision |
+| `503` | `Couldn't check which job the caller is a step of; try again.` | Builder couldn't read the platform's record of the caller, or its own settings. Check the `builder` and `auth` sections |
+| `409` | `<image> is built by a build service; its completion must name the build` | The completion named no build (`external.build_id`). The driver always names one, so the caller wasn't the driver |
+| `409` | `<image> is already ready as <digest>, not <digest>` | Another completion came first, with another digest. The row keeps the first |
+
+### An evals build fails after a switch
+
+- `Builder refused the build: <detail>`: Builder's refusal, as above. On `remote`, a task that names a prebuilt image fails this way each time its build is requested.
+- `Builder builds with the 'remote' backend, and this build was requested for 'execution': …`: the build was requested for another backend than Builder builds with. Request the build again. [Switch the Builder backend](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#switch-the-builder-backend) says what to do if it fails the same way.
+- `layer_not_built_in_cluster`: a Builder build another backend made under an agent layer's name was refused. The task runs on its own image.

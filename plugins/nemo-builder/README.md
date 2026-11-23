@@ -326,7 +326,7 @@ job, and each spec becomes one `ContainerImage` row.
 | `source.image` | Instead of a fileset, a published image to copy unchanged: see [Copying a published image](#copying-a-published-image). |
 | `dockerfile` | Path relative to the context, or an absolute path to a file inside one of the spec's `mounts`. `..` is rejected. Defaults to `Dockerfile`. A copy takes none. |
 | `mounts` | Optional. Files the build's `RUN` instructions read that the context mustn't hold: see [Mounting files into a build](#mounting-files-into-a-build). A copy takes none. |
-| `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
+| `platform` | Passed to kaniko. Defaults to the deployment's `default_platform`, `linux/amd64` unless set. |
 | `output.repository`, `output.tag` | Optional. Where the image is published, within your workspace's part of the registry. Tags containing `--` or starting with `sha256-` are reserved for system tags and signatures. |
 
 A misspelt field is a `422`, never silently ignored.
@@ -573,6 +573,12 @@ images still build, push and complete. The failed image's row fails once the job
 | `push` | `nhx-build-push` | the workspace's registry credential and signing key, unless the deployment turned them off | yes | no |
 
 ## Building through a service outside the cluster
+
+To set this up on a deployment, follow the operator's walk-through,
+[`docs/set-up/helm/builder-remote-backend.mdx`](../../docs/set-up/helm/builder-remote-backend.mdx):
+the order of setup, with the chart values to set. This README stays the reference for what the
+step image's client owes. The calls themselves, and what each is given and returns, are in
+[`run/remote.py`](src/nemo_builder_plugin/run/remote.py).
 
 Unless it says otherwise, the rest of this README describes the default backend, `execution`, which
 builds in this cluster. A deployment can instead set `builder.backend: remote`, and a build service outside the cluster then
@@ -827,7 +833,7 @@ What an operator sets up:
   is refused with `409` `missing_secrets`. Each of them can read its value too, through a job of
   their own that names it. It is otherwise kept as any platform secret is, which is not from
   everything inside the cluster (see [Security](#security)). Write it as `<workspace>/<name>`: a
-  bare name is read from each submitter's own workspace.
+  bare name is read from the workspace each build is submitted in.
   The other way is for the profile to mount it, as a Kubernetes Secret volume
   (`storage.additional_volumes`, with a read-only `storage.additional_volume_mounts` entry that
   mounts it in the step), and that way it reaches further. Jobs gives whatever a profile carries
