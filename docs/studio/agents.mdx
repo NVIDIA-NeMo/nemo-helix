@@ -38,6 +38,18 @@ Select **Register Agent** to open **Register an agent with NeMo Helix**. The dia
 | Register from traces | Select an unregistered agent that appears in ingested traces, identified by the `agent.name` attribute. The agent is registered without a configuration, so it needs one before you can deploy or chat with it. |
 | Coding agent prompt | Shows a prompt to give a coding agent so it can connect your agent to NeMo Helix. |
 
+You can also start from the workspace **Dashboard**: in the **Quickstart** section's **Connect an Agent** panel, **Upload an Agent** opens this dialog on the code-upload tab and **Import from GitHub** opens it on the **Register from GitHub** tab.
+
+### Register from a private GitHub repository
+
+A private repository needs a GitHub personal access token stored as a secret. You can create the secret without leaving the dialog:
+
+1. On the **Register from GitHub** tab, open the **Access token secret** list and select **New Secret**.
+2. In **Create Secret**, use **Create a token on GitHub** to create a fine-grained personal access token. Limit it to the repository you're registering and set **Contents** to **Read-only**; Studio doesn't need any other permission.
+3. Paste the token as the secret value and save. Studio suggests a secret name based on the repository and selects the new secret for you.
+
+If GitHub rejects the repository, Studio explains whether the repository doesn't exist or the selected token can't read it. For a private repository with no token selected, choose an access token secret and try again.
+
 On the upload and GitHub tabs, turn on **Deploy after creating** to deploy the agent as soon as it is registered. Select **Register** to register the agent.
 
 ## Agent Details
@@ -47,11 +59,31 @@ The agent details page has the following tabs:
 - **Overview**, when enabled, summarizes the agent, models, and recent activity.
 - **Deployments** lists active and historical deployments for the agent. Use this tab to deploy the agent, open chat for a running deployment, view logs, or delete a deployment.
 - **Logs** shows deployment logs.
-- **Chat** opens an interactive chat with a running deployment.
+- **Chat** opens an interactive chat with a running deployment. Its side panel includes an **MCP Servers** section; see [Inspect MCP Servers](#inspect-mcp-servers).
 - **Evaluations** lists this agent's evaluations, including runs still in progress, and can group them by experiment. Start a new evaluation from this tab.
 - **Optimizations**, when enabled, lists optimization runs for the agent and lets you start a new one. See [Optimize an Agent](#optimize-an-agent).
 - **Insights**, when enabled, configures **Insights analysis** for this agent: whether to **Run periodic analysis**, and the **Default model** and **Fast model** the analysis uses. See [NeMo Studio Insights](/documentation/studio/insights).
 - **Details** shows a **Summary** of the agent (name, workspace, models, config format, and timestamps) and its stored configuration. Legacy NAT agents show their `workflow`, `llms`, and `functions` sections in **Workflow**, **Models**, and **Tools** panels. All other top-level fields, including every `nemo-agents-spec-v1` field such as the harness, models, instructions, skills, and MCP servers, are listed in a collapsed **Additional configuration** panel.
+
+### Inspect MCP Servers
+
+The **MCP Servers** section of the **Chat** tab checks the MCP servers declared in the agent's configuration and shows which tools they serve. It reports on the deployment selected in the Chat header. Select a different deployment there to inspect it.
+
+The deployment checks each server with a status probe: it launches stdio servers in a separate, short-lived process, or connects to HTTP and SSE servers at their URL, and lists their tools. The agent itself starts its servers lazily on a chat turn, so the probe result doesn't confirm that the agent has launched a server.
+
+Each server is listed with an **MCP** badge, its name, its transport, and, after a successful probe, its tool count. The status badge shows the probe result:
+
+| Badge               | Meaning                                                                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Running**         | The probe started or connected to the server and listed its tools. The tools are listed below it.                                                                                                                          |
+| **Not started**     | The selected deployment isn't running. Studio lists the declared servers but can't probe them.                                                                                                                              |
+| **Not on PATH**     | The stdio server's launch command wasn't found in the deployment's runtime.                                                                                                                                                 |
+| **Failed to start** | The probe couldn't launch or connect to the server, or the server didn't list its tools before the probe timed out. A remote HTTP or SSE server may still be running. Studio shows the command or URL, the error, and any captured stderr. |
+| **Unknown**         | The runtime reported a state Studio doesn't recognize.                                                                                                                                                                      |
+
+A tool marked **Blocked** is served by the MCP server but excluded from what the agent exposes, so the agent can't call it.
+
+If the section says **This deployment's runtime doesn't report MCP status**, the deployment uses an older runtime; redeploy the agent to pick up a runtime that reports it. If the agent declares no servers, the section says **This agent declares no MCP servers**.
 
 ## Evaluate an Agent
 
