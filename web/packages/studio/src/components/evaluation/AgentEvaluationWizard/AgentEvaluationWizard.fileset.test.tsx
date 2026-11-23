@@ -6,10 +6,11 @@ import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-j
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   createExperiment,
+  getExperiment,
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import {
-  filesDeleteFileset,
+  filesCreateFileset,
   filesDownloadFile,
   filesUploadFile,
   getFilesListFilesetFilesQueryKey,
@@ -17,7 +18,12 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
-import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
+import { DEFAULT_EXPERIMENT_AGENT_KEY } from '@studio/components/evaluation/defaultExperiment';
+import {
+  createRunEvaluation,
+  EVAL_CONFIG_FILESET_KEY,
+  recordRunJob,
+} from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -36,6 +42,7 @@ vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOrigi
 vi.mock('@nemo/sdk/generated/platform/experiments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/experiments')>()),
   createExperiment: vi.fn(),
+  getExperiment: vi.fn(),
 }));
 
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
@@ -56,6 +63,7 @@ vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   createRunEvaluation: vi.fn(),
+  recordRunJob: vi.fn(),
 }));
 
 vi.mock('@nemo/common/src/components/form/VariableTextArea', async (importOriginal) => {
@@ -192,12 +200,9 @@ const mockListApis = (datasetPaths = ['output/part-0.parquet']) => {
 
 type User = ReturnType<typeof userEvent.setup>;
 
-const openConfigurationStep = async (user: User) => {
-  await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-  await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: 'Next' }));
+/** The wizard opens on Configuration; this only waits for it. */
+const openConfigurationStep = async () => {
+  await screen.findByLabelText('Dataset file ref');
 };
 
 const pickDataset = async (user: User, ref = DATASET_REF) => {
@@ -226,16 +231,14 @@ const clickNextWhenReady = async (user: User) => {
   await user.click(screen.getByRole('button', { name: 'Next' }));
 };
 
-/** Next out of Configuration; parallelism is the one field only that step shows. */
+/** Next out of Configuration, onto the Run step. */
 const leaveConfiguration = async (user: User) => {
   await clickNextWhenReady(user);
-  await waitFor(() =>
-    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument()
-  );
+  await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
 };
 
 const nameAndRun = async (user: User) => {
-  await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+  await user.type(await screen.findByLabelText(/Evaluation Name/), 'run-1');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
@@ -267,10 +270,10 @@ beforeEach(() => {
       : parquetFile(PARQUET.twoRows)
   );
   vi.mocked(evalsCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
-  vi.mocked(createExperiment).mockResolvedValue({
-    id: 'grp_new',
-    name: 'model-update-tests',
-  } as never);
+  vi.mocked(getExperiment).mockRejectedValue(
+    Object.assign(new Error('Not Found'), { response: { status: 404 } })
+  );
+  vi.mocked(createExperiment).mockResolvedValue({ id: 'grp_default' } as never);
   vi.mocked(createRunEvaluation).mockResolvedValue('eval_new' as never);
 });
 
@@ -278,12 +281,127 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** A dataset and an uploaded config, then on to the Run step. */
+const configureAndContinue = async (user: User) => {
+  await pickDataset(user);
+  await chooseConfigKind(user, 'Upload');
+  await uploadConfig(user);
+  await leaveConfiguration(user);
+};
+
+const runWhenReady = async (user: User) => {
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+  await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+};
+
+describe('AgentEvaluationWizard run target', () => {
+  it("runs with only a dataset and config, landing in the agent's default experiment", async () => {
+    vi.mocked(createRunEvaluation).mockImplementation(async (_ws, { name }) => name);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await runWhenReady(user);
+
+    expect(createExperiment).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({
+        name: 'my-agent-runs',
+        metadata: { [DEFAULT_EXPERIMENT_AGENT_KEY]: AGENT },
+      }),
+      undefined
+    );
+    const [, { name, experimentIds, filesetName, metadata }] =
+      vi.mocked(createRunEvaluation).mock.calls[0];
+    expect(experimentIds).toEqual(['grp_default']);
+    expect(name).toMatch(/^my-agent-[a-z0-9]{8}$/);
+    expect(filesetName).toBe(`${name}-data`);
+    expect(metadata).toMatchObject({ [EVAL_CONFIG_FILESET_KEY]: `${name}-data` });
+    const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(request.spec).toMatchObject({ publication: { intake: { evaluation_id: name } } });
+    expect(recordRunJob).toHaveBeenCalledWith(DEFAULT_WORKSPACE, name, 'job-1', metadata);
+  });
+
+  it('reuses an existing default experiment instead of creating another', async () => {
+    vi.mocked(getExperiment).mockResolvedValue({ id: 'grp_existing_default' } as never);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await runWhenReady(user);
+
+    expect(createExperiment).not.toHaveBeenCalled();
+    expect(vi.mocked(createRunEvaluation).mock.calls[0][1].experimentIds).toEqual([
+      'grp_existing_default',
+    ]);
+  });
+
+  it('links the run to a picked experiment and names it as typed', async () => {
+    server.use(
+      http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: 'grp_primary',
+              name: 'primary-use-cases-benchmark',
+              workspace: DEFAULT_WORKSPACE,
+            },
+          ],
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await user.click(await screen.findByRole('combobox', { name: /^Experiment/ }));
+    await user.click(await screen.findByRole('option', { name: 'primary-use-cases-benchmark' }));
+    await user.type(screen.getByLabelText('Evaluation Name (Optional)'), 'run-1');
+    await runWhenReady(user);
+
+    expect(getExperiment).not.toHaveBeenCalled();
+    expect(createRunEvaluation).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({
+        experimentIds: ['grp_primary'],
+        name: 'run-1',
+        filesetName: 'run-1-data',
+      })
+    );
+  });
+
+  it('submits the chosen parallelism', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    const field = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
+    await user.clear(field);
+    await user.type(field, '2');
+    await runWhenReady(user);
+
+    const [, request] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(request.spec?.params?.parallelism).toBe(2);
+  });
+
+  it('goes back to Configuration with the picks kept', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await configureAndContinue(user);
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByText('Metrics')).toBeVisible();
+  });
+});
+
 describe('AgentEvaluationWizard dataset', () => {
   it('reads the picked dataset in place and stores only the eval config', async () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -296,12 +414,12 @@ describe('AgentEvaluationWizard dataset', () => {
       DEFAULT_WORKSPACE,
       expect.objectContaining({
         datasetName: 'generated',
-        metadata: {
+        metadata: expect.objectContaining({
           [DATASET_SNAPSHOT_KEY]: JSON.stringify({
             ref: DATASET_REF,
             files: [{ path: 'output/part-0.parquet', size: 10 }],
           }),
-        },
+        }),
       })
     );
   });
@@ -310,7 +428,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -318,8 +436,8 @@ describe('AgentEvaluationWizard dataset', () => {
     mockListApis([]);
     await nameAndRun(user);
 
-    await waitFor(() => expect(filesDeleteFileset).toHaveBeenCalled());
-    expect(createExperiment).not.toHaveBeenCalled();
+    expect(await screen.findByText(`The dataset ${DATASET_REF} no longer exists.`)).toBeVisible();
+    expect(filesCreateFileset).not.toHaveBeenCalled();
     expect(createRunEvaluation).not.toHaveBeenCalled();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
@@ -328,7 +446,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user, 'other-ws/generated#output/part-0.parquet');
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -346,7 +464,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(
       await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
@@ -366,7 +484,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     expect(
       await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
@@ -383,11 +501,11 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await user.click(await screen.findByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText('Select an input file.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 
   it('holds Next and says why while the picked file is still being read', async () => {
@@ -395,7 +513,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('Reading the selected file...')).toBeVisible();
@@ -407,7 +525,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('Unable to find base file.')).toBeVisible();
@@ -418,7 +536,7 @@ describe('AgentEvaluationWizard dataset', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
 
     expect(await screen.findByText('File contains no data')).toBeVisible();
@@ -452,7 +570,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt', 'expected']);
     await checkFields(user, 'Judge Prompt', ['prompt', 'expected']);
@@ -492,7 +610,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
     await checkFields(user, 'Judge Prompt', ['expected']);
@@ -529,7 +647,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await findPromptFields('Agent Prompt');
     for (const box of promptFields('Agent Prompt').getAllByRole('checkbox')) {
@@ -543,7 +661,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
 
     await clickNextWhenReady(user);
     expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
 
     await user.click(promptFields('Agent Prompt').getByRole('checkbox', { name: 'prompt' }));
     await waitFor(() =>
@@ -557,7 +675,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt']);
     await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
@@ -565,14 +683,14 @@ describe('AgentEvaluationWizard guided eval config', () => {
     await clickNextWhenReady(user);
 
     expect(await screen.findByText('Select at least one field, or write a prompt.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 
   it('builds the prompt in the order fields are checked, dropping unchecked ones', async () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['expected', 'prompt']);
     expect(await readPrompt(user, 'Agent Prompt')).toBe(
@@ -587,7 +705,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await checkFields(user, 'Agent Prompt', ['prompt']);
     await user.click(screen.getByRole('button', { name: 'Edit Agent Prompt' }));
@@ -615,7 +733,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await findPromptFields('Judge Prompt');
     const response = promptFields('Judge Prompt').getByRole('checkbox', {
@@ -629,7 +747,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(await screen.findByRole('button', { name: 'Edit Judge Prompt' }));
     const prompt = screen.getByLabelText('Judge Prompt');
@@ -654,7 +772,7 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await user.click(await screen.findByRole('button', { name: 'Edit Agent Prompt' }));
     const prompt = screen.getByLabelText('Agent Prompt');
@@ -671,12 +789,12 @@ describe('AgentEvaluationWizard guided eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await clickNextWhenReady(user);
 
     expect(await screen.findByText('Select a judge model.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument();
   });
 });
 
@@ -696,7 +814,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
@@ -716,7 +834,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Upload');
     await uploadConfig(user, configReading('item.missing'));
@@ -731,7 +849,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await chooseConfigKind(user, 'Choose from Fileset');
     await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
@@ -749,7 +867,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await leaveConfiguration(user);
@@ -763,7 +881,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'configs/strict.json');
 
@@ -774,7 +892,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await openConfigurationStep(user);
+    await openConfigurationStep();
     await pickDataset(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await chooseConfigKind(user, 'Upload');
@@ -783,21 +901,5 @@ describe('AgentEvaluationWizard existing eval config', () => {
     expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
     expect(await screen.findByText('Select an eval configuration')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
-  });
-
-  it('keeps errors outside the eval config when switching its source', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    await openConfigurationStep(user);
-    await pickDataset(user);
-    const parallelism = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
-    await user.clear(parallelism);
-    await user.type(parallelism, '99');
-    await clickNextWhenReady(user);
-    expect(await screen.findByText('At most 16')).toBeVisible();
-
-    await chooseConfigKind(user, 'Upload');
-    expect(screen.getByText('At most 16')).toBeVisible();
   });
 });

@@ -40,8 +40,24 @@ describe('registered agent target identity', () => {
     { kind: 'fabric', name: 'my-agent', source: { config: {} } },
     { kind: 'harbor', source: { agent: { name: 'my-agent' } } },
     { kind: 'gym', source: { agent: '  ' } },
+    { format: 'generic', name: 'my-agent', url: 'https://api.example.com/v1/chat/completions' },
   ])('does not attribute unrelated or malformed targets: %j', (target) => {
     expect(agentIdentityForTarget(target, DEFAULT_WORKSPACE)).toBeNull();
     expect(agentNameForTarget(target, DEFAULT_WORKSPACE)).toBeNull();
+  });
+
+  it("reads a generic endpoint's agent from the platform route it calls, not its label", () => {
+    const target = {
+      format: 'generic',
+      name: 'display-label',
+      url: `http://localhost:8080/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/agents/my-agent/-/v1/chat/completions`,
+    };
+    expect(agentNameForTarget(target, DEFAULT_WORKSPACE)).toBe('my-agent');
+    expect(
+      agentNameForTarget(
+        { ...target, url: target.url.replace(DEFAULT_WORKSPACE, 'other') },
+        DEFAULT_WORKSPACE
+      )
+    ).toBe('other/my-agent');
   });
 });
