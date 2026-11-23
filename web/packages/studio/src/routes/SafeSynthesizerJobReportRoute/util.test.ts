@@ -2,168 +2,63 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  GRADE_VALUES,
-  getDataPrivacyGradeLabel,
-  getSyntheticQualityGradeLabel,
-  GRADE_ORDER,
-  isPassingGrade,
+  gradeForScore,
+  meetsGrade,
+  PRIVACY_RECOMMENDED_USES,
+  QUALITY_RECOMMENDED_USES,
 } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
 
-describe('GenerateJobReportRoute utils', () => {
-  describe('getDataPrivacyGradeLabel', () => {
-    it('returns "Poor" for scores less than 2', () => {
-      expect(getDataPrivacyGradeLabel(0)).toBe(GRADE_VALUES.POOR);
-      expect(getDataPrivacyGradeLabel(1)).toBe(GRADE_VALUES.POOR);
-      expect(getDataPrivacyGradeLabel(1.99)).toBe(GRADE_VALUES.POOR);
-    });
-
-    it('returns "Moderate" for scores between 2 and 3.99', () => {
-      expect(getDataPrivacyGradeLabel(2)).toBe(GRADE_VALUES.MODERATE);
-      expect(getDataPrivacyGradeLabel(3)).toBe(GRADE_VALUES.MODERATE);
-      expect(getDataPrivacyGradeLabel(3.99)).toBe(GRADE_VALUES.MODERATE);
-    });
-
-    it('returns "Good" for scores between 4 and 5.99', () => {
-      expect(getDataPrivacyGradeLabel(4)).toBe(GRADE_VALUES.GOOD);
-      expect(getDataPrivacyGradeLabel(5)).toBe(GRADE_VALUES.GOOD);
-      expect(getDataPrivacyGradeLabel(5.99)).toBe(GRADE_VALUES.GOOD);
-    });
-
-    it('returns "Very Good" for scores between 6 and 7.99', () => {
-      expect(getDataPrivacyGradeLabel(6)).toBe(GRADE_VALUES.VERY_GOOD);
-      expect(getDataPrivacyGradeLabel(7)).toBe(GRADE_VALUES.VERY_GOOD);
-      expect(getDataPrivacyGradeLabel(7.99)).toBe(GRADE_VALUES.VERY_GOOD);
-    });
-
-    it('returns "Excellent" for scores 8 and above', () => {
-      expect(getDataPrivacyGradeLabel(8)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getDataPrivacyGradeLabel(9)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getDataPrivacyGradeLabel(10)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getDataPrivacyGradeLabel(100)).toBe(GRADE_VALUES.EXCELLENT);
-    });
-
-    it('handles edge cases and boundary values', () => {
-      expect(getDataPrivacyGradeLabel(-1)).toBe(GRADE_VALUES.POOR);
-      expect(getDataPrivacyGradeLabel(1.999999)).toBe(GRADE_VALUES.POOR);
-      expect(getDataPrivacyGradeLabel(2.0)).toBe(GRADE_VALUES.MODERATE);
-      expect(getDataPrivacyGradeLabel(4.0)).toBe(GRADE_VALUES.GOOD);
-      expect(getDataPrivacyGradeLabel(6.0)).toBe(GRADE_VALUES.VERY_GOOD);
-      expect(getDataPrivacyGradeLabel(8.0)).toBe(GRADE_VALUES.EXCELLENT);
-    });
+describe('gradeForScore', () => {
+  it.each([
+    [10, 'Excellent'],
+    [8, 'Excellent'],
+    [7.9, 'Very Good'],
+    [6, 'Very Good'],
+    [5.9, 'Good'],
+    [4, 'Good'],
+    [3.9, 'Moderate'],
+    [2, 'Moderate'],
+    [1.9, 'Poor'],
+  ])('uses the library scale for quality and privacy: %s is %s', (score, grade) => {
+    expect(gradeForScore(score)).toBe(grade);
   });
 
-  describe('getSyntheticQualityGradeLabel', () => {
-    it('returns "Very Poor" for scores less than 2', () => {
-      expect(getSyntheticQualityGradeLabel(0)).toBe(GRADE_VALUES.VERY_POOR);
-      expect(getSyntheticQualityGradeLabel(1)).toBe(GRADE_VALUES.VERY_POOR);
-      expect(getSyntheticQualityGradeLabel(1.99)).toBe(GRADE_VALUES.VERY_POOR);
-    });
+  it.each([undefined, null, 0, Number.NaN])('treats %s as Unavailable', (score) => {
+    expect(gradeForScore(score)).toBe('Unavailable');
+  });
+});
 
-    it('returns "Poor" for scores between 2 and 3.99', () => {
-      expect(getSyntheticQualityGradeLabel(2)).toBe(GRADE_VALUES.POOR);
-      expect(getSyntheticQualityGradeLabel(3)).toBe(GRADE_VALUES.POOR);
-      expect(getSyntheticQualityGradeLabel(3.99)).toBe(GRADE_VALUES.POOR);
-    });
-
-    it('returns "Moderate" for scores between 4 and 5.99', () => {
-      expect(getSyntheticQualityGradeLabel(4)).toBe(GRADE_VALUES.MODERATE);
-      expect(getSyntheticQualityGradeLabel(5)).toBe(GRADE_VALUES.MODERATE);
-      expect(getSyntheticQualityGradeLabel(5.99)).toBe(GRADE_VALUES.MODERATE);
-    });
-
-    it('returns "Good" for scores between 6 and 7.99', () => {
-      expect(getSyntheticQualityGradeLabel(6)).toBe(GRADE_VALUES.GOOD);
-      expect(getSyntheticQualityGradeLabel(7)).toBe(GRADE_VALUES.GOOD);
-      expect(getSyntheticQualityGradeLabel(7.99)).toBe(GRADE_VALUES.GOOD);
-    });
-
-    it('returns "Excellent" for scores 8 and above', () => {
-      expect(getSyntheticQualityGradeLabel(8)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getSyntheticQualityGradeLabel(9)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getSyntheticQualityGradeLabel(10)).toBe(GRADE_VALUES.EXCELLENT);
-      expect(getSyntheticQualityGradeLabel(100)).toBe(GRADE_VALUES.EXCELLENT);
-    });
-
-    it('handles edge cases and boundary values', () => {
-      expect(getSyntheticQualityGradeLabel(-1)).toBe(GRADE_VALUES.VERY_POOR);
-      expect(getSyntheticQualityGradeLabel(1.999999)).toBe(GRADE_VALUES.VERY_POOR);
-      expect(getSyntheticQualityGradeLabel(2.0)).toBe(GRADE_VALUES.POOR);
-      expect(getSyntheticQualityGradeLabel(4.0)).toBe(GRADE_VALUES.MODERATE);
-      expect(getSyntheticQualityGradeLabel(6.0)).toBe(GRADE_VALUES.GOOD);
-      expect(getSyntheticQualityGradeLabel(8.0)).toBe(GRADE_VALUES.EXCELLENT);
-    });
+describe('meetsGrade', () => {
+  it('passes at or above the minimum grade', () => {
+    expect(meetsGrade('Good', 'Good')).toBe(true);
+    expect(meetsGrade('Excellent', 'Very Good')).toBe(true);
   });
 
-  describe('GRADE_ORDER', () => {
-    it('contains all grade values in correct order', () => {
-      expect(GRADE_ORDER).toEqual([
-        GRADE_VALUES.UNAVAILABLE,
-        GRADE_VALUES.VERY_POOR,
-        GRADE_VALUES.POOR,
-        GRADE_VALUES.MODERATE,
-        GRADE_VALUES.GOOD,
-        GRADE_VALUES.VERY_GOOD,
-        GRADE_VALUES.EXCELLENT,
-      ]);
-    });
+  it('fails below the minimum grade or when unavailable', () => {
+    expect(meetsGrade('Moderate', 'Good')).toBe(false);
+    expect(meetsGrade('Unavailable', 'Moderate')).toBe(false);
+  });
+});
 
-    it('has correct length', () => {
-      expect(GRADE_ORDER).toHaveLength(7);
-    });
+describe('recommended uses', () => {
+  const suitableAt = (uses: typeof QUALITY_RECOMMENDED_USES, score: number) =>
+    uses
+      .filter((use) => meetsGrade(gradeForScore(score), use.minimumGrade))
+      .map((use) => use.label);
+
+  it('matches the library quality guidance', () => {
+    expect(suitableAt(QUALITY_RECOMMENDED_USES, 3)).toEqual([]);
+    expect(suitableAt(QUALITY_RECOMMENDED_USES, 5)).toEqual([
+      'Demo environments or mock data',
+      'Pre-production testing environments',
+    ]);
+    expect(suitableAt(QUALITY_RECOMMENDED_USES, 6)).toHaveLength(4);
   });
 
-  describe('isPassingGrade', () => {
-    it('returns true when grade equals reference grade', () => {
-      expect(isPassingGrade(GRADE_VALUES.POOR, GRADE_VALUES.POOR)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.MODERATE, GRADE_VALUES.MODERATE)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.GOOD, GRADE_VALUES.GOOD)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.EXCELLENT, GRADE_VALUES.EXCELLENT)).toBe(true);
-    });
-
-    it('returns true when grade is higher than reference grade', () => {
-      expect(isPassingGrade(GRADE_VALUES.POOR, GRADE_VALUES.MODERATE)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.POOR, GRADE_VALUES.EXCELLENT)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.MODERATE, GRADE_VALUES.GOOD)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.GOOD, GRADE_VALUES.EXCELLENT)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.VERY_POOR, GRADE_VALUES.VERY_GOOD)).toBe(true);
-    });
-
-    it('returns false when grade is lower than reference grade', () => {
-      expect(isPassingGrade(GRADE_VALUES.EXCELLENT, GRADE_VALUES.GOOD)).toBe(false);
-      expect(isPassingGrade(GRADE_VALUES.GOOD, GRADE_VALUES.MODERATE)).toBe(false);
-      expect(isPassingGrade(GRADE_VALUES.MODERATE, GRADE_VALUES.POOR)).toBe(false);
-      expect(isPassingGrade(GRADE_VALUES.POOR, GRADE_VALUES.VERY_POOR)).toBe(false);
-      expect(isPassingGrade(GRADE_VALUES.VERY_GOOD, GRADE_VALUES.MODERATE)).toBe(false);
-    });
-
-    it('handles unavailable grade correctly', () => {
-      expect(isPassingGrade(GRADE_VALUES.UNAVAILABLE, GRADE_VALUES.UNAVAILABLE)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.UNAVAILABLE, GRADE_VALUES.POOR)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.UNAVAILABLE, GRADE_VALUES.EXCELLENT)).toBe(true);
-      expect(isPassingGrade(GRADE_VALUES.POOR, GRADE_VALUES.UNAVAILABLE)).toBe(false);
-      expect(isPassingGrade(GRADE_VALUES.EXCELLENT, GRADE_VALUES.UNAVAILABLE)).toBe(false);
-    });
-
-    it('handles all combinations systematically', () => {
-      const grades = [
-        GRADE_VALUES.UNAVAILABLE,
-        GRADE_VALUES.VERY_POOR,
-        GRADE_VALUES.POOR,
-        GRADE_VALUES.MODERATE,
-        GRADE_VALUES.GOOD,
-        GRADE_VALUES.VERY_GOOD,
-        GRADE_VALUES.EXCELLENT,
-      ];
-
-      // Test all combinations
-      for (let i = 0; i < grades.length; i++) {
-        for (let j = 0; j < grades.length; j++) {
-          const referenceGrade = grades[i];
-          const grade = grades[j];
-          const expected = i <= j; // passing if reference index <= grade index
-          expect(isPassingGrade(referenceGrade, grade)).toBe(expected);
-        }
-      }
-    });
+  it('matches the library privacy guidance', () => {
+    expect(suitableAt(PRIVACY_RECOMMENDED_USES, 1)).toEqual([]);
+    expect(suitableAt(PRIVACY_RECOMMENDED_USES, 2)).toEqual(['Internally, within the same team']);
+    expect(suitableAt(PRIVACY_RECOMMENDED_USES, 7.9)).toHaveLength(3);
+    expect(suitableAt(PRIVACY_RECOMMENDED_USES, 8)).toHaveLength(4);
   });
 });

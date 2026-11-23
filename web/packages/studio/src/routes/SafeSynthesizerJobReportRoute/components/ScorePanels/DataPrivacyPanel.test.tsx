@@ -4,7 +4,6 @@
 import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { DataPrivacyPanel } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/DataPrivacyPanel';
-import { GRADE_VALUES } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
 import { screen } from '@studio/tests/util/render';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, within } from '@testing-library/react';
@@ -149,10 +148,10 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Share internally for analytics and reporting')).toBeInTheDocument();
-      expect(screen.getByText('Share externally with trusted third-parties')).toBeInTheDocument();
-      expect(screen.getByText('Publish for research and community use')).toBeInTheDocument();
-      expect(screen.getByText('Train production models')).toBeInTheDocument();
+      expect(screen.getByText('Internally, within the same team')).toBeInTheDocument();
+      expect(screen.getByText('Internally, across different teams')).toBeInTheDocument();
+      expect(screen.getByText('Externally, with trusted partners')).toBeInTheDocument();
+      expect(screen.getByText('Externally, with public availability')).toBeInTheDocument();
     });
 
     it('should render Differential Privacy section', () => {
@@ -182,10 +181,8 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      // Verify score is displayed
       expect(screen.getByText('7.5')).toBeInTheDocument();
-      // Verify a grade label is displayed (util function handles the mapping)
-      expect(screen.getByTestId('nv-tag-root')).toBeInTheDocument();
+      expect(screen.getByTestId('score-grade')).toHaveTextContent('Very Good');
     });
 
     it('should handle edge cases for missing or zero scores', () => {
@@ -199,14 +196,14 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText(GRADE_VALUES.UNAVAILABLE)).toBeInTheDocument();
+      expect(screen.getByText('Unavailable')).toBeInTheDocument();
 
       // Test undefined report summary
       rerender(
         <DataPrivacyPanel reportSummary={undefined} dpEnabled title="Data Privacy" icon={<svg />} />
       );
 
-      expect(screen.getByText(GRADE_VALUES.UNAVAILABLE)).toBeInTheDocument();
+      expect(screen.getByText('Unavailable')).toBeInTheDocument();
     });
   });
 
@@ -277,7 +274,7 @@ describe('DataPrivacyPanel', () => {
       );
 
       expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
-      expect(within(screen.getByTestId('dp-status')).getByText('On')).toBeInTheDocument();
+      expect(within(screen.getByTestId('dp-status')).getByText('Enabled')).toBeInTheDocument();
     });
 
     it('should show Differential Privacy as disabled when dpEnabled is false', () => {
@@ -292,7 +289,7 @@ describe('DataPrivacyPanel', () => {
       );
 
       expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
-      expect(within(screen.getByTestId('dp-status')).getByText('Off')).toBeInTheDocument();
+      expect(within(screen.getByTestId('dp-status')).getByText('Disabled')).toBeInTheDocument();
     });
 
     it('should render Differential Privacy status indicator', () => {
@@ -314,11 +311,9 @@ describe('DataPrivacyPanel', () => {
 
   describe('Sharing Scenarios Validation', () => {
     it('should display check icons for passing scenarios and cancel icons for failing scenarios', () => {
-      // Score 3.0 → MODERATE grade: POOR and MODERATE thresholds pass,
-      // GOOD and VERY_GOOD thresholds fail → 2 check icons, 2 cancel icons
       render(
         <DataPrivacyPanel
-          reportSummary={createMockReportSummary({ data_privacy_score: 3.0 })}
+          reportSummary={createMockReportSummary({ data_privacy_score: 5.0 })}
           dpEnabled
           title="Data Privacy"
           icon={<svg />}

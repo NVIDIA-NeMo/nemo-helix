@@ -146,7 +146,7 @@ describe('SyntheticQualityPanel', () => {
       expect(screen.getByText('Text Structure Similarity')).toBeInTheDocument();
     });
 
-    it('should render "Understand your SQS" section', () => {
+    it('should render the quality score guidance', () => {
       render(
         <SyntheticQualityPanel
           reportSummary={createMockReportSummary()}
@@ -156,7 +156,7 @@ describe('SyntheticQualityPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Understand what you can do with your data')).toBeInTheDocument();
+      expect(screen.getByText('Understanding Quality Scores')).toBeInTheDocument();
     });
 
     it('should render all four use case scenarios', () => {
@@ -169,10 +169,10 @@ describe('SyntheticQualityPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Analyze internally for directional guidance')).toBeInTheDocument();
-      expect(screen.getByText('Prototype, test, and run QA')).toBeInTheDocument();
-      expect(screen.getByText('Balance or augment real-world datasets')).toBeInTheDocument();
-      expect(screen.getByText('Train production models')).toBeInTheDocument();
+      expect(screen.getByText('Demo environments or mock data')).toBeInTheDocument();
+      expect(screen.getByText('Pre-production testing environments')).toBeInTheDocument();
+      expect(screen.getByText('Balance or augment machine learning data')).toBeInTheDocument();
+      expect(screen.getByText('Machine learning or statistical analysis')).toBeInTheDocument();
     });
   });
 
@@ -332,10 +332,10 @@ describe('SyntheticQualityPanel', () => {
       );
 
       // Verify use case headings are present (text validation tests component integration)
-      expect(screen.getByText('Analyze internally for directional guidance')).toBeInTheDocument();
-      expect(screen.getByText('Prototype, test, and run QA')).toBeInTheDocument();
-      expect(screen.getByText('Balance or augment real-world datasets')).toBeInTheDocument();
-      expect(screen.getByText('Train production models')).toBeInTheDocument();
+      expect(screen.getByText('Demo environments or mock data')).toBeInTheDocument();
+      expect(screen.getByText('Pre-production testing environments')).toBeInTheDocument();
+      expect(screen.getByText('Balance or augment machine learning data')).toBeInTheDocument();
+      expect(screen.getByText('Machine learning or statistical analysis')).toBeInTheDocument();
     });
   });
 
@@ -351,9 +351,7 @@ describe('SyntheticQualityPanel', () => {
       );
 
       expect(
-        screen.getByText(
-          /The Synthetic Quality Score is computed by taking a weighted combination/i
-        )
+        screen.getByText(/The SQS measures how well synthetic data preserves/i)
       ).toBeInTheDocument();
     });
 

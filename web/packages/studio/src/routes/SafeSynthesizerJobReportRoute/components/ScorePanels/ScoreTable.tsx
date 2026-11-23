@@ -2,19 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
-import { InfoCircle } from '@nemo/icons/icons';
-import { Flex, Table, Tooltip } from '@nvidia/foundations-react-core';
-import { tooltipClassName } from '@studio/styles/common';
+import { Stack, Table, Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 interface ScoreTableProps {
   scores: {
     name: string;
-    value: number;
-    displayValue?: string;
-    description?: string;
+    value?: number | null;
+    description: string;
   }[];
 }
+
 export const ScoreTable: FC<ScoreTableProps> = ({ scores }) => {
   return (
     <Table
@@ -37,27 +35,16 @@ export const ScoreTable: FC<ScoreTableProps> = ({ scores }) => {
         cells: [
           {
             children: (
-              <Flex gap="density-sm" align="center" className="overflow-visible">
-                <span className="truncate">{score.name}</span>
-                {score.description && (
-                  <Tooltip
-                    slotContent={score.description}
-                    side="bottom"
-                    className={tooltipClassName}
-                  >
-                    <InfoCircle className="inline shrink-0" />
-                  </Tooltip>
-                )}
-              </Flex>
+              <Stack gap="density-xs">
+                <Text kind="body/semibold/md">{score.name}</Text>
+                <Text kind="body/regular/sm" className="text-secondary">
+                  {score.description}
+                </Text>
+              </Stack>
             ),
-            attributes: {
-              TableDataCell: {
-                className: 'overflow-visible',
-              },
-            },
           },
           {
-            children: <ScoreGauge score={score.value} size="sm" />,
+            children: <ScoreGauge score={score.value ?? undefined} size="sm" />,
             attributes: {
               TableDataCell: {
                 style: { width: '0px' },
