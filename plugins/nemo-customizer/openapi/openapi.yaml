@@ -2622,12 +2622,15 @@ components:
       properties:
         longest_edge:
           title: Longest Edge
-          description: Maximum pixels in a resized image. The same ceiling as max_pixels.
+          description: Maximum pixels (an area, not a side length) in a resized image.
+            Larger images are scaled down, which loses fine detail. The same ceiling
+            as max_pixels.
           type: integer
           exclusiveMinimum: 0.0
         shortest_edge:
           title: Shortest Edge
-          description: Minimum pixels in a resized image.
+          description: Minimum pixels (an area, not a side length) in a resized image.
+            Smaller images are scaled up, which adds no detail.
           type: integer
           exclusiveMinimum: 0.0
       additionalProperties: false
@@ -4982,12 +4985,15 @@ components:
       properties:
         longest_edge:
           title: Longest Edge
-          description: Maximum pixels in a resized image. The same ceiling as max_pixels.
+          description: Maximum pixels (an area, not a side length) in a resized image.
+            Larger images are scaled down, which loses fine detail. The same ceiling
+            as max_pixels.
           type: integer
           exclusiveMinimum: 0.0
         shortest_edge:
           title: Shortest Edge
-          description: Minimum pixels in a resized image.
+          description: Minimum pixels (an area, not a side length) in a resized image.
+            Smaller images are scaled up, which adds no detail.
           type: integer
           exclusiveMinimum: 0.0
       additionalProperties: false

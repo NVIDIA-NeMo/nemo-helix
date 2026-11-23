@@ -272,12 +272,12 @@ class ImageSize(AutomodelSchema):
     longest_edge: int | None = Field(
         default=None,
         gt=0,
-        description="Maximum pixels in a resized image. The same ceiling as max_pixels.",
+        description="Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.",
     )
     shortest_edge: int | None = Field(
         default=None,
         gt=0,
-        description="Minimum pixels in a resized image.",
+        description="Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.",
     )
 
     @model_validator(mode="after")

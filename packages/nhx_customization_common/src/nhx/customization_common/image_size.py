@@ -12,7 +12,8 @@ from __future__ import annotations
 DEFAULT_SHORTEST_EDGE = 65_536
 """Platform floor for the vision processor when a ceiling is set and ``shortest_edge`` is not.
 
-A ceiling at or below this floor gets half the ceiling as its floor instead.
+65_536 pixels (256x256) is the ``shortest_edge`` in the Qwen3-VL processor config, which the Super VL
+and Qwen3-VL recipes use. A ceiling at or below this floor gets half the ceiling as its floor instead.
 """
 
 
@@ -58,6 +59,9 @@ def check_seq_length_fits_image(
 ) -> None:
     """Reject a token cap that cannot hold one image at the pixel ceiling.
 
+    This is a lower bound. Rows also carry text tokens (prompt and answer), which the platform cannot
+    measure here, so a cap just above the image tokens can still truncate the text. Leave room for it.
+
     ``vision_patch_size`` is the side length, in pixels, of one image token from the model spec.
     Without it the token count is unknown, so the cap is left to the recipe.
     """
@@ -68,5 +72,6 @@ def check_seq_length_fits_image(
     if image_tokens and max_seq_length <= image_tokens:
         raise ValueError(
             f"max_seq_length ({max_seq_length}) must be larger than the {image_tokens} tokens "
-            f"one image can use at this pixel ceiling (one token per {vision_patch_size}x{vision_patch_size} pixels)."
+            f"one image can use at this pixel ceiling (one token per {vision_patch_size}x{vision_patch_size} pixels). "
+            "Rows also hold text tokens, so leave room for them."
         )
