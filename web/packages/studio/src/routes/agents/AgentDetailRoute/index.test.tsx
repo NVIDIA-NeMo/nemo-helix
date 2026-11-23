@@ -90,7 +90,8 @@ describe('AgentDetailRoute', () => {
     // The overview's experiments panel now offers the registry's create action, which
     // opens the same Run Evaluation modal — submitting an evaluation is how an
     // experiment comes into being.
-    expect(screen.getByRole('button', { name: 'Create Experiment' })).toBeInTheDocument();
+    // The panel shows a skeleton until the evaluations query settles, so wait for it.
+    expect(await screen.findByRole('button', { name: 'Create Experiment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
