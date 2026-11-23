@@ -406,9 +406,9 @@ parameters should be in `input` instead.
 ## Post-Run Actions
 
 A post-run action is plugin-owned work that turns the agent's output into
-something the plugin owns — for example, the Compass plugin's analysis runs
-attach an action that saves an `analysis-report` result and files the insights
-it found.
+something the plugin owns — for example, Compass runs use the
+`compass.save-insights` action, which saves an `analysis-report` result and
+files the insights the run found.
 
 - **When it runs.** After the agent invocation succeeds, inside the job's
   execute step. It does not run when the invocation fails, and it never runs

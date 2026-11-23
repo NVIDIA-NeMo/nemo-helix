@@ -24,7 +24,6 @@ from nemo_helix_plugin.cli_output import is_tty
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE_URL = "http://nhx.test"
-RUN_NAME = "compass-run-0123456789abcdef0123456789abcdef"
 CONFIGURED_DEFAULT = "default/configured-big"
 CONFIGURED_FAST = "default/configured-small"
 
@@ -32,23 +31,6 @@ _PATH = re.compile(r"^/apis/compass/v2/workspaces/(?P<workspace>[^/]+)(?P<rest>/
 
 ClientT = TypeVar("ClientT", bound=NemoClient)
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
-
-
-def run_json(*, name: str = RUN_NAME, workspace: str = "default", agent: str = "demo-agent") -> dict[str, Any]:
-    return {
-        "name": name,
-        "workspace": workspace,
-        "agent": agent,
-        "id": "run-id-1",
-        "created_at": "2026-09-01T12:00:00Z",
-        "updated_at": "2026-09-01T12:00:00Z",
-        "created_by": "alice",
-    }
-
-
-def run_response_json(status: str | None = "created", **run: Any) -> dict[str, Any]:
-    job = None if status is None else {"name": RUN_NAME, "status": status}
-    return {"run": run_json(**run), "job": job}
 
 
 def config_json(*, workspace: str = "default", agent: str = "demo-agent", enabled: bool = True) -> dict[str, Any]:

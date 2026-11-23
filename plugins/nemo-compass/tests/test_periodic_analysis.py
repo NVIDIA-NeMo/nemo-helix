@@ -25,14 +25,13 @@ from nemo_compass_plugin.analysis.backend import (
     make_backend,
 )
 from nemo_compass_plugin.analysis.result import CompassResult, InsightUpdate, NewInsight
-from nemo_compass_plugin.analysis_runs import mint_analysis_run_name
 from nemo_compass_plugin.config import (
     CompassConfig,
     CompassSchedulerConfig,
     Frequency,
     Weekday,
 )
-from nemo_compass_plugin.controller import CompassAnalysisController
+from nemo_compass_plugin.controller import CompassAnalysisController, mint_compass_job_name
 from nemo_compass_plugin.entities import (
     AnalysisConfig,
     AnalysisConfigStatus,
@@ -970,7 +969,7 @@ async def _controller(
 
 
 def test_generated_job_name_fits_derived_fileset_name_limit() -> None:
-    name = mint_analysis_run_name()
+    name = mint_compass_job_name()
 
     assert len(name) <= 63 - len("job-fileset-")
     assert len(f"job-fileset-{name}") <= 63
@@ -1082,7 +1081,6 @@ async def test_controller_defers_legacy_config_without_persisted_models(
         pytest.param(
             {"plugin_managed_agent_type": "compass.analyst", "subject": "research-agent"}, None, id="by-subject"
         ),
-        pytest.param({}, {"insights_analysis_agent": "research-agent"}, id="inline-analysis-run"),
     ],
 )
 async def test_controller_skips_active_job(

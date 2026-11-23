@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
 from nemo_compass_plugin.analysis.backend import make_backend
-from nemo_compass_plugin.analysis_runs import mint_analysis_run_name
 from nemo_compass_plugin.analyst import COMPASS_ANALYST_TYPE_ID, SAVE_INSIGHTS_ACTION_KIND, CompassAnalyst
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
@@ -40,6 +40,9 @@ from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
 
 logger = logging.getLogger(__name__)
+
+# Compass job names: unique per run, so a second run of an agent never collides with the first.
+COMPASS_JOB_NAME_PREFIX = "compass-run-"
 
 _ACTIVE_JOB_STATUSES = [
     "creation_pending",
@@ -249,8 +252,7 @@ class CompassAnalysisController(NemoController):
                 "filter": json.dumps(
                     {
                         "status": {"$in": _ACTIVE_JOB_STATUSES},
-                        # Include legacy analysis jobs that may still be running.
-                        "source": {"$in": ["nemo-agents-plugin-execute", "insights"]},
+                        "source": "nemo-agents-plugin-execute",
                     }
                 ),
                 "page_size": 100,
@@ -348,7 +350,9 @@ class CompassAnalysisController(NemoController):
         }
         if since is not None:
             context["since"] = since.isoformat()
-        job_name = mint_analysis_run_name()
+        # Named here rather than by the Jobs service so the name can be
+        # recorded before the job is submitted.
+        job_name = mint_compass_job_name()
         pending = (
             status.model_copy()
             if status
@@ -402,8 +406,9 @@ class CompassAnalysisController(NemoController):
 def _job_targets_agent(job: HelixJobResponse, agent: str) -> bool:
     """Whether *job* is a Compass run analyzing *agent*."""
     spec = job.spec or {}
-    if spec.get("plugin_managed_agent_type") == COMPASS_ANALYST_TYPE_ID:
-        return spec.get("subject") == agent
-    # An inline run from the analysis-runs API has no subject, only this tag.
-    # Goes when that API does.
-    return (job.custom_fields or {}).get("insights_analysis_agent") == agent
+    return spec.get("plugin_managed_agent_type") == COMPASS_ANALYST_TYPE_ID and spec.get("subject") == agent
+
+
+def mint_compass_job_name() -> str:
+    """Mint a unique name for a Compass job the scheduler submits."""
+    return f"{COMPASS_JOB_NAME_PREFIX}{uuid.uuid4().hex}"

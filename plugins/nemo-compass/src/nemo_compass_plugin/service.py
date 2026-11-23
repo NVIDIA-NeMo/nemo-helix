@@ -12,7 +12,6 @@ from typing import ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisConfigPerms, AnalysisRunStatusPerms, InsightPerms
-from nemo_compass_plugin.analysis_runs import router as analysis_runs_router
 from nemo_compass_plugin.analyst import CompassAnalyst
 from nemo_compass_plugin.authz import scope
 from nemo_compass_plugin.entities import (
@@ -94,12 +93,6 @@ class CompassService(NemoService):
                 _build_analysis_run_statuses_router(),
                 tag="Compass Analysis Run Statuses",
                 description="Machine-written state for periodic insights analysis.",
-                prefix="/v2/workspaces/{workspace}",
-            ),
-            RouterSpec(
-                analysis_runs_router,
-                tag="Compass Analysis Runs",
-                description="Submit Compass analysis runs backed by generic execute-agent jobs.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]
