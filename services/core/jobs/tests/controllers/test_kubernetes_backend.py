@@ -3019,7 +3019,8 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_kubernetes_already_finished(
 ):
     """The reconciler can reach a step after its TTL even though Kubernetes finished the Job long ago.
 
-    The TTL timeout must not delete that Job or replace its real outcome with a timeout.
+    Neither the TTL timeout nor the staleness timeout, which sees the tasks' old timestamps, may delete
+    that Job or replace its real outcome.
     """
     step = request.getfixturevalue(step_name)
     config = kubernetes_job._execution_profile_config
@@ -3035,6 +3036,7 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_kubernetes_already_finished(
     with (
         patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch.object(kubernetes_job, "check_step_is_stale", return_value=True),
     ):
         result = kubernetes_job.sync(step)
 
@@ -3043,24 +3045,25 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_kubernetes_already_finished(
     kubernetes_job._batch_v1.delete_namespaced_job.assert_not_called()
 
 
-def test_sync_past_ttl_still_times_out_a_job_kubernetes_has_not_finished(kubernetes_job, test_step_pending):
-    """Only a finished Job is spared. One that is still unfinished past the TTL is terminated."""
+def test_sync_past_ttl_times_out_a_job_whose_failure_kubernetes_has_not_counted(kubernetes_job, test_step_pending):
+    """A Failed condition without a counted failure is not finished, because the mapper does not report it as ERROR.
+
+    Sparing it would leave the step pending with no TTL to end it.
+    """
     ttl_seconds = kubernetes_job._execution_profile_config.ttl_seconds_before_active
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_step_pending.created_at = old_timestamp
     test_step_pending.updated_at = old_timestamp
-    k8s_job = _kubernetes_job_for_step(
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _kubernetes_job_for_step(
         test_step_pending,
         status=client.V1JobStatus(
-            active=1,
+            active=None,
             completion_time=None,
             failed=None,
             succeeded=None,
-            conditions=[client.V1JobCondition(type="Suspended", status="False")],
+            conditions=[client.V1JobCondition(type="Failed", status="True", message="DeadlineExceeded")],
         ),
     )
-    k8s_job.metadata.labels[JOB_MANAGED_BY_LABEL] = JOB_MANAGED_BY_JOBS_CONTROLLER
-    kubernetes_job._batch_v1.read_namespaced_job.return_value = k8s_job
 
     with (
         patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
@@ -3079,10 +3082,7 @@ def test_cleanup_active_by_the_step_ttl(kubernetes_job, test_step_active):
     test_step_active.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=3600)
     test_step_active.status = HelixJobStatus.ACTIVE
     test_step_active.created_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
-    mock_job = MagicMock()
-    mock_job.metadata.name = "test-job-active"
-    mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
-    kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _kubernetes_job_for_step(test_step_active)
 
     with (
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
@@ -3092,6 +3092,7 @@ def test_cleanup_active_by_the_step_ttl(kubernetes_job, test_step_active):
 
     assert result.status == HelixJobStatus.ERROR.value
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+    kubernetes_job._batch_v1.delete_namespaced_job.assert_called_once()
 
 
 def test_schedule_sets_the_pod_deadline_from_the_step_ttl(kubernetes_job, cpu_execution_provider, test_step_pending):

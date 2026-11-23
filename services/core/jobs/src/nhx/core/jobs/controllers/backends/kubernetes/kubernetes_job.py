@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import datetime
 import logging
 from collections.abc import Callable
 from typing import Generic, Literal, TypeVar
@@ -359,7 +358,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 )
             ):
                 return result
-            if k8s_job is not None and self.check_step_is_stale(step):
+            if k8s_job is not None and not _kubernetes_job_has_finished(k8s_job) and self.check_step_is_stale(step):
                 update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
                 self.terminate_job(k8s_job)
                 message = staleness_error_message(require_staleness_timeout_seconds(step))
@@ -889,19 +888,19 @@ def _job_namespace(job: V1Job) -> str | None:
 
 
 def _kubernetes_job_has_finished(job: V1Job) -> bool:
-    """Whether Kubernetes has already recorded this Job as Complete or Failed.
+    """Whether map_kubernetes_job_status_to_step_status reports this Job as COMPLETED or ERROR from its status alone.
 
-    A Complete Job has a completion time. A Failed Job has a Failed condition that is True.
+    A finished Job skips the TTL and staleness timeouts, so this must not be broader than the mapper:
+    a Job called finished here that the mapper still sees as running would never be ended.
     """
     job_status = job.status
     if job_status is None:
         return False
-    if isinstance(job_status.completion_time, datetime.datetime):
+    if job_status.completion_time is not None:
         return True
-    conditions = job_status.conditions
-    if not isinstance(conditions, list):
-        return False
-    return any(condition.type in ("Complete", "Failed") and condition.status == "True" for condition in conditions)
+    return bool(job_status.failed) and any(
+        condition.type == "Failed" and condition.status == "True" for condition in job_status.conditions or []
+    )
 
 
 def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> bool:

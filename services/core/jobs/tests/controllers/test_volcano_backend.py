@@ -1390,6 +1390,7 @@ def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pendin
     [
         ("Completed", HelixJobStatus.COMPLETED, "Job completed successfully"),
         ("Failed", HelixJobStatus.ERROR, "Job failed"),
+        ("Terminated", HelixJobStatus.ERROR, "Job failed"),
     ],
 )
 @pytest.mark.parametrize("step_name", ["test_step_pending", "test_step_active"])
@@ -1398,7 +1399,8 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
 ):
     """The reconciler can reach a step after its TTL even though Volcano finished the Job long ago.
 
-    The TTL timeout must not delete that Job or replace its real outcome with a timeout.
+    Neither the TTL timeout nor the staleness timeout, which sees the tasks' old timestamps, may delete
+    that Job or replace its real outcome.
     """
     step = request.getfixturevalue(step_name)
     config = volcano_job._execution_profile_config
@@ -1408,16 +1410,12 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     step.created_at = old_timestamp
     step.updated_at = old_timestamp
-    mock_job = {
-        "status": {"state": {"phase": phase}},
-        "metadata": {
-            "name": "test-job-finished",
-            "labels": {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER},
-        },
-    }
-    volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
+    volcano_job._custom_v1.get_namespaced_custom_object.return_value = _volcano_job_for_step(step, phase=phase)  # ty: ignore[invalid-assignment]
 
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False):
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "check_step_is_stale", return_value=True),
+    ):
         result = volcano_job.sync(step)
 
     assert result.status == expected_status.value
