@@ -248,8 +248,7 @@ authz:
           description: "Read safe synthesizer jobs"
     secrets:
       access:
-        description: "Access secret values (service principals only)"
-        has_role: false
+        description: "Access secret values as an explicitly authorized runtime identity"
       create:
         description: "Create secrets"
       delete:
@@ -432,6 +431,10 @@ authz:
       description: "Runtime permissions for job workload containers"
       permissions:
       - jobs.logs.create
+    SecretAccessor:
+      description: "Access secret values in the bound workspace; delegated calls also require subject secrets.read"
+      permissions:
+      - secrets.access
     TaskImageBuildRunner:
       description: "Scoped entity access for Kubernetes task-image-build workers"
       permissions: []

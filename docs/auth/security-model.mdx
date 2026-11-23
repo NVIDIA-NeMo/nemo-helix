@@ -173,6 +173,13 @@ the represented user's IAM permission. Secret value access requires both actor
 declared actor requirements. Scopes, caller restrictions and mandatory denials
 still apply.
 
+Kubernetes jobs can also access secret values through delegated workload tokens
+bound to a job pod. Their service-account actor needs the opt-in `SecretAccessor`
+role in the secret's workspace, and their represented user still needs
+`secrets.read`. The launcher exchanges the projected token before resolving secret
+environment variables. Direct human tokens and unbound service-account tokens
+remain unable to read secret values.
+
 Service code can express independent permission requirements through
 `AuthClient.check_permissions(workspace, actor=[...], subject=[...])`. Both supplied
 lists must pass against their respective identities. Omitting actor or passing

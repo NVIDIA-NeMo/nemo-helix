@@ -293,9 +293,10 @@ path_under_denied_prefix(path, prefix) if {
 	substring(path, count(prefix), 1) == "/"
 }
 
-# Deny direct secret value access for non-service principals (including HelixAdmin).
-# Secret values must only be accessed through the service delegation pattern, where a
-# service principal or verified delegated workload reads for a creator with secrets.read.
+# Secret values require a service, a verified delegated workload, or a verified
+# delegated Kubernetes job actor. The route contract separately requires actor
+# secrets.access and subject secrets.read. Interactive users (including
+# HelixAdmin) cannot read values directly.
 # Matches: /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access
 deny_request if {
 	path := extract_path
@@ -308,6 +309,16 @@ deny_request if {
 
 	request_caller_kind != "service_principal"
 	not data.common.verified_delegated_secret_request
+	not delegated_job_secret_accessor
+}
+
+delegated_job_secret_accessor if {
+	regex.match("^system:serviceaccount:[a-z0-9][-a-z0-9]*:[a-z0-9][-a-z0-9.]*$", extract_principal_id)
+	extract_on_behalf_of_principal_id != ""
+	is_string(input.nhx_workload_job)
+	input.nhx_workload_job != ""
+	is_string(input.nhx_workload_workspace)
+	input.nhx_workload_workspace != ""
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).

@@ -7,11 +7,18 @@ The jobs-launcher now supports automatic secret injection from the NeMo Helix Se
 
 ## Configuration
 
-The feature uses three environment variables:
+The feature uses these environment variables:
 
 1. **`NEMO_JOB_SECRETS`** (required) - A comma-separated list of secret references, e.g  `NEMO_JOB_SECRETS='ENV_VAR=workspace/secret_name,OTHER_ENV_VAR=workspace/other_secret_name'`
-2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
-3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
+2. **`NHX_SECRETS_URL`** - The Secrets API base URL. Falls back to `NHX_BASE_URL`.
+3. **`NHX_WORKLOAD_IDENTITY_TOKEN_FILE`** - When set, the launcher discovers workload exchange settings through `NHX_BASE_URL`, exchanges this projected token, and sends a refreshable bearer token for secret retrieval. The same authentication supports `--fetch-step-config` and log uploads. Exchange failures stop the launch; they never fall back to trusted headers or anonymous secret requests.
+4. **`NHX_PRINCIPAL`** - Legacy JSON auth context used only when workload identity is not configured, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`. Workload mode needs no principal environment variable and removes legacy identity headers from bearer-authenticated requests.
+
+With workload exchange, the Kubernetes job service account needs the `SecretAccessor` role in
+the secret's platform workspace. This grants `secrets.access`; the delegated submitter must
+separately have `secrets.read`. The API accepts this path only for delegated job-bound Kubernetes
+workloads or service principals. `JobRunner` alone permits log upload, not secret access.
+Operators must create the role binding explicitly; Kubernetes RBAC does not grant Helix roles.
 
 The launcher uses configured workload credentials, an access-token file, or the creator in `NHX_PRINCIPAL`. If none is configured, it sends an anonymous request without auth discovery; the Secrets API enforces the platform's authentication and permission settings. Anonymous requests support internal HTTP service URLs. URL-embedded credentials are rejected for anonymous Secret requests. A configured credential that fails is an error, and a failed Secret request prevents the subprocess from starting.
 
@@ -59,7 +66,7 @@ export NEMO_JOB_SECRETS="HF_TOKEN=default/hf-token,WANDB_API_KEY=default/wandb-k
 
 The launcher will exit with an error if:
 
-- `NEMO_JOB_SECRETS` is set but `NHX_SECRETS_URL` is missing
+- `NEMO_JOB_SECRETS` is set but both `NHX_SECRETS_URL` and `NHX_BASE_URL` are missing
 - A secret reference has an invalid format
 - The API returns an error (e.g., secret not found, authentication failure)
 - Network connectivity issues occur

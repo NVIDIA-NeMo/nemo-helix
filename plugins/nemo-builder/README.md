@@ -237,8 +237,8 @@ export NHX_BASE_URL=http://localhost:8080
 `imagePullSecrets`, and get the same Secret into `$NS-builds`: the chart doesn't copy it, but
 `builder.namespaceLabels` can label the namespace for a tool that does. Installing needs permission
 to create the build namespace and its RBAC. Platform auth is off, the chart's default, as in the
-quickstart; with it on, your calls need a token, and the builder needs workload token exchange off
-(see [Security](#security)).
+quickstart; with it on, your calls need a token. With workload token exchange enabled, grant the
+build service accounts the workspace roles described under [Security](#security).
 
 **Instead of step 5:** the username from your file, not `builder`.
 
@@ -824,7 +824,7 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
   secret in any workspace: the platform takes those headers on trust. A build's own `RUN` reaches
   the platform, so a Dockerfile can read every workspace's signing key and registry credential,
   sign as any workspace, and push to its repositories. With exchange on, the platform refuses those
-  headers, but the builder doesn't work with exchange on yet (below).
+  headers. Use workload token exchange and explicit workload role bindings (below).
 - **A service can submit builds for anyone it names.** `POST /builds` admits a service acting for a
   person, so that a platform service, such as evaluations, can build for its user. The policy
   admits a service on its own permissions, so the checks behind `403` and `409`, that the person
@@ -846,13 +846,28 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
   included, can mark any of the submitter's `pending` images `ready` at a digest of its choosing.
   One that names a service can also rewrite any image's row through the platform's generic Entities
   route, including a `ready` row's digest, which `complete` never changes. Even a real workload
-  token says only whom a step acts for, not which job it belongs to.
-- **Platform auth on works only with workload token exchange off.** With exchange on, the jobs
-  launcher can't fetch the push step's secrets: it fetches them with the step's delegated identity,
-  which Jobs doesn't give a step under exchange, so the step never starts. Without exchange, the
-  push step calls the builder as `service:builder`, acting for the submitter. `complete` admits a
-  service only when it acts for the image's submitter; reading an image admits one acting for any
-  person.
+  token is still checked only against the submitter by `complete`, not against the image's build job.
+- **Workload token exchange requires explicit actor grants.** The launcher exchanges the projected
+  service-account token for a delegated bearer token when fetching push-step secrets, just as it
+  does for log uploads. Fetch and push use the same exchange mechanism for Files and Builder calls.
+  The actor is the Kubernetes service account, not `service:builder` or `service:jobs`; service
+  permissions do not transfer to it. The chart creates the service accounts but does not grant
+  platform roles. Bind roles in each build's platform workspace as follows:
+
+  | Actor (`system:serviceaccount:<build-namespace>:<service-account>`) | Roles |
+  | --- | --- |
+  | `nhx-build-fetch` | `Viewer`, `JobRunner` |
+  | `nhx-build-control` | `JobRunner` |
+  | `nhx-build-push` | `Editor`, `JobRunner`, `SecretAccessor` |
+
+  `SecretAccessor` grants only `secrets.access`; it does not include Viewer or Editor. Grant it
+  in the workspace containing the registry and signing secrets (`system` for builds in that
+  workspace). The submitter must separately have `secrets.read` there. Secret values remain
+  inaccessible to direct human callers: a Kubernetes workload must present a delegated,
+  job-bound token. The workload token's scopes must also admit the requested APIs.
+  Treat these service accounts as trusted build identities: their roles apply to every job
+  running as them, and `SecretAccessor` covers all secrets in the bound workspace whose metadata
+  the represented user may read. Keep the sandbox pods credential-free.
 - **`fetch` unpacks archives the request names.** It runs acting for the submitter and parses an
   archive anyone who can write to the fileset put there. Python's `data` filter keeps every entry
   inside the archive's directory, and refuses links out of it and devices; the caps bound what one

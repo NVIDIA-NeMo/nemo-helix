@@ -46,6 +46,21 @@ NeMo Helix provides human-facing roles for interactive users and a separate work
 - Does not include Viewer, Editor, or Admin permissions
 - Should be granted alongside the minimum human-facing role the workload needs, such as Viewer when the workload only reads workspace resources
 
+## Runtime Secret Access
+
+`SecretAccessor` is a separate opt-in runtime role that grants only `secrets.access`
+in the bound workspace. It is not inherited by Viewer, Editor, Admin or JobRunner.
+For a delegated Kubernetes job, bind it to the service-account actor, for example
+`system:serviceaccount:helix-builds:nhx-build-push`. The represented user must
+separately have `secrets.read` in the secret's workspace. The job must authenticate
+with a delegated, job-bound workload token; a direct human token or an unbound
+service-account token cannot use this role to read secret values.
+
+The launcher exchanges the projected workload token when resolving `from_secret`
+environment variables before starting a job's command. Missing actor grants return
+403 even if the submitter is an administrator. Kubernetes RBAC and Helix role
+bindings are separate; creating the service account does not grant this role.
+
 ## Service Entity Storage
 
 `ServiceEntityStore` grants direct service principals `entities.create`,

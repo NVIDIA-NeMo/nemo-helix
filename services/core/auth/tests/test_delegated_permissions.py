@@ -586,6 +586,42 @@ def test_envoy_dual_secret_checks_keep_actor_claims(policy: OPAPolicy, policy_da
     assert result[0]["result"]["allowed"] is True
 
 
+@pytest.mark.parametrize(
+    ("actor_roles", "subject", "workspace", "job_bound", "allowed"),
+    [
+        (["SecretAccessor"], "viewer", "private", True, True),
+        (["JobRunner"], "viewer", "private", True, False),
+        (["SecretAccessor"], "non-member", "private", True, False),
+        (["SecretAccessor"], "viewer", "other", True, False),
+        (["SecretAccessor"], "viewer", "private", False, False),
+        (["SecretAccessor"], "", "private", True, False),
+    ],
+)
+def test_kubernetes_job_secret_access_in_wasm(
+    policy: OPAPolicy,
+    policy_data: dict[str, Any],
+    actor_roles: list[str],
+    subject: str,
+    workspace: str,
+    job_bound: bool,
+    allowed: bool,
+) -> None:
+    actor = "system:serviceaccount:helix-builds:nhx-build-push"
+    policy_data["authz"]["principals"][actor] = {"workspaces": {"private": actor_roles}}
+    policy.set_data(policy_data)
+    request: dict[str, Any] = {
+        "method": "GET",
+        "path": f"/apis/secrets/v2/workspaces/{workspace}/secrets/registry-password/access",
+        "principal_id": actor,
+        "on_behalf_of_principal_id": subject,
+        "scopes": ["platform:read"],
+    }
+    if job_bound:
+        request.update(nhx_workload_job="builder-example-1", nhx_workload_workspace="private")
+    result = policy.evaluate(request, entrypoint=0)
+    assert result[0]["result"]["allowed"] is allowed
+
+
 @pytest.mark.parametrize("claim", ["email", "groups"])
 def test_envoy_direct_caller_keeps_own_claims(policy: OPAPolicy, policy_data: dict[str, Any], claim: str) -> None:
     grant = "direct-admin@example.com" if claim == "email" else "direct-admins"
