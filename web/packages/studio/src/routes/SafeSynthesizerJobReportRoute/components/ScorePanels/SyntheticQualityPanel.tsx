@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
-import { Grid, Panel, Stack } from '@nvidia/foundations-react-core';
+import { Anchor, Grid, Panel, Stack } from '@nvidia/foundations-react-core';
+import { LINK_SAFE_SYNTHESIZER_LOW_SQS, LINK_SAFE_SYNTHESIZER_SQS } from '@studio/constants/links';
 import { ScoreGuidance } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreGuidance';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
 import { TitledDial } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/TitledDial';
@@ -29,14 +30,22 @@ export const SyntheticQualityPanel: FC<SyntheticQualityPanelProps> = ({
           <TitledDial
             title="Synthetic Quality Score (SQS)"
             score={sqsScore}
-            description="The SQS measures how well synthetic data preserves the statistical properties of your training data, scoring 0.0–10.0 (higher is better) across up to 5 subscores."
+            description={
+              <>
+                The{' '}
+                <Anchor href={LINK_SAFE_SYNTHESIZER_SQS} textKind="body/regular/sm" external>
+                  SQS measures
+                </Anchor>{' '}
+                how well synthetic data preserves the statistical properties of your training data,
+                scoring 0.0–10.0 (higher is better) across up to 5 subscores.
+              </>
+            }
           />
           <ScoreGuidance
             heading="Understanding Quality Scores"
-            paragraphs={[
-              "Some quality loss is expected — and acceptable — since it's inherent to privacy preservation. Mid-range scores are often sufficient for model training. You should test your synthetic data on the downstream use case to assess true viability.",
-              'Low scores suggest you should adjust your configuration to improve model learning.',
-            ]}
+            intro="Some quality loss is expected — and acceptable — since it's inherent to privacy preservation. Mid-range scores are often sufficient for model training. You should test your synthetic data on the downstream use case to assess true viability."
+            lowScoreGoal="model learning"
+            lowScoreHref={LINK_SAFE_SYNTHESIZER_LOW_SQS}
             uses={QUALITY_RECOMMENDED_USES}
             score={sqsScore}
           />

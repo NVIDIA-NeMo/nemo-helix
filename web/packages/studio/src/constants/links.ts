@@ -12,6 +12,14 @@ export const LINK_DOCS_DEPLOYMENTS = `${DOCS_BASE_URL}reference/cli-reference#ne
 
 export const LINK_DOCS_SAFE_SYNTHESIZER = `${DOCS_BASE_URL}synthesize-safe-data`;
 
+// Safe Synthesizer library documentation links, matching its HTML report
+const SAFE_SYNTHESIZER_LIBRARY_DOCS_URL = 'https://nvidia-nemo.github.io/Safe-Synthesizer/';
+export const LINK_SAFE_SYNTHESIZER_SQS = `${SAFE_SYNTHESIZER_LIBRARY_DOCS_URL}product-overview/evaluation/#synthetic-quality-score-sqs`;
+export const LINK_SAFE_SYNTHESIZER_LOW_SQS = `${SAFE_SYNTHESIZER_LIBRARY_DOCS_URL}user-guide/evaluating-data/#low-sqs-scores`;
+export const LINK_SAFE_SYNTHESIZER_DPS = `${SAFE_SYNTHESIZER_LIBRARY_DOCS_URL}product-overview/evaluation/#data-privacy-score-dps`;
+export const LINK_SAFE_SYNTHESIZER_DPS_INTERPRETATION = `${SAFE_SYNTHESIZER_LIBRARY_DOCS_URL}product-overview/evaluation/#dps-interpretation`;
+export const LINK_SAFE_SYNTHESIZER_DIFFERENTIAL_PRIVACY = `${SAFE_SYNTHESIZER_LIBRARY_DOCS_URL}product-overview/data_synthesis/#differential-privacy`;
+
 // SDK documentation links
 export const LINK_DOCS_SDK = `${DOCS_BASE_URL}reference/python-sdk`;
 

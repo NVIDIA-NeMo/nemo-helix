@@ -3,6 +3,7 @@
 
 import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
+import { LINK_SAFE_SYNTHESIZER_DPS_INTERPRETATION } from '@studio/constants/links';
 import { DataPrivacyPanel } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/DataPrivacyPanel';
 import { screen } from '@studio/tests/util/render';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -165,7 +166,7 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
+      expect(screen.getByText('Differential Privacy', { ignore: 'a' })).toBeInTheDocument();
     });
   });
 
@@ -273,7 +274,7 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
+      expect(screen.getByText('Differential Privacy', { ignore: 'a' })).toBeInTheDocument();
       expect(within(screen.getByTestId('dp-status')).getByText('Enabled')).toBeInTheDocument();
     });
 
@@ -288,7 +289,7 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
+      expect(screen.getByText('Differential Privacy', { ignore: 'a' })).toBeInTheDocument();
       expect(within(screen.getByTestId('dp-status')).getByText('Disabled')).toBeInTheDocument();
     });
 
@@ -304,7 +305,7 @@ describe('DataPrivacyPanel', () => {
       );
 
       // Verify that Differential Privacy status is displayed correctly
-      expect(screen.getByText('Differential Privacy')).toBeInTheDocument();
+      expect(screen.getByText('Differential Privacy', { ignore: 'a' })).toBeInTheDocument();
       expect(screen.getByTestId('dp-status')).toBeInTheDocument();
     });
   });
@@ -327,6 +328,41 @@ describe('DataPrivacyPanel', () => {
       expect(checkIcons).toHaveLength(2);
       expect(cancelIcons).toHaveLength(2);
       expect(checkIcons.length + cancelIcons.length).toBe(4);
+    });
+
+    it('should hide the scenarios when the score is unavailable', () => {
+      render(
+        <DataPrivacyPanel
+          reportSummary={createMockReportSummary({ data_privacy_score: undefined })}
+          dpEnabled
+          title="Data Privacy"
+          icon={<svg />}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(screen.queryByTestId('score-check-icon')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('score-cancel-icon')).not.toBeInTheDocument();
+      expect(
+        screen.getByText('Recommended uses appear once a score is available.')
+      ).toBeInTheDocument();
+    });
+
+    it('should link low-score guidance to the library docs', () => {
+      render(
+        <DataPrivacyPanel
+          reportSummary={createMockReportSummary()}
+          dpEnabled
+          title="Data Privacy"
+          icon={<svg />}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(screen.getByRole('link', { name: /adjust your configuration/ })).toHaveAttribute(
+        'href',
+        LINK_SAFE_SYNTHESIZER_DPS_INTERPRETATION
+      );
     });
   });
 

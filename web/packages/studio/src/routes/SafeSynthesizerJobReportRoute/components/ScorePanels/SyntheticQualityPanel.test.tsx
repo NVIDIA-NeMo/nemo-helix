@@ -351,7 +351,7 @@ describe('SyntheticQualityPanel', () => {
       );
 
       expect(
-        screen.getByText(/The SQS measures how well synthetic data preserves/i)
+        screen.getByText(/how well synthetic data preserves the statistical properties/i)
       ).toBeInTheDocument();
     });
 

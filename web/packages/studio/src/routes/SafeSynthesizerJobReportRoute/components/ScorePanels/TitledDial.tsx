@@ -26,7 +26,7 @@ export const TitledDial: FC<TitledDialProps> = ({ title, score, description }) =
             data-testid="score-grade"
             className="inline-flex w-fit items-center rounded-sm border px-density-sm text-xs font-bold"
             /* eslint-disable-next-line no-restricted-syntax */
-            style={{ borderColor: tierColor, color: tierColor }}
+            style={{ borderColor: tierColor }}
           >
             {gradeForScore(score)}
           </span>

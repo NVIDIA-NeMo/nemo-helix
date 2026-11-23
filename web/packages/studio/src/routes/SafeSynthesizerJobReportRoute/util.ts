@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ScoreTier } from '@nemo/common/src/components/ScoreGauge/consts';
+import { SCORE_TIER_COLORS, type ScoreTier } from '@nemo/common/src/components/ScoreGauge/consts';
 import { scoreTier } from '@nemo/common/src/components/ScoreGauge/utils';
+
+const TIERS_HIGHEST_FIRST = Object.keys(SCORE_TIER_COLORS) as ScoreTier[];
 
 export const GRADE_ORDER: readonly ScoreTier[] = [
   'Unavailable',
-  'Poor',
-  'Moderate',
-  'Good',
-  'Very Good',
-  'Excellent',
+  ...[...TIERS_HIGHEST_FIRST].reverse(),
 ];
 
 export function gradeForScore(score: number | null | undefined): ScoreTier {

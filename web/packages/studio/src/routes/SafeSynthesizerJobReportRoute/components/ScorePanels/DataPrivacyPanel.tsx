@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
-import { Badge, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { Anchor, Badge, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  LINK_SAFE_SYNTHESIZER_DIFFERENTIAL_PRIVACY,
+  LINK_SAFE_SYNTHESIZER_DPS,
+  LINK_SAFE_SYNTHESIZER_DPS_INTERPRETATION,
+} from '@studio/constants/links';
 import { ScoreGuidance } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreGuidance';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
 import { TitledDial } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/TitledDial';
@@ -31,14 +36,22 @@ export const DataPrivacyPanel: FC<DataPrivacyPanelProps> = ({
           <TitledDial
             title="Data Privacy Score (DPS)"
             score={dpsScore}
-            description="The DPS measures how well synthetic data protects sensitive information from the training data, scoring 0.0–10.0 (higher is better)."
+            description={
+              <>
+                The{' '}
+                <Anchor href={LINK_SAFE_SYNTHESIZER_DPS} textKind="body/regular/sm" external>
+                  DPS
+                </Anchor>{' '}
+                measures how well synthetic data protects sensitive information from the training
+                data, scoring 0.0–10.0 (higher is better).
+              </>
+            }
           />
           <ScoreGuidance
             heading="Understanding Privacy Scores"
-            paragraphs={[
-              'High DPS scores mean adversaries rarely outperform random chance across hundreds of simulated attacks. Scores are penalized for even minor information leakage; mid-range scores still imply significant uncertainty for attackers.',
-              'Low scores suggest you should adjust your configuration to improve privacy protection.',
-            ]}
+            intro="High DPS scores mean adversaries rarely outperform random chance across hundreds of simulated attacks. Scores are penalized for even minor information leakage; mid-range scores still imply significant uncertainty for attackers."
+            lowScoreGoal="privacy protection"
+            lowScoreHref={LINK_SAFE_SYNTHESIZER_DPS_INTERPRETATION}
             uses={PRIVACY_RECOMMENDED_USES}
             score={dpsScore}
           />
@@ -67,9 +80,16 @@ export const DataPrivacyPanel: FC<DataPrivacyPanelProps> = ({
               </Badge>
             </Flex>
             <Text kind="body/regular/sm" className="text-secondary">
-              Differential Privacy offers supplemental protection for mathematical privacy
-              guarantees beyond the inherent privacy of synthetic data. It typically comes with a
-              reduction in quality and longer training time.
+              <Anchor
+                href={LINK_SAFE_SYNTHESIZER_DIFFERENTIAL_PRIVACY}
+                textKind="body/regular/sm"
+                external
+              >
+                Differential Privacy
+              </Anchor>{' '}
+              offers supplemental protection for mathematical privacy guarantees beyond the inherent
+              privacy of synthetic data. It typically comes with a reduction in quality and longer
+              training time.
             </Text>
           </Stack>
         </Stack>
