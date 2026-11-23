@@ -583,7 +583,7 @@ async def test_execd_gets_a_token_that_only_the_sandboxs_own_connection_sends() 
     assert len(token) >= 32
     assert env == {"A": "1", EXECD_ACCESS_TOKEN_ENV: token}
     assert getattr(sent["connection_config"], "headers") == {EXECD_ACCESS_TOKEN_HEADER: token}
-    # Listing and killing go through the server API only, so their connection carries no sandbox's token.
+    # Listing and orphan cleanup use the driver's own connection, which carries no sandbox's token.
     assert getattr(driver._connection_config, "headers") == {}
     assert token not in str(sent["metadata"])
 

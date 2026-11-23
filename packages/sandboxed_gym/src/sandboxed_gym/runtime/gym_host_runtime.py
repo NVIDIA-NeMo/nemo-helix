@@ -60,6 +60,11 @@ from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV
 from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
+#: The job's own variables (``env_vars`` and resolved ``env_secrets``) as one JSON object. They travel
+#: in this one variable rather than as the container's environment because everything that starts as
+#: root in the sandbox, before the host drops to the container user, would otherwise run with them:
+#: a job's ``PATH``, ``LD_PRELOAD`` or ``PYTHONPATH`` would choose what root executes.
+JOB_ENV_ENV_KEY = "NHX_GYM_JOB_ENV"
 #: Set by the orchestrator when the caller supplied an explicit ``environment_path`` (a FileSet).
 #: ``NHX_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
 #: for image-bundled Gym too; this flag is how a missing ``nemo-environment.yaml`` becomes a
@@ -1620,6 +1625,24 @@ class _Server(ThreadingHTTPServer):
         )
 
 
+def _apply_job_env(environ: collections.abc.MutableMapping[str, str] = os.environ) -> None:
+    """Merge the job's variables, carried in ``JOB_ENV_ENV_KEY``, into this process's environment.
+
+    Called after the container-engine setup and privilege drop, so the job's values reach Gym and the
+    servers it starts but nothing that ran before. They override the image's own variables, as they did
+    when they were the container's environment; the orchestrator already left out any name it sets itself.
+    """
+    raw = environ.pop(JOB_ENV_ENV_KEY, None)
+    if not raw:
+        return
+    job_env = json.loads(raw)
+    if not isinstance(job_env, dict) or not all(
+        isinstance(name, str) and isinstance(value, str) for name, value in job_env.items()
+    ):
+        raise ValueError(f"{JOB_ENV_ENV_KEY} must be a JSON object of strings")
+    environ.update(job_env)
+
+
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
@@ -1643,6 +1666,8 @@ def main() -> None:
     try:
         # Before Gym starts anything: the Gym servers must run as the unprivileged container user.
         prepare_container_engine()
+        # Only now, with any privileged setup done, may the job's variables affect what runs.
+        _apply_job_env()
         _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
     except Exception as exc:
         # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller

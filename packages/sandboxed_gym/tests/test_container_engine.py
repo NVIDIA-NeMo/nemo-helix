@@ -11,8 +11,10 @@ from sandboxed_gym.runtime.container_engine import ENGINE_ENV, is_kata_guest, pr
 
 KATA_CMDLINE = "console=hvc0 ro rootfstype=ext4 systemd.unit=kata-containers.target agent.cdh_api_timeout=50"
 NODE_CMDLINE = "BOOT_IMAGE=/vmlinuz-6.8.0-1041-oracle root=UUID=a664f091 ro console=ttyS0 user_namespace.enable=1"
-STATUS_NO_CAPS = "Name:\tpython\nCapInh:\t0000000000000000\nCapEff:\t0000000000000000\n"
-STATUS_SYS_ADMIN = "Name:\tpython\nCapEff:\t0000000000200000\n"
+STATUS_DROPPED = "Name:\tpython\nCapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nNoNewPrivs:\t1\n"
+STATUS_SYS_ADMIN = "Name:\tpython\nCapEff:\t0000000000200000\nCapBnd:\t0000000000000000\nNoNewPrivs:\t1\n"
+STATUS_FULL_BOUNDING = "Name:\tpython\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nNoNewPrivs:\t1\n"
+STATUS_PRIVS_ALLOWED = "Name:\tpython\nCapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nNoNewPrivs:\t0\n"
 
 
 @pytest.mark.parametrize(
@@ -33,7 +35,11 @@ class _Host:
     """Stands in for the sandbox: kernel files, the setup script and the uid calls."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, cmdline: str = KATA_CMDLINE) -> None:
-        self.files = {"/proc/cmdline": cmdline, "/proc/self/status": STATUS_NO_CAPS}
+        self.files = {
+            "/proc/cmdline": cmdline,
+            "/proc/self/status": STATUS_DROPPED,
+            "/proc/sys/kernel/cap_last_cap": "40\n",
+        }
         self.setup_exit = 0
         self.setup_output = "ok\n"
         self.calls: list[tuple[str, object]] = []
@@ -69,8 +75,11 @@ class _Host:
         self.files[str(self.log)] = self.setup_output
         return subprocess.CompletedProcess(argv, self.setup_exit)
 
+    def prctl(self, option: int, arg: int) -> None:
+        self.calls.append(("prctl", (option, arg)))
+
     def prepare(self, environ: dict[str, str]) -> bool:
-        return prepare_container_engine(environ, read_text=self.read_text, run=self.run)
+        return prepare_container_engine(environ, read_text=self.read_text, run=self.run, prctl=self.prctl)
 
 
 def test_an_image_without_an_engine_is_left_alone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -95,6 +104,10 @@ def test_setup_runs_then_the_host_drops_to_the_container_user(monkeypatch: pytes
         os.path.join(host.work, "nested", "file"),
     }
     assert names[-3:] == ["setgroups", "setgid", "setuid"]
+    # The bounding set (needs CAP_SETPCAP) and no_new_privs go before the uid changes.
+    prctls = [args for name, args in host.calls if name == "prctl"]
+    assert prctls == [(24, capability) for capability in range(41)] + [(38, 1)]
+    assert names.index("setgroups") > max(i for i, name in enumerate(names) if name == "prctl")
     assert ("setuid", 1000) in host.calls
     assert environ["HOME"] == "/home/docker-user"
     assert environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
@@ -123,6 +136,18 @@ def test_a_failed_setup_reports_its_output_and_keeps_gym_from_starting(
 def test_capabilities_left_after_the_drop_are_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     host = _Host(monkeypatch, tmp_path)
     host.files["/proc/self/status"] = STATUS_SYS_ADMIN
+
+    with pytest.raises(RuntimeError, match="still privileged"):
+        host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)})
+
+
+@pytest.mark.parametrize("status", [STATUS_FULL_BOUNDING, STATUS_PRIVS_ALLOWED])
+def test_a_bounding_set_or_exec_privileges_left_after_the_drop_are_an_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: str
+) -> None:
+    """A setuid helper run with a bounding set left would get those capabilities back."""
+    host = _Host(monkeypatch, tmp_path)
+    host.files["/proc/self/status"] = status
 
     with pytest.raises(RuntimeError, match="still privileged"):
         host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)})

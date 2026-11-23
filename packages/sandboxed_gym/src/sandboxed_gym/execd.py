@@ -5,7 +5,9 @@
 execd, OpenSandbox's command server in every sandbox, refuses any request without the token when
 ``EXECD_ACCESS_TOKEN`` is set in the sandbox's environment. The driver sets a fresh one per sandbox and
 sends it on that sandbox's own SDK connection. The Gym host runtime removes it from its environment at
-startup, so nothing the host starts can read it.
+startup, so nothing the host starts inherits it. On the Docker-enabled image, where the host then drops to
+an unprivileged user, nothing it starts can read it at all; on the default image, Gym runs as the same user
+as execd, so the token adds nothing there that Gym couldn't already do.
 """
 
 #: Environment variable execd reads its token from.

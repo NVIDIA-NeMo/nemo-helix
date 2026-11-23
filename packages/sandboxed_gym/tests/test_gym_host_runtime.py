@@ -2229,6 +2229,71 @@ def test_the_execd_token_is_gone_before_the_host_starts_anything(monkeypatch):
     assert "EXECD_ACCESS_TOKEN" not in os.environ
 
 
+def _run_main_recording(monkeypatch, *, setup) -> list[tuple[str, str | None]]:
+    """Run main() with the setup and Gym bootstrap replaced by recorders; no server is started."""
+    seen: list[tuple[str, str | None]] = []
+
+    def _setup() -> bool:
+        seen.append(("setup", os.environ.get("PATH")))
+        return setup()
+
+    def _bootstrap():
+        seen.append(("bootstrap", os.environ.get("PATH")))
+        raise RuntimeError("stop before Gym")
+
+    class _NoServer:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            return None
+
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+    monkeypatch.setattr(runtime, "prepare_container_engine", _setup)
+    monkeypatch.setattr(runtime, "bootstrap_gym_host", _bootstrap)
+    monkeypatch.setattr(runtime, "_Server", _NoServer)
+    runtime.main()
+    return seen
+
+
+def test_the_jobs_variables_apply_only_after_the_privileged_setup(monkeypatch):
+    """A job's PATH must not choose what the root-only setup runs; Gym and its servers still get it."""
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, json.dumps({"PATH": "/job/environment/bin"}))
+
+    seen = _run_main_recording(monkeypatch, setup=lambda: True)
+
+    assert seen == [("setup", "/usr/bin:/bin"), ("bootstrap", "/job/environment/bin")]
+    assert runtime.JOB_ENV_ENV_KEY not in os.environ
+
+
+def test_a_failed_setup_never_applies_the_jobs_variables(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, json.dumps({"PATH": "/job/environment/bin"}))
+
+    def _fail() -> bool:
+        raise RuntimeError("needs a Kata sandbox")
+
+    seen = _run_main_recording(monkeypatch, setup=_fail)
+
+    assert seen == [("setup", "/usr/bin:/bin")]
+    assert os.environ["PATH"] == "/usr/bin:/bin"
+    error = runtime._BOOTSTRAP_ERROR
+    assert error is not None
+    assert "needs a Kata sandbox" in error["error"]["message"]
+
+
+@pytest.mark.parametrize("payload", ["[1]", '{"A": 1}', "not json"])
+def test_a_malformed_job_environment_fails_the_bootstrap(payload):
+    environ = {runtime.JOB_ENV_ENV_KEY: payload}
+
+    with pytest.raises(ValueError):
+        runtime._apply_job_env(environ)
+
+
 def test_captured_output_masks_secret_env_values(monkeypatch):
     """The tail is returned to the caller and stored in job logs.
 

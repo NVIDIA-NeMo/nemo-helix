@@ -11,6 +11,7 @@ cannot ride into user-supplied environment code.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1003,11 +1004,35 @@ async def test_a_platform_run_scores_each_reward_component_per_trial(
 
 def test_the_host_env_reaches_the_built_spec() -> None:
     from sandboxed_gym.host.models import BROKER_URL_ENV
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
 
     spec = built_host_spec(capable_plan(), target(env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared"}))
 
-    assert spec.bootstrap_env["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
+    assert json.loads(spec.bootstrap_env[JOB_ENV_ENV_KEY])["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
     assert spec.bootstrap_env[BROKER_URL_ENV] == "http://10.0.0.5:51234"
+
+
+def test_the_jobs_variables_are_not_the_hosts_container_environment() -> None:
+    """Everything that starts as root in the sandbox runs with the container's environment.
+
+    A job's PATH or LD_PRELOAD there would choose what root executes before the host drops privileges,
+    so the job's variables reach the host only inside one JSON variable it applies afterwards.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
+
+    job_env = {"PATH": "/job/environment/bin", "LD_PRELOAD": "/job/environment/hook.so", "PYTHONPATH": "/x"}
+    spec = built_host_spec(capable_plan(), target(env_vars=job_env))
+
+    assert not set(job_env) & set(spec.bootstrap_env)
+    carried = json.loads(spec.bootstrap_env[JOB_ENV_ENV_KEY])
+    assert {name: carried[name] for name in job_env} == job_env
+
+
+def test_a_job_cannot_name_the_variable_that_carries_its_environment() -> None:
+    from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
+
+    with pytest.raises(ValueError, match=JOB_ENV_ENV_KEY):
+        built_host_spec(capable_plan(), target(env_vars={JOB_ENV_ENV_KEY: "{}"}))
 
 
 def test_a_job_cannot_move_the_broker_by_naming_its_variable() -> None:

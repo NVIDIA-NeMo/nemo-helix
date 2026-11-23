@@ -237,7 +237,9 @@ class OpenSandboxDriver:
     ) -> None:
         self._sdk = dict(sdk) if sdk is not None else None
         self._connection = dict(connection) if connection else {}
-        # Server-only calls (listing, killing) use this one; it carries no sandbox's execd token.
+        # Listing and orphan cleanup use this one, so it carries no sandbox's execd token. Every call made through a
+        # sandbox's own SDK object -- execd, its egress API, its lifecycle calls including the kill -- sends that
+        # sandbox's token, as Harbor's driver does; all of those go to the sandbox or to the OpenSandbox server.
         self._connection_config = connection_config(self._connection, config_class=self.sdk["ConnectionConfig"])
         self._create_options = dict(create) if create else {}
         # `probe` configured NeMo-Gym's create-time health probe. This driver exposes the SDK's own

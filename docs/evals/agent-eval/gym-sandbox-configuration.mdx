@@ -146,7 +146,10 @@ Each Gym host and episode sandbox also gets its own execd access token. execd, t
 every OpenSandbox sandbox, then refuses any request without it, including requests through the
 OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, only the
 Evaluator task that created it holds the token. The Gym host also removes the token from its own
-environment before it starts anything, so environment code running there can't use execd.
+environment before it starts anything, so nothing it starts inherits it. On the image that runs
+Docker (see below), the Gym servers can't read it at all. On the default image they run as the same
+user as execd, so they could read it from the process table, but it gives them nothing they can't
+already do.
 
 For a job-specific model credential, create a NeMo Helix secret and reference it through
 `GymRunnerTarget.env_secrets`:
@@ -230,16 +233,29 @@ Some environments start containers from a resource server, for example with `doc
 project gets its own network with service-name DNS, and the Gym host's egress policy still applies
 to every container.
 
-The image's setup needs `SYS_ADMIN`, which only a Kata VM contains, so this requires OpenSandbox
-sandboxes that run with a Kata runtime class. The Gym host checks for a Kata VM and fails the job
-instead of running the setup anywhere else. After setup, the Gym servers run as an unprivileged user
-with no capabilities. `NET_ADMIN` is never granted, so nothing in the host can change its network or
-egress rules.
+The image's setup needs `SYS_ADMIN`, which only a Kata VM contains. Point the platform at an
+OpenSandbox server that creates every sandbox with a Kata runtime class: the `bootstrap.execd.isolation`
+extension grants `SYS_ADMIN` when the sandbox is created, before anything in it runs. The Gym host also
+checks for a Kata VM and fails the job instead of running the setup anywhere else.
+
+After setup, the Gym servers run as an unprivileged user with no capabilities, an empty capability
+bounding set and `no_new_privs`, so no setuid program in the image can give capabilities back. The
+job's `env_vars` and `env_secrets` reach Gym only after that, never the root setup. `NET_ADMIN` is
+never granted, so nothing in the host can change its network or egress rules. Resource servers use
+the `docker` CLI, which only talks to the Podman service's socket.
+
+The image isn't published yet. Build it from the repository with the `nhx-gym-host-podman-docker`
+bake target and push it to a registry your cluster can pull from:
+
+```bash
+IMAGE_REGISTRY=<your-registry> BAKE_TAG=<tag> docker buildx bake nhx-gym-host-podman-docker \
+  --set 'nhx-gym-host-podman-docker.output=type=registry'
+```
 
 ```yaml
 platformConfig:
   evals:
-    sandbox_runtime_image: nvcr.io/nvidia/nemo-helix/nhx-gym-host-podman:<release-tag>
+    sandbox_runtime_image: <your-registry>/nhx-gym-host-podman:<tag>
     sandbox_host_provider_options:
       create:
         extensions:

@@ -42,6 +42,7 @@ from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
     GYM_GLOBAL_CONFIG_ENV_KEY,
+    JOB_ENV_ENV_KEY,
     REUSE_IMAGE_GYM_INSTALL_ENV_KEY,
     UV_OFFLINE_ENV_KEY,
 )
@@ -238,12 +239,8 @@ def build_gym_host_spec(
         )
 
     gym_global = apply_sandbox_runtime_defaults(cfg.gym_global_config)
-    # Caller's variables first so they cannot displace the gym config, package-required flag,
-    # broker endpoint, or mount paths. `build_bootstrap_env` also refuses reserved-key collisions.
-    bootstrap_extra = {
-        **cfg.host_env,
-        GYM_GLOBAL_CONFIG_ENV_KEY: json.dumps(gym_global, sort_keys=True),
-    }
+    # What the platform sets for the host. The job's own variables are kept apart: see below.
+    bootstrap_extra = {GYM_GLOBAL_CONFIG_ENV_KEY: json.dumps(gym_global, sort_keys=True)}
     if cfg.environment_path is not None:
         # The mount path is ``/job/environment`` with or without a FileSet. This flag is how the
         # host distinguishes a required package from an image-bundled tree at the same path.
@@ -268,8 +265,18 @@ def build_gym_host_spec(
         sandbox.max_response_bytes,
         dataset_path=dataset_path,
         rollout_deadline_s=sandbox.rollout_timeout_s,
-        extra=bootstrap_extra,
+        # The job's variables first, so they cannot displace anything the platform sets; this also puts
+        # them through the same checks (reserved names, OpenSandbox credentials).
+        extra={**cfg.host_env, **bootstrap_extra},
     )
+    # The job's variables then leave the container's environment for one JSON variable, which the host
+    # applies only after its privileged setup. As the container's environment they would reach every
+    # process that starts as root first: a job's PATH or LD_PRELOAD would choose what root runs.
+    if JOB_ENV_ENV_KEY in cfg.host_env:
+        raise ValueError(f"the job's environment must not set {JOB_ENV_ENV_KEY}; the platform uses it")
+    job_env = {name: bootstrap_env.pop(name) for name in cfg.host_env if name not in bootstrap_extra}
+    if job_env:
+        bootstrap_env[JOB_ENV_ENV_KEY] = json.dumps(job_env, sort_keys=True)
 
     egress_allow = collect_gym_host_egress_allows(
         configured=sandbox.network_policy.egress_allow,

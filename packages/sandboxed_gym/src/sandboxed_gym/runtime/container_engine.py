@@ -10,6 +10,7 @@ for one first. After setup the host becomes the unprivileged container user, so 
 nor anything an agent drives through them keeps root or SYS_ADMIN.
 """
 
+import ctypes
 import os
 import subprocess
 from collections.abc import Callable, MutableMapping
@@ -24,6 +25,10 @@ CONTAINER_USER = "docker-user"
 SETUP_TIMEOUT_S = 300.0
 SETUP_LOG = "/tmp/rootless-podman-up.log"
 
+# prctl(2) options. Dropping from the bounding set needs CAP_SETPCAP, so it happens before the uid change.
+_PR_CAPBSET_DROP = 24
+_PR_SET_NO_NEW_PRIVS = 38
+
 # Kata boots its guest kernel with the agent's systemd target; a runc container sees the node's own
 # command line instead. Runtimes that boot without systemd still pass `agent.*` parameters.
 _KATA_TARGET = "systemd.unit=kata-containers.target"
@@ -35,11 +40,18 @@ def is_kata_guest(kernel_cmdline: str) -> bool:
     return _KATA_TARGET in tokens or any(token.startswith("agent.") for token in tokens)
 
 
-def _effective_capabilities(status: str) -> int:
+def _status_field(status: str, name: str) -> str:
     for line in status.splitlines():
-        if line.startswith("CapEff:"):
-            return int(line.split()[1], 16)
-    raise RuntimeError("CapEff missing from /proc/self/status")
+        if line.startswith(f"{name}:"):
+            return line.split()[1]
+    raise RuntimeError(f"{name} missing from /proc/self/status")
+
+
+def _libc_prctl(option: int, arg: int) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(option, arg, 0, 0, 0) != 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, f"prctl({option}, {arg}) failed: {os.strerror(errno)}")
 
 
 def _chown_tree(root: Path, uid: int, gid: int) -> None:
@@ -54,6 +66,7 @@ def prepare_container_engine(
     *,
     read_text: Callable[[str], str] = lambda path: Path(path).read_text(),
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    prctl: Callable[[int, int], None] = _libc_prctl,
 ) -> bool:
     """Set up the image's container engine and drop to its user. Returns whether it did anything.
 
@@ -92,17 +105,33 @@ def prepare_container_engine(
     user = getpwnam(CONTAINER_USER)
     # The work directory is the only place the host writes; everything else it needs is read-only.
     _chown_tree(Path(environ.get("NHX_WORK_PATH", "/job/work")), user.pw_uid, user.pw_gid)
+    # The image keeps setuid newuidmap/newgidmap for the Podman service, which the setup started already. On
+    # Kata's filesystem they can't carry file capabilities, so a setuid run would get the whole bounding set,
+    # SYS_ADMIN included. Nothing under Gym needs them -- the docker CLI only talks to the Podman socket -- so
+    # this process and everything it starts lose the bounding set and can't gain privileges through exec.
+    for capability in range(int(read_text("/proc/sys/kernel/cap_last_cap").strip()) + 1):
+        prctl(_PR_CAPBSET_DROP, capability)
+    prctl(_PR_SET_NO_NEW_PRIVS, 1)
     setgroups([])
     setgid(user.pw_gid)
     setuid(user.pw_uid)
-    capabilities = _effective_capabilities(read_text("/proc/self/status"))
-    if geteuid() == 0 or capabilities:
-        raise RuntimeError(f"still privileged after dropping to {CONTAINER_USER}: CapEff={capabilities:x}")
+    status = read_text("/proc/self/status")
+    effective = int(_status_field(status, "CapEff"), 16)
+    bounding = int(_status_field(status, "CapBnd"), 16)
+    no_new_privs = _status_field(status, "NoNewPrivs")
+    if geteuid() == 0 or effective or bounding or no_new_privs != "1":
+        raise RuntimeError(
+            f"still privileged after dropping to {CONTAINER_USER}: "
+            f"CapEff={effective:x} CapBnd={bounding:x} NoNewPrivs={no_new_privs}"
+        )
     environ.update(
         HOME=user.pw_dir,
         USER=CONTAINER_USER,
         LOGNAME=CONTAINER_USER,
         XDG_RUNTIME_DIR=f"/run/user/{user.pw_uid}",
     )
-    print(f"gym-host: rootless Podman ready; running as {CONTAINER_USER} with no capabilities", flush=True)
+    print(
+        f"gym-host: rootless Podman ready; running as {CONTAINER_USER} with no capabilities and no_new_privs",
+        flush=True,
+    )
     return True
