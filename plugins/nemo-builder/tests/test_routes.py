@@ -943,14 +943,14 @@ class TestWhichJobIsCalling:
     def test_with_auth_off_no_token_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Anyone may complete an image then, so which workload one of them is changes nothing."""
         monkeypatch.setattr(completion, "platform_auth_enabled", lambda: False)
-        monkeypatch.setattr(
-            completion, "current_auth_client", lambda _request: _authenticated("workload_access_token", MINTED)
-        )
+        auth_client = MagicMock(return_value=_authenticated("workload_access_token", MINTED))
+        monkeypatch.setattr(completion, "current_auth_client", auth_client)
         job_of = _job_of({"workload-delegation-1": ANOTHER_JOBS_STEP})
         app = _app(_entities(_row(backend="remote")), job_of=job_of, exchange=True)
         del app.dependency_overrides[current_caller], app.dependency_overrides[current_delegation]
         body = {"digest": DIGEST, "external": {"build_id": "build-1"}}
         assert TestClient(app).post(f"{IMAGE}/complete", json=body).status_code == 200
+        auth_client.assert_not_called()
         job_of.assert_not_awaited()
 
     async def test_only_a_step_of_the_attempt_the_images_submit_created_passes(self) -> None:
@@ -1482,6 +1482,7 @@ class TestSubmitting:
         assert response.status_code == 409
         assert response.json()["code"] == "backend_rejected"
         assert response.json()["detail"] == "the builder's configuration can't be read; the API log says why"
+        assert "hunter2" not in response.text
         assert "must be a mapping" in caplog.text
 
     @pytest.mark.parametrize(
