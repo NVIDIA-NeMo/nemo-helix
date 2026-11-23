@@ -792,6 +792,7 @@ def test_chat_completion_maps_session_resolution_errors(
     [
         (FabricRuntimeStartError("startup failed"), 503),
         (FabricRuntimeExecutionError("stream failed"), 502),
+        (FabricRuntimeTimeoutError("timed out"), 504),
     ],
 )
 def test_streaming_chat_completion_without_session_maps_stream_start_errors(
@@ -1225,17 +1226,24 @@ async def test_streaming_response_logs_cleanup_failure_after_timeout(
     await iterator.aclose()
 
 
+@pytest.mark.parametrize(
+    ("stage", "code", "status_code"),
+    [("invoke", None, 502), ("invoke", "timeout", 504), ("start", "timeout", 502), ("stop", "timeout", 502)],
+)
 def test_chat_completion_maps_failed_run_result(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    code: str | None,
+    status_code: int,
 ) -> None:
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
 
     async def invoke_once(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(
             status="failed",
-            error={"stage": "invoke", "message": "adapter failed"},
+            error={"stage": stage, "code": code, "message": "adapter failed"},
         )
 
     with TestClient(app) as client:
@@ -1245,7 +1253,7 @@ def test_chat_completion_maps_failed_run_result(
             json={"messages": [{"role": "user", "content": "hello"}]},
         )
 
-    assert response.status_code == 502
+    assert response.status_code == status_code
     assert SESSION_ID_HEADER not in response.headers
     assert response.json() == {"detail": "adapter failed"}
 

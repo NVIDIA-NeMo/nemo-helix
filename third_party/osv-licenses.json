@@ -1838,7 +1838,7 @@
         {
           "package": {
             "name": "nemo-fabric",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1848,7 +1848,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapter-catalog",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1858,7 +1858,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapter-contract",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1868,7 +1868,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-claude",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1878,7 +1878,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-codex",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1888,7 +1888,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-common",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1898,7 +1898,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-deepagents",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1908,7 +1908,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-hermes",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1918,7 +1918,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-mini-swe-agent",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1928,7 +1928,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-nooa",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1938,7 +1938,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-remote-agent",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1948,7 +1948,7 @@
         {
           "package": {
             "name": "nemo-fabric-collector",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1958,7 +1958,7 @@
         {
           "package": {
             "name": "nemo-fabric-evidence",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1968,7 +1968,7 @@
         {
           "package": {
             "name": "nemo-fabric-runtime",
-            "version": "0.6.0",
+            "version": "0.7.0",
             "ecosystem": "PyPI"
           },
           "licenses": [

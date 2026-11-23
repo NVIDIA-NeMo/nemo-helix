@@ -177,13 +177,13 @@ def test_plugin_and_user_adapters_are_assumed_to_read_request_context(adapter_id
 
 
 def test_stock_adapter_audit_matches_the_installed_fabric() -> None:
-    """Fabric 0.6.0's stock adapters were each checked to ignore ``AgentRunRequest.context``.
+    """Fabric 0.7.0's stock adapters were each checked to ignore ``AgentRunRequest.context``.
 
     A newer Fabric may teach one to read it, which the catalog lookup alone would
     keep rejecting. When this fails, re-check the stock adapters' ``invoke`` for
     ``request.context``, update ``adapter_reads_request_context``, and move the pin.
     """
-    assert version("nemo-fabric").startswith("0.6."), version("nemo-fabric")
+    assert version("nemo-fabric").startswith("0.7."), version("nemo-fabric")
 
 
 def _config(**harnesses: str) -> AgentConfig:
