@@ -56,8 +56,8 @@ class BuildImage(BaseModel):
     context_digest: str | None = Field(
         default=None,
         description=(
-            "Digest of every file in the build context, for a `dockerfile` image. Tasks whose contexts digest the "
-            "same share one build."
+            "Digest of every file in the build context, for a `dockerfile` image. Images whose contexts digest "
+            "the same can share one build."
         ),
     )
     image: str | None = Field(default=None, description="The image the task names, for a `prebuilt` image.")
