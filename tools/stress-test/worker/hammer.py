@@ -24,17 +24,18 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
 from pydantic import SecretStr
 
+# One pass through a tuple works on one object per service: it is created first and deleted last.
 FILE_OPS = (
     "fileset_create",
     "fileset_get",
     "fileset_list",
-    "fileset_delete",
     "file_upload",
     "file_download",
     "file_list",
     "file_delete",
+    "fileset_delete",
 )
-SECRET_OPS = ("create", "get", "list", "update", "delete", "value_read")
+SECRET_OPS = ("create", "get", "list", "update", "value_read", "delete")
 AUTH_OPS = ("discovery", "authz", "access_key_create", "access_key_list", "access_key_revoke")
 OPERATIONS = {"files": FILE_OPS, "secrets": SECRET_OPS, "auth": AUTH_OPS}
 
@@ -46,7 +47,7 @@ class Operations(Protocol):
     def fileset_delete(self, name: str) -> int: ...
     def file_upload(self, name: str, payload: bytes) -> int: ...
     def file_download(self, name: str) -> int: ...
-    def file_list(self) -> int: ...
+    def file_list(self, name: str) -> int: ...
     def file_delete(self, name: str) -> int: ...
     def secret_create(self, name: str) -> int: ...
     def secret_get(self, name: str) -> int: ...
@@ -63,6 +64,7 @@ class Operations(Protocol):
 
 
 def object_name(job: str, kind: str, iteration: int) -> str:
+    """Name an object. The hammer passes the cycle number as the iteration."""
     digest = hashlib.sha256(f"{job}:{kind}:{iteration}".encode()).hexdigest()[:12]
     return f"w{digest}"
 
@@ -129,7 +131,8 @@ def _invoke(
     iteration: int,
     log: HistoryLog,
 ) -> int:
-    name = object_name(job, operation, iteration)
+    cycle = (iteration - 1) // len(OPERATIONS[service])
+    name = object_name(job, service, cycle)
     if service == "files":
         return _files(operation, calls, name, payload)
     if service == "secrets":
@@ -151,7 +154,7 @@ def _files(operation: str, calls: Operations, name: str, payload: bytes) -> int:
     if operation == "file_download":
         return calls.file_download(name)
     if operation == "file_list":
-        return calls.file_list()
+        return calls.file_list(name)
     return calls.file_delete(name)
 
 
@@ -216,7 +219,10 @@ class LiveOperations:
         return self._status(lambda: self._files.list_filesets(workspace=self._workspace))
 
     def fileset_delete(self, name: str) -> int:
-        return self._status(lambda: self._files.delete_fileset(workspace=self._workspace, name=name).data())
+        status = self._status(lambda: self._files.delete_fileset(workspace=self._workspace, name=name).data())
+        if status < 300 and name in self._filesets:
+            self._filesets.remove(name)
+        return status
 
     def file_upload(self, name: str, payload: bytes) -> int:
         fileset = self._ensure_fileset(name)
@@ -235,15 +241,18 @@ class LiveOperations:
             lambda: self._files.download_file(workspace=self._workspace, name=fileset, path="blob").read()
         )
 
-    def file_list(self) -> int:
-        fileset = self._ensure_fileset(object_name(self._workspace, "list", 1))
+    def file_list(self, name: str) -> int:
+        fileset = self._ensure_fileset(name)
         return self._status(lambda: self._files.list_files(workspace=self._workspace, name=fileset).data())
 
     def file_delete(self, name: str) -> int:
         fileset = self._ensure_fileset(name)
-        return self._status(
+        status = self._status(
             lambda: self._files.delete_file(workspace=self._workspace, name=fileset, path="blob").data()
         )
+        if status < 300 and (fileset, "blob") in self._uploaded:
+            self._uploaded.remove((fileset, "blob"))
+        return status
 
     def secret_create(self, name: str) -> int:
         body = HelixSecretCreateRequest(name=name, value=SecretStr("payload"))
@@ -263,7 +272,10 @@ class LiveOperations:
         return self._status(lambda: self._secrets.update_secret(workspace=self._workspace, name=name, body=body).data())
 
     def secret_delete(self, name: str) -> int:
-        return self._status(lambda: self._secrets.delete_secret(workspace=self._workspace, name=name))
+        status = self._status(lambda: self._secrets.delete_secret(workspace=self._workspace, name=name))
+        if status < 300 and name in self._secrets_created:
+            self._secrets_created.remove(name)
+        return status
 
     def secret_value(self, name: str) -> int:
         return self._status(lambda: self._secrets.access_secret(workspace=self._workspace, name=name).data())

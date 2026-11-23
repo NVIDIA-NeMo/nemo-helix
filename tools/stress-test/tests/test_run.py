@@ -279,6 +279,39 @@ def test_completed_exit_does_not_require_a_result(tmp_path: Path, caplog: pytest
     assert saved["finished_at"] == 0
 
 
+def test_finish_time_is_when_the_wait_saw_the_job_end_not_when_cleanup_reached_it(tmp_path: Path) -> None:
+    clock = Clock()
+
+    class SlowDeleteCluster(FakeCluster):
+        def delete(self, name: str) -> None:
+            clock.sleep(44)
+            super().delete(name)
+
+    step = _exit("exit-01", 3)
+    cluster = SlowDeleteCluster()
+    cluster.complete_on_sleep = True
+    code = execute_steps(
+        _sweep(step),
+        tmp_path,
+        selected_steps(_sweep(step), tmp_path, None),
+        cluster,
+        profile_name="default",
+        provider="cpu",
+        fileset="stress-stress",
+        ttl_before=50,
+        ttl_active=50,
+        clock=clock,
+        sleep=lambda seconds: cluster.sleep(seconds, clock),
+        poll_seconds=2,
+        image=None,
+    )
+    assert code == 0
+    finished = [
+        read_json(record_path(tmp_path, step.id, f"stress-exit-01-{index}"))["finished_at"] for index in (1, 2, 3)
+    ]
+    assert finished == [2.0, 2.0, 2.0]
+
+
 def test_completed_job_logs_started_and_stopped(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     step = _exit("exit-01", 1)
     with caplog.at_level(logging.INFO, logger="stress"):
