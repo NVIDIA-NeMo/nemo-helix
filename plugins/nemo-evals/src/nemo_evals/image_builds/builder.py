@@ -66,9 +66,8 @@ class ImageBuilder(Protocol):
     ) -> SubmitBuildResponse:
         """Submit (or rejoin) one build, or copy, of one image; for the deployment's platform when ``platform`` is None.
 
-        ``role`` is the role Builder is told the image has (:data:`HELPER_ROLE`). None, as for every image a
-        workload runs as its main container, names none: the request is then the one it was before a build could
-        name a role.
+        ``role`` is the role Builder is told the image has (:data:`HELPER_ROLE`). None names no role: the request
+        is then the one it was before a build could name a role. Which images get a role is the caller's rule.
         """
         ...
 
@@ -356,7 +355,8 @@ class HttpImageBuilder:
         role: str | None = None,
     ) -> SubmitBuildResponse:
         # Only what is set: the client serializes with `exclude_unset`, and a copy takes no dockerfile or mounts.
-        # A request that names no role must not carry the key at all: a Builder API from before the field refuses it.
+        # A role is kept to what is set like the rest. What keeps a null one off the wire, which a Builder API from
+        # before the field refuses, is the spec: it leaves a role with no value out of every dump.
         options: dict[str, object] = {}
         if dockerfile is not None:
             options["dockerfile"] = dockerfile

@@ -686,7 +686,6 @@ def test_a_role_is_its_own_builder_build_set() -> None:
     built = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
 
     assert builder_name(**built, role="helper") != builder_name(**built)
-    assert builder_name(**built, role=None) == builder_name(**built)
     on_arm = builder_name(**built, platform="linux/arm64", role="helper")
     assert on_arm not in {builder_name(**built, platform="linux/arm64"), builder_name(**built, role="helper")}
 

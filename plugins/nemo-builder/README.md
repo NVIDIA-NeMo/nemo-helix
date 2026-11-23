@@ -677,11 +677,11 @@ What differs for a caller:
   checks none of it, and the row doesn't record the role, or whether it was acted on. A step image
   from before roles existed ignores the role without saying so, and the helper is built as a main
   image (see the upgrade order, below). Evals names `helper` for one kind of image: that of a
-  Compose task's service which it builds from a Dockerfile, in a build requested for a backend
-  other than `execution`. A task's main image and a separate verifier's name no role, since each
-  runs as the main container of its own sandbox. Neither does a published image that a service
-  names, which is a copy, nor any image of a build requested for `execution`. Evals builds a helper
-  under a build set name of its own, so the same context built as a main image is another build.
+  Compose task's service which it builds from a Dockerfile, in a build requested for `remote`. A
+  task's main image and a separate verifier's name no role, since each runs as the main container
+  of its own sandbox. Neither does a published image that a service names, which is a copy, nor
+  any image of a build requested for `execution`. Evals builds a helper under a build set name of
+  its own, so the same context built as a main image is another build.
 - What the ignore file at the root leaves out of the build is left out of what is sent to the
   service only by the service's client. The step hands the client the whole context, ignored files
   included, and the client must apply that ignore file before anything leaves the step (see what
