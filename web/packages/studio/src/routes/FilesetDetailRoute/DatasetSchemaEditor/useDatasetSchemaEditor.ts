@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { getFirstRow } from '@nemo/common/src/utils/file';
 import {
   buildDatasetMetadata,
@@ -26,6 +27,7 @@ import {
   deriveSelectionText,
   detectFormatFromPath,
   resolveSchemaForFile,
+  validateDatasetMetadata,
 } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/helpers';
 import {
   DEFAULT_SCHEMA_VALUE,
@@ -132,6 +134,14 @@ export function useDatasetSchemaEditor({
   // Per-selection unsaved edits: switching selections preserves what the user
   // had been typing. Saving or Resetting clears the entry for that selection.
   const [editsBySelection, setEditsBySelection] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Bumped on every edit, reset, and selection change so a save that fails
+  // after the user moved on doesn't surface an error for superseded text.
+  const editRevision = useRef(0);
+  useEffect(() => {
+    editRevision.current += 1;
+    setSaveError(null);
+  }, [selectedSchema]);
 
   const derivedText = useMemo(
     () => deriveSelectionText(savedMetadata, selectedSchema),
@@ -143,6 +153,8 @@ export function useDatasetSchemaEditor({
   const handleEditorChange = useCallback(
     (next: string) => {
       setEditsBySelection((prev) => ({ ...prev, [selectedSchema]: next }));
+      editRevision.current += 1;
+      setSaveError(null);
     },
     [selectedSchema]
   );
@@ -155,6 +167,8 @@ export function useDatasetSchemaEditor({
       return next;
     });
     setInferError(null);
+    editRevision.current += 1;
+    setSaveError(null);
   }, [selectedSchema]);
 
   // Inference state lives here too (used by "Infer from existing files").
@@ -223,6 +237,7 @@ export function useDatasetSchemaEditor({
         ...prev,
         [SHOW_ALL_VALUE]: JSON.stringify(inferred, null, 2),
       }));
+      editRevision.current += 1;
       setSelectedSchema(SHOW_ALL_VALUE);
     } finally {
       setIsInferring(false);
@@ -232,11 +247,37 @@ export function useDatasetSchemaEditor({
   const { mutateAsync: updateMetadata, isPending: isSaving } = useFilesUpdateFilesetMetadata();
   const queryClient = useQueryClient();
 
+  const saveDataset = useCallback(
+    async (dataset: DatasetMetadataContent | null): Promise<boolean> => {
+      const submittedRevision = editRevision.current;
+      setSaveError(null);
+      try {
+        await updateMetadata({
+          workspace,
+          name: datasetName,
+          data: { metadata: { dataset: dataset as DatasetMetadataContent } },
+        });
+      } catch (err) {
+        if (editRevision.current === submittedRevision) {
+          setSaveError(getErrorMessage(err as Error, 'Failed to save schema'));
+        }
+        return false;
+      }
+      await queryClient.invalidateQueries({
+        queryKey: getFilesRetrieveFilesetQueryKey(workspace, datasetName),
+      });
+      return true;
+    },
+    [updateMetadata, workspace, datasetName, queryClient]
+  );
+
   const validation = useMemo(() => {
     if (!text.trim()) return { valid: true as const, errors: [] };
     const result = parseAndValidate(text);
-    return result.valid ? { valid: true as const, errors: [] } : result;
-  }, [text]);
+    if (!result.valid) return result;
+    if (selectedSchema === SHOW_ALL_VALUE) return validateDatasetMetadata(result.value);
+    return { valid: true as const, errors: [] };
+  }, [text, selectedSchema]);
 
   // Count of files affected by saving the current edit.
   //   Single-schema view: iterate filesList, count files whose resolved
@@ -308,32 +349,14 @@ export function useDatasetSchemaEditor({
       }
     }
 
-    await updateMetadata({
-      workspace,
-      name: datasetName,
-      // `dataset: null` clears the field on the backend (matches the
-      // pydantic `DatasetMetadataContent | None` default).
-      data: { metadata: { dataset: newDataset as DatasetMetadataContent } },
-    });
-    await queryClient.invalidateQueries({
-      queryKey: getFilesRetrieveFilesetQueryKey(workspace, datasetName),
-    });
+    if (!(await saveDataset(newDataset))) return;
     setEditsBySelection((prev) => {
       if (!(selectedSchema in prev)) return prev;
       const next = { ...prev };
       delete next[selectedSchema];
       return next;
     });
-  }, [
-    validation.valid,
-    text,
-    selectedSchema,
-    savedMetadata,
-    updateMetadata,
-    workspace,
-    datasetName,
-    queryClient,
-  ]);
+  }, [validation.valid, text, selectedSchema, savedMetadata, saveDataset]);
 
   const handleSave = useCallback(async () => {
     if (sharedReferrerCount > 1) {
@@ -363,15 +386,8 @@ export function useDatasetSchemaEditor({
       schema_defs: { ...(savedMetadata.schema_defs ?? {}) },
       schemas_by_path: { ...(savedMetadata.schemas_by_path ?? {}) },
     };
-    await updateMetadata({
-      workspace,
-      name: datasetName,
-      data: { metadata: { dataset: newMetadata } },
-    });
-    await queryClient.invalidateQueries({
-      queryKey: getFilesRetrieveFilesetQueryKey(workspace, datasetName),
-    });
-  }, [selectedSchema, savedMetadata, updateMetadata, workspace, datasetName, queryClient]);
+    await saveDataset(newMetadata);
+  }, [selectedSchema, savedMetadata, saveDataset]);
 
   const canInferFromExisting = supportedExistingFiles.length > 0 && !isInferring;
   const canSave = userEdited && validation.valid && !isSaving;
@@ -401,6 +417,7 @@ export function useDatasetSchemaEditor({
     handleInferFromExisting,
     isSaving,
     validation,
+    saveError,
     sharedReferrerCount,
     pendingShareConfirm,
     setPendingShareConfirm,

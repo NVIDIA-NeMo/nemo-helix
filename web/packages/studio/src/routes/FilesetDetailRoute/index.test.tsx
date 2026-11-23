@@ -4,6 +4,7 @@
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { ROUTES } from '@studio/constants/routes';
+import { DatasetDetailRoute } from '@studio/routes/DatasetDetailRoute';
 import { FilesetDetailRoute } from '@studio/routes/FilesetDetailRoute';
 import { FilesetDetailTabContent } from '@studio/routes/FilesetDetailRoute/FilesetDetailTabContent';
 import { TestProviders } from '@studio/tests/util/TestProviders';
@@ -75,6 +76,27 @@ const openAtUrl = (url: string) => {
         element: <FilesetDetailRoute />,
         children: [
           { path: ROUTES.workspace.filesetDetailTab, element: <FilesetDetailTabContent /> },
+        ],
+      },
+    ],
+    { initialEntries: [url] }
+  );
+  rtlRender(
+    <TestProviders>
+      <RouterProvider router={router} />
+    </TestProviders>
+  );
+  return router;
+};
+
+const openDatasetAtUrl = (url: string) => {
+  const router = createMemoryRouter(
+    [
+      {
+        path: ROUTES.workspace.datasetDetail,
+        element: <DatasetDetailRoute />,
+        children: [
+          { path: ROUTES.workspace.datasetDetailTab, element: <FilesetDetailTabContent /> },
         ],
       },
     ],
@@ -167,5 +189,21 @@ describe('FilesetDetailRoute', () => {
     expect(screen.queryByTestId('fileset-files-tab-preview')).toBeNull();
     expect(screen.queryByTestId('mock-file-preview-content')).toBeNull();
     await flushFilesTab();
+  });
+
+  it.each([
+    ['dataset', '/workspaces/default/datasets/test-fileset/card', openDatasetAtUrl],
+    ['fileset', detailUrl('card'), openAtUrl],
+  ])('words the delete confirmation for the %s route', async (noun, url, open) => {
+    const user = userEvent.setup();
+    open(url);
+
+    await user.click(await screen.findByRole('button', { name: /open fileset actions menu/i }));
+    await user.click(await screen.findByText('Delete'));
+
+    expect(
+      await screen.findByRole('heading', { name: `Delete ${noun} 'test-fileset'?` })
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`^The ${noun} and its files`))).toBeInTheDocument();
   });
 });

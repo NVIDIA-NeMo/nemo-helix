@@ -1295,6 +1295,12 @@ async def _collect_rollout_results(
     capture_budget: int = 0,
     route_failures_to_sidecar: bool = False,
 ) -> list[dict]:
+    # Newer Gym exposes preprocessing separately from its low-level dispatcher.
+    # It stamps the task/rollout IDs required by legacy environment adapters.
+    # Published Gym 0.5.0 lacks this API, so keep its existing dispatch path.
+    preprocess = getattr(rollout_helper, "preprocess_examples", None)
+    if callable(preprocess):
+        examples = preprocess(examples)
     results: list[dict] = []
     remaining = capture_budget
     # Gym's own switch (in Gym 0.7.0): a failed agent `/run` resolves to a failure row rather than raising, which

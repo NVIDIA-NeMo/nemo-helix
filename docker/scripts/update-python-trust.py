@@ -43,6 +43,8 @@ ROOTS = (
 SOURCE_OUTPUT = Path("/usr/share/nemo-helix/source-distributions/rebuilt-wandb")
 CACHE_ROOTS = (Path("/opt/uv_cache"), Path("/home/ubuntu/.cache/uv"))
 FIXED_PACKAGES = {"certifi": "2026.10.19", "pip": "26.2.2", "uv": "0.13.4"}
+# W&B 0.31.1 requires Go 1.27.4; keep every Docker rebuild mount aligned.
+WANDB_GO_VERSION = "1.27.4"
 
 
 def source_collection_enabled() -> bool:
@@ -181,7 +183,7 @@ def rebuild_wandb(version: str, work: Path) -> Path:
     finally:
         os.chdir(previous)
     version_info = check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
-    if version_info.splitlines()[0].split()[-1] != "go1.27.3":
+    if version_info.splitlines()[0].split()[-1] != f"go{WANDB_GO_VERSION}":
         raise ValueError(f"Unexpected wandb-core toolchain: {version_info}")
     if source_collection_enabled():
         run_process(
