@@ -331,33 +331,16 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
         assert not (tmp_path / "workspace").exists()
 
 
-@pytest.mark.parametrize(
-    ("kind", "skill_path", "expected_names"),
-    [
-        ("deepagents", "skills/review", ["review"]),
-        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"]),
-    ],
-)
-def test_startup_stages_skills_and_maps_runtime_paths(
+@pytest.mark.parametrize("skills", [{"paths": ["skills/review"]}, {"directories": [{"folder": "skills"}]}])
+def test_startup_preserves_skill_sources_with_private_workspaces(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
-    kind: str,
-    skill_path: str,
-    expected_names: list[str],
+    skills: dict[str, Any],
 ) -> None:
-    linked_asset = tmp_path / "linked-asset.txt"
-    linked_asset.write_text("skill input")
-    for name in ("review", "audit"):
-        bundle = tmp_path / "skills" / name
-        (bundle / "references").mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: Review inputs\n---\nRead references/input.txt.\n"
-        )
-        (bundle / "references/input.txt").symlink_to(linked_asset)
     config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = kind
-    config["skills"] = {"paths": [skill_path]}
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["skills"] = skills
     start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
     fabric = Fabric()
     monkeypatch.setattr(fabric, "start_runtime", start_runtime)
@@ -367,93 +350,11 @@ def test_startup_stages_skills_and_maps_runtime_paths(
         app.state.session_manager._fabric = fabric
         assert client.portal is not None
         session = client.portal.call(app.state.session_manager.open_session)
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert sorted(path.name for path in skills.iterdir()) == expected_names
-        for name in expected_names:
-            assert (skills / name / "SKILL.md").read_text() == (tmp_path / "skills" / name / "SKILL.md").read_text()
-            assert (skills / name / "references/input.txt").read_text() == "skill input"
-            assert not (skills / name / "references/input.txt").is_symlink()
         runtime_config = start_runtime.call_args.args[0]
         assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
-        assert runtime_config.skills.paths == [f"/{environment.DEEPAGENTS_SKILLS_DIR}"]
-        assert app.state.agent_config.skills.paths == [skill_path]
-
-
-@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
-def test_startup_refreshes_skills_without_recapturing_workspace(
-    tmp_path: Path,
-    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
-    monkeypatch: pytest.MonkeyPatch,
-    configured_workspace: str,
-) -> None:
-    workspace = tmp_path / configured_workspace
-    workspace.mkdir(exist_ok=True)
-    (workspace / "input.txt").write_text("original input")
-    for name in ("review", "retired"):
-        bundle = tmp_path / ".agents/skills" / name
-        bundle.mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(name)
-    config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["environment"] = {"workspace": configured_workspace}
-    config["skills"] = {"paths": [".agents/skills/review", ".agents/skills/retired"]}
-    config_path = _write_agent_config(tmp_path, config)
-    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
-    fabric = Fabric()
-    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
-
-    app = create_fabric_serving_app(config_path)
-    with TestClient(app) as client:
-        app.state.session_manager._fabric = fabric
-        baseline = app.state.workspace_baseline
-        (tmp_path / ".agents/skills/review/SKILL.md").write_text("updated review")
-        new_bundle = tmp_path / ".agents/skills/new"
-        new_bundle.mkdir()
-        (new_bundle / "SKILL.md").write_text("new")
-        config["skills"]["paths"] = [".agents/skills/review", ".agents/skills/new"]
-        _write_agent_config(tmp_path, config)
-        (workspace / "input.txt").write_text("later conversation output")
-        assert client.portal is not None
-        session = client.portal.call(app.state.session_manager.open_session)
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
-            "review": "review",
-            "retired": "retired",
-        }
-
-    restarted = create_fabric_serving_app(config_path)
-    with TestClient(restarted) as client:
-        restarted.state.session_manager._fabric = fabric
-        assert restarted.state.workspace_baseline == baseline
-        assert client.portal is not None
-        session = client.portal.call(restarted.state.session_manager.open_session)
-        assert (session.workspace_dir / "input.txt").read_text() == "original input"
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
-            "review": "updated review",
-            "new": "new",
-        }
-    assert not list(baseline.parent.glob("skills-*"))
-
-
-def test_skill_collision_cleans_up_partial_snapshot(
-    tmp_path: Path,
-    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
-) -> None:
-    paths = ["skills/review", "other/review"]
-    for skill_path in paths:
-        bundle = tmp_path / skill_path
-        bundle.mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(skill_path)
-    config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["skills"] = {"paths": paths}
-    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
-
-    with pytest.raises(ValueError, match="both stage as"), TestClient(app):
-        pass
-
-    assert not list((tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
+        assert runtime_config.skills.model_dump(exclude_none=True) == app.state.agent_config.skills.model_dump(
+            exclude_none=True
+        )
 
 
 @pytest.mark.parametrize("socket_fd", [None, 123])

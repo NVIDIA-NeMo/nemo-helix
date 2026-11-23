@@ -80,7 +80,6 @@ class FabricSessionManager:
         base_dir: Path,
         session_registry: FabricSessionRegistry,
         workspace_baseline: Path | None = None,
-        skills_snapshot: Path | None = None,
         fabric: Fabric | None = None,
         max_concurrent_invocations: int = DEFAULT_MAX_CONCURRENT_INVOCATIONS,
     ) -> None:
@@ -91,7 +90,6 @@ class FabricSessionManager:
         self._base_dir = base_dir
         self._session_registry = session_registry
         self._workspace_baseline = workspace_baseline
-        self._skills_snapshot = skills_snapshot
         self._fabric = fabric
         self._session_creation_gates: dict[str, _SessionCreationGate] = {}
         self._closed_session_ids: set[str] = set()
@@ -289,9 +287,7 @@ class FabricSessionManager:
     async def _create_workspace(self) -> Path | None:
         if self._workspace_baseline is None:
             return None
-        copy_task = asyncio.create_task(
-            asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline, self._skills_snapshot)
-        )
+        copy_task = asyncio.create_task(asyncio.to_thread(create_deepagents_workspace, self._workspace_baseline))
         try:
             return await await_resource_task(copy_task)
         except asyncio.CancelledError:

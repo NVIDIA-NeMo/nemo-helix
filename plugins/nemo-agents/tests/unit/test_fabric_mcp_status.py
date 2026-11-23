@@ -6,9 +6,11 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any, get_args
 
+import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -64,6 +66,56 @@ def server_script(tmp_path: Path) -> str:
     path = tmp_path / "server.py"
     path.write_text(_SERVER_SCRIPT, encoding="utf-8")
     return str(path)
+
+
+@pytest.mark.parametrize("reject_token", [False, True])
+async def test_service_account_probe(monkeypatch: pytest.MonkeyPatch, reject_token: bool) -> None:
+    secret, token = "test-client-secret", "test-access-token"
+    monkeypatch.setenv("MCP_TEST_SECRET", secret)
+    requests: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/token":
+            assert request.headers["authorization"].startswith("Basic ")
+            if reject_token:
+                return httpx.Response(401, json={"error": f"{secret} {token}"})
+            return httpx.Response(200, json={"access_token": token, "expires_in": 3600})
+        assert request.headers["authorization"] == f"Bearer {token}"
+        assert request.headers["X-Application"] == "test-app"
+        message = json.loads(request.content)
+        if "id" not in message:
+            return httpx.Response(202)
+        result = (
+            {"protocolVersion": "2025-03-26", "capabilities": {}, "serverInfo": {"name": "test", "version": "1"}}
+            if message["method"] == "initialize"
+            else {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}]}
+        )
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+    monkeypatch.setattr(httpx, "AsyncClient", partial(httpx.AsyncClient, transport=httpx.MockTransport(respond)))
+    config = _config(
+        {
+            "tools": {
+                "transport": "streamable-http",
+                "url": "https://mcp.example.test/mcp",
+                "custom_headers": {"X-Application": "test-app"},
+                "authentication": {
+                    "type": "service_account",
+                    "client_id": "test-client",
+                    "client_secret_env": "MCP_TEST_SECRET",
+                    "token_url": "https://idp.example.test/token",
+                },
+            }
+        }
+    )
+    [status] = (await McpStatusCache().get(config)).servers
+
+    assert status.state == ("failed" if reject_token else "running")
+    assert [tool.name for tool in status.tools] == ([] if reject_token else ["lookup"])
+    assert requests.count("/token") == 1
+    assert secret not in status.model_dump_json()
+    assert token not in status.model_dump_json()
 
 
 async def test_unresolved_stdio_command() -> None:
