@@ -55,12 +55,17 @@ README = ROOT / "plugins/nemo-builder/README.md"
 PLUGIN = ROOT / "plugins/nemo-builder/src/nemo_builder_plugin"
 JOBS_ON_KUBERNETES = ROOT / "services/core/jobs/src/nhx/core/jobs/controllers/backends/kubernetes"
 #: Where the sentences the guide quotes are spelt: the plugin, and the Jobs backend the step runs on, whose
-#: message for a step that ran out of time, or whose image could not be pulled, a failed image's row repeats.
+#: message for a step that ran out of time, whose image could not be pulled or whose pod failed, a failed
+#: image's row repeats.
 SOURCES = (
     *sorted(PLUGIN.rglob("*.py")),
     JOBS_ON_KUBERNETES / "kubernetes_job.py",
     JOBS_ON_KUBERNETES / "common.py",
 )
+#: Where Jobs' launcher, which starts the step program, spells the lines it ends a step with before the program
+#: runs, and the errors those lines wrap. Go, so read as text, and apart from SOURCES.
+LAUNCHER = ROOT / "services/core/jobs/jobs-launcher"
+LAUNCHER_SOURCES = (LAUNCHER / "cmd/run.go", LAUNCHER / "nhxclient/client.go")
 #: Where a deployment that builds with `remote` may raise a refusal a submit answers with `code`
 #: `backend_rejected`: anywhere in the plugin but the in-cluster backend, which such a deployment doesn't run.
 REFUSALS = tuple(path for path in sorted(PLUGIN.rglob("*.py")) if path.name != "execution.py")
@@ -108,17 +113,26 @@ MIN_SPELT = 12
 SPELT_SHARE = 2 / 3
 PLACEHOLDER = re.compile(r"<[^<>]+>")
 #: How many sentences the troubleshooting tables quote, each in a cell of its own.
-QUOTED_SENTENCES = 54
+QUOTED_SENTENCES = 57
 #: What the troubleshooting section quotes outside a cell of its own: the driver's line for an image it didn't
-#: build and what may end its reason, and the API's log lines for a completion it refused or put off.
+#: build and what may end its reason, what Jobs may add to its message for a pod that failed, and the API's log
+#: lines for a completion it refused or put off.
 PROSE_QUOTES = (
     "NHX_BUILD_FAILED <image>: <reason>",
     "[build <id>]",
     "the build service could not be told to stop it, it may still be running",
     "a build may be running, started with key <key>",
+    "One or more tasks are in error state",
     "completing <workspace>/<image> refused: <detail>",
     "completing <workspace>/<image> put off: its row records no build job yet",
     "could not tell which job is completing <workspace>/<image>",
+)
+#: The launcher's lines the guide tells an operator to look for at the end of a failed step's container log, and
+#: the error one of them ends with when the API answered.
+LAUNCHER_LINES = (
+    "Error fetching secrets: failed to fetch secret <workspace>/<name>: <error>",
+    "failed to get secret: status code <n>",
+    "Error starting command: <error>",
 )
 #: A number as the guide writes it out in a sentence.
 NUMBERS = "zero one two three four five six seven eight nine ten eleven twelve".split()
@@ -266,6 +280,28 @@ def _said_in_one_string(quote: str, strings: list[tuple[str | None, ...]]) -> bo
 def _quoted_sentences() -> list[str]:
     """Each sentence a troubleshooting table quotes: a cell that is one code span, and not a code or a status."""
     return [cell for cell in re.findall(r"\| `([^`]+)` (?=\|)", _section(TROUBLESHOOTING)) if " " in cell]
+
+
+@cache
+def _launcher_formats() -> list[re.Pattern[str]]:
+    """Each format the launcher spells, as a pattern: a group where a verb fills a value in. A format with less
+    fixed text than :data:`MIN_SPELT` is left out: `%s=%s` would stand for any line."""
+    formats: list[re.Pattern[str]] = []
+    for path in LAUNCHER_SOURCES:
+        for literal in re.findall(r'"((?:[^"\\]|\\.)*)"', _text(path)):
+            fixed = re.split(r"%[a-z]", literal.removesuffix(r"\n"))
+            if len(fixed) > 1 and sum(map(len, fixed)) >= MIN_SPELT:
+                formats.append(re.compile("(.+)".join(map(re.escape, fixed))))
+    return formats
+
+
+def _launcher_says(line: str) -> bool:
+    """Whether the launcher's formats make ``line``: what a format fills in is a placeholder of the guide's or,
+    for an error it wraps, what another format makes."""
+    if PLACEHOLDER.fullmatch(line):
+        return True
+    made = [found for pattern in _launcher_formats() if (found := pattern.fullmatch(line))]
+    return any(all(map(_launcher_says, found.groups())) for found in made)
 
 
 def _refusals() -> list[re.Pattern[str]]:
@@ -540,6 +576,22 @@ def test_what_the_troubleshooting_prose_quotes_is_said_by_the_sources() -> None:
     for quote in PROSE_QUOTES:
         assert f"`{quote}`" in section, f"the guide no longer quotes {quote!r}"
         assert _said_in_one_string(quote, _strings(*SOURCES)), f"no string of the sources says {quote!r}"
+
+
+def test_the_launchers_lines_the_guide_quotes_are_the_launchers() -> None:
+    """A step that Jobs' launcher ends before the step program runs logs no line of the driver's, so the guide
+    names the launcher's, for an operator to find at the end of the container's log."""
+    for line in LAUNCHER_LINES:
+        assert f"`{line}`" in _subsection(IMAGE_FAILS), f"the guide no longer quotes {line!r}"
+        assert _launcher_says(line), f"the launcher's formats don't make {line!r}"
+
+
+def test_a_row_the_guide_points_at_is_a_row_of_its_tables() -> None:
+    """The guide sends a reader on to a row by the sentence the row quotes, which finds the row only while the
+    two read the same. Not a row it names by a status, such as a `ready` one: that is an image's row."""
+    pointed = {quote for quote in re.findall(r"the `([^`]+)` row\b", _text()) if " " in quote}
+    unknown = pointed - set(_quoted_sentences())
+    assert pointed and not unknown, f"the troubleshooting tables have no row for: {unknown}"
 
 
 def test_an_invalid_setting_is_answered_as_the_guide_reads_it(monkeypatch: pytest.MonkeyPatch) -> None:
