@@ -121,7 +121,8 @@ Full template:
 | `lora.target_modules` | `null` | e.g. `["q_proj","v_proj"]`; null = platform default targets |
 | `lora.exclude_modules` | `null` | Patterns to exclude from LoRA, e.g. `["*.out_proj"]` |
 | `lora.use_triton` | `true` | Use the optimized Triton LoRA kernel |
-| `max_seq_length` | `2048` | Truncate/pack to this length; lower if OOM |
+| `max_seq_length` | `2048` | Token cap. With `image_size` or `max_pixels`, this must exceed the tokens one image can use at that ceiling, plus the text tokens in each row. The model spec's `vision_patch_size` is the side of one image token. A shorter cap is rejected, but only when the model spec has `vision_patch_size`. Without it the check is skipped and a short cap can truncate rows, so work out the image token count yourself. Lower it if the run OOMs |
+| `image_size` | `null` | `{longest_edge, shortest_edge}` pixel-area bounds. Both required, `shortest_edge` < `longest_edge`. Set this or `max_pixels`, not both. Vision-language checkpoints only |
 | `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint. Exception: full-weight distillation with `Adam`/`AdamW` keeps the student in fp32, because those optimizers hold no separate fp32 copy of the weights. Set `precision` to override |
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
 | `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
