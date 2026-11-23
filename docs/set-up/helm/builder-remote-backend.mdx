@@ -14,7 +14,7 @@ This page sets up a deployment whose Builder builds container images through a b
 
 <Warning>
 
-The remote backend has run only in the Builder plugin's tests, against a stand-in for a build service. This repository holds no build service's client and no step image, and nothing on this page has been run on a cluster or against a real build service. That includes both ways of authenticating a step with platform auth on. Prove the setup on your own cluster with [one build](#apply-and-verify) before you rely on it.
+The remote backend has run in the Builder plugin's tests and on a Kind cluster, both against a stand-in for a build service. The Kind run was simpler than this page's setup: the step ran in the release's namespace, with platform auth off and no credential. This repository holds no build service's client and no step image, and the steps on this page have not been run on a cluster or against a real build service. That includes both ways of authenticating a step with platform auth on. Prove the setup on your own cluster with [one build](#apply-and-verify) before you rely on it.
 
 </Warning>
 
