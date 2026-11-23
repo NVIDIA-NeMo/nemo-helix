@@ -593,9 +593,9 @@ async def _decode_kubernetes_subject_token(
     if not host:
         raise jwt.InvalidTokenError("Kubernetes service environment is unavailable")
 
-    reviewer_token, ca_path = _kubernetes_reviewer_credentials()
     token_review_url = f"https://{host}:{port}/apis/authentication.k8s.io/v1/tokenreviews"
     try:
+        reviewer_token, ca_path = _kubernetes_reviewer_credentials()
         async with AsyncClient(timeout=10.0, verify=ca_path) as client:
             response = await client.post(
                 token_review_url,
@@ -613,7 +613,7 @@ async def _decode_kubernetes_subject_token(
                 },
             )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, OSError) as exc:
         raise jwt.InvalidTokenError(f"Kubernetes TokenReview request failed: {exc}") from exc
 
     token_review = response.json()
