@@ -69,6 +69,33 @@ describe('getMetadataSections', () => {
     expect(findRow(sections, 'source', 'Storage')?.value).toBe('Hugging Face');
   });
 
+  describe('Hugging Face source link', () => {
+    const sourceHref = (repoType?: HuggingfaceStorageConfig['repo_type']) => {
+      const sections = getMetadataSections(
+        {
+          ...huggingfaceFileset,
+          storage: {
+            ...huggingfaceFileset.storage,
+            repo_type: repoType,
+          } as HuggingfaceStorageConfig,
+        },
+        undefined,
+        []
+      );
+      const value = findRow(sections, 'source', 'Source')?.value;
+      return isValidElement<{ href?: string }>(value) ? value.props.href : undefined;
+    };
+
+    it.each([
+      [undefined, 'https://huggingface.co/meta-llama/Llama-2-7b'],
+      ['model', 'https://huggingface.co/meta-llama/Llama-2-7b'],
+      ['dataset', 'https://huggingface.co/datasets/meta-llama/Llama-2-7b'],
+      ['space', 'https://huggingface.co/spaces/meta-llama/Llama-2-7b'],
+    ] as const)('links a %s repo to %s', (repoType, href) => {
+      expect(sourceHref(repoType)).toBe(href);
+    });
+  });
+
   it('omits the Details section when readme metadata is empty', () => {
     const sections = getMetadataSections(huggingfaceFileset, {}, []);
     expect(sections.find((section) => section.value === 'details')).toBeUndefined();

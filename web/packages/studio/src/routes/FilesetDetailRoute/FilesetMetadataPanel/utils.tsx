@@ -42,6 +42,12 @@ export const getMetadataSections = (
   return sections;
 };
 
+// The Hub serves dataset and space repos under their own prefix; a missing repo_type means model, as on the backend.
+const HUGGING_FACE_REPO_PREFIX: Record<string, string> = { dataset: 'datasets/', space: 'spaces/' };
+
+const getHuggingFaceRepoUrl = (repoId: string, repoType?: string) =>
+  `https://huggingface.co/${(repoType && HUGGING_FACE_REPO_PREFIX[repoType]) ?? ''}${repoId}`;
+
 const getSourceRows = (fileset: FilesetOutput): MetadataRow[] => {
   const { storage } = fileset;
   const source = getModelSource(fileset);
@@ -56,7 +62,10 @@ const getSourceRows = (fileset: FilesetOutput): MetadataRow[] => {
       value:
         storage.type === 'huggingface' ? (
           <Anchor
-            href={`https://huggingface.co/${source.path}`}
+            href={getHuggingFaceRepoUrl(
+              source.path,
+              'repo_type' in storage ? storage.repo_type : undefined
+            )}
             target="_blank"
             rel="noopener noreferrer"
           >
