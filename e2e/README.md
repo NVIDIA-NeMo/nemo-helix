@@ -263,6 +263,11 @@ They check that:
   would reach it. Unless `NHX_E2E_GYM_POLICY_API_KEY_SECRET` names one, the tests create a secret in
   their own workspace holding the placeholder `not-used`.
 
+The environment the tests upload is in `e2e/data/gym_greeting_env/`, and its verifier,
+`resources_servers/greeting_verifier/app.py`, makes the checks above from inside the Gym host. The
+tests add the verifier's one extra dependency as a wheel they build. Their `kubectl` reads of the
+cluster are in `e2e/sandbox_cluster.py`.
+
 The tests skip unless `NHX_E2E_SANDBOXED_GYM=1`. With that set and a deployment to run against
 (`--kubernetes --cluster-url`, as in the command below; without one every e2e test is skipped), they
 fail rather than skip when something they need is missing: `NHX_E2E_KUBE_CONTEXT`, read access to
