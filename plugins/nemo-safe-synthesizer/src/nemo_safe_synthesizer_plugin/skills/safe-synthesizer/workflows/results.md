@@ -14,6 +14,7 @@ Platform jobs publish named results through the Jobs service:
 - `summary`
 - `synthetic-data`
 - `evaluation-report`
+- `evaluation-report-data`
 - `adapter`
 
 Use the Jobs API or SDK to list and fetch result records for platform jobs. The plugin does not expose plugin-specific CLI result commands.

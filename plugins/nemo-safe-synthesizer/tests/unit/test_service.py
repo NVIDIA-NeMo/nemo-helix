@@ -27,6 +27,12 @@ def test_service_routes_include_safe_synthesizer_jobs_path():
 
     assert "/v2/workspaces/{workspace}/jobs" in spec["paths"]
     assert "/v2/workspaces/{workspace}/jobs/{job}/results/adapter/download" in spec["paths"]
+    report_data_download = spec["paths"][
+        "/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report-data/download"
+    ]
+    assert report_data_download["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/SafeSynthesizerReportData"
+    }
     assert "GenerateJobRequest" in spec["components"]["schemas"]
     request_properties = spec["components"]["schemas"]["GenerateJobRequest"]["properties"]
     assert "profile" in request_properties
@@ -57,3 +63,5 @@ def test_service_authz_derives_from_job_routes():
     assert contribution.endpoints[f"{jobs_path}/{{job}}/results/synthetic-data/download"]["get"].permissions == [
         "safe-synthesizer.read"
     ]
+    report_data_download = f"{jobs_path}/{{job}}/results/evaluation-report-data/download"
+    assert contribution.endpoints[report_data_download]["get"].permissions == ["safe-synthesizer.read"]

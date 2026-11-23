@@ -48,6 +48,12 @@ from nemo_safe_synthesizer_plugin.job_config import (
     SafeSynthesizerJobConfig,
     parse_pretrained_model_job_ref,
 )
+from nemo_safe_synthesizer_plugin.report_data import (
+    REPORT_DATA_RESULT_NAME,
+    EvaluationReportLike,
+    build_report_data,
+    evaluation_report_of,
+)
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.adapter_resolution import (
     embed_run_config_in_adapter,
     is_adapter_reuse_requested,
@@ -141,7 +147,20 @@ def _load_local_dataset(path: str) -> pd.DataFrame:
     return cast(pd.DataFrame, hf_dataset.to_pandas())
 
 
-def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = None):
+def _write_report_data(report: EvaluationReportLike, path: Path) -> bool:
+    try:
+        path.write_text(build_report_data(report).model_dump_json(), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to build evaluation report data; skipping the %s result", REPORT_DATA_RESULT_NAME)
+        return False
+    return True
+
+
+def upload_results(
+    result: SafeSynthesizerResults,
+    adapter_path: Path | None = None,
+    report: EvaluationReportLike | None = None,
+):
     """Upload job results to the files service using FilesetFileManager."""
     job_id = os.environ.get(NEMO_JOB_ID_ENVVAR)
     if not job_id:
@@ -193,6 +212,11 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
                 f.write(result.evaluation_report_html)
             artifact_url = file_manager.upload(report_html_path, f"results/{attempt_id}/evaluation-report")
             _create_job_result(client, workspace, job_id, attempt_id, "evaluation-report", artifact_url)
+
+        report_data_path = temp_path / "report-data.json"
+        if report is not None and _write_report_data(report, report_data_path):
+            artifact_url = file_manager.upload(report_data_path, f"results/{attempt_id}/{REPORT_DATA_RESULT_NAME}")
+            _create_job_result(client, workspace, job_id, attempt_id, REPORT_DATA_RESULT_NAME, artifact_url)
 
     if adapter_path is not None and adapter_path.exists():
         embed_run_config_in_adapter(adapter_path)
@@ -317,7 +341,7 @@ def run_config(
     save_path: Path,
     *,
     adapter_location: str | Path | None = None,
-) -> tuple[SafeSynthesizerResults, Path | None]:
+) -> tuple[SafeSynthesizerResults, Path | None, EvaluationReportLike | None]:
     """Run NSS against a validated config and already-loaded data source."""
     _validate_flat_tabular_data(data_source)
     enable_synthesis: bool = job_config.enable_synthesis
@@ -380,7 +404,7 @@ def run_config(
     adapter_path = ss._workdir.adapter_path if ss._workdir and enable_synthesis else None
     if adapter_path is not None:
         embed_run_config_in_adapter(adapter_path)
-    return ss.results, adapter_path
+    return ss.results, adapter_path, evaluation_report_of(ss)
 
 
 def run_from_env() -> None:
@@ -413,13 +437,13 @@ def run_from_env() -> None:
     save_path = Path(os.environ.get(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, DEFAULT_TASK_STORAGE_PATH))
     pretrained_model_tmp, adapter_path = _resolve_pretrained_model(job_config, workspace=workspace, client=client)
     try:
-        result, adapter_path = run_config(
+        result, adapter_path, report = run_config(
             job_config,
             data_source,
             save_path,
             adapter_location=adapter_path,
         )
-        upload_results(result=result, adapter_path=adapter_path)
+        upload_results(result=result, adapter_path=adapter_path, report=report)
     finally:
         if pretrained_model_tmp is not None:
             pretrained_model_tmp.cleanup_tmp_dir()

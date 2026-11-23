@@ -296,6 +296,31 @@ def test_safe_synthesizer_job_fetch_summary_parses_json() -> None:
     assert summary.timing.total_time_sec == 12.5
 
 
+def test_safe_synthesizer_job_fetch_report_data_parses_json() -> None:
+    mock_jobs = MagicMock()
+    mock_jobs.download_job_result.return_value = _binary_resp(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "components": {
+                    "synthetic_quality_score": {
+                        "name": "Synthetic Quality Score",
+                        "score": {"grade": "Good", "score": 7.1},
+                    }
+                },
+            }
+        ).encode()
+    )
+    job = _make_job(mock_jobs)
+
+    report_data = job.fetch_report_data()
+
+    mock_jobs.download_job_result.assert_called_once_with(
+        name="evaluation-report-data", job="platform-job-original", workspace="default"
+    )
+    assert report_data.components["synthetic_quality_score"].score.score == 7.1
+
+
 def test_safe_synthesizer_job_fetch_logs_follows_pagination() -> None:
     mock_jobs = MagicMock()
     options_client = MagicMock()

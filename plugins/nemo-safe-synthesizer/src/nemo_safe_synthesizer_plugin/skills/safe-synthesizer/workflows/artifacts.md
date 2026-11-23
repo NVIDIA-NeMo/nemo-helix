@@ -19,10 +19,12 @@
 - `summary`
 - `synthetic-data`
 - `evaluation-report`
+- `evaluation-report-data`
 - `adapter`
 - `summary` / `summary.json`: use this first for row counts, timing, and high-level run status.
 - `synthetic-data`: final CSV data. For PII-only runs this may be processed data rather than newly synthesized records.
 - `evaluation-report`: HTML report if evaluation was enabled and completed.
+- `evaluation-report-data`: JSON with the scores, tables, and Plotly figures behind `evaluation-report`. Missing if the report ran but its data could not be serialized; the job logs say why.
 - `adapter`: model adapter artifacts, present only for runs that train and save an adapter.
 
 ## Missing Artifacts

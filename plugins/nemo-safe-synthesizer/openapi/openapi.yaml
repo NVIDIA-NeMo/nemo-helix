@@ -135,6 +135,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report-data/download:
+    get:
+      tags:
+      - Safe Synthesizer
+      summary: Download Job Result Evaluation-Report-Data
+      operationId: download_job_result_evaluation_report_data_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results_evaluation_report_data_download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SafeSynthesizerReportData'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report/download:
     get:
       tags:
@@ -1830,6 +1864,101 @@ components:
         \  wrapped in ``TorchAoConfig``. Requires Blackwell (sm_100+). Weight-only.\n\
         - ``mxfp4``: OCP Microscaling FP4 via transformers ``Mxfp4Config``.\n  Hardware\
         \ support varies by torch/torchao version."
+    ReportCard:
+      properties:
+        name:
+          type: string
+          title: Name
+        score:
+          $ref: '#/components/schemas/ReportScore'
+        figures:
+          items:
+            $ref: '#/components/schemas/ReportFigure'
+          type: array
+          title: Figures
+      additionalProperties: true
+      type: object
+      required:
+      - name
+      - score
+      title: ReportCard
+      description: 'One report component: its score, charts, and the component-specific
+        fields the HTML report renders.'
+    ReportDifferentialPrivacy:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        epsilon:
+          title: Epsilon
+          type: number
+        delta:
+          anyOf:
+          - type: number
+          - type: string
+          title: Delta
+      type: object
+      title: ReportDifferentialPrivacy
+    ReportFigure:
+      properties:
+        title:
+          title: Title
+          type: string
+        figure:
+          additionalProperties: true
+          type: object
+          title: Figure
+          description: Plotly figure JSON with `data` and `layout`; layout.template
+            removed.
+      additionalProperties: true
+      type: object
+      required:
+      - figure
+      title: ReportFigure
+      description: One chart in a report card, as Plotly figure JSON.
+    ReportFlags:
+      properties:
+        with_synthesizer:
+          type: boolean
+          title: With Synthesizer
+          default: false
+        with_data_privacy:
+          type: boolean
+          title: With Data Privacy
+          default: false
+        with_transform:
+          type: boolean
+          title: With Transform
+          default: false
+        with_time_series:
+          type: boolean
+          title: With Time Series
+          default: false
+      type: object
+      title: ReportFlags
+      description: Which report sections have data.
+    ReportScore:
+      properties:
+        raw_score:
+          title: Raw Score
+          type: number
+        grade:
+          type: string
+          title: Grade
+          description: Qualitative grade, e.g. 'Unavailable', 'Poor', 'Good', 'Excellent'.
+        score:
+          title: Score
+          description: Scaled score from 0 to 10.
+          type: number
+        notes:
+          title: Notes
+          type: string
+      type: object
+      required:
+      - grade
+      title: ReportScore
+      description: A component score as the library reports it.
     Row:
       properties:
         name:
@@ -2002,6 +2131,40 @@ components:
       type: object
       title: SafeSynthesizerParameters
       description: NHX-facing Safe Synthesizer parameters with SDK convenience flags.
+    SafeSynthesizerReportData:
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+          title: Schema Version
+          default: 1
+        library_version:
+          title: Library Version
+          description: nemo-safe-synthesizer version that built it.
+          type: string
+        job_id:
+          title: Job Id
+          type: string
+        flags:
+          $ref: '#/components/schemas/ReportFlags'
+        differential_privacy:
+          $ref: '#/components/schemas/ReportDifferentialPrivacy'
+        tooltips:
+          additionalProperties:
+            type: string
+          type: object
+          title: Tooltips
+        components:
+          additionalProperties:
+            $ref: '#/components/schemas/ReportCard'
+          type: object
+          title: Components
+          description: Cards keyed by snake-cased component name, e.g. `synthetic_quality_score`,
+            in report order.
+      type: object
+      title: SafeSynthesizerReportData
+      description: Everything the Safe Synthesizer Quality & Privacy report shows,
+        keyed by component.
     SafeSynthesizerSummary:
       properties:
         synthetic_data_quality_score:

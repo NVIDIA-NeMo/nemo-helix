@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
+from nemo_safe_synthesizer_plugin.report_data import REPORT_DATA_RESULT_NAME, SafeSynthesizerReportData
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,13 @@ class SafeSynthesizerJob:
             name="evaluation-report", job=self._reference(), workspace=self._workspace
         ).read()
         return ReportHtml(html=data.decode("utf-8"))
+
+    def fetch_report_data(self) -> SafeSynthesizerReportData:
+        """Fetch the structured data behind the evaluation report: scores, tables, and Plotly figures."""
+        data = self._jobs.download_job_result(
+            name=REPORT_DATA_RESULT_NAME, job=self._reference(), workspace=self._workspace
+        ).read()
+        return SafeSynthesizerReportData.model_validate_json(data)
 
     def display_report_in_notebook(self, width: str = "100%", height: int = 1000) -> None:
         """Display the evaluation report in a Jupyter notebook."""

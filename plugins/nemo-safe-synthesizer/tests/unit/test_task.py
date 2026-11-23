@@ -77,13 +77,14 @@ def test_run_config_pii_only_uses_processed_training_df(tmp_path, monkeypatch):
         }
     )
 
-    result, adapter_path = task_main.run_config(
+    result, adapter_path, report = task_main.run_config(
         job_config,
         pd.DataFrame({"name": ["Alice"], "age": [1]}),
         tmp_path,
     )
 
     assert adapter_path is None
+    assert report is None
     pd.testing.assert_frame_equal(result.synthetic_data, processed)
 
 

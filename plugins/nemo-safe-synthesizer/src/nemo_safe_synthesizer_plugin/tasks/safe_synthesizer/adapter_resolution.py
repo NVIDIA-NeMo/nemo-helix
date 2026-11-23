@@ -15,6 +15,7 @@ import pandas as pd
 from nemo_safe_synthesizer.cli.artifact_structure import RunName, Workdir
 from nemo_safe_synthesizer.config.internal_results import SafeSynthesizerResults
 from nemo_safe_synthesizer_plugin.job_config import DEFAULT_PRETRAINED_MODEL
+from nemo_safe_synthesizer_plugin.report_data import EvaluationReportLike, evaluation_report_of
 
 if TYPE_CHECKING:
     from nemo_safe_synthesizer.sdk.library_builder import SafeSynthesizer
@@ -166,7 +167,7 @@ def run_generation_from_prior_adapter(
     save_path: Path,
     *,
     adapter_location: str | None = None,
-) -> tuple[SafeSynthesizerResults, Path | None]:
+) -> tuple[SafeSynthesizerResults, Path | None, EvaluationReportLike | None]:
     """Generate synthetic data from a prior adapter without retraining."""
     from nemo_safe_synthesizer.sdk.library_builder import SafeSynthesizer
 
@@ -195,4 +196,4 @@ def run_generation_from_prior_adapter(
     _apply_generation_overrides(ss, job_config)
     ss.generate().evaluate()
     ss.save_results()
-    return ss.results, parent_workdir.adapter_path
+    return ss.results, parent_workdir.adapter_path, evaluation_report_of(ss)

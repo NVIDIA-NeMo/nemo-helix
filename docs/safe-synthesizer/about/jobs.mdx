@@ -113,10 +113,11 @@ When the job completes, access these job results:
 
 - **`synthetic-data`**: Generated synthetic records
 - **`evaluation-report`**: HTML report with scores and visualizations
+- **`evaluation-report-data`**: The data behind the evaluation report as JSON, with scores, tables, and Plotly figures
 - **`summary`**: Job summary with scores and timing
 - **`adapter`**: LoRA adapter from the training step (when synthesis ran)
 
-With the Python SDK, retrieve them with `job.fetch_data()`, `job.save_report(path)`, and `job.fetch_summary()`.
+With the Python SDK, retrieve them with `job.fetch_data()`, `job.save_report(path)`, `job.fetch_report_data()`, and `job.fetch_summary()`.
 Logs remain available through `job.fetch_logs()`.
 For the equivalent CLI commands, refer to [Getting Started](/documentation/synthesize-safe-data).
 
