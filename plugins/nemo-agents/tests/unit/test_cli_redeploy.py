@@ -761,11 +761,11 @@ def _redeploy(tmp_path: Path, make_cli_state, rec: _Recorder, *extra: str) -> An
 
 
 def test_redeploy_keeps_existing_labels_when_label_omitted(tmp_path: Path, make_cli_state) -> None:
-    rec = _LabelsRecorder(existing_labels={"team": "support", "helix-agents/managed-by": "compass"}, deployments=[])
+    rec = _LabelsRecorder(existing_labels={"team": "support", "acme/owner": "compass"}, deployments=[])
     result = _redeploy(tmp_path, make_cli_state, rec)
     assert result.exit_code == 0, result.output
     assert rec.created is not None
-    assert rec.created["labels"] == {"team": "support", "helix-agents/managed-by": "compass"}
+    assert rec.created["labels"] == {"team": "support", "acme/owner": "compass"}
 
 
 def test_redeploy_label_replaces_existing_labels(tmp_path: Path, make_cli_state) -> None:

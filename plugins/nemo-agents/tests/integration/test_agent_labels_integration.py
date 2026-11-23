@@ -83,7 +83,7 @@ def test_list_agents_by_label() -> None:
     with create_test_client(_TestAgentsService, client_type=ClientContext, workspace="default") as ctx:
         agents = AgentsResource(ctx.client)
         for name, labels in [
-            ("support-analyst", {"team": "support", "helix-compass/target-agent": "default/bot"}),
+            ("support-analyst", {"team": "support", "acme/target": "default/bot"}),
             ("support-triage", {"team": "support"}),
             ("billing-analyst", {"team": "billing"}),
             ("unlabeled", None),
@@ -91,9 +91,7 @@ def test_list_agents_by_label() -> None:
             agents.register(name=name, config=_agent_config(name), labels=labels)
 
         assert _names(agents.list(labels={"team": "support"})) == {"support-analyst", "support-triage"}
-        assert _names(agents.list(labels={"team": "support", "helix-compass/target-agent": "default/bot"})) == {
-            "support-analyst"
-        }
+        assert _names(agents.list(labels={"team": "support", "acme/target": "default/bot"})) == {"support-analyst"}
         assert _names(agents.list(labels={"team": "nobody"})) == set()
         assert agents.get("unlabeled")["labels"] == {}
 

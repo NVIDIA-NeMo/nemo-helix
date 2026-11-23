@@ -60,6 +60,9 @@ navigation:
               - page: Execute as Jobs
                 slug: execute-agents-as-jobs
                 path: ../../agents/execute-agent-jobs.mdx
+              - page: Plugin-Managed Agents
+                slug: plugin-managed-agents
+                path: ../../agents/plugin-managed-agents.mdx
           - section: Insights
             skip-slug: true
             contents:

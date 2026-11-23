@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.agent_config_formats import validate_agent_config
+from nemo_agents_plugin.fabric import translator
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import (
     FabricTranslationError,
@@ -679,6 +680,33 @@ class TestTranslateAgentConfig:
 
         with pytest.raises(FabricTranslationError, match="no models.default is configured"):
             translate_agent_config(config)
+
+    def test_an_adapter_that_takes_no_models_needs_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An adapter that reads its models from the run's context takes none, so its config names none."""
+        monkeypatch.setattr(translator, "adapter_accepts_models", lambda adapter_id: False)
+        payload = _example_yaml_config()
+        payload["models"] = {}
+        payload["default_harness"] = "codex"
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        assert fabric_config.models == {}
+
+    def test_an_adapter_that_takes_no_models_records_no_atif_model_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(translator, "adapter_accepts_models", lambda adapter_id: False)
+        payload = _example_yaml_config()
+        payload["models"] = {}
+        payload["default_harness"] = "codex"
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        assert fabric_config.relay is not None
+        assert fabric_config.relay.observability is not None
+        atif = fabric_config.relay.observability.model_dump(exclude_none=True)["atif"]
+        assert "model_name" not in atif
 
     def test_relay_defaults_pi_runtime_artifacts_when_unset(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())

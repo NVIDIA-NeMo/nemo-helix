@@ -21,8 +21,10 @@ from nemo_helix_plugin.agents.types import (
     DEFAULT_INPUT_DESCRIPTION,
     LABELS_DESCRIPTION,
     NOOP_POST_RUN_ACTION_KIND,
+    PLUGIN_MANAGED_AGENT_DESCRIPTION,
     POST_RUN_ACTIONS_DESCRIPTION,
     Labels,
+    PluginManagedAgentSpec,
     PostRunActionKinds,
     ReferenceConfig,
 )
@@ -300,6 +302,9 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
+    plugin_managed_agent: PluginManagedAgentSpec | None = Field(
+        default=None, description=PLUGIN_MANAGED_AGENT_DESCRIPTION
+    )
 
 
 class AgentDeployment(NemoEntity, entity_type="agent_deployment"):

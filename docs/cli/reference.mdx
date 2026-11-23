@@ -6242,6 +6242,8 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `redeploy`: Redeploy an agent from a new config, in one command.
 * `logs`: Show logs for an agent deployment.
 * `undeploy`: Stop and remove a deployment (or all deployments for an...
+* `types`: List the plugin-managed agent types installed on the...
+* `create`: Create this workspace's agent of a plugin-managed agent...
 * `deployments`: Manage agent deployments.
 * `environment-specs`: Manage agent environment specs.
 * `environments`: Manage agent environments.
@@ -6683,6 +6685,63 @@ nemo agents undeploy [OPTIONS] [NAME]
 * `--agent, --all, -a`: Remove all deployments for this agent.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents types
+
+List the plugin-managed agent types installed on the platform.
+
+Each row shows the context a run takes (optional keys in brackets) and
+this workspace's agent of the type, if it has one. Create one with
+`nemo agents create <type>`, then run it with `nemo agents execute --agent <name>`.
+
+**Usage:**
+
+```shell
+nemo agents types [OPTIONS]
+```
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo agents create
+
+Create this workspace's agent of a plugin-managed agent type.
+
+The type supplies the agent's config, so there is nothing to write: a
+workspace holds at most one agent of each type, and it stays current as
+the plugin is upgraded.
+
+**Usage:**
+
+```shell
+nemo agents create [OPTIONS] TYPE
+```
+
+**Arguments:**
+
+* `<TYPE>`: Plugin-managed agent type ID. List the installed types with `nemo agents types`.
+
+**Options:**
+
+* `--name, -n`: Agent name. Defaults to the type's default name.
+* `--description`: [default: ]
+* `--label, -l`: Agent label as KEY=VALUE, e.g. team=search. Repeatable. [default: ]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
 

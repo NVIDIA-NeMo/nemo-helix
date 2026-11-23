@@ -46,6 +46,7 @@ from nemo_agents_plugin.environment_resolution import (
     resolve_environment,
 )
 from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
+from nemo_agents_plugin.plugin_managed_agents import derive_agent
 from nemo_agents_plugin.runner.deployments_backend import (
     image_entrypoint_unsupported_message,
     require_deployment_mode_available,
@@ -242,6 +243,9 @@ async def create_deployment(
 
 
 def _resolve_deployment_config(agent: Agent, *, workspace: str) -> dict[str, Any]:
+    # A plugin-managed agent stores no config: deploy the one its type supplies,
+    # exactly as reads and execute jobs see it.
+    agent = derive_agent(agent)
     try:
         return resolve_agent_config_for_deployment(
             agent.config_format,

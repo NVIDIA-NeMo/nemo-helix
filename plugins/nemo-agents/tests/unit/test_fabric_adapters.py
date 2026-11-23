@@ -16,6 +16,7 @@ from nemo_agents_plugin.fabric.adapters import (
     HARNESS_ADAPTER_IDS,
     UnknownAdapterError,
     accepted_adapter_ids,
+    adapter_accepts_models,
     adapter_reads_request_context,
     context_unaware_harness,
     installed_adapter_ids,
@@ -204,3 +205,24 @@ def test_context_unaware_harness_leaves_workflow_configs_alone() -> None:
     )
 
     assert context_unaware_harness(config) is None
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "accepts_models"),
+    [
+        pytest.param({"config": {"accepts": ["models", "instructions.system"]}}, True, id="declares-models"),
+        pytest.param({"config": {"accepts": ["instructions.system"]}}, False, id="declares-others"),
+        pytest.param({}, False, id="declares-nothing"),
+    ],
+)
+def test_an_installed_adapter_takes_models_only_when_its_manifest_accepts_them(
+    tmp_path: Path, descriptor: dict[str, object], accepts_models: bool
+) -> None:
+    _write(tmp_path / "acme/custom.fabric-adapter.json", json.dumps({"adapter_id": "acme.custom", **descriptor}))
+
+    assert adapter_accepts_models("acme.custom", tmp_path) is accepts_models
+
+
+def test_an_adapter_without_an_installed_manifest_takes_models(tmp_path: Path) -> None:
+    """The stock adapters ship no manifest in this tree, and all of them take models."""
+    assert adapter_accepts_models("nvidia.fabric.claude", tmp_path) is True

@@ -12,7 +12,12 @@ from typing import Any
 
 import nemo_fabric as fabric
 from nemo_agents_plugin.agent_config import AgentConfig, HarnessConfig, ModelConfig
-from nemo_agents_plugin.fabric.adapters import HARNESS_ADAPTER_IDS, UnknownAdapterError, resolve_adapter_id
+from nemo_agents_plugin.fabric.adapters import (
+    HARNESS_ADAPTER_IDS,
+    UnknownAdapterError,
+    adapter_accepts_models,
+    resolve_adapter_id,
+)
 from nemo_agents_plugin.fabric.gateway_credentials import (
     bind_platform_gateway_model_credential,
     platform_gateway_credential_env,
@@ -179,19 +184,22 @@ def _adapter_id_for_harness(harness: HarnessConfig) -> str:
         raise FabricTranslationError(str(error)) from error
 
 
-def _resolve_model(config: AgentConfig, harness_name: str, harness: HarnessConfig) -> ModelConfig:
+def _resolve_model(config: AgentConfig, harness_name: str, harness: HarnessConfig) -> ModelConfig | None:
+    """Return the harness's primary model, or None for an adapter that takes no models."""
     if harness.model is not None:
         return harness.model
 
     model = config.models.get("default")
     if model is None:
+        if not adapter_accepts_models(_adapter_id_for_harness(harness)):
+            return None
         raise FabricTranslationError(
             f"Harness {harness_name!r} does not define a model and no models.default is configured."
         )
     return model
 
 
-def _model_payloads(config: AgentConfig, selected: ModelConfig) -> dict[str, dict[str, Any]]:
+def _model_payloads(config: AgentConfig, selected: ModelConfig | None) -> dict[str, dict[str, Any]]:
     """Translate every configured model, keyed as the Platform config keys them.
 
     ``FabricConfig.models`` and the adapter contract's ``AgentConfig.models`` are
@@ -202,12 +210,13 @@ def _model_payloads(config: AgentConfig, selected: ModelConfig) -> dict[str, dic
 
     ``selected`` is always published as ``default`` — that is the key adapters
     treat as the primary model, and ``harness.model`` outranks ``models.default``
-    when both are set.
+    when both are set. It is None only for an adapter that takes no models.
     """
     payloads = {
         key: bind_platform_gateway_model_credential(_model_payload(model)) for key, model in config.models.items()
     }
-    payloads["default"] = bind_platform_gateway_model_credential(_model_payload(selected))
+    if selected is not None:
+        payloads["default"] = bind_platform_gateway_model_credential(_model_payload(selected))
     return payloads
 
 
@@ -306,7 +315,7 @@ def _tools_config(config: AgentConfig) -> Any:
         raise FabricTranslationError(str(error)) from error
 
 
-def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig) -> None:
+def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig | None) -> None:
     telemetry = config.telemetry
     if not telemetry.enabled:
         return
@@ -372,7 +381,7 @@ def _telemetry_agent_name(config: AgentConfig) -> str:
     return config.telemetry.agent_name or config.name
 
 
-def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict[str, Any]:
+def _relay_observability_config(config: AgentConfig, model: ModelConfig | None) -> dict[str, Any]:
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
     observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
@@ -385,7 +394,9 @@ def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict
         if telemetry.output_dir is not None:
             atif.setdefault("output_directory", telemetry.output_dir)
         atif.setdefault("agent_name", agent_name)
-        atif.setdefault("model_name", model.model)
+        # An adapter that takes no models has none to name here.
+        if model is not None:
+            atif.setdefault("model_name", model.model)
         observability["atif"] = atif
 
     if telemetry.atof is not None:
