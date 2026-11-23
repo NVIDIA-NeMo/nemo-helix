@@ -287,3 +287,35 @@ async def test_async_get_execution_profiles_parses_list_response() -> None:
 
     assert isinstance(profiles, list)
     assert {p.backend for p in profiles} == {"subprocess", "e2e"}
+
+
+@pytest.mark.parametrize("attempt_id", [None, "current", "attempt-previous"])
+def test_status_attempt_selector_is_an_optional_keyword(attempt_id: str | None) -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_STATUS_JSON)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        client = JobsClient(base_url=BASE, http_client=http)
+        assert client.get_job_status(name="my-job", workspace="default", attempt_id=attempt_id).data().id == "job-1"
+    assert seen[0].url.path.endswith("/jobs/my-job/status")
+    assert dict(seen[0].url.params) == ({"attempt_id": attempt_id} if attempt_id is not None else {})
+
+
+@pytest.mark.parametrize("attempt_id", [None, "current", "attempt-previous"])
+async def test_async_status_attempt_selector_is_an_optional_keyword(attempt_id: str | None) -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_STATUS_JSON)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        client = AsyncJobsClient(base_url=BASE, http_client=http)
+        assert (
+            await client.get_job_status(name="my-job", workspace="default", attempt_id=attempt_id)
+        ).data().id == "job-1"
+    assert seen[0].url.path.endswith("/jobs/my-job/status")
+    assert dict(seen[0].url.params) == ({"attempt_id": attempt_id} if attempt_id is not None else {})

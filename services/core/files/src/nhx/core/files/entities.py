@@ -13,6 +13,8 @@ from nhx.common.files.metadata import FilesetMetadata
 from nhx.core.files.app.backends.factory import StorageConfig
 from pydantic import Field
 
+DEFAULT_COMMIT_REVISION = "00000000-0000-0000-0000-000000000000"
+
 
 class Fileset(EntityBase):
     """Fileset domain model - represents a fileset entity."""
@@ -30,6 +32,10 @@ class Fileset(EntityBase):
     metadata: FilesetMetadata = Field(
         default_factory=FilesetMetadata,
         description="Purpose-specific metadata for the fileset.",
+    )
+
+    commit_revision: str = Field(
+        default=DEFAULT_COMMIT_REVISION, description="Opaque token assigned on creation and explicit commit."
     )
 
     custom_fields: Dict[str, Any] = Field(default_factory=dict, description="Custom fields for the fileset.")

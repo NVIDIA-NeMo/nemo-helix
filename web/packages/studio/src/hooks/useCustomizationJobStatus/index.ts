@@ -20,7 +20,7 @@ import {
 } from '@nemo/sdk/generated/customizer/unsloth-jobs';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { CustomizationBackend } from '@studio/util/customizationBackend';
-import { skipToken, useQuery } from '@tanstack/react-query';
+import { type QueryKey, skipToken, useQuery } from '@tanstack/react-query';
 
 interface StatusEndpoint {
   fetchStatus: (
@@ -28,20 +28,23 @@ interface StatusEndpoint {
     name: string,
     signal?: AbortSignal
   ) => Promise<HelixJobStatusResponse>;
-  getQueryKey: (workspace: string, name: string) => readonly string[];
+  getQueryKey: (workspace: string, name: string) => QueryKey;
 }
 
 const STATUS_ENDPOINTS: Record<CustomizationBackend, StatusEndpoint> = {
   automodel: {
-    fetchStatus: customizationGetAutomodelJobStatus,
+    fetchStatus: (workspace, name, signal) =>
+      customizationGetAutomodelJobStatus(workspace, name, undefined, signal),
     getQueryKey: getCustomizationGetAutomodelJobStatusQueryKey,
   },
   unsloth: {
-    fetchStatus: customizationGetUnslothJobStatus,
+    fetchStatus: (workspace, name, signal) =>
+      customizationGetUnslothJobStatus(workspace, name, undefined, signal),
     getQueryKey: getCustomizationGetUnslothJobStatusQueryKey,
   },
   rl: {
-    fetchStatus: customizationGetRlJobStatus,
+    fetchStatus: (workspace, name, signal) =>
+      customizationGetRlJobStatus(workspace, name, undefined, signal),
     getQueryKey: getCustomizationGetRlJobStatusQueryKey,
   },
 };
@@ -53,7 +56,7 @@ export const getCustomizationJobStatusQueryKey = (
   backend: CustomizationBackend,
   workspace: string,
   name: string
-): readonly string[] => STATUS_ENDPOINTS[backend].getQueryKey(workspace, name);
+): QueryKey => STATUS_ENDPOINTS[backend].getQueryKey(workspace, name);
 
 export interface UseCustomizationJobStatusResult {
   steps: HelixJobStepStatusResponse[];

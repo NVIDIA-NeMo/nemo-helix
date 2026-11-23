@@ -12,6 +12,7 @@ import pytest
 from nemo_helix_ext.cli.core import waiters
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError
+from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 
 WAITERS_MODULE = "nemo_helix_ext.cli.core.waiters"
@@ -156,7 +157,7 @@ def test_wait_for_platform_job_returns_true_on_completed(frozen_time: MagicMock)
 
     assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default") is True
 
-    jobs.get_job_status.assert_called_once_with(workspace="default", name="job-a")
+    jobs.get_job_status.assert_called_once_with(workspace="default", name="job-a", attempt_id=None)
     frozen_time.assert_called()
 
 
@@ -395,3 +396,12 @@ def test_wait_for_gateway_reraises_unexpected_errors(frozen_time: MagicMock) -> 
 def test_sleep_until_next_poll_rejects_non_positive_poll_interval() -> None:
     with pytest.raises(ValueError, match=r"_sleep_until_next_poll.*poll_interval"):
         waiters._sleep_until_next_poll(0.0, 10.0, 0)
+
+
+def test_watched_jobs_client_forwards_attempt_selector() -> None:
+    response = httpx.Response(200, json=_status_response("completed").data().model_dump(mode="json"))
+    with _scripted_client([response]) as client:
+        jobs = waiters._WatchedJobsClient(JobsClient.from_client(client))
+        status = jobs.get_job_status(workspace="default", name="job-a", attempt_id="attempt-7")
+        assert jobs.last_status == status.data()
+    assert response.request.url.params["attempt_id"] == "attempt-7"

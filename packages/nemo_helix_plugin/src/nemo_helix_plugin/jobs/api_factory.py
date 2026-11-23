@@ -1674,16 +1674,22 @@ def job_route_factory(
         async def get_job_status(
             workspace: str,
             name: str,
+            attempt_id: str | None = Query(default=None),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobStatusResponse:
             f"""Get the status of a job by name for the {service_name} microservice."""
             jobs_client = AsyncJobsClient.from_client(async_client)
             checked_job = await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
-            job_resp = (
-                await jobs_client.get_job_status(
-                    name=checked_job.id if checked_job is not None else name, workspace=workspace
-                )
-            ).data()
+            try:
+                job_resp = (
+                    await jobs_client.get_job_status(
+                        name=checked_job.id if checked_job is not None else name,
+                        workspace=workspace,
+                        attempt_id=attempt_id,
+                    )
+                ).data()
+            except NemoHTTPError as exc:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
             return HelixJobStatusResponse(**job_resp.model_dump())
 
         @router.delete(

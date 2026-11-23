@@ -31,6 +31,17 @@ def test_fileset(files_client: FilesClient, random_workspace: str) -> dict:
     return {"workspace": random_workspace, "name": fileset.name}
 
 
+def test_commit_fileset(runner: NhxCliRunner, files_client: FilesClient, test_fileset: dict) -> None:
+    previous = files_client.get_fileset(**test_fileset).data().commit_revision
+    result = runner.invoke(
+        app, f"files filesets commit {test_fileset['name']} --workspace {test_fileset['workspace']} -f json"
+    )
+    assert_exit_code(result, 0)
+    revision = json.loads(result.stdout)["commit_revision"]
+    assert revision and revision != previous
+    assert files_client.get_fileset(**test_fileset).data().commit_revision == revision
+
+
 class TestFilesetsUpload:
     """Tests for filesets upload command."""
 

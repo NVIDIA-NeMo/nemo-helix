@@ -63,8 +63,9 @@ class _WatchedJobsClient:
         *,
         workspace: str | None = None,
         name: str,
+        attempt_id: str | None = None,
     ) -> NemoResponse[HelixJobStatusResponse]:
-        response = self._jobs_client.get_job_status(workspace=workspace, name=name)
+        response = self._jobs_client.get_job_status(workspace=workspace, name=name, attempt_id=attempt_id)
         self.last_status = response.data()
         return response
 
@@ -86,7 +87,7 @@ class _WatchedJobsClient:
         timeout: float | None = None,
         include_history: bool = True,
         include_logs: bool = True,
-        attempt_id: int | None = None,
+        attempt_id: str | None = None,
         step_id: str | None = None,
         task_id: str | None = None,
         limit: int | None = None,

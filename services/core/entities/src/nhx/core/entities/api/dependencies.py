@@ -5,7 +5,7 @@
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from nemo_helix_plugin.auth.access import AuthContextAccessRule
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import get_auth_client
@@ -16,13 +16,14 @@ from nhx.core.entities.app.repository import (
     dep_workspace_repository,
     get_async_session_maker,
 )
-from nhx.core.entities.app.repository.field_policy import ProtectedEntityField
+from nhx.core.entities.app.repository.field_policy import EntityFieldPolicies, ProtectedEntityField
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AUTH_CONTEXT_FIELD = ProtectedEntityField("_auth_context")
 
 
 def dep_entity_repository_with_session(
+    request: Request,
     session_maker: async_sessionmaker[AsyncSession] = Depends(get_async_session_maker),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> EntityRepositoryInterface:
@@ -31,7 +32,12 @@ def dep_entity_repository_with_session(
     policy = AUTH_CONTEXT_FIELD.bind(
         policy_enabled=access.policy_enabled, can_read=access.can_read, can_write=access.can_write
     )
-    return dep_entity_repository(session_maker, policy)
+    workflow_policy = ProtectedEntityField("workflow_state").bind(
+        policy_enabled=auth_client.auth_enabled and request.path_params.get("entity_type") == "platform_job_attempt",
+        can_read=True,
+        can_write=auth_client.principal.id == "service:jobs" and not auth_client.principal.is_delegated,
+    )
+    return dep_entity_repository(session_maker, EntityFieldPolicies((policy, workflow_policy)))
 
 
 def dep_workspace_repository_with_session(

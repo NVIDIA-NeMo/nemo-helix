@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from nemo_helix_plugin.jobs.workflows import WorkflowView
 from nemo_helix_plugin.schema import Value
 from pydantic import BaseModel, Field, field_validator
 
@@ -186,6 +187,8 @@ class HelixJobStepStatusResponse(BaseModel):
 
 
 class HelixJobStatusResponse(BaseModel):
+    attempt_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    workflow: WorkflowView | None = Field(default=None, exclude_if=lambda value: value is None)
     id: str
     name: str
     status: HelixJobStatus

@@ -28,6 +28,7 @@ class _FilesMethods:
     delete_fileset_by_id = method(endpoints.delete_fileset_by_id)
     update_fileset = method(endpoints.update_fileset)
     delete_fileset = method(endpoints.delete_fileset)
+    commit_fileset = method(endpoints.commit_fileset)
     refresh_fileset = method(endpoints.refresh_fileset)
     list_files = method(endpoints.list_files)
     upload_file = method(endpoints.upload_file)

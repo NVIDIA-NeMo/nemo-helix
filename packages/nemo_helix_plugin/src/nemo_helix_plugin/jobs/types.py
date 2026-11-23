@@ -343,6 +343,7 @@ class HelixJobStepWithContext(BaseModel):
         description="ID of the platform job. Unlike the job name, it is never reused by a later job.",
     )
     attempt_id: str
+    workflow_held: bool = False
     fileset: str
     artifact_base_path: str | None = Field(
         default=None,
@@ -534,6 +535,10 @@ class ListAttemptsQueryParams(TypedDict, total=False):
 
 class ListJobResultsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
+    attempt_id: NotRequired[str]
+
+
+class JobStatusQueryParams(TypedDict, total=False):
     attempt_id: NotRequired[str]
 
 

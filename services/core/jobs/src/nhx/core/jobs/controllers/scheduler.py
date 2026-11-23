@@ -178,6 +178,8 @@ class JobScheduler(HeartbeatMixin, Controller):
             begin_pass()
         # Round-robin across users so one user's backlog cannot starve others when capacity is scarce.
         for step in round_robin_by_user(steps):
+            if step.workflow_held:
+                continue
             with start_span_with_ctx(
                 tracer, "jobs_scheduler/schedule_step", JobContext(id=step.job, step_name=step.name)
             ):
