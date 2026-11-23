@@ -41,6 +41,18 @@ describe('registered agent target identity', () => {
     { kind: 'harbor', source: { agent: { name: 'my-agent' } } },
     { kind: 'gym', source: { agent: '  ' } },
     { format: 'generic', name: 'my-agent', url: 'https://api.example.com/v1/chat/completions' },
+    {
+      format: 'generic',
+      url: `https://api.example.com/v1/chat/completions?next=/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/agents/my-agent/-/v1/chat/completions`,
+    },
+    {
+      format: 'generic',
+      url: `https://api.example.com/v1/chat/completions#/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/agents/my-agent/-/`,
+    },
+    {
+      format: 'generic',
+      url: `http://localhost:8080/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/agents/%/-/v1/chat/completions`,
+    },
   ])('does not attribute unrelated or malformed targets: %j', (target) => {
     expect(agentIdentityForTarget(target, DEFAULT_WORKSPACE)).toBeNull();
     expect(agentNameForTarget(target, DEFAULT_WORKSPACE)).toBeNull();
@@ -59,5 +71,10 @@ describe('registered agent target identity', () => {
         DEFAULT_WORKSPACE
       )
     ).toBe('other/my-agent');
+  });
+
+  it('decodes percent-encoded agent names from the route', () => {
+    const url = `http://localhost:8080/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/agents/my%20agent/-/v1/chat/completions`;
+    expect(agentNameForTarget({ format: 'generic', url }, DEFAULT_WORKSPACE)).toBe('my agent');
   });
 });
