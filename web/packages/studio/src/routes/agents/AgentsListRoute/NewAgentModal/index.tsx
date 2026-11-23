@@ -50,6 +50,7 @@ import {
 import {
   type GitHubAgentSource,
   agentNameFromSource,
+  formatGitHubSource,
   githubTokenSecretDefaults,
   parseGitHubSource,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
@@ -194,7 +195,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
   const watchedDefaultModel = useWatch({ control, name: 'defaultModel' });
-  const needsModel = onGitHubTab ? modelRequiredForRepo === watchedRepoUrl : uploadNeedsModel;
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -206,6 +206,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     }
   }, [watchedRepoUrl]);
   const repoSource = parsedRepo.source;
+  const repoKey = repoSource ? formatGitHubSource(repoSource) : null;
+  const needsModel = onGitHubTab
+    ? repoKey !== null && modelRequiredForRepo === repoKey
+    : uploadNeedsModel;
   // Held back until the field is left, so the message is not a running commentary on typing.
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
@@ -346,7 +350,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
-    const defaultModel = formData.defaultModel || undefined;
+    // A choice made for another source must never bind silently into this one.
+    const defaultModel = needsModel ? formData.defaultModel || undefined : undefined;
     deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
       if (onGitHubTab) {
@@ -372,7 +377,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       // An orphaned fileset is recoverable, so the next submit replaces it.
       setReplaceArmedFor(error instanceof AgentSpecFilesetOrphanError ? name : null);
       if (error instanceof DefaultModelRequiredError && onGitHubTab) {
-        setModelRequiredForRepo(watchedRepoUrl);
+        setModelRequiredForRepo(repoKey);
       }
     }
   };

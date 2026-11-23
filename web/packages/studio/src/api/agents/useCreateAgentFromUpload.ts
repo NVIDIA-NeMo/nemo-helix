@@ -20,7 +20,6 @@ export interface CreateAgentFromUploadParams {
   workspace: string;
   name: string;
   entries: UploadAgentEntry[];
-  /** Substituted for `${NEMO_DEFAULT_MODEL}`; registration is refused without it when the config uses one. */
   defaultModel?: string;
   replaceOrphanedFileset?: boolean;
 }

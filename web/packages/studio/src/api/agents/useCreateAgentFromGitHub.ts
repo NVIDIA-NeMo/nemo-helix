@@ -27,7 +27,6 @@ export interface CreateAgentFromGitHubParams {
   source: GitHubAgentSource;
   /** Workspace secret holding a personal access token. Omit for a public repository. */
   secretName?: string;
-  /** Substituted for `${NEMO_DEFAULT_MODEL}`; registration is refused without it when the config uses one. */
   defaultModel?: string;
   replaceOrphanedFileset?: boolean;
 }

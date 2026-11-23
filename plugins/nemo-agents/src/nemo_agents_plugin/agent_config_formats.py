@@ -69,8 +69,7 @@ class _NemoAgentsSpecConfigHandler:
         if contains_default_model_placeholder(config):
             raise InvalidAgentConfigError(
                 "Invalid agent config: it references ${NEMO_DEFAULT_MODEL}, which the platform cannot resolve. "
-                "Replace it with an explicit model name such as 'default/my-model', or register with the nemo CLI "
-                "or Python SDK, which substitute your selected default model."
+                "Set an explicit model name in the agent config, such as 'default/my-model'."
             )
         return self._normalize(config)
 

@@ -220,7 +220,7 @@ export const agentNameFromConfig = (config: Record<string, unknown>): string | u
 
 export const DEFAULT_MODEL_PLACEHOLDER = '${NEMO_DEFAULT_MODEL}';
 
-// Same tokens the CLI substitutes, `$$` being an escaped literal dollar.
+// Mirrors the CLI's expand_env_vars: `$$` escapes a literal dollar and is unescaped on substitution.
 const DEFAULT_MODEL_REFERENCE = /\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))/g;
 const ESCAPED_DOLLAR = '$$';
 
@@ -255,12 +255,11 @@ export const containsDefaultModelPlaceholder = (value: unknown): boolean => {
 export class DefaultModelRequiredError extends Error {
   constructor() {
     super(
-      `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, which only the nemo CLI can fill in. Choose a model, then register again.`
+      `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, which only the nemo CLI or Python SDK can fill in. Choose a model, then register again.`
     );
   }
 }
 
-/** Studio has no default model of its own, so a config that defers to one needs the user's choice. */
 export const bindDefaultModel = (
   config: RegisterAgentRequestConfig,
   model: string | undefined
@@ -275,7 +274,7 @@ export const bindDefaultModel = (
     text
       .split(ESCAPED_DOLLAR)
       .map((part) => part.replace(DEFAULT_MODEL_REFERENCE, () => model))
-      .join(ESCAPED_DOLLAR);
+      .join('$');
   return Object.fromEntries(
     Object.entries(config).map(([key, value]) => [key, mapConfigStrings(value, bind)])
   );

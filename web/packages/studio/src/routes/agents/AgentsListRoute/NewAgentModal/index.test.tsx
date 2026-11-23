@@ -637,7 +637,9 @@ describe('NewAgentModal GitHub import', () => {
     await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
     await submit(dialog, user);
 
-    expect(await within(dialog).findByText(/only the nemo CLI can fill in/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/only the nemo CLI or Python SDK can fill in/)
+    ).toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
     expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
@@ -649,6 +651,48 @@ describe('NewAgentModal GitHub import', () => {
 
     await waitFor(() => expect(created).toHaveLength(1));
     expect(created[0]?.config?.models?.default?.model).toBe(`${workspace}/my-model`);
+  });
+
+  it('keeps asking for a model when only the formatting of the repository URL changes', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+    await within(dialog).findByLabelText('Model');
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository URL' }), ' ');
+
+    expect(within(dialog).getByLabelText('Model')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('does not reuse a model chosen for an upload when importing a repository', async () => {
+    const user = userEvent.setup();
+    const { created } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(DEFAULT_MODEL_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickDirectory(dialog, [makeFile('calc-agent/agent.yaml', DEFAULT_MODEL_YAML)]);
+    fireEvent.change(await within(dialog).findByLabelText('Model'), {
+      target: { value: `${workspace}/upload-model` },
+    });
+
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/only the nemo CLI or Python SDK can fill in/)
+    ).toBeInTheDocument();
+    expect(created).toHaveLength(0);
   });
 
   it('reads a private repository with the chosen access token secret', async () => {

@@ -367,15 +367,15 @@ describe('containsDefaultModelPlaceholder', () => {
 });
 
 describe('bindDefaultModel', () => {
-  it('substitutes every reference, leaving escaped dollars and other values alone', () => {
+  it('substitutes every reference and unescapes $$ the way the CLI does', () => {
     const config = {
       models: { default: { model: '${NEMO_DEFAULT_MODEL}', temperature: 0 } },
-      notes: ['$NEMO_DEFAULT_MODEL then $${NEMO_DEFAULT_MODEL}', '$OTHER'],
+      notes: ['$NEMO_DEFAULT_MODEL costs $$5', '$OTHER'],
     };
 
     expect(bindDefaultModel(config, 'ws/model')).toEqual({
       models: { default: { model: 'ws/model', temperature: 0 } },
-      notes: ['ws/model then $${NEMO_DEFAULT_MODEL}', '$OTHER'],
+      notes: ['ws/model costs $5', '$OTHER'],
     });
   });
 
