@@ -39,7 +39,7 @@ Choose `remote` when a build service outside the cluster must build and publish 
 - **Copy a published image.** A spec whose source is an image (`source.image`) is refused.
 - **Mount files into a build.** A spec with `mounts` is refused: the service takes one build context.
 - **Show a build log.** A failed image's row carries the step's one-line reason and, once a build was started, the service's ID for it.
-- **Build an evals task that names a prebuilt image.** Evals copies a prebuilt image through Builder, and this backend refuses copies. A task that names a prebuilt image, for main, the verifier or a compose service, can't be built, and runs then refuse the task.
+- **Build an evals task that names a prebuilt image.** Evals copies a prebuilt image through Builder, and this backend refuses copies. A task that names a prebuilt image, for main, the verifier or a compose service, can't be built. Once its build is requested on `remote`, the failed attempt is its newest build, and runs refuse the task.
 - **Build an evals agent layer.** A layer build needs `mounts`. A layer this cluster built before a switch is used until it is too old for the run. Past that, the task runs on its own image and its trials install the agent during setup.
 
 ## Before you begin
@@ -54,11 +54,11 @@ Choose `remote` when a build service outside the cluster must build and publish 
 
 ### Upgrade before you switch
 
-Set `backend: remote` only once every part of the release already knows the backend. Do it in two rollouts:
+Set `backend: remote` only once every part of the release already knows the backend. Do it in this order:
 
 1. Upgrade the release in a rollout of its own: every API pod, the controllers, `builder-settle` among them, and the `nhx-tasks` image evals' build Jobs run in.
 2. Upgrade users' SDK and CLI.
-3. Then set `backend: remote`.
+3. Then set `backend: remote` in a second rollout, with a step image built from the release you upgraded to.
 
 A part from before the backend existed doesn't treat a remote build as one. The last paragraphs of the [Builder plugin's README section](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/README.md#building-through-a-service-outside-the-cluster) say what each older part does, and why not to go back to an older release once a remote build is recorded. The evals side of the same order is in [Switch the Builder backend](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#switch-the-builder-backend).
 
@@ -113,7 +113,7 @@ How the section is checked:
 
 Builder ships no step image. Yours needs three things:
 
-- **The Builder plugin's Python package**, `nemo-builder-plugin`, which holds the step's driver (`nemo_builder_plugin.run.remote`). The release's `nhx-builder-tasks` image, which the in-cluster steps run in, carries it. Build the step image from the same release as the platform, so the step and the API agree on the step's configuration and the completion request.
+- **The Builder plugin's Python package**, `nemo-builder-plugin`, which holds the step's driver (`nemo_builder_plugin.run.remote`). The release's `nhx-builder-tasks` image, which the in-cluster steps run in, carries it. Build the step image from the same release as the platform, so the step and the API agree on the step's configuration and the completion request. At each later platform upgrade, rebuild the step image from the new release, and change `remote.image` with the chart upgrade or after it, never before it: the API refuses a completion that carries a field it doesn't know, and a build keeps the `remote.image` it was submitted with.
 - **Your service's client**, which implements `RemoteBuildService`: three calls, `start`, `status` and `cancel`, and three error types that tell the driver whether to repeat a call, wait, or fail the image.
 - **A step program**, which `remote.command` names: a few lines that call `step_main` with a factory for that client.
 
@@ -343,7 +343,7 @@ platformConfig:
 | `config.image_pull_secrets` | Secrets in the step's namespace for pulling the step image, as a list of `name` entries, on top of the platform's `imagePullSecrets` |
 | `config.max_active_jobs` | The most build jobs running at once. Jobs starts a step on the profile only while fewer than this many run on it, and queues the rest. Set it to what the service lets this deployment queue. If unset, 500 |
 | `config.ttl_seconds_active` | The only limit Jobs puts on the running step. If unset, 86400 (24 h). See below |
-| `config.ttl_seconds_before_active` | How long the step may stay pending before Jobs fails it. If unset, 1800 (30 min) |
+| `config.ttl_seconds_before_active` | How long the step may stay pending before Jobs fails it. If unset, 1800 (30 min). An image pull that keeps failing ends it sooner |
 | `config.env` | Whatever the service's client reads from its environment, such as the service's address. Never the credential: Jobs returns a profile's settings, `env` included, to every user who lists the profiles |
 | `config.storage` | Only to mount the credential: see [Give the step its credential](#give-the-step-its-credential). The step needs no `pvc_name`: it keeps each build context on its pod's task storage, an `emptyDir` |
 
@@ -475,7 +475,7 @@ Add the step's namespace, the credential, the `remote` settings and the profile 
 Evals takes task images from the backend `builder.backend` names. It reads that key itself, from the configuration its API reads, which with this chart is the one Builder reads. There is nothing to set under `evals`. [Task image builds](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#task-image-builds) has the rule, and [Switch the Builder backend](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#switch-the-builder-backend) the steps. In short:
 
 - A request for a task's image build returns the task's ready build only when the current backend built every image of it. Otherwise it starts a new attempt on the current backend. So a task is built again the next time its build is requested.
-- Evals requests no build by itself. Once the rollout has finished, request each taskset's builds once: `nemo evals tasksets build-images <taskset>`.
+- Evals requests no build by itself. Once the rollout has finished, request each taskset's builds once: `nemo evals tasksets build-images <taskset>`. Leave out a taskset that holds a task naming a prebuilt image, or expect its runs to be refused: such a task goes on running on its in-cluster build until its build is requested, and the request leaves a failed attempt as its newest build.
 - Until a new build of a task is requested, a run takes the task's ready build, whichever backend built it.
 - Evals submits each image as a build set of one spec with no `output`, which the default `max_specs_per_set: 1` takes.
 - A task that names a prebuilt image can't be built on `remote`, and no agent layer can: see [What it can't do today](#what-it-cant-do-today).
@@ -525,7 +525,7 @@ Then put every chart value from this page in one values file, here `builder-remo
 
 5. Submit one build. Builder has no CLI command, so call its API. The spec names no `output`, no `mounts` and no platform. With platform auth on, the request must carry your credentials: one that names no one is answered `401`. Add `-H "Authorization: Bearer $(nemo auth token)"` to this request and to the one in the next step. [Using Authentication](/documentation/access-control/authentication/using-authentication) has the login that the token comes from.
 
-   - `curl` doesn't read the CLI's context. Both requests go to the URL in this shell's `NHX_BASE_URL`, if it holds the deployment's, and otherwise to `http://localhost:8080`. For the second, forward the API Service there first, as [Install](/documentation/kubernetes-deployment/setup/helm/install#verify-the-deployment) does: `kubectl port-forward svc/<api-service> 8080:8080 -n "$NHX_NAMESPACE"`.
+   - `curl` doesn't read the CLI's context. Both requests go to `NHX_BASE_URL` when this shell sets it, so check that it is the deployment's, and otherwise to `http://localhost:8080`. To use localhost, forward the API Service there first, as [Install](/documentation/kubernetes-deployment/setup/helm/install#verify-the-deployment) does: `kubectl port-forward svc/<api-service> 8080:8080 -n "$NHX_NAMESPACE"`.
 
    ```bash
    curl -s -X POST "${NHX_BASE_URL:-http://localhost:8080}/apis/builder/v2/workspaces/default/builds" \
@@ -618,12 +618,14 @@ A failed row's `status_detail` starts with one of these:
 | `not built: its build job ended (<status>) without publishing it: <reason>` | The job ended and the image wasn't completed. `<reason>` is the step's line for the image, or else Jobs' own message. In a set of many images, some rows have no reason |
 | `not built: its build job was not found (never created, or deleted)` | The row is five minutes old and has no job. Submit the next revision |
 | `not built: <set> revision <n> was already submitted under another backend` | Part of this revision was already submitted under the other backend, so the rows this request wrote were failed. Submit the next revision |
+| `not built: <set> revision <n> belongs to a different request` | Part of this revision is held by another request, so the rows this request wrote were failed. Submit the next revision |
 
 The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <reason>`. Once a build was started, the reason ends with `[build <id>]`, the service's ID for it.
 
 | `<reason>` | What to do |
 | --- | --- |
 | `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise the one it names |
+| `Image pull did not succeed within <n>s (<reasons>): <detail>` | Jobs gave up pulling the step image. `<n>` is the profile's `ttl_seconds_image_pull`, 600 if unset. Check `remote.image`, or the profile's `default_task_image`, and the image pull secrets in the step's namespace |
 | `the step could not start: RuntimeError: NHX_BUILD_REMOTE_CREDENTIAL not set: the build service's credential did not reach this step` | `credential_secret` is set and the secret's value didn't reach the step. Check the secret holds a value |
 | `the step could not start: RuntimeError: the build service's credential is empty: the step's Jobs profile did not mount it` | The step program reads a mounted credential and found none. Mount it, or set `credential_secret` |
 | `the step could not start: RuntimeError: the build service's credential could not be read: <why>` | The step program's `read_credential` failed. Check the mount and its path |
@@ -636,7 +638,7 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 | `the build service published '<reference>', not a digest in <registry>/<repository>` | `remote.registry` and `remote.repository` aren't where the service publishes |
 | `it was built, but the builder refused to complete it: <error>` | Builder answered the completion with a refusal. See the next table |
 | `it was built, but the builder could not be told: <error>` | The completion kept failing for five minutes. With a `503`, see the next table. Otherwise the API couldn't be reached |
-| `cancelled: the job was told to stop` | The job was cancelled |
+| `cancelled: the job was told to stop` | The step was told to stop: the job was cancelled, or Jobs ended the step at a limit (see the first row) |
 
 If the reason ends with `the build service could not be told to stop it, it may still be running`, or with `a build may be running, started with key <key>`, a build may be left running at the service. Cancel it there.
 
@@ -657,6 +659,9 @@ The step's reason quotes Builder's answer. For a `403`, the API log has it too, 
 | `503` | `Couldn't check which job the caller is a step of; try again.` | Builder couldn't read the platform's record of the caller, or its own settings. Check the `builder` and `auth` sections |
 | `409` | `<image> is built by a build service; its completion must name the build` | The completion named no build (`external.build_id`). The driver always names one, so the caller wasn't the driver |
 | `409` | `<image> is already ready as <digest>, not <digest>` | Another completion came first, with another digest. The row keeps the first |
+| `409` | `<image> is already ready at <digest>, as another build's image` | Another completion came first, with the same digest and another `external`, the handle of another build. The row keeps the first |
+| `409` | `<image> is already ready at <digest>, with another runtime configuration` | Another completion came first, with the same digest and `external` and another `runtime_config`. The row keeps the first |
+| `409` | `<image> has already failed (<status_detail>); ready is not reachable from it` | The row had already failed, for the reason it quotes, when the step came to complete it. A failed row stays failed. Submit the next revision |
 
 ### An evals build fails after a switch
 
