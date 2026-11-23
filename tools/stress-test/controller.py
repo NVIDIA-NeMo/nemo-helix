@@ -357,6 +357,14 @@ def _submitted_at(payload: dict[str, object], fallback: float) -> float:
     return fallback
 
 
+def _terminal_seen_at(payload: dict[str, object], fallback: float) -> float:
+    """When the wait first saw the job terminal. Cleanup deletes jobs one at a time, so the clock then is later."""
+    value = payload.get("terminal_seen_at")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return fallback
+
+
 def _note(payload: dict[str, object], status: str) -> None:
     raw = payload.get("status_history")
     history = [item for item in raw if isinstance(item, str)] if isinstance(raw, list) else []
@@ -405,6 +413,8 @@ def _wait(
                 _save(run_dir, step.id, name, payload)
                 continue
             _note(payload, job.status)
+            if job.status in TERMINAL:
+                payload.setdefault("terminal_seen_at", now)
             _save(run_dir, step.id, name, payload)
             if job.status not in TERMINAL:
                 pending = True
@@ -449,7 +459,7 @@ def _finalize(
         if shell and job is not None and job.status == "completed":
             payload["download_succeeded"] = False
             payload["fileset_copy_succeeded"] = False
-            payload["finished_at"] = clock()
+            payload["finished_at"] = _terminal_seen_at(payload, clock())
             log.info("stopped %s", name)
         elif body is None:
             payload["download_succeeded"] = False
@@ -567,7 +577,7 @@ def _record_barrier_exit(
     payload["exit_reason"] = reason
     payload["terminal"] = job is not None and job.status in TERMINAL
     if job is not None and job.status in TERMINAL:
-        payload["finished_at"] = clock()
+        payload["finished_at"] = _terminal_seen_at(payload, clock())
     if reason == "barrier" and job is not None and job.status == "completed":
         log.info("stopped %s: barrier", name)
         return
