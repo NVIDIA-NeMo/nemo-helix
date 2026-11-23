@@ -52,6 +52,9 @@ INTENSITY_GARAK: dict[str, dict[str, int]] = {
     "thorough": {"generations": 5, "max_attempts_per_tool": 10},
 }
 
+_GUARDRAILS_STABLE_IMPL = "agent_hardener.agents.defenders.guardrails_defender:run"
+_GUARDRAILS_LEGACY_IMPL = "agent_hardener.agents.defenders.guardrails_defender_v2.guardrails_defender_agent:run"
+
 # Defender override entries mirroring agent_hardener.manifest._default_defenders (name + implementation +
 # capabilities — agent-hardener's SessionConfig validator requires a non-empty `capabilities`). Selecting a
 # subset replaces the default defender list via the manifest's `overrides.defenders` (agent-hardener merges
@@ -74,7 +77,7 @@ DEFENDER_ENTRIES: dict[str, dict[str, Any]] = {
     },
     "guardrails": {
         "name": "defender-guardrails",
-        "implementation": "agent_hardener.agents.defenders.guardrails_defender_v2.guardrails_defender_agent:run",
+        "implementation": _GUARDRAILS_STABLE_IMPL,
         "timeout_seconds": 300,
         "capabilities": (
             "Mitigates prompt injection, unsafe tool invocations, sensitive content disclosure, "
@@ -82,6 +85,34 @@ DEFENDER_ENTRIES: dict[str, dict[str, Any]] = {
         ),
     },
 }
+
+
+def _resolve_guardrails_implementation(venv_path: Path | None = None) -> str:
+    """Pick the guardrails defender entry point shipped by the provisioned agent-hardener venv.
+
+    agent-hardener >= 0.0.19 moved the entry point to guardrails_defender:run and removed
+    guardrails_defender_v2; 0.0.18 only ships guardrails_defender_v2.
+    """
+    if venv_path is None:
+        try:
+            from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+
+            venv_path = AgentHardenerConfig.get().venv_path
+        except Exception:
+            return _GUARDRAILS_STABLE_IMPL
+    for defenders_dir in venv_path.glob("lib/python*/site-packages/agent_hardener/agents/defenders"):
+        if (defenders_dir / "guardrails_defender.py").is_file():
+            return _GUARDRAILS_STABLE_IMPL
+        if (defenders_dir / "guardrails_defender_v2" / "guardrails_defender_agent.py").is_file():
+            return _GUARDRAILS_LEGACY_IMPL
+    return _GUARDRAILS_STABLE_IMPL
+
+
+def _defender_entry(key: str) -> dict[str, Any]:
+    entry = dict(DEFENDER_ENTRIES[key])
+    if key == "guardrails":
+        entry["implementation"] = _resolve_guardrails_implementation()
+    return entry
 
 
 def _safety_model(data: dict[str, Any]) -> str | None:
@@ -138,7 +169,7 @@ def _apply_manifest_overrides(manifest: dict[str, Any], data: dict[str, Any]) ->
     # to contain, so it applies to every victim. Gating on `agent.workflow` (a NAT-era leftover) meant
     # selecting defenders in Studio silently dropped this one and scored 0 blocked, while selecting
     # none — which falls through to agent-hardener's defaults — hardened normally.
-    entries = [DEFENDER_ENTRIES[key] for key in enabled]
+    entries = [_defender_entry(key) for key in enabled]
     if safety_model:
         if any(entry["name"] == DEFENDER_ENTRIES["guardrails"]["name"] for entry in entries):
             entries = _with_safety_llm(entries, safety_model)
