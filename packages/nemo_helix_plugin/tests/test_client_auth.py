@@ -301,6 +301,23 @@ class TestAsyncNemoClientAuth:
         assert route.called
         assert route.calls[0].request.headers["Authorization"] == "Bearer sync-token"
 
+    @respx.mock
+    def test_str_token_works_in_async_client(self):
+        """AsyncNemoClient coerces a plain string token into StaticToken like NemoClient."""
+        route = respx.get("http://localhost:8080/test").mock(return_value=httpx.Response(200, json={"ok": True}))
+        client = AsyncNemoClient(base_url="http://localhost:8080", auth="raw-async-token")
+
+        from nemo_helix_plugin.client.types import PreparedRequest
+
+        req = PreparedRequest(
+            method="GET", path_template="/test", path_params={}, content=None, content_type=None, response_type=None
+        )
+
+        asyncio.run(client.send(req))
+
+        assert route.called
+        assert route.calls[0].request.headers["Authorization"] == "Bearer raw-async-token"
+
     def test_constructor_does_not_bootstrap_workload_identity_from_env(self, monkeypatch, tmp_path):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token\n", encoding="utf-8")

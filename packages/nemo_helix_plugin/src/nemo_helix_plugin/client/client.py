@@ -1129,7 +1129,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         *,
         base_url: str,
         workspace: str | None = None,
-        auth: AsyncClientTokenProvider | None = None,
+        auth: AsyncClientTokenProvider | str | None = None,
         default_headers: Mapping[str, str] | None = None,
         timeout: float | httpx.Timeout | None = None,
         retry: RetryPolicy | None = None,
@@ -1150,7 +1150,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             timeout=timeout,
             client_runtime=resolved_runtime,
         )
-        self._auth = auth
+        self._auth = StaticToken(auth) if isinstance(auth, str) else auth
         self._owns_http = http_client is None if owns_http_client is None else owns_http_client
         self._http = http_client or AsyncClient(
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
