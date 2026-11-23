@@ -12,6 +12,7 @@ import {
   getSubtleToolDetail,
   getSubtleToolIcon,
   getSubtleToolMessage,
+  resolveToolName,
 } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import type { FileChangeSummary } from '@nemo/common/src/components/AssistantChat/toolCall/types';
 import {
@@ -104,8 +105,9 @@ export const ToolCallStep = ({
   isError,
   result,
   running,
-  toolName,
+  toolName: rawToolName,
 }: ToolCallStepProps) => {
+  const toolName = resolveToolName(rawToolName);
   const toolArgs = toAssistantToolArgs(args);
   const fileChange = isError ? undefined : getFileChangeSummary(toolName, toolArgs, argsText ?? '');
   const { action, detail } = getTitleParts(toolName, toolArgs, running, fileChange);

@@ -6,6 +6,8 @@ import {
   SUBTLE_TOOL_ICONS,
   TOOL_ICONS,
   TOOL_LABELS,
+  TOOL_NAME_ALIASES,
+  TOOL_RUNNING_ACTIONS,
 } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import type {
   FileChangeSummary,
@@ -21,6 +23,33 @@ import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { NvidiaGuiIconProps } from '@nemo/icons';
 import { WindowTerminal } from '@nemo/icons/icons';
 import type { FC } from 'react';
+
+const normalizeToolName = (toolName: string): string =>
+  toolName
+    .replace(/^mcp__.+?__/, '')
+    .toLowerCase()
+    .replace(/[_-]/g, '');
+
+const BUILT_IN_TOOL_NAMES = new Map(
+  [
+    ...Object.keys(TOOL_LABELS),
+    ...Object.keys(TOOL_RUNNING_ACTIONS),
+    ...Object.keys(SUBTLE_TOOL_ICONS),
+    ...Object.keys(TOOL_NAME_ALIASES),
+  ].flatMap((name) =>
+    [name, ...(TOOL_NAME_ALIASES[name] ?? [])].map(
+      (alias) => [normalizeToolName(alias), name] as const
+    )
+  )
+);
+
+/**
+ * Resolves a tool name to the built-in tool it matches, ignoring case, `_`, `-`, an
+ * `mcp__<server>__` prefix, and aliases: `mcp__browser__web_search` resolves to `WebSearch`.
+ * Returns the name unchanged when it matches no built-in tool.
+ */
+export const resolveToolName = (toolName: string): string =>
+  BUILT_IN_TOOL_NAMES.get(normalizeToolName(toolName)) ?? toolName;
 
 const getStringArg = (args: AssistantToolArgs, keys: string[]): string | undefined => {
   for (const key of keys) {
@@ -371,10 +400,11 @@ export const getSubtleToolGroupActions = (args: AssistantToolArgs): readonly Sub
   }
 
   return actions.filter(isPlainObject).flatMap((action, index): SubtleToolAction[] => {
-    const toolName = getRawStringArg(action, ['toolName'])?.trim();
-    if (!toolName) {
+    const rawToolName = getRawStringArg(action, ['toolName'])?.trim();
+    if (!rawToolName) {
       return [];
     }
+    const toolName = resolveToolName(rawToolName);
     const actionArgs = isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {};
     if (!getSubtleToolMessage(toolName, actionArgs)) {
       return [];
