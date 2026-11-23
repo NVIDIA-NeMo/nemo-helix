@@ -832,16 +832,34 @@ What an operator sets up:
   written in full: a profile added under `jobs.executors`
   inherits nothing from `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
   security context, as the chart does for the in-cluster build profiles. Its `max_active_jobs` caps
-  the builds in flight, so set it to what the service lets the deployment queue. Its
-  `ttl_seconds_active` is the only limit Jobs puts on the running step, and Jobs counts it from when
-  the build was submitted, so it must cover the longest a build waits for a slot as well as the
-  build. The limit a submit checks it against is a floor: it leaves out fetching each context and
-  up to five minutes of reporting a built image, so set the profile's limit above it. Whatever the service's client reads from its environment is set there too, and so is the
+  the build jobs that run at once. A job is one set, built an image at a time, so running jobs wait
+  on at most that many builds at the service: set it to what the service lets the deployment queue.
+  A build whose step was killed holds no slot once its job has ended, and may still be running at
+  the service (see [Reliability](#reliability)). Its
+  `ttl_seconds_active` is the only time limit Jobs puts on the step once its pod is running, and Jobs
+  counts it from when the build was submitted, so it must cover the longest a build waits for a slot
+  as well as the build. The limit a submit checks it against is a floor: it leaves out fetching each context and
+  up to five minutes of reporting a built image, so set the profile's limit above it. Other
+  limits of the profile can end a step that has its slot before its pod is running:
+  `ttl_seconds_before_active`, once Jobs has recorded no change to the step for that long, 30
+  minutes by default, in the same words as `ttl_seconds_active` (`Job timed out after reaching max
+  TTL of <n> seconds`: the number says which), and `ttl_seconds_image_pull` when an image can't be
+  pulled. Whatever the service's client reads from its environment is set there too, and so is the
   network path to the service: a Jobs profile has no egress setting. A profile in a namespace other
   than the release's also needs what the chart creates only for the in-cluster builder: a Role and
   RoleBinding there for the Jobs controller, the ServiceAccount the profile names, with
   `sandboxClusterCapable` a Secret under the OpenSandbox key's name (Jobs gives every job pod a
-  reference to it), and a namespace-qualified `platform.base_url`.
+  reference to it), and, where the chart puts a network policy on the API (`networkPolicies.enabled`,
+  with `networkPolicies.api.enabled`, its default), an ingress rule that admits that namespace's
+  step pods (`networkPolicies.api.extraIngress`). The chart copies image pull
+  secrets nowhere: Jobs gives the step's pod the platform's `imagePullSecrets` and the profile's by
+  name, so create them in that namespace too. And the step's pod must be able to resolve and reach
+  `platform.base_url`, which Jobs hands to every step by default. The chart's default names the API's Service
+  without its namespace. With workload token exchange off, the Service's namespace-qualified address
+  is enough, and the chart sets it when `builder.enabled`. With it on, the address must be an
+  `https://` one, as that mode requires of `platform.base_url` anyway (see
+  [Credential Propagation](../../docs/auth/deployment/credential-propagation.mdx)): a step's client
+  sends its token over plain HTTP to loopback only.
 - The credential, which is in reach of more than the step either way, so give the service one that
   can do no more than build into the one repository, and that can be replaced.
   Set `credential_secret`, which names a platform secret, whether or not the platform uses
@@ -852,7 +870,7 @@ What an operator sets up:
   is refused with `409` `missing_secrets`. Each of them can read its value too, through a job of
   their own that names it. It is otherwise kept as any platform secret is, which is not from
   everything inside the cluster (see [Security](#security)). Write it as `<workspace>/<name>`: a
-  bare name is read from each submitter's own workspace.
+  bare name is read from the workspace the build is submitted in.
   The other way is for the profile to mount it, as a Kubernetes Secret volume
   (`storage.additional_volumes`, with a read-only `storage.additional_volume_mounts` entry that
   mounts it in the step), and that way it reaches further. Jobs gives whatever a profile carries
@@ -897,19 +915,21 @@ What an operator sets up:
   that record is as sure as the namespace is closed. So the remote-build profile must name a
   namespace where no other workload and no user may create pods. Never the build namespace
   while the in-cluster build's profiles are deployed: its `build-control` step may create pods
-  there (see [Security](#security)). A submit is refused while the remote-build profile names
-  the namespace of the `control_profile` that Jobs lists. The builder can't see what else may
+  there (see [Security](#security)). A submit is refused while the remote-build profile has
+  the same `namespace` setting as the `control_profile` that Jobs lists. The two are compared as
+  written, so one left unset matches only another left unset. The builder can't see what else may
   create pods where the step runs.
 
-A deployment that can't run the step refuses every submit with `409` and says what is missing: the
-registry or repository, the profile, a step image, a profile whose limit is below one full set's
+A deployment that can't run the step refuses every submit with `409` and says what is missing or
+wrong: the registry or repository, the profile, a profile on a Jobs backend other than
+`kubernetes_job`, a step image, a profile whose `ttl_seconds_active` is below one full set's
 build timeouts plus two minutes, or a `default_platform` the service doesn't build. Last, it
 refuses a platform that can't show who completes an image. One with platform auth on and workload
 token exchange off, unless `allow_unverified_completion` is set: the answer names the setting and
 what turning it on accepts. One with platform auth on whose settings for token exchange can't be
 read, whatever that setting is: `complete` admits no one there, since the platform may be
-verifying its workloads. And one with workload token exchange on whose remote-build profile names
-the namespace of the in-cluster build step's profile.
+verifying its workloads. And one with platform auth and workload token exchange on whose
+remote-build profile has the same `namespace` setting as the in-cluster build step's profile.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
 under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
@@ -1442,8 +1462,8 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   wherever a record carries one, which the platform's doesn't yet. That record is the
   platform's word about a pod in the step's namespace, and it is as sure as that namespace is
   closed: whatever else can create a pod where the step runs is inside what the check trusts.
-  The builder refuses a remote-build profile that names the namespace of the in-cluster build
-  step's profile, whose steps may create pods there, and can see no further: the step must run
+  The builder refuses a remote-build profile with the same `namespace` setting as the in-cluster
+  build step's profile, whose steps may create pods there, and can see no further: the step must run
   in a namespace where nothing but Jobs can create a pod. And the step is taken at its word:
   the check shows which step is calling, not that the digest it sends is the image the
   service built, so a row is worth what the deployment's step image and its client are.
