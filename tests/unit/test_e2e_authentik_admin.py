@@ -80,7 +80,7 @@ def test_app_password_is_written_privately_without_logging_the_key(
 
     assert len(requests) == 3
     body = requests[1].data
-    assert body is not None
+    assert isinstance(body, bytes)
     assert json.loads(body) == {"identifier": identifier, "intent": "app_password", "user": 42, "expiring": False}
     assert output.read_text() == APP_PASSWORD
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -108,7 +108,8 @@ def test_set_email_patches_only_when_the_address_differs(
     assert len(requests) == len(responses)
     if current_email != target_email:
         body = requests[-1].data
-        assert body is not None and json.loads(body) == {"email": target_email}
+        assert isinstance(body, bytes)
+        assert json.loads(body) == {"email": target_email}
 
 
 def test_app_password_for_a_missing_user_does_not_create_a_file(
