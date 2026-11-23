@@ -11,6 +11,7 @@ import { AGENT_CONFIG_FILENAME } from '@studio/routes/agents/AgentsListRoute/New
 import type { UploadAgentEntry } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import {
   agentSpecFilesetName,
+  bindDefaultModel,
   parseAgentConfig,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
@@ -19,6 +20,8 @@ export interface CreateAgentFromUploadParams {
   workspace: string;
   name: string;
   entries: UploadAgentEntry[];
+  /** Substituted for `${NEMO_DEFAULT_MODEL}`; registration is refused without it when the config uses one. */
+  defaultModel?: string;
   replaceOrphanedFileset?: boolean;
 }
 
@@ -29,13 +32,14 @@ export const createAgentFromUpload = async ({
   workspace,
   name,
   entries,
+  defaultModel,
   replaceOrphanedFileset = false,
 }: CreateAgentFromUploadParams): Promise<Agent> => {
   const filesetName = agentSpecFilesetName(name);
 
   const configEntry = entries.find((entry) => entry.path === AGENT_CONFIG_FILENAME);
   if (!configEntry) throw new Error(`No ${AGENT_CONFIG_FILENAME} in the selected directory.`);
-  const config = parseAgentConfig(await configEntry.file.text());
+  const config = bindDefaultModel(parseAgentConfig(await configEntry.file.text()), defaultModel);
 
   await claimFileset(workspace, name, filesetName, replaceOrphanedFileset);
 

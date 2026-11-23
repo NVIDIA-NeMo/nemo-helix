@@ -5,8 +5,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
+import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { hasModelProvider } from '@nemo/common/src/utils/models';
 import {
   getAgentsListAgentsQueryKey,
   useAgentsRegisterAgent,
@@ -17,6 +19,7 @@ import {
   Banner,
   Button,
   Flex,
+  FormField,
   Label,
   Select,
   Stack,
@@ -61,6 +64,9 @@ import { useTraceAgentNames } from '@studio/routes/agents/AgentsListRoute/NewAge
 import {
   agentNameFromConfig,
   collectAgentEntries,
+  containsDefaultModelPlaceholder,
+  DEFAULT_MODEL_PLACEHOLDER,
+  DefaultModelRequiredError,
   findNonUtf8Path,
   parseAgentConfig,
   pickedFromDataTransfer,
@@ -83,7 +89,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
+import { Controller, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 
 export const NewAgentModal: FC<NewAgentModalProps> = ({
   open,
@@ -115,6 +121,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
+  const [uploadNeedsModel, setUploadNeedsModel] = useState(false);
+  // GitHub's agent.yaml is only read during registration, so the need surfaces as that attempt's error.
+  const [modelRequiredForRepo, setModelRequiredForRepo] = useState<string | null>(null);
   // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
   const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
   const deployOnCreate = useDeployOnCreate(workspace, { enabled: open });
@@ -184,6 +193,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
+  const watchedDefaultModel = useWatch({ control, name: 'defaultModel' });
+  const needsModel = onGitHubTab ? modelRequiredForRepo === watchedRepoUrl : uploadNeedsModel;
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -213,6 +224,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setReplaceArmedFor(null);
     setRepoBlurred(false);
     setTracedAgent('');
+    setUploadNeedsModel(false);
+    setModelRequiredForRepo(null);
     onClose();
   };
 
@@ -226,6 +239,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setEntries([]);
     setSelectionError(undefined);
     setReplaceArmedFor(null);
+    setUploadNeedsModel(false);
     return () => selection !== selectionSeq.current;
   };
 
@@ -261,6 +275,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       setValue('name', initialName ?? agentNameFromConfig(config) ?? '', {
         shouldValidate: true,
       });
+      setUploadNeedsModel(containsDefaultModelPlaceholder(config));
     } catch (error) {
       if (superseded()) return;
       setEntries([]);
@@ -331,6 +346,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
+    const defaultModel = formData.defaultModel || undefined;
     deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
       if (onGitHubTab) {
@@ -340,14 +356,24 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           name,
           source: repoSource,
           secretName: formData.secretKey?.trim() || undefined,
+          defaultModel,
           replaceOrphanedFileset: replaceOrphan,
         });
         return;
       }
-      await createAgent({ workspace, name, entries, replaceOrphanedFileset: replaceOrphan });
+      await createAgent({
+        workspace,
+        name,
+        entries,
+        defaultModel,
+        replaceOrphanedFileset: replaceOrphan,
+      });
     } catch (error) {
       // An orphaned fileset is recoverable, so the next submit replaces it.
       setReplaceArmedFor(error instanceof AgentSpecFilesetOrphanError ? name : null);
+      if (error instanceof DefaultModelRequiredError && onGitHubTab) {
+        setModelRequiredForRepo(watchedRepoUrl);
+      }
     }
   };
 
@@ -384,6 +410,32 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   const busy = isPending || isCreatingTraced || deployOnCreate.isDeploying;
   const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
+  const awaitingModel = needsModel && !watchedDefaultModel;
+
+  const defaultModelField = needsModel ? (
+    <Controller
+      control={control}
+      name="defaultModel"
+      render={({ field }) => (
+        <FormField
+          slotLabel="Model"
+          slotHelp={`${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, the default model the nemo CLI fills in. Studio has no default of its own, so choose the model this agent will use.`}
+        >
+          <WorkspaceModelSelect
+            workspace={workspace}
+            include={hasModelProvider}
+            value={field.value ? { model: field.value } : null}
+            onValueChange={({ model }) => field.onChange(model)}
+            placeholder="Select a model"
+            disabled={field.disabled}
+            hideAdapters
+            fullWidth
+            aria-label="Model"
+          />
+        </FormField>
+      )}
+    />
+  ) : null;
 
   const deployFields = (
     <DeployOnCreateFields
@@ -415,10 +467,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         loading={busy}
         submitDisabled={
           onGitHubTab
-            ? !repoSource || awaitingDeployModes
+            ? !repoSource || awaitingDeployModes || awaitingModel
             : onTracesTab
               ? !tracedAgent
-              : entries.length === 0 || awaitingDeployModes
+              : entries.length === 0 || awaitingDeployModes || awaitingModel
         }
         slotFooterRight={
           onCreateTab ? undefined : (
@@ -497,6 +549,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   status: agentNameError ? 'error' : undefined,
                 }}
               />
+              {defaultModelField}
               {deployFields}
             </Stack>
           </TabsContent>
@@ -545,6 +598,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   status: agentNameError ? 'error' : undefined,
                 }}
               />
+              {defaultModelField}
               {deployFields}
             </Stack>
           </TabsContent>

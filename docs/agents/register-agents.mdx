@@ -107,6 +107,21 @@ Deployments and evaluations stage that fileset beside `agent.yaml`, so relative 
 working. The Python SDK registers the config only; use the CLI or Studio when the agent has other
 files.
 
+### Default Model
+
+An `agent.yaml` can set a model to `${NEMO_DEFAULT_MODEL}` (or `$NEMO_DEFAULT_MODEL`) instead of
+naming one. Each registration path fills it in before the agent is created, so the agent always
+stores an explicit model:
+
+- **CLI and Python SDK** use the default model chosen in `nemo setup`, or the `NEMO_DEFAULT_MODEL`
+  environment variable when it is set. With neither, registration fails and asks you to pick one.
+- **Studio** has no default model of its own, so it asks you to choose a model from the workspace.
+  For a code upload it asks as soon as the folder is selected. For a GitHub import it asks after
+  the first **Register** attempt reads `agent.yaml`.
+
+The API rejects a `nemo-agents-spec-v1` config that still holds the placeholder, because nothing
+fills it in at deploy time.
+
 Config files must contain a YAML mapping; `{}` is accepted as an empty config.
 API and SDK registration use `config.config_format` when the outer `config_format`
 is omitted. If both are supplied, they must match. Nonempty configs without a

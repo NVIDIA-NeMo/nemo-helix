@@ -217,3 +217,66 @@ export const parseAgentConfig = (text: string): RegisterAgentRequestConfig => {
 
 export const agentNameFromConfig = (config: Record<string, unknown>): string | undefined =>
   typeof config.name === 'string' && config.name.trim() ? config.name.trim() : undefined;
+
+export const DEFAULT_MODEL_PLACEHOLDER = '${NEMO_DEFAULT_MODEL}';
+
+// Same tokens the CLI substitutes, `$$` being an escaped literal dollar.
+const DEFAULT_MODEL_REFERENCE = /\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))/g;
+const ESCAPED_DOLLAR = '$$';
+
+const mapConfigStrings = (value: unknown, map: (text: string) => string): unknown => {
+  if (typeof value === 'string') {
+    return map(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => mapConfigStrings(item, map));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, mapConfigStrings(item, map)])
+    );
+  }
+  return value;
+};
+
+export const containsDefaultModelPlaceholder = (value: unknown): boolean => {
+  if (typeof value === 'string') {
+    return value.split(ESCAPED_DOLLAR).some((part) => part.search(DEFAULT_MODEL_REFERENCE) !== -1);
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsDefaultModelPlaceholder);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some(containsDefaultModelPlaceholder);
+  }
+  return false;
+};
+
+export class DefaultModelRequiredError extends Error {
+  constructor() {
+    super(
+      `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, which only the nemo CLI can fill in. Choose a model, then register again.`
+    );
+  }
+}
+
+/** Studio has no default model of its own, so a config that defers to one needs the user's choice. */
+export const bindDefaultModel = (
+  config: RegisterAgentRequestConfig,
+  model: string | undefined
+): RegisterAgentRequestConfig => {
+  if (!containsDefaultModelPlaceholder(config)) {
+    return config;
+  }
+  if (!model) {
+    throw new DefaultModelRequiredError();
+  }
+  const bind = (text: string) =>
+    text
+      .split(ESCAPED_DOLLAR)
+      .map((part) => part.replace(DEFAULT_MODEL_REFERENCE, () => model))
+      .join(ESCAPED_DOLLAR);
+  return Object.fromEntries(
+    Object.entries(config).map(([key, value]) => [key, mapConfigStrings(value, bind)])
+  );
+};

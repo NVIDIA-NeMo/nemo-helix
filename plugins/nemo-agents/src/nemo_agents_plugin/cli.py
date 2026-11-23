@@ -41,7 +41,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -3266,7 +3265,7 @@ def _validate_agent_config_for_register(
     command runs before it touches the API; ``redeploy`` reuses it as a
     fail-fast gate so a bad config aborts before any destructive teardown.
     """
-    from nemo_agents_plugin.utils import inject_default_model
+    from nemo_agents_plugin.utils import contains_default_model_placeholder, inject_default_model
 
     if agent_config is None:
         return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, AgentRegistration()
@@ -3300,7 +3299,7 @@ def _validate_agent_config_for_register(
     # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
     # no user context at deploy time.
     config_dict = inject_default_model(config_dict)
-    if _contains_default_model_placeholder(config_dict):
+    if contains_default_model_placeholder(config_dict):
         typer.echo(
             "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
             "default model is selected. Run `nemo setup` to pick one, or "
@@ -3527,25 +3526,6 @@ def _load_yaml(path: Path) -> Any:
             location = f" at line {mark.line + 1}, column {mark.column + 1}"
         typer.echo(f"Error: invalid YAML in agent config {path}{location}: {problem}", err=True)
         raise typer.Exit(code=1) from error
-
-
-# Mirrors ``nemo_agents_plugin.utils._ENV_VAR_PATTERN`` semantics: matches
-# ``${NEMO_DEFAULT_MODEL}`` and bare ``$NEMO_DEFAULT_MODEL`` (with an
-# identifier-boundary lookahead so ``$NEMO_DEFAULT_MODELX`` is not matched).
-_DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
-
-
-def _contains_default_model_placeholder(value: Any) -> bool:
-    """Return True if *value* still contains an unresolved ``NEMO_DEFAULT_MODEL`` reference."""
-    if isinstance(value, str):
-        # Honor ``$$`` escape the same way ``expand_env_vars`` does.
-        protected = value.replace("$$", "\0DOLLAR\0")
-        return _DEFAULT_MODEL_PLACEHOLDER.search(protected) is not None
-    if isinstance(value, dict):
-        return any(_contains_default_model_placeholder(v) for v in value.values())
-    if isinstance(value, list):
-        return any(_contains_default_model_placeholder(v) for v in value)
-    return False
 
 
 def _validate_platform_agent_config_for_cli(config: dict[str, Any], *, base_dir: Path) -> dict[str, Any]:
