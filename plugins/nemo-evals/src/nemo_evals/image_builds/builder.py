@@ -42,6 +42,8 @@ ENDED_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
 #: creates its job after, so a request that reads the row in between (any of many tasks sharing one build) sees no
 #: job yet. Longer than any submit takes; short enough that a submit that died between the two is retried soon.
 JOB_GRACE = timedelta(minutes=2)
+#: Builder's role for an image that isn't the one a workload runs as its main container, such as a sidecar.
+HELPER_ROLE = "helper"
 
 
 class ImageBuilder(Protocol):
@@ -60,8 +62,14 @@ class ImageBuilder(Protocol):
         dockerfile: str | None,
         platform: str | None,
         mounts: Sequence[BuildMount] = (),
+        role: str | None = None,
     ) -> SubmitBuildResponse:
-        """Submit (or rejoin) one build, or copy, of one image; for the deployment's platform when ``platform`` is None."""
+        """Submit (or rejoin) one build, or copy, of one image; for the deployment's platform when ``platform`` is None.
+
+        ``role`` is the role Builder is told the image has (:data:`HELPER_ROLE`). None, as for every image a
+        workload runs as its main container, names none: the request is then the one it was before a build could
+        name a role.
+        """
         ...
 
     async def image_platforms(self, image: str) -> list[str]:
@@ -73,14 +81,21 @@ class ImageBuilder(Protocol):
         ...
 
 
-def builder_name(*, context_digest: str, dockerfile: str, platform: str | None = None) -> str:
+def builder_name(*, context_digest: str, dockerfile: str, platform: str | None = None, role: str | None = None) -> str:
     """Builder build-set name for an image built from a context holding ``context_digest``'s files, for one platform.
 
     Keyed by content, not by which task archive holds it: tasks whose build contexts hold the same files share
     one build (see :func:`adopt_or_build`). A build for the deployment's default platform leaves ``platform``
     out of the key.
+
+    A build that names no ``role`` leaves that out of the key too, so it keeps the name it had before a build
+    could name one. A role is in the key because it is part of the request: Builder refuses one revision for two
+    requests, and a remote build service may test-run an image built with no role as a main container, which it
+    need not do for a helper. The same context built with a role and built with none is two builds.
     """
-    key = {"v": 3, "context": context_digest, "dockerfile": dockerfile}
+    key: dict[str, object] = {"v": 3, "context": context_digest, "dockerfile": dockerfile}
+    if role is not None:
+        key["role"] = role
     return f"{_BUILDER_NAME_PREFIX}{_key_hash(key, platform)}"
 
 
@@ -130,6 +145,7 @@ async def ensure_build(
     source: FileSetSource | ImageSource,
     dockerfile: str | None,
     platform: str | None = None,
+    role: str | None = None,
 ) -> SubmitBuildResponse:
     """Submit the newest revision of ``name`` again, or the next one when the newest failed.
 
@@ -138,6 +154,8 @@ async def ensure_build(
     deployment's default changes. And so does one submitted under another backend, after the deployment changed its
     backend. A 409 by which Builder refuses the request itself, whatever its revision, is raised instead, as a
     :class:`BuildRefused` with Builder's own detail.
+
+    ``role`` is as :meth:`ImageBuilder.submit` takes it, and goes with every revision submitted.
     """
     newest: ContainerImage | None = None
     revision = 1
@@ -147,7 +165,13 @@ async def ensure_build(
     if newest is not None and not await _abandoned(builder, newest):
         try:
             return await _submit_unless_refused(
-                builder, name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
+                builder,
+                name=name,
+                revision=revision - 1,
+                source=source,
+                dockerfile=dockerfile,
+                platform=platform,
+                role=role,
             )
         except ConflictError:
             logger.info(
@@ -156,7 +180,7 @@ async def ensure_build(
                 revision - 1,
             )
     return await _submit_unless_refused(
-        builder, name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+        builder, name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, role=role
     )
 
 
@@ -168,6 +192,7 @@ async def _submit_unless_refused(
     source: FileSetSource | ImageSource,
     dockerfile: str | None,
     platform: str | None,
+    role: str | None,
 ) -> SubmitBuildResponse:
     """Submit one revision, raising a 409 by which Builder refuses the request itself as a :class:`BuildRefused`.
 
@@ -175,7 +200,7 @@ async def _submit_unless_refused(
     """
     try:
         return await builder.submit(
-            name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+            name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, role=role
         )
     except ConflictError as exc:
         if _refuses_the_request(exc):
@@ -197,6 +222,7 @@ async def adopt_or_build(
     platform: str | None = None,
     built_after: datetime | None = None,
     backend: str | None = None,
+    role: str | None = None,
 ) -> ContainerImage:
     """The newest usable build of ``name``, submitting one only when there is none.
 
@@ -206,6 +232,10 @@ async def adopt_or_build(
     that loses that race reads the winner's build instead. A 409 by which Builder refuses the request itself
     is raised as a :class:`BuildRefused`, with Builder's own detail, whether it says so by its code or leaves no row
     at the revision. Giving up on a build other requests keep submitting is not one.
+
+    ``role`` is as :meth:`ImageBuilder.submit` takes it, and goes with each submit. It is no part of whether a
+    build is usable, which Builder's row doesn't say: a caller that names one puts it in ``name``
+    (:func:`builder_name`), so the builds read here were asked for with the same role.
 
     When the caller names a ``backend``, a build another backend made gets the next revision too: its image is
     where that backend published it. A build returned under another backend is then one Builder took just now, for
@@ -219,7 +249,13 @@ async def adopt_or_build(
             return newest
         try:
             submitted = await builder.submit(
-                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
+                name=name,
+                revision=revision,
+                source=source,
+                dockerfile=dockerfile,
+                platform=platform,
+                mounts=mounts,
+                role=role,
             )
         except ConflictError as exc:
             # Builder also answers 409 when it refuses the request before writing anything (no registry, unusable
@@ -317,8 +353,10 @@ class HttpImageBuilder:
         dockerfile: str | None,
         platform: str | None,
         mounts: Sequence[BuildMount] = (),
+        role: str | None = None,
     ) -> SubmitBuildResponse:
         # Only what is set: the client serializes with `exclude_unset`, and a copy takes no dockerfile or mounts.
+        # A request that names no role must not carry the key at all: a Builder API from before the field refuses it.
         options: dict[str, object] = {}
         if dockerfile is not None:
             options["dockerfile"] = dockerfile
@@ -326,6 +364,8 @@ class HttpImageBuilder:
             options["platform"] = platform
         if mounts:
             options["mounts"] = list(mounts)
+        if role is not None:
+            options["role"] = role
         spec = BuildSpec.model_validate({"source": source, **options})
         build_set = BuildSet(name=name, revision=revision, build_specs=[spec])
         return (await self._builder.submit_build(workspace=self._workspace, body=build_set)).data()

@@ -105,21 +105,31 @@ def _ready(name: str, created_at: datetime | None = None, *, backend: str = IN_C
 
 
 class _Builder:
-    """Builder whose builds are ready once submitted; records each submit's source, Dockerfile and mounts."""
+    """Builder whose builds are ready once submitted; records each submit's source, Dockerfile, mounts and role."""
 
     def __init__(self) -> None:
         self.rows: dict[str, ContainerImage] = {}
         self.submits: list[tuple[str, FileSetSource | ImageSource, str | None]] = []
         self.mounts: list[list[BuildMount]] = []
+        self.roles: list[str | None] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
         return self.rows.get(name)
 
     async def submit(
-        self, *, name: str, revision: int, source: Any, dockerfile: str | None, platform: str | None, mounts: Any = ()
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: Any,
+        dockerfile: str | None,
+        platform: str | None,
+        mounts: Any = (),
+        role: str | None = None,
     ):
         self.submits.append((name, source, dockerfile))
         self.mounts.append(list(mounts))
+        self.roles.append(role)
         self.rows[f"{name}-{revision}"] = _ready(f"{name}-{revision}")
         return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[self.rows[f"{name}-{revision}"]])
 
@@ -275,6 +285,18 @@ async def test_a_layer_is_recorded_without_the_keys_of_a_remote_build(
 
     assert layer.status == "ready"
     assert list(layer._get_data_fields()["image"]) == build_image_keys
+
+
+async def test_a_layer_is_submitted_with_no_role(entity_store, store_task, monkeypatch, tmp_path) -> None:
+    """A layer is the image a trial's agent runs in, as its sandbox's main container: its request names no role."""
+    _serve_archive(monkeypatch, _ENV)
+    spec, _ = await _requested(entity_store, store_task)
+    builder = _Builder()
+
+    layer = await _run(entity_store, spec, builder, _Files(), tmp_path)
+
+    assert layer.status == "ready"
+    assert builder.roles == [None]
 
 
 async def test_a_row_another_backend_built_under_the_layers_name_isnt_the_layer(

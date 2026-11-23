@@ -83,6 +83,8 @@ class _Builder:
         #: The 409 itself, when it is not Builder's own: what a proxy in front of it answers, say.
         self.response: httpx.Response | None = None
         self.submitted: list[int] = []
+        #: The role each submit named, in order: None when it named none.
+        self.roles: list[str | None] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
         revision = int(name.rsplit("-", 1)[1])
@@ -102,8 +104,10 @@ class _Builder:
         dockerfile: str | None,
         platform: str | None,
         mounts: Sequence[BuildMount] = (),
+        role: str | None = None,
     ) -> SubmitBuildResponse:
         self.submitted.append(revision)
+        self.roles.append(role)
         if revision in self.conflicting:
             body = {"detail": "a revision names one request"} | ({"code": self.code} if self.code else {})
             raise ConflictError(self.response or httpx.Response(409, json=body))
@@ -195,6 +199,17 @@ async def test_ensure_build_moves_past_a_revision_another_backend_built() -> Non
     assert submitted.job == "builder-harbor-env-0123456789ab-2"
 
 
+@pytest.mark.parametrize("role", [None, "helper"], ids=["no-role", "a-helper"])
+async def test_ensure_build_submits_every_revision_with_the_role_it_is_given(role: str | None) -> None:
+    """The revision it submits again and the one it moves on to are one request: a helper is a helper in both."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+
+    await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", role=role)
+
+    assert builder.submitted == [1, 2]
+    assert builder.roles == [role] * 2
+
+
 def test_builder_name_depends_on_the_contexts_contents_and_dockerfile() -> None:
     base = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
     name = builder_name(**base)
@@ -226,6 +241,16 @@ async def test_adopt_or_build_uses_a_usable_build_and_submits_only_without_one(
 
     assert builder.submitted == submitted
     assert image.name == f"harbor-env-0123456789ab-{revision}"
+
+
+@pytest.mark.parametrize("role", [None, "helper"], ids=["no-role", "a-helper"])
+async def test_adopt_or_build_submits_with_the_role_it_is_given(role: str | None) -> None:
+    builder = _Builder(["failed"])
+
+    await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile", role=role)
+
+    assert builder.submitted == [2]
+    assert builder.roles == [role]
 
 
 @pytest.mark.parametrize("existing", ["ready", "pending"])
@@ -511,6 +536,48 @@ async def test_http_builder_submits_one_unnamed_spec_per_image() -> None:
     assert [(image.name, image.status) for image in submitted.images] == [("harbor-env-0123456789ab-2", "pending")]
 
 
+async def test_http_builder_names_a_role_only_for_an_image_submitted_with_one() -> None:
+    """The spec gains the one key. Told there is no role, it carries no key for one, as in the request above.
+
+    A Builder API from before the field refuses a request that carries it, a null one included.
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json=_submitted("harbor-env-0123456789ab", 2).model_dump(mode="json"))
+
+    builder = _http_builder(handler)
+    for role in ("helper", None):
+        await builder.submit(
+            name="harbor-env-0123456789ab",
+            revision=2,
+            source=_SOURCE,
+            dockerfile="Dockerfile",
+            platform=None,
+            role=role,
+        )
+
+    as_a_helper, with_no_role = (json.loads(request.content) for request in requests)
+    assert as_a_helper == {
+        "name": "harbor-env-0123456789ab",
+        "revision": 2,
+        "build_specs": [
+            {
+                "source": {
+                    "fileset": "default/harbor-tasks",
+                    "archive": "sort/abc/task_archive",
+                    "context_path": "sort/tests",
+                },
+                "dockerfile": "Dockerfile",
+                "role": "helper",
+            }
+        ],
+    }
+    [spec] = with_no_role["build_specs"]
+    assert "role" not in spec
+
+
 async def test_http_builder_reads_an_image_and_reports_a_missing_one_as_none() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/harbor-env-0123456789ab-1"):
@@ -610,6 +677,34 @@ def test_a_platform_is_its_own_builder_build_set() -> None:
     )
 
 
+def test_a_role_is_its_own_builder_build_set() -> None:
+    """A role is part of the request, and Builder refuses one revision of a set for two requests.
+
+    So a context built as a helper and the same context built with no role, as a main image is, need a name each.
+    A remote build service may test-run the one with no role as a main container, so they aren't one build either.
+    """
+    built = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
+
+    assert builder_name(**built, role="helper") != builder_name(**built)
+    assert builder_name(**built, role=None) == builder_name(**built)
+    on_arm = builder_name(**built, platform="linux/arm64", role="helper")
+    assert on_arm not in {builder_name(**built, platform="linux/arm64"), builder_name(**built, role="helper")}
+
+
+def test_a_build_that_names_no_role_keeps_the_name_it_had_before_a_build_could_name_one() -> None:
+    """Builder keeps a build under its name, so a changed name loses every build made under the old one.
+
+    These names were computed before a name could carry a role. A build that names none must still get them, for
+    the default platform and for one it names, and so must a copy, which never names a role.
+    """
+    built = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
+
+    assert builder_name(**built) == "harbor-env-a3fbf8b60775"
+    assert builder_name(**built, platform="linux/arm64") == "harbor-env-6c7cf44341a0"
+    assert copy_builder_name("docker.io/library/ubuntu:24.04") == "harbor-img-e388da3c7138"
+    assert copy_builder_name("docker.io/library/ubuntu:24.04", "linux/arm64") == "harbor-img-ff3b4c68337f"
+
+
 class _RacingBuilder:
     """Builder's submit as it runs: the row is created atomically, then the job, with a pause in between.
 
@@ -638,6 +733,7 @@ class _RacingBuilder:
         dockerfile: str | None,
         platform: str | None,
         mounts: Sequence[BuildMount] = (),
+        role: str | None = None,
     ) -> SubmitBuildResponse:
         image_name, request = f"{name}-{revision}", source.model_dump_json()
         if image_name in self.rows:
