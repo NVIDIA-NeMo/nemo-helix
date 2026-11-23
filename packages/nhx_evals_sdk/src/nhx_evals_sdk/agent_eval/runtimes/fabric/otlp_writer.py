@@ -18,12 +18,6 @@ from typing import Any
 from google.protobuf.json_format import MessageToJson
 from google.protobuf.message import DecodeError
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_receiver import EXPORT_SUFFIX
-from nhx_evals_sdk.values.evidence import (
-    EVIDENCE_FORMAT_ATIF,
-    EVIDENCE_FORMAT_OTLP,
-    EVIDENCE_TRACE,
-    EvidenceDescriptor,
-)
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 logger = logging.getLogger(__name__)
@@ -141,24 +135,3 @@ def _drop(exports: list[Path]) -> None:
                 export,
                 error,
             )
-
-
-def register_trace_evidence(
-    descriptors: dict[str, EvidenceDescriptor], *, atif: Path | None, otlp: Path | None
-) -> None:
-    """File each trace under its format-qualified key, and the primary one under ``trace``.
-
-    OTLP takes the primary key when it exists, ATIF otherwise -- the rule Harbor and Gym follow, so
-    a metric that asks for neither format gets the same kind of answer whatever ran the trial.
-
-    The two are admitted on different terms. ATIF is registered on a path alone, because Fabric
-    declares it in the run's artifact manifest and ``ATIFTraceHandle`` validates it on read. OTLP is
-    one we wrote ourselves, so an empty file means the exporter never flushed and is not a trace.
-    """
-    admitted = [(atif, EVIDENCE_FORMAT_ATIF)] if atif is not None else []
-    if otlp is not None and otlp.is_file() and otlp.stat().st_size > 0:
-        admitted.append((otlp, EVIDENCE_FORMAT_OTLP))
-    for path, trace_format in admitted:
-        descriptor = EvidenceDescriptor(kind=EVIDENCE_TRACE, format=trace_format, ref=str(path))
-        descriptors[EVIDENCE_TRACE] = descriptor
-        descriptors[f"{EVIDENCE_TRACE}:{trace_format}"] = descriptor
