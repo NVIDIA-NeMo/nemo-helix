@@ -12,7 +12,8 @@
 # namespace, where the egress policy applies.
 set -eu
 
-USER_NAME=${NHX_CONTAINER_USER:-docker-user}
+# Fixed: the Gym host drops to this user, and the image's DOCKER_HOST and storage.conf name its uid.
+USER_NAME=docker-user
 USER_ID=$(id -u "$USER_NAME")
 RUN_DIR=/run/user/$USER_ID
 SOCKET=$RUN_DIR/podman/podman.sock

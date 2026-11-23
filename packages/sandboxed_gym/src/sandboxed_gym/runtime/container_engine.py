@@ -33,7 +33,7 @@ _CAP_SYS_ADMIN = 21
 
 # What the root-only setup runs with: a fixed PATH and the image's own settings for it, nothing else.
 _SETUP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-_SETUP_ENV_KEYS = ("NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_ENGINE_LOG", "NHX_CONTAINER_USER")
+_SETUP_ENV_KEYS = ("NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_ENGINE_LOG")
 
 # Kata boots its guest kernel with the agent's systemd target; a runc container sees the node's own
 # command line instead. Runtimes that boot without systemd still pass `agent.*` parameters.

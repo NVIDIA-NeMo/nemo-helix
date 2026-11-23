@@ -165,6 +165,9 @@ target:
     EXTERNAL_MODEL_API_KEY: default/my-model-api-key
 ```
 
+A job's `env_vars` and resolved `env_secrets` travel to the Gym host together and may total about
+90 KiB; Evaluator refuses a job over that limit.
+
 Do not use `env_vars` for API keys, tokens, passwords, or other secrets. Evaluator rejects
 credential-shaped `env_vars` for sandboxed jobs because environment code can read them.
 

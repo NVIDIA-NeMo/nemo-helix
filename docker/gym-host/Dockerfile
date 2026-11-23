@@ -142,7 +142,7 @@ WORKDIR /job/work
 
 EXPOSE 8080
 # Isolated, so the working directory (the job's workspace) is not on the import path.
-CMD ["python", "-I", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+CMD ["python", "-I", "-u", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime-base AS runtime
 # Copy the matching uv cache used by those component environments. In its own stage so the `podman`
