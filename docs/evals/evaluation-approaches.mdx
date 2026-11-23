@@ -98,6 +98,11 @@ uv run nemo evals retrieve-eval --spec \
   '{"dataset":"default/eval-beir","target":"default/embed-nim","k":[1,5,10,100]}'
 ```
 
+By default, `retrieve-eval` puts `query: ` before each query and `passage: ` before each passage. An
+embedder scores best with the prefixes it was trained with, so set `query_prefix` and `passage_prefix`
+on the target to match its training, for example
+`"target": {"embeddings": "default/embed-nim", "query_prefix": "", "passage_prefix": ""}`.
+
 The job writes the BEIR-compatible `eval_results.json` artifact with `ndcg_cut_k`, `recall_k`,
 `P_k`, and `map_cut_k` keys. Add `"baseline":"default/base-embed-nim"` to report relative
 `ndcg_cut_10` and `recall_10` without turning those measurements into a release gate.

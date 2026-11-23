@@ -151,6 +151,7 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(),
+            pooling="avg",
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
@@ -192,7 +193,8 @@ class TestEmbeddingExport:
             output_path=out,
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
-            cfg=_parity_config(pooling=pooling),
+            cfg=_parity_config(),
+            pooling=pooling,
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
@@ -211,14 +213,17 @@ class TestEmbeddingExport:
         saved_tokenizer = cast(PreTrainedTokenizerBase, AutoTokenizer.from_pretrained(out / "tokenizer"))
         assert saved_tokenizer.padding_side == padding_side
 
-    def test_dimensions_input_truncates_and_renormalizes(self, embedding_checkpoint, tmp_path):
-        """`dimensions` truncates then L2-renormalizes."""
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_dimensions_input_truncates_and_renormalizes(self, embedding_checkpoint, tmp_path, normalize):
+        """`dimensions` truncates then L2-renormalizes, even when full-width output is unnormalized."""
         onnx_path = export_onnx(
             model_path=embedding_checkpoint,
             output_path=tmp_path / "out-dims",
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(dimensions=True),
+            pooling="avg",
+            normalize=normalize,
             trust_remote_code=False,
             load_trust_remote_code=False,
         )
