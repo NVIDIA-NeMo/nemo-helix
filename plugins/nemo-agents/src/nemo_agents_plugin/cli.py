@@ -531,12 +531,23 @@ def _register_local_commands(app: typer.Typer) -> None:
             None,
             "--registry",
             "-r",
-            help="Remote registry URL (required when --publish is set).",
+            help="Registry to push to, without a URL scheme, e.g. nvcr.io/my-org (required when --publish is set).",
         ),
         push_tag: Optional[str] = typer.Option(
             None,
             "--push-tag",
-            help="Fully-qualified remote tag.  Defaults to '<registry>/<tag>'.",
+            help=(
+                "Fully-qualified remote tag.  Defaults to '<registry>/<tag>', with a UTC timestamp "
+                "appended to the tag when --tag is also omitted, so every push is unique."
+            ),
+        ),
+        nemo_version: Optional[str] = typer.Option(
+            None,
+            "--nemo-version",
+            help=(
+                "Published nemo-helix release the image pins, e.g. the one the target platform runs "
+                "(shown by `nemo cluster-info`). Defaults to this CLI's installed version. Fabric agents only."
+            ),
         ),
         output: Optional[Path] = typer.Option(
             None,
@@ -626,6 +637,10 @@ def _register_local_commands(app: typer.Typer) -> None:
                 err=True,
             )
             raise typer.Exit(code=1)
+        if config_format == NAT_WORKFLOW_CONFIG_FORMAT and nemo_version is not None:
+            typer.echo("Error: --nemo-version is only valid for Fabric agent packaging.", err=True)
+            raise typer.Exit(code=1)
+        contract_version = nemo_version.removeprefix("v") if nemo_version else None
 
         if no_build:
             _package_render_only(
@@ -645,8 +660,22 @@ def _register_local_commands(app: typer.Typer) -> None:
                 python_version=python_version,
                 nat_version=nat_version,
                 uv_version=uv_version,
+                contract_version=contract_version,
             )
             return
+
+        if publish:
+            from nemo_agents_plugin.container.registry import registry_has_credentials, registry_login_hint
+
+            assert registry is not None  # guaranteed by _validate_package_flags
+            has_credentials = registry_has_credentials(registry)
+            if has_credentials is False:
+                typer.echo(
+                    f"Error: Docker has no credentials for {registry}. {registry_login_hint(registry)}", err=True
+                )
+                raise typer.Exit(code=1)
+            if has_credentials is None:
+                typer.echo(f"Warning: could not read Docker's credential store to check {registry}.", err=True)
 
         from nemo_agents_plugin.container.builder import build_fabric_agent_image, build_nat_agent_image
         from nemo_agents_plugin.container.errors import AgentPackagingError
@@ -671,6 +700,7 @@ def _register_local_commands(app: typer.Typer) -> None:
                     generate_ignore=generate_ignore,
                     platforms=platform,
                     on_progress=typer.echo,
+                    contract_version=contract_version,
                 )
             else:
                 result_tag = build_nat_agent_image(
@@ -703,12 +733,19 @@ def _register_local_commands(app: typer.Typer) -> None:
             return
 
         from nemo_agents_plugin.container.publisher import docker_push
+        from nemo_agents_plugin.container.registry import registry_login_hint
 
         assert registry is not None  # guaranteed by _validate_package_flags
+        if push_tag is None and tag is None:
+            repository, _, version_tag = result_tag.rpartition(":")
+            if not repository or "/" in version_tag:
+                repository, version_tag = result_tag, "latest"
+            timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+            push_tag = f"{registry.rstrip('/')}/{repository}:{version_tag}-{timestamp}"
         try:
             remote = docker_push(local_tag=result_tag, registry=registry, push_tag=push_tag, on_progress=typer.echo)
         except AgentPackagingError as exc:
-            typer.echo(f"Error: {exc}", err=True)
+            typer.echo(f"Error: {exc}\n{registry_login_hint(registry)}", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"Published: {remote}")
 
@@ -742,6 +779,14 @@ def _validate_package_flags(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    if registry:
+        from nemo_agents_plugin.container.registry import registry_scheme_error
+
+        scheme_error = registry_scheme_error(registry)
+        if scheme_error:
+            typer.echo(f"Error: {scheme_error}", err=True)
+            raise typer.Exit(code=1)
 
     if format not in {"docker", "whl"}:
         typer.echo(f"Error: --format must be 'docker' or 'whl' (got '{format}').", err=True)
@@ -817,6 +862,7 @@ def _package_render_only(
     python_version: Optional[str],
     nat_version: Optional[str],
     uv_version: Optional[str],
+    contract_version: Optional[str] = None,
 ) -> None:
     """Implements the ``--no-build`` path: render files and exit."""
     # ``--format whl`` is rejected globally by ``_validate_package_flags``
@@ -843,6 +889,7 @@ def _package_render_only(
                 agent_version=agent_version,
                 agent_author=agent_author,
                 template_path=template,
+                contract_version=contract_version,
             )
         else:
             content = render_nat_dockerfile(

@@ -22,7 +22,7 @@ from nhx.platform_runner.schemas import (
     NotReadyServiceInfo,
     ServiceStatusBreakdown,
 )
-from nhx.platform_runner.version import get_platform_version, get_revision
+from nhx.platform_runner.version import get_architecture, get_platform_version, get_revision
 from opentelemetry.semconv.attributes import service_attributes
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,9 @@ def create_platform_health_router(
 
     @router.get("/cluster-info", operation_id="platform_cluster_info", response_model=ClusterInfo)
     async def cluster_info() -> ClusterInfo:
-        return ClusterInfo(platform_version=get_platform_version(), revision=get_revision())
+        return ClusterInfo(
+            platform_version=get_platform_version(), revision=get_revision(), architecture=get_architecture()
+        )
 
     @router.get("/status", operation_id="platform_status", response_model=HelixStatusResponse)
     async def status() -> HelixStatusResponse:

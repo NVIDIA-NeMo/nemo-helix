@@ -170,6 +170,50 @@ class TestClusterInfo:
         assert result.exit_code == 1
         assert str(status_code) in result.stderr
 
+    @pytest.mark.parametrize(
+        ("cluster_info", "expected", "absent"),
+        [
+            (
+                {"platform_version": "0.10.0", "revision": "abc", "architecture": "linux/amd64"},
+                ["Platform Version: 0.10.0", "Architecture: linux/amd64"],
+                [],
+            ),
+            ({"platform_version": "0.9.0", "revision": "abc"}, ["Platform Version: 0.9.0"], ["Architecture:"]),
+        ],
+    )
+    def test_shows_platform_version_and_architecture(
+        self,
+        tmp_path: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+        cluster_info: dict,
+        expected: list[str],
+        absent: list[str],
+    ) -> None:
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        status_resp = MagicMock(status_code=200)
+        status_resp.json.return_value = {
+            "status": "healthy",
+            "services": {"ready": [], "not_ready": []},
+            "controllers": {"healthy": True, "status": {}},
+        }
+        info_resp = MagicMock(status_code=200)
+        info_resp.json.return_value = cluster_info
+
+        def _get(url: str, **_kwargs: object) -> MagicMock:
+            return info_resp if url.endswith("/cluster-info") else status_resp
+
+        with (
+            patch("nemo_helix_ext.cli.core.context.CLIContext.get_base_url", return_value=_BASE_URL),
+            patch("nemo_helix_ext.cli.commands.quickstart.cli.http_get", side_effect=_get),
+        ):
+            result = runner.invoke(app, ["cluster-info"])
+        assert result.exit_code == 0
+        output = _strip(result.stderr)
+        for fragment in expected:
+            assert fragment in output, f"{fragment!r} not in output: {output!r}"
+        for fragment in absent:
+            assert fragment not in output
+
 
 class TestQuickstartInfo:
     def test_docker_unavailable_exits_one(

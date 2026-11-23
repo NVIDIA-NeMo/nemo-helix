@@ -702,8 +702,13 @@ def resolve_shared_render_params(
     agent_version: str | None = None,
     agent_author: str | None = None,
     metadata: dict[str, str] | None = None,
+    contract_version: str | None = None,
 ) -> SharedRenderParams:
-    """Resolve image, project, sandbox, and metadata fields shared by runtimes."""
+    """Resolve image, project, sandbox, and metadata fields shared by runtimes.
+
+    *contract_version* overrides the installed nemo-helix version, so the
+    sandbox image tag default follows the version the image pins.
+    """
     from nemo_agents_plugin.container.metadata import extract_agent_metadata
 
     has_pyproject = pyproject is not None and pyproject.exists()
@@ -728,7 +733,7 @@ def resolve_shared_render_params(
     sandbox_user_setup = ""
     sandbox_workdir_setup = ""
     sandbox_image_files = ""
-    contract_version = get_contract_version()
+    contract_version = contract_version or get_contract_version()
     if sandbox_runtime:
         profile = resolve_sandbox_profile(sandbox_runtime)
         sandbox_runtime_name = profile.name
@@ -908,11 +913,10 @@ def render_fabric_dockerfile(
         agent_version=agent_version,
         agent_author=agent_author,
         metadata=metadata,
+        # With a wheel, the version the image installs comes from the wheel, not the
+        # build host, so labels and the agent id describe what is actually inside.
+        contract_version=contract_version,
     )
-    # With a wheel, the version the image installs comes from the wheel, not the
-    # build host, so labels and the agent id describe what is actually inside.
-    if contract_version:
-        shared.contract_version = contract_version
 
     # A wheel is installed from the build context, so the version never has to
     # be resolvable from an index.
