@@ -73,6 +73,8 @@ EVALS_SOURCES = (
 #: What the guide copies from the chart, for a namespace the chart doesn't create.
 CHART_VALUES = ROOT / "k8s/helm/values.yaml"
 CHART_BUILD_NAMESPACE = ROOT / "k8s/helm/templates/builder/build-namespace.yaml"
+#: The chart, by whose paths the guide names the templates it renders to read a value back.
+CHART = CHART_VALUES.parent
 #: Each page the guide links into at a heading, by the link's address, and the file that holds its headings.
 #: The guide's links into itself have no address.
 LINKED = {
@@ -402,8 +404,9 @@ def test_the_guide_states_the_numbers_the_code_holds() -> None:
 
 
 def test_the_manifests_the_guide_copies_from_the_chart_are_the_charts() -> None:
-    """An operator applies these by hand, in a namespace the chart doesn't create: the Jobs controller's Role
-    there, a placeholder under the OpenSandbox key's name, and a way in to the API for the job pods."""
+    """What the guide copies from the chart for a namespace the chart doesn't create: the Jobs controller's Role
+    and a placeholder under the OpenSandbox key's name, which an operator applies there by hand, and the rule in
+    the chart's values that lets that namespace's job pods in to the API."""
     manifests = _yaml_documents(_section(NAMESPACE))
     values = yaml.safe_load(_text(CHART_VALUES))
     (role,) = [manifest for manifest in manifests if manifest.get("kind") == "Role"]
@@ -426,6 +429,21 @@ def test_the_manifests_create_what_the_profile_recipe_names() -> None:
     assert selected == {"kubernetes.io/metadata.name": config.namespace}
     # A command the guide runs in a namespace it names, not in the release's, runs where the step does.
     assert set(re.findall(r" -n ([a-z0-9-]+)", _text())) == {config.namespace}
+
+
+def test_the_templates_the_guide_renders_are_the_charts() -> None:
+    """A later values file's list replaces an earlier one's, and only a rendering shows what is left of it. The
+    guide names each template it renders by its path in the chart, and a path the chart doesn't hold renders
+    nothing to read."""
+    rendered = re.findall(r"--show-only (\S+)", _section(VERIFY))
+    missing = [path for path in rendered if not (CHART / path).is_file()]
+    assert rendered and not missing, f"the chart has no template at: {missing}"
+    # The rule the guide adds to the API's policy is read back from a template that renders that policy's list.
+    (values,) = [manifest for manifest in _yaml_documents(_section(NAMESPACE)) if "networkPolicies" in manifest]
+    (key,) = values["networkPolicies"]["api"]
+    templates = [_text(CHART / path) for path in rendered]
+    reads = [".Values.networkPolicies.api" in template and f".{key}" in template for template in templates]
+    assert any(reads), f"no template the guide renders reads networkPolicies.api.{key}"
 
 
 def test_the_mounted_credential_recipe_validates_and_is_where_the_step_program_reads() -> None:
