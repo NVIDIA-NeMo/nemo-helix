@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from nemo_deployments_plugin.auth_proxy import AUTH_PROXY_CONTAINER_NAME
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
@@ -88,7 +89,7 @@ from nemo_deployments_plugin.secrets import (
     resolve_deployment_config_secrets,
 )
 from nemo_deployments_plugin.types import NON_TERMINAL_DEPLOYMENT_STATUSES, Endpoint, RestartPolicy
-from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
 from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationConflictError,
     WorkloadDelegationEntity,
@@ -290,7 +291,7 @@ class DockerDeploymentBackend(DeploymentBackend):
         try:
             config = await self._load_deployment_config(workspace, config_name)
             config = await resolve_deployment_config_secrets(self._nemo_client, config)
-            plan = build_docker_plan(config)
+            plan = build_docker_plan(config, auth_context=auth_context)
         except DeploymentConfigError as exc:
             return BackendStatusUpdate(status="FAILED", status_message=str(exc))
         except SecretResolutionError as exc:
@@ -1499,7 +1500,10 @@ class DockerDeploymentBackend(DeploymentBackend):
         Deployments with no sidecars (the common single-container case) skip the
         Docker enumeration entirely.
         """
-        expected_roles = {sidecar.name for sidecar in build_docker_plan(config).sidecars} if config else set()
+        # Status checks need container names, not a rebuilt auth-proxy identity.
+        expected_roles = {sidecar.name for sidecar in config.containers[1:]} if config else set()
+        if config is not None and config.auth_proxy_sidecar and platform_auth_enabled():
+            expected_roles.add(AUTH_PROXY_CONTAINER_NAME)
         if not expected_roles:
             return True, "no sidecars"
 

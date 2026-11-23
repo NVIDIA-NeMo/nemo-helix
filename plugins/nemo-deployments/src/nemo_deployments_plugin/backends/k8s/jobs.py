@@ -177,6 +177,7 @@ def build_job_body(
     executor_image_pull_secrets: list | None = None,
     executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
 ) -> BuiltJob:
     """Build a ``batch/v1.Job`` for create."""
     k8s = k8s_client_module()
@@ -190,6 +191,7 @@ def build_job_body(
         executor_image_pull_secrets=executor_image_pull_secrets,
         executor_defaults=executor_defaults,
         secret_env=secret_env,
+        auth_context=auth_context,
     )
     ttl_seconds_after_finished = resolve_job_ttl_seconds_after_finished(
         k8s_config=k8s_config,
@@ -342,6 +344,7 @@ async def create_job(
             executor_image_pull_secrets=executor_image_pull_secrets,
             executor_defaults=executor_defaults,
             secret_env=secret_env,
+            auth_context=auth_context,
         )
         body = built.job
         compiled = built.compiled

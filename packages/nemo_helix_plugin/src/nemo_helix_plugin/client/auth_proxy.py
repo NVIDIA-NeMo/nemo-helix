@@ -24,9 +24,9 @@ _PRINCIPAL_ALIASES_HEADER = "x-nhx-actor-aliases"
 _ON_BEHALF_OF_HEADER = "x-nhx-principal-on-behalf-of"
 # Companion metadata for the on-behalf-of principal. The platform derives the
 # delegated user's groups/email from these (Principal.from_headers -> effective_*),
-# and effective_groups/effective_email feed the PDP authorization input. We stamp
-# only the OBO id here, so any inbound companion headers are untrusted and must be
-# dropped — otherwise a colocated workload could pair our stamped OBO id with
+# and effective_groups/effective_email feed the PDP authorization input. Any
+# inbound companion headers are untrusted and must be dropped before stamping
+# captured creator context — otherwise a colocated workload could pair our OBO id with
 # attacker-chosen groups/email and be evaluated with those, defeating the scoping.
 _ON_BEHALF_OF_EMAIL_HEADER = "x-nhx-principal-on-behalf-of-email"
 _ON_BEHALF_OF_GROUPS_HEADER = "x-nhx-principal-on-behalf-of-groups"

@@ -26,7 +26,7 @@ from nemo_deployments_plugin.entities import (
     Probe,
     RestartPolicy,
 )
-from nemo_helix_plugin.auth import platform_auth_enabled
+from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES, get_nemo_config
 from nemo_helix_plugin.jobs.image import get_qualified_image
 
@@ -36,6 +36,7 @@ AUTH_PROXY_CONTAINER_NAME = "auth-proxy"
 _NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
 _AUTH_PROXY_PRINCIPAL_ENVVAR = "NHX_AUTH_PROXY_PRINCIPAL"
 _AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NHX_AUTH_PROXY_ON_BEHALF_OF"
+_AUTH_PROXY_AUTH_CONTEXT_ENVVAR = "NHX_AUTH_PROXY_AUTH_CONTEXT"
 _AUTH_PROXY_HOST_ENVVAR = "NHX_AUTH_PROXY_HOST"
 _AUTH_PROXY_PORT_ENVVAR = "NHX_AUTH_PROXY_PORT"
 _AUTH_PROXY_STATE_HOME_ENVVAR = "XDG_STATE_HOME"
@@ -71,13 +72,18 @@ def _upstream_base_url(*, docker: bool) -> str:
     return parts._replace(netloc=netloc).geturl()
 
 
-def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False) -> Container | None:
+def build_auth_proxy_container(
+    config: DeploymentConfig, *, docker: bool = False, auth_context: AuthContext | None = None
+) -> Container | None:
     """Return the auth-proxy sidecar Container for *config*, or None.
 
     Returns None when the config does not request the sidecar, or when platform
     auth is disabled (the sidecar would be pointless — internal calls are already
     trusted). Pass ``docker=True`` so the sidecar's upstream is rewritten to a
     docker-reachable host.
+
+    Delegation claims come only from *auth_context*, captured on the Deployment
+    at creation. Do not populate it from the caller's DeploymentConfig fields.
     """
     if not config.auth_proxy_sidecar:
         return None
@@ -106,7 +112,14 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
         EnvVar(name=_AUTH_PROXY_DATA_DIR_ENVVAR, value="/tmp/nhx-data"),
     ]
     if on_behalf_of:
+        # The config can select delegation, but its claims must come from the
+        # authenticated context captured on the Deployment by the API.
+        if auth_context is None:
+            raise ValueError("auth-proxy delegation requires captured creator auth context")
+        if on_behalf_of != (auth_context.principal_on_behalf_of or auth_context.principal_id):
+            raise ValueError("auth-proxy on-behalf-of identity does not match its captured creator")
         env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))
+        env.append(EnvVar(name=_AUTH_PROXY_AUTH_CONTEXT_ENVVAR, value=auth_context.model_dump_json()))
 
     return Container(
         name=AUTH_PROXY_CONTAINER_NAME,

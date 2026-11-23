@@ -18,6 +18,7 @@ import respx
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.auth import StaticToken, TokenProviderAuth
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nhx.common.auth import AuthContext
 from nhx.common.auth.principal_identifier import InvalidPrincipalIdentifier
 from nhx.common.auth.workload_proxy import main as workload_proxy_main
 from nhx.common.auth.workload_proxy.main import build_app
@@ -179,6 +180,16 @@ def test_forward_omits_on_behalf_of_when_not_configured() -> None:
 
     sent = route.calls.last.request
     assert "x-nhx-principal-on-behalf-of" not in {k.lower() for k in sent.headers}
+
+
+def test_forward_rejects_context_for_a_different_creator() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        build_app(
+            base_url="http://platform.test",
+            principal="models",
+            on_behalf_of="user:alice",
+            auth_context=AuthContext(principal_id="user:mallory", principal_groups=["admins"]),
+        )
 
 
 @respx.mock

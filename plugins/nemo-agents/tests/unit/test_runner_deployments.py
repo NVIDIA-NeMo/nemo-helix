@@ -1453,6 +1453,7 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
             port=0,
             deployment_mode="k8s",
             created_by="user:alice",
+            auth_context=AuthContext(principal_id="user:alice", principal_groups=["research"]),
         )
     assert info.status == "starting"
     created_config = entities.create.await_args_list[0].args[0]

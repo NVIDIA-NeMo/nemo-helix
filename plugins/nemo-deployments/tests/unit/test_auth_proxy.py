@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from nemo_deployments_plugin.auth_proxy import AUTH_PROXY_CONTAINER_NAME, build_auth_proxy_container
 from nemo_deployments_plugin.entities import DeploymentConfig
+from nemo_helix_plugin.auth import AuthContext
 from pydantic import ValidationError
 
 _MOD = "nemo_deployments_plugin.auth_proxy"
@@ -66,12 +67,34 @@ def test_sidecar_stamps_on_behalf_of_when_set() -> None:
                 auth_proxy_sidecar=True,
                 auth_proxy_sidecar_identity="agents",
                 auth_proxy_sidecar_on_behalf_of="user:alice",
-            )
+            ),
+            auth_context=AuthContext(principal_id="user:alice", principal_groups=["research"]),
         )
     assert container is not None
     env = {e.name: e.value for e in container.env}
     assert env["NHX_AUTH_PROXY_PRINCIPAL"] == "agents"
     assert env["NHX_AUTH_PROXY_ON_BEHALF_OF"] == "user:alice"
+    raw_context = env["NHX_AUTH_PROXY_AUTH_CONTEXT"]
+    assert raw_context is not None
+    assert AuthContext.model_validate_json(raw_context).principal_groups == ["research"]
+
+
+@pytest.mark.parametrize("creator_id", [None, "user:mallory"])
+def test_sidecar_delegation_requires_matching_captured_creator(creator_id: str | None) -> None:
+    with (
+        patch(f"{_MOD}.platform_auth_enabled", return_value=True),
+        patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
+        patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
+        pytest.raises(ValueError, match="creator"),
+    ):
+        build_auth_proxy_container(
+            _config(
+                auth_proxy_sidecar=True,
+                auth_proxy_sidecar_identity="models",
+                auth_proxy_sidecar_on_behalf_of="user:alice",
+            ),
+            auth_context=AuthContext(principal_id=creator_id) if creator_id else None,
+        )
 
 
 def test_sidecar_omits_on_behalf_of_when_unset() -> None:

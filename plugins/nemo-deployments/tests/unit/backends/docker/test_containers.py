@@ -15,6 +15,7 @@ from nemo_deployments_plugin.backends.docker.containers import (
     validate_config_for_docker,
 )
 from nemo_deployments_plugin.entities import Container, ContainerPort, DeploymentConfig
+from nemo_helix_plugin.auth import AuthContext
 
 _AUTH_PROXY_MOD = "nemo_deployments_plugin.auth_proxy"
 
@@ -51,6 +52,25 @@ def test_auth_proxy_not_injected_when_auth_off() -> None:
     with patch(f"{_AUTH_PROXY_MOD}.platform_auth_enabled", return_value=False):
         plan = build_docker_plan(config)
     assert plan.sidecars == []
+
+
+def test_docker_plan_preserves_captured_creator_context() -> None:
+    creator = AuthContext(principal_id="user:alice", principal_groups=["research"])
+    config = sample_config().model_copy(
+        update={
+            "auth_proxy_sidecar": True,
+            "auth_proxy_sidecar_identity": "models",
+            "auth_proxy_sidecar_on_behalf_of": "user:alice",
+        }
+    )
+    with patch(f"{_AUTH_PROXY_MOD}.platform_auth_enabled", return_value=True):
+        plan = build_docker_plan(config, auth_context=creator)
+
+    proxy = next(container for container in plan.sidecars if container.name == "auth-proxy")
+    env = {item.name: item.value for item in proxy.env}
+    raw_context = env["NHX_AUTH_PROXY_AUTH_CONTEXT"]
+    assert raw_context is not None
+    assert AuthContext.model_validate_json(raw_context) == creator
 
 
 def test_auth_proxy_docker_upstream_rewrites_loopback() -> None:

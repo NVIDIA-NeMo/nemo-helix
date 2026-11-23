@@ -43,6 +43,7 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
 )
 from nemo_deployments_plugin.types import RestartPolicy
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.workload_identity import (
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
@@ -577,6 +578,7 @@ def compile_workload(
     executor_image_pull_secrets: list[ImagePullSecret] | None = None,
     executor_defaults: ExecutorK8sDefaults | None = None,
     secret_env: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
 ) -> CompiledWorkload:
     """Compile pod spec kwargs and optional ConfigMap/Secret for a Job or Deployment.
 
@@ -623,7 +625,7 @@ def compile_workload(
     # container. It receives workload identity when enabled because the proxy is
     # the component that forwards bearer-authenticated platform calls upstream,
     # but it deliberately does NOT receive the workload's secret envFrom.
-    auth_proxy = build_auth_proxy_container(config)
+    auth_proxy = build_auth_proxy_container(config, auth_context=auth_context)
     if auth_proxy is not None:
         init_containers.append(
             build_container(

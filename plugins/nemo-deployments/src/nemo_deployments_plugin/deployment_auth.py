@@ -54,6 +54,12 @@ def plan_deployment_auth(
         )
 
     auth_proxy_on_behalf_of = None if token_exchange_enabled else on_behalf_of
+    if auth_proxy_on_behalf_of is not None:
+        if auth_context is None:
+            return DeploymentAuthPlan(error=f"{workload_label} requires creator auth context for legacy delegation.")
+        creator_id = auth_context.principal_on_behalf_of or auth_context.principal_id
+        if auth_proxy_on_behalf_of != creator_id:
+            return DeploymentAuthPlan(error=f"{workload_label} on-behalf-of identity does not match its creator.")
     warning = None
     if not token_exchange_enabled and auth_proxy_on_behalf_of is None:
         warning = (
