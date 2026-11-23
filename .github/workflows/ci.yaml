@@ -65,6 +65,8 @@ jobs:
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      go: ${{ steps.changes.outputs.go }}
+      go-modules: ${{ steps.go-modules.outputs.modules }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       nightly-taskset-runs-report: ${{ steps.changes.outputs.nightly-taskset-runs-report }}
@@ -77,6 +79,11 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/changes
         id: changes
+      - name: Discover Go modules
+        id: go-modules
+        run: |
+          go_modules=$(bash .github/scripts/go-modules.sh)
+          echo "modules=$go_modules" >> "$GITHUB_OUTPUT"
 
   actionlint:
     name: Run actionlint
@@ -1661,6 +1668,38 @@ jobs:
           ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
+  go-test:
+    name: Go tests (${{ matrix.module }})
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.go == 'true'
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go-modules) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NHX_GO_MODULE: ${{ matrix.module }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
+        with:
+          disable-metrics: "true"
+      - name: Test and vet Go module
+        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
+        with:
+          dir: ./tools/go
+          command: >-
+            bash -euc 'cd "$NHX_GO_MODULE" && go test -race ./... && go vet ./...'
+
   openshell-tests:
     # Share setup between backend suites while retaining each suite's path filter.
     name: OpenShell backend tests
@@ -1959,6 +1998,7 @@ jobs:
       - web-typecheck
       - web-test
       - web-static
+      - go-test
       - openshell-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
