@@ -3,7 +3,8 @@
 
 # The builder's remote backend with a stand-in for a remote build service, for the Kind builder e2e
 # (e2e/test_builder_remote.py). Layer it last: on kind.yaml and on builder.yaml, which deploys the development
-# registry the stand-in "publishes" to. The test creates the ConfigMap the step's profile mounts.
+# registry this file names as where the build service publishes. The stand-in pushes nothing there: it reports a
+# digest, and the builder reads no registry for it. The test creates the ConfigMap the step's profile mounts.
 #
 # For a platform with auth off. With auth on and no workload token exchange, the builder refuses every remote build
 # unless builder.remote.allow_unverified_completion is set, and this file doesn't set it.
@@ -23,6 +24,13 @@ platformConfig:
       # Longer than the test holds a build and then waits for its cancelled row, so that row is not one that timed out.
       build_timeout_seconds: 600
   jobs:
+    # Every kubernetes_job profile deletes the finished Jobs of its whole namespace, each by its own setting, and
+    # Jobs' default profiles run in the release namespace, as the remote-build step does. Without this they would
+    # delete that step's pod however the build-remote profile below is set. A map, so it merges with the chart's
+    # and kind.yaml's executor_defaults.
+    executor_defaults:
+      kubernetes_job:
+        cleanup_completed_jobs_immediately: false
     # Replaces kind.yaml's list, as Helm replaces any list. The chart still appends its own build-* profiles.
     executors:
       - provider: cpu
@@ -37,7 +45,7 @@ platformConfig:
           # At least build_timeout_seconds for the one image a set may hold, plus the builder's two-minute margin.
           ttl_seconds_active: 900
           # Keep a step's pod once it has succeeded, which Jobs otherwise deletes at once: its log is what the CI job
-          # collects when a test fails.
+          # collects when a test fails. It is kept only because executor_defaults, above, says the same.
           cleanup_completed_jobs_immediately: false
           storage:
             additional_volumes:

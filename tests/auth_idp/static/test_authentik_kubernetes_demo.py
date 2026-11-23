@@ -113,6 +113,19 @@ def _workflow_job_block(workflow: str, job_name: str) -> str:
     return "\n".join(lines[start:end])
 
 
+def _action_step_env(action: dict, step_name: str, given: dict) -> dict[str, str]:
+    """A composite action step's ``env`` for a caller whose ``with`` is ``given``: each input it reads, in place."""
+    step = next(step for step in action["runs"]["steps"] if step["name"] == step_name)
+
+    def passed(read: re.Match[str]) -> str:
+        name = read[1]
+        return str(given[name] if name in given else action["inputs"][name]["default"])
+
+    return {
+        name: re.sub(r"\$\{\{ inputs\['([\w-]+)'\] \}\}", passed, str(value)) for name, value in step["env"].items()
+    }
+
+
 def _load_authentik_k8s_live_module() -> ModuleType:
     module_path = Path("tests/auth_idp/runtime_kubernetes.py")
     spec = importlib.util.spec_from_file_location("authentik_k8s_live_for_unit", module_path)
@@ -306,8 +319,37 @@ def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
     assert "e2e/test_builder.py" in run
     assert "features+=(--feature auth --config e2e/quickstart/auth.yaml)" in run
     # One check after every builder stage of the leg, in place of one inside each stage's step.
-    assert "if tests == 0 or skipped:" in steps["Check that no builder e2e test was skipped"]["run"]
+    check = steps["Check that no builder e2e test was skipped"]["run"]
+    assert "if tests == 0 or skipped:" in check
     assert steps["Finalize Kind builder e2e"]["if"] == "always()"
+
+    # The remote backend's stage, on the auth-off leg only: its upgrade carries no auth overlay.
+    switch = steps["Switch the builder to the remote backend"]
+    remote = steps["Run remote builder e2e tests"]
+    assert switch["if"] == remote["if"] == "matrix.auth == 'off'"
+    # The upgrade is the install over again, plus one values file. The install script hands `helm upgrade` what it
+    # is given and no `--reuse-values`, so whatever the install passed and the upgrade doesn't is dropped from the
+    # release without an error, and the remote tests would run on another deployment than the in-cluster ones.
+    assert "e2e/k8s/scripts/install_helm_e2e.sh" in switch["run"]
+    setup = steps["Setup Kind cluster with NeMo Helix and the builder"]["with"]
+    action = _load_yaml(Path(".github/actions/setup-kind-cluster/action.yaml"))
+    installed = _action_step_env(action, "Install NeMo Helix", setup)
+    upgraded = dict(switch["env"])
+    auth_overlay = "${{ matrix.auth == 'on' && '-f e2e/k8s/values/auth-overlay.yaml' || '' }}"
+    assert auth_overlay in installed["HELM_EXTRA_ARGS"]
+    extra_args = installed.pop("HELM_EXTRA_ARGS").replace(auth_overlay, "").split()
+    assert upgraded.pop("HELM_EXTRA_ARGS").split() == [*extra_args, "-f", "e2e/k8s/values/builder-remote.yaml"]
+    # The upgrade leaves these two to the install script, so the install must be passing the script's own defaults.
+    install_script = Path("e2e/k8s/scripts/install_helm_e2e.sh").read_text(encoding="utf-8")
+    for name in ("POSTGRES_IMAGE", "BUSYBOX_IMAGE"):
+        assert f'{name}="${{{name}:-{installed.pop(name)}}}"' in install_script
+    assert upgraded == installed
+    # The stage's tests are selected by path and feature. Deselected, they are skipped and pytest still ends with 0:
+    # only the check over this report then fails the leg.
+    assert "e2e/test_builder_remote.py" in remote["run"]
+    assert "--feature builder-remote" in remote["run"]
+    assert "--junitxml=report-kubernetes-builder-remote-e2e.xml" in remote["run"]
+    assert "reports+=(report-kubernetes-builder-remote-e2e.xml)" in check
 
 
 def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:

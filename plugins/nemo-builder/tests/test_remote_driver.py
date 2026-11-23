@@ -4909,3 +4909,28 @@ class TestTheKindE2EsStandIn:
         build_id = f"{step_program.BUILD_ID_PREFIX}{idempotency_key(ATTEMPT, 'demo-1')[:16]}"
         found = [match.groups() for line in _marked_lines(caplog.text) if (match := _FAILURE_LINE.match(line))]
         assert found == [("demo-1", f"the build service reports it failed: stand-in-refused-1234 [build {build_id}]")]
+
+    def test_a_held_build_is_cancelled_once_the_job_is_told_to_stop(
+        self, step_program: ModuleType, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """What the e2e test's cancelled build rests on. On the cluster, Jobs may keep none of a cancelled step's
+        log, so only here is the line it ends on read every time."""
+        (context / step_program.OUTCOME_FILE).write_text(json.dumps({"outcome": "hang"}))
+        service = step_program.make_service(_config(), None)
+        builder = FakeBuilder()
+        clock = FakeClock()
+
+        def told_to_stop() -> bool:
+            """After two polls, by the clock: the stand-in keeps no count of its polls, as a ``FakeService`` does."""
+            return clock.now >= 2 * POLL_SECONDS
+
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, tmp_path, clock=clock, cancelled=told_to_stop) == 1
+
+        assert builder.completed == []
+        # Held, poll after poll, until the stop: at a stage the driver didn't know, the build would end at the first.
+        assert clock.sleeps == [POLL_SECONDS] * 2
+        # The stand-in took the cancel: what follows the reason says nothing of a build left running.
+        build_id = f"{step_program.BUILD_ID_PREFIX}{idempotency_key(ATTEMPT, 'demo-1')[:16]}"
+        found = [match.groups() for line in _marked_lines(caplog.text) if (match := _FAILURE_LINE.match(line))]
+        assert found == [("demo-1", f"{STOPPED} [build {build_id}]")]
