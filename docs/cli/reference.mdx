@@ -6557,9 +6557,9 @@ outcome of runtime startup instead of merely the API call.  Use
 scripted pipelines that prefer to poll separately via ``nemo agents
 deployments wait``.
 
-Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
+Container modes (``--mode docker|k8s|openshell|opensandbox``) compile to the nemo-deployments
 plugin. Requires a configured deployments executor (``deployments.executors``
-/ ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
+/ ``agents.deployments.docker_executor``, ``k8s_executor``, ``openshell_executor``, or ``opensandbox_executor``). Container
 endpoint gateway routing and the full k8s runtime contract (in-cluster
 inference gateway, wheel staging) are still evolving — docker mode is the
 supported local path today.
@@ -6575,7 +6575,7 @@ nemo agents deploy [OPTIONS]
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
-* `--image, -i`: Container image for docker/k8s/openshell modes. Falls back to the agent's reference.container_image, then deployments.default_image.
+* `--image, -i`: Container image for docker/k8s/openshell/opensandbox modes. Falls back to the agent's reference.container_image, then deployments.default_image.
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass `--no-wait` for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
@@ -6614,7 +6614,7 @@ nemo agents redeploy [OPTIONS]
 * `--clear-labels`: Recreate the agent with no labels. Cannot be combined with `--label`.
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
-* `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.
+* `--image, -i`: Container image for docker/k8s/openshell/opensandbox modes. Auto-detected from the existing deployment when omitted.
 * `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass `--no-wait` to return the pending deployment immediately as JSON.

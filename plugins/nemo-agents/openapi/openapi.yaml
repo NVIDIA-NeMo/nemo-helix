@@ -3089,10 +3089,11 @@ components:
           - docker
           - k8s
           - openshell
+          - opensandbox
           title: Deployment Mode
           description: Runtime backend for this deployment. 'subprocess' (default)
-            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell' read the projected
-            'endpoints'.
+            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell'/'opensandbox'
+            read the projected 'endpoints'.
           default: subprocess
         endpoint:
           type: string
@@ -3793,14 +3794,16 @@ components:
           - docker
           - k8s
           - openshell
+          - opensandbox
           title: Deployment Mode
-          description: 'Runtime backend: subprocess (default), docker, k8s, or openshell.'
+          description: 'Runtime backend: subprocess (default), docker, k8s, openshell,
+            or opensandbox.'
           default: subprocess
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s/openshell modes. When omitted,
-            uses the agent's reference.container_image, then deployments.default_image.
+          description: Container image for docker/k8s/openshell/opensandbox modes.
+            When omitted, uses the agent's reference.container_image, then deployments.default_image.
             Ignored for subprocess.
           default: ''
         use_image_entrypoint:
@@ -4011,6 +4014,7 @@ components:
           - docker
           - k8s
           - openshell
+          - opensandbox
           title: Mode
           description: The deployment mode.
         enabled:

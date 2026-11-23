@@ -971,6 +971,7 @@ class TestListDeploymentModes:
             "docker": {"mode": "docker", "enabled": False, "requires_image": True},
             "k8s": {"mode": "k8s", "enabled": False, "requires_image": True},
             "openshell": {"mode": "openshell", "enabled": False, "requires_image": True},
+            "opensandbox": {"mode": "opensandbox", "enabled": False, "requires_image": True},
         }
 
     def test_subprocess_is_disabled_when_turned_off(self, monkeypatch: pytest.MonkeyPatch) -> None:

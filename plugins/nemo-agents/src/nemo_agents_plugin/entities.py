@@ -94,13 +94,14 @@ class SessionStatus(StrEnum):
 
 # Runtime backend for an AgentDeployment. ``subprocess`` (the default) runs the
 # agent as a local ``nat serve`` process reachable on a loopback ``endpoint``.
-# ``docker``/``k8s``/``openshell`` run the agent as a durable container deployment
+# ``docker``/``k8s``/``openshell``/``opensandbox`` run the agent as a durable container deployment
 # via the deployments plugin; their routable address is projected onto ``endpoints``.
 # Modes that compile to the nemo-deployments plugin (not local subprocess).
-CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s", "openshell"})
+CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s", "openshell", "opensandbox"})
 
-# Container modes whose substrate runs the image ENTRYPOINT/CMD. The OpenShell
-# sandbox supervisor ignores the entrypoint, so openshell needs an explicit command.
+# Container modes whose substrate runs the image ENTRYPOINT/CMD. The OpenShell sandbox
+# supervisor ignores the entrypoint and OpenSandbox requires an explicit one, so both
+# need an explicit command.
 IMAGE_ENTRYPOINT_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s"})
 
 
@@ -377,7 +378,7 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
         default="subprocess",
         description=(
             "Runtime backend for this deployment. 'subprocess' (default) reads the loopback "
-            "'endpoint'; 'docker'/'k8s'/'openshell' read the projected 'endpoints'."
+            "'endpoint'; 'docker'/'k8s'/'openshell'/'opensandbox' read the projected 'endpoints'."
         ),
     )
     # Dual addressing: subprocess uses loopback ``endpoint``; docker/k8s project

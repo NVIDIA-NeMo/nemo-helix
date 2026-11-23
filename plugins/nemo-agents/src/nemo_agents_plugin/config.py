@@ -70,6 +70,10 @@ class DeploymentsRunnerConfig(BaseModel):
         default=None,
         description="Named executor for deployment_mode=openshell. Falls back to default_executor.",
     )
+    opensandbox_executor: str | None = Field(
+        default=None,
+        description="Named executor for deployment_mode=opensandbox. Falls back to default_executor.",
+    )
     default_image: str = Field(
         default="",
         description="Default container image when CreateDeploymentRequest.image is omitted.",
@@ -95,7 +99,7 @@ class DeploymentsRunnerConfig(BaseModel):
             "for every container mode, and by eval trials in OpenSandbox sandboxes. When unset, the deploy "
             "path derives a container-reachable URL: "
             "docker rewrites loopback hosts to host.docker.internal; k8s uses k8s_internal_base_url; "
-            "openshell uses the executor's platform_egress host and port."
+            "openshell and opensandbox use the executor's platform_egress host and port."
         ),
     )
     k8s_internal_base_url: str | None = Field(
@@ -169,7 +173,7 @@ class AgentsConfig(NemoConfig):
     )
     deployments: DeploymentsRunnerConfig = Field(
         default_factory=DeploymentsRunnerConfig,
-        description="Container-mode (docker/k8s/openshell) settings for the deployments-plugin runner.",
+        description="Container-mode (docker/k8s/openshell/opensandbox) settings for the deployments-plugin runner.",
     )
     jobs: AgentJobsConfig = Field(
         default_factory=AgentJobsConfig,

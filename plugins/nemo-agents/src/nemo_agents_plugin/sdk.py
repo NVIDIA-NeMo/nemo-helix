@@ -397,7 +397,7 @@ class _DeploymentResource:
             agent: Name of the agent to deploy.
             name: Deployment name (auto-generated if omitted).
             deployment_mode: Runtime backend — ``"subprocess"`` (default),
-                ``"docker"``, ``"k8s"``, or ``"openshell"``. Container modes run the agent as a
+                ``"docker"``, ``"k8s"``, ``"openshell"``, or ``"opensandbox"``. Container modes run the agent as a
                 durable container through the deployments plugin and require a
                 configured executor.
             image: Container image for container modes. When omitted, uses the
