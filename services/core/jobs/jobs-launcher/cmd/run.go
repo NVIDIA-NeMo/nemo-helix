@@ -279,10 +279,11 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			principal := nhxclient.PrincipalFromEnv()
 
 			session := launcherSession(ctx)
-			if !session.BearerMode() && (principal == nil || principal.ID == "") {
-				return 1, fmt.Errorf("NHX_PRINCIPAL with a creator is required for trusted Secret injection")
-			}
 			fetchCtx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
+			if err := session.ValidateSecretPrincipal(fetchCtx, principal); err != nil {
+				cancel()
+				return 1, err
+			}
 			secretEnvVars, err := fetchSecretsWithContext(fetchCtx, session.SecretClient(secretEndpoint, principal), secretRefs)
 			cancel()
 			if err != nil {

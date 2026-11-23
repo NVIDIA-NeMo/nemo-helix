@@ -289,6 +289,71 @@ func TestRunExecWithSecrets(t *testing.T) {
 	}
 }
 
+func TestRunExecWithSecretsWithoutCreator(t *testing.T) {
+	for _, principal := range []string{"", `{"id":"","groups":[]}`} {
+		for _, tc := range []struct {
+			name      string
+			discovery string
+			status    int
+			allowed   bool
+			baseURL   bool
+		}{
+			{name: "auth_disabled", discovery: `{"auth_enabled":false}`, status: http.StatusOK, allowed: true},
+			{name: "auth_disabled_base_url_fallback", discovery: `{"auth_enabled":false}`, status: http.StatusOK, allowed: true, baseURL: true},
+			{name: "auth_enabled", discovery: `{"auth_enabled":true}`, status: http.StatusOK},
+			{name: "missing_auth_enabled", discovery: `{}`, status: http.StatusOK},
+			{name: "null_auth_enabled", discovery: `{"auth_enabled":null}`, status: http.StatusOK},
+			{name: "invalid_discovery", discovery: `not json`, status: http.StatusOK},
+			{name: "discovery_unavailable", status: http.StatusBadGateway},
+			{name: "discovery_redirect", status: http.StatusFound},
+		} {
+			t.Run(tc.name+"/principal="+principal, func(t *testing.T) {
+				secretRequests := 0
+				secretsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					secretRequests++
+					if r.URL.Path != "/apis/secrets/v2/workspaces/default/secrets/test-secret/access" {
+						t.Errorf("unexpected secret path: %s", r.URL.Path)
+					}
+					if r.Header.Get("Authorization") != "" || r.Header.Get("X-NHX-Principal-Id") != "" || r.Header.Get("X-NHX-Principal-On-Behalf-Of") != "" {
+						t.Error("auth-disabled secret request must not invent a creator or service identity")
+					}
+					fmt.Fprint(w, `{"value":"injected-value"}`)
+				}))
+				defer secretsServer.Close()
+				authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/apis/auth/discovery" {
+						t.Errorf("unexpected discovery path: %s", r.URL.Path)
+					}
+					w.Header().Set("Location", secretsServer.URL)
+					w.WriteHeader(tc.status)
+					fmt.Fprint(w, tc.discovery)
+				}))
+				defer authServer.Close()
+
+				t.Setenv("NHX_BASE_URL", "")
+				t.Setenv("NHX_AUTH_URL", authServer.URL)
+				if tc.baseURL {
+					t.Setenv("NHX_AUTH_URL", "")
+					t.Setenv("NHX_BASE_URL", authServer.URL)
+				}
+				t.Setenv("NHX_SECRETS_URL", secretsServer.URL)
+				t.Setenv("NHX_PRINCIPAL", principal)
+				t.Setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "")
+				t.Setenv("NHX_ACCESS_TOKEN_FILE", "")
+				t.Setenv("NEMO_JOB_SECRETS", "TEST_SECRET=default/test-secret")
+				exitCode, err := runExec(context.Background(), []string{"sh", "-c", `test "$TEST_SECRET" = injected-value`}, nil)
+				if tc.allowed {
+					if err != nil || exitCode != 0 || secretRequests != 1 {
+						t.Fatalf("expected injected secret: exit=%d err=%v requests=%d", exitCode, err, secretRequests)
+					}
+				} else if err == nil || exitCode != 1 || secretRequests != 0 {
+					t.Fatalf("expected rejection before accessing secrets: exit=%d err=%v requests=%d", exitCode, err, secretRequests)
+				}
+			})
+		}
+	}
+}
+
 func TestRunExecWithSecretsNotFound(t *testing.T) {
 	// Create a mock server that always returns 404
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

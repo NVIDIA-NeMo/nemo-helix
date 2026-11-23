@@ -20,6 +20,33 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
+func TestValidateSecretPrincipalWithoutDiscoveryEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		principal    *Principal
+		workloadFile string
+		accessFile   string
+		allowed      bool
+	}{
+		{name: "missing_creator"},
+		{name: "empty_creator", principal: &Principal{}},
+		{name: "trusted_creator", principal: &Principal{ID: "creator"}, allowed: true},
+		{name: "workload_bearer", workloadFile: "/configured/workload-token", allowed: true},
+		{name: "access_bearer", accessFile: "/configured/access-token", allowed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NHX_AUTH_URL", "")
+			t.Setenv(nhxBaseURLEnv, "")
+			t.Setenv(workloadIdentityTokenFileEnv, tc.workloadFile)
+			t.Setenv("NHX_ACCESS_TOKEN_FILE", tc.accessFile)
+			err := NewSessionFromEnv().ValidateSecretPrincipal(context.Background(), tc.principal)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v, got error %v", tc.allowed, err)
+			}
+		})
+	}
+}
+
 func TestSessionCredentialModes(t *testing.T) {
 	for _, mode := range []string{"trusted", "access-file", "workload"} {
 		t.Run(mode, func(t *testing.T) {
