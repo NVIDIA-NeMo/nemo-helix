@@ -29,7 +29,9 @@ from sandboxed_gym.opensandbox_policy import create_options_with_policy
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 2.0
-_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+# Isolated (-I): `-m` would otherwise put the working directory, the job's writable workspace, first on the
+# import path, and PYTHON* variables would apply too. The host starts as root on the Docker-enabled image.
+_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-I", "-m", "sandboxed_gym.runtime.gym_host_runtime")
 # Match nhx_sandbox.harbor_opensandbox_services, which this package does not depend on.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"

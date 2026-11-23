@@ -70,6 +70,7 @@ class _Host:
 
     def run(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         self.calls.append(("run", argv))
+        self.setup_env = kwargs["env"]
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["stdout"] is not subprocess.PIPE, "setup output must not go to a pipe it can hold open"
         self.files[str(self.log)] = self.setup_output
@@ -91,9 +92,17 @@ def test_an_image_without_an_engine_is_left_alone(monkeypatch: pytest.MonkeyPatc
 
 def test_setup_runs_then_the_host_drops_to_the_container_user(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     host = _Host(monkeypatch, tmp_path)
-    environ = {ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work), "HOME": "/root"}
+    environ = {
+        ENGINE_ENV: "rootless-podman",
+        "NHX_WORK_PATH": str(host.work),
+        "HOME": "/root",
+        "NHX_CONTAINER_STORAGE_SIZE": "40G",
+        "NHX_BROKER_TOKEN": "broker-secret",
+    }
 
     assert host.prepare(environ) is True
+    # The root-only setup runs with a fixed PATH and its own settings, nothing else from the host.
+    assert host.setup_env == {"PATH": container_engine._SETUP_PATH, "NHX_CONTAINER_STORAGE_SIZE": "40G"}
 
     names = [name for name, _ in host.calls]
     assert names[0] == "run" and host.calls[0][1] == [container_engine.SETUP_SCRIPT]
@@ -103,14 +112,26 @@ def test_setup_runs_then_the_host_drops_to_the_container_user(monkeypatch: pytes
         os.path.join(host.work, "nested"),
         os.path.join(host.work, "nested", "file"),
     }
-    assert names[-3:] == ["setgroups", "setgid", "setuid"]
+    assert names[-4:] == ["setgroups", "setgid", "setuid", "prctl"]
+    # Non-dumpable after the uid change, whatever fs.suid_dumpable says.
+    assert host.calls[-1] == ("prctl", (4, 0))
     # The bounding set (needs CAP_SETPCAP) and no_new_privs go before the uid changes.
     prctls = [args for name, args in host.calls if name == "prctl"]
-    assert prctls == [(24, capability) for capability in range(41)] + [(38, 1)]
-    assert names.index("setgroups") > max(i for i, name in enumerate(names) if name == "prctl")
+    assert prctls == [(24, capability) for capability in range(41)] + [(38, 1), (4, 0)]
+    assert names.index("setgroups") > max(i for i, name in enumerate(names[:-1]) if name == "prctl")
     assert ("setuid", 1000) in host.calls
     assert environ["HOME"] == "/home/docker-user"
     assert environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+
+def test_sys_admin_without_a_container_engine_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The isolation extension with the default image would leave the Gym servers holding SYS_ADMIN."""
+    host = _Host(monkeypatch, tmp_path)
+    host.files["/proc/self/status"] = STATUS_SYS_ADMIN
+
+    with pytest.raises(RuntimeError, match="SYS_ADMIN but no container engine"):
+        host.prepare({})
+    assert host.calls == []
 
 
 def test_a_non_kata_sandbox_is_refused_before_any_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

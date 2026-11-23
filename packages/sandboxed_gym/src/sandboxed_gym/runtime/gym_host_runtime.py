@@ -1625,14 +1625,13 @@ class _Server(ThreadingHTTPServer):
         )
 
 
-def _apply_job_env(environ: collections.abc.MutableMapping[str, str] = os.environ) -> None:
-    """Merge the job's variables, carried in ``JOB_ENV_ENV_KEY``, into this process's environment.
+def _apply_job_env(raw: str | None, environ: collections.abc.MutableMapping[str, str] = os.environ) -> None:
+    """Merge the job's variables, as carried in ``JOB_ENV_ENV_KEY``, into this process's environment.
 
     Called after the container-engine setup and privilege drop, so the job's values reach Gym and the
     servers it starts but nothing that ran before. They override the image's own variables, as they did
     when they were the container's environment; the orchestrator already left out any name it sets itself.
     """
-    raw = environ.pop(JOB_ENV_ENV_KEY, None)
     if not raw:
         return
     job_env = json.loads(raw)
@@ -1650,7 +1649,20 @@ def main() -> None:
     # so neither the container engine nor a Gym server inherits it: environment code that held it could run
     # commands through execd, which keeps root after this process becomes the unprivileged container user.
     os.environ.pop(EXECD_ACCESS_TOKEN_ENV, None)
+    # The job's variables, held aside so the privileged setup and the services it starts never see them.
+    job_env = os.environ.pop(JOB_ENV_ENV_KEY, None)
 
+    # Before any thread starts: dropping the capability bounding set and setting no_new_privs apply to the
+    # calling thread only, so a thread started earlier would keep them. A failure is reported below, once the
+    # output is captured; the job's variables are applied only when the setup succeeded.
+    setup_error: Exception | None = None
+    try:
+        prepare_container_engine()
+        _apply_job_env(job_env)
+    except Exception as exc:
+        setup_error = exc
+
+    # After the job's variables are applied, so the secrets among them are masked in what is captured.
     # Before bootstrap, so both host output and inherited component fd 1/2 are captured.
     # Do not enable Gym's `nemo_gym_log_dir`: in nemo-gym 0.5.0 it runs each component under
     # `set -o pipefail`, which kills any non-editable install whose requirements.txt has nothing
@@ -1664,10 +1676,8 @@ def main() -> None:
 
     _ensure_event_loop()
     try:
-        # Before Gym starts anything: the Gym servers must run as the unprivileged container user.
-        prepare_container_engine()
-        # Only now, with any privileged setup done, may the job's variables affect what runs.
-        _apply_job_env()
+        if setup_error is not None:
+            raise setup_error
         _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
     except Exception as exc:
         # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller

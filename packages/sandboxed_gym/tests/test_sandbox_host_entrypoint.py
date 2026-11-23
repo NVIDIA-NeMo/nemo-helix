@@ -122,7 +122,7 @@ def test_opensandbox_host_provider_supplies_runtime_entrypoint_when_omitted():
     provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"})
     sandbox_spec = provider._to_sandbox_spec(_gym_host_spec())
 
-    assert sandbox_spec.entrypoint == ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+    assert sandbox_spec.entrypoint == ["python", "-I", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 
 @requires_opensandbox

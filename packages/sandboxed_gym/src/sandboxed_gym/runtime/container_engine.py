@@ -26,8 +26,14 @@ SETUP_TIMEOUT_S = 300.0
 SETUP_LOG = "/tmp/rootless-podman-up.log"
 
 # prctl(2) options. Dropping from the bounding set needs CAP_SETPCAP, so it happens before the uid change.
+_PR_SET_DUMPABLE = 4
 _PR_CAPBSET_DROP = 24
 _PR_SET_NO_NEW_PRIVS = 38
+_CAP_SYS_ADMIN = 21
+
+# What the root-only setup runs with: a fixed PATH and the image's own settings for it, nothing else.
+_SETUP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+_SETUP_ENV_KEYS = ("NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_ENGINE_LOG", "NHX_CONTAINER_USER")
 
 # Kata boots its guest kernel with the agent's systemd target; a runc container sees the node's own
 # command line instead. Runtimes that boot without systemd still pass `agent.*` parameters.
@@ -76,6 +82,19 @@ def prepare_container_engine(
     """
     engine = environ.get(ENGINE_ENV, "")
     if not engine:
+        # Only this image's setup is meant to run with SYS_ADMIN, and only until it drops it. Granted to an
+        # image without an engine (the isolation extension with the default image), the Gym servers would keep it.
+        try:
+            status = read_text("/proc/self/status")
+        except FileNotFoundError:
+            # Not Linux: a development machine running the runtime directly, never a sandbox.
+            return False
+        effective = int(_status_field(status, "CapEff"), 16)
+        if effective & (1 << _CAP_SYS_ADMIN):
+            raise RuntimeError(
+                "this Gym host has SYS_ADMIN but no container engine to set up and drop it: the "
+                "bootstrap.execd.isolation extension is meant only for the Docker-enabled Gym host image"
+            )
         return False
     if engine != ROOTLESS_PODMAN:
         raise RuntimeError(f"{ENGINE_ENV}={engine!r} is not supported; expected {ROOTLESS_PODMAN!r}")
@@ -92,6 +111,7 @@ def prepare_container_engine(
     with open(SETUP_LOG, "w") as log:
         result = run(
             [SETUP_SCRIPT],
+            env={"PATH": _SETUP_PATH, **{key: environ[key] for key in _SETUP_ENV_KEYS if key in environ}},
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -115,6 +135,9 @@ def prepare_container_engine(
     setgroups([])
     setgid(user.pw_gid)
     setuid(user.pw_uid)
+    # The kernel usually does this on a uid change, unless fs.suid_dumpable says otherwise. Non-dumpable, this
+    # process's memory and original environment stay unreadable to the Gym servers running as the same user.
+    prctl(_PR_SET_DUMPABLE, 0)
     status = read_text("/proc/self/status")
     effective = int(_status_field(status, "CapEff"), 16)
     bounding = int(_status_field(status, "CapBnd"), 16)

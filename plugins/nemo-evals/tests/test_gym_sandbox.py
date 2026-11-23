@@ -1028,6 +1028,12 @@ def test_the_jobs_variables_are_not_the_hosts_container_environment() -> None:
     assert {name: carried[name] for name in job_env} == job_env
 
 
+def test_a_job_environment_too_large_for_one_variable_is_refused_before_the_host_starts() -> None:
+    """Past Linux's 128 KiB limit on one environment string, the container could not start at all."""
+    with pytest.raises(ValueError, match="the Gym host accepts at most"):
+        built_host_spec(capable_plan(), target(env_vars={"A": "x" * 70_000, "B": "y" * 70_000}))
+
+
 def test_a_job_cannot_name_the_variable_that_carries_its_environment() -> None:
     from sandboxed_gym.runtime.gym_host_runtime import JOB_ENV_ENV_KEY
 

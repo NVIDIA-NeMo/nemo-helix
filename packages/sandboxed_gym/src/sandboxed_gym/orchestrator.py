@@ -217,6 +217,10 @@ def collect_gym_host_egress_allows(
     return tuple(deduped.values())
 
 
+#: Room left under Linux's 128 KiB limit on one environment string for the job's packed variables.
+_JOB_ENV_MAX_BYTES = 120 * 1024
+
+
 def build_gym_host_spec(
     cfg: SandboxedGymServeConfig,
     broker: BrokerEndpoint,
@@ -276,7 +280,14 @@ def build_gym_host_spec(
         raise ValueError(f"the job's environment must not set {JOB_ENV_ENV_KEY}; the platform uses it")
     job_env = {name: bootstrap_env.pop(name) for name in cfg.host_env if name not in bootstrap_extra}
     if job_env:
-        bootstrap_env[JOB_ENV_ENV_KEY] = json.dumps(job_env, sort_keys=True)
+        encoded = json.dumps(job_env, sort_keys=True)
+        # Linux caps one environment string at 128 KiB (MAX_ARG_STRLEN); past it the container can't start at all.
+        if len(f"{JOB_ENV_ENV_KEY}={encoded}".encode()) > _JOB_ENV_MAX_BYTES:
+            raise ValueError(
+                f"the job's environment variables total {len(encoded.encode())} bytes as JSON; "
+                f"the Gym host accepts at most {_JOB_ENV_MAX_BYTES - len(JOB_ENV_ENV_KEY) - 1}"
+            )
+        bootstrap_env[JOB_ENV_ENV_KEY] = encoded
 
     egress_allow = collect_gym_host_egress_allows(
         configured=sandbox.network_policy.egress_allow,

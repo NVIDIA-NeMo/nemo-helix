@@ -141,7 +141,8 @@ RUN mkdir -p /job/environment /job/work
 WORKDIR /job/work
 
 EXPOSE 8080
-CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+# Isolated, so the working directory (the job's workspace) is not on the import path.
+CMD ["python", "-I", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime-base AS runtime
 # Copy the matching uv cache used by those component environments. In its own stage so the `podman`
@@ -169,7 +170,10 @@ RUN apt-get update \
     # capability bounding set still holds SYS_ADMIN for a setuid-root program to pick up.
     && find / -xdev -perm -4000 -type f ! -path /usr/bin/newuidmap ! -path /usr/bin/newgidmap \
         -exec chmod u-s {} + \
-    && chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+    && chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap \
+    # Gym creates a venv per component under /opt/gym_venvs/<kind>/<server> when the image has none
+    # baked for it. Only the directories are handed over; the baked venvs stay read-only.
+    && find /opt/gym_venvs -maxdepth 1 -type d -exec chown docker-user:docker-user {} +
 # Offline server venv builds write to the uv cache, and the Gym servers run as docker-user.
 COPY --from=builder --chown=docker-user:docker-user /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
@@ -188,6 +192,7 @@ RUN podman --version && docker --version && docker compose version \
     && test -z "$(find / -xdev -perm -4000 -type f ! -path /usr/bin/newuidmap ! -path /usr/bin/newgidmap -print -quit)" \
     && grep -q '^docker-user:100000:65536$' /etc/subuid \
     && test "$(stat -c %U /home/ubuntu/.cache/uv)" = docker-user \
+    && test -z "$(find /opt/gym_venvs -maxdepth 1 -type d ! -user docker-user -print -quit)" \
     && python -c 'from sandboxed_gym.runtime import container_engine; print(container_engine.ENGINE_ENV)'
 
 FROM runtime AS smoke-test

@@ -144,8 +144,10 @@ tokens and the environment variables required by its selected Gym components.
 
 Each Gym host and episode sandbox also gets its own execd access token. execd, the command server in
 every OpenSandbox sandbox, then refuses any request without it, including requests through the
-OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, only the
-Evaluator task that created it holds the token. The Gym host also removes the token from its own
+OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, the
+Evaluator task that created it holds the token, and like the job's `env_secrets` values it appears in
+the sandbox's pod spec, so anyone allowed to read pods in the sandbox namespace can read it. The Gym
+host also removes the token from its own
 environment before it starts anything, so nothing it starts inherits it. On the image that runs
 Docker (see below), the Gym servers can't read it at all. On the default image they run as the same
 user as execd, so they could read it from the process table, but it gives them nothing they can't
