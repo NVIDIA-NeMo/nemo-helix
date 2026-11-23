@@ -288,10 +288,12 @@ def test_failed_rows_names_a_row_that_only_skipped() -> None:
     ) == ["auth-on-exchange-true-1: [skipped]"]
 
 
-def test_a_failed_row_that_uploaded_no_artifact_is_listed_from_the_runs_jobs() -> None:
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_an_unsuccessful_row_without_an_artifact_is_listed_from_the_runs_jobs(conclusion: str) -> None:
     jobs = (
-        {"name": "Kind taskset runs e2e (auth-on, exchange-true, 1)", "conclusion": "failure"},
+        {"name": "Kind taskset runs e2e (auth-on, exchange-true, 1)", "conclusion": conclusion},
         {"name": "Kind taskset runs e2e (auth-off, exchange-false, 1)", "conclusion": "success"},
+        {"name": "Kind taskset runs e2e (auth-on, exchange-false, 2)", "conclusion": "skipped"},
         {"name": "Build images", "conclusion": "failure"},
     )
     github = FakeGitHub(jobs=jobs)
@@ -300,7 +302,31 @@ def test_a_failed_row_that_uploaded_no_artifact_is_listed_from_the_runs_jobs() -
 
     opened = github.written(0)
     assert opened is not None
-    assert "Failed rows: `auth-on-exchange-true-1: [setup]`" in opened["body"]
+    assert opened["body"].splitlines()[-1] == "Failed rows: `auth-on-exchange-true-1: [setup]`"
+
+
+def test_read_artifacts_keeps_row_xml_separate_and_preserves_rows_without_junit(tmp_path: Path) -> None:
+    row = tmp_path / "kind-taskset-runs-e2e-auth-on-exchange-true-2-kubernetes-artifacts"
+    nested = row / "logs"
+    nested.mkdir(parents=True)
+    (row / "first.xml").write_text(JUNIT_GREEN)
+    (nested / "second.xml").write_text(JUNIT_IMAGE_BUILD)
+    missing_junit = tmp_path / "kind-taskset-runs-e2e-auth-off-exchange-false-1-kubernetes-artifacts"
+    missing_junit.mkdir()
+    (missing_junit / "setup.log").write_text("cluster setup failed")
+    (tmp_path / "unrelated.xml").write_text(JUNIT_DISPATCH)
+
+    _, junit, rows = report_module.read_artifacts(tmp_path)
+
+    assert JUNIT_DISPATCH in junit
+    assert rows == {
+        "auth-off-exchange-false-1": None,
+        "auth-on-exchange-true-2": f"{JUNIT_GREEN}\n{JUNIT_IMAGE_BUILD}",
+    }
+    assert report_module.failed_rows(rows) == [
+        "auth-off-exchange-false-1: [setup]",
+        "auth-on-exchange-true-2: [image-build]",
+    ]
 
 
 def test_a_failed_job_with_passing_junit_is_listed() -> None:

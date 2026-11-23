@@ -1164,6 +1164,54 @@ def test_build_failure_ignores_a_failed_build_from_before_the_call(tmp_path: Pat
     assert "build" not in driver.evidence.data
 
 
+def test_build_failure_accepts_a_job_at_the_clock_skew_limit(tmp_path: Path) -> None:
+    expired = job_body("task-image-build-old", "error", "old", created_at="2025-12-31T23:59:54Z")
+    # The Jobs API can send a UTC timestamp without the offset.
+    recent = job_body("task-image-build-new", "error", "new", created_at="2025-12-31T23:59:55")
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(expired, recent))
+
+    failure = driver.build_failure("build", SINCE)
+    assert failure is not None and failure.startswith("[image-build] task-image-build-new: ")
+    assert [failure["job"] for failure in evidence_file(driver)["build"]["image_build_failures"]] == [
+        "task-image-build-new"
+    ]
+
+
+def test_build_failure_attributes_pod_logs_to_their_own_jobs(tmp_path: Path) -> None:
+    pods = [
+        pod_body("unrelated", "another-job"),
+        pod_body("second", "task-image-build-second"),  # the label may carry the job name
+        pod_body("first", "id-1"),
+    ]
+    logs = {"first": "BuildError: first failed", "second": "BuildError: second failed"}
+
+    def kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if "logs" in args:
+            assert args[args.index("-n") + 1] == "nemo"
+            return done(logs[args[args.index("-n") + 2]])
+        assert "--context" in args and args[args.index("--context") + 1] == "kind-e2e"
+        assert "-A" in args and args[args.index("-l") + 1] == "nhx.nvidia.com/job_workspace_id=ws"
+        return done({"items": pods})
+
+    driver, _ = make_driver(
+        tmp_path,
+        lambda args, timeout: done(),
+        Clock(),
+        client=jobs_api(
+            job_body("task-image-build-first", "error", "id-1"),
+            job_body("task-image-build-second", "error", "id-2"),
+        ),
+        kube_context="kind-e2e",
+        kubectl=kubectl,
+    )
+
+    assert driver.build_failure("build", SINCE) == "[image-build] task-image-build-first: BuildError: first failed"
+    assert evidence_file(driver)["build"]["image_build_failures"] == [
+        {"job": "task-image-build-first", "status": "error", "error": logs["first"], "pods": ["first"]},
+        {"job": "task-image-build-second", "status": "error", "error": logs["second"], "pods": ["second"]},
+    ]
+
+
 def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_account() -> None:
     check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1"), pod_body("p2", "j2")]}), exchange=True)
 
@@ -1174,6 +1222,7 @@ def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_a
         ([], "no Job pods"),
         ([pod_body("p1", "j1", service_account="default")], "ServiceAccount 'default'"),
         ([pod_body("p1", "j1", token=False)], "workload token missing"),
+        ([pod_body("p1", "j1"), pod_body("p2", "j2", token=False)], "p2 ran as .*workload token missing"),
     ],
 )
 def test_check_workload_identity_fails_on_a_pod_acting_as_the_submitter(pods: list[dict], message: str) -> None:
@@ -1211,3 +1260,18 @@ def test_check_workload_discovery_without_exchange() -> None:
         check_workload_discovery(NHXOIDCConfig(auth_enabled=True, workload_token_exchange_enabled=True), exchange=False)
     with pytest.raises(AssertionError, match="expected auth on"):
         check_workload_discovery(NHXOIDCConfig(auth_enabled=False), exchange=False)
+
+
+@pytest.mark.parametrize(("endpoint", "client_id"), [(None, "workload"), ("https://idp/token", None)])
+def test_check_workload_discovery_rejects_incomplete_exchange_config(
+    endpoint: str | None, client_id: str | None
+) -> None:
+    config = NHXOIDCConfig(
+        auth_enabled=True,
+        workload_token_exchange_enabled=True,
+        workload_token_endpoint=endpoint,
+        workload_client_id=client_id,
+    )
+
+    with pytest.raises(AssertionError, match=r"^\[identity\] discovery has no workload token endpoint or client"):
+        check_workload_discovery(config, exchange=True)

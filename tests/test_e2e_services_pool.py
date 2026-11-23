@@ -1,16 +1,42 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
 import yaml
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.execution_profiles import DockerJobExecutionProfile
 
 import e2e.services_pool as services_pool
 import e2e.services_pool_fixtures as services_pool_fixtures
+
+
+def test_services_pool_client_uses_the_configured_gateway_ca(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = tmp_path / "gateway-ca.pem"
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(bundle))
+    monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("NHX_CONTEXT_NAME", raising=False)
+    observed: list[str | None] = []
+
+    def make_transport(*, verify: str | None = None, **kwargs: Any) -> httpx.Client:
+        observed.append(verify)
+        return httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)), **kwargs)
+
+    monkeypatch.setattr(services_pool_fixtures, "httpx", SimpleNamespace(Client=make_transport))
+    fixture_fn = cast(
+        Callable[[str, services_pool.RunningServices], Iterator[NemoClient]],
+        cast(Any, services_pool_fixtures.services_pool_client).__wrapped__,
+    )
+    instance = services_pool.RunningServices("https://gateway.test", log_path=None, proc=None, config_path=None)
+    for client in fixture_fn(instance.url, instance):
+        assert client.base_url == instance.url
+
+    assert observed == [str(bundle)]
 
 
 def test_docker_quickstart_runs_cpu_jobs_in_task_containers() -> None:

@@ -2115,3 +2115,19 @@ def test_authentik_taskset_runs_overlay_extends_the_demo_and_the_kind_values() -
     ]
     for kind_values in ("e2e/k8s/values/builder.yaml", "e2e/k8s/values/taskset-runs.yaml"):
         assert _deep_contains(overlay, yaml.safe_load(Path(kind_values).read_text())), kind_values
+
+
+def test_nightly_taskset_run_matrix_covers_only_supported_auth_modes() -> None:
+    workflow = _load_yaml(Path(".github/workflows/nightly-taskset-runs-e2e.yaml"))
+    matrix = workflow["jobs"]["kind-taskset-runs-e2e"]["strategy"]["matrix"]
+    rows = {
+        (auth, exchange)
+        for auth in matrix["auth"]
+        for exchange in matrix["workload_token_exchange"]
+        if not any(
+            {"auth": auth, "workload_token_exchange": exchange}.items() >= exclusion.items()
+            for exclusion in matrix.get("exclude", [])
+        )
+    }
+
+    assert rows == {("off", False), ("on", False), ("on", True)}
