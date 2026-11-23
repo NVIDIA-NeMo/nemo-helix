@@ -179,14 +179,14 @@ That is a summary. Two places hold the rest:
 
 ## Create the step's namespace
 
-The remote backend uses none of what `builder.enabled` creates for the in-cluster build: the build namespace, its ServiceAccounts and RBAC, the work volume and the three build profiles. `builder.enabled` may stay on, and the chart enables Harbor taskset runs only when it is set, but the step doesn't run in the build namespace.
+The remote backend uses none of what `builder.enabled` creates for the in-cluster build: the build namespace, its ServiceAccounts and RBAC, the work volume and the three build profiles. `builder.enabled` may stay on, but the step doesn't run in the build namespace.
 
-On a remote deployment, `builder.enabled: true` still creates all of that, and nothing uses it. That includes the namespace, labelled for the `baseline` standard, and the work-volume claim, which is `ReadWriteMany` and 100Gi unless you change `builder.workVolume`. The chart has no switch for taskset runs alone: with `builder.enabled` off it renders no `evals.runs.harbor`, and taskset runs are off unless you set that block yourself under `platformConfig.evals.runs.harbor`, copying `harbor-standard` from the chart's `values.yaml`. That way hasn't been tried.
+On a remote deployment, `builder.enabled: true` still creates all of that, and no build submitted on `remote` uses it. That includes the namespace, labelled for the `baseline` standard, and the work-volume claim, which is `ReadWriteMany` and 100Gi unless you change `builder.workVolume`. The chart has no switch for taskset runs alone: with `builder.enabled` off it renders no `evals.runs.harbor`, and taskset runs are off unless you set that block yourself under `platformConfig.evals.runs.harbor`, copying `harbor-standard` from the chart's `values.yaml`. That way hasn't been tried.
 
 The namespace rule:
 
 - With platform auth on and workload token exchange, a step is known as the build's own by the platform's record of its pod. That record is as sure as the step's namespace is closed. Run the step in a namespace where nothing but Jobs creates pods: no other workload, and no user.
-- Not the build namespace, `<release namespace>-builds` by default, while the in-cluster build profiles are deployed: the in-cluster build step may create pods there. In that auth mode Builder refuses every submit while the remote-build profile names the namespace of the `control_profile` profile (`build-control`) that Jobs lists.
+- Not the build namespace, `<release-namespace>-builds` by default, while the in-cluster build profiles are deployed: the in-cluster build step may create pods there. In that auth mode Builder refuses every submit while the remote-build profile names the namespace of the `control_profile` profile (`build-control`) that Jobs lists.
 - Builder checks only that one namespace. It can't see what else may create pods where the step runs.
 - Not the release namespace either: the platform's own pods run there, and so do the model deployments it launches.
 - With platform auth off, or on without workload token exchange (where `allow_unverified_completion` lets builds through), nothing checks the namespace. A namespace of its own still lets you turn workload token exchange on later without moving the step.
@@ -269,7 +269,7 @@ A namespace other than the release's also needs:
 
 - **A platform URL the step can reach.** The step calls the platform at `platform.base_url`, and so does Jobs' launcher, which starts it. Which URL that is goes by how the platform authenticates:
 
-  - **Without workload token exchange** (platform auth off, or on without `auth.oidc.workload`), the in-cluster URL, namespace-qualified. With `builder.enabled: true` the chart sets `platform.base_url` to `http://<api-service>.<release namespace>.svc:<port>`, unless your own `platformConfig` sets the key: your value replaces the chart's. With `builder.enabled` off, or where your value isn't a name the step's namespace resolves, set it yourself:
+  - **Without workload token exchange** (platform auth off, or on without `auth.oidc.workload`), the in-cluster URL, namespace-qualified. With `builder.enabled: true` the chart sets `platform.base_url` to `http://<api-service>.<release-namespace>.svc:<port>`, unless your own `platformConfig` sets the key: your value replaces the chart's. With `builder.enabled` off, or where your value isn't a name the step's namespace resolves, set it yourself:
 
     ```yaml
     platformConfig:
@@ -302,7 +302,7 @@ A namespace other than the release's also needs:
 
 ## Add the Jobs profile
 
-A profile you add under `jobs.executors` inherits nothing from `jobs.executor_defaults`, so write it in full. Read what the chart gives its own Kubernetes profiles, and copy `launcher_image` and `pod_security_context` from it:
+A profile you add under `jobs.executors` inherits nothing from `jobs.executor_defaults`, so write it in full. Read what the chart gives its own Kubernetes profiles, and copy `pod_security_context` from it:
 
 ```bash
 kubectl get configmap "$FULLNAME-config" -n "$NHX_NAMESPACE" \
@@ -319,7 +319,7 @@ platformConfig:
         config:
           namespace: nemo-helix-remote-builds
           service_account_name: nhx-build-remote
-          launcher_image: <launcher-image>
+          launcher_image: '{{ include "nhx-core.image" . }}'
           pod_security_context: {}
           max_active_jobs: 4
           ttl_seconds_active: 14400
@@ -328,6 +328,7 @@ platformConfig:
             BUILD_SERVICE_URL: https://build.example.com
 ```
 
+- Keep `launcher_image` as written. Helm evaluates the template expressions in `platformConfig`, so the profile takes the release's own image, as the chart's profiles do, and follows it at every upgrade. An image name copied in would stay at the release it was copied from.
 - Jobs' built-in profiles and the chart's build profiles stay: Jobs adds its defaults to this list, and the chart adds its own after the merge.
 - Helm replaces a list one values file sets with the list a later file sets. Keep every profile you define in one list.
 
@@ -337,7 +338,7 @@ platformConfig:
 | `backend` | `kubernetes_job`. A submit is refused on any other backend |
 | `config.namespace` | The step's namespace |
 | `config.service_account_name` | The ServiceAccount you created there. If unset, the namespace's `default` account |
-| `config.launcher_image` | An image that ships `/tools/jobs-launcher`, as the platform image does. If unset, a profile written in full gets Jobs' own default, not the chart's |
+| `config.launcher_image` | The release's platform image, which ships `/tools/jobs-launcher`: the expression above. If unset, a profile written in full gets Jobs' own default, not the chart's |
 | `config.pod_security_context` | The pod security context for the step's pod: the chart's `podSecurityContext`, `{}` by default |
 | `config.default_task_image` | The step image, only when `builder.remote.image` is unset |
 | `config.image_pull_secrets` | Secrets in the step's namespace for pulling the step image, as a list of `name` entries, on top of the platform's `imagePullSecrets` |
@@ -624,8 +625,8 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 
 | `<reason>` | What to do |
 | --- | --- |
-| `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise the one it names |
-| `Image pull did not succeed within <n>s (<reasons>): <detail>` | Jobs gave up pulling the step image. `<n>` is the profile's `ttl_seconds_image_pull`, 600 if unset. Check `remote.image`, or the profile's `default_task_image`, and the image pull secrets in the step's namespace |
+| `Job timed out after reaching max TTL of <n> seconds` | Jobs ended the step at one of the profile's limits. `<n>` is its `ttl_seconds_active`, which counts from the submit, so the wait for a slot is in it; or its `ttl_seconds_before_active`, for a step that never started. Raise `ttl_seconds_active` when it is the one named. For a step that never started, a longer `ttl_seconds_before_active` helps only a pod that would have started, such as one waiting for a node. A ServiceAccount the profile names, or a Secret it mounts, that isn't in the step's namespace also keeps the pod from starting, and ends in this same message. Jobs deletes the step's Kubernetes Job and its pod when it ends the step, so read the namespace's events while a new build's step is pending, with `kubectl get events -n nemo-helix-remote-builds` |
+| `Image pull did not succeed within <n>s (<reasons>): <detail>` | Jobs gave up pulling an image of the step's pod: the step image, or the profile's `launcher_image`. `<detail>` is the kubelet's event, which as a rule names the image. `<n>` is the profile's `ttl_seconds_image_pull`, 600 if unset. Check `remote.image` or the profile's `default_task_image`, its `launcher_image`, and the image pull secrets in the step's namespace |
 | `the step could not start: RuntimeError: NHX_BUILD_REMOTE_CREDENTIAL not set: the build service's credential did not reach this step` | `credential_secret` is set and the secret's value didn't reach the step. Check the secret holds a value |
 | `the step could not start: RuntimeError: the build service's credential is empty: the step's Jobs profile did not mount it` | The step program reads a mounted credential and found none. Mount it, or set `credential_secret` |
 | `the step could not start: RuntimeError: the build service's credential could not be read: <why>` | The step program's `read_credential` failed. Check the mount and its path |
@@ -637,7 +638,7 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 | `the build service reports it failed: <detail>` | The build failed at the service. Use the build ID to look further there |
 | `the build service published '<reference>', not a digest in <registry>/<repository>` | `remote.registry` and `remote.repository` aren't where the service publishes |
 | `it was built, but the builder refused to complete it: <error>` | Builder answered the completion with a refusal. See the next table |
-| `it was built, but the builder could not be told: <error>` | The completion kept failing for five minutes. With a `503`, see the next table. Otherwise the API couldn't be reached |
+| `it was built, but the builder could not be told: <error>` | The completion kept failing for five minutes. With a `503`, see the next table. With a `422`, the API was reached and refused the request's shape, which the step tries again in case an older API pod answered: the step image is from a newer release than the API pods. Finish the platform's upgrade, or rebuild the step image from the platform's release (see [Build the step image](#build-the-step-image)). Otherwise the API couldn't be reached |
 | `cancelled: the job was told to stop` | The step was told to stop: the job was cancelled, or Jobs ended the step at a limit (see the first row) |
 
 If the reason ends with `the build service could not be told to stop it, it may still be running`, or with `a build may be running, started with key <key>`, a build may be left running at the service. Cancel it there.

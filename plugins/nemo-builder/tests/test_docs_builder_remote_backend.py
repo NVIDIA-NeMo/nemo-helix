@@ -12,24 +12,36 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import itertools
 import re
 from datetime import timedelta
 from functools import cache
 from pathlib import Path
 from typing import Any, get_args
 
+import httpx
 import pytest
 import yaml
 from nemo_builder_plugin import service
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.backends import BACKENDS
 from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
+from nemo_builder_plugin.entities import ContainerImage, ExternalImage, ImageRuntimeConfig
 from nemo_builder_plugin.plan import BuildPlan
 from nemo_builder_plugin.remote import CANCEL_MARGIN_SECONDS, STEP_NAME, RemoteBackend
 from nemo_builder_plugin.run.fetch import MAX_UNPACKED_BYTES, MAX_UNPACKED_ENTRIES
-from nemo_builder_plugin.run.remote import COMPLETION_SECONDS, START_PATIENCE_SECONDS, Stage, step_main
+from nemo_builder_plugin.run.remote import (
+    COMPLETION_SECONDS,
+    START_PATIENCE_SECONDS,
+    Clock,
+    ImageFailed,
+    Stage,
+    _complete,
+    step_main,
+)
 from nemo_builder_plugin.schema import CODE_BACKEND_REJECTED, MAX_BUILD_SPECS, BuildSet
 from nemo_builder_plugin.settle import JOB_GRACE
+from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     KubernetesJobExecutionProfileConfig,
@@ -80,6 +92,8 @@ CREDENTIAL = "## Give the step its credential"
 VERIFY = "## Apply and verify"
 TROUBLESHOOTING = "## Troubleshooting"
 SUBMIT_REFUSED = "### A submit is refused"
+IMAGE_FAILS = "### An image fails"
+COMPLETION_REFUSED = "### A completion is refused"
 #: Here the guide names evals' errors, which the builder's source doesn't spell.
 EVALS_ERRORS = "### An evals build fails after a switch"
 
@@ -106,6 +120,9 @@ PROSE_QUOTES = (
 )
 #: A number as the guide writes it out in a sentence.
 NUMBERS = "zero one two three four five six seven eight nine ten eleven twelve".split()
+#: What the API answers a completion whose shape it doesn't know with. The framework's answer, not a refusal of
+#: the builder's own, so the guide's table of those has no row for it.
+UNKNOWN_SHAPE = 422
 
 
 def _text(path: Path = GUIDE) -> str:
@@ -219,8 +236,8 @@ def _spelt_share(sentence: str) -> float:
     covered = [False] * len(sentence)
     for parts in _strings(*SOURCES):
         literals = [part for part in parts if part]
-        # Too short to be taken for part of a sentence. And, cheap, and most strings fail it: one whose longest
-        # part isn't in the sentence can't be.
+        # Skipped: a string too short to be taken for part of a sentence, and one whose longest part isn't in the
+        # sentence. The second check is cheap, and most strings fail it.
         if sum(map(len, literals)) < MIN_SPELT or max(literals, key=len) not in sentence:
             continue
         pattern = re.compile("".join(".+?" if part is None else f"({re.escape(part)})" for part in parts))
@@ -263,6 +280,32 @@ def _refusals() -> list[re.Pattern[str]]:
     return refusals
 
 
+class _Answering:
+    """The builder's routes, to a step whose every completion is answered with one status."""
+
+    def __init__(self, status: int) -> None:
+        self._answer = httpx.Response(status, request=httpx.Request("POST", "http://builder.test"))
+
+    def row(self, image: str) -> ContainerImage:
+        raise NotImplementedError
+
+    def complete(
+        self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None, external: ExternalImage | None = None
+    ) -> ContainerImage:
+        raise NemoHTTPError(self._answer)
+
+
+def _completion_reason(status: int) -> str:
+    """The reason the driver fails a built image with when its completion goes on being answered with
+    ``status``: on a clock that leaves it one try before the time for completing is up."""
+    ticks = itertools.count(step=COMPLETION_SECONDS)
+    clock = Clock(monotonic=lambda: next(ticks), sleep=lambda wait: None)
+    built = ExternalImage(image_id="image-1", build_id="build-1")
+    with pytest.raises(ImageFailed) as failed:
+        _complete(_Answering(status), "image", f"sha256:{'0' * 64}", None, built, clock=clock, cancelled=lambda: False)
+    return str(failed.value)
+
+
 def test_the_settings_table_has_every_key_at_its_default() -> None:
     rows = dict(re.findall(r"^\| `([a-z_.]+)` \| ([^|]+) \|", _section(SETTINGS), re.MULTILINE))
     fields = _settings()
@@ -288,6 +331,14 @@ def test_the_profile_recipe_validates_and_can_run_the_backend_recipe() -> None:
     """Held to the check every submit runs, not to a copy of it: on the build the guide itself submits."""
     config = BuilderConfig.model_validate(_backend_recipe())
     RemoteBackend(config, [_profile_recipe()]).check(_request_plan(config))
+
+
+def test_the_profile_recipe_takes_its_launcher_image_as_the_charts_profiles_do() -> None:
+    """The chart keeps a profile the values list as written, so an image name copied in would stay at the release
+    it was copied from. The chart's own expression is filled in again at every upgrade."""
+    platform_config = yaml.safe_load(_text(CHART_VALUES))["baseHelixConfig"]
+    (image,) = set(re.findall(r'launcher_image: \{\{ include "([\w.-]+)" \. \| quote \}\}', platform_config))
+    assert _profile_recipe().config.launcher_image == f'{{{{ include "{image}" . }}}}'
 
 
 def test_the_build_the_guide_submits_is_named_as_its_commands_name_it() -> None:
@@ -373,6 +424,8 @@ def test_the_manifests_create_what_the_profile_recipe_names() -> None:
     assert {metadata["namespace"] for kind, metadata in created.items() if kind != "Namespace"} == {config.namespace}
     selected = _api_ingress_peer(manifests)["namespaceSelector"]["matchLabels"]
     assert selected == {"kubernetes.io/metadata.name": config.namespace}
+    # A command the guide runs in a namespace it names, not in the release's, runs where the step does.
+    assert set(re.findall(r" -n ([a-z0-9-]+)", _text())) == {config.namespace}
 
 
 def test_the_mounted_credential_recipe_validates_and_is_where_the_step_program_reads() -> None:
@@ -445,6 +498,21 @@ def test_the_refusal_tables_hold_each_refusal_of_the_backend_once() -> None:
     for refusal in refusals:
         quoted = [row for row in rows if refusal.fullmatch(row)]
         assert len(quoted) == 1, f"{len(quoted)} rows quote the refusal {refusal.pattern!r}: {quoted}"
+
+
+def test_each_status_of_a_completion_is_filed_under_the_reason_the_step_gives() -> None:
+    """The step tries some answers again, and gives a built image up with another reason than it has for a
+    refusal. An operator goes from the reason to the status, so the guide files each status as the step does."""
+    put_off, refused = "it was built, but the builder could not be told", "it was built, but the builder refused"
+    row = re.search(rf"^\| `{put_off}: <error>` \| (.+) \|$", _subsection(IMAGE_FAILS), re.MULTILINE)
+    assert row, "the guide has no row for a completion the step gave up"
+    answered = set(re.findall(r"^\| `(\d{3})` \|", _subsection(COMPLETION_REFUSED), re.MULTILINE))
+    assert answered, "the guide lists no status a completion is answered with"
+    for status in sorted(answered | {str(UNKNOWN_SHAPE)}):
+        reason = _completion_reason(int(status))
+        assert reason.startswith((put_off, refused)), reason
+        tried_again = reason.startswith(put_off)
+        assert tried_again == (f"`{status}`" in row.group(1)), f"{status} is filed under another reason than {reason!r}"
 
 
 def test_what_the_troubleshooting_prose_quotes_is_said_by_the_sources() -> None:
