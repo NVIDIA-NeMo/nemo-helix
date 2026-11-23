@@ -256,6 +256,17 @@ def test_cleanup_reclaims_completed_sandbox_for_terminal_step(backend: OpenShell
     assert _sandbox_gone(backend, name), f"completed sandbox {name} not reclaimed by cleanup"
 
 
+def test_default_policy_allows_reading_cgroup_limits(backend: OpenShellJobBackend) -> None:
+    # Runtimes size themselves from these cgroup v2 limit files; DuckDB aborts when
+    # Landlock denies the open. cat exits nonzero if either cannot be read.
+    step = _step()
+    _create_sandbox(backend, step, ["/bin/cat", "/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/memory.max"])
+
+    update = _sync_until(backend, step, {HelixJobStatus.COMPLETED, HelixJobStatus.ERROR})
+
+    assert update.status == HelixJobStatus.COMPLETED, update.status_details
+
+
 # Fetches EGRESS_TEST_HOST over HTTPS; exits 0 only when the request goes through.
 _FETCH_EGRESS_HOST = [
     "/usr/local/bin/python3",
