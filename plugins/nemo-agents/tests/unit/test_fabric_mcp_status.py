@@ -6,11 +6,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from functools import partial
 from pathlib import Path
 from typing import Any, get_args
 
-import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -26,6 +24,8 @@ from nemo_agents_plugin.fabric.mcp_status import (
     probe_mcp_server,
 )
 from nemo_agents_plugin.fabric.server import create_fabric_serving_app
+from pytest_httpserver import HTTPServer
+from werkzeug.wrappers import Request, Response
 
 _SERVER_SCRIPT = """
 from mcp.server.fastmcp import FastMCP
@@ -69,42 +69,47 @@ def server_script(tmp_path: Path) -> str:
 
 
 @pytest.mark.parametrize("reject_token", [False, True])
-async def test_service_account_probe(monkeypatch: pytest.MonkeyPatch, reject_token: bool) -> None:
+async def test_service_account_probe(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, reject_token: bool
+) -> None:
     secret, token = "test-client-secret", "test-access-token"
     monkeypatch.setenv("MCP_TEST_SECRET", secret)
     requests: list[str] = []
 
-    def respond(request: httpx.Request) -> httpx.Response:
-        requests.append(request.url.path)
-        if request.url.path == "/token":
+    def respond(request: Request) -> Response:
+        requests.append(request.path)
+        if request.path == "/token":
             assert request.headers["authorization"].startswith("Basic ")
             if reject_token:
-                return httpx.Response(401, json={"error": f"{secret} {token}"})
-            return httpx.Response(200, json={"access_token": token, "expires_in": 3600})
+                return Response(json.dumps({"error": f"{secret} {token}"}), status=401, mimetype="application/json")
+            return Response(json.dumps({"access_token": token, "expires_in": 3600}), mimetype="application/json")
         assert request.headers["authorization"] == f"Bearer {token}"
         assert request.headers["X-Application"] == "test-app"
-        message = json.loads(request.content)
+        message = request.get_json()
         if "id" not in message:
-            return httpx.Response(202)
+            return Response(status=202)
         result = (
             {"protocolVersion": "2025-03-26", "capabilities": {}, "serverInfo": {"name": "test", "version": "1"}}
             if message["method"] == "initialize"
             else {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}]}
         )
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], "result": result})
+        return Response(
+            json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), mimetype="application/json"
+        )
 
-    monkeypatch.setattr(httpx, "AsyncClient", partial(httpx.AsyncClient, transport=httpx.MockTransport(respond)))
+    for endpoint in ("/token", "/mcp"):
+        httpserver.expect_request(endpoint, method="POST").respond_with_handler(respond)
     config = _config(
         {
             "tools": {
                 "transport": "streamable-http",
-                "url": "https://mcp.example.test/mcp",
+                "url": httpserver.url_for("/mcp"),
                 "custom_headers": {"X-Application": "test-app"},
                 "authentication": {
                     "type": "service_account",
                     "client_id": "test-client",
                     "client_secret_env": "MCP_TEST_SECRET",
-                    "token_url": "https://idp.example.test/token",
+                    "token_url": httpserver.url_for("/token"),
                 },
             }
         }
@@ -114,6 +119,7 @@ async def test_service_account_probe(monkeypatch: pytest.MonkeyPatch, reject_tok
     assert status.state == ("failed" if reject_token else "running")
     assert [tool.name for tool in status.tools] == ([] if reject_token else ["lookup"])
     assert requests.count("/token") == 1
+    httpserver.check_assertions()
     assert secret not in status.model_dump_json()
     assert token not in status.model_dump_json()
 
