@@ -6,11 +6,14 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import {
+  EntityEmptyState,
+  type EntityEmptyStateProps,
+} from '@nemo/common/src/components/EntityEmptyState';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { ChartTree, Trash } from '@nemo/icons/icons';
+import { Trash } from '@nemo/icons/icons';
 import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
 import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
@@ -27,6 +30,11 @@ interface ExperimentsTableProps {
 
 /** The agent's evaluations rolled up by the experiment they belong to. Selecting one opens the
  *  experiment's own route, which already lists the evaluations under it. */
+/** Variant-specific `EntityEmptyState` props for the `experiments` entity, minus `entity`/`workspace`. */
+type AgentExperimentsEmptyStateProps =
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
+
 export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experiments }) => {
   const openRow = useRowNavigation();
   const queryClient = useQueryClient();
@@ -117,14 +125,15 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
         attributes={{
           DataViewRoot: { data: pageRows, totalCount: experiments.length },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                className="py-density-3xl"
-                icon={<ChartTree className="size-16" />}
-                header="No experiments yet"
-                emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
-              />
-            ),
+            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
+              const emptyStateProps: AgentExperimentsEmptyStateProps =
+                hasFiltersApplied || hasSearchApplied
+                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
+                  : { variant: 'first-use' };
+              return (
+                <EntityEmptyState entity="experiments" workspace={workspace} {...emptyStateProps} />
+              );
+            },
           },
         }}
       />

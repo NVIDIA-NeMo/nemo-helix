@@ -164,12 +164,18 @@ describe('RecentExperimentsPanel', () => {
         experiments={[]}
         onOpenExperiment={vi.fn()}
         onRunEvaluation={onRunEvaluation}
+        workspace="my-workspace"
       />
     );
 
-    expect(screen.getByText('Measure agent performance')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+    expect(screen.getByText('No experiments yet')).toBeInTheDocument();
+    // The create action is registry copy; submitting an evaluation is what it does.
+    await user.click(screen.getByRole('button', { name: 'Create Experiment' }));
 
     expect(onRunEvaluation).toHaveBeenCalled();
+
+    // The handoff is resolved against the real workspace, not left as a placeholder.
+    expect(screen.getByTestId('entity-empty-state-help')).toBeInTheDocument();
+    expect(screen.queryByText(/<workspace>/)).not.toBeInTheDocument();
   });
 });

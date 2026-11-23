@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
+import {
+  EntityEmptyState,
+  type EntityEmptyStateProps,
+} from '@nemo/common/src/components/EntityEmptyState';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { TrialTextModal } from '@studio/components/dataViews/OptimizationJobsDataView/TrialTextModal';
 import { useTrialColumns } from '@studio/components/dataViews/OptimizationJobsDataView/useTrialColumns';
@@ -13,6 +16,7 @@ import {
   PARAM_SORT_PREFIX,
   paramValue,
 } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type {
   StudyResults,
   Trial,
@@ -105,7 +109,13 @@ export interface TrialsDataViewProps {
   onDeploy?: (trial: Trial) => void;
 }
 
+/** Variant-specific `EntityEmptyState` props for the `optimizationTrials` entity, minus `entity`/`workspace`. */
+type OptimizationTrialsEmptyStateProps =
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
+
 export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy }) => {
+  const workspace = useWorkspaceFromPath();
   const { trials, metricNames } = results;
   const primaryMetric = metricNames[0];
 
@@ -179,16 +189,19 @@ export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy
             totalCount: processedTrials.length,
           },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                header={debouncedSearchBar.trim() ? 'No matching trials' : 'No trials'}
-                emptyMessage={
-                  debouncedSearchBar.trim()
-                    ? 'No trial matches this search.'
-                    : 'This study did not record any trials.'
-                }
-              />
-            ),
+            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
+              const emptyStateProps: OptimizationTrialsEmptyStateProps =
+                hasFiltersApplied || hasSearchApplied
+                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
+                  : { variant: 'first-use' };
+              return (
+                <EntityEmptyState
+                  entity="optimizationTrials"
+                  workspace={workspace}
+                  {...emptyStateProps}
+                />
+              );
+            },
           },
         }}
       />

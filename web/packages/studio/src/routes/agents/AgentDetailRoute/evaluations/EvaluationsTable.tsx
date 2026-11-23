@@ -7,15 +7,18 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
+import {
+  EntityEmptyState,
+  type EntityEmptyStateProps,
+} from '@nemo/common/src/components/EntityEmptyState';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { utcToLocalDate } from '@nemo/common/src/utils/date';
-import { Beaker, Trash } from '@nemo/icons/icons';
+import { Trash } from '@nemo/icons/icons';
 import {
   deleteEvaluation,
   getListEvaluationsQueryKey,
@@ -123,6 +126,11 @@ interface EvaluationsTableProps {
 }
 
 /** Every evaluation for the agent, ungrouped, from the moment its run is submitted. */
+/** Variant-specific `EntityEmptyState` props for the `agentEvaluations` entity, minus `entity`/`workspace`. */
+type AgentEvaluationsEmptyStateProps =
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
+
 export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   workspace,
   agentName,
@@ -399,14 +407,19 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             },
           },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                className="py-density-3xl"
-                icon={<Beaker className="size-16" />}
-                header="No evaluations yet"
-                emptyMessage="Runs appear here as soon as they are submitted, before any results are published."
-              />
-            ),
+            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
+              const emptyStateProps: AgentEvaluationsEmptyStateProps =
+                hasFiltersApplied || hasSearchApplied
+                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
+                  : { variant: 'first-use' };
+              return (
+                <EntityEmptyState
+                  entity="agentEvaluations"
+                  workspace={workspace}
+                  {...emptyStateProps}
+                />
+              );
+            },
           },
         }}
       />

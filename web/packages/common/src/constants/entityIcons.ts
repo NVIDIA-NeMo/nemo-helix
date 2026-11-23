@@ -27,6 +27,9 @@ import {
   ProfileGroup,
   Route,
   Faders,
+  ChatMulti,
+  Paperclip,
+  Book,
 } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
@@ -56,6 +59,8 @@ export const ENTITY_ICONS = {
   agentMonitorRuns: ListBullet,
   // Every run that tunes an agent — parameter sweeps, insight loops.
   agentOptimizations: Sliders,
+  // A study's individual trials are read as part of the study, so they take its glyph.
+  optimizationTrials: Sliders,
 
   // Models
   baseModels: CubeStack,
@@ -94,6 +99,12 @@ export const ENTITY_ICONS = {
   telemetryTraces: ChartTree,
   insightTraces: ChartTree,
   telemetrySpans: ListBullet,
+
+  // NeMo Assistant. In-app chat surfaces rather than platform entities — they
+  // have no CLI equivalent, so they carry copy and a glyph but no bridge.
+  assistantSessions: ChatMulti,
+  assistantArtifacts: Paperclip,
+  assistantSkills: Book,
 
   // System
   jobs: ListCheckmark,

@@ -22,6 +22,8 @@ const INTENTIONAL_ALIASES: Record<string, string> = {
   recentJobs: 'jobs',
   // Files and their containing fileset share the mapped folder glyph.
   filesetFiles: 'filesets',
+  // A study's trials are read as part of the study, not as a separate thing.
+  optimizationTrials: 'agentOptimizations',
 };
 
 describe('ENTITY_ICONS', () => {

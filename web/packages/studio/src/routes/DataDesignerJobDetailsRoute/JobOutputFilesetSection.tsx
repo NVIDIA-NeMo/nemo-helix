@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import {
+  EntityEmptyState,
+  type EntityEmptyStateProps,
+} from '@nemo/common/src/components/EntityEmptyState';
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import {
   getFilesListFilesetFilesQueryKey,
@@ -48,6 +51,11 @@ const centeredCard = (children: ReactNode) => (
     {children}
   </Card>
 );
+
+/** Variant-specific `EntityEmptyState` props for the `filesetFiles` entity, minus `entity`/`workspace`. */
+type OutputFilesEmptyStateProps =
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
+  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
 
 export const JobOutputFilesetSection: FC = () => {
   const navigate = useNavigate();
@@ -246,13 +254,19 @@ export const JobOutputFilesetSection: FC = () => {
                 },
                 DataViewTableContent: {
                   className: 'studio-data-view-table',
-                  renderEmptyState: () => (
-                    <TableEmptyState
-                      className="py-4"
-                      header="No files yet"
-                      emptyMessage="This fileset has no files, or they are not visible yet."
-                    />
-                  ),
+                  renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
+                    const emptyStateProps: OutputFilesEmptyStateProps =
+                      hasFiltersApplied || hasSearchApplied
+                        ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
+                        : { variant: 'first-use' };
+                    return (
+                      <EntityEmptyState
+                        entity="filesetFiles"
+                        workspace={filesetWorkspace}
+                        {...emptyStateProps}
+                      />
+                    );
+                  },
                 },
               }}
             />
