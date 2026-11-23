@@ -198,7 +198,7 @@ const StaticAssistantChatThread = ({
   );
 };
 
-describe('AssistantChat', () => {
+describe('AssistantChat', { timeout: interactionTimeoutMs }, () => {
   beforeEach(() => {
     mocks.createChatCompletion.mockReset();
     mocks.createChatCompletion.mockResolvedValue(completion);
