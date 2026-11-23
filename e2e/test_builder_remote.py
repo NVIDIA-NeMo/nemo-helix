@@ -21,7 +21,8 @@ the stand-in reports a digest the test makes up.
 
 Run it with ``--feature builder-remote``, against a platform with auth off: the values file accepts no completion
 that nothing can verify, so with auth on and no workload token exchange the builder refuses every submit. The module
-fails on a platform with auth on, before it submits anything.
+fails on a platform with auth on, before it submits anything, and on one whose Jobs has no ``cpu/build-remote``
+profile, which is one that was not upgraded.
 """
 
 import json
@@ -60,6 +61,10 @@ pytestmark = [
 #: The stand-in step program, and the ConfigMap the remote profile mounts it from (builder-remote.yaml).
 STEP_PROGRAM = Path(__file__).parent / "resources" / "builder_remote" / "remote_build_step.py"
 STEP_CONFIGMAP = "nhx-e2e-remote-build-step"
+#: The Jobs execution profile that file adds for the step, and the repository it says the build service publishes
+#: to. plugins/nemo-builder/tests/test_remote_e2e_assets.py holds both to the file.
+STEP_PROFILE = ("cpu", "build-remote")
+REPOSITORY = "e2e-remote/images"
 #: The one step the remote backend compiles.
 STEP_NAME = "remote-build"
 #: How long a row may take to settle. Shorter than builder-remote.yaml's build_timeout_seconds, so a build that
@@ -113,8 +118,6 @@ class Submitted:
     job: str
     #: The one image's row name.
     image: str
-    #: ``<registry>/<repository>``, as the row was written at submit: where the deployment's service publishes.
-    destination: str
     #: What the build context told the stand-in to do.
     outcome: dict[str, str]
 
@@ -160,13 +163,14 @@ def _submit(client: NemoClient, workspace: Workspace, build_set: str, outcome: d
     workspace.jobs.append(submitted.job)
     assert len(submitted.images) == 1, f"submit returned rows {[image.name for image in submitted.images]}"
     row = submitted.images[0]
+    # builder.backend, the other half of the values file: the workspace's fixture has looked for Jobs' half, the
+    # step's profile.
     if row.provenance.backend != "remote":
         pytest.fail(
             f"{row.name} was submitted under the {row.provenance.backend!r} backend: the platform is not building "
             "through the remote backend; upgrade it with e2e/k8s/values/builder-remote.yaml"
         )
-    destination = f"{row.registry}/{row.repository}"
-    return Submitted(job=submitted.job, image=row.name, destination=destination, outcome=outcome)
+    return Submitted(job=submitted.job, image=row.name, outcome=outcome)
 
 
 def _wait_row(
@@ -213,7 +217,7 @@ def remote_workspace(
     client: NemoClient,
     step_program: None,  # noqa: ARG001
 ) -> Iterator[Workspace]:
-    """A workspace for this module's builds, on a platform with auth off that holds the step's program.
+    """A workspace for this module's builds, on a platform with auth off, upgraded, that holds the step's program.
 
     Every submit takes it, so none is made before the ConfigMap exists: a remote-build step whose ConfigMap is
     missing never starts, and its row would wait until the test gave up.
@@ -223,23 +227,32 @@ def remote_workspace(
         "verify, so without workload token exchange the builder refuses every remote submit. Run this module "
         "against a platform with auth off"
     )
+    # Looked for here, and not left to the first submit: a platform still building in the cluster refuses this
+    # workspace's submit for the secrets its push step reads, which says nothing of the upgrade, and writes no row
+    # that would say which backend took it.
+    profiles = JobsClient.from_client(client).list_execution_profiles()
+    assert STEP_PROFILE in {(profile.provider, profile.profile) for profile in profiles}, (
+        f"Jobs has no execution profile {'/'.join(STEP_PROFILE)}: the platform is not building through the remote "
+        "backend; upgrade it with e2e/k8s/values/builder-remote.yaml"
+    )
     workspaces = WorkspacesClient.from_client(client)
     workspace = Workspace(name=f"e2e-builder-remote-{uuid.uuid4().hex[:8]}")
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace.name)).data()
     failed_before = request.session.testsfailed
     yield workspace
-    # Best effort; the cluster is discarded after the run. After a failure the jobs are left as they are: cancelling
-    # one deletes its step's pod, and that pod's log is what the CI job collects next.
+    # Best effort; the cluster is discarded after the run. After a failure the jobs and their workspace are left as
+    # they are: cancelling a job deletes its step's pod, and that pod's log is what the CI job collects next. Deleting
+    # the workspace cancels each of its jobs that is still running, so it would delete that pod too.
     if request.session.testsfailed == failed_before:
         for job in workspace.jobs:
             try:
                 cleanup_platform_job(client, job, workspace.name, timeout=120)
             except Exception:
                 pass
-    try:
-        workspaces.delete_workspace(name=workspace.name).data()
-    except Exception:
-        pass
+        try:
+            workspaces.delete_workspace(name=workspace.name).data()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="module")
@@ -263,7 +276,9 @@ def test_a_built_image_is_completed_with_its_digest_and_the_services_handle(
 
     assert row.status_detail is None
     assert row.digest == digest
-    assert row.image_ref == f"{build.destination}@{digest}"
+    # Where the values file says the build service publishes (builder.remote.repository), and not under the
+    # in-cluster build's prefix, which this release carries too.
+    assert row.repository == REPOSITORY
     external = row.external
     assert external is not None, f"{build.image} is ready without the build service's handle"
     assert external.build_id and external.build_id.startswith(BUILD_ID_PREFIX), external

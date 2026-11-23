@@ -126,6 +126,16 @@ def test_the_profile_mounts_the_step_program_where_the_command_runs_it(
     assert mount.model_fields_set == set(written_storage["additional_volume_mounts"][0])
 
 
+def test_the_e2e_module_names_the_profile_and_the_repository_as_the_values_file_does(
+    builder_config: BuilderConfig, profile: KubernetesJobExecutionProfile
+) -> None:
+    """The e2e test looks for the step's profile before it submits anything, and for the repository on the row of
+    the image it built. Named otherwise than the values file names them, each would fail an upgraded platform."""
+    e2e_module = E2E_MODULE.read_text(encoding="utf-8")
+    assert f'STEP_PROFILE = ("{profile.provider}", "{profile.profile}")' in e2e_module
+    assert f'REPOSITORY = "{builder_config.remote.repository}"' in e2e_module
+
+
 def test_no_profile_in_the_release_namespace_deletes_a_step_that_succeeded(
     platform_config: dict[str, Any], profile: KubernetesJobExecutionProfile
 ) -> None:

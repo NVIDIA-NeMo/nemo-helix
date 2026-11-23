@@ -37,7 +37,8 @@ platformConfig:
         profile: build-remote
         backend: kubernetes_job
         config:
-          # Written in full: a profile added here inherits nothing from executor_defaults.
+          # A profile added here inherits nothing from executor_defaults, so it names the service account and the
+          # launcher image itself. The pod security context and env are left at Jobs' own defaults.
           # No namespace, so the step runs in the release namespace, where the test creates the ConfigMap.
           service_account_name: '{{ include "nhx-core.jobsServiceAccountName" . }}'
           launcher_image: '{{ include "nhx-core.image" . }}'
