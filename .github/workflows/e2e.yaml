@@ -434,7 +434,8 @@ jobs:
       # this release, and with the helm-extra-args the setup step above gave it: the same install, plus one
       # values file. Whatever isn't set here is the install script's own default.
       - name: Switch the builder to the remote backend
-        if: matrix.auth == 'off'
+        # PROOF BRANCH ONLY: run although the in-cluster tests failed, which they do on main today.
+        if: ${{ !cancelled() && matrix.auth == 'off' }}
         shell: bash
         env:
           NAMESPACE: nemo-helix
@@ -461,7 +462,8 @@ jobs:
           e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120
 
       - name: Run remote builder e2e tests
-        if: matrix.auth == 'off'
+        # PROOF BRANCH ONLY: run although the in-cluster tests failed, which they do on main today.
+        if: ${{ !cancelled() && matrix.auth == 'off' }}
         shell: bash
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
