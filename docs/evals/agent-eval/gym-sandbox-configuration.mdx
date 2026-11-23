@@ -142,6 +142,12 @@ widening its own network access.
 OpenSandbox credentials remain in the trusted Evaluator task. The Gym host receives only per-run
 tokens and the environment variables required by its selected Gym components.
 
+Each Gym host and episode sandbox also gets its own execd access token. execd, the command server in
+every OpenSandbox sandbox, then refuses any request without it, including requests through the
+OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, only the
+Evaluator task that created it holds the token. The Gym host also removes the token from its own
+environment before it starts anything, so environment code running there can't use execd.
+
 For a job-specific model credential, create a NeMo Helix secret and reference it through
 `GymRunnerTarget.env_secrets`:
 

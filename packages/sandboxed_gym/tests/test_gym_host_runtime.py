@@ -2196,6 +2196,39 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
     assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]
 
 
+def test_the_execd_token_is_gone_before_the_host_starts_anything(monkeypatch):
+    """Whatever the host starts -- the container engine, then the Gym servers -- inherits its environment.
+
+    Environment code holding the token could run commands through execd, which keeps root after the host
+    becomes the unprivileged container user.
+    """
+    monkeypatch.setenv("EXECD_ACCESS_TOKEN", "sandbox-token")
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+    seen_by_setup: list[str | None] = []
+
+    def _record_setup() -> bool:
+        seen_by_setup.append(os.environ.get("EXECD_ACCESS_TOKEN"))
+        raise RuntimeError("stop after setup")
+
+    class _NoServer:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            return None
+
+    monkeypatch.setattr(runtime, "prepare_container_engine", _record_setup)
+    monkeypatch.setattr(runtime, "_Server", _NoServer)
+
+    runtime.main()
+
+    assert seen_by_setup == [None]
+    assert "EXECD_ACCESS_TOKEN" not in os.environ
+
+
 def test_captured_output_masks_secret_env_values(monkeypatch):
     """The tail is returned to the caller and stored in job logs.
 

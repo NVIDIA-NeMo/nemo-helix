@@ -56,6 +56,7 @@ from sandboxed_gym.environment_package import (
     load_environment_package,
     validate_environment_namespaces,
 )
+from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV
 from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
@@ -1621,6 +1622,11 @@ class _Server(ThreadingHTTPServer):
 
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
+
+    # execd's token reaches this process as the sandbox's own environment. Drop it before starting anything,
+    # so neither the container engine nor a Gym server inherits it: environment code that held it could run
+    # commands through execd, which keeps root after this process becomes the unprivileged container user.
+    os.environ.pop(EXECD_ACCESS_TOKEN_ENV, None)
 
     # Before bootstrap, so both host output and inherited component fd 1/2 are captured.
     # Do not enable Gym's `nemo_gym_log_dir`: in nemo-gym 0.5.0 it runs each component under
