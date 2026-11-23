@@ -10,27 +10,26 @@ in its build context says. Everything else is the platform's own: the backend's 
 Kubernetes launcher, the driver, the completion route and settling.
 
 The platform must be upgraded with ``e2e/k8s/values/builder-remote.yaml``, on top of ``builder.yaml``, as the
-``kind-builder-e2e`` CI job does once its in-cluster tests have passed. The test creates that ConfigMap, and pushes
-a small image with crane from a pod on the cluster, so it needs ``kubectl`` and:
+``kind-builder-e2e`` CI job does once its in-cluster tests have passed. The test creates that ConfigMap, so it needs
+``kubectl`` and:
 
 - ``NHX_E2E_KUBE_CONTEXT``: the cluster's kubectl context. Required: the test never uses the current context.
-- ``NHX_E2E_KUBE_NAMESPACE``: the release namespace, where the remote-build step and the development registry
-  run; ``nemo-helix`` by default.
-- ``NHX_E2E_BUILDER_REGISTRY_PASSWORD``: the development registry's password, as installed.
-- ``NHX_E2E_IMAGE_REGISTRY`` and ``NHX_E2E_IMAGE_TAG``: the platform's images; crane runs from ``nhx-builder-tasks``.
+- ``NHX_E2E_KUBE_NAMESPACE``: the release namespace, where the remote-build step runs; ``nemo-helix`` by default.
+
+No image is pushed. The builder records the digest a remote build's step reports and reads no registry for it, so
+the stand-in reports a digest the test makes up.
 
 Run it with ``--feature builder-remote``, against a platform with auth off: the values file accepts no completion
 that nothing can verify, so with auth on and no workload token exchange the builder refuses every submit. The module
-fails if the platform's auth isn't what the features say, rather than skipping what it should have checked.
+fails on a platform with auth on, before it submits anything.
 """
 
 import json
 import os
-import re
 import subprocess
 import time
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -63,10 +62,6 @@ STEP_PROGRAM = Path(__file__).parent / "resources" / "builder_remote" / "remote_
 STEP_CONFIGMAP = "nhx-e2e-remote-build-step"
 #: The one step the remote backend compiles.
 STEP_NAME = "remote-build"
-# The chart's builder.devRegistry.username.
-REGISTRY_USERNAME = "builder"
-TAG = "e2e"
-POD_TIMEOUT_SECONDS = 600
 #: How long a row may take to settle. Shorter than builder-remote.yaml's build_timeout_seconds, so a build that
 #: was cancelled isn't one that timed out.
 ROW_DEADLINE_SECONDS = 300
@@ -74,20 +69,6 @@ JOB_DEADLINE_SECONDS = 240
 #: How long a build is watched before its job is cancelled: a little over two of the driver's polls of the service,
 #: so a build that is still there is one the stand-in is holding, not one a step is about to fail.
 HOLD_SECONDS = 2 * POLL_SECONDS + 5
-PUSHED = re.compile(r"NHX_E2E_PUSHED=(sha256:[0-9a-f]{64})")
-# One layer on no base image, so nothing is pulled from outside the cluster. The digest is read back from the
-# registry, which is also the check that it serves what was pushed. It is printed last, and after a pause: kubectl
-# attaches to the pod once it is running, and shows nothing of what was printed before that.
-PUSH = (
-    "set -e; export HOME=/tmp; cd /tmp\n"
-    "printf 'pushed by the remote builder e2e\\n' > hello.txt\n"
-    "tar -cf layer.tar hello.txt\n"
-    'crane auth login "${REF%%/*}" -u "$USERNAME" -p "$PASSWORD" >/dev/null 2>&1\n'
-    'crane append --insecure --new_layer layer.tar --new_tag "$REF:$TAG" >/dev/null\n'
-    'DIGEST=$(crane digest --insecure "$REF:$TAG")\n'
-    "sleep 5\n"
-    'echo "NHX_E2E_PUSHED=$DIGEST"\n'
-)
 
 
 @dataclass(frozen=True)
@@ -109,25 +90,6 @@ class Kube:
             check=False,
         )
 
-    def run(
-        self, purpose: str, image: str, args: Sequence[str], *, env: dict[str, str] | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        """Run ``args`` in a new pod and return how it ended. The pod is deleted when it ends."""
-        return self._kubectl(
-            "run",
-            f"builder-remote-e2e-{purpose}-{uuid.uuid4().hex[:6]}",
-            "--rm",
-            "-i",
-            "--restart=Never",
-            "--pod-running-timeout=5m",
-            f"--image={image}",
-            *(f"--env={name}={value}" for name, value in (env or {}).items()),
-            "--command",
-            "--",
-            *args,
-            timeout=POD_TIMEOUT_SECONDS,
-        )
-
     def put_configmap(self, name: str, file: Path) -> None:
         """Create or replace the ConfigMap ``name``, holding ``file`` under its own name."""
         source = f"--from-file={file.name}={file}"
@@ -139,13 +101,9 @@ class Kube:
 
 @dataclass(frozen=True)
 class Workspace:
-    """Where this module's builds are submitted. Every submit takes one, and there is one only once the cluster
-    holds the step's program: a remote-build step whose ConfigMap is missing never starts, and its row would wait
-    until the test gave up."""
+    """Where this module's builds are submitted."""
 
     name: str
-    #: The ConfigMap that holds the step's program, which the fixture that made this workspace made first.
-    step_program: str
     #: Every job this module created, for teardown.
     jobs: list[str] = field(default_factory=list)
 
@@ -159,13 +117,6 @@ class Submitted:
     destination: str
     #: What the build context told the stand-in to do.
     outcome: dict[str, str]
-
-
-@dataclass(frozen=True)
-class Pushed:
-    #: ``<registry>/<repository>``.
-    ref: str
-    digest: str
 
 
 def _required_env(name: str) -> str:
@@ -243,15 +194,6 @@ def _wait_row(
 
 
 @pytest.fixture(scope="module")
-def auth_on(request: pytest.FixtureRequest, client: NemoClient) -> bool:
-    """Whether the platform runs with auth on, which must be what ``--feature auth`` says."""
-    expected = "auth" in {feature.lower() for feature in request.config.getoption("--feature") or []}
-    actual = discover_nhx_config(str(client.base_url)).auth_enabled
-    assert actual == expected, f"platform auth is {'on' if actual else 'off'}, but --feature auth is {expected}"
-    return actual
-
-
-@pytest.fixture(scope="module")
 def kube() -> Kube:
     return Kube(
         context=_required_env("NHX_E2E_KUBE_CONTEXT"),
@@ -260,28 +202,29 @@ def kube() -> Kube:
 
 
 @pytest.fixture(scope="module")
-def registry_password() -> str:
-    return _required_env("NHX_E2E_BUILDER_REGISTRY_PASSWORD")
-
-
-@pytest.fixture(scope="module")
-def step_program(kube: Kube) -> str:
-    """Put the stand-in step program where the remote profile mounts it from. The ConfigMap's name."""
+def step_program(kube: Kube) -> None:
+    """Put the stand-in step program where the remote profile mounts it from."""
     kube.put_configmap(STEP_CONFIGMAP, STEP_PROGRAM)
-    return STEP_CONFIGMAP
 
 
 @pytest.fixture(scope="module")
 def remote_workspace(
     request: pytest.FixtureRequest,
     client: NemoClient,
-    auth_on: bool,  # noqa: ARG001
-    step_program: str,
+    step_program: None,  # noqa: ARG001
 ) -> Iterator[Workspace]:
-    """A workspace for this module's builds, on a platform whose auth is as expected and that holds the step's
-    program. Every submit takes it, so none is made before the ConfigMap exists."""
+    """A workspace for this module's builds, on a platform with auth off that holds the step's program.
+
+    Every submit takes it, so none is made before the ConfigMap exists: a remote-build step whose ConfigMap is
+    missing never starts, and its row would wait until the test gave up.
+    """
+    assert not discover_nhx_config(str(client.base_url)).auth_enabled, (
+        "the platform runs with auth on: e2e/k8s/values/builder-remote.yaml accepts no completion that nothing can "
+        "verify, so without workload token exchange the builder refuses every remote submit. Run this module "
+        "against a platform with auth off"
+    )
     workspaces = WorkspacesClient.from_client(client)
-    workspace = Workspace(name=f"e2e-builder-remote-{uuid.uuid4().hex[:8]}", step_program=step_program)
+    workspace = Workspace(name=f"e2e-builder-remote-{uuid.uuid4().hex[:8]}")
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=workspace.name)).data()
     failed_before = request.session.testsfailed
     yield workspace
@@ -306,38 +249,21 @@ def failed_build(client: NemoClient, remote_workspace: Workspace) -> Submitted:
     return _submit(client, remote_workspace, "remote-failed", outcome)
 
 
-@pytest.fixture(scope="module")
-def pushed(failed_build: Submitted, kube: Kube, image: Callable[[str], str], registry_password: str) -> Pushed:
-    """A small image in the repository the deployment's build service publishes to, for a build to report.
-
-    Where that is comes from a row the builder wrote, the failed build's, so nothing here repeats the deployment's
-    settings.
-    """
-    ref = failed_build.destination
-    env = {"REF": ref, "TAG": TAG, "USERNAME": REGISTRY_USERNAME, "PASSWORD": registry_password}
-    result = kube.run("push", image("nhx-builder-tasks"), ["sh", "-c", PUSH], env=env)
-    if result.returncode == 0 and not PUSHED.search(result.stdout):
-        # Once more, should kubectl have attached too late to show the pod's last line all the same.
-        result = kube.run("push", image("nhx-builder-tasks"), ["sh", "-c", PUSH], env=env)
-    assert result.returncode == 0, f"could not push an image to {ref}: {_ended(result)}"
-    found = PUSHED.search(result.stdout)
-    assert found, f"the push to {ref} did not print the digest it pushed: {_ended(result)}"
-    return Pushed(ref=ref, digest=found.group(1))
-
-
 def test_a_built_image_is_completed_with_its_digest_and_the_services_handle(
-    client: NemoClient, remote_workspace: Workspace, pushed: Pushed
+    client: NemoClient, remote_workspace: Workspace
 ) -> None:
     """The one-step job's step completes its row ``ready``, at the digest and with the handle the service reports."""
+    # Made up, and of no image: the builder records the digest the step reports, and reads no registry for it.
+    digest = "sha256:" + uuid.uuid4().hex * 2
     image_id = f"e2e-image-{uuid.uuid4().hex[:8]}"
-    outcome = {"outcome": "ready", "digest": pushed.digest, "image_id": image_id}
+    outcome = {"outcome": "ready", "digest": digest, "image_id": image_id}
     build = _submit(client, remote_workspace, "remote-ready", outcome)
 
     row = _wait_row(client, remote_workspace, build, "ready")
 
     assert row.status_detail is None
-    assert row.digest == pushed.digest
-    assert row.image_ref == f"{pushed.ref}@{pushed.digest}"
+    assert row.digest == digest
+    assert row.image_ref == f"{build.destination}@{digest}"
     external = row.external
     assert external is not None, f"{build.image} is ready without the build service's handle"
     assert external.build_id and external.build_id.startswith(BUILD_ID_PREFIX), external
@@ -378,7 +304,7 @@ def test_a_failed_builds_reason_reaches_its_row(
 
 
 def test_cancelling_the_job_fails_its_row(client: NemoClient, remote_workspace: Workspace) -> None:
-    """A build whose job is cancelled while the service is still building ends ``failed``, well before its timeout."""
+    """A build whose job is cancelled while the stand-in holds it ends ``failed``, well before its timeout."""
     jobs = JobsClient.from_client(client)
     builder = BuilderClient.from_client(client)
     build = _submit(client, remote_workspace, "remote-cancel", {"outcome": "hang"})
@@ -415,7 +341,9 @@ def test_cancelling_the_job_fails_its_row(client: NemoClient, remote_workspace: 
     assert "timed out after" not in detail, detail
     assert row.digest is None
     # But whatever the step did say of the image, where Jobs kept the end of its log, is that it was told to stop:
-    # a build that failed some other way just as it was cancelled is not this one.
+    # a build that failed some other way just as it was cancelled is not this one. Jobs may have kept none, so this
+    # can pass having read nothing; that the stand-in's held build ends on that line is tested without a cluster,
+    # in plugins/nemo-builder/tests/test_remote_driver.py.
     ended = jobs.get_job_status(workspace=remote_workspace.name, name=build.job).data()
     said = [
         line

@@ -432,7 +432,9 @@ jobs:
       #
       # Keep in step with the "Install NeMo Helix" step of .github/actions/setup-kind-cluster, which installed
       # this release, and with the helm-extra-args the setup step above gave it: the same install, plus one
-      # values file. Whatever isn't set here is the install script's own default.
+      # values file. The script upgrades with what it is handed and reuses no values, so anything the install
+      # passed and this step doesn't is dropped from the release. Whatever isn't set here is the install
+      # script's own default. tests/auth_idp/static/test_authentik_kubernetes_demo.py holds the two together.
       - name: Switch the builder to the remote backend
         # PROOF BRANCH ONLY: run although the in-cluster tests failed, which they do on main today.
         if: ${{ !cancelled() && matrix.auth == 'off' }}
@@ -470,19 +472,14 @@ jobs:
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
           NHX_E2E_KUBE_NAMESPACE: nemo-helix
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: |
           set -euo pipefail
           test -n "${NHX_E2E_CLUSTER_URL}"
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          NHX_E2E_BUILDER_REGISTRY_PASSWORD="$(cat "${RUNNER_TEMP}/builder-registry-password")"
-          export NHX_E2E_BUILDER_REGISTRY_PASSWORD
 
           uv run --frozen pytest \
             e2e/test_builder_remote.py \
             -v \
-            --feature builder \
             --feature builder-remote \
             --run-e2e \
             --no-cov \
