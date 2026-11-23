@@ -279,7 +279,7 @@ A namespace other than the release's also needs:
 
   - **With workload token exchange** (`auth.oidc.workload` is set), the HTTPS URL that mode needs: `platform.base_url` must then be an HTTPS endpoint that every platform pod can resolve and reach. Keep the one you set for that mode, and don't replace it with the in-cluster URL above. Check that its name resolves, and that it can be reached, from the step's namespace. Where its certificate is from a private CA, the step must trust that CA. The step image is yours, so add the CA to the image's system certificates, which Jobs' launcher goes by, and name a file that holds it in `NHX_CLIENT_SSL_CERT_FILE`, in the profile's `env`, for the step's own calls. [Credential Propagation](/documentation/access-control/deployment/credential-propagation) has the rule.
 
-- **With `networkPolicies.enabled`, a way in to the API.** This is for a step that reaches the API pods directly, at the in-cluster URL. One that comes in at an HTTPS URL is let in, or not, by whatever serves that URL. The chart's API ingress policy admits job pods from the release namespace and, with `builder.enabled`, from the build namespace. Admit the step's namespace too:
+- **With `networkPolicies.enabled`, a way in to the API.** This applies while `networkPolicies.api.enabled` is on, its default, and is for a step that reaches the API pods directly, at the in-cluster URL. One that comes in at an HTTPS URL is let in, or not, by whatever serves that URL. The chart's API ingress policy admits job pods from the release namespace and, with `builder.enabled`, from the build namespace. Admit the step's namespace too:
 
   ```yaml
   networkPolicies:
