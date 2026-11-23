@@ -10,7 +10,8 @@ This exercises the whole loop against *real* services and *real* LLM APIs:
 3. Clear all spans for the test project.
 4. Run the research agent on three questions (concurrently) so it logs
    traces to Intake.
-5. Run Compass agent (``nemo compass analysis-runs create --wait``).
+5. Run the workspace's Compass agent (``nemo agents execute``) and wait for
+   its job (``nemo jobs watch``).
 6. Assert Compass created at least one Insight.
 
 Required setup (the test is **opt-in** because it costs real tokens and needs
@@ -46,6 +47,7 @@ spans or Insights.
 """
 
 import asyncio
+import json
 import os
 import shutil
 import signal
@@ -143,6 +145,20 @@ def _cli_cmd(name: str, *args: str) -> list[str]:
     """Build a command that runs CLI *name* via its entry-point callable."""
     module, func = _CLI_CALLABLES[name]
     return [sys.executable, "-c", f"from {module} import {func}; {func}()", *args]
+
+
+def _nemo(*args: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+    """Run ``nemo *args`` against the test platform, failing the test if it fails."""
+    result = subprocess.run(
+        _cli_cmd("nemo", *args),
+        cwd=str(EXAMPLE_DIR),
+        env=_subprocess_env(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    assert result.returncode == 0, f"nemo {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}"
+    return result
 
 
 def _require_keys() -> None:
@@ -460,28 +476,23 @@ def test_compass_creates_insight_end_to_end(platform_server: str) -> None:  # no
     trace_count = _wait_for_traces(MIN_TRACES, SPAN_VISIBLE_TIMEOUT_S)
     assert trace_count >= MIN_TRACES, f"expected >= {MIN_TRACES} traces for {TEST_AGENT}, saw {trace_count}"
 
-    # 4. Run Compass.
-    result = subprocess.run(
-        _cli_cmd(
-            "nemo",
-            "compass",
-            "analysis-runs",
-            "create",
-            "--wait",
-            "--agent",
-            TEST_AGENT,
-            "--workspace",
-            WORKSPACE,
-            "--base-url",
-            BASE_URL,
-        ),
-        cwd=str(EXAMPLE_DIR),
-        env=_subprocess_env(),
-        capture_output=True,
-        text=True,
-        timeout=600,
+    # 4. Run Compass: create the workspace's Compass agent, run it on the test
+    #    agent (the CLI fills in its configured models), and wait for the job.
+    _nemo("agents", "create", "compass.analyst", "--workspace", WORKSPACE)
+    submitted = _nemo(
+        "--output-format",
+        "json",
+        "agents",
+        "execute",
+        "--agent",
+        "compass-analyst",
+        "--spec",
+        json.dumps({"context": {"agent": TEST_AGENT}}),
+        "--workspace",
+        WORKSPACE,
     )
-    assert result.returncode == 0, f"compass failed:\n{result.stdout}\n{result.stderr}"
+    job_name = json.loads(submitted.stdout)["name"]
+    result = _nemo("jobs", "watch", job_name, "--workspace", WORKSPACE, timeout=600)
 
     # 5. Compass must have persisted at least one Insight.
     insight_ids = _list_insight_ids()

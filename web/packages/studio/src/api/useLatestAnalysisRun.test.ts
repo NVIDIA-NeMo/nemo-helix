@@ -2,40 +2,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import type { ExecuteJob, ExecuteJobsPage } from '@nemo/sdk/generated/agents/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import { LIST_POLL_MS, runPollInterval } from '@studio/api/useLatestAnalysisRun';
-import { mockAnalysisRunWithJob } from '@studio/mocks/handlers/insights';
+import { mockAnalysisJob } from '@studio/mocks/handlers/insights';
 
 const failedFetchAttempts = DEFAULT_QUERY_RETRY_COUNT + 1;
 
+const pageOf = (...jobs: ExecuteJob[]): ExecuteJobsPage => ({ data: jobs });
+
 describe('runPollInterval', () => {
   it('polls an in-flight run at the job interval', () => {
-    expect(runPollInterval(mockAnalysisRunWithJob('agent', HelixJobStatus.active), 0)).toBe(
+    expect(runPollInterval(pageOf(mockAnalysisJob('agent', HelixJobStatus.active)), 0)).toBe(
       JOB_POLLING_INTERVAL_MS
     );
   });
 
-  it('backs off to the list interval instead of stopping when a refetch fails', () => {
+  it('polls a queued run at the job interval', () => {
+    expect(runPollInterval(pageOf(mockAnalysisJob('agent', HelixJobStatus.queued)), 0)).toBe(
+      JOB_POLLING_INTERVAL_MS
+    );
+  });
+
+  it('backs off to the list interval when a refetch fails', () => {
     expect(
-      runPollInterval(mockAnalysisRunWithJob('agent', HelixJobStatus.active), failedFetchAttempts)
+      runPollInterval(pageOf(mockAnalysisJob('agent', HelixJobStatus.active)), failedFetchAttempts)
     ).toBe(LIST_POLL_MS);
   });
 
-  it('stops polling a finished run even when its last refetch failed', () => {
-    expect(
-      runPollInterval(
-        mockAnalysisRunWithJob('agent', HelixJobStatus.completed),
-        failedFetchAttempts
-      )
-    ).toBe(false);
+  it('keeps polling at the list interval after a run finishes, to notice new runs', () => {
+    expect(runPollInterval(pageOf(mockAnalysisJob('agent', HelixJobStatus.completed)), 0)).toBe(
+      LIST_POLL_MS
+    );
   });
 
-  it('does not poll before the run has loaded', () => {
-    expect(runPollInterval(undefined, 0)).toBe(false);
-  });
-
-  it('retries at the list interval when the first detail fetch fails', () => {
-    expect(runPollInterval(undefined, failedFetchAttempts)).toBe(LIST_POLL_MS);
+  it('polls at the list interval when the agent has no runs yet', () => {
+    expect(runPollInterval(pageOf(), 0)).toBe(LIST_POLL_MS);
+    expect(runPollInterval(undefined, 0)).toBe(LIST_POLL_MS);
   });
 });

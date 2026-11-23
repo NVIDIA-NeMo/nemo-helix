@@ -1,16 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { agentsCreateExecuteJob, agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
+import { agentsListPluginManagedAgentTypesRoute } from '@nemo/sdk/generated/agents/plugin-managed-agent-types';
+import type { Agent, PluginManagedAgentTypeInfo } from '@nemo/sdk/generated/agents/schema';
 import { compassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import { compassCreateAnalysisRun } from '@nemo/sdk/generated/compass/compass-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
-import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import {
   agentsFromTrajectories,
+  COMPASS_AGENT_TYPE,
   isQualifiedModelRef,
+  resolveCompassAgent,
   triggerInsightsRun,
   triggerInsightsRuns,
 } from '@studio/api/insightsAnalysis';
+import { mockAnalysisJob } from '@studio/mocks/handlers/insights';
 import { AxiosError, AxiosHeaders } from 'axios';
 
 vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', async (importOriginal) => ({
@@ -20,19 +24,37 @@ vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', async (importOri
   compassGetAnalysisConfig: vi.fn(),
 }));
 
-vi.mock('@nemo/sdk/generated/compass/compass-analysis-runs', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@nemo/sdk/generated/compass/compass-analysis-runs')>()),
-  compassCreateAnalysisRun: vi.fn(),
+vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
+  agentsCreateExecuteJob: vi.fn(),
+  agentsRegisterAgent: vi.fn(),
 }));
 
-vi.mock('@studio/api/agents/agentEthos', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@studio/api/agents/agentEthos')>()),
-  readAgentEthos: vi.fn(),
+vi.mock('@nemo/sdk/generated/agents/plugin-managed-agent-types', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@nemo/sdk/generated/agents/plugin-managed-agent-types')
+  >()),
+  agentsListPluginManagedAgentTypesRoute: vi.fn(),
 }));
 
 const getConfig = vi.mocked(compassGetAnalysisConfig);
-const readEthos = vi.mocked(readAgentEthos);
-const createRun = vi.mocked(compassCreateAnalysisRun);
+const createJob = vi.mocked(agentsCreateExecuteJob);
+const registerAgent = vi.mocked(agentsRegisterAgent);
+const listTypes = vi.mocked(agentsListPluginManagedAgentTypesRoute);
+
+const compassType = (agent?: string): PluginManagedAgentTypeInfo => ({
+  type: COMPASS_AGENT_TYPE,
+  title: 'Compass analyst',
+  description: '',
+  default_name: 'compass-analyst',
+  adapter_id: 'nvidia.helix.compass.analyst',
+  context_schema: {},
+  post_run_actions: ['compass.save-insights'],
+  ...(agent ? { agent } : {}),
+});
+
+/** The context of the `index`th execute job created. */
+const contextOf = (index = 0) => createJob.mock.calls[index][1].spec.context;
 
 const config = (overrides: Record<string, unknown> = {}) => ({
   name: 'email-security-triage',
@@ -63,6 +85,8 @@ const axiosErrorWithStatus = (status: number, detail?: string) =>
 
 beforeEach(() => {
   vi.resetAllMocks();
+  listTypes.mockResolvedValue([compassType('compass-analyst')]);
+  createJob.mockResolvedValue(mockAnalysisJob('email-security-triage', 'created'));
 });
 
 describe('agentsFromTrajectories', () => {
@@ -84,12 +108,8 @@ describe('agentsFromTrajectories', () => {
 });
 
 describe('triggerInsightsRun', () => {
-  it('creates an analysis run with the config model pair', async () => {
+  it('runs the Compass agent with the config model pair', async () => {
     getConfig.mockResolvedValue(config());
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
@@ -98,19 +118,62 @@ describe('triggerInsightsRun', () => {
       status: 'started',
       jobName: 'analysis-run-1',
     });
-    expect(createRun).toHaveBeenCalledWith('default', {
-      agent: 'email-security-triage',
-      default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
-      fast_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+    expect(createJob).toHaveBeenCalledWith('default', {
+      spec: {
+        agent: 'compass-analyst',
+        context: {
+          agent: 'email-security-triage',
+          default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+          fast_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+        },
+      },
+    });
+    expect(registerAgent).not.toHaveBeenCalled();
+  });
+
+  it('scopes the run to a time and an evaluation', async () => {
+    getConfig.mockResolvedValue(config());
+
+    await triggerInsightsRun(
+      'default',
+      'email-security-triage',
+      {},
+      { since: '2026-08-13T09:00:00Z', evaluation_id: 'eval-1' }
+    );
+
+    expect(contextOf()).toMatchObject({
+      since: '2026-08-13T09:00:00Z',
+      evaluation_id: 'eval-1',
     });
   });
 
-  it('uses a config the caller already holds instead of fetching it', async () => {
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
+  it('creates the Compass agent when the workspace has none', async () => {
+    getConfig.mockResolvedValue(config());
+    listTypes.mockResolvedValue([compassType()]);
+    registerAgent.mockResolvedValue({ name: 'compass-analyst' } as Agent);
 
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result.status).toBe('started');
+    expect(registerAgent).toHaveBeenCalledWith('default', {
+      name: 'compass-analyst',
+      plugin_managed_agent: { type: COMPASS_AGENT_TYPE },
+    });
+    expect(createJob.mock.calls[0][1].spec.agent).toBe('compass-analyst');
+  });
+
+  it('reports an error when the Compass agent type is not installed', async () => {
+    getConfig.mockResolvedValue(config());
+    listTypes.mockResolvedValue([]);
+
+    const result = await triggerInsightsRun('default', 'email-security-triage');
+
+    expect(result).toMatchObject({ status: 'error' });
+    expect(result.message).toContain(COMPASS_AGENT_TYPE);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('uses a config the caller already holds instead of fetching it', async () => {
     const result = await triggerInsightsRun(
       'default',
       'email-security-triage',
@@ -120,10 +183,7 @@ describe('triggerInsightsRun', () => {
 
     expect(result.status).toBe('started');
     expect(getConfig).not.toHaveBeenCalled();
-    expect(createRun).toHaveBeenCalledWith(
-      'default',
-      expect.objectContaining({ fast_model: 'default/held-fast' })
-    );
+    expect(contextOf()).toMatchObject({ fast_model: 'default/held-fast' });
   });
 
   it('reports not-enabled when the agent has no analysis config', async () => {
@@ -133,36 +193,21 @@ describe('triggerInsightsRun', () => {
 
     expect(result.status).toBe('not-enabled');
     expect(result.message).toContain('nemo compass analysis enable --agent recipe-agent');
-    expect(createRun).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
   });
 
-  it('does not report started when the run has no backing job', async () => {
+  it('surfaces the reason Compass rejected the run', async () => {
     getConfig.mockResolvedValue(config());
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1' },
-    });
-
-    const result = await triggerInsightsRun('default', 'email-security-triage');
-
-    expect(result).toMatchObject({ status: 'error' });
-    expect(result.message).toContain('analysis-run-1');
-  });
-
-  it('surfaces an AnalysisRun submission error detail', async () => {
-    getConfig.mockResolvedValue(config());
-    createRun.mockRejectedValue(
-      new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
-        status: 503,
-        statusText: '',
-        data: { detail: { error: 'Could not reach the Jobs service.', run: 'analysis-run-1' } },
-        headers: {},
-        config: { headers: new AxiosHeaders() },
-      })
+    createJob.mockRejectedValue(
+      axiosErrorWithStatus(422, "Model 'default/missing' was not found in workspace 'default'.")
     );
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
-    expect(result).toMatchObject({ status: 'error', message: 'Could not reach the Jobs service.' });
+    expect(result).toMatchObject({
+      status: 'error',
+      message: "Model 'default/missing' was not found in workspace 'default'.",
+    });
   });
 
   it('reports not-enabled when the stored config has no model pair', async () => {
@@ -171,7 +216,7 @@ describe('triggerInsightsRun', () => {
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
     expect(result.status).toBe('not-enabled');
-    expect(createRun).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   it('surfaces a non-404 config failure as an error', async () => {
@@ -182,41 +227,9 @@ describe('triggerInsightsRun', () => {
     expect(result).toMatchObject({ status: 'error', message: 'Failed to get analysis config.' });
   });
 
-  it('sends the agent ethos with the run', async () => {
-    getConfig.mockResolvedValue(config());
-    readEthos.mockResolvedValue('# Ethos');
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
-
-    const result = await triggerInsightsRun('default', 'email-security-triage');
-
-    expect(result.status).toBe('started');
-    expect(readEthos).toHaveBeenCalledWith('default', 'email-security-triage');
-    expect(createRun).toHaveBeenCalledWith(
-      'default',
-      expect.objectContaining({ ethos: '# Ethos' })
-    );
-  });
-
-  it('runs without ethos when the agent has none', async () => {
-    getConfig.mockResolvedValue(config());
-    readEthos.mockResolvedValue(undefined);
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
-
-    const result = await triggerInsightsRun('default', 'email-security-triage');
-
-    expect(result.status).toBe('started');
-    expect(createRun.mock.calls[0][1]).not.toHaveProperty('ethos');
-  });
-
   it('surfaces a job creation failure as an error', async () => {
     getConfig.mockResolvedValue(config());
-    createRun.mockRejectedValue(new Error('boom'));
+    createJob.mockRejectedValue(new Error('boom'));
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
 
@@ -240,52 +253,34 @@ describe('isQualifiedModelRef', () => {
 describe('triggerInsightsRun overrides', () => {
   it('replaces the stored pair with the supplied overrides', async () => {
     getConfig.mockResolvedValue(config());
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
 
     await triggerInsightsRun('default', 'email-security-triage', {
       default_model: 'default/override-slow',
       fast_model: 'default/override-fast',
     });
 
-    expect(createRun).toHaveBeenCalledWith(
-      'default',
-      expect.objectContaining({
-        default_model: 'default/override-slow',
-        fast_model: 'default/override-fast',
-      })
-    );
+    expect(contextOf()).toMatchObject({
+      default_model: 'default/override-slow',
+      fast_model: 'default/override-fast',
+    });
   });
 
   it('keeps the stored value for a blank override half', async () => {
     getConfig.mockResolvedValue(config());
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
 
     await triggerInsightsRun('default', 'email-security-triage', {
       default_model: '   ',
       fast_model: 'default/override-fast',
     });
 
-    expect(createRun).toHaveBeenCalledWith(
-      'default',
-      expect.objectContaining({
-        default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
-        fast_model: 'default/override-fast',
-      })
-    );
+    expect(contextOf()).toMatchObject({
+      default_model: 'default/nvidia-nemotron-3-nano-30b-a3b',
+      fast_model: 'default/override-fast',
+    });
   });
 
   it('lets an override supply a pair the stored config is missing', async () => {
     getConfig.mockResolvedValue(config({ default_model: '', fast_model: '' }));
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
 
     const result = await triggerInsightsRun('default', 'email-security-triage', {
       default_model: 'default/override-slow',
@@ -304,7 +299,7 @@ describe('triggerInsightsRun overrides', () => {
 
     expect(result.status).toBe('error');
     expect(result.message).toContain('workspace/name format');
-    expect(createRun).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   it('rejects an unqualified ref that came from the stored config', async () => {
@@ -314,23 +309,19 @@ describe('triggerInsightsRun overrides', () => {
 
     expect(result.status).toBe('error');
     expect(result.message).toContain('workspace/name format');
-    expect(createRun).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
   });
 });
 
 describe('triggerInsightsRuns', () => {
   it('applies the overrides to every agent', async () => {
     getConfig.mockImplementation(async (_workspace, agent) => config({ agent }));
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
-    });
 
     await triggerInsightsRuns('default', ['a', 'b'], { default_model: 'default/override-slow' });
 
-    expect(createRun).toHaveBeenCalledTimes(2);
-    for (const call of createRun.mock.calls) {
-      expect(call[1].default_model).toBe('default/override-slow');
+    expect(createJob).toHaveBeenCalledTimes(2);
+    for (const index of [0, 1]) {
+      expect(contextOf(index)).toMatchObject({ default_model: 'default/override-slow' });
     }
   });
 
@@ -338,10 +329,6 @@ describe('triggerInsightsRuns', () => {
     getConfig.mockImplementation(async (_workspace, agent) => {
       if (agent === 'missing') throw axiosErrorWithStatus(404);
       return config({ agent });
-    });
-    createRun.mockResolvedValue({
-      run: { ...config(), name: 'analysis-run-1', evaluation_id: '' },
-      job: { name: 'analysis-run-1', status: 'created' },
     });
 
     const results = await triggerInsightsRuns('default', ['a', 'missing', 'b']);
@@ -351,5 +338,16 @@ describe('triggerInsightsRuns', () => {
       ['missing', 'not-enabled'],
       ['b', 'started'],
     ]);
+  });
+});
+
+describe('resolveCompassAgent', () => {
+  it('uses the agent that won a concurrent create', async () => {
+    listTypes
+      .mockResolvedValueOnce([compassType()])
+      .mockResolvedValueOnce([compassType('compass-analyst')]);
+    registerAgent.mockRejectedValue(axiosErrorWithStatus(409));
+
+    await expect(resolveCompassAgent('default')).resolves.toBe('compass-analyst');
   });
 });

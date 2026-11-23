@@ -1,84 +1,108 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getAgentsListAgentsQueryKey,
+  getAgentsListExecuteJobsQueryKey,
+} from '@nemo/sdk/generated/agents/agents';
+import { getAgentsListPluginManagedAgentTypesRouteQueryKey } from '@nemo/sdk/generated/agents/plugin-managed-agent-types';
+import type {
+  ExecuteJob,
+  ExecuteJobRequest,
+  PluginManagedAgentTypeInfo,
+  RegisterAgentRequest,
+} from '@nemo/sdk/generated/agents/schema';
 import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import { getCompassGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
-import {
-  getCompassGetAnalysisRunQueryKey,
-  getCompassListAnalysisRunsQueryKey,
-} from '@nemo/sdk/generated/compass/compass-analysis-runs';
 import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
-import type {
-  AnalysisRunResponse,
-  CreateAnalysisRunRequest,
-  InsightListItem,
-} from '@nemo/sdk/generated/compass/schema';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
-import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { COMPASS_AGENT_TYPE } from '@studio/api/insightsAnalysis';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
-import { AGENT_ETHOS_FILE } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
-import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { http, HttpResponse } from 'msw';
 
 const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
 const ANALYSIS_CONFIG_URL = mockApiUrl(getCompassGetAnalysisConfigQueryKey, ':workspace', ':agent');
-const ANALYSIS_RUNS_URL = mockApiUrl(getCompassListAnalysisRunsQueryKey, ':workspace');
-const ANALYSIS_RUN_URL = mockApiUrl(getCompassGetAnalysisRunQueryKey, ':workspace', ':name');
+const EXECUTE_JOBS_URL = mockApiUrl(getAgentsListExecuteJobsQueryKey, ':workspace');
+const AGENT_TYPES_URL = mockApiUrl(getAgentsListPluginManagedAgentTypesRouteQueryKey, ':workspace');
 const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
   getCompassGetStatusesAnalysisRunStatusQueryKey,
   ':workspace',
   ':agent'
 );
 
-const mockAnalysisRunResponse = (
-  workspace: string,
-  { agent, default_model, fast_model }: CreateAnalysisRunRequest
-): AnalysisRunResponse => ({
-  run: {
-    id: 'analysis-run-1',
-    entity_id: 'analysis-run-1',
-    name: 'analysis-run-1',
-    workspace,
-    agent,
-    default_model,
-    fast_model,
-    parent: `ws-${workspace}`,
-    db_version: 1,
-    created_at: '2026-08-14T09:00:00Z',
-    created_by: 'user@example.com',
-    updated_at: '2026-08-14T09:00:00Z',
-    updated_by: 'user@example.com',
+/** The workspace's Compass agent in these mocks. */
+export const MOCK_COMPASS_AGENT = 'compass-analyst';
+
+/** A Compass analysis of `agent`: an execute job on the Compass agent whose subject is `agent`. */
+export const mockAnalysisJob = (
+  agent: string,
+  status: HelixJobStatus,
+  {
+    name = 'analysis-run-1',
+    created_at = '2026-08-14T09:00:00Z',
+    workspace = 'default',
+    context = {
+      agent,
+      default_model: mockAnalysisConfig.default_model,
+      fast_model: mockAnalysisConfig.fast_model,
+    } as Record<string, unknown>,
+  } = {}
+): ExecuteJob => ({
+  name,
+  workspace,
+  created_at,
+  updated_at: created_at,
+  status,
+  spec: {
+    request: { agent: MOCK_COMPASS_AGENT, context },
+    agent: {
+      name: MOCK_COMPASS_AGENT,
+      workspace,
+      config: {},
+      config_format: 'nemo-agents-spec-v1',
+    },
+    input: 'Analyze the target agent.',
+    agent_ref: `${workspace}/${MOCK_COMPASS_AGENT}`,
+    context,
+    subject: agent,
+    plugin_managed_agent_type: COMPASS_AGENT_TYPE,
   },
-  job: { name: 'analysis-run-1', status: 'created' },
 });
 
-/** An analysis run for `agent` whose backing job is in `status`, or has no job when `status` is null. */
-export const mockAnalysisRunWithJob = (
-  agent: string,
-  status: HelixJobStatus | null,
-  { name = 'analysis-run-1', created_at = '2026-08-14T09:00:00Z', workspace = 'default' } = {}
-): AnalysisRunResponse => {
-  const response = mockAnalysisRunResponse(workspace, {
-    agent,
-    default_model: mockAnalysisConfig.default_model,
-    fast_model: mockAnalysisConfig.fast_model,
-  });
-  return {
-    run: { ...response.run, name, created_at },
-    job: status ? { ...response.job, name, status } : undefined,
-  };
+/** The JSON `filter` param as field -> value, unwrapping `{ $eq: value }` operators. */
+const parseJobFilter = (request: Request): Record<string, unknown> => {
+  const raw = new URL(request.url).searchParams.get('filter');
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(parsed).map(([field, value]: [string, unknown]) => [
+        field,
+        value && typeof value === 'object' && '$eq' in value ? value.$eq : value,
+      ])
+    );
+  } catch {
+    return {};
+  }
 };
 
-/** Serves `runs()`, newest first, reading it per request so a test can advance a job between polls. */
-export const analysisRunHandlers = (runs: () => AnalysisRunResponse[]) => [
-  http.get(ANALYSIS_RUNS_URL, ({ request }) => {
-    const params = new URL(request.url).searchParams;
-    const agent = params.get('agent');
-    const pageSize = Number(params.get('page_size') ?? 20);
-    const matches = runs()
-      .map(({ run }) => run)
-      .filter((run) => !agent || run.agent === agent);
+/**
+ * Serves `jobs()` as the execute jobs list, newest first, reading it per request so a test
+ * can advance a job between polls. Honors the type and subject filters Studio sends.
+ */
+export const analysisJobHandlers = (jobs: () => ExecuteJob[]) => [
+  http.get(EXECUTE_JOBS_URL, ({ request }) => {
+    const filter = parseJobFilter(request);
+    const pageSize = Number(new URL(request.url).searchParams.get('page_size') ?? 20);
+    const matches = jobs().filter(
+      ({ spec }) =>
+        (filter['spec.plugin_managed_agent_type'] === undefined ||
+          spec.plugin_managed_agent_type === filter['spec.plugin_managed_agent_type']) &&
+        (filter['spec.subject'] === undefined || spec.subject === filter['spec.subject'])
+    );
     const data = matches.slice(0, pageSize);
     return HttpResponse.json({
       data,
@@ -91,13 +115,35 @@ export const analysisRunHandlers = (runs: () => AnalysisRunResponse[]) => [
       },
     });
   }),
-  http.get<{ name: string }>(ANALYSIS_RUN_URL, ({ params }) => {
-    const response = runs().find(({ run }) => run.name === params.name);
-    return response
-      ? HttpResponse.json(response)
-      : HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
-  }),
 ];
+
+/** The installed Compass type, with `agent` as the workspace's Compass agent or none when null. */
+export const compassAgentTypeHandler = (agent: string | null = MOCK_COMPASS_AGENT) =>
+  http.get(AGENT_TYPES_URL, () => {
+    const info: PluginManagedAgentTypeInfo = {
+      type: COMPASS_AGENT_TYPE,
+      title: 'Compass analyst',
+      description: '',
+      default_name: MOCK_COMPASS_AGENT,
+      adapter_id: 'nvidia.helix.compass.analyst',
+      context_schema: {},
+      post_run_actions: ['compass.save-insights'],
+      subject_label: 'Analyzed agent',
+      ...(agent ? { agent } : {}),
+    };
+    return HttpResponse.json([info]);
+  });
+
+/** Answers agent registration and hands each request body to `onRegister`. */
+export const agentRegisterHandler = (onRegister: (body: RegisterAgentRequest) => void) =>
+  http.post<{ workspace: string }, RegisterAgentRequest>(
+    mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'),
+    async ({ params, request }) => {
+      const body = await request.json();
+      onRegister(body);
+      return HttpResponse.json({ ...body, workspace: params.workspace });
+    }
+  );
 
 /** The scheduler's run status for `agent`, or a 404 when it has never run. */
 export const analysisRunStatusHandler = (agent: string, lastSuccessfulRunAt: string | null) =>
@@ -113,17 +159,19 @@ export const analysisRunStatusHandler = (agent: string, lastSuccessfulRunAt: str
       : HttpResponse.json({ detail: 'Not Found' }, { status: 404 })
   );
 
-/** Answers run creation like the default handler and hands each request body to `onCreate`. */
-export const analysisRunCreateHandler = (
-  onCreate: (body: CreateAnalysisRunRequest, response: AnalysisRunResponse) => void
+/** Answers execute job creation and hands each request body and created job to `onCreate`. */
+export const analysisJobCreateHandler = (
+  onCreate: (body: ExecuteJobRequest, job: ExecuteJob) => void
 ) =>
-  http.post<{ workspace: string }, CreateAnalysisRunRequest>(
-    ANALYSIS_RUNS_URL,
+  http.post<{ workspace: string }, ExecuteJobRequest>(
+    EXECUTE_JOBS_URL,
     async ({ params, request }) => {
       const body = await request.json();
-      const response = mockAnalysisRunResponse(params.workspace, body);
-      onCreate(body, response);
-      return HttpResponse.json(response);
+      const context = { ...(body.spec.context ?? {}) };
+      const subject = typeof context.agent === 'string' ? context.agent : '';
+      const job = mockAnalysisJob(subject, 'created', { workspace: params.workspace, context });
+      onCreate(body, job);
+      return HttpResponse.json(job);
     }
   );
 
@@ -145,27 +193,6 @@ export const agentEvaluationsHandler = (agent: string, names: string[]) =>
         : [];
     return HttpResponse.json({ data });
   });
-
-/** Serves `content` as the agent's ETHOS.md, or 404s the file when `content` is null. */
-export const agentEthosHandlers = (agent: string, content: string | null) => {
-  const url = mockApiUrl(
-    getFilesDownloadFileQueryKey,
-    ':workspace',
-    agentSpecFilesetName(agent),
-    AGENT_ETHOS_FILE
-  );
-  const notFound = () => HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
-  return [
-    http.head(url, () =>
-      content === null
-        ? new HttpResponse(null, { status: 404 })
-        : new HttpResponse(null, {
-            headers: { 'Content-Length': String(new TextEncoder().encode(content).length) },
-          })
-    ),
-    http.get(url, () => (content === null ? notFound() : HttpResponse.text(content))),
-  ];
-};
 
 /** Stored per-agent analysis config, as the agent Insights tab's analysis panel reads it. */
 export const mockAnalysisConfig = {
@@ -222,11 +249,13 @@ export const mockInsights: InsightListItem[] = [
 ];
 
 export const insightsHandlers = [
-  ...analysisRunHandlers(() => []),
+  ...analysisJobHandlers(() => []),
+
+  compassAgentTypeHandler(),
 
   analysisRunStatusHandler('', null),
 
-  analysisRunCreateHandler(() => undefined),
+  analysisJobCreateHandler(() => undefined),
 
   http.get(ANALYSIS_CONFIG_URL, ({ params }) =>
     HttpResponse.json({ ...mockAnalysisConfig, name: params.agent, agent: params.agent })
