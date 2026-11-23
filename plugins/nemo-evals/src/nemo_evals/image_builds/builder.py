@@ -150,7 +150,11 @@ async def adopt_or_build(
             submitted = await builder.submit(
                 name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
             )
-        except ConflictError:
+        except ConflictError as exc:
+            # Builder also answers 409 when it refuses the request before writing anything (no registry, unusable
+            # execution profiles, missing secrets). A lost race leaves the winner's revision behind; a refusal doesn't.
+            if await builder.get_image(f"{name}-{revision}") is None:
+                raise RuntimeError(f"Builder refused build {name}-{revision}: {exc.detail}") from exc
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
             continue
         return submitted.images[0]

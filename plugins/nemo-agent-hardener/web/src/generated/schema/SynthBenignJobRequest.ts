@@ -13,7 +13,7 @@ import type { SynthBenignSpec } from './SynthBenignSpec.ts';
 
 export interface SynthBenignJobRequest {
   /**
-     * Job name. Name must start with a lowercase letter, be 2-63 characters, and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). At most 51 characters when output_location is not set. Auto-generated when omitted.
+     * Job name. Name must start with a lowercase letter, be 2-63 characters, and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). Auto-generated when omitted.
      * @maxLength 63
      * @pattern ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
      */

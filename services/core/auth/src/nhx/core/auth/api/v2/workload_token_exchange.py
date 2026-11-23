@@ -765,6 +765,7 @@ def _build_delegated_claims(
     if verified_subject.groups:
         actor_claims["groups"] = ",".join(verified_subject.groups)
     claims["act"] = actor_claims
+    claims["nhx_service_attributes"] = {"auth": {"delegation_id": delegation.id}}
     return claims
 
 

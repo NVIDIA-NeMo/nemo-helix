@@ -3,9 +3,9 @@
 
 """Runs a real IORails engine through the handlers' generate helper against a fake model server.
 
-The handlers cache one engine per config and run every request on a throwaway event loop in a
-worker thread. IORails owns loop-bound HTTP clients and queue workers, so these tests guard against
-reusing an engine across loops, which only shows up on the second request.
+The handlers cache one engine per config and reuse it across requests. IORails owns loop-bound HTTP
+clients and queue workers, so these tests guard against an engine that only works for the first
+request, which only shows up on the second.
 """
 
 import asyncio

@@ -22,7 +22,7 @@ ARG KUBECTL_VERSION=v1.33.2
 
 FROM ${BUILDKIT_IMAGE} AS buildkit
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3 AS jobs-launcher
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS jobs-launcher
 ARG TARGETOS
 ARG TARGETARCH
 COPY services/core/jobs/jobs-launcher /app/jobs-launcher

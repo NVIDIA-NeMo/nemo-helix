@@ -8,7 +8,7 @@ from pathlib import Path
 from nemo_data_designer_plugin.jobs.run import run_step_config
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.jobs.constants import (
@@ -23,7 +23,7 @@ from nemo_helix_plugin.jobs.constants import (
 
 def run() -> int:
     step_config = _get_step_config()
-    client = get_nemo_client(as_service="data-designer")
+    client = get_task_nemo_client("data-designer")
     ctx = _get_ctx(client)
 
     return run_step_config(

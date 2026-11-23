@@ -104,6 +104,12 @@ def build_app() -> typer.Typer:
         safety_key_secret: str | None = typer.Option(
             None, "--safety-key-secret", help="Secrets-store name holding the safety endpoint's API key."
         ),
+        victim_image: str | None = typer.Option(
+            None,
+            "--victim-image",
+            help="Registry image built from `nemo agent-hardener stage`, run as the victim where jobs cannot "
+            "build it (Kubernetes). Pass an empty string to clear it.",
+        ),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
     ) -> None:
         """Change a saved manifest's stored defaults (the baseline every later run starts from).
@@ -124,6 +130,8 @@ def build_app() -> typer.Typer:
             body["egress"] = list(egress)
         if env:
             body["env"] = parse_env_pairs(list(env))
+        if victim_image is not None:
+            body["victim_image"] = victim_image
         chosen_models = models_from_flags(
             attack_model=attack_model,
             attack_base_url=attack_base_url,
