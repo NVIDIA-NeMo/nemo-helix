@@ -247,9 +247,9 @@ class RemoteBuildService(Protocol):
 
         ``build.role`` is ``helper`` for an image its request marked as one: an image that is not the one a
         workload runs as its main container. For such an image a client may leave out a check that starts the
-        image as a main container, which a sidecar need not pass. None is every other image, and a role the
-        client does not know is built as None is. A client that reads no role builds a helper as any other
-        image, and nothing says so.
+        image as a main container, which a sidecar need not pass. None is every other image, and an image
+        whose role the client does not know is built as one with none. A client that reads no role builds a
+        helper as any other image, and nothing says so.
 
         ``build.context`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
         An implementation that sends the context anywhere first applies the ignore file at the context's
@@ -1223,7 +1223,13 @@ def _build_one(
             # A build may be running whose ID never arrived, so this step can't cancel it. Its key finds it.
             exc.ending = f" [a build may be running, started with key {build.key}]"
         raise
-    logger.info("%s is build %s", _quoted(image.image), _quoted(build_id))
+    if image.role is None:
+        logger.info("%s is build %s", _quoted(image.image), _quoted(build_id))
+    else:
+        # Said, so that a helper's line without a role shows a step image from before roles. Nothing else does.
+        logger.info(
+            "%s is build %s, started with role %s", _quoted(image.image), _quoted(build_id), _quoted(image.role)
+        )
     ended = False
     try:
         status = _wait(

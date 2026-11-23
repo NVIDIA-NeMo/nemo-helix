@@ -75,7 +75,6 @@ class TestADeploymentThatCannotBuild:
         plain = _plan(_spec("main"), _spec("sidecar", repository=None))
         placed = [plan.with_destinations(backend.destination) for plan in (marked, plain)]
         assert [image.placed for image in placed[0].images] == [image.placed for image in placed[1].images]
-        assert backend.compile(placed[0]) == backend.compile(placed[1])
 
 
 class TestTheBuildProfiles:

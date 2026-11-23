@@ -202,17 +202,13 @@ class TestRoles:
         mounted = BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=[mount], role="helper")
         assert (copy.role, mounted.role) == ("helper", "helper")
 
-    def test_a_spec_that_names_no_role_is_sent_as_it_was_before_there_were_roles(self) -> None:
-        """A request is sent with the fields its caller set. An API from before roles refuses one it doesn't
-        know, so a spec that names none must not carry the field."""
-        spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}})
-        assert spec.model_dump(mode="json", exclude_unset=True) == {"source": {"fileset": "fs-a"}}
-
     @pytest.mark.parametrize("spelt", [{}, {"role": None}], ids=["left-out", "null"])
     def test_a_role_with_no_value_is_in_no_dump_of_its_spec(self, spelt: dict[str, None]) -> None:
         """Left out by its value, whether the request named the field or not, and from a dump of every field
         too: the one a request's digest is taken over and its job records. Each form a spec is written out in
-        is then what it was before a spec could name a role."""
+        is then what it was before a spec could name a role. That holds for the fields its caller set, as a
+        request is sent, too: an API from before roles refuses a field it doesn't know, so a spec that names
+        no role must not carry it."""
         spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}} | spelt)
         before_roles = {
             "name": None,

@@ -867,8 +867,9 @@ class TestTheRequestDigest:
 
         Each request is written twice. Once with every field its digest covers, so what the digest is taken
         over can be read here. And once as short as a caller may send it, so a default that changes fails here
-        too. Between the two requests every field of a request is covered, and every default is left out once.
-        A field a request gains later has to leave all of them as they are.
+        too. Between the two requests every field of a request but `role` is covered, and every default is left
+        out once. A field a request gains later has to leave all of them as they are. `role` came later, and
+        does: a request that names none keeps these digests, and a helper's is written out below.
         """
         assert request_digest(spelt_out) == digest
         # As a submit computes it: over the request with the deployment's default platform filled in.
@@ -929,7 +930,7 @@ class TestTheRequestDigest:
         assert len(set(digests)) == 3
 
     def test_a_helper_keeps_the_digest_its_rows_record(self) -> None:
-        """Written out as the two above are, and for the same reason: nothing else holds the digest of a request
+        """Written out as the digests above are, and for the same reason: nothing else holds the digest of a request
         that marks a helper, and a row records it. Beside it, the text the digest is taken over, so that what
         a role adds to it can be read here: its own key in its spec, as any other field."""
         helper = BuildSet(
