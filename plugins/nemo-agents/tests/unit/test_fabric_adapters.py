@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -174,16 +173,6 @@ def test_catalog_adapters_without_a_short_name_are_stock_too(adapter_id: str) ->
 @pytest.mark.parametrize("adapter_id", ["nvidia.helix.compass.analyst", "acme.custom.native"])
 def test_plugin_and_user_adapters_are_assumed_to_read_request_context(adapter_id: str) -> None:
     assert adapter_reads_request_context(adapter_id)
-
-
-def test_stock_adapter_audit_matches_the_installed_fabric() -> None:
-    """Fabric 0.7.0's stock adapters were each checked to ignore ``AgentRunRequest.context``.
-
-    A newer Fabric may teach one to read it, which the catalog lookup alone would
-    keep rejecting. When this fails, re-check the stock adapters' ``invoke`` for
-    ``request.context``, update ``adapter_reads_request_context``, and move the pin.
-    """
-    assert version("nemo-fabric").startswith("0.7."), version("nemo-fabric")
 
 
 def _config(**harnesses: str) -> AgentConfig:

@@ -974,7 +974,7 @@ def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> Non
             "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
             "api_key": None,
             # An issued-token prefix counts only on a value long enough to be one.
-            "fabric_package": "nemo-fabric[codex]==0.7.0",
+            "fabric_package": "nemo-fabric[codex]",
             "model": "sk-tiny",
             # A marker must stand as a word in the path, so a tokenizer is not a token.
             "tokenizer": "o200k_base",

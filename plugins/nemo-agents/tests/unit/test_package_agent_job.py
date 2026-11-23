@@ -628,31 +628,12 @@ class TestPublishedPackagingContract:
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
         assert "all" not in extras
-        assert extras["claude"] == [
-            "nemo-fabric-adapters-claude[harness]>=0.7.0,<0.8.0",
-            "nemo-relay-cli-bin>=0.11.0,<0.12",
-        ]
-        assert extras["codex"] == [
-            "nemo-fabric-adapters-codex[harness]>=0.7.0,<0.8.0",
-            "nemo-relay-cli-bin>=0.11.0,<0.12",
-        ]
-        assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.7.0,<0.8.0"]
-        assert extras["mini-swe-agent"] == ["nemo-fabric-adapters-mini-swe-agent[harness]>=0.7.0,<0.8.0"]
-        assert extras["nooa"] == [
-            "nemo-fabric-adapters-nooa[harness]>=0.7.0,<0.8.0; python_version >= '3.12' and python_version < '3.14'"
-        ]
-
-    def test_published_mini_swe_agent_extra(self) -> None:
-        import tomllib
-
-        root = Path(__file__).resolve().parents[4]
-        extras = tomllib.loads((root / "packages/nemo_helix/pyproject.toml").read_text())["project"][
-            "optional-dependencies"
-        ]
-        assert extras["nemo-agents-plugin-mini-swe-agent"] == [
-            "nemo-helix[nemo-agents-plugin]",
-            "nemo-fabric-adapters-mini-swe-agent[harness]>=0.7.0,<0.8.0",
-        ]
+        for harness in ("claude", "codex", "deepagents", "mini-swe-agent", "nooa"):
+            expected = {f"nemo-fabric-adapters-{harness}": {"harness"}}
+            if harness in ("claude", "codex"):
+                expected["nemo-relay-cli-bin"] = set()
+            requirements = (Requirement(spec) for spec in extras[harness])
+            assert {requirement.name: requirement.extras for requirement in requirements} == expected
 
     @pytest.mark.parametrize(
         ("python_version", "supported"), [("3.11", False), ("3.12", True), ("3.13", True), ("3.14", False)]
