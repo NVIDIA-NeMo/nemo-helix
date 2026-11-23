@@ -352,7 +352,8 @@ def find_deployment(model_entity: str):
     raise RuntimeError(f"No active deployment serves default/{model_entity}")
 
 
-deployment_name = find_deployment(model_name).name
+deployment = find_deployment(model_name)
+deployment_name = deployment.name
 if not client.models.wait_for_deployment_status(deployment_name, "READY", workspace="default", timeout=1800):
     raise TimeoutError("Deployment did not become ready")
 
@@ -450,7 +451,6 @@ The scoring jobs use the deployment. Wait for them to finish, then delete the de
 exact.wait_until_done()
 similarity.wait_until_done()
 
-deployment = find_deployment(model_name)
 config_name = deployment.config
 client.models.delete_deployment(name=deployment.name, workspace="default")
 if config_name:

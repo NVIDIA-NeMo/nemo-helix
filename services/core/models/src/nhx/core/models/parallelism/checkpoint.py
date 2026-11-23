@@ -84,6 +84,8 @@ def _vision_patch_size(blocks: list[Any]) -> int | None:
 
     A Qwen-style vision config declares ``patch_size`` and ``spatial_merge_size``.
     One token covers ``patch_size * spatial_merge_size`` pixels on a side.
+    A Nemotron-style root config declares ``downsample_ratio`` instead, the fraction by which
+    the patch grid shrinks per side, so the merge is its inverse (0.5 merges 2x2 patches).
     """
     for block in blocks:
         vision = _get(block, "vision_config")
@@ -92,8 +94,25 @@ def _vision_patch_size(blocks: list[Any]) -> int | None:
         patch = _positive_int(_get(vision, "patch_size"))
         if patch is None:
             continue
-        merge = _positive_int(_get(vision, "spatial_merge_size")) or _positive_int(_get(vision, "merge_size")) or 1
+        merge = (
+            _positive_int(_get(vision, "spatial_merge_size"))
+            or _positive_int(_get(vision, "merge_size"))
+            or _downsample_merge(blocks)
+            or 1
+        )
         return patch * merge
+    return None
+
+
+def _downsample_merge(blocks: list[Any]) -> int | None:
+    """Patches merged per side, from a ``downsample_ratio`` in (0, 1)."""
+    for block in blocks:
+        ratio = _get(block, "downsample_ratio")
+        if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < 1:
+            continue
+        merge = round(1 / ratio)
+        if merge > 1:
+            return merge
     return None
 
 

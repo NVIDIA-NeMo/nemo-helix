@@ -44,6 +44,13 @@ def test_vision_patch_size_is_the_patch_times_the_spatial_merge() -> None:
     assert qwen.vision_patch_size == 32
     assert merge_alias.vision_patch_size == 28
     assert patch_only.vision_patch_size == 16
+    nemotron = inspect_checkpoint({"downsample_ratio": 0.5, "vision_config": {"patch_size": 16}})
+    assert nemotron.vision_patch_size == 32
+    explicit_merge = inspect_checkpoint(
+        {"downsample_ratio": 0.5, "vision_config": {"patch_size": 14, "spatial_merge_size": 3}}
+    )
+    assert explicit_merge.vision_patch_size == 42
+    assert inspect_checkpoint({"downsample_ratio": 1.0, "vision_config": {"patch_size": 16}}).vision_patch_size == 16
     assert inspect_checkpoint({"vision_config": {"hidden_size": 4}}).vision_patch_size is None
     assert inspect_checkpoint({"hidden_size": 8}).vision_patch_size is None
 

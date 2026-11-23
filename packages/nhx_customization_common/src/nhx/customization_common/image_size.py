@@ -10,7 +10,10 @@ is the minimum pixel count. Both are areas, not side lengths.
 from __future__ import annotations
 
 DEFAULT_SHORTEST_EDGE = 65_536
-"""Platform floor for the vision processor when a ceiling is set and ``shortest_edge`` is not."""
+"""Platform floor for the vision processor when a ceiling is set and ``shortest_edge`` is not.
+
+A ceiling at or below this floor gets half the ceiling as its floor instead.
+"""
 
 
 def image_size_bounds(
@@ -26,7 +29,10 @@ def image_size_bounds(
     if longest_edge is None:
         raise ValueError("max_pixels or image_size.longest_edge is required to set the vision processor size.")
     if shortest_edge is None:
-        shortest_edge = DEFAULT_SHORTEST_EDGE
+        # A small ceiling would sit below the platform floor, so halve it instead.
+        shortest_edge = DEFAULT_SHORTEST_EDGE if longest_edge > DEFAULT_SHORTEST_EDGE else longest_edge // 2
+        if shortest_edge < 1:
+            raise ValueError("max_pixels or image_size.longest_edge must be at least 2.")
     return {"longest_edge": longest_edge, "shortest_edge": shortest_edge}
 
 
