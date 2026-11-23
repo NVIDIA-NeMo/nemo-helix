@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The submit ordering, against fakes: what every backend's submit keeps, shown for each backend, and the rest
-for a build in this cluster."""
+"""The submit ordering, against fakes. The tests that take a ``case`` show a rule every backend's submit keeps,
+for each backend; the rest are shown for a build in this cluster."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import httpx
@@ -98,7 +99,9 @@ class FakeJobs:
             )
         self.events.append("create_job")
         self.jobs[request.name] = request
-        # As Jobs answers a create: with the job's own ID, and its first attempt's.
+        # As Jobs answers a create: with the job's own ID, and its first attempt's. This double makes the ID of
+        # the job's name, where Jobs gives every job its own, so it can't tell two jobs under one name apart: a
+        # test that needs to, for a backend whose rows record their job, belongs with `test_remote_backend.py`.
         return CreatedJob(uid=f"platform-job-{request.name}", attempt_id=f"attempt-of-{request.name}")
 
     async def get_job(self, name: str) -> ExistingJob:
@@ -164,13 +167,11 @@ class Case:
     submit does with its rows and its job that the other backend's does not."""
 
     backend: Backend
-    #: A request the backend takes, for two images: ``img0`` and ``img1``.
-    build_set: BuildSet
-    #: Another request for the same two images, at the same revision.
-    different: BuildSet
-    #: A request the backend takes, for the images so named.
-    naming: Callable[[list[str]], BuildSet]
-    #: What a submit of ``build_set`` writes once it has created its job, and what it reads once it has found
+    #: Writes a request the backend takes, as ``_set`` writes one: for ``img0`` and ``img1``, unless told otherwise.
+    request: Callable[..., BuildSet]
+    #: The digest each row of ``request()`` records, written out for the reason `TestTheRequestDigest` gives.
+    digest: str
+    #: What a submit of ``request()`` writes once it has created its job, and what it reads once it has found
     #: the job already there. Nothing, for a build in this cluster. A row a build service builds records its
     #: job, and a job found under the build's name is the build's own only if the rows record it.
     written_after_the_job: list[str]
@@ -182,9 +183,8 @@ class Case:
 def _in_cluster() -> Case:
     return Case(
         backend=ExecutionBackend(_config(), PROFILES),
-        build_set=_set(),
-        different=_set(tag="v2"),
-        naming=lambda names: _set(names=names),
+        request=_set,
+        digest="sha256:0729abcf822c9dac673ecc025c2f005fb112236d7be250a08497899c7b17eb01",
         written_after_the_job=[],
         read_after_the_job=[],
         job_recorded=(None, None),
@@ -194,10 +194,8 @@ def _in_cluster() -> Case:
 def _remote() -> Case:
     return Case(
         backend=RemoteBackend(_remote_config(), REMOTE_PROFILES),
-        build_set=_set(tag=None),
-        # No output to name another tag with: it builds from another fileset.
-        different=_set(tag=None, fileset="fs-b"),
-        naming=lambda names: _set(tag=None, names=names),
+        request=partial(_set, tag=None),
+        digest="sha256:c1e3cd1514b28dfc7938bbb608c4becf0b7c2e9a422fe0ea5dede29036b1eb65",
         written_after_the_job=["update:demo-1.img0:pending", "update:demo-1.img1:pending"],
         read_after_the_job=["get:demo-1.img0", "get:demo-1.img1"],
         # As `FakeJobs` answers the create.
@@ -221,7 +219,8 @@ async def _submit(
     backend: Backend | None = None,
 ) -> SubmitResult:
     """Submit to ``backend``: unless a test names one, a deployment that builds in this cluster, as ``config``
-    has it."""
+    has it. The default platform is ``config``'s either way, so a named backend's own configuration has to agree
+    with it."""
     jobs = jobs or FakeJobs(entity_client.events)
 
     async def secret_readable(workspace: str, name: str) -> bool:
@@ -248,12 +247,10 @@ async def _submit(
 
 
 class TestOrdering:
-    """The tests that take a ``case`` hold whichever backend builds, and run for each."""
-
     @pytest.mark.asyncio
     async def test_rows_are_created_before_the_job(self, case: Case) -> None:
         client = FakeEntityClient()
-        await _submit(client, build_set=case.build_set, backend=case.backend)
+        await _submit(client, build_set=case.request(), backend=case.backend)
         assert client.events == [
             "create:demo-1.img0",
             "create:demo-1.img1",
@@ -264,22 +261,24 @@ class TestOrdering:
     @pytest.mark.asyncio
     async def test_rows_are_created_pending_with_nothing_observed(self, case: Case) -> None:
         client = FakeEntityClient()
-        result = await _submit(client, build_set=case.build_set, backend=case.backend)
+        result = await _submit(client, build_set=case.request(), backend=case.backend)
         assert [i.status for i in result.images] == ["pending", "pending"]
         assert all(i.digest is None for i in result.images)
 
     @pytest.mark.asyncio
     async def test_every_row_records_the_request_that_wrote_it(self, case: Case) -> None:
         client = FakeEntityClient()
-        # Taken before the submit: the digest of the request as it was sent, whatever a submit does with it.
-        expected = request_digest(case.build_set.with_default_platform("linux/amd64"))
-        result = await _submit(client, build_set=case.build_set, backend=case.backend)
-        assert all(image.provenance.request_digest == expected for image in result.images)
+        result = await _submit(client, build_set=case.request(), backend=case.backend)
+        # What is stored, against a digest that is written out: a change to what a submit digests can't be
+        # followed here by computing the same thing, only by changing the literal.
+        assert [image.provenance.request_digest for image in result.images] == [case.digest, case.digest]
+        # And the literal is the digest of the request as it was sent, with the default platform filled in.
+        assert case.digest == request_digest(case.request().with_default_platform("linux/amd64"))
 
     @pytest.mark.asyncio
     async def test_every_row_names_its_job_and_spec(self, case: Case) -> None:
         client = FakeEntityClient()
-        result = await _submit(client, build_set=case.build_set, backend=case.backend)
+        result = await _submit(client, build_set=case.request(), backend=case.backend)
         provenance = result.images[0].provenance
         assert (provenance.job, provenance.spec) == ("default/builder-demo-1", "img0")
 
@@ -290,7 +289,7 @@ class TestOrdering:
         below, with the job's request, and for a build service with the remote backend's submits."""
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        helper = _with_a_helper(case.build_set)
+        helper = _with_a_helper(case.request())
         expected = request_digest(helper.with_default_platform("linux/amd64"))
         result = await _submit(client, jobs, helper, backend=case.backend)
         assert client.events == [
@@ -330,22 +329,19 @@ class TestOrdering:
 class TestResubmission:
     """Settled by the unique-name index, not a read-then-write, and by the request digest.
 
-    The tests that take a ``case`` hold whichever backend builds, and run for each. The others show what a
-    build in this cluster does with a job it finds under its name: it takes or refuses the job by the digest
-    the job carries. A backend whose rows record their job goes by that record instead, which the tests of
-    the remote backend show.
+    The tests that take no ``case`` show what a build in this cluster does with a job it finds under its name:
+    it takes or refuses the job by the digest the job carries. A backend whose rows record their job goes by
+    that record instead, which the tests of the remote backend show.
     """
 
     @pytest.mark.asyncio
     async def test_the_same_request_again_adopts_the_rows_and_the_job(self, case: Case) -> None:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        # An equal request of its own, copied before the first is submitted: not the object that submit was given.
-        again = case.build_set.model_copy(deep=True)
-        first = await _submit(client, jobs, case.build_set, backend=case.backend)
+        first = await _submit(client, jobs, case.request(), backend=case.backend)
         client.events.clear()
 
-        second = await _submit(client, jobs, again, backend=case.backend)
+        second = await _submit(client, jobs, case.request(), backend=case.backend)
         # Nothing is created, and nothing written.
         assert client.events == [
             "conflict:demo-1.img0",
@@ -387,18 +383,18 @@ class TestResubmission:
     async def test_a_different_request_at_the_same_revision_is_refused_and_adopts_nothing(self, case: Case) -> None:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        await _submit(client, jobs, case.build_set, backend=case.backend)
+        await _submit(client, jobs, case.request(), backend=case.backend)
         client.events.clear()
 
         with pytest.raises(BuildConflict, match="new revision"):
-            await _submit(client, jobs, case.different, backend=case.backend)
+            await _submit(client, jobs, case.request(fileset="fs-b"), backend=case.backend)
         assert client.events == ["conflict:demo-1.img0", "get:demo-1.img0"]
 
     @pytest.mark.asyncio
     async def test_the_same_set_with_and_without_a_helper_are_two_requests_at_one_revision(self, case: Case) -> None:
         """An image's role is part of the request, on either backend: a caller that starts to mark a helper in
         a set it has already submitted needs the next revision, and so does one that stops."""
-        plain, helper = case.build_set, _with_a_helper(case.build_set)
+        plain, helper = case.request(), _with_a_helper(case.request())
         for first, second in ((plain, helper), (helper, plain)):
             client = FakeEntityClient()
             jobs = FakeJobs(client.events)
@@ -413,11 +409,11 @@ class TestResubmission:
     async def test_a_set_with_a_helper_sent_again_is_the_same_request(self, case: Case) -> None:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        helper = _with_a_helper(case.build_set)
+        helper = _with_a_helper(case.request())
         await _submit(client, jobs, helper, backend=case.backend)
         client.events.clear()
 
-        again = await _submit(client, jobs, _with_a_helper(case.build_set), backend=case.backend)
+        again = await _submit(client, jobs, _with_a_helper(case.request()), backend=case.backend)
         assert client.events == [
             "conflict:demo-1.img0",
             "get:demo-1.img0",
@@ -433,11 +429,11 @@ class TestResubmission:
     async def test_rows_written_before_a_collision_are_failed(self, case: Case) -> None:
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        await _submit(client, jobs, case.naming(["img0"]), backend=case.backend)
+        await _submit(client, jobs, case.request(names=["img0"]), backend=case.backend)
         client.events.clear()
 
         with pytest.raises(BuildConflict, match="new revision"):
-            await _submit(client, jobs, case.naming(["extra", "img0"]), backend=case.backend)
+            await _submit(client, jobs, case.request(names=["extra", "img0"]), backend=case.backend)
         assert client.events == [
             "create:demo-1.extra",
             "conflict:demo-1.img0",
@@ -556,7 +552,7 @@ class TestTheJobRequest:
         otherwise: the record a builder from before roles wrote of the same request."""
         client = FakeEntityClient()
         jobs = FakeJobs(client.events)
-        result = await _submit(client, jobs, case.build_set, backend=case.backend)
+        result = await _submit(client, jobs, case.request(), backend=case.backend)
         job = jobs.jobs["builder-demo-1"]
         assert [spec["name"] for spec in job.spec["build_specs"]] == ["img0", "img1"]
         assert not any("role" in spec for spec in job.spec["build_specs"])
@@ -854,26 +850,35 @@ class TestTheRequestDigest:
             ),
         ],
     )
-    def test_a_request_keeps_the_digest_its_rows_record(
+    @pytest.mark.asyncio
+    async def test_a_request_keeps_the_digest_its_rows_record(
         self, as_sent: BuildSet, spelt_out: BuildSet, digest: str
     ) -> None:
-        """Each digest is written out here, as it was when this test was written, because nothing else holds it.
+        """Each digest is written out here, as it was when this test was written. Nothing else holds one but
+        the ``digest`` of each ``case``, for the request each backend's tests submit.
 
         A row records the digest of the request that wrote it, and a submit of its revision is the same request
-        only at that digest. Every other test computes the digest it expects with ``request_digest`` itself, so
-        all of them would pass if the digest of every request changed, and every revision submitted before the
-        change would then be refused as a different request when it is submitted again. A change that moves
-        one of these on purpose strands the rows that already record it.
+        only at that digest. The tests that compute the digest they expect with ``request_digest`` itself would
+        all pass if the digest of every request changed, and every revision submitted before the change would
+        then be refused as a different request when it is submitted again. A change that moves one of these on
+        purpose strands the rows that already record it.
 
         Each request is written twice. Once with every field its digest covers, so what the digest is taken
         over can be read here. And once as short as a caller may send it, so a default that changes fails here
-        too. Between the two requests every field of a request but `role` is covered, and every default is left
-        out once. A field a request gains later has to leave all of them as they are. `role` came later, and
-        does: a request that names none keeps these digests, and a helper's is written out below.
+        too; that one is also submitted, and its digest read from the row the submit wrote. Between the two
+        requests every field of a request but `role` is named, and every default is left out once. ``archive``,
+        ``context_path`` and ``dockerfile`` appear only at their defaults: these hold that the fields are in
+        the digest, not how another value of them is written. A field a request gains later has to leave all
+        of them as they are. `role` came later, and does: a request that names none keeps these digests, and a
+        helper's is written out below.
         """
         assert request_digest(spelt_out) == digest
         # As a submit computes it: over the request with the deployment's default platform filled in.
         assert request_digest(as_sent.with_default_platform("linux/amd64")) == digest
+        # And as a submit stores it, for a build in this cluster: the remote backend takes neither request, and
+        # the one it does take is written out on its ``case``. Only the copy asks a registry what its tag names.
+        result = await _submit(FakeEntityClient(), build_set=as_sent, upstream={UBUNTU: UBUNTU_AMD64})
+        assert [image.provenance.request_digest for image in result.images] == [digest]
 
     def test_a_role_given_as_null_is_the_request_that_names_none(self) -> None:
         """A spec's role is left out of the digest where it has no value, which is what keeps the digests written
