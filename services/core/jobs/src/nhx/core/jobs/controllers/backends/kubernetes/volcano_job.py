@@ -81,6 +81,9 @@ from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
+# Phases after which Volcano has stopped the Job, so a TTL timeout would only replace its real outcome.
+VOLCANO_FINISHED_PHASES = ("Completed", "Failed", "Terminated")
+
 
 class VolcanoJobExecutionProfileConfig(BaseKubernetesExecutionProfileConfig):
     """Configuration for Volcano Job Execution Profile"""
@@ -874,6 +877,16 @@ class VolcanoJobBackend(
             else self.check_step_ttl(step, ttl_seconds)
         )
         if not ttl_exceeded:
+            return None
+        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
+        if phase in VOLCANO_FINISHED_PHASES:
+            # The reconciler can reach a step long after Volcano finished its Job. Timing it out now
+            # would delete the Job and replace its real outcome with a false timeout, so let the normal
+            # sync record whether it completed or failed.
+            logger.info(
+                "Skipping TTL timeout for a Volcano Job that already finished",
+                extra={"job_name": name_for_step(step), "namespace": self.namespace, "phase": phase},
+            )
             return None
         return self.sync_remove_job_with_status(
             step,

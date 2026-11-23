@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import datetime
 import logging
 from collections.abc import Callable
 from typing import Generic, Literal, TypeVar
@@ -519,6 +520,19 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         )
         if not ttl_exceeded:
             return None
+        if _kubernetes_job_has_finished(k8s_job):
+            # The reconciler can reach a step long after Kubernetes finished its Job. Timing it out now
+            # would delete the Job and replace its real outcome with a false timeout, so let the normal
+            # sync record whether it completed or failed.
+            logger.info(
+                "Skipping TTL timeout for a Kubernetes Job that already finished",
+                extra={
+                    "job_name": _job_name(k8s_job),
+                    "namespace": _job_namespace(k8s_job),
+                    "ttl_seconds": ttl_seconds,
+                },
+            )
+            return None
         self.terminate_job(k8s_job)
         status = HelixJobStatus.ERROR
         status_details = {"message": f"Job timed out after reaching max TTL of {ttl_seconds} seconds"}
@@ -872,6 +886,22 @@ def _job_namespace(job: V1Job) -> str | None:
     if metadata is None:
         return None
     return metadata.namespace
+
+
+def _kubernetes_job_has_finished(job: V1Job) -> bool:
+    """Whether Kubernetes has already recorded this Job as Complete or Failed.
+
+    A Complete Job has a completion time. A Failed Job has a Failed condition that is True.
+    """
+    job_status = job.status
+    if job_status is None:
+        return False
+    if isinstance(job_status.completion_time, datetime.datetime):
+        return True
+    conditions = job_status.conditions
+    if not isinstance(conditions, list):
+        return False
+    return any(condition.type in ("Complete", "Failed") and condition.status == "True" for condition in conditions)
 
 
 def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> bool:
