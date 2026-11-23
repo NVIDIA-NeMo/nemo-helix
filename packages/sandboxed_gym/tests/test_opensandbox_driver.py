@@ -358,6 +358,26 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
     assert handle.sandbox_id == "sandbox-1"
     assert captured["resource"] == {"cpu": "4", "memory": "12Gi"}
     assert captured["resource_requests"] == {"cpu": "500m"}
+    assert captured["extensions"] is None
+
+
+@requires_opensandbox
+async def test_create_forwards_the_configured_server_extensions(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    driver = OpenSandboxDriver(create={"extensions": {"bootstrap.execd.isolation": "enable"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    await driver.create(spec_with())
+
+    assert captured["extensions"] == {"bootstrap.execd.isolation": "enable"}
 
 
 class _FakeSandbox:

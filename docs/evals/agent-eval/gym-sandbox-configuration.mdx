@@ -217,6 +217,38 @@ the OpenSandbox provider with the NeMo extension installed, and a bundle built f
 `nhx-gym-host` image's architecture and C library. Evaluator rejects `agent_bundle` with the
 `docker` provider.
 
+## Run Docker in resource servers
+
+Some environments start containers from a resource server, for example with `docker compose up`. The
+`nhx-gym-host-podman` image supports this with rootless Podman behind the Docker CLI. Each compose
+project gets its own network with service-name DNS, and the Gym host's egress policy still applies
+to every container.
+
+The image's setup needs `SYS_ADMIN`, which only a Kata VM contains, so this requires OpenSandbox
+sandboxes that run with a Kata runtime class. The Gym host checks for a Kata VM and fails the job
+instead of running the setup anywhere else. After setup, the Gym servers run as an unprivileged user
+with no capabilities. `NET_ADMIN` is never granted, so nothing in the host can change its network or
+egress rules.
+
+```yaml
+platformConfig:
+  evals:
+    sandbox_runtime_image: nvcr.io/nvidia/nemo-helix/nhx-gym-host-podman:<release-tag>
+    sandbox_host_provider_options:
+      create:
+        extensions:
+          bootstrap.execd.isolation: enable
+    # Every registry the environment's images come from, including its blob storage hosts.
+    sandbox_egress_allow:
+      - registry-1.docker.io:443
+      - auth.docker.io:443
+      - production.cloudflare.docker.com:443
+      - production.cloudfront.docker.com:443
+```
+
+Container images are stored in a 30 GiB sparse file in the Gym host's ephemeral storage. GPU access
+and registry credentials for pulling private images are not supported yet.
+
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.

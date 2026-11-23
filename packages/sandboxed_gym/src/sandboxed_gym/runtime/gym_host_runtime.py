@@ -56,6 +56,7 @@ from sandboxed_gym.environment_package import (
     load_environment_package,
     validate_environment_namespaces,
 )
+from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
 #: Set by the orchestrator when the caller supplied an explicit ``environment_path`` (a FileSet).
@@ -1634,6 +1635,8 @@ def main() -> None:
 
     _ensure_event_loop()
     try:
+        # Before Gym starts anything: the Gym servers must run as the unprivileged container user.
+        prepare_container_engine()
         _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
     except Exception as exc:
         # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller

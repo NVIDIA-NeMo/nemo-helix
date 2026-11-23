@@ -109,7 +109,7 @@ RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonl
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
     GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
 
-FROM ${NHX_PYTHON_IMAGE} AS runtime
+FROM ${NHX_PYTHON_IMAGE} AS runtime-base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates \
@@ -127,8 +127,6 @@ COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
 COPY --from=builder /opt/gym-host-overrides.txt /opt/gym-host-overrides.txt
 # Copy Gym's prebuilt per-component environments to avoid runtime installation.
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs
-# Copy the matching uv cache used by those component environments.
-COPY --from=builder /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
 
 ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/gym-host-venv \
@@ -144,6 +142,53 @@ WORKDIR /job/work
 
 EXPOSE 8080
 CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+
+FROM runtime-base AS runtime
+# Copy the matching uv cache used by those component environments. In its own stage so the `podman`
+# variant can take it from the builder already owned by its unprivileged user, rather than copying
+# this layer again to change the owner.
+COPY --from=builder /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
+
+# Docker CLI and Compose for the `podman` variant. They talk to Podman's Docker-compatible API.
+FROM docker.io/library/docker:27.5.1-cli AS docker-cli
+
+# Sandboxed Gym host whose resource servers can run `docker` and `docker compose`. Opt-in: an operator
+# points `sandbox_runtime_image` at it and enables OpenSandbox's `bootstrap.execd.isolation` extension.
+# The runtime refuses the setup outside a Kata VM, runs `rootless-podman-up` as root, then drops to
+# docker-user, so nothing the Gym servers run keeps root or SYS_ADMIN.
+FROM runtime-base AS podman
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        podman passt uidmap aardvark-dns catatonit nftables e2fsprogs \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --user-group docker-user \
+    && (grep -q '^docker-user:' /etc/subuid || echo 'docker-user:100000:65536' >> /etc/subuid) \
+    && (grep -q '^docker-user:' /etc/subgid || echo 'docker-user:100000:65536' >> /etc/subgid) \
+    # Kata's virtio-fs root filesystem can't carry file capabilities, so the uid/gid map helpers
+    # need the setuid bit. They are the only setuid binaries left: the rest go, because the sandbox's
+    # capability bounding set still holds SYS_ADMIN for a setuid-root program to pick up.
+    && find / -xdev -perm -4000 -type f ! -path /usr/bin/newuidmap ! -path /usr/bin/newgidmap \
+        -exec chmod u-s {} + \
+    && chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+# Offline server venv builds write to the uv cache, and the Gym servers run as docker-user.
+COPY --from=builder --chown=docker-user:docker-user /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
+    /usr/local/libexec/docker/cli-plugins/docker-compose
+COPY docker/gym-host/podman/containers.conf /etc/containers/containers.conf
+COPY --chown=docker-user:docker-user docker/gym-host/podman/storage.conf \
+    /home/docker-user/.config/containers/storage.conf
+COPY docker/gym-host/podman/rootless-podman-up /usr/local/libexec/nhx/rootless-podman-up
+ENV NHX_GYM_HOST_CONTAINER_ENGINE=rootless-podman \
+    DOCKER_HOST=unix:///run/user/1000/podman/podman.sock
+
+FROM podman AS podman-smoke-test
+RUN podman --version && docker --version && docker compose version \
+    && test -u /usr/bin/newuidmap && test -u /usr/bin/newgidmap \
+    && test -z "$(find / -xdev -perm -4000 -type f ! -path /usr/bin/newuidmap ! -path /usr/bin/newgidmap -print -quit)" \
+    && grep -q '^docker-user:100000:65536$' /etc/subuid \
+    && test "$(stat -c %U /home/ubuntu/.cache/uv)" = docker-user \
+    && python -c 'from sandboxed_gym.runtime import container_engine; print(container_engine.ENGINE_ENV)'
 
 FROM runtime AS smoke-test
 # The prefetch above only warns when it fails, and a sandbox with no index egress cannot build these

@@ -122,6 +122,16 @@ def _network_policy(create_options: Mapping[str, Any]) -> Any:
     return NetworkPolicy.model_validate(policy)
 
 
+def _extensions(create_options: Mapping[str, Any]) -> dict[str, str] | None:
+    """Operator-configured OpenSandbox server extensions, such as ``bootstrap.execd.isolation``.
+
+    Only the deployment's create options carry these; nothing on a ``SandboxSpec`` can, so a job or an
+    episode request can't reach them. The server receives them as strings.
+    """
+    extensions = create_options.get("extensions")
+    return {str(k): str(v) for k, v in extensions.items()} if extensions else None
+
+
 def _volumes(spec: SandboxSpec) -> list[Any]:
     """Translate ``provider_options["volumes"]`` into the SDK's ``Volume`` models.
 
@@ -229,6 +239,7 @@ class OpenSandboxDriver:
                 resource=_resource_limits(self._create_options),
                 resource_requests=_resource_requests(spec) or None,
                 network_policy=_network_policy(self._create_options),
+                extensions=_extensions(self._create_options),
                 entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
                 volumes=_volumes(spec) or None,
                 # Set only by the job-host provider; the broker refuses provider_options on episode requests.
