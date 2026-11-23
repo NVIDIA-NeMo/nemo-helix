@@ -43,7 +43,7 @@ class AgentHardenerPluginService(NemoService):
             return {
                 "plugin": self.name,
                 "status": "ok",
-                "jobs": ["agent-hardener.war-game", "agent-hardener.synth"],
+                "jobs": ["agent-hardener.war-game", "agent-hardener.synth", "agent-hardener.victim-context"],
                 "entities": ["agent_hardener_run", "agent_hardener_manifest"],
             }
 
@@ -83,5 +83,11 @@ class AgentHardenerPluginService(NemoService):
                 tag="Agent Hardener Synth Jobs",
                 description="Submit and manage the benign-suite synthesis job.",
                 prefix="/v2/workspaces/{workspace}/synth-benign",
+            ),
+            RouterSpec(
+                router=jobs.victim_context_router,
+                tag="Agent Hardener Victim Context Jobs",
+                description="Stage a manifest's victim build context, to build the victim image outside the job.",
+                prefix="/v2/workspaces/{workspace}/victim-context",
             ),
         ]
