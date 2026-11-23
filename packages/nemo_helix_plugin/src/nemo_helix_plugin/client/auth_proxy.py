@@ -69,7 +69,8 @@ _STRIP_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
         _SCOPES_HEADER,
     }
 )
-# We stream the response, so the upstream's framing headers no longer apply.
+# We stream response bodies, so their upstream framing headers no longer apply.
+# HEAD has no response body; its Content-Length describes the representation.
 _STRIP_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | frozenset({"content-length"})
 _MULTI_VALUE_RESPONSE_HEADERS = frozenset({"set-cookie"})
 
@@ -154,9 +155,12 @@ def build_auth_proxy_app(
             finally:
                 await response.aclose()
 
+        response_headers_to_strip = _STRIP_RESPONSE_HEADERS
+        if request.method == "HEAD" and "transfer-encoding" not in response.headers:
+            response_headers_to_strip = _HOP_BY_HOP_HEADERS
         resp_headers = _sanitized_headers(
             response.headers,
-            strip=_STRIP_RESPONSE_HEADERS | _MULTI_VALUE_RESPONSE_HEADERS,
+            strip=response_headers_to_strip | _MULTI_VALUE_RESPONSE_HEADERS,
         )
         proxy_response = StreamingResponse(
             _body(),

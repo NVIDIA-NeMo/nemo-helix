@@ -3,7 +3,6 @@
 
 import shlex
 import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,9 +17,7 @@ from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
 from nhx.core.models.controllers.backends.deployments_plugin.compiler import (
-    _REMOTE_LOCAL_DIR_FALLBACK,
     _busybox_image,
-    _weight_puller_script,
     compile_model_deployment,
 )
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
@@ -31,7 +28,6 @@ from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import
 from nhx.core.models.controllers.backends.deployments_plugin.request_converters import deployment_config_create_request
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
-from pytest_httpserver import HTTPServer
 
 
 def _resolved(engine: str, *, lora: bool = False, runtime: Runtime = Runtime.KUBERNETES) -> ResolvedPluginDeployment:
@@ -162,62 +158,21 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     # HF cache bookkeeping must land on the mounted PVC, not ephemeral container
     # storage, so large checkpoints don't overflow $HOME/.cache with ENOSPC.
     assert puller_env["HF_HOME"] == MODEL_STORE_PATH
-    assert puller.command[:2] == ["sh", "-c"]
-    assert "hf download org/model --local-dir /model-store" in puller.command[2]
-    assert _REMOTE_LOCAL_DIR_FALLBACK in puller.command[2]
-    assert puller.args == []
+    assert puller.command == ["python3", "-m", "nhx.core.models.tasks.weight_puller"]
+    assert puller.args == ["--repo-id", "org/model", "--local-dir", "/model-store"]
     assert "nvidia.com/gpu" not in puller.resources.limits
 
 
-def test_weight_puller_script_fails_when_snapshot_download_keeps_local_dir(tmp_path: Path) -> None:
-    """A 401 that huggingface_hub turns into a local-dir return must fail the puller."""
-    result = _run_puller_script(
-        tmp_path,
-        _weight_puller_script("org/model", None),
-        f"#!/bin/sh\necho {_REMOTE_LOCAL_DIR_FALLBACK} >&2\nexit 0\n",
+def test_weight_puller_preserves_image_override_and_literal_revision() -> None:
+    resolved = replace(
+        _resolved("vllm"), huggingface_model_puller="example/helix-puller:custom", model_revision="refs/pr/7"
     )
-    assert result.returncode == 1
-    assert b"remote repository could not be accessed" in result.stderr
-
-
-def test_weight_puller_script_preserves_hf_exit_code(tmp_path: Path) -> None:
-    ok = _run_puller_script(
-        tmp_path,
-        _weight_puller_script("org/model", "main"),
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" >&2\necho download-ok >&2\nexit 0\n",
-    )
-    assert ok.returncode == 0
-    assert b"download-ok" in ok.stderr
-    assert b"--revision" in ok.stderr and b"main" in ok.stderr
-
-    failed = _run_puller_script(tmp_path, _weight_puller_script("org/model", None), "#!/bin/sh\nexit 7\n")
-    assert failed.returncode == 7
-
-
-def test_weight_puller_waits_for_proxy_before_downloading(tmp_path: Path, httpserver: HTTPServer) -> None:
-    httpserver.expect_ordered_request("/healthz").respond_with_data("starting", status=503)
-    httpserver.expect_ordered_request("/healthz").respond_with_data("ready")
-    result = _run_puller_script(
-        tmp_path,
-        _weight_puller_script("org/model", None, proxy_health_url=httpserver.url_for("/healthz")),
-        "#!/bin/sh\necho download-ok >&2\n",
-    )
-    assert result.returncode == 0, result.stderr
-    assert b"download-ok" in result.stderr
-    httpserver.check_assertions()
-
-
-def _run_puller_script(bin_dir: Path, script: str, hf_body: str) -> subprocess.CompletedProcess[bytes]:
-    hf = bin_dir / "hf"
-    hf.write_text(hf_body)
-    hf.chmod(0o755)
-    return subprocess.run(
-        ["sh", "-c", script],
-        cwd=bin_dir,
-        env={"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/bin:/usr/bin", "TMPDIR": str(bin_dir)},
-        capture_output=True,
-        check=False,
-    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    assert compiled.puller_config is not None
+    puller = compiled.puller_config.containers[0]
+    assert puller.image == "example/helix-puller:custom"
+    assert puller.command == ["python3", "-m", "nhx.core.models.tasks.weight_puller"]
+    assert puller.args[-2:] == ["--revision", "refs/pr/7"]
 
 
 def test_nim_defaults_to_the_model_free_nim_image() -> None:
@@ -976,6 +931,10 @@ def test_authenticated_weight_puller_uses_creator_scoped_proxy(
     assert puller is not None
     env = {item.name: item.value for item in puller.containers[0].env}
     assert env["HF_ENDPOINT"] == "http://127.0.0.1:8090/apis/files/v2/hf"
+    if runtime == Runtime.DOCKER:
+        assert puller.containers[0].args[-2:] == ["--proxy-health-url", "http://127.0.0.1:8090/healthz"]
+    else:
+        assert "--proxy-health-url" not in puller.containers[0].args
     assert "HF_TOKEN" not in env
     assert puller.auth_proxy_sidecar is True
     assert puller.auth_proxy_sidecar_identity == "models"

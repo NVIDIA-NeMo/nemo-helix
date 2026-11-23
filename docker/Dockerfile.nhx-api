@@ -52,6 +52,10 @@ RUN /app/.venv/bin/pip --version && \
 # Fail the image build if the installed auth package cannot see its generated policy.
 RUN /app/.venv/bin/python -c 'from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm; ensure_embedded_policy_wasm(auto_build=False)'
 
+# The Models controller uses this image for weight pulls. Check the packaged
+# entry point and its locked Hugging Face dependencies during every image build.
+RUN /app/.venv/bin/python -m nhx.core.models.tasks.weight_puller --help
+
 # Pre-install DuckDB aws + httpfs so OTLP log ingestion works without outbound network.
 # Download the extension artifacts directly over HTTPS and install from local files
 # because DuckDB's default remote INSTALL path can be blocked or flaky in some build environments.

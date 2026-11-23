@@ -8,7 +8,6 @@ mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 """
 
 import logging
-import shlex
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -160,58 +159,6 @@ def _workload_identity_for_model(resolved: ResolvedPluginDeployment) -> Workload
 
 def _env(values: dict[str, str]) -> list[EnvVar]:
     return [EnvVar(name=name, value=value) for name, value in values.items()]
-
-
-# huggingface_hub logs this and exits 0 when `snapshot_download` cannot reach the
-# remote but `local_dir` is already non-empty. HF_HOME lives on that same mount,
-# so the hub cache alone makes a fresh volume look populated and a 401 is reported
-# as a completed pull.
-_REMOTE_LOCAL_DIR_FALLBACK = "Returning existing local_dir"
-
-
-def _weight_puller_script(repo_id: str, revision: str | None, *, proxy_health_url: str | None = None) -> str:
-    """Run `hf download` and fail if it kept a local dir the remote could not serve."""
-    revision_flag = f" --revision {shlex.quote(revision)}" if revision else ""
-    marker = shlex.quote(_REMOTE_LOCAL_DIR_FALLBACK)
-    wait_for_proxy = []
-    if proxy_health_url is not None:
-        # Docker starts the primary before its sidecars can join its network.
-        wait_for_proxy = [
-            "python3 - <<'PY'",
-            "import time",
-            "from urllib.request import urlopen",
-            "deadline = time.monotonic() + 60",
-            "while True:",
-            "    try:",
-            f"        with urlopen({proxy_health_url!r}, timeout=1):",
-            "            break",
-            "    except OSError:",
-            "        if time.monotonic() >= deadline:",
-            "            raise SystemExit('weight puller failed: auth proxy did not become ready')",
-            "        time.sleep(1)",
-            "PY",
-        ]
-    return "\n".join(
-        [
-            "set -eu",
-            *wait_for_proxy,
-            "log=$(mktemp)",
-            "set +e",
-            (
-                f"hf download {shlex.quote(repo_id)} --local-dir {shlex.quote(_WEIGHTS_MOUNT)}"
-                f'{revision_flag} >"$log" 2>&1'
-            ),
-            "status=$?",
-            "set -e",
-            'cat "$log" >&2',
-            f'if grep -F -q {marker} "$log"; then',
-            '  echo "weight puller failed: remote repository could not be accessed" >&2',
-            "  exit 1",
-            "fi",
-            'exit "$status"',
-            "",
-        ]
-    )
 
 
 def _server_env(engine: str, values: dict[str, str]) -> list[EnvVar]:
@@ -382,22 +329,16 @@ def compile_model_deployment(
             puller_env["HF_ENDPOINT"] = auth_plan.auth_proxy_base_url + urlsplit(resolved.files_hf_url).path
         else:
             puller_env["HF_TOKEN"] = "service:models"
+        puller_args = ["--repo-id", f"{resolved.model_namespace}/{resolved.model_name}", "--local-dir", _WEIGHTS_MOUNT]
+        if resolved.model_revision:
+            puller_args.extend(["--revision", resolved.model_revision])
+        if auth_plan.auth_proxy_base_url and resolved.runtime == Runtime.DOCKER:
+            puller_args.extend(["--proxy-health-url", f"{auth_plan.auth_proxy_base_url}/healthz"])
         puller = Container(
             name="weight-puller",
             image=resolved.huggingface_model_puller,
-            command=[
-                "sh",
-                "-c",
-                _weight_puller_script(
-                    f"{resolved.model_namespace}/{resolved.model_name}",
-                    resolved.model_revision,
-                    proxy_health_url=(
-                        f"{auth_plan.auth_proxy_base_url}/healthz"
-                        if auth_plan.auth_proxy_base_url and resolved.runtime == Runtime.DOCKER
-                        else None
-                    ),
-                ),
-            ],
+            command=["python3", "-m", "nhx.core.models.tasks.weight_puller"],
+            args=puller_args,
             env=_env(puller_env),
             volumeMounts=[VolumeMount(name=names.volume, mountPath=_WEIGHTS_MOUNT)],
         )

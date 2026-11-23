@@ -9,6 +9,7 @@ import pytest
 from nhx.common.config import Runtime
 from nhx.core.models.config import (
     ControllerConfig,
+    ModelsConfig,
     backends,
     config,
     get_default_backends_for_runtime,
@@ -16,6 +17,14 @@ from nhx.core.models.config import (
 )
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 from pydantic import ValidationError
+
+
+def test_weight_puller_defaults_to_helix_image_and_accepts_override() -> None:
+    with patch("nhx.core.models.config.get_qualified_image", return_value="registry/nhx-api:release"):
+        assert ModelsConfig().huggingface_model_puller == "registry/nhx-api:release"
+    assert ModelsConfig(huggingface_model_puller="registry/custom-puller:release").huggingface_model_puller == (
+        "registry/custom-puller:release"
+    )
 
 
 def test_models_controller_config_defaults():

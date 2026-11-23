@@ -430,10 +430,9 @@ class ModelsConfig(create_service_config_class("models")):  # type: ignore
 
     huggingface_model_puller: str = Field(
         default_factory=lambda: get_qualified_image("nhx-api"),
-        description="Image used to pull model weights. Its entrypoint is overridden to the "
-        "Hugging Face CLI ('hf download ...'), so any image with the 'hf' CLI on PATH works. "
-        "Defaults to the platform's nhx-api image (registry/tag from platform config); override "
-        "to use a different puller image.",
+        description="Image used to pull model weights. Defaults to the platform's nhx-api image "
+        "(registry/tag from platform config). Overrides must package the Python module "
+        "nhx.core.models.tasks.weight_puller and its dependencies; CLI-only images are not supported.",
     )
     controller: ControllerConfig = Field(
         default_factory=ControllerConfig, description="Controller service configuration"
