@@ -26,3 +26,43 @@ telemetry:
 ```
 
 For a complete list of the default values, refer to [Helm Configuration](/documentation/kubernetes-deployment/helm/helm-reference).
+
+
+## Python application logs
+
+Helix keeps console logging active and can also send logs directly to an OTel
+collector using the standard Python OTel logging handler. This applies to API,
+controller, and platform task logging initialization.
+
+```bash
+export OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=true
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://opentelemetry-collector:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+```
+
+`OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION` defaults to `true` when unset. Set it to
+`false` to skip installing the OTel logging handler. `OTEL_LOGS_EXPORTER=none`
+(the default) disables direct OTLP log export even when the handler is installed.
+`OTEL_SDK_DISABLED=true` also disables direct export. Console logging continues
+with the configured `LOG_FORMAT`, `LOG_LEVEL`, and sensitive-data filtering.
+
+Log-specific `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` and
+`OTEL_EXPORTER_OTLP_LOGS_PROTOCOL` override the general endpoint and protocol.
+Supported protocols are `grpc` (the default) and `http/protobuf`. For HTTP, Helix
+appends `/v1/logs` to the general endpoint; a log-specific endpoint is used as-is.
+Standard OTLP exporter environment settings, including headers, timeouts, TLS,
+and insecure transport, continue to apply.
+
+Direct records retain severity, exception details, available trace/span IDs,
+service/workspace/job context, and extra structured fields. Sensitive messages
+are excluded from both outputs. Internal request logs follow
+`LOG_INTERNAL_REQUESTS` for both outputs.
+
+If a collector already collects the application's console output, enabling
+direct OTLP export can ingest each message twice. Choose the ingestion path for
+your deployment: keep `OTEL_LOGS_EXPORTER=none` or set
+`OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=false` when relying on console collection,
+or arrange for the collector to exclude those console records when using direct
+export. Disabling Python log auto-instrumentation does not disable console
+collection, job-launcher log paths, or Files log storage/query paths.
