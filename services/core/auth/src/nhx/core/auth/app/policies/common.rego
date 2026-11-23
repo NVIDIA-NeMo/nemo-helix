@@ -69,7 +69,7 @@ has_identity_permissions(principal, workspace, required_permissions, actor_side)
 # Returns undefined (not []) when the matched endpoint has no `callers` key, so
 # callers can treat absence as the default (PRINCIPAL) semantics — no new restriction.
 endpoint_callers(path, method) := callers if {
-	endpoint := normalize_endpoint(path)
+	endpoint := normalize_endpoint(path, method)
 	method_lower := lower(method)
 	callers := data.authz.endpoints[endpoint][method_lower].callers
 }
@@ -78,7 +78,7 @@ endpoint_callers(path, method) := callers if {
 # signal emitted for unruled or invalid plugin routes. Undefined (not false) otherwise so it
 # only fires where the marker is present.
 endpoint_denied(path, method) if {
-	endpoint := normalize_endpoint(path)
+	endpoint := normalize_endpoint(path, method)
 	data.authz.endpoints[endpoint][lower(method)].deny == true
 }
 
@@ -521,15 +521,18 @@ segment_matches(path_segment, pattern_segment) if {
 	path_segment != ""
 }
 
-# Normalize endpoint path by matching against defined endpoint patterns
+# Normalize endpoint path and method against defined endpoint patterns
 # Removes query parameters and matches path against configured endpoint patterns
 # Returns the matching pattern for looking up permissions and scopes
 # If multiple patterns match, returns the most specific one (fewest placeholders)
-normalize_endpoint(path) := pattern if {
+normalize_endpoint(path, method) := pattern if {
 	base_path := split(path, "?")[0]
 	matching_patterns := {p |
 		some p in object.keys(data.authz.endpoints)
 		path_matches_pattern(base_path, p)
+
+		# FastAPI skips path matches that do not support the request method.
+		data.authz.endpoints[p][lower(method)]
 	}
 
 	# Find the pattern with the fewest placeholders (most specific)
@@ -558,7 +561,7 @@ normalize_endpoint(path) := pattern if {
 # The functions above are kept intact — the policy tests call them with explicit
 # paths/methods, which must not be tied to the live request path.
 endpoint_scan := e if {
-	e := normalize_endpoint(extract_path)
+	e := normalize_endpoint(extract_path, extract_method)
 } else := ""
 
 req_method_lower := lower(extract_method)

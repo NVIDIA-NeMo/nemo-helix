@@ -66,95 +66,6 @@ def _hf_headers(fileset_name: str, updated_at: datetime | None, path: str, size:
     }
 
 
-@router.head(
-    "/{workspace}/{name}/resolve/{revision}/{path:path}",
-    summary="Get file metadata (HF compatible)",
-    status_code=HTTP_200_OK,
-)
-async def head_file(
-    workspace: str,
-    name: str,
-    revision: str,
-    path: str,
-    entity_store: EntityClient = Depends(get_entity_client),
-    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    client: AsyncNemoClient = Depends(get_nemo_client),
-    auth_client: AuthClient = Depends(get_auth_client),
-) -> Response:
-    """Get file metadata without downloading content."""
-    fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
-
-    cache_ctx: CacheContext | None = None
-    if fileset.storage.type != config.default_storage_config.type:
-        cache_ctx = CacheContext(
-            storage=storage_impl_factory(config.default_storage_config, {}),
-            lock_manager=FileLockManager(
-                entity_client=entity_store,
-                workspace="system",
-                lock_ttl_seconds=config.file_lock_ttl_seconds,
-            ),
-        )
-
-    file_info = await get_download_file_info(storage, path, cache_ctx=cache_ctx)
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(file_info.size),
-        "Content-Type": "application/octet-stream",
-        **_hf_headers(fileset.name, fileset.updated_at, path, file_info.size),
-    }
-
-    return Response(status_code=HTTP_200_OK, headers=headers)
-
-
-@router.get(
-    "/{workspace}/{name}/resolve/{revision}/{path:path}",
-    summary="Download file content (HF compatible)",
-)
-async def download_file(
-    workspace: str,
-    name: str,
-    revision: str,
-    path: str,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    entity_store: EntityClient = Depends(get_entity_client),
-    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    client: AsyncNemoClient = Depends(get_nemo_client),
-    auth_client: AuthClient = Depends(get_auth_client),
-) -> Response:
-    """Download file content with Range support."""
-    fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
-    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
-
-    # Set up caching for external storage backends (HuggingFace, NGC, etc.)
-    cache_ctx: CacheContext | None = None
-    if fileset.storage.type != config.default_storage_config.type:
-        cache_ctx = CacheContext(
-            storage=storage_impl_factory(config.default_storage_config, {}),
-            lock_manager=FileLockManager(
-                entity_client=entity_store,
-                workspace="system",
-                lock_ttl_seconds=config.file_lock_ttl_seconds,
-            ),
-        )
-
-    file_info = await get_download_file_info(storage, path, cache_ctx=cache_ctx)
-    extra_headers = _hf_headers(fileset.name, fileset.updated_at, path, file_info.size)
-    return await stream_file_download(
-        storage=storage,
-        path=path,
-        request=request,
-        file_size=file_info.size,
-        background_tasks=background_tasks,
-        cache_ctx=cache_ctx,
-        extra_headers=extra_headers,
-    )
-
-
 @router.get(
     "/api/models/{workspace}/{name}",
     summary="Get repository info (HF compatible)",
@@ -283,3 +194,94 @@ async def get_paths_info(
             continue
 
     return result
+
+
+# Keep metadata routes above the catch-all: a workspace named "resolve" can
+# otherwise make /api/models/... metadata URLs match the download route.
+@router.head(
+    "/{workspace}/{name}/resolve/{revision}/{path:path}",
+    summary="Get file metadata (HF compatible)",
+    status_code=HTTP_200_OK,
+)
+async def head_file(
+    workspace: str,
+    name: str,
+    revision: str,
+    path: str,
+    entity_store: EntityClient = Depends(get_entity_client),
+    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
+    client: AsyncNemoClient = Depends(get_nemo_client),
+    auth_client: AuthClient = Depends(get_auth_client),
+) -> Response:
+    """Get file metadata without downloading content."""
+    fileset = await get_fileset(workspace, name, entity_store)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
+
+    cache_ctx: CacheContext | None = None
+    if fileset.storage.type != config.default_storage_config.type:
+        cache_ctx = CacheContext(
+            storage=storage_impl_factory(config.default_storage_config, {}),
+            lock_manager=FileLockManager(
+                entity_client=entity_store,
+                workspace="system",
+                lock_ttl_seconds=config.file_lock_ttl_seconds,
+            ),
+        )
+
+    file_info = await get_download_file_info(storage, path, cache_ctx=cache_ctx)
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_info.size),
+        "Content-Type": "application/octet-stream",
+        **_hf_headers(fileset.name, fileset.updated_at, path, file_info.size),
+    }
+
+    return Response(status_code=HTTP_200_OK, headers=headers)
+
+
+@router.get(
+    "/{workspace}/{name}/resolve/{revision}/{path:path}",
+    summary="Download file content (HF compatible)",
+)
+async def download_file(
+    workspace: str,
+    name: str,
+    revision: str,
+    path: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    entity_store: EntityClient = Depends(get_entity_client),
+    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
+    client: AsyncNemoClient = Depends(get_nemo_client),
+    auth_client: AuthClient = Depends(get_auth_client),
+) -> Response:
+    """Download file content with Range support."""
+    fileset = await get_fileset(workspace, name, entity_store)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
+    storage = await resolve_download_storage(storage_impl_factory(fileset.storage, secrets), path)
+
+    # Set up caching for external storage backends (HuggingFace, NGC, etc.)
+    cache_ctx: CacheContext | None = None
+    if fileset.storage.type != config.default_storage_config.type:
+        cache_ctx = CacheContext(
+            storage=storage_impl_factory(config.default_storage_config, {}),
+            lock_manager=FileLockManager(
+                entity_client=entity_store,
+                workspace="system",
+                lock_ttl_seconds=config.file_lock_ttl_seconds,
+            ),
+        )
+
+    file_info = await get_download_file_info(storage, path, cache_ctx=cache_ctx)
+    extra_headers = _hf_headers(fileset.name, fileset.updated_at, path, file_info.size)
+    return await stream_file_download(
+        storage=storage,
+        path=path,
+        request=request,
+        file_size=file_info.size,
+        background_tasks=background_tasks,
+        cache_ctx=cache_ctx,
+        extra_headers=extra_headers,
+    )

@@ -4,6 +4,7 @@
 package authz_test
 
 import data.authz
+import data.common
 import future.keywords.if
 import future.keywords.in
 
@@ -62,4 +63,40 @@ test_hf_write_scope_does_not_grant_read_access if {
 test_hf_read_permission_does_not_cross_workspaces if {
 	request := {"method": "GET", "path": "/apis/files/v2/hf/api/models/other/model/revision/main"}
 	not hf_allowed(request, "creator", ["platform:read"])
+}
+
+# GET metadata shadows the catch-all download route. HEAD skips GET-only
+# metadata routes, and longer download paths still address the api workspace.
+hf_overlapping_requests := [
+	{"method": "GET", "suffix": "/api/models/resolve/incident", "workspace": "resolve"},
+	{"method": "GET", "suffix": "/api/models/resolve/incident/revision/main", "workspace": "resolve"},
+	{"method": "GET", "suffix": "/api/models/resolve/incident/tree/main", "workspace": "resolve"},
+	{"method": "POST", "suffix": "/api/models/resolve/incident/paths-info/main", "workspace": "resolve"},
+	{"method": "HEAD", "suffix": "/api/models/resolve/incident/revision/main", "workspace": "api"},
+	{"method": "GET", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": "api"},
+	{"method": "HEAD", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": "api"},
+	{"method": "GET", "suffix": "/resolve/model/resolve/main/config.json", "workspace": "resolve"},
+]
+
+test_hf_overlapping_routes_authorize_only_the_selected_workspace if {
+	every request in hf_overlapping_requests {
+		every granted_workspace in ["api", "resolve"] {
+			result := authz.allow with input as {
+				"principal_id": "reader",
+				"method": request.method,
+				"path": concat("", ["/apis/files/v2/hf", request.suffix]),
+				"scopes": ["platform:read"],
+			}
+				with data.authz.principals as {"reader": {"workspaces": {granted_workspace: ["Viewer"]}}}
+			result.allowed == (request.workspace == granted_workspace)
+		}
+	}
+}
+
+test_hf_head_uses_download_contract_and_workspace if {
+	request := {"method": "HEAD", "path": "/apis/files/v2/hf/api/models/resolve/incident/revision/main"}
+	endpoint := common.endpoint_scan with input as request
+	workspace := authz.workspace_scan with input as request
+	endpoint == "/apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}"
+	workspace == "api"
 }

@@ -89,6 +89,46 @@ def minimal_authz_data():
     }
 
 
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("granted_workspace", ["api", "resolve"])
+@pytest.mark.parametrize(
+    ("method", "suffix", "workspace"),
+    [
+        ("GET", "/api/models/resolve/incident", "resolve"),
+        ("GET", "/api/models/resolve/incident/revision/main", "resolve"),
+        ("GET", "/api/models/resolve/incident/tree/main", "resolve"),
+        ("POST", "/api/models/resolve/incident/paths-info/main", "resolve"),
+        ("HEAD", "/api/models/resolve/incident/revision/main", "api"),
+        ("GET", "/api/models/resolve/incident/weights/model.bin", "api"),
+        ("HEAD", "/api/models/resolve/incident/weights/model.bin", "api"),
+        ("GET", "/resolve/model/resolve/main/config.json", "resolve"),
+    ],
+)
+def test_hf_overlapping_routes_use_the_application_workspace(
+    static_authz_data: dict[str, Any],
+    method: str,
+    suffix: str,
+    workspace: str,
+    granted_workspace: str,
+    delegated: bool,
+) -> None:
+    static_authz_data["authz"]["principals"] = {"reader": {"workspaces": {granted_workspace: ["Viewer"]}}}
+    set_policy_data(static_authz_data)
+    request = {
+        "principal_id": "reader",
+        "method": method,
+        "path": f"/apis/files/v2/hf{suffix}",
+        "scopes": ["platform:read"],
+    }
+    if delegated:
+        request["principal_id"] = "system:serviceaccount:cluster:default"
+        request["on_behalf_of_principal_id"] = "reader"
+
+    result = evaluate("allow", request)
+
+    assert result["allowed"] is (workspace == granted_workspace)
+
+
 @pytest.fixture(autouse=True)
 def reset_policy():
     """Reset policy state between tests."""

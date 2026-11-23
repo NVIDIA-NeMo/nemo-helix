@@ -39,9 +39,6 @@ logger = logging.getLogger(__name__)
 
 ADAPTER_META_FILENAME = "nhx_adapter_meta.json"
 
-# Keep enough of vLLM's module mismatch errors to diagnose adapter failures.
-VLLM_ERROR_LOG_LIMIT = 2000
-
 
 class AdaptersController(HeartbeatMixin, Controller):
     def __init__(self, stop_signal: threading.Event | None = None):
@@ -365,9 +362,7 @@ class AdaptersController(HeartbeatMixin, Controller):
         if status == 400 and "already" in body.lower():
             logger.debug(f"LoRA adapter {lora_name!r} already loaded in vLLM")
             return True
-        logger.warning(
-            "vLLM load_lora_adapter failed for %r (status=%s): %s", lora_name, status, body[:VLLM_ERROR_LOG_LIMIT]
-        )
+        logger.warning(f"vLLM load_lora_adapter failed for {lora_name!r} (status={status}): {body[:300]}")
         return False
 
     def _unload_vllm_adapter(self, lora_name: str) -> bool:
@@ -398,10 +393,8 @@ class AdaptersController(HeartbeatMixin, Controller):
             # still be loaded. Keep the directory and retry next cycle rather than
             # deleting it and orphaning the adapter in vLLM until a restart.
             logger.warning(
-                "vLLM unload_lora_adapter for %r returned server error (status=%s), will retry: %s",
-                lora_name,
-                status,
-                body[:VLLM_ERROR_LOG_LIMIT],
+                f"vLLM unload_lora_adapter for {lora_name!r} returned server error "
+                f"(status={status}), will retry: {body[:200]}"
             )
             return False
         # Non-2xx, non-5xx (e.g. 404 "not loaded"): vLLM answered and the adapter
