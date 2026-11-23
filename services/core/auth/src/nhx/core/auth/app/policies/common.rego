@@ -527,13 +527,11 @@ segment_matches(path_segment, pattern_segment) if {
 # If multiple patterns match, returns the most specific one (fewest placeholders)
 normalize_endpoint(path, method) := pattern if {
 	base_path := split(path, "?")[0]
-	matching_patterns := {p |
+	path_patterns := {p |
 		some p in object.keys(data.authz.endpoints)
 		path_matches_pattern(base_path, p)
-
-		# FastAPI skips path matches that do not support the request method.
-		data.authz.endpoints[p][lower(method)]
 	}
+	matching_patterns := patterns_for_method(path_patterns, method)
 
 	# Find the pattern with the fewest placeholders (most specific)
 	# Count placeholders by counting segments that start with {
@@ -551,6 +549,14 @@ normalize_endpoint(path, method) := pattern if {
 	some pattern in matching_patterns
 	pattern_scores[pattern] == min_score
 }
+
+# FastAPI skips path matches that do not support the request method. If none
+# supports it, retain a known path so its missing method contract denies access
+# rather than entering the legacy unknown-path service/admin bypass.
+patterns_for_method(patterns, method) := supported if {
+	supported := {p | some p in patterns; data.authz.endpoints[p][lower(method)]}
+	count(supported) > 0
+} else := patterns
 
 # --- Request-scoped memoization -------------------------------------------------
 # extract_path and extract_method are 0-arg rules, and OPA caches complete-rule

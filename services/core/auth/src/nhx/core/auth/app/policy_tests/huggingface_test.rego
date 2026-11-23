@@ -88,7 +88,8 @@ test_hf_overlapping_routes_authorize_only_the_selected_workspace if {
 				"scopes": ["platform:read"],
 			}
 				with data.authz.principals as {"reader": {"workspaces": {granted_workspace: ["Viewer"]}}}
-			result.allowed == (request.workspace == granted_workspace)
+			expected := request.workspace == granted_workspace
+			result.allowed == expected
 		}
 	}
 }
@@ -99,4 +100,15 @@ test_hf_head_uses_download_contract_and_workspace if {
 	workspace := authz.workspace_scan with input as request
 	endpoint == "/apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}"
 	workspace == "api"
+}
+
+test_hf_unsupported_methods_cannot_use_admin_bypass if {
+	every method in ["DELETE", "OPTIONS", "PATCH"] {
+		request := {"method": method, "path": "/apis/files/v2/hf/api/models/resolve/incident/revision/main"}
+		result := authz.allow with input as object.union(request, {"principal_id": "service:admin"})
+			with data.authz.principals as {"service:admin": {"workspaces": {"system": ["HelixAdmin"]}}}
+		not result.allowed
+		endpoint := common.endpoint_scan with input as request
+		endpoint == "/apis/files/v2/hf/api/models/{workspace}/{name}/revision/{revision}"
+	}
 }
