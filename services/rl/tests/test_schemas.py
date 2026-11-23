@@ -634,6 +634,11 @@ def test_vllm_kwargs_rejects_worker_owned_keys() -> None:
         GRPOTraining(type="grpo", vllm_kwargs={"enable_prefix_caching": False, "moe_backend": "triton"})
 
 
+def test_vllm_kwargs_rejects_a_non_dict_mm_processor_kwargs() -> None:
+    with pytest.raises(ValueError, match="mm_processor_kwargs must be a dict"):
+        GRPOTraining(type="grpo", vllm_kwargs={"mm_processor_kwargs": "max_pixels=1"})
+
+
 def test_vllm_kwargs_accepts_engine_options() -> None:
     t = GRPOTraining(type="grpo", vllm_kwargs={"moe_backend": "triton"})
     assert t.vllm_kwargs == {"moe_backend": "triton"}

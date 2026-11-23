@@ -699,6 +699,9 @@ class GRPOTraining(_TrainingBase):
         reserved = sorted(self.vllm_kwargs.keys() & _VLLM_KWARGS_RESERVED)
         if reserved:
             raise ValueError(f"vllm_kwargs must not set {', '.join(reserved)}")
+        mm = self.vllm_kwargs.get("mm_processor_kwargs")
+        if mm is not None and not isinstance(mm, dict):
+            raise ValueError("vllm_kwargs.mm_processor_kwargs must be a dict")
         return self
 
     @model_validator(mode="after")

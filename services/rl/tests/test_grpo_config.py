@@ -1564,6 +1564,20 @@ class TestGrpoPassthroughKnobs:
             "do_rescale": False,
         }
 
+    @pytest.mark.parametrize("value", ["max_pixels=1", 5, ["min_pixels"]])
+    def test_non_dict_mm_processor_kwargs_is_rejected(
+        self, tmp_path: Path, job_ctx: NHXJobContext, value: object
+    ) -> None:
+        step, _ = _prepared_step(
+            tmp_path,
+            has_vision_tower=True,
+            grpo=GRPOConfig(num_generations_per_prompt=4, vllm_kwargs={"mm_processor_kwargs": value}),
+        )
+        step.model.max_pixels = 2_621_440
+
+        with pytest.raises(ValueError, match="mm_processor_kwargs must be a dict"):
+            compile_grpo_config(step, job_ctx)
+
     def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path)
 
