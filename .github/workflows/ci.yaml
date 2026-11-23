@@ -1404,7 +1404,7 @@ jobs:
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests (${{ matrix.group }})
+    name: Web tests (${{ matrix.shard }}/4)
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1415,9 +1415,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Studio product areas (STUDIO_TEST_GROUPS in web/packages/studio/vite.config.ts),
-        # plus `packages` for every other web package's tests.
-        group: [agents, data, models, platform, packages]
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: web
@@ -1435,7 +1433,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test changed packages
         env:
-          GROUP: ${{ matrix.group }}
+          SHARD: ${{ matrix.shard }}
         run: |
           filters=(--recursive)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -1447,10 +1445,11 @@ jobs:
               filters+=(--filter=nemo-studio-ui)
             fi
           fi
-          if [ "${GROUP}" = packages ]; then
+          if [ "${SHARD}" = 1 ]; then
             pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
-          elif pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
-            STUDIO_TEST_GROUP="${GROUP}" pnpm --filter nemo-studio-ui run test:ci
+          fi
+          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
           else
             echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
