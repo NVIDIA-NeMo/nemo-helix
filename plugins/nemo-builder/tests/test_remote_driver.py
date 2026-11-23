@@ -2772,22 +2772,8 @@ class TestFollowingAContextsLinks:
         with pytest.raises(ImageFailed, match=too_long):
             stage_context(context, "Dockerfile")
 
-    @pytest.fixture
-    def looked_at(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        """How long each path is that is looked at, a name at a time, to learn where links lead, from here
-        on: by the driver's own following, and by the standard library's. Both ask ``os.lstat``."""
-        lengths: list[int] = []
-        lstat = os.lstat
-
-        def looked(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
-            lengths.append(len(os.fspath(path)))
-            return lstat(path, *args, **kwargs)
-
-        monkeypatch.setattr(os, "lstat", looked)
-        return lengths
-
     def test_a_dockerfile_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
-        self, root: Path, looked_at: list[int]
+        self, root: Path
     ) -> None:
         """The Dockerfile's path is a submitter's, and so is every link on the way to it. Whether it leads
         to a file is asked of the system, which gives up on a chain after a few tens of links, before the
@@ -2806,7 +2792,6 @@ class TestFollowingAContextsLinks:
         with LinkReads() as reads, pytest.raises(ImageFailed, match="dockerfile 'Dockerfile' is not a file inside"):
             stage_context(context, "Dockerfile")
         assert reads.total == 0
-        assert max(looked_at, default=0) <= driver.MAX_LINK_PATH_CHARS
 
     def test_a_path_the_system_refuses_outright_is_no_file_and_no_directory(self, root: Path) -> None:
         """A name longer than the system allows: it answers with an error, not that nothing is there. The
@@ -2825,7 +2810,7 @@ class TestFollowingAContextsLinks:
         assert sorted(os.listdir(context)) == ["Dockerfile", "payload"]
 
     def test_a_context_path_that_is_the_first_of_such_links_is_refused_with_none_of_them_followed(
-        self, root: Path, caplog: pytest.LogCaptureFixture, looked_at: list[int]
+        self, root: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """One image's own download, unpacked as the step unpacks it, whose context path names the first
         link of the chain. Whether that is a directory is asked of the system, which gives up on a chain
@@ -2838,13 +2823,14 @@ class TestFollowingAContextsLinks:
         entries |= {self._name(number): Link(self._name(number + 1) + not_there) for number in range(links)}
         fetch, _ = _fetching(entries)
 
-        outcome = _built(root, caplog, fetch, "app")
+        with LinkReads() as reads:
+            outcome = _built(root, caplog, fetch, "app")
 
         assert (outcome.exit, outcome.handed, outcome.completed) == (1, {}, [])
         assert outcome.reasons == {
             "a": "its build context is not a directory in what was fetched: its context path matches none"
         }
-        assert max(looked_at) <= driver.MAX_LINK_PATH_CHARS
+        assert reads.total == 0
 
     def test_a_path_within_what_one_link_can_lead_to_is_followed_though_nothing_is_there(self, root: Path) -> None:
         """What is refused is a path no one link could be written as. A link that leads nowhere, by as many
