@@ -350,6 +350,11 @@ class ModelSpec(BaseModel):
         default=False,
         description="True when the checkpoint config contains a vision tower.",
     )
+    vision_patch_size: int | None = Field(
+        default=None,
+        description="Side length, in pixels, of one image token. Read from the checkpoint vision config as "
+        "patch_size times the spatial merge. None when the checkpoint does not declare a patch size.",
+    )
     has_audio_tower: bool = Field(
         default=False,
         description="True when the checkpoint config contains an audio tower.",
