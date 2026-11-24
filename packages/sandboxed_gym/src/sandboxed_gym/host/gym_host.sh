@@ -11,8 +11,11 @@
 set -eu
 
 # Nothing this launcher starts needs execd's token, so it goes before the job's variables can change
-# which programs run here.
-unset EXECD_ACCESS_TOKEN
+# which programs run here. Unsetting it would leave it in /proc/<pid>/environ for a child to read, so
+# the launcher starts again without it.
+if [ -n "${EXECD_ACCESS_TOKEN+set}" ]; then
+    exec /usr/bin/env -u EXECD_ACCESS_TOKEN /bin/sh "$0" "$@"
+fi
 
 # This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
 # NHX_GYM_JOB_ENV, are unpacked first, as if they had arrived in the environment: before the launcher's

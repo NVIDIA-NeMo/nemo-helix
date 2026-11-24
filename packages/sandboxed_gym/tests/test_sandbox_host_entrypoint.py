@@ -322,6 +322,48 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
     assert (tmp_path / "runtime-arg").read_text() == f"{paths['runtime']}\n"
 
 
+@pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="needs procfs")
+def test_a_program_on_the_jobs_path_cannot_read_the_token_from_the_launchers_initial_environment(
+    tmp_path: Path,
+) -> None:
+    """Unsetting a variable leaves it in /proc/<pid>/environ, so the launcher starts again without the token."""
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
+    paths = _fake_host(tmp_path)
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "cp").write_text(
+        f'#!/bin/sh\ncat /proc/$PPID/environ > "{tmp_path / "launcher-environ"}"\nexec /bin/cp "$@"\n',
+        encoding="utf-8",
+    )
+    (job_bin / "cp").chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_JOB_ENV": encode_job_env({"PATH": f"{job_bin}:{os.environ['PATH']}"}),
+            "EXECD_ACCESS_TOKEN": "sandbox-token",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    launcher_environ = (tmp_path / "launcher-environ").read_bytes()
+    assert launcher_environ
+    assert b"sandbox-token" not in launcher_environ
+
+
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
     """The head must return so the host can start, and Gym must be told to join it.
 
