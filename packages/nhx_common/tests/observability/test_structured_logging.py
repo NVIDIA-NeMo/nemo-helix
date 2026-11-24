@@ -17,6 +17,7 @@ from nhx.common.observability.otel import OTELSettings, settings
 from nhx.common.observability.structured_logging import _sanitize_log_strings, initialize_logging
 from nhx.common.observability.task_logging import HelixTaskLoggingProvider
 from opentelemetry._logs import SeverityNumber
+from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from opentelemetry.sdk.resources import Resource
@@ -419,3 +420,129 @@ def test_direct_log_without_active_span(monkeypatch):
     assert record.attributes is not None
     assert "trace_id" not in record.attributes
     assert "span_id" not in record.attributes
+
+
+@pytest.mark.parametrize(
+    ("source_path", "filename"),
+    [
+        ("/opt/application/src/worker.py", "worker.py"),
+        (r"C:\application\src\worker.py", "worker.py"),
+        ("worker.py", "worker.py"),
+        ('/opt/application/src/quoted"worker.py', 'quoted"worker.py'),
+    ],
+)
+def test_exported_source_metadata_keeps_filename_without_directories(monkeypatch, source_path, filename):
+    exporter = InMemoryLogRecordExporter()
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    initialize_logging()
+    output = StringIO()
+    _capture_console(output)
+    record = logging.LogRecord("source-test", logging.INFO, source_path, 37, "message %s", ("preserved",), None, "run")
+    logging.getLogger().handle(record)
+    _flush_logs()
+
+    logs = exporter.get_finished_logs()
+    assert len(logs) == 1
+    exported = logs[0].log_record
+    assert exported.body == "message preserved"
+    assert exported.attributes is not None
+    assert exported.attributes["code.file.path"] == filename
+    assert exported.attributes["code.function.name"] == "run"
+    assert exported.attributes["code.line.number"] == 37
+    assert "message preserved" in output.getvalue()
+    # The privacy policy affects outgoing OTel metadata, not other handlers.
+    assert record.pathname == source_path
+
+
+@pytest.mark.parametrize(
+    ("source_path", "filename"),
+    [
+        ("/opt/application/src/worker.py", "worker.py"),
+        (r"C:\application\src\worker.py", "worker.py"),
+        ('/opt/application/src/quoted"worker.py', 'quoted"worker.py'),
+    ],
+)
+def test_exported_exceptions_keep_details_without_source_directories(monkeypatch, source_path, filename):
+    exporter = InMemoryLogRecordExporter()
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    initialize_logging()
+    source = "def fail():\n    raise ValueError('failure details')\nfail()\n"
+    try:
+        exec(compile(source, source_path, "exec"), {})
+    except ValueError:
+        logging.getLogger().exception("operation failed")
+    _flush_logs()
+
+    logs = exporter.get_finished_logs()
+    assert len(logs) == 1
+    exported = logs[0].log_record
+    assert exported.body == "operation failed"
+    assert exported.severity_number == SeverityNumber.ERROR
+    assert exported.attributes is not None
+    assert exported.attributes["exception.type"] == "ValueError"
+    assert exported.attributes["exception.message"] == "failure details"
+    stacktrace = exported.attributes["exception.stacktrace"]
+    assert isinstance(stacktrace, str)
+    assert f'File "{filename}", line 2, in fail' in stacktrace
+    assert "ValueError: failure details" in stacktrace
+    assert source_path not in stacktrace
+    assert __file__ not in stacktrace
+
+
+def test_only_marked_sensitive_records_are_dropped(monkeypatch):
+    exporter = InMemoryLogRecordExporter()
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    initialize_logging()
+    output = StringIO()
+    _capture_console(output)
+    root = logging.getLogger()
+    root.info("private content", extra={"sensitive": True})
+    root.info("public content", extra={"sensitive": False, "sample_value": "example-value"})
+    message = 'File "user/input.txt", line 7'
+    try:
+        raise ValueError(message)
+    except ValueError:
+        root.exception("private exception", extra={"sensitive": True})
+        root.exception("public exception")
+    _flush_logs()
+
+    logs = exporter.get_finished_logs()
+    assert [item.log_record.body for item in logs] == ["public content", "public exception"]
+    attributes = logs[0].log_record.attributes
+    assert attributes is not None
+    assert attributes["sample_value"] == "example-value"
+    attributes = logs[1].log_record.attributes
+    assert attributes is not None
+    assert attributes["exception.message"] == message
+    stacktrace = attributes["exception.stacktrace"]
+    assert isinstance(stacktrace, str)
+    assert message in stacktrace
+    console = output.getvalue()
+    assert "private content" not in console
+    assert "private exception" not in console
+    assert "public content" in console
+    assert "public exception" in console
+    assert message in console
+
+
+def test_source_privacy_preserves_otlp_encoding_and_dropped_attribute_counts(monkeypatch):
+    exporter = InMemoryLogRecordExporter()
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    initialize_logging()
+    logging.getLogger().info("bounded record", extra={f"field_{index}": index for index in range(200)})
+    _flush_logs()
+
+    logs = exporter.get_finished_logs()
+    assert len(logs) == 1
+    request = encode_logs(logs)
+    # Exercise the actual OTLP wire encoding without opening a connection.
+    assert request.SerializeToString()
+    record = request.resource_logs[0].scope_logs[0].log_records[0]
+    assert record.body.string_value == "bounded record"
+    assert record.dropped_attributes_count > 0
+    attributes = {attribute.key: attribute.value for attribute in record.attributes}
+    assert attributes["code.file.path"].string_value == "test_structured_logging.py"

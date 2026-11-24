@@ -55,9 +55,13 @@ Standard OTLP exporter environment settings, including headers, timeouts, TLS,
 and insecure transport, continue to apply.
 
 Direct records retain severity, exception details, available trace/span IDs,
-service/workspace/job context, and extra structured fields. Sensitive messages
-are excluded from both outputs. Internal request logs follow
-`LOG_INTERNAL_REQUESTS` for both outputs.
+service/workspace/job context, and extra structured fields. Source-file metadata
+and traceback frame filenames use only the filename, without absolute source paths.
+
+Messages marked with `extra={"sensitive": True}` are discarded from both console
+and direct OTLP output. This filter does not automatically redact secrets or
+personal data from unmarked messages, exceptions, or extra fields. Internal
+request logs follow `LOG_INTERNAL_REQUESTS` for both outputs.
 
 If a collector already collects the application's console output, enabling
 direct OTLP export can ingest each message twice. Choose the ingestion path for
@@ -66,3 +70,38 @@ your deployment: keep `OTEL_LOGS_EXPORTER=none` or set
 or arrange for the collector to exclude those console records when using direct
 export. Disabling Python log auto-instrumentation does not disable console
 collection, job-launcher log paths, or Files log storage/query paths.
+
+
+### Before disabling namespace console collection
+
+Verify the replacement paths before stopping stdout/stderr scraping for a namespace:
+
+1. Inventory the actual namespaces, pods, and containers selected by the scrape
+   configuration. Include API/controller pods, managed task pods, init containers,
+   and sidecars. Managed task pods default to the controller's namespace unless
+   their execution profile selects another namespace.
+2. Enable direct logs for API/controllers through top-level Helm `telemetry`:
+   `OTEL_LOGS_EXPORTER=otlp`, `OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=true`, and
+   `OTEL_SDK_DISABLED=false`. Verify the effective settings in the deployed pods.
+   Confirm the collector has an OTLP receiver connected to its **logs pipeline**
+   and central logging backend; a working traces pipeline is insufficient.
+3. Verify DNS, network access, endpoint/port, protocol, and authentication/TLS
+   settings from each source. Emit a normal log and an exception from each
+   API/controller process and confirm both reach central logs with the expected
+   service, severity, and exception details. Check trace/span correlation when
+   an active trace is available.
+4. Establish coverage for early startup output, `print`, native libraries,
+   subprocesses, init containers, and sidecars. The Python logging handler does
+   not capture every stdout/stderr write. Retain a collection route for required
+   output that direct OTLP does not cover.
+5. Test representative managed jobs separately. Their launcher-to-Files log path
+   is independent of central console scraping. If jobs also need direct central
+   logs, configure OTLP per step and allow the job pods to reach the collector.
+   Direct export covers Python records that reach the logging handler. Verify
+   the required central and Files log paths before removing their scrape coverage.
+6. During a bounded overlap, compare expected records, existing queries, and
+   alerts. Account for duplicate records and differences in fields/resource
+   metadata; select which route to retain for each source before ending overlap.
+7. Disable scraping only for verified sources, then repeat checks through a pod
+   restart and a job completion/failure. Monitor for missing expected logs and
+   restore scraping if the replacement route is incomplete.

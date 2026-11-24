@@ -24,7 +24,7 @@ from structlog.typing import EventDict
 from .otel import settings
 
 if TYPE_CHECKING:
-    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs import LoggerProvider, LogRecordProcessor
     from opentelemetry.sdk._logs.export import LogRecordExporter
     from opentelemetry.sdk.resources import Resource
 
@@ -44,6 +44,43 @@ def _new_logger_provider(resource: Resource) -> LoggerProvider:
     from opentelemetry.sdk._logs import LoggerProvider
 
     return LoggerProvider(resource=resource)
+
+
+def _source_path_log_processor() -> LogRecordProcessor:
+    """Strip source directories after the standard handler creates OTel attributes."""
+    import ntpath
+    import re
+
+    from opentelemetry.sdk._logs import LogRecordProcessor
+
+    # Match traceback frame locations, including chained exceptions. Message
+    # text is deliberately preserved; this is not general content redaction.
+    frame_path = re.compile(r'(?m)^([ \t|+]*File ")(.+)(", line \d+)')
+
+    class SourcePathLogProcessor(LogRecordProcessor):
+        def on_emit(self, log_record) -> None:
+            # Preserve SDK limits and dropped-attribute accounting.
+            attributes = log_record.log_record.attributes
+            if attributes is None:
+                return
+            for key in ("code.file.path", "code.filepath"):
+                value = attributes.get(key)
+                if isinstance(value, str):
+                    # ntpath handles both Windows and POSIX source paths.
+                    attributes[key] = ntpath.basename(value)
+            stacktrace = attributes.get("exception.stacktrace")
+            if isinstance(stacktrace, str):
+                attributes["exception.stacktrace"] = frame_path.sub(
+                    lambda match: match[1] + ntpath.basename(match[2]) + match[3], stacktrace
+                )
+
+        def shutdown(self) -> None:
+            pass
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
+
+    return SourcePathLogProcessor()
 
 
 _logger_provider: LoggerProvider | None = None
@@ -214,6 +251,7 @@ def initialize_logging(resource: Resource | None = None):
         if resource is None:
             resource = create_otel_resource()
         logger_provider = _new_logger_provider(resource)
+        logger_provider.add_log_record_processor(_source_path_log_processor())
         otel_handler = LoggingHandler(logger_provider=logger_provider)
         otel_handler.addFilter(DiscardSensitiveMessages())
         if not settings.log_internal_requests:
