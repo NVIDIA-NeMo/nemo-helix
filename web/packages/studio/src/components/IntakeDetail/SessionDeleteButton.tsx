@@ -49,7 +49,7 @@ export const SessionDeleteButton = ({
   };
 
   return (
-    <Stack gap="density-sm">
+    <Stack gap="density-sm" className="max-w-sm">
       <Button kind="secondary" color="danger" onClick={() => setOpen(true)}>
         {failure ? 'Retry session telemetry deletion' : 'Delete session telemetry'}
       </Button>
