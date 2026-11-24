@@ -3,18 +3,19 @@
 
 import re
 from abc import ABC
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 from urllib.parse import urlparse
 
 from nemo_helix_plugin.inference_middleware import BackendFormat
-from nemo_helix_plugin.models.types import ModelMetadata
+from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import AuthContext
 from nhx.common.entities import Filter, constants
 from nhx.common.entities.utils import get_random_id
-from nhx.common.entities.values import DatetimeFilter, StringFilter, map_entity_field
+from nhx.common.entities.values import DatetimeFilter, NumberFilter, StringFilter, map_entity_field
 from nhx.common.inference import InferenceParams
 from nhx.core.models.constants import (
     FILESET_REF_MAX_LEN,
@@ -1394,6 +1395,52 @@ def _adapters_as_exists(operation: FilterOperation) -> FilterOperation:
     return operation
 
 
+_METADATA_LIST_FILTER_FIELDS: dict[str, type[StrEnum]] = {
+    "capabilities": ModelCapability,
+    "input_modalities": ModelModality,
+    "output_modalities": ModelModality,
+}
+_METADATA_NUMBER_FILTER_FIELDS = frozenset({"context_length", "max_output_tokens", "parameter_count"})
+
+
+def _coerce_metadata_value(field: str, value: Any, coerce: Callable[[Any], Any]) -> Any:
+    try:
+        if isinstance(value, list):
+            return [coerce(item) for item in value]
+        return coerce(value)
+    except ValueError:
+        raise ValueError(f"Invalid value {value!r} for filter field '{field}'") from None
+
+
+def _as_int(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError
+    return int(value)
+
+
+def _metadata_filter_values(operation: FilterOperation) -> FilterOperation:
+    """Validate metadata filter values, and match list fields by membership.
+
+    Query-string values arrive as strings, so numbers are coerced before they reach the store's JSON
+    comparison, and equality on a list field becomes ``$contains`` so ``capabilities=reasoning`` matches.
+    """
+    if isinstance(operation, ComparisonOperation):
+        if operation.field in _METADATA_LIST_FILTER_FIELDS:
+            enum_type = _METADATA_LIST_FILTER_FIELDS[operation.field]
+            value = _coerce_metadata_value(operation.field, operation.value, lambda v: enum_type(v).value)
+            operator = FilterOperator.CONTAINS if operation.operator == FilterOperator.EQ else operation.operator
+            return operation.model_copy(update={"operator": operator, "value": value})
+        if operation.field in _METADATA_NUMBER_FILTER_FIELDS:
+            value = _coerce_metadata_value(operation.field, operation.value, _as_int)
+            return operation.model_copy(update={"value": value})
+        return operation
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [_metadata_filter_values(child) for child in operation.operations]}
+        )
+    return operation
+
+
 # Filter classes for Model Entity queries
 class ModelEntityFilter(Filter):
     """Filter for Model Entity queries."""
@@ -1435,12 +1482,33 @@ class ModelEntityFilter(Filter):
         default=None,
         description="Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.",
     )
+    display_name: Annotated[StringFilter | str | None, map_entity_field("data.metadata.display_name")] = Field(
+        default=None, description="Filter by the display name in the model's metadata."
+    )
+    capabilities: Annotated[ModelCapability | None, map_entity_field("data.metadata.capabilities")] = Field(
+        default=None, description="Filter models whose metadata lists this capability, e.g. 'tool_calling'."
+    )
+    input_modalities: Annotated[ModelModality | None, map_entity_field("data.metadata.input_modalities")] = Field(
+        default=None, description="Filter models whose metadata says they accept this modality, e.g. 'image'."
+    )
+    output_modalities: Annotated[ModelModality | None, map_entity_field("data.metadata.output_modalities")] = Field(
+        default=None, description="Filter models whose metadata says they produce this modality."
+    )
+    context_length: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.context_length")] = Field(
+        default=None, description="Filter by context window in tokens, e.g. filter[context_length][$gte]=128000."
+    )
+    max_output_tokens: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.max_output_tokens")] = (
+        Field(default=None, description="Filter by maximum output tokens, e.g. filter[max_output_tokens][$gte]=8192.")
+    )
+    parameter_count: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.parameter_count")] = Field(
+        default=None, description="Filter by total parameter count, e.g. filter[parameter_count][$lte]=10000000000."
+    )
     created_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on creation date.")
     updated_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on update date.")
 
     @classmethod
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
-        return super().translate_operation(_adapters_as_exists(operation))
+        return super().translate_operation(_metadata_filter_values(_adapters_as_exists(operation)))
 
 
 class AdapterEntityFilter(Filter):

@@ -40,8 +40,8 @@ class FakeEntity(Base):
 # The compared JSON fields (score, tier, flag) are present on every row so the
 # suite exercises agreeing semantics, not SQL's literal-"null" handling of
 # absent keys (a documented native divergence pinned in the unit tests). A
-# plain-column NULL (name on row 5) and an explicit/absent ``k`` for $eq-None
-# coverage are the only nullable bits, and $eq agrees with SQL on both.
+# plain-column NULL (name on row 5), an explicit/absent ``k`` for $eq-None, and an
+# explicit/absent ``rank`` for ordered comparisons are the only nullable bits.
 SEED = [
     dict(
         id=1,
@@ -52,6 +52,7 @@ SEED = [
             "tier": "free",
             "flag": True,
             "k": None,
+            "rank": 3,
             "tags": ["red", "blue"],
             "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
             "members": ["ws/task_a#d1", "ws/task-b#d2"],
@@ -75,6 +76,7 @@ SEED = [
             "score": 9,
             "tier": "pro",
             "flag": False,
+            "rank": None,
             "tags": ["red"],
             "meta": [{"key": "owner", "value": "bob"}, {"key": "level", "value": 3}],
             # Near misses for "ws/task_a#": a longer workspace, "ws/taskXa" if "_" were a LIKE wildcard,
@@ -94,6 +96,7 @@ SEED = [
             "tier": "pro",
             "flag": True,
             "k": "v",
+            "rank": 7,
             "tags": ["green", "redish"],
             "meta": [{"key": "owner", "value": None}, {"key": "team", "value": "alice"}],
             "members": ["ws/task_a#d9"],
@@ -174,6 +177,10 @@ CASES = [
     ("nin_name", C(FilterOperator.NIN, "name", ["llama"])),
     ("nin_data_tier", C(FilterOperator.NIN, "data.tier", ["pro"])),
     ("nin_data_score", C(FilterOperator.NIN, "data.score", [5, 9])),
+    ("lt_rank_skips_null_and_absent", C(FilterOperator.LT, "data.rank", 5)),
+    ("lte_rank_skips_null_and_absent", C(FilterOperator.LTE, "data.rank", 7)),
+    ("gt_rank_negative_skips_null_and_absent", C(FilterOperator.GT, "data.rank", -1)),
+    ("gte_rank_skips_null_and_absent", C(FilterOperator.GTE, "data.rank", 7)),
     ("contains_tags_red", C(FilterOperator.CONTAINS, "data.tags", "red")),
     ("contains_tags_blue", C(FilterOperator.CONTAINS, "data.tags", "blue")),
     ("contains_tags_absent", C(FilterOperator.CONTAINS, "data.tags", "nope")),

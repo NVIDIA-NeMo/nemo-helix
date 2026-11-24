@@ -179,13 +179,13 @@ class SQLAlchemyFilterRepository(FilterRepository):
     }
 
     _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
-    _NULL_EXCLUDING_OPS = _STRING_OPS | {FilterOperator.NIN}
+    _NULL_EXCLUDING_OPS = _STRING_OPS | {FilterOperator.NIN} | frozenset(_ORDERED_OPS)
 
     def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
         """One comparison against a column, or against a JSON field when ``is_json``.
 
         A missing or null JSON value renders as the text ``null``; it never satisfies
-        ``$startsWith``/``$endsWith``/``$nin``.
+        ``$startsWith``/``$endsWith``/``$nin`` or an ordered comparison.
         """
         if operator == FilterOperator.EQ:
             return (
@@ -212,7 +212,9 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if not is_json:
             return getattr(element, op)(self._coerce_value_for_column(element, value))
         if isinstance(value, (int, float)):
-            return getattr(self._cast_json_to_numeric(element), op)(value)
+            # CASE keeps PostgreSQL from casting the text "null" to a float, which raises.
+            numeric = case((self._json_eq(element, None), None), else_=self._cast_json_to_numeric(element))
+            return getattr(numeric, op)(value)
         return getattr(text, op)(str(value))
 
     def _field_compare(self, field: str, operator: FilterOperator, value: Any) -> Any:
