@@ -35,12 +35,11 @@ nemo files upload ./data.csv my-input
 cat <<EOF > ./nss-job.json
 {
   "data_source": "default/my-input#data.csv",
+  "pii_model_provider": "default/nvidia-build",
   "config": {
     "replace_pii": {
-      "globals": {
-        "classify": {
-          "classify_model_provider": "default/nvidia-build"
-        }
+      "llm": {
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b"
       }
     }
   }

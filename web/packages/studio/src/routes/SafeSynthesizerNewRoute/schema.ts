@@ -3,6 +3,7 @@
 
 import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import type { GenerateJobRequest } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import { SafeSynthesizerCreateJobBody } from '@nemo/sdk/generated/safe-synthesizer/zod/safe-synthesizer';
 import {
   DEFAULT_PRETRAINED_MODEL,
   MAX_NUM_RECORDS,
@@ -10,7 +11,15 @@ import {
 } from '@studio/routes/SafeSynthesizerNewRoute/constants';
 import { z } from 'zod';
 
-export const safeSynthesizerJobRequestSchema = z.object({
+const generatedSpecShape = SafeSynthesizerCreateJobBody.shape.spec.shape;
+const generatedPiiLlmShape = generatedSpecShape.config.shape.replace_pii
+  .unwrap()
+  .shape.llm.unwrap().shape;
+
+export const PII_MODEL_PROVIDER_REQUIRED = 'Model provider is required for PII replacement';
+export const PII_MODEL_ID_REQUIRED = 'Model ID is required for PII replacement';
+
+const jobRequestFieldsSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
   namespace: z.string().optional(),
@@ -31,6 +40,7 @@ export const safeSynthesizerJobRequestSchema = z.object({
           workspace.length > 0 && name.length > 0 && !name.includes('/') && filePath.length > 0
         );
       }, 'Data source must be a valid fileset reference (workspace/name#path)'),
+    pii_model_provider: generatedSpecShape.pii_model_provider,
     config: z.object({
       data: z
         .object({
@@ -58,6 +68,11 @@ export const safeSynthesizerJobRequestSchema = z.object({
         ),
       enable_synthesis: z.boolean().optional(),
       enable_replace_pii: z.boolean().optional(),
+      replace_pii: z
+        .object({
+          llm: z.object({ model_id: generatedPiiLlmShape.model_id }).optional(),
+        })
+        .optional(),
       training: z
         .object({
           num_input_records_to_sample: z
@@ -136,7 +151,29 @@ export const safeSynthesizerJobRequestSchema = z.object({
         .optional(),
     }),
   }),
-}) satisfies z.ZodType<GenerateJobRequest>;
+});
+
+export const safeSynthesizerJobRequestSchema = jobRequestFieldsSchema.superRefine(
+  ({ spec }, ctx) => {
+    if (!spec.config.enable_replace_pii) {
+      return;
+    }
+    if (!spec.pii_model_provider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: PII_MODEL_PROVIDER_REQUIRED,
+        path: ['spec', 'pii_model_provider'],
+      });
+    }
+    if (!spec.config.replace_pii?.llm?.model_id?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: PII_MODEL_ID_REQUIRED,
+        path: ['spec', 'config', 'replace_pii', 'llm', 'model_id'],
+      });
+    }
+  }
+) satisfies z.ZodType<GenerateJobRequest>;
 
 export type SafeSynthesizerFormData = z.infer<typeof safeSynthesizerJobRequestSchema>;
 
@@ -145,9 +182,13 @@ export const getSafeSynthesizerFormDefaults = (): SafeSynthesizerFormData => ({
   description: '',
   spec: {
     data_source: '',
+    pii_model_provider: '',
     config: {
       enable_synthesis: true,
       enable_replace_pii: true,
+      replace_pii: {
+        llm: { model_id: '' },
+      },
       training: {
         num_input_records_to_sample: 'auto',
         rope_scaling_factor: 'auto',
@@ -166,3 +207,32 @@ export const getSafeSynthesizerFormDefaults = (): SafeSynthesizerFormData => ({
     },
   },
 });
+
+type ExampleOrdering = NonNullable<SafeSynthesizerFormData['spec']['config']['data']>;
+
+const withoutBlankExampleOrdering = (data: ExampleOrdering): ExampleOrdering => {
+  const result: ExampleOrdering = {};
+  if (data.group_training_examples_by?.trim()) {
+    result.group_training_examples_by = data.group_training_examples_by;
+  }
+  if (data.order_training_examples_by?.trim()) {
+    result.order_training_examples_by = data.order_training_examples_by;
+  }
+  return result;
+};
+
+export const toGenerateJobRequest = (formData: SafeSynthesizerFormData): GenerateJobRequest => {
+  const { pii_model_provider: piiModelProvider, ...spec } = formData.spec;
+  const { replace_pii: replacePii, ...config } = spec.config;
+  const request: GenerateJobRequest = { ...formData, spec: { ...spec, config } };
+  if (config.data) {
+    request.spec.config.data = withoutBlankExampleOrdering(config.data);
+  }
+  if (config.enable_replace_pii) {
+    request.spec.pii_model_provider = piiModelProvider;
+    request.spec.config.replace_pii = {
+      llm: { model_id: replacePii?.llm?.model_id?.trim() },
+    };
+  }
+  return request;
+};

@@ -93,7 +93,7 @@
     }
     ```
 
-## PII Classification Provider
+## PII Model Provider
 
 === "Python SDK"
 
@@ -101,14 +101,10 @@
     spec = {
         "data_source": "default/my-input#input.csv",
         "hf_token_secret": "hf-token",
+        "pii_model_provider": "default/my-nim",
         "config": {
             "replace_pii": {
-                "globals": {
-                    "classify": {
-                        "classify_model_provider": "default/my-nim",
-                    },
-                },
-                "steps": [{}],
+                "llm": {"model_id": "nvidia/nemotron-3-ultra-550b-a55b"},
             },
         },
     }
@@ -120,14 +116,12 @@
     {
       "data_source": "default/my-input#input.csv",
       "hf_token_secret": "hf-token",
+      "pii_model_provider": "default/my-nim",
       "config": {
         "replace_pii": {
-          "globals": {
-            "classify": {
-              "classify_model_provider": "default/my-nim"
-            }
-          },
-          "steps": [{}]
+          "llm": {
+            "model_id": "nvidia/nemotron-3-ultra-550b-a55b"
+          }
         }
       }
     }

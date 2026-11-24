@@ -9,7 +9,6 @@ from typing import Any
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_safe_synthesizer.config.job import SafeSynthesizerJobConfig as SafeSynthesizerJobConfigInternal
 from nemo_safe_synthesizer.config.job import SafeSynthesizerParameters as SafeSynthesizerParametersInternal
-from nemo_safe_synthesizer.config.replace_pii import PiiReplacerConfig
 from pydantic import Field, SerializationInfo, field_serializer, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
@@ -48,6 +47,12 @@ class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
         "synthesis. Accepts either '<job>' in the current workspace or '<workspace>/<job>'. "
         "The plugin resolves the prior job's 'adapter' result from Files.",
     )
+    pii_model_provider: str | None = Field(
+        default=None,
+        description="Inference Gateway model provider, as '<workspace>/<provider>', that PII replacement uses "
+        "to find PII. Required when PII replacement discovers its plan automatically; set the model it serves "
+        "in config.replace_pii.llm.model_id.",
+    )
 
     enable_synthesis: SkipJsonSchema[bool] = Field(
         default=True,
@@ -74,31 +79,6 @@ class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
         data.setdefault("enable_synthesis", enable_synthesis)
         if not enable_replace_pii:
             cfg["replace_pii"] = None
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def _apply_pii_defaults(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        config_data = data.get("config")
-        if not isinstance(config_data, dict):
-            return data
-        replace_pii = config_data.get("replace_pii")
-        if not isinstance(replace_pii, dict) or "steps" in replace_pii:
-            return data
-
-        def deep_update(base: dict, override: dict) -> dict:
-            for k, v in override.items():
-                if isinstance(v, dict) and isinstance(base.get(k), dict):
-                    deep_update(base[k], v)
-                else:
-                    base[k] = v
-            return base
-
-        default = PiiReplacerConfig.get_default_config().model_dump()
-        deep_update(default, replace_pii)
-        config_data["replace_pii"] = default
         return data
 
     @model_validator(mode="before")

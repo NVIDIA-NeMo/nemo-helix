@@ -156,8 +156,8 @@ def test_job_builder_uploads_dataframe_and_creates_job() -> None:
     builder = (
         SafeSynthesizerJobBuilder(client, workspace="default")
         .with_data_source(pd.DataFrame({"value": [1]}))
-        .with_classify_model_provider("nvidia-build")
-        .with_replace_pii()
+        .with_pii_model_provider("nvidia-build")
+        .with_replace_pii(llm={"model_id": "nvidia/nemotron"})
         .synthesize()
         .with_generate(num_records=10)
         .with_hf_token_secret("hf-token")
@@ -181,7 +181,8 @@ def test_job_builder_uploads_dataframe_and_creates_job() -> None:
     assert config["enable_synthesis"] is True
     assert config["enable_replace_pii"] is True
     assert config["generation"] == {"num_records": 10}
-    assert config["replace_pii"]["globals"]["classify"]["classify_model_provider"] == "default/nvidia-build"
+    assert config["replace_pii"] == {"llm": {"model_id": "nvidia/nemotron"}}
+    assert create_kwargs["spec"]["pii_model_provider"] == "default/nvidia-build"
 
 
 def test_job_builder_creates_pretrained_model_job_for_adapter_reuse() -> None:
