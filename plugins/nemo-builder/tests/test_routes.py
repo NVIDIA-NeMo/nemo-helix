@@ -42,8 +42,10 @@ from nemo_builder_plugin.schema import JOB_NAME_PREFIX, BuildSet, BuildSpec
 from nemo_builder_plugin.service import BuilderService, get_allow_unverified, get_job_of, get_settle, get_token_exchange
 from nemo_builder_plugin.settle import settle
 from nemo_builder_plugin.submit import (
+    RECORD_TRIES,
     BackendChanged,
     BuildConflict,
+    BuildNotRecorded,
     CreatedJob,
     ExistingJob,
     MissingSecrets,
@@ -1686,6 +1688,32 @@ class TestSubmitting:
         # A revision another request holds is the one a caller gets past by reading or resubmitting.
         assert response.json().get("code") == code
 
+    def test_a_build_whose_job_could_not_be_recorded_is_a_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Not a 201 with rows that nothing could complete, and not a conflict: the request was sound, and
+        the job it created was given up. The answer says what became of the job and what to do."""
+        given_up = BuildNotRecorded(
+            "The build's job 'builder-demo-1' was created, but could not be recorded on its images (image "
+            "demo-1 could not be made to record it), so no step that is verified could have completed them. "
+            "The job was cancelled. Its images that still waited are failed. Submit the next revision."
+        )
+
+        async def submit(*_args: object, **_kwargs: object) -> SubmitResult:
+            raise given_up
+
+        monkeypatch.setattr(service, "load_backend", lambda *_args: None)
+        monkeypatch.setattr(service, "submit_build_set", submit)
+        response = self._post(monkeypatch, BuilderConfig.model_validate({}))
+        assert (response.status_code, response.json()) == (503, {"detail": str(given_up)})
+        # Final: a client that sent the request again of its own accord would be answered the failed rows,
+        # and its caller shown no error.
+        assert response.headers["x-should-retry"] == "false"
+
+        # Not where the job was gone and the rows were left as they were: sent again, the request builds.
+        given_up = BuildNotRecorded("The job is gone ... Submit the request again.", final=False)
+        response = self._post(monkeypatch, BuilderConfig.model_validate({}))
+        assert (response.status_code, response.json()) == (503, {"detail": str(given_up)})
+        assert "x-should-retry" not in response.headers
+
 
 class TestWhoTheRoutesAdmit:
     """Submitting and the push step's two routes admit a service; listing, people only."""
@@ -1925,6 +1953,8 @@ class Jobs:
 
     def __init__(self) -> None:
         self.jobs: dict[str, CreatedJob] = {}
+        #: The jobs a submit gave up and cancelled.
+        self.cancelled: list[str] = []
         self._made = 0
 
     async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
@@ -1937,6 +1967,9 @@ class Jobs:
 
     async def get_job(self, name: str) -> ExistingJob:
         return ExistingJob(uid=self.jobs[name].uid, custom_fields={})
+
+    async def cancel_job(self, job: str) -> None:
+        self.cancelled.append(job)
 
 
 async def _submit_remote(store: Store, jobs: Jobs, *, by: str, fileset: str = "fs-a") -> ContainerImage:
@@ -1958,10 +1991,12 @@ async def _submit_remote(store: Store, jobs: Jobs, *, by: str, fileset: str = "f
             entity_client=store.client,
             create_job=jobs.create_job,
             get_job=jobs.get_job,
+            cancel_job=jobs.cancel_job,
             secret_readable=secret_readable,
             resolve_upstream=resolve_upstream,
             default_platform="linux/amd64",
         )
+    assert jobs.cancelled == [], "these submits record their job on their rows, and give none up"
     (row,) = submitted.images
     assert (row.name, row.status, row.created_by, row.db_version) == (DEMO, "pending", by, 2)
     created = jobs.jobs[DEMO_JOB]
@@ -2162,7 +2197,7 @@ class TestTheRowThatIsCompleted:
 
 
 def _a_job(
-    job_id: str, attempt_id: str, *, source: str = "builder.build", custom_fields: dict[str, Any] | None = None
+    job_id: str, attempt_id: str | None, *, source: str = "builder.build", custom_fields: dict[str, Any] | None = None
 ) -> HelixJobResponse:
     """A job as Jobs answers with it, to a create or a read."""
     spec = HelixJobSpec.model_validate(
@@ -2186,9 +2221,17 @@ class TestARemoteBuildsJob:
 
     @staticmethod
     def _post(
-        monkeypatch: pytest.MonkeyPatch, store: Store, *, create: httpx.Response, found: HelixJobResponse | None = None
+        monkeypatch: pytest.MonkeyPatch,
+        store: Store,
+        *,
+        create: httpx.Response,
+        found: HelixJobResponse | None = None,
+        cancel: httpx.Response | None = None,
+        as_builder: list[object] | None = None,
     ):
-        """The submit's answer, and what Jobs was asked: each request's method and path, and how it was answered."""
+        """The submit's answer, and what Jobs was asked by the caller's client: each request's method and path,
+        and how it was answered. ``as_builder`` is given how each client the route made for the builder itself
+        was asked for, and then each request that client made: it is another client than the caller's."""
         jobs = "/apis/jobs/v2/workspaces/ws-a/jobs"
         asked: list[tuple[str, str, int]] = []
 
@@ -2204,10 +2247,28 @@ class TestARemoteBuildsJob:
             asked.append((request.method, request.url.path, answer.status_code))
             return answer
 
+        def platform_as_the_builder(request: httpx.Request) -> httpx.Response:
+            cancelling = request.method == "POST" and request.url.path.endswith("/cancel") and cancel is not None
+            answer = cancel if cancelling and cancel is not None else httpx.Response(404, json={"detail": "not found"})
+            if as_builder is not None:
+                as_builder.append((request.method, request.url.path, answer.status_code))
+            return answer
+
         monkeypatch.setattr(service, "_load_config", _remote_config)
         client = AsyncNemoClient(
             base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(platform))
         )
+
+        @asynccontextmanager
+        async def builders_client(**kwargs: object) -> AsyncGenerator[AsyncNemoClient]:
+            if as_builder is not None:
+                as_builder.append(kwargs)
+            yield AsyncNemoClient(
+                base_url="http://platform.test",
+                http_client=httpx.AsyncClient(transport=httpx.MockTransport(platform_as_the_builder)),
+            )
+
+        monkeypatch.setattr(service, "get_async_nemo_client", builders_client)
         store.acting_for = "alice"
         app = _app(cast(AsyncMock, store.client), Caller(auth=True, actor="alice"))
         app.dependency_overrides[get_nemo_client] = lambda: client
@@ -2234,6 +2295,84 @@ class TestARemoteBuildsJob:
             2,
         )
         assert [(method, status) for method, _, status in asked] == [("GET", 200), ("POST", 201)]
+
+    async def test_a_job_that_cant_be_recorded_is_cancelled_as_the_builder_and_the_submit_is_a_503(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The row changes before each write that would record the job on it. The route does not answer 201
+        for an image nothing verified could complete. It asks Jobs, as the caller, whether the job still
+        holds its name; cancels it by the ID Jobs gave it, as the builder, since one who may create a job
+        need not be let cancel one; fails the row; and says so, in an answer no client sends again."""
+        store = Store()
+        created = _a_job("platform-job-CREATED", "attempt-CREATED")
+
+        async def changes() -> None:
+            store.touch(await store.now())
+
+        store.before_write = {write: changes for write in range(1, RECORD_TRIES + 1)}
+        as_builder: list[object] = []
+        response, asked = self._post(
+            monkeypatch,
+            store,
+            create=httpx.Response(201, json=created.model_dump(mode="json")),
+            found=created,
+            cancel=httpx.Response(200, json=created.model_dump(mode="json")),
+            as_builder=as_builder,
+        )
+        assert response.status_code == 503, response.text
+        assert response.json() == {
+            "detail": (
+                f"The build's job {DEMO_JOB!r} was created, but could not be recorded on its images (image "
+                f"{DEMO} could not be made to record it), so no step that is verified could have completed "
+                "them. The job was cancelled. Its images that still waited are failed. Submit the next revision."
+            )
+        }
+        assert response.headers["x-should-retry"] == "false"
+        jobs = "/apis/jobs/v2/workspaces/ws-a/jobs"
+        # The caller's client: the profiles, the create, and the job under the name before each later write.
+        assert asked == [
+            ("GET", "/apis/jobs/v2/execution-profiles", 200),
+            ("POST", jobs, 201),
+            *[("GET", f"{jobs}/{DEMO_JOB}", 200)] * (RECORD_TRIES - 1),
+        ]
+        # The builder's own: the cancel, and nothing else.
+        assert as_builder == [
+            {"as_service": "builder", "internal": True},
+            ("POST", f"{jobs}/platform-job-CREATED/cancel", 200),
+        ]
+        stored = await store.now()
+        assert (stored.status, stored.status_detail) == (
+            "failed",
+            "not built: its build job could not be recorded on its images, and was cancelled",
+        )
+        assert (stored.provenance.job_uid, stored.provenance.job_attempt_id) == (None, None)
+
+    async def test_a_job_jobs_named_no_attempt_of_is_given_up_though_jobs_refuses_its_cancel(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A job with no attempt is one Jobs has nothing to cancel of, and says so with a conflict. The cancel
+        is asked as often as the submit allows, the answer names the job, and the row is failed all the same."""
+        store = Store()
+        created = _a_job("platform-job-CREATED", None)
+        as_builder: list[object] = []
+        response, _ = self._post(
+            monkeypatch,
+            store,
+            create=httpx.Response(201, json=created.model_dump(mode="json")),
+            cancel=httpx.Response(409, json={"detail": "it has no current attempt"}),
+            as_builder=as_builder,
+        )
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"].endswith(
+            f"The job could not be cancelled: cancel {DEMO_JOB!r}. Its images that still waited are failed. Submit the next revision."
+        )
+        cancel = ("POST", "/apis/jobs/v2/workspaces/ws-a/jobs/platform-job-CREATED/cancel", 409)
+        assert [entry for entry in as_builder if isinstance(entry, tuple)] == [cancel] * RECORD_TRIES
+        stored = await store.now()
+        assert (stored.status, stored.status_detail) == (
+            "failed",
+            "not built: its build job could not be recorded on its images, and could not be cancelled",
+        )
 
     async def test_a_job_made_beforehand_under_the_builds_name_is_not_taken_for_the_builds(
         self, monkeypatch: pytest.MonkeyPatch

@@ -7,8 +7,9 @@ The builder writes a row ``pending`` when the build is submitted, before the job
 remote build service builds is written again once that job does, with the job's ID and its first attempt's (see
 ``Provenance.job_uid``). It becomes ``ready`` when the step that built the
 image completes it: the push step, once it has pushed and signed the image, or a remote-build step, once its build
-service has published it. It becomes ``failed`` when the submit is refused, or once its job is found to have ended
-without completing it (see ``settle``). The builder never changes a row after that, but it isn't the
+service has published it. It becomes ``failed`` when the submit is refused, when a submit gives its build up
+because the job could not be recorded on its rows, or once its job is found to have ended without completing it
+(see ``settle``). The builder never changes a row after that, but it isn't the
 only way to write one: see the README's Security limitations.
 
 ``queued`` is deprecated: 0.10's builder wrote it when it queued a build itself (see :class:`QueuedBuild`). Rows it

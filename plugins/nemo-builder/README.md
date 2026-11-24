@@ -403,6 +403,7 @@ status is `queued` and the rows stay `pending`.
 | `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: a `builder` setting is invalid, `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. With `backend: remote`, the job's name is held by a job that the request's `pending` rows don't record: those rows are left as they are, whether they record no job or an earlier one (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). Some `409`s carry a `code` beside their `detail`. `backend_rejected` (the deployment or its backend can't build this) and `missing_secrets` refuse the request itself, whatever its revision. `backend_changed` refuses only this revision, which was submitted under another backend: submit the next. A revision another request holds has no `code`. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
 | `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
+| `503` | With `backend: remote`, the build's job was created but could not be recorded on its images, so no step that is verified could have completed them (see [Reliability](#reliability)). The job is cancelled and the images are failed, where they can be: the answer says what was done, and names the job if it could not be cancelled. It carries `x-should-retry: false`, since the same request sent again would build nothing: it is returned the failed rows, or refused `409` while a row could not be failed. Submit the next `revision`. If the answer says the job was gone, nothing was failed and the header is not set: submit the same request again. |
 | `500` | Anything else. |
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
@@ -418,7 +419,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image, or, with the `remote` backend, once the build service has published it. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image, or, with the `remote` backend, once the build service has published it. `failed` is written when the submit that wrote the row was refused, when a submit gave the build up because its job could not be recorded on its rows (`backend: remote`), or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. When its job ended without completing it, the detail ends with the job's own reason, if the job gave one: for a remote build, the line its step logged for the image. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the image is published at, set when the row becomes `ready`: the one the push step pushed and signed, or the one a remote build service published. |
@@ -610,10 +611,12 @@ Jobs answers the submit's create with the job's ID, which it gives no later job,
 job's first attempt, the one that runs the request as the builder compiled it. The submit then
 writes each of its rows that is still `pending` once more, with both, as `provenance.job_uid` and
 `provenance.job_attempt_id`. They come only from that answer, never from a job found under the
-build's name: whatever such a job says of itself, its creator wrote. A row that can't be written
-again is named in the API log, and the submit still answers `201`, with that row as it was: for
-a row it has just created, `pending` and with neither field. No later submit records that job
-on the row (see [Reliability](#reliability)).
+build's name: whatever such a job says of itself, its creator wrote. The write is tried a few
+times. If a row that still waits can't be made to record the job, the submit does not answer
+`201` for images that no step that is verified could complete: it cancels the job, fails the
+rows and answers `503`.
+A job is recorded on a row only by the submit that created it, never by a later one (see
+[Reliability](#reliability)).
 
 Completing such a row records what its caller sends, and the builder can check none of it against
 the build service. What stands for it is who is calling, so who may complete the row goes by how
@@ -974,11 +977,11 @@ On `remote`, a task that names a prebuilt image can't be built, by a request aft
 failed attempt is then the task's newest build, which a run doesn't take. Upgrade every API pod and
 the `builder-settle` controller before setting `backend: remote`: an API pod from before the
 setting existed ignores it and builds in this cluster, and refuses a remote step's completion, and
-an older controller writes a row back without the backend that built it. A remote build's row that
-a builder wrote before rows recorded their job records none, as one whose write failed does (see
-[Reliability](#reliability)): under workload token exchange, a build in flight across such an
-upgrade is not completed, and its image fails once its step gives up. A row of it that has settled
-is returned to a resubmit as it is. Upgrade Evals before setting `backend: remote` too, with the
+an older controller writes a row back without the backend that built it. A remote build's row
+that a builder wrote before rows recorded their job records none, as one whose submit died
+before recording it does (see [Reliability](#reliability)): under workload token exchange, a build in flight across
+such an upgrade is not completed, and its image fails once its step gives up. A row of it that
+has settled is returned to a resubmit as it is. Upgrade Evals before setting `backend: remote` too, with the
 `nhx-tasks` image its build Jobs run in and users' SDK and CLI: Evals records the backend on each
 image of a remote build as soon as it has submitted the build's images, and the service's handle
 once the image is ready, and an older Evals, SDK or CLI refuses a build recorded with either. That
@@ -1288,9 +1291,40 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   deployment's `build_timeout_seconds`), so that the client can pass it to its service as the
   build's own deadline. A service that enforces one ends the build by then, whatever became of the
   step. Otherwise the build runs on until the service ends it.
-- **With `backend: remote`, a build whose rows don't record its job is lost under workload token
-  exchange.** A submit writes its rows, creates the job, then writes on each row the job it
-  created. If that last write fails, or the submit dies before it, the job still builds. Under
+- **With `backend: remote`, a build whose job can't be recorded on its rows is given up, and one
+  whose submit died before recording it is lost under workload token exchange.** A submit writes
+  its rows, creates the job, then writes on each row the job it created. That write is tried
+  three times, half a second apart, for a store that fails for a moment or a row something else
+  is writing. Before each later try the submit asks Jobs which job holds the build's name. While
+  it is the job this submit created, the row is written, over whatever else it says of a job:
+  that is of a job deleted since. Once it is not, this submit's job was deleted, and the rows
+  are left to whoever has the name, with the submit answering `201` as it does for any job
+  deleted after it was created.
+
+  If a row can't be made to record the job (it still waits after the three tries, or is gone,
+  or is no longer this submit's row), or Jobs' answer named no ID or attempt for the job, the
+  submit gives the build up, whatever the platform's auth: where a step is verified nothing
+  could complete such an image, and nothing restores the record later. It cancels the job it
+  created, as the builder and by the ID Jobs answered with (by its name, if Jobs named none);
+  fails the rows of the set that still wait, with
+  `not built: its build job could not be recorded on its images, and was cancelled`; and answers
+  `503`, saying what it did. The answer carries `x-should-retry: false`, which a client on the
+  platform's retry policy heeds: the same request sent again would be answered `201` with the
+  failed rows, and its caller shown no error, only rows whose `status_detail` says why. A job
+  cancelled before its step ran builds nothing, and one whose step had started is told to stop,
+  so its step asks the service to stop the build. The cancelled job keeps the build's name: the
+  same request is then returned the failed rows, and the next `revision` builds. If the cancel
+  fails too, the answer names the job and the rows say `and could not be cancelled`. Its step
+  builds no image whose row it finds failed; only an image it had begun before its row was
+  failed is still built, and its completion is refused. Cancel the job to stop that build and
+  free its slot. A row that records another job is then left as it is: nothing showed whether
+  that job has the name by now. Once Jobs has removed a job that was deleted meanwhile, there
+  is none to cancel, the rows are left as they are and the answer carries no such header:
+  submit the request again. While its deletion is still pending, it is reported as one that
+  could not be cancelled. A row that could not be failed is failed once the job has ended, as
+  any abandoned row is.
+
+  A submit that dies between the create and that write leaves the job building. Under
   workload token exchange, its step's completion is answered `503` until the step gives up, five
   minutes on, and the row is failed once the job has ended. That comes after the build: before
   it starts, the step reads only that its row is `pending`. So the service builds and publishes
@@ -1303,24 +1337,20 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   record later either: the job's ID and attempt come only from Jobs' answer to the create,
   which that submit alone held, and a job found under the name afterwards can't be told from
   one that someone else put there. Once the rows have settled, the same request returns them,
-  and the next `revision` builds again. The API log names each row that was not written, or
-  the job, where Jobs' answer gave no ID or attempt for it. The submit's answer shows it for a
-  row that submit created: `pending`, with no `provenance.job_uid`. A row left recording an
-  earlier job looks in the answer like any recorded row, since the answer names the job and
-  not its ID: compare the row's `provenance.job_uid` with the `id` Jobs reports for that job.
-  Read such a row once more, since a write whose answer was lost may have been
-  made. If it still does not record the job, and the platform uses workload token exchange,
-  cancel the job rather than wait for it: its step asks the service to stop the build, the row
-  is failed once the job has ended, and the next `revision` builds. The same holds for a row a
-  builder wrote before rows recorded their job. It holds too for a row left recording an
-  earlier job, when the build's job was deleted, the same request created another, and that
-  submit's write failed, except that the new job's step is answered `403` at once, and its
-  line says `it was built, but the builder refused to complete it`. So is a
-  step of the new job that asks before that write is made: the platform's record of a step
-  names its job by name, so nothing tells it from a rerun of the earlier job, or from a step
-  of another job put under the name, and neither of those is kept waiting. A submit writes its
-  job on its rows as soon as Jobs has answered its create, so a step meets this only where
-  that write takes longer than the step's whole build.
+  and the next `revision` builds again. Such a row is `pending` with no `provenance.job_uid`,
+  or with another than the `id` Jobs reports for the job under the build's name. If the
+  platform uses workload token exchange, cancel that job rather than wait for it: its step asks
+  the service to stop the build, the row is failed once the job has ended, and the next
+  `revision` builds. The same holds for a row a builder wrote before rows recorded their job.
+  It holds too for a row left recording an earlier job, when the build's job was deleted, the
+  same request created another, and that submit died before its write, except that the new
+  job's step is answered `403` at once, and its line says
+  `it was built, but the builder refused to complete it`. So is a step of the new job that asks
+  before that write is made: the platform's record of a step names its job by name, so nothing
+  tells it from a rerun of the earlier job, or from a step of another job put under the name,
+  and neither of those is kept waiting. A submit writes its job on its rows as soon as Jobs has
+  answered its create, so a step meets this only where that write, with its tries, takes longer
+  than the step's whole build.
 - **With `backend: remote`, a build context with links is held to an archive's limits with
   those links followed, and the step carries no context past them.** A context with links that
   comes to more than 4 GiB or 100,000 entries with them followed fails its image, however
