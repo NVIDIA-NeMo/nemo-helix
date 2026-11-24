@@ -23,14 +23,14 @@ def test_install_checks_upstream_override_policy(
         "run_path",
         lambda _: {"override_requirements": lambda _: ["Pillow==13.0.0"], "unexpected_incompatibilities": checker},
     )
-    monkeypatch.setattr(install_hermes, "version", lambda _: "0.6.0")
+    monkeypatch.setattr(install_hermes, "version", lambda _: "0.7.0")
 
     def run(command, **kwargs):
         assert command[command.index("--python") + 1] == str(interpreter)
         if "install" in command:
             assert Path(command[command.index("--overrides") + 1]).read_text() == "Pillow==13.0.0\n"
-            assert "nemo-fabric==0.6.0" in command
-            assert "nemo-fabric-adapters-hermes[relay]==0.6.0" in command
+            assert "nemo-fabric==0.7.0" in command
+            assert "nemo-fabric-adapters-hermes[relay]==0.7.0" in command
             assert "nemo-relay==0.10.0" in command
             return subprocess.CompletedProcess(command, 0)
         return subprocess.CompletedProcess(command, 1, stdout="report", stderr="")

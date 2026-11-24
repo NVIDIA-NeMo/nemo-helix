@@ -24,6 +24,8 @@ from nemo_agents_plugin.fabric.mcp_status import (
     probe_mcp_server,
 )
 from nemo_agents_plugin.fabric.server import create_fabric_serving_app
+from pytest_httpserver import HTTPServer
+from werkzeug.wrappers import Request, Response
 
 _SERVER_SCRIPT = """
 from mcp.server.fastmcp import FastMCP
@@ -64,6 +66,62 @@ def server_script(tmp_path: Path) -> str:
     path = tmp_path / "server.py"
     path.write_text(_SERVER_SCRIPT, encoding="utf-8")
     return str(path)
+
+
+@pytest.mark.parametrize("reject_token", [False, True])
+async def test_service_account_probe(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, reject_token: bool
+) -> None:
+    secret, token = "test-client-secret", "test-access-token"
+    monkeypatch.setenv("MCP_TEST_SECRET", secret)
+    requests: list[str] = []
+
+    def respond(request: Request) -> Response:
+        requests.append(request.path)
+        if request.path == "/token":
+            assert request.headers["authorization"].startswith("Basic ")
+            if reject_token:
+                return Response(json.dumps({"error": f"{secret} {token}"}), status=401, mimetype="application/json")
+            return Response(json.dumps({"access_token": token, "expires_in": 3600}), mimetype="application/json")
+        assert request.headers["authorization"] == f"Bearer {token}"
+        assert request.headers["X-Application"] == "test-app"
+        message = request.get_json()
+        if "id" not in message:
+            return Response(status=202)
+        result = (
+            {"protocolVersion": "2025-03-26", "capabilities": {}, "serverInfo": {"name": "test", "version": "1"}}
+            if message["method"] == "initialize"
+            else {"tools": [{"name": "lookup", "inputSchema": {"type": "object"}}]}
+        )
+        return Response(
+            json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), mimetype="application/json"
+        )
+
+    for endpoint in ("/token", "/mcp"):
+        httpserver.expect_request(endpoint, method="POST").respond_with_handler(respond)
+    config = _config(
+        {
+            "tools": {
+                "transport": "streamable-http",
+                "url": httpserver.url_for("/mcp"),
+                "custom_headers": {"X-Application": "test-app"},
+                "authentication": {
+                    "type": "service_account",
+                    "client_id": "test-client",
+                    "client_secret_env": "MCP_TEST_SECRET",
+                    "token_url": httpserver.url_for("/token"),
+                },
+            }
+        }
+    )
+    [status] = (await McpStatusCache().get(config)).servers
+
+    assert status.state == ("failed" if reject_token else "running")
+    assert [tool.name for tool in status.tools] == ([] if reject_token else ["lookup"])
+    assert requests.count("/token") == 1
+    httpserver.check_assertions()
+    assert secret not in status.model_dump_json()
+    assert token not in status.model_dump_json()
 
 
 async def test_unresolved_stdio_command() -> None:

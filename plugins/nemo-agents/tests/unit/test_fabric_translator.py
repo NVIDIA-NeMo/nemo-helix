@@ -362,9 +362,17 @@ class TestTranslateAgentConfig:
         with pytest.raises(FabricTranslationError, match="extensions"):
             translate_agent_config(config)
 
-    def test_translates_shared_capability_sections(self) -> None:
+    @pytest.mark.parametrize(
+        "skill_settings",
+        [
+            {"paths": ["skills/review"]},
+            {"directories": [{"skill": "skills/review"}], "duplicates": "reject"},
+            {"directories": [], "bundled": {"include": []}},
+        ],
+    )
+    def test_translates_shared_capability_sections(self, skill_settings: dict[str, Any]) -> None:
         payload = copy.deepcopy(_example_yaml_config())
-        payload["skills"] = {"paths": ["skills/review"]}
+        payload["skills"] = skill_settings
         payload["mcp"] = {
             "servers": {
                 "repo": {
@@ -380,9 +388,27 @@ class TestTranslateAgentConfig:
                     "allowed_tools": [],
                     "custom_headers": {"Authorization": "Bearer ${MCP_ACCESS_TOKEN}"},
                 },
+                "authenticated": {
+                    "transport": "streamable-http",
+                    "url": "https://mcp.example.com",
+                    "authentication": {
+                        "type": "service_account",
+                        "client_id": "example-client",
+                        "client_secret_env": "MCP_CLIENT_SECRET",
+                        "token_url": "https://idp.example.com/token",
+                        "scopes": ["tools.read"],
+                    },
+                },
             }
         }
-        payload["tools"] = {"blocked": ["shell", "browser"]}
+        payload["tools"] = {
+            "definitions": {"convert": {"kind": "python", "ref": "example.tools:convert", "settings": {"unit": "m"}}},
+            "blocked": ["shell", "browser"],
+        }
+        payload["harnesses"][payload["default_harness"]]["settings"] = {
+            "deepagents": {"middleware": [{"ref": "example.middleware:Counter"}]}
+        }
+        payload = validate_agent_config(payload["config_format"], payload)
         config = AgentConfig.model_validate(payload)
 
         fabric_config = translate_agent_config(config)
@@ -391,9 +417,11 @@ class TestTranslateAgentConfig:
         mcp = fabric_config.mcp
         tools = fabric_config.tools
         assert skills is not None
+        assert config.skills is not None
+        assert fabric_config.harness is not None
         assert mcp is not None
         assert tools is not None
-        assert skills.paths == ["skills/review"]
+        assert skills.model_dump(exclude_none=True) == config.skills.model_dump(exclude_none=True)
         assert mcp.servers["repo"].transport == "stdio"
         assert mcp.servers["repo"].url == "repo-mcp --root ."
         assert mcp.servers["repo"].exposure == "fabric_managed"
@@ -402,6 +430,15 @@ class TestTranslateAgentConfig:
         assert mcp.servers["disabled"].allowed_tools == []
         assert mcp.servers["disabled"].custom_headers == {"Authorization": "Bearer ${MCP_ACCESS_TOKEN}"}
         assert tools.blocked == ["shell", "browser"]
+
+        authentication = mcp.servers["authenticated"].authentication
+        assert authentication is not None
+        assert authentication.client_secret_env == "MCP_CLIENT_SECRET"
+        assert authentication.token_url == "https://idp.example.com/token"
+        assert authentication.scopes == ["tools.read"]
+        assert tools.definitions["convert"].ref == "example.tools:convert"
+        assert tools.definitions["convert"].settings == {"unit": "m"}
+        assert fabric_config.harness.settings == payload["harnesses"][payload["default_harness"]]["settings"]
 
     @pytest.mark.parametrize("tools", [{}, {"enabled": None}, {"enabled": []}, {"enabled": ["execute"]}])
     def test_tools_allowlist_survives_normalization_and_translation(self, tools: dict[str, Any]) -> None:

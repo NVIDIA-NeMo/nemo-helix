@@ -24,12 +24,14 @@ from datetime import UTC, datetime
 from typing import Any, Literal, TextIO
 
 import anyio
+import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
+from nemo_fabric_adapters.common import mcp_service_account
 from pydantic import BaseModel, Field
 
 PROBE_TIMEOUT_SECONDS = 15.0
@@ -108,9 +110,30 @@ def _is_exposed(tool: str, spec: McpServerConfig, config: AgentConfig) -> bool:
     return spec.allowed_tools is None or tool in spec.allowed_tools
 
 
+def _service_account_auth(name: str, spec: McpServerConfig, target: str, env: dict[str, str]) -> httpx.Auth | None:
+    authentication = spec.authentication
+    if authentication is None:
+        return None
+    if any(header.lower() == "authorization" for header in spec.custom_headers):
+        raise ValueError("Service-account authentication cannot be combined with an Authorization header.")
+    mcp_service_account.validate_secure_url(name, "url", target)
+    token_url = mcp_service_account.validate_token_url(name, authentication.token_url)
+    secret = mcp_service_account.resolve_client_secret(name, authentication.client_secret_env, {**os.environ, **env})
+    return mcp_service_account.service_account_auth(
+        mcp_service_account.ServiceAccountTokenClient(
+            client_id=authentication.client_id,
+            client_secret=secret,
+            token_url=token_url,
+            scopes=authentication.scopes,
+            token_endpoint_auth_method=authentication.token_endpoint_auth_method,
+            token_cache_buffer_seconds=authentication.token_cache_buffer_seconds,
+        )
+    )
+
+
 @asynccontextmanager
 async def _open_streams(
-    transport: str, target: str, spec: McpServerConfig, env: dict[str, str], errlog: TextIO
+    name: str, transport: str, target: str, spec: McpServerConfig, env: dict[str, str], errlog: TextIO
 ) -> AsyncGenerator[tuple[Any, Any]]:
     if transport == "stdio":
         params = StdioServerParameters(command=target, args=spec.args, env=env or None)
@@ -118,11 +141,12 @@ async def _open_streams(
             yield streams
         return
     headers = {name: os.path.expandvars(value) for name, value in spec.custom_headers.items()}
+    auth = _service_account_auth(name, spec, target, env)
     if transport == "sse":
-        async with sse_client(target, headers=headers) as streams:
+        async with sse_client(target, headers=headers, auth=auth) as streams:
             yield streams
         return
-    async with streamablehttp_client(target, headers=headers) as (read, write, _):
+    async with streamablehttp_client(target, headers=headers, auth=auth) as (read, write, _):
         yield read, write
 
 
@@ -185,6 +209,11 @@ async def probe_mcp_server(
         status.error = f"Status probing does not support the '{transport}' transport."
         return status
 
+    if spec.authentication is not None and transport == "stdio":
+        status.state = "unsupported"
+        status.error = "Service-account authentication requires an HTTP MCP transport."
+        return status
+
     if transport == "stdio":
         # Resolve against the PATH the server inherits, but keep host paths out of the response.
         search_path = env.get("PATH", os.environ.get("PATH", ""))
@@ -196,7 +225,7 @@ async def probe_mcp_server(
     with tempfile.TemporaryFile(mode="w+", errors="replace") as errlog:
         try:
             with anyio.fail_after(timeout_seconds):
-                async with _open_streams(transport, target, spec, env, errlog) as (read, write):
+                async with _open_streams(name, transport, target, spec, env, errlog) as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
                         tools = await _list_all_tools(session)
@@ -205,8 +234,12 @@ async def probe_mcp_server(
             status.stderr = redact(_read_tail(errlog))
             return status
         except Exception as error:
-            status.error = redact(_describe_error(error))
-            status.stderr = redact(_read_tail(errlog))
+            if spec.authentication is not None:
+                # Auth responses may contain tokens that are absent from the configured environment.
+                status.error = f"Authenticated MCP probe failed ({type(error).__name__})."
+            else:
+                status.error = redact(_describe_error(error))
+                status.stderr = redact(_read_tail(errlog))
             return status
 
     status.state = "running"

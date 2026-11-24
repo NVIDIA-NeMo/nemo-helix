@@ -8,7 +8,6 @@ from __future__ import annotations
 import copy
 import os
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 import nemo_fabric as fabric
@@ -284,16 +283,17 @@ def _instructions_config(config: AgentConfig) -> Any:
 def _skills_config(config: AgentConfig) -> Any:
     if config.skills is None:
         return None
-    paths: list[str | Path] = []
-    paths.extend(config.skills.paths)
-    return fabric.SkillConfig(paths=paths)
+    return fabric.SkillConfig(**config.skills.model_dump(exclude_none=True))
 
 
 def _mcp_config(config: AgentConfig) -> Any:
     if config.mcp is None:
         return None
     return fabric.McpConfig(
-        servers={name: fabric.McpServerConfig(**server.model_dump()) for name, server in config.mcp.servers.items()}
+        servers={
+            name: fabric.McpServerConfig(**server.model_dump(exclude_none=True))
+            for name, server in config.mcp.servers.items()
+        }
     )
 
 
@@ -301,7 +301,7 @@ def _tools_config(config: AgentConfig) -> Any:
     if config.tools is None:
         return None
     try:
-        return fabric.ToolsConfig(enabled=config.tools.enabled, blocked=config.tools.blocked)
+        return fabric.ToolsConfig(**config.tools.model_dump(exclude_none=True))
     except ValidationError as error:
         raise FabricTranslationError(str(error)) from error
 

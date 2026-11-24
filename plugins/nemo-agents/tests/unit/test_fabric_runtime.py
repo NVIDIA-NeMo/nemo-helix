@@ -313,8 +313,14 @@ class TestRunFabricAgentOnce:
         assert result.status == "succeeded"
         assert fake_runtime.exit_calls == 1
 
-    async def test_wraps_runtime_timeout_without_configured_deadline(self) -> None:
-        timeout_error = TimeoutError("adapter timed out")
+    @pytest.mark.parametrize(
+        "timeout_error",
+        [
+            TimeoutError("adapter timed out"),
+            fabric_runtime.FabricError("adapter timed out", stage="invoke", code="timeout"),
+        ],
+    )
+    async def test_wraps_runtime_timeout_without_configured_deadline(self, timeout_error: Exception) -> None:
         fake_runtime = _FakeRuntime(invoke_error=timeout_error)
         fake_fabric = _FakeFabric(runtime=fake_runtime)
         request = FabricOneShotRequest(
@@ -322,7 +328,7 @@ class TestRunFabricAgentOnce:
             base_dir=Path("/tmp/agent"),
         )
 
-        with pytest.raises(FabricRuntimeTimeoutError, match=r"Fabric runtime invocation timed out\.$") as exc_info:
+        with pytest.raises(FabricRuntimeTimeoutError, match="Fabric runtime invocation timed out") as exc_info:
             await run_fabric_agent_once(request, fabric=fake_fabric)
 
         assert exc_info.value.__cause__ is timeout_error
@@ -718,11 +724,17 @@ class TestInvokeFabricRuntime:
         with pytest.raises(FabricRuntimeTimeoutError, match="timed out after 0.01s"):
             await invoke_fabric_runtime(cast(Any, fake_runtime), request)
 
-    async def test_wraps_active_runtime_timeout_without_configured_deadline(self) -> None:
-        timeout_error = TimeoutError("adapter timed out")
+    @pytest.mark.parametrize(
+        "timeout_error",
+        [
+            TimeoutError("adapter timed out"),
+            fabric_runtime.FabricError("adapter timed out", stage="invoke", code="timeout"),
+        ],
+    )
+    async def test_wraps_active_runtime_timeout_without_configured_deadline(self, timeout_error: Exception) -> None:
         fake_runtime = _FakeRuntime(invoke_error=timeout_error)
 
-        with pytest.raises(FabricRuntimeTimeoutError, match=r"Fabric runtime invocation timed out\.$") as exc_info:
+        with pytest.raises(FabricRuntimeTimeoutError, match="Fabric runtime invocation timed out") as exc_info:
             await invoke_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest())
 
         assert exc_info.value.__cause__ is timeout_error
@@ -799,15 +811,20 @@ class TestStreamFabricRuntime:
 
         assert not fake_runtime.invoke_requests
 
-    async def test_wraps_stream_result_errors(self) -> None:
+    @pytest.mark.parametrize("stage", ["invoke", "start", "stop", None])
+    async def test_wraps_stream_result_errors(self, stage: str | None) -> None:
         fake_runtime = _FakeRuntime()
-        stream = _FakeInvokeStream(result_error=fabric_runtime.FabricError("stream failed"))
+        error = fabric_runtime.FabricError("stream failed", stage=stage, code="timeout")
+        stream = _FakeInvokeStream(result_error=error)
         fake_runtime.stream = stream
 
         runtime_stream = fabric_runtime.FabricRuntimeStream(stream)
 
-        with pytest.raises(FabricRuntimeExecutionError, match="Fabric runtime streaming failed"):
+        expected = FabricRuntimeTimeoutError if stage == "invoke" else FabricRuntimeExecutionError
+        with pytest.raises(expected) as exc_info:
             await runtime_stream.result()
+        assert type(exc_info.value) is expected
+        assert exc_info.value.__cause__ is error
 
     async def test_wraps_stream_result_timeout(self) -> None:
         class _SlowInvokeStream(_FakeInvokeStream):

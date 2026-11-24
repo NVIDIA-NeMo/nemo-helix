@@ -54,6 +54,7 @@ jobs:
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
+      automodel: ${{ steps.changes.outputs.automodel }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
       customizer-skill-references: ${{ steps.changes.outputs.customizer-skill-references }}
@@ -814,6 +815,33 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+  # The automodel service loads checkpoint configs with transformers, which only its training image
+  # ships. `python-unit-test` reads them from JSON instead. Load them for real here through the opt-in
+  # `automodel-tests` group, so the regular install does not carry transformers.
+  python-unit-test-automodel:
+    name: Python unit tests (automodel, with transformers)
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      (needs.changes.outputs.deps == 'true' || needs.changes.outputs.automodel == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run automodel tests
+        run: uv run --frozen --group automodel-tests pytest services/automodel/tests -v
 
   # The scaled-evals plugin stays out of `enabled-plugins`, so `python-unit-test` cannot
   # import it and skips its tests. Installing it into that shared run is not an option:
@@ -1966,6 +1994,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - python-unit-test-automodel
       - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests
