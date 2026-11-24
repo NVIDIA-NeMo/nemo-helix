@@ -114,7 +114,7 @@ How the section is checked:
 Builder ships no step image. Yours needs three things:
 
 - **The Builder plugin's Python package**, `nemo-builder-plugin`, which holds the step's driver (`nemo_builder_plugin.run.remote`). The release's `nhx-builder-tasks` image, which the in-cluster steps run in, carries it. Build the step image from the same release as the platform, so the step and the API agree on the step's configuration and the completion request. At each later platform upgrade, rebuild the step image from the new release, and change `remote.image` with the chart upgrade or after it, never before it: the API refuses a completion that carries a field it doesn't know, and a build keeps the `remote.image` it was submitted with.
-- **Your service's client**, which implements `RemoteBuildService`: three calls, `start`, `status` and `cancel`, and three error types that tell the driver whether to repeat a call, wait, or fail the image.
+- **Your service's client**, which implements `RemoteBuildService`: four calls, `upload_context`, `start`, `status` and `cancel`, and three error types that tell the driver whether to repeat a call, wait, or fail the image.
 - **A step program**, which `remote.command` names: a few lines that call `step_main` with a factory for that client.
 
 A step program, with the client in a module of your own:
@@ -165,16 +165,17 @@ The driver does everything that is the same for every service: it fetches each c
 
 What the client owes, in short:
 
+- `upload_context` sends the image's build context to the service and returns the service's reference to it, which is never empty. The driver calls it before `start` and hands `start` that reference. It is safe to repeat with the same key, which keeps the first upload.
 - `start` returns the service's ID for the build, which is never empty: the row names the build by it. It is safe to repeat with the same `build.key`, which starts one build: the driver calls again when a response is lost.
 - `status` reports one of six stages: `queued`, `building`, `verifying`, `done`, `failed` or `cancelled`. Any other fails the image. Once `done`, it carries the image as `<registry>/<repository>@sha256:<digest>`, in the registry and repository that `remote.registry` and `remote.repository` name.
 - It gives the service the build's time limit as the build's own deadline. A step that is killed outright cancels nothing, so only the service's deadline ends that build.
 - Each call bounds its own time, and `cancel` is safe to repeat.
-- It is handed the whole build context, ignored files included. It applies the ignore file at the context's root before anything leaves the step, and it follows no link in the context.
+- `upload_context` is handed the whole build context, ignored files included. It applies the ignore file at the context's root before anything leaves the step, and it follows no link in the context.
 - If it can read the published image's config, it reports how the image starts. The driver reads nothing from the registry.
 
 That is a summary. Two places hold the rest:
 
-- The driver's module, [`run/remote.py`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/src/nemo_builder_plugin/run/remote.py), is the authority for the calls: `step_main`, the `RemoteBuildService` protocol, what each call is given and returns (`RemoteBuild`, `RemoteBuildStatus`, `RemoteImage`), and the three error types.
+- The driver's module, [`run/remote.py`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/src/nemo_builder_plugin/run/remote.py), is the authority for the calls: `step_main`, the `RemoteBuildService` protocol, what each call is given and returns (`RemoteContext`, `RemoteBuild`, `RemoteBuildStatus`, `RemoteImage`), and the three error types.
 - The [Builder plugin's README](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-builder/README.md#building-through-a-service-outside-the-cluster), under "What an operator sets up", is the reference for what the client owes, and for what is kept out of the step's log.
 
 ## Create the step's namespace
@@ -186,7 +187,7 @@ On a remote deployment, `builder.enabled: true` still creates all of that, and n
 The namespace rule:
 
 - With platform auth on and workload token exchange, a step is known as the build's own by the platform's record of its pod. That record is as sure as the step's namespace is closed. Run the step in a namespace where nothing but Jobs creates pods: no other workload, and no user.
-- Not the build namespace, `<release-namespace>-builds` by default, while the in-cluster build profiles are deployed: the in-cluster build step may create pods there. In that auth mode Builder refuses every submit while the remote-build profile names the namespace of the `control_profile` profile (`build-control`) that Jobs lists.
+- Not the build namespace, `<release-namespace>-builds` by default, while the in-cluster build profiles are deployed: the in-cluster build step may create pods there. In that auth mode Builder refuses every submit while the remote-build profile names the namespace of the `control_profile` profile (`build-control`) that Jobs lists, or while only one of the two profiles names a namespace: a profile that names none runs in the namespace of Jobs' own controller, which Builder can't read.
 - Builder checks only that one namespace. It can't see what else may create pods where the step runs.
 - Not the release namespace either: the platform's own pods run there, and so do the model deployments it launches.
 - With platform auth off, or on without workload token exchange (where `allow_unverified_completion` lets builds through), nothing checks the namespace. A namespace of its own still lets you turn workload token exchange on later without moving the step.
@@ -459,7 +460,7 @@ In every mode, a `ready` row says what its first completion said. Builder compar
 - **`runtime_config`** is what the service's client reported for the image, and null when it reported none. With none, a consumer can't learn from the row how the image starts.
 - **The row** records `provenance.backend: remote`, the job its submit created (`provenance.job_uid` and `provenance.job_attempt_id`), and what the service calls the image (`external`: `image_id`, `build_id`, `attributes`).
 - **Resubmits.** The same request again returns its rows. If a job holds the build's name and the request's `pending` rows don't record it, the answer is `409`, and the rows are left as they are.
-- **Outages.** A build that starts while the service is unreachable is tried again for up to ten minutes, less if its timeout is sooner. One already running is waited on until its timeout.
+- **Outages.** An upload or a start made while the service is unreachable is tried again for up to ten minutes each, less if the build's timeout is sooner. One already running is waited on until its timeout.
 
 The README section has the rest: how a Dockerfile is moved to the context root, how links in a context are followed and limited, and how one download is shared by the images of a set.
 
@@ -608,6 +609,7 @@ Refusals of the deployment, with `code` `backend_rejected`. Every submit gets th
 | `the platform's auth configuration can't be read, so nothing says whether the completion of a remote build could be verified, and none would be let through` | Fix the platform's `auth` section |
 | `platform auth is on without workload token exchange, so nothing shows which job a caller completing an image is a step of, and a remote build could not be recorded. Turn workload token exchange on, or set builder.remote.allow_unverified_completion, which accepts that anything able to reach the platform's API can make a pending image ready at a digest of its choosing` | Do one of the two it names. [Decide who may complete an image](#decide-who-may-complete-an-image) says what each accepts, and links to how workload token exchange is turned on |
 | `Jobs execution profile cpu/<profile> runs the remote-build step in the namespace of cpu/<control profile>, whose steps may create pods there. Under workload token exchange the builder relies on nothing but Jobs creating pods where the remote-build step runs. Run the remote-build step in a namespace of its own, where only Jobs creates pods` | Move the profile to [a namespace of its own](#create-the-steps-namespace) |
+| `Jobs execution profile cpu/<profile> names no namespace, so its steps run in the namespace of Jobs' own controller, which the builder can't read. Nothing then shows that the remote-build step (cpu/<remote profile>) runs apart from the steps of cpu/<control profile>, which may create pods where they run. Under workload token exchange the builder relies on nothing but Jobs creating pods where the remote-build step runs. Name a namespace on both profiles, and give the remote-build step one of its own, where only Jobs creates pods` | Set `config.namespace` on both profiles, the remote-build step's to [a namespace of its own](#create-the-steps-namespace) |
 
 Refusals of the request, with `code` `backend_rejected`. `<image>` is the image's row name:
 
@@ -656,6 +658,9 @@ The step logs the same reason on a line of its own, `NHX_BUILD_FAILED <image>: <
 | `the step could not start: RuntimeError: the build service's credential could not be read: <why>` | The step program's `read_credential` failed. Check the mount and its path |
 | `cannot read its row: <error>` | The step can't reach the platform's API, or isn't let in. Check `platform.base_url`, and the API's NetworkPolicy, from the step's namespace. On an HTTPS URL, check that the step trusts its certificate. With `credential_secret` set, or under workload token exchange, the launcher calls the API before the step does, so an API that can't be reached at all ends in the `Job has errored pods, check tasks for error details` row instead |
 | `cannot fetch its build context: <error>` | The step can't read the fileset as the submitter, or the context is refused |
+| `uploading the build context failed <n> times over <s>s: <error>` | The service's client couldn't upload the context for ten minutes. Check the network path from the step's namespace, and what the profile's `env` points the client at |
+| `uploading the build context: <error>` | The service's client gave the upload up. `<error>` is its own |
+| `the build service's client uploaded the build context without naming it` | The client's `upload_context` returned no reference. Fix the client |
 | `starting the build failed <n> times over <s>s: <error>` | The service's client couldn't start the build for ten minutes. Check the network path from the step's namespace, and what the profile's `env` points the client at |
 | `starting the build: <error>` | The service's client gave the start up. `<error>` is its own |
 | `timed out after <n>s, while <stage>` | The build ran past `build_timeout_seconds` and was cancelled |

@@ -349,14 +349,16 @@ def _launcher_says(line: str) -> bool:
 
 
 def _refusals() -> list[re.Pattern[str]]:
-    """What each refusal raised in :data:`REFUSALS` says, as a pattern: anything where the code fills in a value."""
+    """What each refusal made in :data:`REFUSALS` says, as a pattern: anything where the code fills in a value.
+
+    Every refusal the code makes, whether it is raised where it is made or kept and raised later, as a refusal
+    of the builder's configuration is."""
     refusals: list[re.Pattern[str]] = []
     for path in REFUSALS:
         for node in ast.walk(ast.parse(_text(path))):
-            raised = node.exc if isinstance(node, ast.Raise) else None
-            if isinstance(raised, ast.Call) and isinstance(raised.func, ast.Name):
-                if raised.func.id == BackendRejectedError.__name__:
-                    (message,) = raised.args
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id == BackendRejectedError.__name__:
+                    (message,) = node.args
                     parts = _parts(message)
                     refusals.append(re.compile("".join(".+" if part is None else re.escape(part) for part in parts)))
     return refusals
