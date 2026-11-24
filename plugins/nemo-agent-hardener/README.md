@@ -67,7 +67,8 @@ Three things that trip people up, each covered in full below:
   as a Studio bundle, so there is no flag to set. [More](#run-it-in-the-ui)
 
 Got your own agent instead? `init --agent <name>` works for any registered agent, and
-`init --project-dir <path>` war-games a local NAT project with nothing registered at all.
+`init --project-dir <path>` war-games an agent from its own Dockerfile with nothing registered at all
+([what the image needs](#bring-your-own-image)).
 
 ---
 
@@ -373,21 +374,45 @@ Run-level overrides do not change the saved target. PATCH and Studio's
 **Save as default** synchronize the saved routing port, listener command, and PORT
 override together so subsequent runs use the same listener.
 
-### War-game a local NAT project
+### Bring your own image
 
-No deployed agent needed — point `init` at the project directory instead:
+No registered agent needed: point `init` at the directory that holds your agent's Dockerfile.
 
 ```bash
-uv run nemo agent-hardener init --project-dir ~/my-nat-agent      # asks about workflow, port, secrets
-uv run nemo agent-hardener init --project-dir ~/my-nat-agent --yes  # CI: accept detected answers
+uv run nemo agent-hardener init --project-dir ~/my-agent --relay-confirmed
 ```
 
-This runs `agent-hardener init` in your terminal so you answer its questions directly, then uploads the
-project and saves the result as a manifest. From there it's the same `--manifest-id` flow as above.
-`--workflow`, `--port`, `--egress` and `--secrets` pre-answer individual prompts.
+The project is uploaded and its Dockerfile read on the platform, the same way Studio's "Bring your own"
+option does it. Whatever the Dockerfile cannot state, `init` names in one error: pass `--dockerfile` (when
+there are several), `--start-command`, `--binary`, `--harness` or `--relay-confirmed`. `--port`,
+`--egress`, `--secrets` and `--env` work as above. From there it's the same `--manifest-id` flow.
 
-Your project supplies its own dependencies, so its `pyproject.toml`/`requirements.txt` must include
-`nvidia-nat` (plus whatever your tools import).
+The war-game runs your image in an OpenShell sandbox, so the image must have:
+
+- **A `sandbox` user and group.** The sandbox runs the agent as that user; without it the container
+  crash-loops with `sandbox user not found in image`.
+- **`iproute2`** (the `ip` binary). The sandbox uses it to set up the network namespace; without it you
+  get `trusted ip helper not found`.
+- **A start command with absolute paths** (`/app/.venv/bin/python server.py`, not `python server.py`).
+  The sandbox replaces the image's `PATH`, so a bare name may not resolve.
+- **The agent listening on the victim port** (default 8000), answering `GET /health` with a 2xx within
+  120 seconds of starting and serving OpenAI-style `POST /v1/chat/completions`. That is the endpoint the
+  attacks and the replay validators call.
+- **NeMo Relay attached**: the `nemo-relay` package with your framework's extra (for example
+  `nemo-relay[langgraph]`), its middleware on the agent, and `nemo_relay.plugin.activate(PluginConfig())`
+  held open for the life of the process (for example in the server's lifespan).
+  Without Relay the agent's tool calls are invisible and the run cannot be scored. `--relay-confirmed`
+  records that you did this; the run still checks it against real traffic.
+
+Agent Hardener adds the rest itself: the guardrail plugin, the directories a run writes to
+(`/etc/nemo-relay` and its artifacts directory), and your `env` as `ENV` lines. Secrets never go into the
+image; the sandbox gets placeholders, and the real value is filled in only on requests to the endpoints
+the sandbox policy binds it to. The sandbox denies all other egress, so list every host the agent calls (`host[:port]`, port
+443 by default).
+
+A complete working example is
+[`examples/langgraph-victim`](https://github.com/NVIDIA-NeMo/agent-hardener/tree/main/examples/langgraph-victim)
+in the Agent Hardener repository.
 
 Prefer `run --manifest-id` over `run --config`: the cached suite is looked up by manifest id, so the
 `--config` form needs you to pass `--benign-suite <csv>` yourself.
@@ -416,8 +441,8 @@ was unset when the agent was registered. Export it and re-run `nemo agents regis
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a
 `_type`.** The agent references a component the scaffolded victim can't resolve — it installs only
 `nvidia-nat[langchain]`, not the platform's NAT plugins. Platform telemetry (`nemo_files`) is
-stripped for you; anything else means the agent needs a real project, so pass `--project-dir` to
-`init` and let its `pyproject.toml` supply the dependency.
+stripped for you; anything else means the agent needs its own image, so pass `--project-dir` to
+`init` and let its Dockerfile install the dependency ([Bring your own image](#bring-your-own-image)).
 
 **The victim is healthy but every request 422s with `Invalid model`.** The workflow's `model_name`
 isn't a model entity the platform knows. Entity names are lowercase letters, digits and hyphens —

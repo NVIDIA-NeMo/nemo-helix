@@ -50,6 +50,13 @@ import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router';
 
 /** The harnesses agent-hardener knows how to stage; `other` is the honest escape hatch. */
+// What a brought image must have for the sandbox to run it (the plugin README's "Bring your own image").
+const IMAGE_REQUIREMENTS =
+  'The war-game runs your image in a sandbox, so it needs: a sandbox user and group; iproute2; a start ' +
+  'command with absolute paths; the agent serving GET /health and POST /v1/chat/completions on the victim ' +
+  'port; and NeMo Relay attached (nemo-relay middleware, plus nemo_relay.plugin.activate() held open ' +
+  'for the life of the process).';
+
 const HARNESS_ITEMS = ['deepagents', 'hermes', 'langchain', 'langgraph', 'other'].map((value) => ({
   value,
   children: value,
@@ -272,6 +279,9 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                     />
                   ) : (
                     <Stack gap="density-lg" data-testid="project-upload">
+                      <Text kind="body/regular/sm" className="text-subtle" data-testid="image-requirements">
+                        {IMAGE_REQUIREMENTS}
+                      </Text>
                       <FileUpload
                         accept={{ 'application/zip': ['.zip'] }}
                         files={projectFile ? [projectFile] : []}
@@ -302,6 +312,7 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                           useControllerProps={{ control, name: 'dockerfile' }}
                           formFieldProps={{
                             slotLabel: 'Dockerfile',
+                            slotInfo: IMAGE_REQUIREMENTS,
                             slotHelp: asks('dockerfile')
                               ? 'Several were found — name the one that builds the agent.'
                               : 'Detected. Edit to override.',
@@ -313,9 +324,11 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                           useControllerProps={{ control, name: 'startCommand' }}
                           formFieldProps={{
                             slotLabel: 'Start Command',
+                            slotInfo:
+                              'How the sandbox starts the agent. Use absolute paths, e.g. ' +
+                              '/app/.venv/bin/python server.py: the sandbox replaces the image PATH.',
                             slotHelp: asks('start_command')
-                              ? 'The ENTRYPOINT is a shell form, so it cannot be read. Must be absolute — ' +
-                                'the sandbox replaces PATH.'
+                              ? 'The ENTRYPOINT is a shell form, so it cannot be read. Enter it here.'
                               : 'Derived from the Dockerfile. Edit to override.',
                           }}
                         />
@@ -325,9 +338,11 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                           useControllerProps={{ control, name: 'binaries' }}
                           formFieldProps={{
                             slotLabel: 'Interpreter Globs',
-                            slotHelp:
-                              'Comma-separated. Scopes which processes may egress; a glob matching no ' +
-                              'process grants nothing while looking like it grants something.',
+                            slotInfo:
+                              'The processes allowed to reach the egress allow-list, e.g. ' +
+                              '/app/.venv/bin/python*. A glob matching no process grants nothing while ' +
+                              'looking like it grants something.',
+                            slotHelp: 'Comma-separated.',
                           }}
                         />
                       )}
@@ -337,9 +352,10 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                           items={HARNESS_ITEMS}
                           formFieldProps={{
                             slotLabel: 'Harness',
-                            slotHelp:
-                              'Not readable from the project. Decides whether a guardrail can refuse a ' +
-                              'tool call at all.',
+                            slotInfo:
+                              'The framework the agent is built on. It decides whether a guardrail can ' +
+                              'refuse a tool call at all.',
+                            slotHelp: 'Not readable from the project.',
                           }}
                         />
                       )}
@@ -351,7 +367,7 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                             onChange={(event) => setRelayConfirmed(event.target.checked)}
                           />
                           <Text kind="body/regular/sm">
-                            NeMo Relay is attached to this agent (middleware + plugin.initialize()).
+                            NeMo Relay is attached to this agent (middleware + plugin.activate() held open).
                             Without it the victim emits no telemetry and the run cannot be scored.
                           </Text>
                         </label>
@@ -362,16 +378,22 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                     useControllerProps={{ control, name: 'egress' }}
                     formFieldProps={{
                       slotLabel: 'Egress Allow-list',
+                      slotInfo:
+                        'The sandbox blocks every other outbound connection. Auto-detected from the ' +
+                        'agent config (model endpoints, network MCP servers); add hosts only the ' +
+                        'packaged code knows about. Port 443 when none is given.',
                       slotHelp: inspectAgent.isPending
                         ? 'Detecting from the agent…'
-                        : 'Comma-separated host[:port]. Auto-detected from the agent config (model ' +
-                          'endpoints, network MCP servers). Add hosts only the packaged code knows about.',
+                        : 'Comma-separated host[:port].',
                     }}
                   />
                   <ControlledTextInput
                     useControllerProps={{ control, name: 'port' }}
                     formFieldProps={{
                       slotLabel: 'Victim Port',
+                      slotInfo:
+                        'Where the agent listens. It must answer GET /health within two minutes of ' +
+                        'starting and serve OpenAI-style POST /v1/chat/completions, which the attacks call.',
                       slotHelp: inspectAgent.isPending
                         ? 'Detecting from the agent…'
                         : 'Auto-detected from the deployment. Edit to override.',
@@ -381,6 +403,9 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                     useControllerProps={{ control, name: 'secrets' }}
                     formFieldProps={{
                       slotLabel: 'Secret Names',
+                      slotInfo:
+                        'Credentials the agent reads, by name. Their values never go into the image: the ' +
+                        'sandbox gets placeholders, filled in only on requests to the endpoints they belong to.',
                       slotHelp: inspectAgent.isPending
                         ? 'Detecting from the agent…'
                         : 'Comma-separated; auto-detected from the agent config. Edit to override.',
@@ -390,9 +415,10 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                     useControllerProps={{ control, name: 'env' }}
                     formFieldProps={{
                       slotLabel: 'Environment Variables (optional)',
-                      slotHelp:
-                        'Comma-separated KEY=VALUE for non-secret settings the agent reads. ' +
-                        'Credentials belong in Secret Names — values here are stored in plain text.',
+                      slotInfo:
+                        'Non-secret settings the agent reads, set as ENV in its image. Values here are ' +
+                        'stored in plain text, so credentials belong in Secret Names.',
+                      slotHelp: 'Comma-separated KEY=VALUE.',
                     }}
                   />
                   <AccordionRoot>
