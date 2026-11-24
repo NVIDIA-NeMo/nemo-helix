@@ -219,6 +219,82 @@ def test_pod_with_services_or_a_bundle_and_an_ip_counts_as_allocated(
     assert provider.get_status(_workload(annotations, phase, pod_ip))["state"] == state
 
 
+def _labelled_workload(annotations: dict[str, str], phase: str, pod_ip: str | None) -> dict[str, Any]:
+    """``_workload`` with the sandbox ID label the server puts on every BatchSandbox it creates."""
+    workload = _workload(annotations, phase, pod_ip)
+    workload["metadata"]["labels"] = {"opensandbox.io/id": SANDBOX_ID}
+    workload["metadata"]["namespace"] = "nemo"
+    return workload
+
+
+def _pod(*containers: V1ContainerStatus) -> V1Pod:
+    return V1Pod(
+        metadata=V1ObjectMeta(name="sbx-1-pod", namespace="nemo"),
+        status=V1PodStatus(container_statuses=list(containers)),
+    )
+
+
+def _container(name: str, terminated: V1ContainerStateTerminated | None) -> V1ContainerStatus:
+    state = V1ContainerState(terminated=terminated)
+    return V1ContainerStatus(name=name, state=state, image="i", image_id="i", ready=False, restart_count=0)
+
+
+@pytest.mark.parametrize(
+    ("annotations", "pod_ip"),
+    [
+        ({}, None),
+        ({}, "10.0.0.5"),
+        ({POD_ANNOTATION: SPEC}, "10.0.0.5"),
+        ({AGENT_BUNDLE_POD_ANNOTATION: BUNDLE_SPEC}, "10.0.0.5"),
+    ],
+)
+def test_pending_sandbox_whose_container_stopped_is_failed_with_its_reason(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, annotations: dict[str, str], pod_ip: str | None
+) -> None:
+    """The controller leaves a dead sandbox Pending, which the client would report as still being created.
+
+    With services or a bundle the pod keeps its IP, so without this a dead sandbox reads as Allocated forever.
+    """
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+
+    status = provider.get_status(_labelled_workload(annotations, "Pending", pod_ip))
+
+    assert status["state"] == "Failed"
+    assert status["reason"] == "CONTAINER_TERMINATED"
+    assert status["message"] == "container sandbox: OOMKilled (exit 137)"
+    assert k8s.listed_namespaces == ["nemo"]
+
+
+def test_pending_sandbox_whose_containers_run_keeps_the_stock_status(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    k8s.pods = [_pod(_container("sandbox", None))]
+
+    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+    assert provider.get_status(_labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))["state"] == (
+        "Allocated"
+    )
+
+
+def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    """get_status runs on every status read, so a pod lookup is spent only on a Pending sandbox."""
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+
+    assert provider.get_status(_labelled_workload({}, "Running", "10.0.0.5"))["state"] == "Running"
+    assert k8s.listed_namespaces == []
+
+
+def test_failed_pod_lookup_keeps_the_stock_status(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(**_: Any) -> list[V1Pod]:
+        raise RuntimeError("API server unavailable")
+
+    monkeypatch.setattr(k8s, "list_pods", fail)
+
+    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+
+
 async def test_stock_create_wait_returns_for_a_pending_bundle_only_sandbox(
     provider: ext.NemoComposeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:

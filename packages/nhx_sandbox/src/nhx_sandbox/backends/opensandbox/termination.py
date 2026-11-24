@@ -132,6 +132,12 @@ def diagnose_from_status(
             TerminationCause.OUT_OF_MEMORY, f"the sandbox ran out of memory; {reported}", evidence
         )
 
+    if state == "Pending":
+        # A sandbox that was ready once and reads Pending again died; "being created" would mislead.
+        reported = (
+            f"server reported {state}" + (f" ({reason})" if reason else "") + ", as it does for a sandbox whose "
+            "container stopped; the NeMo OpenSandbox extension (nemo-opensandbox-ext) reports the container's reason"
+        )
     detail = f"the sandbox stopped; {reported}" + (f"; events: {'; '.join(events)}" if events else "")
 
     return TerminationDiagnosis(TerminationCause.UNKNOWN, detail, evidence)

@@ -103,7 +103,11 @@ async def test_an_oom_kill_the_server_does_not_name_is_unknown_with_what_it_said
     )
 
     assert diagnosis.cause is TerminationCause.UNKNOWN
-    assert diagnosis.detail == "the sandbox stopped; server reported Pending (CREATING): Sandbox is being created"
+    assert diagnosis.detail == (
+        "the sandbox stopped; server reported Pending (CREATING), as it does for a sandbox whose container stopped; "
+        "the NeMo OpenSandbox extension (nemo-opensandbox-ext) reports the container's reason"
+    )
+    assert diagnosis.evidence["message"] == "Sandbox is being created"
 
 
 async def test_unreadable_events_still_diagnose_from_the_state() -> None:
@@ -152,7 +156,10 @@ async def test_any_other_status_read_failure_says_nothing() -> None:
 
 
 def test_an_oom_kill_in_the_servers_message_is_named() -> None:
-    diagnosis = diagnose_from_status(state="Failed", reason="FAILED", message="container sandbox: OOMKilled", events=[])
+    """The message is the NeMo extension's for a sandbox whose container stopped."""
+    diagnosis = diagnose_from_status(
+        state="Failed", reason="CONTAINER_TERMINATED", message="container sandbox: OOMKilled (exit 137)", events=[]
+    )
 
     assert diagnosis.cause is TerminationCause.OUT_OF_MEMORY
 

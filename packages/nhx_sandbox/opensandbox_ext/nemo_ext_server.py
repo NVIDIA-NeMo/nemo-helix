@@ -29,7 +29,8 @@ only knows port 18080, so that the token follows the egress policy API when a co
 
 ``NemoComposeProvider.get_status`` reports such a sandbox ``Allocated`` once its pod has an IP,
 so create returns while the services start; the client waits for ``main`` (which Kubernetes starts
-after the services) itself, and reads failures from the services route.
+after the services) itself, and reads failures from the services route. It also reports a sandbox
+whose container stopped as ``Failed`` with the container's reason, where the stock status says ``Pending``.
 
 Loaded by ``sitecustomize.py``. Python 3.10, like the server image.
 """
@@ -158,15 +159,27 @@ class NemoComposeProvider(BatchSandboxProvider):
                 workload_annotations[EGRESS_API_PORT_ANNOTATION] = str(services.egress_api_port)
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
-        """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
+        """The stock status, except where the pod says more than the BatchSandbox does.
 
-        Kubernetes starts the sandbox container only after every init container and sidecar is up,
-        and the stock create waits for that. Reporting the pod as allocated once it has an IP instead
+        A Pending sandbox whose pod has a stopped container is ``Failed``, with the container's
+        reason (``OOMKilled``, say) as its message, so a client can tell why its sandbox died.
+
+        A sandbox with services or a bundle is ``Allocated`` once its pod has an IP. Kubernetes starts
+        the sandbox container only after every init container and sidecar is up, and the stock create
+        waits for that. Reporting the pod as allocated once it has an IP instead
         lets create return (the client looks up its endpoints next, so the IP must be known), and a
         failing or slow service or bundle is seen by the client's wait, not hidden behind the create call.
         """
         status = super().get_status(workload)
-        if status["state"] != "Pending" or not self._parse_pod_ip(workload):
+        if status["state"] != "Pending":
+            return status
+
+        # The controller leaves a sandbox whose container stopped in Pending; only the pod says why.
+        stopped = self._stopped_container(workload)
+        if stopped is not None:
+            return {**status, "state": "Failed", "reason": "CONTAINER_TERMINATED", "message": stopped}
+
+        if not self._parse_pod_ip(workload):
             return status
 
         template = (workload.get("spec") or {}).get("template") or {}
@@ -186,6 +199,31 @@ class NemoComposeProvider(BatchSandboxProvider):
                 "message": "The agent bundle is installing",
             }
         return status
+
+    def _stopped_container(self, workload: dict[str, Any]) -> str | None:
+        """``"container <name>: <reason> (exit <code>)"`` for the sandbox pod's first stopped container, else None.
+
+        Never raises: a failed lookup leaves the stock status as it was.
+        """
+        metadata = workload.get("metadata") or {}
+        sandbox_id = (metadata.get("labels") or {}).get(SANDBOX_ID_LABEL)
+        if not sandbox_id:
+            return None
+        try:
+            pods = self.k8s_client.list_pods(
+                namespace=metadata.get("namespace") or self.namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}"
+            )
+        except Exception:
+            logger.warning("Could not read sandbox %s's pod to tell why it stopped", sandbox_id, exc_info=True)
+            return None
+        for pod in pods:
+            for container in (pod.status.container_statuses if pod.status is not None else None) or []:
+                terminated = container.state.terminated if container.state is not None else None
+                if terminated is not None:
+                    return (
+                        f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})"
+                    )
+        return None
 
     def _create_workload_from_pool(self, *args: Any, **kwargs: Any) -> Any:
         """The stock pooled create, refused for a request with services.
