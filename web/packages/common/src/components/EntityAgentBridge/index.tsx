@@ -24,7 +24,8 @@ const resolvePlaceholders = (
 ) =>
   text &&
   Object.entries(values).reduce(
-    (resolved, [key, value]) => (value ? resolved.replaceAll(`<${key}>`, value) : resolved),
+    // A replacer function keeps `$&` / `$$` in a value literal instead of as replacement patterns.
+    (resolved, [key, value]) => (value ? resolved.replaceAll(`<${key}>`, () => value) : resolved),
     text
   );
 

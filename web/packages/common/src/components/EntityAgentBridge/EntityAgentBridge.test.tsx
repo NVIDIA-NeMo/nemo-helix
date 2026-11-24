@@ -62,6 +62,12 @@ describe('EntityAgentBridge', () => {
     );
   });
 
+  it('inserts a value literally, even when it contains replacement patterns', () => {
+    wrap(<EntityAgentBridge entity="telemetrySpans" params={{ 'trace-id': 'a$&b$$c' }} />);
+
+    expect(screen.getByTestId('entity-empty-state-help')).toHaveTextContent('"a$&b$$c"');
+  });
+
   it('leaves a placeholder alone when its param is missing or empty', () => {
     wrap(
       <EntityAgentBridge
