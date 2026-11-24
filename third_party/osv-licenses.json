@@ -78,7 +78,7 @@
         {
           "package": {
             "name": "aiohttp",
-            "version": "3.14.3",
+            "version": "3.14.5",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2008,7 +2008,7 @@
         {
           "package": {
             "name": "nemo-safe-synthesizer",
-            "version": "0.1.15",
+            "version": "0.1.17",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2078,7 +2078,7 @@
         {
           "package": {
             "name": "nltk",
-            "version": "3.10.3",
+            "version": "3.10.4",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2898,7 +2898,7 @@
         {
           "package": {
             "name": "pyasn1",
-            "version": "0.6.4",
+            "version": "0.6.5",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -4148,7 +4148,7 @@
         {
           "package": {
             "name": "yarl",
-            "version": "1.24.5",
+            "version": "1.25.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
