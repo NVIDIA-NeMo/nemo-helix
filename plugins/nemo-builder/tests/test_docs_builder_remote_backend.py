@@ -254,6 +254,16 @@ def _parts(node: ast.expr) -> tuple[str | None, ...]:
     return (node.value,)
 
 
+def _variants(node: ast.expr) -> list[tuple[str | None, ...]]:
+    """Each string a message can be, in its parts: a message joined with ``+`` from a choice of endings is
+    each ending after what comes before it."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [left + right for left in _variants(node.left) for right in _variants(node.right)]
+    if isinstance(node, ast.IfExp):
+        return _variants(node.body) + _variants(node.orelse)
+    return [_parts(node)]
+
+
 @cache
 def _strings(*paths: Path) -> list[tuple[str | None, ...]]:
     """Every string the files at ``paths`` spell, each in its parts. Not a docstring: it says what the code
@@ -359,8 +369,10 @@ def _refusals() -> list[re.Pattern[str]]:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 if node.func.id == BackendRejectedError.__name__:
                     (message,) = node.args
-                    parts = _parts(message)
-                    refusals.append(re.compile("".join(".+" if part is None else re.escape(part) for part in parts)))
+                    for parts in _variants(message):
+                        refusals.append(
+                            re.compile("".join(".+" if part is None else re.escape(part) for part in parts))
+                        )
     return refusals
 
 
