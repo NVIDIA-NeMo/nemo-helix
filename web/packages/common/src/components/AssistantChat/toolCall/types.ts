@@ -18,6 +18,8 @@ export interface FileChangeSummary {
   readonly action: 'Edited' | 'Wrote';
   readonly additions: number;
   readonly deletions: number;
+  /** True when matched by argument shape rather than a known tool name, so it may be wrong. */
+  readonly inferred?: boolean;
   readonly path: string;
   readonly reviewContent: string;
 }
