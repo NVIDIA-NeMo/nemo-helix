@@ -479,8 +479,9 @@ def _build_router() -> APIRouter:
         """Make an image `ready` at the digest the step that built it published.
 
         Completing an image already `ready` at that digest, with the same `external` and the same
-        `runtime_config`, returns it; 409 if it settled otherwise, if the request doesn't fit the image's
-        backend, or if another image took its name meanwhile. For an image a build service built, with
+        `runtime_config`, returns it, as does one that carries no `runtime_config` for an image this cluster
+        built; 409 if it settled otherwise, if the request doesn't fit the image's backend, or if another
+        image took its name meanwhile. For an image a build service built, with
         platform auth on: under workload token exchange, 403 to a caller that is not a step of the attempt the
         image records, and 503 while it records none; without workload token exchange, 403 to every caller
         unless `builder.remote.allow_unverified_completion` is set. With platform auth off no caller is checked.
