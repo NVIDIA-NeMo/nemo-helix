@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NeMo Helix values for a release in a tenant namespace that uses the shared OpenSandbox server.
+# Add to the release's other values files:  helm upgrade ... -f <your values> -f helix/helix-values.yaml
+#
+# Prerequisites: steps 1-7 of the README, including the namespace-local Secret
+# opensandbox-server-api-key holding this namespace's tenant key.
+
+# Injects OPEN_SANDBOX_DOMAIN and OPEN_SANDBOX_API_KEY into job pods. Also renders a NetworkPolicy in
+# this namespace that admits sandbox ingress only from opensandbox.namespace.
+sandboxClusterCapable: true
+
+opensandbox:
+  domain: opensandbox-server.opensandbox-system.svc.cluster.local
+  protocol: http
+  namespace: opensandbox-system
+  # This namespace's tenant key.
+  apiKeySecret: opensandbox-server-api-key
+  apiKeySecretKey: api-key
+  composeServices:
+    # The platform team applies the extension ConfigMap and the exec Role (README steps 2 and 5);
+    # a tenant release can't write to opensandbox-system.
+    enabled: false
+
+# Harbor taskset runs need Builder, which builds each task's images. It runs in <release ns>-builds,
+# which the chart creates (see the README's Builder section for what that namespace needs).
+builder:
+  enabled: true
+
+platformConfig:
+  builder:
+    registry: <REGISTRY_HOST>             # a host only, e.g. nvcr.io
+    repository_prefix: "<PREFIX>"         # the project or path builds publish under; quote numeric ones
+
+  # Sandboxed Gym: Evaluator's agent-evaluate jobs run NeMo Gym in its own sandbox (the "Gym host"),
+  # not in the job pod. Custom environment FileSets always need this.
+  evals:
+    # Run every Gym target in a Gym host.
+    sandboxed_gym_default: true
+    # Evaluator's own switch, separate from the top-level sandboxClusterCapable; both must be true.
+    sandbox_cluster_capable: true
+    sandbox_host_provider: opensandbox
+    # The Gym host image, the same Helix build as the release: <image registry>/nhx-gym-host:<image tag>.
+    sandbox_runtime_image: <IMAGE_REGISTRY>/nhx-gym-host:<IMAGE_TAG>
+    # The job storage PVC the Jobs profile mounts (ReadWriteMany), which the Gym host mounts too: the
+    # environment read-only, its workspace read-write. The chart's default claim is nemo-helix-core-storage.
+    sandbox_job_storage_pvc_claim: nemo-helix-core-storage
+    # The only destinations the Gym host may reach: the model endpoints its agents call. Here, this
+    # release's API (Inference Gateway). Add external model URLs if jobs use them.
+    sandbox_policy_base_urls:
+      - http://<RELEASE>-api.<TENANT_NS>.svc.cluster.local:8080
+    # CPU and memory for each Gym host.
+    sandbox_resources:
+      cpu: "2"
+      memory: 8Gi

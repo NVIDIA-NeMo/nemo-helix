@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenSandbox controller (manifests/charts/controller at release-1.1.1). It turns BatchSandbox
+# objects into pods, in every namespace, so it has a ClusterRole. Install once per cluster.
+#
+#   helm upgrade --install opensandbox-controller "$OPENSANDBOX_SRC/manifests/charts/controller" \
+#     -n opensandbox-system -f values/controller.yaml
+
+namespaceOverride: opensandbox-system
+
+controller:
+  replicaCount: 1
+  logLevel: info
+  image:
+    repository: docker.io/opensandbox/controller
+    tag: release-1.1.1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # Keep the controller off GPU nodes.
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: nvidia.com/gpu.present
+                operator: NotIn
+                values: ["true"]
+  # Pause/resume snapshots need containerd and a snapshot registry; NeMo Helix doesn't use them.
+  snapshot:
+    imageCommitterImage: docker.io/opensandbox/image-committer:release-1.1.1
+    registry: ""
+    registryInsecure: false
+    snapshotPushSecret: ""
+    resumePullSecret: ""
+
+rbac:
+  create: true
+serviceAccount:
+  create: true

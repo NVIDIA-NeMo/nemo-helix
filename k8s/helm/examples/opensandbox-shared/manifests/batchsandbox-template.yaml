@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Pod template the OpenSandbox server starts every sandbox from, in every tenant namespace.
+# Shared-kernel: no runtimeClassName, so sandboxes use the cluster's default runtime.
+#
+#   oc apply -n opensandbox-system -f manifests/batchsandbox-template.yaml
+#
+# The server reads it only at startup. After a change, bump the template-revision annotation in
+# values/server.yaml and run helm upgrade.
+#
+# Replace <PULL_SECRET> with the pull Secret that every tenant namespace has (for example the
+# namespace's NGC pull Secret). Add an entry per registry that task images, Builder output and agent
+# bundles come from. Each Secret must exist in every tenant namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-batchsandbox-template
+  labels:
+    app.kubernetes.io/part-of: opensandbox
+data:
+  batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        opensandbox.nvidia.com/isolation-class: shared-kernel
+    spec:
+      replicas: 1
+      template:
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          # Sandboxes run untrusted task code. A dedicated ServiceAccount (manifests/tenant-namespace.yaml)
+          # lets the cluster grant the sandbox SCC to sandboxes only, and the pod gets no token.
+          serviceAccountName: opensandbox-sandbox
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: <PULL_SECRET>
+          affinity:
+            nodeAffinity:
+              # Never on a control-plane node: the toleration below tolerates every taint.
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+                      - key: node-role.kubernetes.io/master
+                        operator: DoesNotExist
+              # Prefer CPU nodes; GPU tasks still land on GPU nodes through their nvidia.com/gpu request.
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 80
+                  preference:
+                    matchExpressions:
+                      - key: nvidia.com/gpu.present
+                        operator: NotIn
+                        values: ["true"]
+          tolerations:
+            - operator: Exists
+          # Harbor creates its log, solution and agent directories through execd, which runs as the
+          # task image's USER. Writable emptyDirs let images with a non-root USER start. /tests is left
+          # alone on purpose: verifier images bake their tests there.
+          volumes:
+            - name: harbor-logs
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: harbor-solution
+              emptyDir:
+                sizeLimit: 1Gi
+            - name: harbor-installed-agent
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Gi
+          # The server copies only volumeMounts from the container named "sandbox" onto the task container.
+          containers:
+            - name: sandbox
+              volumeMounts:
+                - name: harbor-logs
+                  mountPath: /logs
+                - name: harbor-solution
+                  mountPath: /solution
+                - name: harbor-installed-agent
+                  mountPath: /installed-agent
+                - name: dshm
+                  mountPath: /dev/shm

@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenShift only. Not yet tested on OpenShift: check with `oc policy scc-subject-review` (README
+# step 2) and adjust to the cluster's SCC conventions.
+#
+#   sed -e "s/<TENANT_NS>/$TENANT_NS/g" -e "s/<BUILDS_NS>/$TENANT_NS-builds/g" manifests/scc.yaml | oc apply -f -
+#
+# Add a `users` entry per tenant namespace (and its builds namespace) as you onboard more.
+
+# Sandbox pods: benchmark task images run unmodified, often as root, and every sandbox has an
+# `egress` sidecar that enforces its network allowlist with nftables (NET_ADMIN). Granted only to the
+# opensandbox-sandbox ServiceAccount the sandbox template names.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: opensandbox-sandbox
+allowPrivilegedContainer: false
+# Some task images use setuid tools (sudo, su).
+allowPrivilegeEscalation: true
+allowedCapabilities:
+  - NET_ADMIN
+defaultAddCapabilities: null
+requiredDropCapabilities: null
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+readOnlyRootFilesystem: false
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+seccompProfiles:
+  - runtime/default
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - ephemeral
+  - persistentVolumeClaim
+  - projected
+  - secret
+users:
+  - system:serviceaccount:<TENANT_NS>:opensandbox-sandbox
+---
+# NeMo Helix Builder (needed for Harbor taskset runs): kaniko builds task images as UID 0 with these
+# capabilities, in the tenant's build namespace, as that namespace's default ServiceAccount.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: nemo-helix-builder-kaniko
+allowPrivilegedContainer: false
+allowPrivilegeEscalation: false
+allowedCapabilities:
+  - CHOWN
+  - DAC_OVERRIDE
+  - FOWNER
+  - SETUID
+  - SETGID
+defaultAddCapabilities: null
+requiredDropCapabilities: null
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+readOnlyRootFilesystem: false
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+seccompProfiles:
+  - runtime/default
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+users:
+  - system:serviceaccount:<BUILDS_NS>:default

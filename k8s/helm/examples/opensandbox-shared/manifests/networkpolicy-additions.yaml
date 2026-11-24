@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Traffic between the shared server (opensandbox-system) and a tenant namespace. NetworkPolicies add
+# up, so these sit alongside the namespace's existing policy. Where the platform manages tenant
+# policies through GitOps, fold them into those instead.
+#
+#   sed "s/<TENANT_NS>/$TENANT_NS/g" manifests/networkpolicy-additions.yaml | oc apply -f -
+#
+# Needed only where a NetworkPolicy already restricts the namespace (for example a tenant policy that denies egress by default).
+
+# Helix job pods call the server's Service on port 80. A tenant policy may deny egress to
+# other namespaces' Services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensandbox-egress-to-server
+  namespace: <TENANT_NS>
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensandbox-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opensandbox-server
+      ports:
+        - protocol: TCP
+          port: 80
+---
+# The server proxies each request to the sandbox pod (execd on 44772, plus any port a client asks
+# for, such as a Compose service's). The Helix chart also creates a policy admitting
+# opensandbox-system to sandbox pods; this is for a tenant policy that would otherwise deny it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensandbox-ingress-from-server
+  namespace: <TENANT_NS>
+spec:
+  podSelector:
+    matchExpressions:
+      - key: opensandbox.io/id
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensandbox-system
+---
+# The other side: if opensandbox-system itself has a default-deny policy, let the server reach
+# sandbox pods in tenant namespaces and the Kubernetes API, and take requests from tenants.
+# Replace with the platform's own rules where it manages opensandbox-system's policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensandbox-server-tenant-traffic
+  namespace: opensandbox-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opensandbox-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: <TENANT_NS>
+      ports:
+        - protocol: TCP
+          port: 80

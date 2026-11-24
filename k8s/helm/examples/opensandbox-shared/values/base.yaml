@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenSandbox base chart (manifests/charts/base at release-1.1.1): the three CRDs
+# (BatchSandbox, Pool, SandboxSnapshot) and their user-facing RBAC. Cluster-scoped: install once per cluster.
+#
+#   helm upgrade --install opensandbox-base "$OPENSANDBOX_SRC/manifests/charts/base" \
+#     -n opensandbox-system -f values/base.yaml
+
+crds:
+  install: true
+  # Keep the CRDs (and every sandbox stored in them) if the release is uninstalled.
+  keep: true
+rbac:
+  create: true
+
+# Fast Sandbox is a different runtime that this setup doesn't use. Install none of its CRDs, RBAC or namespaces.
+fastSandbox:
+  crds:
+    install: false
+  namespaces:
+    createSystem: false
+    create: false
+  rbac:
+    create: false

@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Per tenant namespace: the sandboxes' ServiceAccount, and the extension's exec permission.
+#
+#   sed "s/<TENANT_NS>/$TENANT_NS/g" manifests/tenant-namespace.yaml | oc apply -f -
+#
+# Apply once for each tenant namespace in tenants.toml.
+
+# Every sandbox pod runs as this account (serviceAccountName in the sandbox template). The SCC for
+# root and NET_ADMIN (manifests/scc.yaml) is granted to it alone, not to the namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-sandbox
+  namespace: <TENANT_NS>
+automountServiceAccountToken: false
+---
+# The NeMo Helix extension runs commands in a sandbox's Compose service containers. The server's own
+# ClusterRole covers pods and pods/log but not pods/exec, so grant it here, in this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: <TENANT_NS>
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Kubernetes checks "create" for exec over WebSocket, "get" on older versions.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nemo-opensandbox-ext
+  namespace: <TENANT_NS>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nemo-opensandbox-ext
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-server
+    namespace: opensandbox-system

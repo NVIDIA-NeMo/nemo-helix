@@ -1,0 +1,136 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenSandbox API server (manifests/charts/server at release-1.1.1), shared by every tenant.
+# NeMo Helix jobs call it; it creates sandboxes in the caller's tenant namespace and proxies
+# commands to them. The chart also creates a ClusterRole, <fullname>-role.
+#
+#   helm upgrade --install opensandbox-server "$OPENSANDBOX_SRC/manifests/charts/server" \
+#     -n opensandbox-system -f values/server.yaml
+#
+# Before installing: the Secret opensandbox-tenants (step 3), the ConfigMaps
+# opensandbox-batchsandbox-template (step 4) and nemo-opensandbox-ext (step 5) exist in
+# opensandbox-system, and every tenant namespace in tenants.toml exists (the server checks them at
+# startup).
+
+fullnameOverride: opensandbox-server
+namespaceOverride: opensandbox-system
+
+server:
+  replicaCount: 1
+  image:
+    repository: docker.io/opensandbox/server
+    tag: release-1.1.1
+
+  # The server reads the template and the extension only at startup. Bump these to restart it after
+  # changing the template ConfigMap or the extension ConfigMap. TOML changes restart it on their own.
+  podAnnotations:
+    opensandbox.nvidia.com/template-revision: "1"
+    opensandbox.nvidia.com/extension-revision: "1"
+
+  env:
+    # Tenant mode: each API key in tenants.toml maps to one namespace. Don't also set
+    # OPENSANDBOX_SERVER_API_KEY or server.api_key: the server refuses to start with both.
+    - name: SANDBOX_TENANTS_CONFIG_PATH
+      value: /etc/opensandbox/tenants/tenants.toml
+    # Loads the NeMo Helix extension (Compose services, agent bundles) from the nemo-opensandbox-ext
+    # ConfigMap. With the ConfigMap mounted, the server refuses to start if the extension can't load.
+    - name: PYTHONPATH
+      value: /opt/nemo-opensandbox-ext
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: nvidia.com/gpu.present
+                operator: NotIn
+                values: ["true"]
+
+  volumeMounts:
+    - name: batchsandbox-template
+      mountPath: /etc/opensandbox/batchsandbox-template.yaml
+      subPath: batchsandbox-template.yaml
+      readOnly: true
+    # A directory mount (no subPath), so an updated Secret reaches the server, which reloads the file.
+    - name: tenants
+      mountPath: /etc/opensandbox/tenants
+      readOnly: true
+    - name: nemo-opensandbox-ext
+      mountPath: /opt/nemo-opensandbox-ext
+      readOnly: true
+  volumes:
+    - name: batchsandbox-template
+      configMap:
+        name: opensandbox-batchsandbox-template
+    - name: tenants
+      secret:
+        secretName: opensandbox-tenants
+    - name: nemo-opensandbox-ext
+      configMap:
+        name: nemo-opensandbox-ext
+        items:
+          - {key: sitecustomize.py, path: sitecustomize.py}
+          - {key: nemo_ext_server.py, path: nemo_ext_server.py}
+          - {key: nemo_ext_pod.py, path: nemo_ext_pod.py}
+          - {key: harbor_opensandbox_services.py, path: nhx_sandbox/harbor_opensandbox_services.py}
+
+  # Clients reach sandboxes through the server's proxy; no ingress gateway.
+  gateway:
+    enabled: false
+
+configToml: |
+  [server]
+  host = "0.0.0.0"
+  port = 80
+  max_sandbox_timeout_seconds = 86400
+
+  [log]
+  level = "INFO"
+
+  [runtime]
+  type = "kubernetes"
+  execd_image = "docker.io/opensandbox/execd:release-1.1.1"
+
+  [storage]
+  allowed_host_paths = []
+  volume_default_size = "1Gi"
+
+  [kubernetes]
+  kubeconfig_path = ""
+  # No namespace here: in tenant mode each request goes to its API key's namespace.
+  informer_resync_seconds = 300
+  informer_watch_timeout_seconds = 60
+  snapshot_create_timeout_seconds = 900
+  # How long a create waits for the sandbox pod, image pull included. Clients time out at 960 s.
+  sandbox_create_timeout_seconds = 900
+  workload_provider = "batchsandbox"
+  image_pull_policy = "IfNotPresent"
+  batchsandbox_template_file = "/etc/opensandbox/batchsandbox-template.yaml"
+  # The execd installer init container. Set explicitly so a tenant LimitRange's defaults don't apply.
+  execd_init_resources = { requests = { cpu = "50m", memory = "64Mi" }, limits = { cpu = "500m", memory = "256Mi" } }
+
+  [egress]
+  image = "docker.io/opensandbox/egress:release-1.1.1"
+  # The egress sidecar enforces each sandbox's allowlist with DNS filtering plus nftables (needs NET_ADMIN).
+  mode = "dns+nft"
+  # true would run the execd init container privileged; keep false.
+  disable_ipv6 = false
+  requests = { cpu = "25m", memory = "64Mi" }
+  limits = { cpu = "250m", memory = "256Mi" }
+
+  [proxy]
+  # Proxy to sandbox pod IPs inside the cluster.
+  resolve_internal = true
+
+  [tenants]
+  provider = "file"
