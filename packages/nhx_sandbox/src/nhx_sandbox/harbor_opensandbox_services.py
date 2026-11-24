@@ -70,15 +70,12 @@ COMPOSE_SECURITY_FEATURE = "compose-security"
 # Moving the egress policy API off 18080 when a compose service needs that port. An older extension leaves the API
 # on 18080, and the service can't start.
 EGRESS_PORT_FEATURE = "egress-port"
-# Asking the NRI memory-qos plugin to kill only the process that ran out of memory.
-OOM_KILL_PROCESS_FEATURE = "oom-kill-process"
 EXTENSION_FEATURES = (
     COMPOSE_SERVICES_FEATURE,
     AGENT_BUNDLE_FEATURE,
     COMPOSE_MAIN_FEATURE,
     COMPOSE_SECURITY_FEATURE,
     EGRESS_PORT_FEATURE,
-    OOM_KILL_PROCESS_FEATURE,
 )
 
 # The agent bundle's extensions key and pod annotation, copied the same way as the services'.

@@ -249,11 +249,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             ``docker_image`` names, with an empty list for an image that has none. OpenSandbox
             replaces the container's entrypoint, so the sandbox restores its image's, unless the
             compose file gives ``main`` its own. An image missing here starts as before.
-        oom_kill_process: On Kubernetes, ask that a process in the sandbox that runs out of memory be
-            killed on its own, as Docker does, instead of with every other process in the sandbox,
-            the agent's included. Takes effect on nodes running the NRI memory-qos plugin with
-            ``memory.oom.group`` allowed, through the server's NeMo extension; elsewhere the sandbox
-            behaves as it does without the request.
         runtime: The OpenSandbox server's runtime. Kubernetes expands ``$`` in a container's
             command and env, so they're escaped for it; Docker passes them on as written. NeMo Evals
             only runs on the in-cluster Kubernetes server; set ``docker`` for a Docker-runtime server.
@@ -287,7 +282,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         compose_services: dict[str, Any] | None = None,
         agent_bundle: dict[str, Any] | None = None,
         image_entrypoints: dict[str, list[str]] | None = None,
-        oom_kill_process: bool = True,
         runtime: SandboxRuntime = "kubernetes",
         **kwargs: Any,
     ) -> None:
@@ -324,7 +318,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._image_entrypoints = dict(image_entrypoints or {})
         self._runtime: SandboxRuntime = runtime
-        self._oom_kill_process = oom_kill_process and runtime == "kubernetes"
         self._egress_verification: EgressVerificationMode = egress_verification
         self._enforce_disk_limit = enforce_disk_limit
         self._max_disk_mb = max_disk_mb
@@ -521,7 +514,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[AGENT_BUNDLE_EXTENSION_KEY] = self._agent_bundle.to_json()
         if self._services is not None:
             extensions[EXTENSION_KEY] = self._services.to_json()
-        if self._oom_kill_process:
+        # Kill only the process that runs out of memory, as Docker does, where the node runs the NRI memory-qos plugin.
+        if self._runtime == "kubernetes":
             extensions[OOM_KILL_PROCESS_EXTENSION_KEY] = "true"
         return extensions
 

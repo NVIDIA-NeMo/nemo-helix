@@ -349,7 +349,6 @@ def test_health(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
             "compose-main",
             "compose-security",
             "egress-port",
-            "oom-kill-process",
         ],
     }
     monkeypatch.setattr(ext, "_provider", None)

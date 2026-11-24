@@ -1185,9 +1185,7 @@ async def test_a_failed_status_read_records_nothing_and_still_stops(
     assert server.live() == set()
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "requested"), [({}, True), ({"runtime": "docker"}, False), ({"oom_kill_process": False}, False)]
-)
+@pytest.mark.parametrize(("kwargs", "requested"), [({}, True), ({"runtime": "docker"}, False)])
 async def test_a_kubernetes_sandbox_asks_that_a_process_out_of_memory_be_killed_on_its_own(
     tmp_path: Path, server: Server, kwargs: dict[str, Any], requested: bool
 ) -> None:

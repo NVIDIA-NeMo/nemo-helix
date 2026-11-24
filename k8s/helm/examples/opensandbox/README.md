@@ -209,8 +209,8 @@ unifiedannotations:
 - memory.oom.group
 ```
 
-The plugin needs NRI on in the node's container runtime (on by default in
-containerd 2.x and recent CRI-O). On a node without it the annotation does
+The plugin needs NRI on in the node's container runtime: on by default in
+containerd 2.x; for CRI-O, check `enable_nri` in its config. On a node without it the annotation does
 nothing, and the whole container dies as before. NeMo Evals' Harbor sandboxes
 and Gym hosts send the request. Kata sandboxes don't need it: their guest kernel
 kills only the process.
@@ -326,7 +326,7 @@ compose task at its first check, before any sandbox starts.
 | --- | --- |
 | The server crash-loops with `nemo-ext: not starting without the compose services extension` | The ConfigMap is present but the extension can't load: a changed file, or a server version other than `v0.2.1`. The log above the message has the reason. |
 | No `nemo-ext` line in the server log | The ConfigMap is missing, in the wrong namespace, or the server wasn't restarted since it was created. |
-| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services","features":["compose-services","agent-bundle","compose-main","compose-security","egress-port","oom-kill-process"]}`. |
+| `GET /v1/nemo-ext/health` doesn't answer | The server runs stock. Same causes as the line above. A working server answers `{"status":"ok","extension":"nemo-compose-services","features":["compose-services","agent-bundle","compose-main","compose-security","egress-port"]}`. |
 | A trial with an agent bundle fails with `doesn't support agent bundles` | The extension predates agent bundles: its health answer has no `features`. Upgrade the chart and restart the server. |
 | A trial fails with `agent bundle ErrImagePull` or `ImagePullBackOff` | The bundle's registry isn't covered by the template's `imagePullSecrets`. |
 | A compose task fails reading service status or running a command in a service, with a permission error | The Role is missing in the sandbox namespace, or bound to the wrong ServiceAccount. Check `sandboxNamespace` and `serverServiceAccount`. |

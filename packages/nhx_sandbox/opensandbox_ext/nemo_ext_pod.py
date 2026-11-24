@@ -261,10 +261,7 @@ def add_agent_bundle(pod_spec: dict[str, Any], bundle: SandboxAgentBundle, image
 def add_process_oom_kill(template_metadata: dict[str, Any]) -> None:
     """Ask the NRI memory-qos plugin to kill only the process in ``sandbox`` that runs out of memory, as Docker does.
 
-    Kubernetes 1.28 and later set every container's ``memory.oom.group`` to 1, so the kernel kills
-    every process in it. The plugin sets it to 0 for a container whose pod is annotated so, when its
-    config lists ``memory.oom.group`` under ``unifiedannotations``. A node without it ignores the
-    annotation.
+    A node without the plugin ignores the annotation.
     """
     template_metadata.setdefault("annotations", {})[NRI_OOM_GROUP_ANNOTATION] = "0"
 

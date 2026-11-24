@@ -6,10 +6,11 @@
 A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
 those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
 JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
-One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation that
-has a node running the plugin kill only the process that ran out of memory, not the whole container.
+One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation, so
+that on a node running the plugin an out-of-memory kill takes only the process, not the container.
 The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
-``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
+``AGENT_BUNDLE_POD_ANNOTATION``, ``OOM_KILL_PROCESS_POD_ANNOTATION``), so the spec travels with the
+manifest:
 
 * ``NemoComposeProvider._merge_pod_spec_extras`` runs on the finished manifest, just before the
   stock code creates it, and adds the bundle (``nemo_ext_pod.add_agent_bundle``) and the services
