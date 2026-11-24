@@ -256,7 +256,7 @@ def test_the_staged_path_is_published_for_search_root_discovery(tmp_path: Path) 
 def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_execd_token(tmp_path: Path) -> None:
     """This launcher has no privileged setup, so it unpacks the job's variables before starting anything.
 
-    The script's own exports still win, a job's PYTHONPATH is still appended after the staged Gym tree, and
+    The script's own parameters and exports still win, a job's PYTHONPATH is still appended after the staged Gym tree, and
     names a shell can't export stay packed for the runtime. execd's token reaches neither Ray nor the runtime.
     """
     from sandboxed_gym.runtime.gym_host_runtime import decode_job_env, encode_job_env
@@ -266,7 +266,16 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
         script = paths["venv"] / "bin" / tool
         script.write_text(f'#!/bin/sh\nenv > "{tmp_path / log}"\nexit 0\n', encoding="utf-8")
         script.chmod(0o755)
+    (paths["venv"] / "bin" / "python").write_text(
+        f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\nprintf \'%s\\n\' "$1" > "{tmp_path / "runtime-arg"}"\n',
+        encoding="utf-8",
+    )
     job_env = {
+        # Same names as the launcher's parameters: the job can't redirect what it starts.
+        "venv": "/job/venv",
+        "root": "/job/root",
+        "gym_rw": "/job/gym",
+        "runtime": "/job/missing.py",
         "PROMPT": "it's $(not) expanded",
         "PYTHONPATH": "/job/lib",
         "SANDBOXED_GYM_SRC_DIR": "/job/elsewhere",
@@ -303,6 +312,7 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
     assert runtime_env["SANDBOXED_GYM_SRC_DIR"] == str(gym_rw)
     assert runtime_env["PYTHONPATH"] == f"{gym_rw}:{paths['root']}:/job/lib"
     assert decode_job_env(runtime_env["NHX_GYM_JOB_ENV"]) == {"odd.name": "kept packed"}
+    assert (tmp_path / "runtime-arg").read_text() == f"{paths['runtime']}\n"
 
 
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
