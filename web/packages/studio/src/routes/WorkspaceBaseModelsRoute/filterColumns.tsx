@@ -29,29 +29,11 @@ const toOptionalString = (value: unknown) =>
  * they only provide `meta.filter` config so that DataView's ColumnFilterPanel and
  * StudioAppliedFilters components can render and manage the filter UI.
  *
- * Ordered general → dates, since the filter panel renders them in this order.
+ * The filter panel renders them in this order: LoRA (adapters, serving), family, provider, dates.
  */
 export const makeFilterColumns =
   (workspace: string): ComponentProps<typeof DataView.Root<ModelEntity>>['makeColumns'] =>
   ({ accessor }) => [
-    accessor(() => '', {
-      id: 'model_providers',
-      header: 'Model Provider',
-      enableSorting: false,
-      meta: {
-        filter: {
-          type: 'custom',
-          label: 'Model Provider',
-          renderFilter: ({ setValue, value }) => (
-            <ModelProviderFilterField
-              workspace={workspace}
-              value={toOptionalString(value)}
-              onValueChange={setValue}
-            />
-          ),
-        },
-      },
-    }),
     accessor(() => '', {
       id: LORA_FILTER_ID,
       header: 'LoRA',
@@ -75,6 +57,24 @@ export const makeFilterColumns =
       enableSorting: false,
       meta: {
         filter: { type: 'text', label: 'Family', placeholder: 'e.g. llama (checkpoint models)' },
+      },
+    }),
+    accessor(() => '', {
+      id: 'model_providers',
+      header: 'Model Provider',
+      enableSorting: false,
+      meta: {
+        filter: {
+          type: 'custom',
+          label: 'Model Provider',
+          renderFilter: ({ setValue, value }) => (
+            <ModelProviderFilterField
+              workspace={workspace}
+              value={toOptionalString(value)}
+              onValueChange={setValue}
+            />
+          ),
+        },
       },
     }),
     accessor('created_at', {

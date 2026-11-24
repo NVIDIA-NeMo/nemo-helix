@@ -58,13 +58,12 @@ describe('toModelEntityFilter', () => {
 });
 
 describe('makeFilterColumns', () => {
-  it('leaves Fine-tunable to the toolbar checkbox, not the filter menu', () => {
+  it('orders filters to match the Models API spec and leaves Fine-tunable to the toolbar', () => {
     // Stub accessor returns the column def, so the result is the list of defs.
     const makeColumns = makeFilterColumns('ws') as unknown as (helper: {
       accessor: (_: unknown, def: { id: string }) => { id: string };
     }) => { id: string }[];
     const ids = makeColumns({ accessor: (_, def) => def }).map((col) => col.id);
-    expect(ids).toContain('family');
-    expect(ids).not.toContain('customizable');
+    expect(ids).toEqual(['lora', 'family', 'model_providers', 'created_at', 'updated_at']);
   });
 });
