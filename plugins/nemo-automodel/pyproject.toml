@@ -21,6 +21,7 @@ automodel = "nemo_automodel_plugin.contributor:AutomodelContributor"
 
 [project.entry-points."nemo.jobs"]
 "customization.automodel.jobs" = "nemo_automodel_plugin.jobs.jobs:AutomodelJob"
+"customization.automodel.merge" = "nemo_automodel_plugin.jobs.merge:AutomodelMergeJob"
 
 [build-system]
 requires = ["hatchling"]

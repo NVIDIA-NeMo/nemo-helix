@@ -801,6 +801,7 @@ nemo-evals-trial-recording = "nemo_evals.gateway.middleware.trial_recording:Tria
 "agents.execute" = "nemo_agents_plugin.jobs.execute:ExecuteAgentJob"
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 "customization.automodel.jobs" = "nemo_automodel_plugin.jobs.jobs:AutomodelJob"
+"customization.automodel.merge" = "nemo_automodel_plugin.jobs.merge:AutomodelMergeJob"
 "customization.rl.jobs" = "nemo_rl_plugin.jobs.jobs:RlJob"
 "customization.unsloth.jobs" = "nemo_unsloth_plugin.jobs.jobs:UnslothJob"
 "safe-synthesizer.generate" = "nemo_safe_synthesizer_plugin.jobs.generate:GenerateJob"

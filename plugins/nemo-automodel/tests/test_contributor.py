@@ -42,6 +42,10 @@ def test_contributor_mounts_job_collection() -> None:
 
     paths = _route_paths(app)
     assert "/v2/workspaces/{workspace}/automodel/jobs" in paths
+    assert "/v2/workspaces/{workspace}/automodel-merge/jobs" in paths
+    assert "/v2/workspaces/{workspace}/automodel-merge/jobs/{name}" in paths
+    # The merge step cannot pause, so its collection does not mount the pause/resume routes.
+    assert not any(path.startswith("/v2/workspaces/{workspace}/automodel-merge/") and "pause" in path for path in paths)
 
 
 def test_contributor_get_cli_exposes_flat_verbs() -> None:
@@ -51,7 +55,7 @@ def test_contributor_get_cli_exposes_flat_verbs() -> None:
     assert isinstance(cli, typer.Typer)
     assert cli.info.name == "automodel"
     assert not any(g.name == "jobs" for g in cli.registered_groups)
-    assert {cmd.name for cmd in cli.registered_commands} == {"explain"}
+    assert {cmd.name for cmd in cli.registered_commands} == {"explain", "merge"}
 
 
 def test_contributor_exposes_sdk_resources() -> None:

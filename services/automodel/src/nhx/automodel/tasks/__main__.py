@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         "  python -m nhx.customization_common.tasks.model_entity --service-name customizer\n\n"
         "GPU training uses backend-specific training images:\n"
         "  python -m nhx.automodel.tasks.training\n"
+        "  python -m nhx.automodel.tasks.merge_adapter\n"
         "  python -m nhx.automodel.tasks.retrieval_mine\n",
     )
     parser.add_argument(
