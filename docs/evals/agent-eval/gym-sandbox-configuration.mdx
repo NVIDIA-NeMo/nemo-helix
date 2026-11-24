@@ -293,9 +293,20 @@ GPU access is not supported yet.
 
 Images, containers and volumes live in one ext4 filesystem inside a sparse file in the Gym host's
 ephemeral storage. Its size is a ceiling for everything the job's rollouts pull and write together, not
-an allocation: until something is written, the file takes about 0.5% of its size on the node, mostly the
-filesystem's journal. It holds slightly less than its size, since ext4 keeps some for itself. The file
-lasts as long as the Gym host, so every job starts empty.
+an allocation: the file takes node disk only as data is written. The exception is the filesystem's
+journal, written when the file is formatted, whose size steps up with the configured size and stops at
+1 GiB:
+
+| Configured size | Journal | Node disk used before anything is written |
+|---|---|---|
+| 16–32 GiB (the default 30Gi) | 128 MiB | 134 MiB at 30Gi |
+| 32–64 GiB | 256 MiB | 262 MiB at 40Gi |
+| 64–128 GiB | 512 MiB | 519 MiB at 100Gi |
+| 128 GiB and larger | 1 GiB | about 1 GiB |
+
+The first three rows were measured in a Kata sandbox; the last follows from the journal size. The file
+holds slightly less than its size, since ext4 keeps some for itself. It lasts as long as the Gym host,
+so every job starts empty.
 
 ```yaml
 platformConfig:
