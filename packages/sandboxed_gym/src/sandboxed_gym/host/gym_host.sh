@@ -10,6 +10,10 @@
 # Defaults match sandboxed_gym.host.entrypoint.
 set -eu
 
+# Nothing this launcher starts needs execd's token, so it goes before the job's variables can change
+# which programs run here.
+unset EXECD_ACCESS_TOKEN
+
 # This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
 # NHX_GYM_JOB_ENV, are unpacked first, as if they had arrived in the environment: before the launcher's
 # own parameters and exports below, which keep their precedence over them, and before Ray starts. Names
@@ -59,7 +63,7 @@ if [ ! -d "$gym_rw/nemo_gym" ]; then
     mv "$gym_rw.tmp" "$gym_rw"
 fi
 
-# Nothing started here, Ray included, needs execd's token.
+# Again, in case the job's variables named it.
 unset EXECD_ACCESS_TOKEN
 
 # Pin the single-node in-sandbox Ray to loopback; the routable node IP it picks is dropped by the deny-default sandbox egress.

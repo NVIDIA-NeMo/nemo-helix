@@ -257,7 +257,7 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
     """This launcher has no privileged setup, so it unpacks the job's variables before starting anything.
 
     The script's own parameters and exports still win, a job's PYTHONPATH is still appended after the staged Gym tree, and
-    names a shell can't export stay packed for the runtime. execd's token reaches neither Ray nor the runtime.
+    names a shell can't export stay packed for the runtime. execd's token reaches nothing the launcher runs, a program on the job's PATH included.
     """
     from sandboxed_gym.runtime.gym_host_runtime import decode_job_env, encode_job_env
 
@@ -270,7 +270,13 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
         f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\nprintf \'%s\\n\' "$1" > "{tmp_path / "runtime-arg"}"\n',
         encoding="utf-8",
     )
+    # A job's PATH can put its own programs in front of the ones the launcher stages the Gym tree with.
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "cp").write_text(f'#!/bin/sh\nenv > "{tmp_path / "cp-env"}"\nexec /bin/cp "$@"\n', encoding="utf-8")
+    (job_bin / "cp").chmod(0o755)
     job_env = {
+        "PATH": f"{job_bin}:{os.environ['PATH']}",
         # Same names as the launcher's parameters: the job can't redirect what it starts.
         "venv": "/job/venv",
         "root": "/job/root",
@@ -306,7 +312,8 @@ def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_exec
     assert result.returncode == 0, result.stderr
     ray_env = dict(line.split("=", 1) for line in (tmp_path / "ray-env").read_text().splitlines() if "=" in line)
     runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
-    for env in (ray_env, runtime_env):
+    cp_env = dict(line.split("=", 1) for line in (tmp_path / "cp-env").read_text().splitlines() if "=" in line)
+    for env in (cp_env, ray_env, runtime_env):
         assert "EXECD_ACCESS_TOKEN" not in env
         assert env["PROMPT"] == "it's $(not) expanded"
     assert runtime_env["SANDBOXED_GYM_SRC_DIR"] == str(gym_rw)
