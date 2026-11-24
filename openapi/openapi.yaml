@@ -20709,18 +20709,34 @@ components:
           description: Filter by the display name in the model's metadata.
           title: Display Name
         capabilities:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/ModelCapability'
+          - items:
+              $ref: '#/components/schemas/ModelCapability'
+            type: array
           description: Filter models whose metadata lists this capability, e.g. 'tool_calling'.
+            A list matches models with all of them; use $in for any and $nin for none.
+          title: Capabilities
         input_modalities:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
           description: Filter models whose metadata says they accept this modality,
-            e.g. 'image'.
+            e.g. 'image'. A list matches models that accept all of them; use $in for
+            any and $nin for none.
+          title: Input Modalities
         output_modalities:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
           description: Filter models whose metadata says they produce this modality.
+            A list matches models that produce all of them; use $in for any and $nin
+            for none.
+          title: Output Modalities
         context_length:
           anyOf:
           - $ref: '#/components/schemas/NumberFilter'
