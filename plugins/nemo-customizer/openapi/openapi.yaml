@@ -18,6 +18,639 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Healthz Apis Customization V2 Healthz Get
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs:
+    post:
+      tags:
+      - Automodel Merge Jobs
+      summary: Create Job
+      operationId: create_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomodelMergeJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: List Jobs
+      operationId: list_jobs_apis_customization_v2_workspaces__workspace__automodel_merge_jobs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelMergeJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/AutomodelMergeJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{job}/results/{name}:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Get Job Result
+      operationId: get_job_result_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{job}/results/{name}/download:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Download Job Result
+      operationId: download_job_result_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Get Job
+      operationId: get_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Automodel Merge Jobs
+      summary: Update Job
+      operationId: update_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomodelMergeJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Automodel Merge Jobs
+      summary: Delete Job
+      operationId: delete_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/attempts:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJobAttempt'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/cancel:
+    post:
+      tags:
+      - Automodel Merge Jobs
+      summary: Cancel Job
+      operationId: cancel_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/logs:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/rerun:
+    post:
+      tags:
+      - Automodel Merge Jobs
+      summary: Rerun Job
+      operationId: rerun_job_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__rerun_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomodelMergeJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/results:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: List Job Results
+      operationId: list_job_results_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/automodel-merge/jobs/{name}/status:
+    get:
+      tags:
+      - Automodel Merge Jobs
+      summary: Get Job Status
+      operationId: get_job_status_apis_customization_v2_workspaces__workspace__automodel_merge_jobs__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/automodel/jobs:
     post:
       tags:
@@ -3071,6 +3704,284 @@ components:
 
         setting, and only the fields that are set reach the model. Support differs
         per model.'
+    AutomodelMergeJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/AutomodelMergeSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        control:
+          $ref: '#/components/schemas/JobControl'
+      type: object
+      required:
+      - name
+      - spec
+      title: AutomodelMergeJob
+    AutomodelMergeJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/AutomodelMergeSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: AutomodelMergeJobAttempt
+    AutomodelMergeJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AutomodelMergeJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: AutomodelMergeJobAttemptsPage
+    AutomodelMergeJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/AutomodelMergeSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: AutomodelMergeJobRequest
+    AutomodelMergeJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/AutomodelMergeSpec'
+      additionalProperties: false
+      type: object
+      title: AutomodelMergeJobUpdate
+    AutomodelMergeJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: AutomodelMergeJobsListFilter
+      type: object
+    AutomodelMergeJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AutomodelMergeJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: AutomodelMergeJobsPage
+    AutomodelMergeJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: AutomodelMergeJobsSortField
+    AutomodelMergeSpec:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Base model entity the adapter was trained on ('name' or 'workspace/name').
+        adapter:
+          type: string
+          title: Adapter
+          description: LoRA adapter entity to merge ('name' or 'workspace/name').
+        output:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelOutputRequest'
+          description: The merged model entity; its fileset has the same name.
+        num_gpus:
+          type: integer
+          minimum: 1.0
+          title: Num Gpus
+          description: GPUs for the merge; a model too big for them spills to CPU.
+          default: 1
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      - adapter
+      - output
+      title: AutomodelMergeSpec
     AutomodelOptimizerSpec:
       properties:
         learning_rate:

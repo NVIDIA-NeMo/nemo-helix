@@ -9969,6 +9969,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 * `list-jobs`: List this plugin's jobs, newest first.
 * `automodel.jobs`: Automodel SFT, retrieval, and knowledge-distillation...
+* `automodel.merge`: Merge a LoRA adapter into its base model and register the...
 * `rl.jobs`: NeMo-RL DPO and GRPO training jobs on the platform...
 * `unsloth.jobs`: Unsloth SFT (LoRA / full / merged) training jobs on the...
 
@@ -10145,6 +10146,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
+* `merge`: Submit to a cluster.
 
 ##### nemo customization automodel explain
 
@@ -10163,6 +10165,44 @@ nemo customization automodel explain [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+##### nemo customization automodel merge
+
+Submit to a cluster.
+
+**Usage:**
+
+```shell
+nemo customization automodel merge [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--model`: Base model entity the adapter was trained on ('name' or 'workspace/name').
+* `--adapter`: LoRA adapter entity to merge ('name' or 'workspace/name').
+* `--output.name`: Override `output.name` in the spec.
+* `--output.description`: Override `output.description` in the spec.
+* `--num-gpus <INTEGER>`: GPUs for the merge; a model too big for them spills to CPU.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the AutomodelMergeSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
+​
 
 #### nemo customization rl
 
@@ -10389,7 +10429,7 @@ nemo customization unsloth explain [OPTIONS]
 
 #### nemo customization list-jobs
 
-List this plugin's jobs, newest first. Job types: automodel.jobs, rl.jobs, unsloth.jobs.
+List this plugin's jobs, newest first. Job types: automodel.jobs, automodel.merge, rl.jobs, unsloth.jobs.
 
 **Usage:**
 
@@ -10399,7 +10439,7 @@ nemo customization list-jobs [OPTIONS]
 
 **Options:**
 
-* `--type, -t TYPE`: Only list jobs of this type, one of: automodel.jobs, rl.jobs, unsloth.jobs. Repeat for several. Default: all.
+* `--type, -t TYPE`: Only list jobs of this type, one of: automodel.jobs, automodel.merge, rl.jobs, unsloth.jobs. Repeat for several. Default: all.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--sort <CHOICE>`: Sort field. Prefix with '-' for descending. Default: -created_at. [possible values: created_at, -created_at, updated_at, -updated_at]
 * `--page <INTEGER RANGE>`: Page number. Needs exactly one job type.
@@ -10557,6 +10597,66 @@ Show input/output schemas.
 
 ```shell
 nemo customization automodel.jobs explain [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo customization automodel.merge
+
+Merge a LoRA adapter into its base model and register the result as a new model.
+
+**Usage:**
+
+```shell
+nemo customization automodel.merge [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--model`: Base model entity the adapter was trained on ('name' or 'workspace/name').
+* `--adapter`: LoRA adapter entity to merge ('name' or 'workspace/name').
+* `--output.name`: Override `output.name` in the spec.
+* `--output.description`: Override `output.description` in the spec.
+* `--num-gpus <INTEGER>`: GPUs for the merge; a model too big for them spills to CPU.
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--output-location`: Existing fileset for the job's logs and results (in the submission workspace).
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the AutomodelMergeSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
+​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
+##### nemo customization automodel.merge explain
+
+Show input/output schemas.
+
+**Usage:**
+
+```shell
+nemo customization automodel.merge explain [OPTIONS]
 ```
 
 **Options:**

@@ -1777,9 +1777,7 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
     assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
     assert cfg["policy"]["generation"]["vllm_kwargs"]["skip_mm_profiling"] is True
     assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"] == [
-        "*vision_tower*",
-        "*vision_model*",
-        "*vision_projector*",
+        "*vision*",
         "*visual*",
         "*image_encoder*",
         "*multi_modal_projector*",
@@ -1804,7 +1802,7 @@ def test_grpo_vision_unions_a_caller_exclude_with_the_vision_patterns(
 
     exclude = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"]
 
-    assert exclude[0] == "*vision_tower*"
+    assert exclude[0] == "*vision*"
     assert exclude[-1] == "*.out_proj"
 
 
