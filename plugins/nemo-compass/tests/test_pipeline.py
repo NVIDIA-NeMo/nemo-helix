@@ -94,7 +94,7 @@ def test_omitted_insights_are_not_deleted():
 
 
 @pytest.mark.asyncio
-async def test_existing_insights_are_paginated_and_invalid_records_are_skipped(caplog):
+async def test_existing_insights_are_paginated_and_invalid_resolved_and_deleted_records_are_skipped(caplog):
     def row(id, **updates):
         return MagicMock(
             id=id,
@@ -112,10 +112,12 @@ async def test_existing_insights_are_paginated_and_invalid_records_are_skipped(c
     invalid.evidence = []
     resolved = row("resolved")
     resolved.status = InsightStatus.RESOLVED
+    deleted = row("deleted")
+    deleted.status = InsightStatus.DELETED
     backend = MagicMock()
     backend.list_insights = AsyncMock(
         side_effect=[
-            MagicMock(data=[row("first"), invalid, resolved], pagination=MagicMock(total_pages=2)),
+            MagicMock(data=[row("first"), invalid, resolved, deleted], pagination=MagicMock(total_pages=2)),
             MagicMock(data=[row("second")], pagination=MagicMock(total_pages=2)),
         ]
     )
