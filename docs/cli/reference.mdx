@@ -11200,7 +11200,7 @@ nemo experiments [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `create`: Create Experiment
-* `delete`: Delete Experiment
+* `delete`: Delete an experiment and evaluations with no remaining...
 * `list`: List Experiments
 * `get`: Get Experiment
 * `update`: Update Experiment
@@ -11259,7 +11259,12 @@ nemo experiments create [OPTIONS] [NAME]
 
 #### nemo experiments delete
 
-Delete Experiment
+Delete an experiment and evaluations with no remaining experiment membership.
+
+Cleans eligible complete sessions and all current traces and spans. Sessions
+shared with live or unresolved evaluations remain protected. Requires
+intake.sessions.delete (workspace Admin by default) and write scope.
+Annotations and evaluator results are retained; later ingestion can recreate telemetry.
 
 **Usage:**
 
@@ -11953,6 +11958,7 @@ nemo intake sessions [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `get`: Get Session
+* `delete`: Delete all current traces and spans in a session...
 
 ##### nemo intake sessions get
 
@@ -11971,6 +11977,40 @@ nemo intake sessions get [OPTIONS] ID
 **Options:**
 
 * `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo intake sessions delete
+
+Delete all current traces and spans in a session (workspace Admin required).
+
+Annotations and evaluator results are retained. Later ingestion can recreate
+telemetry. Live or unresolved evaluations protect the session from deletion.
+Pass `--yes` in scripts. After a storage failure, repeat the same command even
+if sessions get returns 404: the retry can repair unfinished index cleanup.
+
+Example: nemo intake sessions delete session-1 `--workspace` team-a `--yes`
+
+**Usage:**
+
+```shell
+nemo intake sessions delete [OPTIONS] ID
+```
+
+**Arguments:**
+
+* `<ID>`: Session whose entire current telemetry will be deleted.
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
