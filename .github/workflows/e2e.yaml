@@ -357,7 +357,7 @@ jobs:
           uv run --frozen pytest \
             e2e/test_evaluator_plugin.py \
             -v -rs \
-            -m gym_sandbox_e2e \
+            -m "gym_sandbox_e2e and not gym_docker_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-gym-sandbox-e2e.xml
