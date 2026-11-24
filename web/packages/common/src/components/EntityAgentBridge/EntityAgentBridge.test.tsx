@@ -42,6 +42,40 @@ describe('EntityAgentBridge', () => {
     expect(screen.getByTestId('entity-empty-state-help')).toHaveTextContent('<workspace>');
   });
 
+  it('resolves every <key> it is given params for, in both the prompt and the command', async () => {
+    wrap(
+      <EntityAgentBridge
+        entity="telemetrySpans"
+        workspace="my-workspace"
+        params={{ 'trace-id': 'trace-123' }}
+      />
+    );
+
+    const help = screen.getByTestId('entity-empty-state-help');
+    expect(help).toHaveTextContent('"trace-123"');
+    expect(help).toHaveTextContent('"my-workspace"');
+    expect(help).not.toHaveTextContent('<trace-id>');
+
+    await userEvent.click(screen.getByText('CLI'));
+    expect(help).toHaveTextContent(
+      "nemo intake spans list --filter.trace-id 'trace-123' --workspace my-workspace"
+    );
+  });
+
+  it('leaves a placeholder alone when its param is missing or empty', () => {
+    wrap(
+      <EntityAgentBridge
+        entity="agentMonitorRuns"
+        workspace="my-workspace"
+        params={{ 'agent-name': '', 'trace-id': 'unused' }}
+      />
+    );
+
+    const help = screen.getByTestId('entity-empty-state-help');
+    expect(help).toHaveTextContent('<agent-name>');
+    expect(help).toHaveTextContent('my-workspace');
+  });
+
   it('offers no toggle when the entity has only one of the two', () => {
     // `members` ships a CLI command and no skill prompt.
     wrap(<EntityAgentBridge entity="members" />);

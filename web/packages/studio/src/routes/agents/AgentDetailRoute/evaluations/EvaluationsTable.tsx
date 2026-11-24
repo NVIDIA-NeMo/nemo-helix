@@ -7,10 +7,8 @@ import {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
-import {
-  EntityEmptyState,
-  type EntityEmptyStateProps,
-} from '@nemo/common/src/components/EntityEmptyState';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
@@ -126,11 +124,6 @@ interface EvaluationsTableProps {
 }
 
 /** Every evaluation for the agent, ungrouped, from the moment its run is submitted. */
-/** Variant-specific `EntityEmptyState` props for the `agentEvaluations` entity, minus `entity`/`workspace`. */
-type AgentEvaluationsEmptyStateProps =
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
-
 export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   workspace,
   agentName,
@@ -407,19 +400,13 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             },
           },
           DataViewTableContent: {
-            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
-              const emptyStateProps: AgentEvaluationsEmptyStateProps =
-                hasFiltersApplied || hasSearchApplied
-                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
-                  : { variant: 'first-use' };
-              return (
-                <EntityEmptyState
-                  entity="agentEvaluations"
-                  workspace={workspace}
-                  {...emptyStateProps}
-                />
-              );
-            },
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="agentEvaluations"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
+              />
+            ),
           },
         }}
       />

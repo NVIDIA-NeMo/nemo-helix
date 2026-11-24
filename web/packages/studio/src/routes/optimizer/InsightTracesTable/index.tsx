@@ -95,7 +95,9 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
             requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
           },
           DataViewTableContent: {
-            renderEmptyState: () => <EntityEmptyState entity="insightTraces" variant="first-use" />,
+            renderEmptyState: () => (
+              <EntityEmptyState entity="insightTraces" variant="first-use" workspace={workspace} />
+            ),
             renderErrorState: () => (
               <ErrorPanel
                 errorMessage={getErrorMessage(error ?? new Error('Failed to load traces'))}

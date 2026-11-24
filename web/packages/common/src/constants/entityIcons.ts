@@ -75,6 +75,8 @@ export const ENTITY_ICONS = {
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
   dataDesignerJobs: LayoutList,
+  // A job's output is read as part of the job, so it takes the job's glyph.
+  dataDesignerJobOutput: LayoutList,
   safeSynthesizerJobs: Generate,
 
   // Governance. A config and its tests are one thing to the user, so the tests

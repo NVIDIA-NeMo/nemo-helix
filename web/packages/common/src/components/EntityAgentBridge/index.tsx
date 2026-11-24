@@ -14,10 +14,19 @@ import {
 } from '@nvidia/foundations-react-core';
 import { type FC, useState } from 'react';
 
-const WORKSPACE_PLACEHOLDER = '<workspace>';
-
-const resolveWorkspace = (text: string | undefined, workspace: string | undefined) =>
-  text && workspace ? text.replaceAll(WORKSPACE_PLACEHOLDER, workspace) : text;
+/**
+ * Fills each `<key>` placeholder whose value is known. Unknown or empty values
+ * leave their placeholder in place, so the reader still sees what to supply.
+ */
+const resolvePlaceholders = (
+  text: string | undefined,
+  values: Readonly<Record<string, string | undefined>>
+) =>
+  text &&
+  Object.entries(values).reduce(
+    (resolved, [key, value]) => (value ? resolved.replaceAll(`<${key}>`, value) : resolved),
+    text
+  );
 
 /** Which self-service snippet is showing. */
 type HelpKind = 'cli' | 'agent';
@@ -26,6 +35,11 @@ export interface EntityAgentBridgeProps {
   entity: EmptyStateEntityKey;
   /** Resolves `<workspace>` in the CLI command and skill prompt. Omitted leaves the placeholder. */
   workspace?: string;
+  /**
+   * Resolves any other `<key>` the page already knows, e.g. `{ 'trace-id': traceId }`, so a
+   * pasted command runs as-is. Keys left out (or empty) keep their placeholder.
+   */
+  params?: Readonly<Record<string, string | undefined>>;
   className?: string;
 }
 
@@ -42,11 +56,17 @@ export interface EntityAgentBridgeProps {
  * separately for the surfaces an empty state cannot cover — a bespoke guidance
  * panel whose own actions exceed the empty-state footer rule, for one.
  */
-export const EntityAgentBridge: FC<EntityAgentBridgeProps> = ({ entity, workspace, className }) => {
+export const EntityAgentBridge: FC<EntityAgentBridgeProps> = ({
+  entity,
+  workspace,
+  params,
+  className,
+}) => {
   const toast = useToast();
   const descriptor = ENTITY_EMPTY_STATES[entity];
-  const cliCommand = resolveWorkspace(descriptor.cliCommand, workspace);
-  const skillPrompt = resolveWorkspace(descriptor.skillPrompt, workspace);
+  const values = { ...params, workspace };
+  const cliCommand = resolvePlaceholders(descriptor.cliCommand, values);
+  const skillPrompt = resolvePlaceholders(descriptor.skillPrompt, values);
   const defaultKind: HelpKind = skillPrompt ? 'agent' : 'cli';
 
   // `kind` should track the current descriptor's default unless the user has picked a value for

@@ -6,10 +6,8 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import {
-  EntityEmptyState,
-  type EntityEmptyStateProps,
-} from '@nemo/common/src/components/EntityEmptyState';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
@@ -30,11 +28,6 @@ interface ExperimentsTableProps {
 
 /** The agent's evaluations rolled up by the experiment they belong to. Selecting one opens the
  *  experiment's own route, which already lists the evaluations under it. */
-/** Variant-specific `EntityEmptyState` props for the `experiments` entity, minus `entity`/`workspace`. */
-type AgentExperimentsEmptyStateProps =
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
-
 export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experiments }) => {
   const openRow = useRowNavigation();
   const queryClient = useQueryClient();
@@ -125,15 +118,13 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
         attributes={{
           DataViewRoot: { data: pageRows, totalCount: experiments.length },
           DataViewTableContent: {
-            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
-              const emptyStateProps: AgentExperimentsEmptyStateProps =
-                hasFiltersApplied || hasSearchApplied
-                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
-                  : { variant: 'first-use' };
-              return (
-                <EntityEmptyState entity="experiments" workspace={workspace} {...emptyStateProps} />
-              );
-            },
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="experiments"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
+              />
+            ),
           },
         }}
       />

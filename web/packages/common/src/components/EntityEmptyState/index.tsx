@@ -16,6 +16,8 @@ export interface EntityEmptyStateBaseProps {
   className?: string;
   /** Resolves `<workspace>` in the CLI command and skill prompt. Omitted leaves the placeholder. */
   workspace?: string;
+  /** Resolves any other `<key>` placeholder the page knows. See {@link EntityAgentBridge}. */
+  params?: Readonly<Record<string, string | undefined>>;
 }
 
 export type EntityEmptyStateProps = EntityEmptyStateBaseProps &
@@ -50,6 +52,7 @@ export const EntityEmptyState: FC<EntityEmptyStateProps> = ({
   onClearFilters,
   className,
   workspace,
+  params,
 }) => {
   const descriptor = ENTITY_EMPTY_STATES[entity];
   const navigate = useNavigate();
@@ -104,7 +107,12 @@ export const EntityEmptyState: FC<EntityEmptyStateProps> = ({
               Or use a coding agent or the CLI:
             </Text>
           ) : null}
-          <EntityAgentBridge entity={entity} workspace={workspace} className="mt-density-lg" />
+          <EntityAgentBridge
+            entity={entity}
+            workspace={workspace}
+            params={params}
+            className="mt-density-lg"
+          />
         </div>
       )}
     </Centered>

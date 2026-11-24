@@ -171,6 +171,12 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     skillPrompt:
       'Help me create my first synthetic dataset with the nemo-data-designer-plugin skill',
   },
+  // A job writes its own output fileset, so there is nothing for the user to
+  // upload or run here — no create action, CLI command, or skill prompt.
+  dataDesignerJobOutput: {
+    heading: 'No output files yet',
+    subheading: 'This job has not written any files, or they are not visible yet.',
+  },
   safeSynthesizerJobs: {
     heading: 'No Safe Synthesizer jobs yet',
     subheading: 'Generate a private version of a sensitive tabular dataset.',

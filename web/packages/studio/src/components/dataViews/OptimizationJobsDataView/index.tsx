@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import {
-  EntityEmptyState,
-  type EntityEmptyStateProps,
-} from '@nemo/common/src/components/EntityEmptyState';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { TrialTextModal } from '@studio/components/dataViews/OptimizationJobsDataView/TrialTextModal';
 import { useTrialColumns } from '@studio/components/dataViews/OptimizationJobsDataView/useTrialColumns';
@@ -109,11 +107,6 @@ export interface TrialsDataViewProps {
   onDeploy?: (trial: Trial) => void;
 }
 
-/** Variant-specific `EntityEmptyState` props for the `optimizationTrials` entity, minus `entity`/`workspace`. */
-type OptimizationTrialsEmptyStateProps =
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'first-use' }>, 'entity' | 'workspace'>
-  | Omit<Extract<EntityEmptyStateProps, { variant: 'no-results' }>, 'entity' | 'workspace'>;
-
 export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy }) => {
   const workspace = useWorkspaceFromPath();
   const { trials, metricNames } = results;
@@ -189,19 +182,13 @@ export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy
             totalCount: processedTrials.length,
           },
           DataViewTableContent: {
-            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) => {
-              const emptyStateProps: OptimizationTrialsEmptyStateProps =
-                hasFiltersApplied || hasSearchApplied
-                  ? { variant: 'no-results', onClearFilters: dataViewState.resetFilters }
-                  : { variant: 'first-use' };
-              return (
-                <EntityEmptyState
-                  entity="optimizationTrials"
-                  workspace={workspace}
-                  {...emptyStateProps}
-                />
-              );
-            },
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="optimizationTrials"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
+              />
+            ),
           },
         }}
       />

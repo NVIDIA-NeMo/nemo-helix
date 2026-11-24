@@ -94,13 +94,16 @@ Field rules:
 ### 2. Wire the callsite
 
 **DataView** (`StudioDataView` / any `DataView` table) — route
-`renderEmptyState` through the shared component so the variant is derived:
+`renderEmptyState` through the shared component, and let
+`getDataViewEmptyStateVariant` pick the variant (and wire the clear action)
+rather than repeating the ternary:
 
 ```tsx
-renderEmptyState={({ hasFiltersApplied, hasSearchApplied }) => (
+renderEmptyState={(state) => (
   <EntityEmptyState
     entity="filesets"
-    variant={hasFiltersApplied || hasSearchApplied ? 'no-results' : 'first-use'}
+    workspace={workspace}
+    {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
   />
 )}
 renderErrorState={() => (
@@ -143,6 +146,20 @@ It renders `null` when the entity has neither a `cliCommand` nor a
 `skillPrompt`, so mount it unconditionally rather than re-reading the registry
 at the callsite to decide. Pass `workspace` wherever one is in scope — without
 it the snippet hands the reader a literal `<workspace>` to fix up by hand.
+
+The same goes for any other placeholder the page already knows. Both
+`EntityAgentBridge` and `EntityEmptyState` take `params`, which fill in each
+`<key>` they name. A key that is missing or empty keeps its placeholder, so
+pass a value only when the page is genuinely scoped to one thing:
+
+```tsx
+<EntityEmptyState
+  entity="agentOptimizations"
+  variant="first-use"
+  workspace={workspace}
+  params={{ 'agent-name': agentName }}
+/>
+```
 
 ### When a bespoke panel is allowed
 
@@ -196,7 +213,8 @@ first", it is one of the rows above.
 
 - `pnpm --filter @nemo/common test` — the `EntityEmptyState` unit tests cover
   the `first-use` and `no-results` variants, and `EntityAgentBridge`'s cover the
-  CLI/prompt toggle, `<workspace>` resolution, and the render-nothing case.
+  CLI/prompt toggle, `<workspace>` and `params` resolution, and the render-nothing
+  case.
   Add a case if you introduced a new descriptor shape or affordance, not for a
   plain new entry.
 - `pnpm --filter nemo-studio-ui test` for migrated studio callsites.
