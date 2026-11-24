@@ -482,12 +482,12 @@ class TestListAgents:
         ("query", "expected"),
         [
             (
-                "filter[labels.helix-agents/managed-by]=insights",
-                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+                "filter[labels.acme/owner]=insights",
+                {"data.labels.acme/owner": {"$eq": "insights"}},
             ),
             (
-                "filter[labels][helix-agents/managed-by]=insights",
-                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+                "filter[labels][acme/owner]=insights",
+                {"data.labels.acme/owner": {"$eq": "insights"}},
             ),
             ("filter[labels.team][$in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
             ("filter[labels][team][in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
@@ -545,7 +545,7 @@ class TestListAgents:
 
 class TestAgentLabels:
     def test_register_stores_labels(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        labels = {"helix-compass/target-agent": "default/support-bot", "team": "search"}
+        labels = {"acme/target": "default/support-bot", "team": "search"}
         saved = _make_agent("calc")
         saved.labels = labels
         mock_entity_client.create = AsyncMock(return_value=saved)

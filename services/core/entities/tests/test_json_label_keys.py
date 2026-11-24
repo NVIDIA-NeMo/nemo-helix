@@ -43,27 +43,25 @@ async def test_label_key_with_prefix_and_dashes_matches(repository):
         workspace="default",
         entity_type="agent",
         name="analyst",
-        data={"labels": {"helix-compass/target-agent": "default/support-bot"}},
+        data={"labels": {"acme/target": "default/support-bot"}},
     )
     await repository.create_entity(
         workspace="default",
         entity_type="agent",
         name="other-analyst",
-        data={"labels": {"helix-compass/target-agent": "default/other-bot"}},
+        data={"labels": {"acme/target": "default/other-bot"}},
     )
     await repository.create_entity(workspace="default", entity_type="agent", name="unlabeled", data={})
 
     assert await _names(
         repository,
-        ComparisonOperation(
-            operator=FilterOperator.EQ, field="data.labels.helix-compass/target-agent", value="default/support-bot"
-        ),
+        ComparisonOperation(operator=FilterOperator.EQ, field="data.labels.acme/target", value="default/support-bot"),
     ) == {"analyst"}
     assert await _names(
         repository,
         ComparisonOperation(
             operator=FilterOperator.IN,
-            field="data.labels.helix-compass/target-agent",
+            field="data.labels.acme/target",
             value=["default/support-bot", "default/other-bot"],
         ),
     ) == {"analyst", "other-analyst"}
