@@ -21,6 +21,7 @@ from nemo_agent_hardener_plugin.filesets import upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
+from nemo_agent_hardener_plugin.jobs.victim_context import AgentHardenerVictimContextJob
 from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
 from nemo_helix_plugin.agent_hardener.types import (
     AGENT_HARDENER_MANIFEST_TYPE,
@@ -32,6 +33,7 @@ from nemo_helix_plugin.agent_hardener.types import (
     ManifestUpdate,
     SynthBenignSpec,
     ValidateModelRequest,
+    VictimContextSpec,
     WarGameModels,
     WarGameSpec,
 )
@@ -341,6 +343,22 @@ class AgentHardenerPluginResource:
             env_file=env_file,
             interview=interview,
             workspace=workspace or "default",
+        )
+
+    def stage_victim_context(self, *, manifest_id: str, workspace: str | None = None) -> JsonMap:
+        """Stage a saved manifest's victim build context on this host and return the job result.
+
+        Needs the agent-hardener venv (``nemo agent-hardener setup``) but no Docker or OpenShell. On success,
+        ``context_archive`` is a ``.tar.gz`` that ``docker build -t <ref> - < archive`` builds directly.
+        """
+        spec: dict[str, JsonValue] = {"manifest_id": manifest_id}
+        VictimContextSpec.model_validate(spec)
+        return _to_json_map(
+            AgentHardenerVictimContextJob().run(
+                spec,
+                ctx=_local_job_context(workspace=workspace or "default", job_name=AgentHardenerVictimContextJob.name),
+                sdk=self._platform,
+            )
         )
 
     def submit(

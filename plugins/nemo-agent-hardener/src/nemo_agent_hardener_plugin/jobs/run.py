@@ -208,7 +208,14 @@ class AgentHardenerRunJob(NemoJob):
         """
         war_game = WarGameSpec.model_validate(spec)
         executor, environment = await _common.task_step_executor(
-            "nemo_agent_hardener_plugin.tasks.war_game", step="war-game", profile=profile, async_sdk=async_sdk
+            _common.WAR_GAME_TASK, step="war-game", profile=profile, async_sdk=async_sdk
+        )
+        await _common.require_victim_image(
+            executor,
+            step="war-game",
+            workspace=workspace,
+            manifest_id=war_game.manifest_id,
+            entity_client=cast(NemoEntitiesClient, entity_client),
         )
 
         # Pre-create the run record now (a Studio war-game submits a manifest_id + service driver) so the UI

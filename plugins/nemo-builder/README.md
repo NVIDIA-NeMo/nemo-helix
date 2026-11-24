@@ -611,8 +611,9 @@ job's first attempt, the one that runs the request as the builder compiled it. T
 writes each of its rows that is still `pending` once more, with both, as `provenance.job_uid` and
 `provenance.job_attempt_id`. They come only from that answer, never from a job found under the
 build's name: whatever such a job says of itself, its creator wrote. A row that can't be written
-again is named in the API log, and the submit still answers `201` (see
-[Reliability](#reliability)).
+again is named in the API log, and the submit still answers `201`, with that row as it was: for
+a row it has just created, `pending` and with neither field. No later submit records that job
+on the row (see [Reliability](#reliability)).
 
 Completing such a row records what its caller sends, and the builder can check none of it against
 the build service. What stands for it is who is calling, so who may complete the row goes by how
@@ -627,7 +628,10 @@ the platform authenticates a caller:
   names no workload, as a platform service acting for the submitter; one the platform has no
   job step on record for; a step of another job; or a step of another run of the build's job.
   A row that records no attempt yet is answered `503`, which the step waits out for up to five
-  minutes: the submit that created the job may still be writing it.
+  minutes: the submit that created the job may still be writing it. A row that records an
+  earlier job of the request, deleted since, is not waited for: a step of the job a resubmit
+  created is answered `403` until that submit has written its job on the row, as a step of any
+  other run is (see [Reliability](#reliability)).
 - **Platform auth on, without workload token exchange.** The platform takes a request's identity
   from headers that anything able to reach its API can set. Nothing then shows who is calling,
   and there is no secret the builder could hand a step that such a caller couldn't read. So
@@ -775,14 +779,15 @@ What differs for a caller:
   submit, and their completions are answered `403`. To build again, submit the next revision.
 - A `ready` row doesn't show that its own build made the image it names, nor whose image that is,
   nor that the image starts as the row says: see [Security](#security).
-- A build that starts while the service is unreachable is tried again for up to ten minutes, less
-  if its timeout is sooner, and one already running is waited on until its timeout. A longer outage fails each queued build as it
+- An upload or a start that fails while the service is unreachable is tried again for up to ten
+  minutes each, less if the build's timeout is sooner, and a build already running is waited on until its timeout. A longer outage fails each queued build as it
   reaches a slot.
 
 What an operator sets up:
 
 - The step image. Its program is a few lines around `run/remote.py`'s `step_main`, which takes a
-  factory for a `RemoteBuildService`: three methods, `start`, `status` and `cancel`, and three error
+  factory for a `RemoteBuildService`: four methods, `upload_context`, then `start`, then
+  `status` until the build ends, and `cancel` when the driver gives a build up, and three error
   types that tell the driver whether to repeat a call, wait, or fail the image. The driver does the
   rest: the context, the deadline, polling, cancelling when the job is told to stop, and completing
   rows. A client that can read the published image's config reports how the image starts, with
@@ -790,12 +795,14 @@ What an operator sets up:
   completion: the driver reads nothing from the registry itself. `start` must give the service
   the build's time limit (`RemoteBuild.timeout_seconds`) as the build's own deadline, wherever the
   service takes one: nothing else ends the build of a step that is killed (see
-  [Reliability](#reliability)). Each of the three calls must bound its own time: the driver can't
+  [Reliability](#reliability)). Each of the four calls must bound its own time: the driver can't
   interrupt one, and a pod has about 30 seconds from the stop signal to cancel its build. `cancel`
   must be safe to repeat, and must return normally for a build that has already ended: the driver
   asks up to three times, and takes any error to mean the build may still be running.
-  The client is handed the build context as a directory (`RemoteBuild.context`), all of it. Before
-  anything leaves the step, it must apply the ignore file at the context's root
+  The client is handed the build context as a directory in `upload_context` (`RemoteContext.path`),
+  all of it, and returns the service's reference to the upload, which the driver hands `start` as
+  `RemoteBuild.context`. Both calls must be safe to repeat with one key: a repeated upload keeps
+  the first. Before anything leaves the step, it must apply the ignore file at the context's root
   (`Dockerfile.dockerignore`, or else `.dockerignore`), which the driver leaves there as a regular
   file: rules applied only by the service come too late for a file that must not leave the
   cluster. The Dockerfile and that ignore file are sent whatever the rules say, as a container
@@ -890,10 +897,12 @@ What an operator sets up:
   that record is as sure as the namespace is closed. So the remote-build profile must name a
   namespace where no other workload and no user may create pods. Never the build namespace
   while the in-cluster build's profiles are deployed: its `build-control` step may create pods
-  there (see [Security](#security)). A submit is refused while the remote-build profile has
-  the same `namespace` setting as the `control_profile` that Jobs lists. The two are compared as
-  written, so one left unset matches only another left unset. The builder can't see what else may
-  create pods where the step runs.
+  there (see [Security](#security)). While Jobs lists the `control_profile`, a submit is refused
+  unless both profiles name a `namespace` and the two differ. A profile that names none, or an
+  empty one, runs its steps in the namespace of Jobs' own controller, which the builder can't
+  read: two such profiles share that namespace, and one may share the namespace the other
+  names, so either is refused. The builder can't see what else may create pods where the step
+  runs.
 
 A deployment that can't run the step refuses every submit with `409` and says what is missing or
 wrong: the registry or repository, the profile, a profile on a Jobs backend other than
@@ -903,8 +912,9 @@ refuses a platform that can't show who completes an image. One with platform aut
 token exchange off, unless `allow_unverified_completion` is set: the answer names the setting and
 what turning it on accepts. One with platform auth on whose settings for token exchange can't be
 read, whatever that setting is: `complete` admits no one there, since the platform may be
-verifying its workloads. And one with platform auth and workload token exchange on whose
-remote-build profile has the same `namespace` setting as the in-cluster build step's profile.
+verifying its workloads. And one with platform auth and workload token exchange on, while Jobs
+lists the in-cluster build step's profile, unless that profile and the remote-build profile each
+name a `namespace` and the two differ.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
 under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
@@ -985,8 +995,11 @@ the row keeps the first, and a caller told `200` would take it for its own. An i
 cluster is held only to what its row records of that. A row an earlier builder completed records
 no `runtime_config`, or none of the image's `user`, and a push step whose completion is repeated
 across the upgrade sends both, for an image that is published; its image's config is fixed by the
-digest either way. An image the `remote` backend built is held to all of it, none included: its
-one step sends the same on every try.
+digest either way. For the same reason a completion that carries no `runtime_config`, as a client
+that sends only the digest does, or a push step that couldn't read the image's config, is held to
+nothing: it says nothing the row could differ from, and is returned the row with what it records.
+An image the `remote` backend built is held to all of it, none included: its one step sends the
+same on every try.
 
 The builder doesn't read the registry: it
 records the digest the push step names. It writes the row it checked its caller against, by the
@@ -1005,7 +1018,7 @@ than the image is `ready` with; and for an image built in this cluster, if the c
 | `200` | The image is `ready` as the request would have written it, now or already. |
 | `403` | The caller lacks the permission, or doesn't act for the image's submitter. Or, for an image the `remote` backend built, the caller isn't shown to be a step of the attempt the image's row records. Under workload token exchange: its token names no workload, the platform has no job step on record for it, or it is a step of another job or of another run of the build's job. With platform auth on and no exchange: the deployment doesn't set `allow_unverified_completion`. |
 | `404` | No such image: none of that name, or the one the caller was checked against was deleted before it was written. |
-| `409` | The image has already settled: `failed`, or `ready` at another digest, or `ready` with another `runtime_config` than the request carries (for an image this cluster built, another than its row records). Or the request carries `external` for an image this cluster builds. Or, for an image the `remote` backend built, the request names no build (`external.build_id`), or carries another `external` than the image is `ready` with. Or another row took the image's name while it was being completed. |
+| `409` | The image has already settled: `failed`, or `ready` at another digest, or `ready` with another `runtime_config` than the request carries (for an image this cluster built: only when the request carries one, and it is another than the row records). Or the request carries `external` for an image this cluster builds. Or, for an image the `remote` backend built, the request names no build (`external.build_id`), or carries another `external` than the image is `ready` with. Or another row took the image's name while it was being completed. |
 | `422` | The body failed validation: `digest` isn't a sha256 digest, or a field is unknown, a key inside `external` included. |
 | `503` | For an image the `remote` backend built: its row doesn't yet record the job its submit created, or the platform's record of the caller's workload, or the deployment's settings, couldn't be read. Nothing was written. The step tries again, for up to five minutes. |
 
@@ -1218,15 +1231,31 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   exchange.** A submit writes its rows, creates the job, then writes on each row the job it
   created. If that last write fails, or the submit dies before it, the job still builds. Under
   workload token exchange, its step's completion is answered `503` until the step gives up, five
-  minutes on, and the row is failed once the job has ended. Where no caller is verified, the
-  step completes the row all the same. In any mode, submitting the same request again while
-  that job exists and a row is still `pending` is answered `409`, and leaves the row as it is:
-  nothing tells the job from one that another submit is about to record. Once the rows have
-  settled, the same request returns them, and the next `revision` builds again. The same holds
-  for a row a builder wrote before rows recorded their job. It holds too for a row left
-  recording an earlier job, when the build's job was deleted, the same request created
-  another, and that submit's write failed, except that the new job's step is answered `403`
-  at once.
+  minutes on, and the row is failed once the job has ended. That comes after the build: before
+  it starts, the step reads only that its row is `pending`. So the service builds and publishes
+  an image that no row then names, and the row stays `pending` for at least the build's time
+  and five minutes more. Where Jobs kept the step's line, its `status_detail` then says
+  `it was built, but the builder could not be told`. Where no caller is verified, the step
+  completes the row all the same. In any mode, submitting the same request again while that
+  job exists and a row is still `pending` is answered `409`, and leaves the row as it is:
+  nothing tells the job from one that another submit is about to record. Nothing restores the
+  record later either: the job's ID and attempt come only from Jobs' answer to the create,
+  which that submit alone held, and a job found under the name afterwards can't be told from
+  one that someone else put there. Once the rows have settled, the same request returns them,
+  and the next `revision` builds again. The API log names each row that was not written, and
+  the submit's answer shows it: a `pending` row with no `provenance.job_uid`, or with an
+  earlier job's. Read such a row once more, since a write whose answer was lost may have been
+  made. If it still does not record the job, and the platform uses workload token exchange,
+  cancel the job rather than wait for it: its step asks the service to stop the build, the row
+  is failed once the job has ended, and the next `revision` builds. The same holds for a row a
+  builder wrote before rows recorded their job. It holds too for a row left recording an
+  earlier job, when the build's job was deleted, the same request created another, and that
+  submit's write failed, except that the new job's step is answered `403` at once. So is a
+  step of the new job that asks before that write is made: the platform's record of a step
+  names its job by name, so nothing tells it from a rerun of the earlier job, or from a step
+  of another job put under the name, and neither of those is kept waiting. A submit writes its
+  job on its rows as soon as Jobs has answered its create, so a step meets this only where
+  that write takes longer than the step's whole build.
 - **With `backend: remote`, a build context with links is held to an archive's limits with
   those links followed, and the step carries no context past them.** A context with links that
   comes to more than 4 GiB or 100,000 entries with them followed fails its image, however
@@ -1365,8 +1394,10 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   wherever a record carries one, which the platform's doesn't yet. That record is the
   platform's word about a pod in the step's namespace, and it is as sure as that namespace is
   closed: whatever else can create a pod where the step runs is inside what the check trusts.
-  The builder refuses a remote-build profile with the same `namespace` setting as the in-cluster
-  build step's profile, whose steps may create pods there, and can see no further: the step must run
+  The builder refuses a remote-build profile that names the same `namespace` as the in-cluster
+  build step's profile, whose steps may create pods there, and one it can't tell apart from that
+  profile: where either names no namespace, Jobs runs its steps in the namespace of its own
+  controller, which the builder can't read. It can see no further: the step must run
   in a namespace where nothing but Jobs can create a pod. And the step is taken at its word:
   the check shows which step is calling, not that the digest it sends is the image the
   service built, so a row is worth what the deployment's step image and its client are.

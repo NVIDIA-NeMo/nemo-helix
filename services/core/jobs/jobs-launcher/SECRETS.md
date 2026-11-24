@@ -13,6 +13,8 @@ The feature uses three environment variables:
 2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
 3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
 
+The launcher uses configured workload credentials, an access-token file, or the creator in `NHX_PRINCIPAL`. If none is configured, it sends an anonymous request without auth discovery; the Secrets API enforces the platform's authentication and permission settings. Anonymous requests support internal HTTP service URLs. URL-embedded credentials are rejected for anonymous Secret requests. A configured credential that fails is an error, and a failed Secret request prevents the subprocess from starting.
+
 ## Usage Example
 
 ```bash
