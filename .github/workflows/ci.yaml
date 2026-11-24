@@ -1411,7 +1411,7 @@ jobs:
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests
+    name: Web tests (${{ matrix.shard }}/4)
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1419,6 +1419,10 @@ jobs:
         needs.changes.outputs.web-studio == 'true'
       )
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: web
@@ -1435,7 +1439,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Test changed packages
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
+          filters=(--recursive)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.base_ref }}" --depth=1
             filters=(--filter="...[origin/${{ github.base_ref }}]")
@@ -1444,9 +1451,14 @@ jobs:
             if [ "${{ needs.changes.outputs.customizer-skill-references }}" = "true" ]; then
               filters+=(--filter=nemo-studio-ui)
             fi
-            pnpm "${filters[@]}" run --parallel --if-present test:ci
+          fi
+          if [ "${SHARD}" = 1 ]; then
+            pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
+          fi
+          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
           else
-            pnpm run --recursive --parallel --if-present test:ci
+            echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
 
   web-static:

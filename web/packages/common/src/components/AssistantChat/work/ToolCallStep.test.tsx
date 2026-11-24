@@ -74,6 +74,39 @@ describe('ToolCallStep', () => {
     expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
   });
 
+  it.each([
+    {
+      args: { query: 'kaizen ui' },
+      expectedText: 'Searched web kaizen ui',
+      toolName: 'web_search',
+    },
+    {
+      args: { query: 'kaizen ui' },
+      expectedText: 'Searched web kaizen ui',
+      toolName: 'search-web',
+    },
+    {
+      args: { query: 'kaizen ui' },
+      expectedText: 'Searched web kaizen ui',
+      toolName: 'mcp__browser__web_search',
+    },
+    { args: { path: 'src/App.tsx' }, expectedText: 'Read App.tsx', toolName: 'read_file' },
+    { args: { path: 'src' }, expectedText: 'Listed directory src', toolName: 'list_directory' },
+  ])('matches $toolName to its built-in tool step', async ({ args, expectedText, toolName }) => {
+    await renderStep({ args, toolName });
+
+    expect(getStepTitle()).toBe(expectedText);
+  });
+
+  it('renders an aliased write tool as a file change', async () => {
+    await renderStep({
+      args: { content: 'hello\n', path: 'notes/todo.md' },
+      toolName: 'mcp__filesystem__write_file',
+    });
+
+    expect(screen.getByTestId('assistant-work-file-edit')).toHaveTextContent('Wrote todo.md');
+  });
+
   it('renders an unknown tool as a Used step with its arguments and result', async () => {
     await renderStep({ args: { query: 'symbols' }, result: { matches: 3 }, toolName: 'Inspect' });
 

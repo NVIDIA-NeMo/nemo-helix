@@ -13,6 +13,7 @@ export const ASSISTANT_THINKING_TOOL_NAME = 'AssistantThinking';
 export const ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME = 'AssistantCollapsedStudioDetails';
 export const ASSISTANT_SUBTLE_TOOL_GROUP_NAME = 'AssistantSubtleToolGroup';
 export const ASSISTANT_WORK_DETAILS_LABEL = 'Work details';
+export const ASSISTANT_UNKNOWN_WORK_DURATION_LABEL = 'worked for unknown';
 
 export const ASSISTANT_JOB_PROGRESS_TOOL_NAME = 'job_progress';
 export const ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME = 'mcp__nemo_studio__job_progress';

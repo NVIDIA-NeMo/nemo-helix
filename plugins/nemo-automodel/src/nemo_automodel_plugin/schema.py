@@ -14,6 +14,7 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.schema import (
     LearningRateDefault,
     NamespacedModel,
@@ -31,6 +32,7 @@ __all__ = [
     "DatasetSpec",
     "DeploymentParams",
     "ExportSpec",
+    "ImageSize",
     "LoRAParams",
     "MTPSpec",
     "OptimizerSpec",
@@ -119,13 +121,21 @@ class ExportSpec(AutomodelSchema):
     attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
         default="eager", description="Attention backend for tracing. The exporter cannot trace SDPA/GQA."
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg", description="Embedding pooling. Ignored for cross_encoder."
-    )
-    normalize: bool = Field(default=True, description="L2-normalize embeddings. Ignored for cross_encoder.")
     dimensions: bool = Field(
         default=False, description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings."
     )
+
+
+# Removed so the ONNX graph can't pool differently from how the model trained; retrieval.pooling sets both.
+_REMOVED_EXPORT_FIELDS = ("pooling", "normalize")
+
+
+def _removed_export_fields(data: object) -> list[str]:
+    """The removed ``training.retrieval.export`` fields present in a raw job spec."""
+    training = data.get("training") if isinstance(data, dict) else None
+    retrieval = training.get("retrieval") if isinstance(training, dict) else None
+    export = retrieval.get("export") if isinstance(retrieval, dict) else None
+    return [field for field in _REMOVED_EXPORT_FIELDS if isinstance(export, dict) and field in export]
 
 
 class RetrievalSpec(AutomodelSchema):
@@ -139,6 +149,23 @@ class RetrievalSpec(AutomodelSchema):
         description=(
             "Score each query against every passage in the global batch rather than only its own "
             "train_n_passages. Ignored for cross_encoder."
+        ),
+    )
+    pooling: Literal["avg", "cls", "last"] | None = Field(
+        default=None,
+        description=(
+            "How a bi_encoder turns its token vectors into one embedding: 'avg' (mean of all tokens), "
+            "'cls' (first token), or 'last' (last token). Omit to keep the pooling the base checkpoint was "
+            "pretrained with: its Sentence Transformers files, else its config's 'pooling', else 'avg'. "
+            "Ignored for cross_encoder."
+        ),
+    )
+    normalize: bool | None = Field(
+        default=None,
+        description=(
+            "Scale bi_encoder embeddings to unit length, so a dot product equals cosine similarity. Omit to keep "
+            "the base checkpoint's choice: normalize unless its Sentence Transformers files leave out Normalize. "
+            "Ignored for cross_encoder."
         ),
     )
     query_max_length: int = Field(default=512, ge=1)
@@ -261,6 +288,29 @@ class PipelineSpec(AutomodelSchema):
     )
 
 
+class ImageSize(AutomodelSchema):
+    """Pixel-area bounds passed to the vision processor as ``size``.
+
+    Both edges are required. ``longest_edge`` is the maximum pixel count and matches ``max_pixels``.
+    """
+
+    longest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.",
+    )
+    shortest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.",
+    )
+
+    @model_validator(mode="after")
+    def _has_both_edges(self) -> Self:
+        check_image_size_edges(self.longest_edge, self.shortest_edge)
+        return self
+
+
 class TrainingSpec(AutomodelSchema):
     model_config = AutomodelSchema.model_config | {"populate_by_name": True}
 
@@ -275,6 +325,22 @@ class TrainingSpec(AutomodelSchema):
     finetuning_type: Literal["lora", "all_weights", "lora_merged"] = "lora"
     lora: LoRAParams | None = None
     max_seq_length: int = Field(default=2048, gt=0)
+    max_pixels: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not "
+            "pass this name to transformers. Unset keeps the checkpoint ceiling. Rejected for text checkpoints."
+        ),
+    )
+    image_size: ImageSize | None = Field(
+        default=None,
+        description=(
+            "Pixel-area bounds for a vision-language processor, as size.longest_edge and size.shortest_edge. "
+            "Both edges are required, and shortest_edge must be less than longest_edge. Set this or max_pixels, "
+            "not both. Rejected for text checkpoints."
+        ),
+    )
     precision: Literal["bf16", "fp16", "fp32", "fp8"] | None = Field(
         default=None,
         description="Model precision for training. Auto-detected from the checkpoint when unset.",
@@ -336,6 +402,7 @@ class TrainingSpec(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
+        check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
         return self
 
 
@@ -482,6 +549,11 @@ class AutomodelJobInput(AutomodelSchema):
     def reject_legacy_fields(cls, data: object) -> object:
         if isinstance(data, dict) and "output_model" in data:
             raise ValueError("spec.output_model was removed. Use spec.output instead.")
+        if _removed_export_fields(data):
+            raise ValueError(
+                "training.retrieval.export.pooling and export.normalize were removed: the ONNX graph pools the way "
+                "the model trained. Set training.retrieval.pooling and training.retrieval.normalize instead."
+            )
         return data
 
     def trains_standalone_lora_adapter(self) -> bool:
@@ -569,13 +641,20 @@ class AutomodelJobOutput(AutomodelSchema):
     @model_validator(mode="before")
     @classmethod
     def drop_legacy_fields(cls, data: object) -> object:
-        """Drop ``dataset.validation`` from jobs stored before it was removed, so they still render.
+        """Drop fields from jobs stored before they were removed, so those jobs still render.
 
-        :class:`AutomodelJobInput` still rejects it: the dataset fileset holds the validation files.
+        :class:`AutomodelJobInput` still rejects them: ``dataset.validation`` (the dataset fileset holds
+        the validation files) and ``training.retrieval.export.pooling``/``normalize`` (ONNX pools the
+        way the model trained).
         """
         if isinstance(data, dict) and isinstance(data.get("dataset"), dict) and "validation" in data["dataset"]:
             dataset = {key: value for key, value in data["dataset"].items() if key != "validation"}
-            return {**data, "dataset": dataset}
+            data = {**data, "dataset": dataset}
+        if isinstance(data, dict) and _removed_export_fields(data):
+            training = data["training"]
+            retrieval = training["retrieval"]
+            export = {key: value for key, value in retrieval["export"].items() if key not in _REMOVED_EXPORT_FIELDS}
+            data = {**data, "training": {**training, "retrieval": {**retrieval, "export": export}}}
         return data
 
     def validate_for_training(self) -> None:

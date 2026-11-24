@@ -22,7 +22,7 @@ class TestCommandInvokedEvent:
         assert d["agentMode"] is False
         assert d["isCi"] is False
         assert e._event_name == "command_invoked"
-        assert e._schema_version == "1.10"
+        assert e._schema_version == "1.12"
 
     def test_no_free_text_fields_beyond_known(self):
         # privacy guard: the event cannot carry arbitrary payloads
