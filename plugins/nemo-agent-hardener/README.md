@@ -210,6 +210,12 @@ until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; 
 
 Watch it with `tail -f /tmp/nemo-helix.log`; stop it with `uv run nemo services stop`.
 
+> **Security note.** `--host 0.0.0.0` serves the platform API on every network interface, and the local
+> platform does not authenticate requests: anyone who can reach port 8080 can read the secrets it stores,
+> including your model API keys. Run it only on a machine and network you trust, or block port 8080 from
+> other hosts with a firewall. The victim agent under attack also reaches this port, so do not store
+> secrets on the platform that the war-game does not need.
+
 Register an inference provider. Both commands fail with `409 already exists` if you've run them
 before — that's harmless, skip to the next step. To start from a clean platform instead, stop it
 (`nemo services stop`), `rm -rf ~/.local/share/nemo`, and restart; the stop must come first or the

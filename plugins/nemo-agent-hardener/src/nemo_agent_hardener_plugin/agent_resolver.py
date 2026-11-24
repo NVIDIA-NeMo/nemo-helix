@@ -62,6 +62,12 @@ IMAGE_AGENT_CONFIG = f"/workspace/{AGENT_CONFIG_FILENAME}"
 
 #: Route-only backend naming the host-side Inference Gateway; reserved so a user backend cannot shadow it.
 GATEWAY_BACKEND_NAME = "nemo-inference-gateway"
+#: The gateway's route reaches the whole local platform, so it also hands the victim the workspace secrets API.
+#: The rest stays open: the victim needs the gateway, and blocking more would need an allow-list per platform API.
+SECRETS_API_DENY_RULE = {"method": "*", "path": "/apis/secrets/**"}
+#: Off until the agent-hardener floor in ``config.py`` reaches the release with backend ``deny_rules``: older
+#: releases reject the field and fail the whole manifest. Turn on together with that floor bump.
+DENY_SECRETS_API = False
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 #: How a container reaches the host's loopback.
 SANDBOX_HOST_ALIAS = "host.docker.internal"
@@ -395,7 +401,10 @@ def gateway_backend(base_url: str) -> dict[str, Any] | None:
     if parts.hostname not in _LOOPBACK_HOSTS:
         return None
     port = parts.port or (443 if parts.scheme == "https" else 80)
-    return {"name": GATEWAY_BACKEND_NAME, "ports": [port]}
+    backend: dict[str, Any] = {"name": GATEWAY_BACKEND_NAME, "ports": [port]}
+    if DENY_SECRETS_API:
+        backend["deny_rules"] = [SECRETS_API_DENY_RULE]
+    return backend
 
 
 def fabric_start_command(port: int) -> str:
