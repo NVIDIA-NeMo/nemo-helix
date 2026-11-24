@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from nemo_agent_hardener_plugin import agent_resolver
 from nemo_agent_hardener_plugin.agent_resolver import (
     AgentResolutionError,
     _agents_resource,
@@ -137,6 +138,16 @@ def test_inject_gateway_url_binds_the_agents_models():
 def test_gateway_backend_declared_for_local_gateway():
     assert gateway_backend("http://localhost:8080") == {"name": "nemo-inference-gateway", "ports": [8080]}
     assert gateway_backend("http://127.0.0.1:9000") == {"name": "nemo-inference-gateway", "ports": [9000]}
+
+
+def test_gateway_backend_denies_the_secrets_api_once_switched_on(monkeypatch: pytest.MonkeyPatch):
+    """The route reaches the whole local platform; an injected victim read every stored key through it."""
+    monkeypatch.setattr(agent_resolver, "DENY_SECRETS_API", True)
+
+    backend = gateway_backend("http://localhost:8080")
+
+    assert backend is not None
+    assert backend["deny_rules"] == [{"method": "*", "path": "/apis/secrets/**"}]
 
 
 def test_gateway_backend_none_for_remote_gateway():
