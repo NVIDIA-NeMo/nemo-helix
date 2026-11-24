@@ -234,12 +234,12 @@ the OpenSandbox provider with the NeMo extension installed, and a bundle built f
 `nhx-gym-host` image's architecture and C library. Evaluator rejects `agent_bundle` with the
 `docker` provider.
 
-## Run Docker in resource servers
+## Run Docker in Gym servers
 
-Some environments start containers from a resource server, for example with `docker compose up`. The
-`nhx-gym-host-podman` image supports this with rootless Podman behind the Docker CLI. Each compose
-project gets its own network with service-name DNS, and the Gym host's egress policy still applies
-to every container.
+Some environments start containers from a resource server, for example with `docker compose up`, and
+some agents run `docker` themselves. The `nhx-gym-host-podman` image supports both with rootless Podman
+behind the Docker CLI. Each compose project gets its own network with service-name DNS, and the Gym
+host's egress policy still applies to every container.
 
 The image's setup needs `SYS_ADMIN`, which only a Kata VM contains. Point the platform at an
 OpenSandbox server that creates every sandbox with a Kata runtime class: the `bootstrap.execd.isolation`
@@ -248,11 +248,18 @@ checks for a Kata VM and fails the job instead of running the setup anywhere els
 execd image must be v1.0.15 or later: execd keeps root, and only from that release does it require
 the per-sandbox token described under credentials.
 
+Agent servers and resource servers run in the same Gym host, so they share one Podman service: a
+resource server can inspect the containers an agent started. The `docker` CLI finds the service through
+the image's `DOCKER_HOST` and also at its default socket, so it works from an agent's shell tool that
+starts commands with only the agent's own variables, such as a registered Deep Agents agent with a local
+shell backend. Rollouts that run concurrently share the service too, so give each rollout's compose
+project its own name, for example with `docker compose -p` or `COMPOSE_PROJECT_NAME`.
+
 After setup, the Gym servers run as an unprivileged user with no capabilities, an empty capability
 bounding set and `no_new_privs`, so no setuid program in the image can give capabilities back. The
 job's `env_vars` and `env_secrets` reach Gym only after that, never the root setup. `NET_ADMIN` is
-never granted, so nothing in the host can change its network or egress rules. Resource servers use
-the `docker` CLI, which only talks to the Podman service's socket.
+never granted, so nothing in the host can change its network or egress rules. Gym servers use the
+`docker` CLI, which only talks to the Podman service's socket.
 
 The image isn't published yet. Build it from the repository with the `nhx-gym-host-podman-docker`
 bake target and push it to a registry your cluster can pull from:
@@ -306,7 +313,7 @@ subprocess.run(
 )
 ```
 
-The login is stored for the Gym host's container user, so every resource server in the host can pull
+The login is stored for the Gym host's container user, so every Gym server in the host can pull
 with it.
 
 ## Local Docker provider

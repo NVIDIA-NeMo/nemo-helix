@@ -68,3 +68,7 @@ until DOCKER_HOST="unix://$SOCKET" docker version >/dev/null 2>&1; do
   fi
   sleep 0.5
 done
+
+# The Docker CLI's default socket, for anything that runs without the image's DOCKER_HOST: an agent's shell
+# tool may start commands with only the agent's own variables.
+ln -sfn "$SOCKET" /var/run/docker.sock
