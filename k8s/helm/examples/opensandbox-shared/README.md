@@ -43,7 +43,7 @@ only sees and creates sandboxes there.
 | 2 | Prepare each tenant namespace: ServiceAccount, exec Role, SCC, NetworkPolicy | Platform |
 | 3 | Tenant keys | Platform |
 | 4 | Sandbox pod template | Platform |
-| 5 | NeMo Helix extension | Platform, with the file from the Helix team |
+| 5 | Compose services: the NeMo Helix extension | Platform, with the file from the Helix team |
 | 6 | Server | Platform |
 | 7 | Check the server | Platform |
 | 8 | Point each Helix release at the server | Helix team |
@@ -180,10 +180,12 @@ The template gives each sandbox the `opensandbox-sandbox` ServiceAccount without
 `/logs`, `/solution` and `/installed-agent` directories Harbor writes to, and keeps sandboxes off
 control-plane nodes.
 
-## 5. NeMo Helix extension
+## 5. Compose services: the NeMo Helix extension
 
-The extension adds Compose services (benchmark tasks that ship a `docker-compose.yaml`) and agent
-bundles to the server. It's a ConfigMap of Python files, `nemo-opensandbox-ext`, that the server
+This step enables **Compose services**: benchmark tasks that ship a `docker-compose.yaml` (a
+database or a mock API next to the agent's container) get those services as sidecars in their
+sandbox pod. Many benchmarks need them, so this step isn't optional. The same extension also adds
+agent bundles. It's a ConfigMap of Python files, `nemo-opensandbox-ext`, that the server
 loads at startup. It ships in the NeMo Helix repository
 ([github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix), public) at
 `k8s/helm/files/opensandbox-ext/configmap.yaml`. Download it for the Helix version the tenants run;
@@ -256,8 +258,25 @@ ID=$(curl -s -H "$H" -H 'Content-Type: application/json' localhost:18080/v1/sand
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 oc -n "$TENANT_NS" get pods -l opensandbox.io/id="$ID"     # Running, with the egress container
 curl -s -X DELETE -H "$H" localhost:18080/v1/sandboxes/"$ID"
+
+# Compose services: a sandbox with a Redis service beside it
+SERVICES='{"services": [{"name": "cache", "image": "docker.io/library/redis:7-alpine", "ports": [6379],
+  "readiness": {"exec": ["redis-cli", "ping"]}}]}'
+ID=$(curl -s -H "$H" -H 'Content-Type: application/json' localhost:18080/v1/sandboxes -d "{
+  \"image\": {\"uri\": \"docker.io/library/busybox:1.36\"}, \"entrypoint\": [\"sleep\", \"infinity\"],
+  \"timeout\": 300, \"resourceLimits\": {\"cpu\": \"250m\", \"memory\": \"256Mi\"},
+  \"extensions\": {\"opensandbox.extensions.nemo-compose-services\": $(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$SERVICES")}}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+oc -n "$TENANT_NS" wait pod -l opensandbox.io/id="$ID" --for=condition=Ready --timeout=300s
+curl -s -H "$H" localhost:18080/v1/nemo-ext/sandboxes/"$ID"/services; echo     # "failure": null, "not_ready": []
+curl -s -H "$H" -H 'Content-Type: application/json' localhost:18080/v1/nemo-ext/sandboxes/"$ID"/services/cache/exec \
+  -d '{"command": ["redis-cli", "ping"]}'; echo                                  # "stdout": "PONG\n"
+curl -s -X DELETE -H "$H" localhost:18080/v1/sandboxes/"$ID"
 kill %1
 ```
+
+The last check runs a command in the Compose service through the extension, which needs both the
+extension (step 5) and its exec Role in the tenant namespace (step 2).
 
 ## 8. Point each Helix release at the server
 
@@ -281,13 +300,38 @@ on Builder, which Harbor taskset runs need to build task images, and turns on sa
 | `<REGISTRY_HOST>` | The registry Builder pushes task images to, host only | `nvcr.io` |
 | `<PREFIX>` | The project or path in that registry that builds go under | `"my-org/helix-builds"` |
 | `<IMAGE_REGISTRY>`, `<IMAGE_TAG>` | Where the release's own images come from, and their tag: the Gym host image is `<IMAGE_REGISTRY>/nhx-gym-host:<IMAGE_TAG>`. Same as `platformConfig.platform.image_registry` and `image_tag` | `nvcr.io/nvidia/nemo-helix`, `0.10.0` |
-| `<RELEASE>`, `<TENANT_NS>` | Form the release's API address, which the Gym host may call for models: `http://<RELEASE>-api.<TENANT_NS>.svc.cluster.local:8080`. Check the Service name with `oc -n "$TENANT_NS" get svc \| grep -- -api` | `nemo-helix`, the tenant namespace |
 
-Leave the rest as is. It points the release at `opensandbox-server.opensandbox-system.svc.cluster.local`
-with the key in `opensandbox-server-api-key`, and turns Builder and sandboxed Gym on. Keep
-`composeServices.enabled: false`: steps 2 and 5 already set up the extension and its Role, and the
-release can't write to `opensandbox-system`. If the release's job storage claim isn't
-`nemo-helix-core-storage`, change `sandbox_job_storage_pvc_claim` to match.
+The rest needs no editing. The release's own API address is filled in by a chart template. The file:
+
+- points the release at `opensandbox-server.opensandbox-system.svc.cluster.local`, with the key in
+  `opensandbox-server-api-key`;
+- sets the **Harbor sandbox policy** (below);
+- turns Builder and sandboxed Gym on.
+
+**Compose services stay on** even though the file says `composeServices.enabled: false`. That
+setting only decides whether the release creates the extension's ConfigMap and Role itself. Here
+the platform created them in steps 2 and 5, because a tenant release can't write to
+`opensandbox-system`, and several releases would all try to own the same ConfigMap.
+
+If the release's job storage claim isn't `nemo-helix-core-storage`, change
+`sandbox_job_storage_pvc_claim` to match.
+
+**The Harbor sandbox policy.** A Harbor taskset run applies a *sandbox profile* to every sandbox it
+creates. The file sets the default profile, `harbor-standard`, under
+`platformConfig.evals.runs.harbor.sandbox_profiles`:
+
+| Key | Set to | What it controls |
+| --- | --- | --- |
+| `egress_allow` | The release's API, plus PyPI, the Debian, Ubuntu and Alpine mirrors, npm, yarn, GitHub and astral.sh | What a `public` task's sandboxes may reach for the whole trial, agent run and grading included. Terminal-Bench tasks are all `public`, and some install packages during the run or grading, so the API alone isn't enough. Narrow it for benchmarks that need less. |
+| `agent_channel` | (chart default: the release's API) | The model endpoint for `no-network` and `allowlist` tasks, which otherwise reach nothing |
+| `agent_setup_egress` | (chart default: package registries and agent installers) | Extra hosts open only while the agent installs itself, then closed |
+| `max_cpus`, `max_memory_mb` | 16, 32768 | The largest sandbox a task may ask for; larger requests are refused at submit |
+| `max_gpus` | 0 | GPU tasks are refused. Raise it, and set `gpu_types`, on clusters with GPU nodes |
+| `max_sandbox_lifetime_s` | 30600 (8.5 h) | How long OpenSandbox keeps a sandbox: the longest trial plus a margin |
+
+Everything else is denied: each sandbox's egress sidecar enforces the profile. Runs choose another
+profile with `--sandbox-profile <name>`; add profiles beside `harbor-standard` in the same map. The
+NeMo Helix guide *Configure Harbor Taskset Runs* lists every key.
 
 **8b. Upgrade the release** with its existing values plus this file (later files win):
 
@@ -329,6 +373,8 @@ oc -n "$TENANT_NS" get configmap <release>-config -o jsonpath='{.data.config\.ya
 # sandbox_runtime_image: <IMAGE_REGISTRY>/nhx-gym-host:<IMAGE_TAG>
 # sandbox_job_storage_pvc_claim: nemo-helix-core-storage
 oc -n "$TENANT_NS" get pvc nemo-helix-core-storage   # ACCESS MODES RWX
+# The Harbor sandbox policy: harbor-standard's egress_allow starts with the release's API
+oc -n "$TENANT_NS" get configmap <release>-config -o jsonpath='{.data.config\.yaml}' | grep -A3 'egress_allow:'
 oc -n "$TENANT_NS" get networkpolicy | grep opensandbox-sandbox-ingress
 oc get namespace "$TENANT_NS-builds"
 ```

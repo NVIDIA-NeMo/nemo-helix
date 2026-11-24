@@ -6,6 +6,9 @@
 #
 # Prerequisites: steps 1-7 of the README, including the namespace-local Secret
 # opensandbox-server-api-key holding this namespace's tenant key.
+#
+# Values in platformConfig may use chart templates: '{{ include "nhx-api.api-servicename" . }}' is this
+# release's API Service, so the addresses below need no editing.
 
 # Injects OPEN_SANDBOX_DOMAIN and OPEN_SANDBOX_API_KEY into job pods. Also renders a NetworkPolicy in
 # this namespace that admits sandbox ingress only from opensandbox.namespace.
@@ -18,9 +21,12 @@ opensandbox:
   # This namespace's tenant key.
   apiKeySecret: opensandbox-server-api-key
   apiKeySecretKey: api-key
+  # Compose services ARE enabled: Harbor tasks that ship a docker-compose.yaml get their services as
+  # sidecars in the sandbox pod. The extension that does it is installed on the shared server (README
+  # step 5), with its exec Role in this namespace (step 2). `enabled: false` only stops this release
+  # from creating those objects itself: it can't write to opensandbox-system, and every tenant
+  # release would try to own the same ConfigMap.
   composeServices:
-    # The platform team applies the extension ConfigMap and the exec Role (README steps 2 and 5);
-    # a tenant release can't write to opensandbox-system.
     enabled: false
 
 # Harbor taskset runs need Builder, which builds each task's images. It runs in <release ns>-builds,
@@ -33,9 +39,47 @@ platformConfig:
     registry: <REGISTRY_HOST>             # a host only, e.g. nvcr.io
     repository_prefix: "<PREFIX>"         # the project or path builds publish under; quote numeric ones
 
-  # Sandboxed Gym: Evaluator's agent-evaluate jobs run NeMo Gym in its own sandbox (the "Gym host"),
-  # not in the job pod. Custom environment FileSets always need this.
   evals:
+    # Harbor sandbox policy: what every sandbox of a taskset run may reach, how big it may be, and how
+    # long it lives. Runs pick a profile with --sandbox-profile; without one they get harbor-standard.
+    # These keys merge over the chart's harbor-standard, but a list you set replaces the chart's list.
+    runs:
+      harbor:
+        sandbox_profiles:
+          harbor-standard:
+            # Hosts a task whose network mode is `public` may reach for the whole trial: while the
+            # agent works and while the verifier grades. Terminal-Bench tasks are all `public`, and
+            # some install packages during the run or grading (pip, apt, npm), so the package
+            # registries are here, not only the API. Narrow it for benchmarks that need less.
+            egress_allow:
+              - '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
+              - pypi.org
+              - files.pythonhosted.org
+              - "*.debian.org"
+              - archive.ubuntu.com
+              - security.ubuntu.com
+              - dl-cdn.alpinelinux.org
+              - registry.npmjs.org
+              - repo.yarnpkg.com
+              - github.com
+              - raw.githubusercontent.com
+              - objects.githubusercontent.com
+              - release-assets.githubusercontent.com
+              - astral.sh
+            # Not set here, so the chart's defaults apply:
+            #   agent_channel      this release's API, for `no-network` and `allowlist` tasks' model calls
+            #   agent_setup_egress package registries and agent installers, open only while the agent
+            #                      installs itself
+            # Largest sandbox a task may ask for. Terminal-Bench's largest task is 16 CPU / 32 GiB.
+            max_cpus: 16
+            max_memory_mb: 32768
+            # GPUs per sandbox. 0 refuses GPU tasks; raise it, and set gpu_types, on clusters with GPU nodes.
+            max_gpus: 0
+            # How long a sandbox may live: the longest trial (agent plus verifier) plus a margin. 8.5 h.
+            max_sandbox_lifetime_s: 30600
+
+    # Sandboxed Gym: Evaluator's agent-evaluate jobs run NeMo Gym in its own sandbox (the "Gym host"),
+    # not in the job pod. Custom environment FileSets always need this.
     # Run every Gym target in a Gym host.
     sandboxed_gym_default: true
     # Evaluator's own switch, separate from the top-level sandboxClusterCapable; both must be true.
@@ -49,7 +93,7 @@ platformConfig:
     # The only destinations the Gym host may reach: the model endpoints its agents call. Here, this
     # release's API (Inference Gateway). Add external model URLs if jobs use them.
     sandbox_policy_base_urls:
-      - http://<RELEASE>-api.<TENANT_NS>.svc.cluster.local:8080
+      - 'http://{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local:8080'
     # CPU and memory for each Gym host.
     sandbox_resources:
       cpu: "2"
