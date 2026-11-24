@@ -1226,7 +1226,8 @@ def _complete(
 
     The image is built and published, and only this call is left; completing is safe to repeat. The first try
     is made even when the job has been told to stop. No other is made once it has: a pod told to stop has
-    seconds, and one try may take them all.
+    seconds, and one try may take them all. Nor is one made once the time for completing has passed, which a
+    wait that fitted when it began may end after: a sleep ends no sooner than it was asked to.
     """
     deadline = clock.monotonic() + COMPLETION_SECONDS
     waits = 0
@@ -1247,8 +1248,8 @@ def _complete(
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
         logger.warning("completing %s failed (%s); trying again in %.0fs", image, _quoted(failure), wait)
         clock.sleep(wait)
-        if cancelled():
-            # The stop cut the wait short. As before the wait, no other try is made.
+        if cancelled() or clock.monotonic() >= deadline:
+            # The stop cut the wait short, or the wait ended late. As before the wait, no other try is made.
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
 
 

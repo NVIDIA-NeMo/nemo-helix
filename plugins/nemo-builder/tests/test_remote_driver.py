@@ -1165,6 +1165,20 @@ class TestABuildThatFails:
         assert "it was built, but the builder could not be told" in caplog.text
         assert "[build build-1]" in caplog.text
 
+    def test_a_wait_to_complete_again_that_ends_late_ends_the_tries_too(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A wait fits the time given to completing when it begins, and a sleep on a busy node ends late. No
+        try is made after that time, as no wait is begun that would end after it."""
+        builder = FakeBuilder(failing=[_unreachable()])
+        clock = LateClock(late=driver.COMPLETION_SECONDS)
+        with caplog.at_level(logging.ERROR):
+            failed = _run(FakeService([DONE]), builder, context, tmp_path, clock=clock)
+        # One try and one wait. No second try, though the builder would have taken it.
+        assert (failed, clock.sleeps, builder.completed) == (1, [2.0], [])
+        assert "it was built, but the builder could not be told" in caplog.text
+        assert "[build build-1]" in caplog.text
+
     def test_an_image_found_built_as_the_stop_came_is_still_completed(self, context: Path, tmp_path: Path) -> None:
         """The stop is read before each call to the service, not after one. A build that the last read found
         done is published, and its one completion is still made."""
@@ -4828,6 +4842,7 @@ class TestTheStepProgram:
                 "GET /builds?key=[credential] failed",
             ),
             ("k3y-[credential]-9f2a", "k3y-k3y-[credential]-9f2a-9f2a", "[credential]"),
+            ("A[credential]", "AA[credential]", "[credential]"),
         ],
         ids=[
             "in-its-middle",
@@ -4838,6 +4853,7 @@ class TestTheStepProgram:
             "only-as-a-log-line-writes-it",
             "ending-in-a-percent-sign-in-a-url-that-encodes-it",
             "between-copies-of-its-own-two-ends",
+            "after-a-copy-of-its-own-start",
         ],
     )
     def test_a_credential_that_holds_the_marks_own_text_is_taken_out_whole(
