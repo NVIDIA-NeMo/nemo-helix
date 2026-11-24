@@ -1,16 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  getAgentsListAgentsQueryKey,
-  getAgentsListExecuteJobsQueryKey,
-} from '@nemo/sdk/generated/agents/agents';
+import { getAgentsListExecuteJobsQueryKey } from '@nemo/sdk/generated/agents/agents';
 import { getAgentsListPluginManagedAgentTypesRouteQueryKey } from '@nemo/sdk/generated/agents/plugin-managed-agent-types';
 import type {
   ExecuteJob,
   ExecuteJobRequest,
   PluginManagedAgentTypeInfo,
-  RegisterAgentRequest,
 } from '@nemo/sdk/generated/agents/schema';
 import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import { getCompassGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
@@ -32,7 +28,6 @@ const ANALYSIS_RUN_STATUS_URL = mockApiUrl(
   ':agent'
 );
 
-/** The workspace's Compass agent in these mocks. */
 export const MOCK_COMPASS_AGENT = 'compass-analyst';
 
 /** A Compass analysis of `agent`: an execute job on the Compass agent whose subject is `agent`. */
@@ -74,10 +69,14 @@ export const mockAnalysisJob = (
 /** The JSON `filter` param as field -> value, unwrapping `{ $eq: value }` operators. */
 const parseJobFilter = (request: Request): Record<string, unknown> => {
   const raw = new URL(request.url).searchParams.get('filter');
-  if (!raw) return {};
+  if (!raw) {
+    return {};
+  }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
     return Object.fromEntries(
       Object.entries(parsed).map(([field, value]: [string, unknown]) => [
         field,
@@ -117,33 +116,18 @@ export const analysisJobHandlers = (jobs: () => ExecuteJob[]) => [
   }),
 ];
 
-/** The installed Compass type, with `agent` as the workspace's Compass agent or none when null. */
-export const compassAgentTypeHandler = (agent: string | null = MOCK_COMPASS_AGENT) =>
-  http.get(AGENT_TYPES_URL, () => {
-    const info: PluginManagedAgentTypeInfo = {
-      type: COMPASS_AGENT_TYPE,
-      title: 'Compass analyst',
-      description: '',
-      default_name: MOCK_COMPASS_AGENT,
-      adapter_id: 'nvidia.helix.compass.analyst',
-      context_schema: {},
-      post_run_actions: ['compass.save-insights'],
-      subject_label: 'Analyzed agent',
-      ...(agent ? { agent } : {}),
-    };
-    return HttpResponse.json([info]);
-  });
-
-/** Answers agent registration and hands each request body to `onRegister`. */
-export const agentRegisterHandler = (onRegister: (body: RegisterAgentRequest) => void) =>
-  http.post<{ workspace: string }, RegisterAgentRequest>(
-    mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'),
-    async ({ params, request }) => {
-      const body = await request.json();
-      onRegister(body);
-      return HttpResponse.json({ ...body, workspace: params.workspace });
-    }
-  );
+/** The installed Compass type, with `agent` as the workspace's Compass agent, if it has one. */
+export const mockCompassAgentType = (agent?: string): PluginManagedAgentTypeInfo => ({
+  type: COMPASS_AGENT_TYPE,
+  title: 'Compass analyst',
+  description: '',
+  default_name: MOCK_COMPASS_AGENT,
+  adapter_id: 'nvidia.helix.compass.analyst',
+  context_schema: {},
+  post_run_actions: ['compass.save-insights'],
+  subject_label: 'Analyzed agent',
+  ...(agent ? { agent } : {}),
+});
 
 /** The scheduler's run status for `agent`, or a 404 when it has never run. */
 export const analysisRunStatusHandler = (agent: string, lastSuccessfulRunAt: string | null) =>
@@ -251,7 +235,7 @@ export const mockInsights: InsightListItem[] = [
 export const insightsHandlers = [
   ...analysisJobHandlers(() => []),
 
-  compassAgentTypeHandler(),
+  http.get(AGENT_TYPES_URL, () => HttpResponse.json([mockCompassAgentType(MOCK_COMPASS_AGENT)])),
 
   analysisRunStatusHandler('', null),
 

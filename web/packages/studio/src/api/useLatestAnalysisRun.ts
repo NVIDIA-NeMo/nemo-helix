@@ -22,7 +22,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
 export interface LatestAnalysisRun {
-  /** Name of the execute job running the analysis. */
   name: string;
   requestedAt: string;
   status?: HelixJobStatus;
@@ -39,7 +38,6 @@ const IN_FLIGHT_STATUSES: HelixJobStatus[] = [
   HelixJobStatus.active,
 ];
 
-/** Lists an agent's Compass runs, newest first: execute jobs of the Compass type about `agent`. */
 export const latestAnalysisRunParams = (agent: string): AgentsListExecuteJobsParams => ({
   page_size: 1,
   sort: ExecuteJobsSortField['-created_at'],
@@ -57,7 +55,9 @@ export const runPollInterval = (
   page: ExecuteJobsPage | undefined,
   fetchFailureCount: number
 ): number => {
-  if (fetchFailureCount > 0) return LIST_POLL_MS;
+  if (fetchFailureCount > 0) {
+    return LIST_POLL_MS;
+  }
   return isInFlight(analysisJobStatus(page?.data[0])) ? JOB_POLLING_INTERVAL_MS : LIST_POLL_MS;
 };
 

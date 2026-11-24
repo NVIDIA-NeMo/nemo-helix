@@ -46,7 +46,6 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
 
 const PERIODIC_CURSOR = '2026-08-14T09:00:00Z';
 
-// The context of each Compass execute job the modal submits.
 let requests: Record<string, unknown>[];
 let configWrites: string[];
 

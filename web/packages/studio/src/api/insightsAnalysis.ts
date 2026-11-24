@@ -10,7 +10,6 @@ import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
 import { AxiosError } from 'axios';
 
-/** The plugin-managed agent type that runs Compass analyses. */
 export const COMPASS_AGENT_TYPE = 'compass.analyst';
 
 export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
@@ -18,7 +17,6 @@ export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
 export interface InsightsTriggerResult {
   agent: string;
   status: InsightsTriggerStatus;
-  /** Name of the execute job running the analysis. */
   jobName?: string;
   message?: string;
 }
@@ -47,6 +45,8 @@ export interface AnalysisRunOptions {
   evaluation_id?: string;
   /** Skips the config lookup when the caller already holds the agent's config. */
   storedConfig?: AnalysisConfig;
+  /** Resolves the Compass agent; lets a batch of runs resolve it once. */
+  resolveAgent?: () => Promise<string>;
 }
 
 /**
@@ -60,7 +60,6 @@ export const isQualifiedModelRef = (ref: string): boolean => {
 const isHelixJobStatus = (value: unknown): value is HelixJobStatus =>
   Object.values<unknown>(HelixJobStatus).includes(value);
 
-/** Narrows an analysis job's status to the platform's job statuses. */
 export const analysisJobStatus = (
   job?: Pick<ExecuteJob, 'status'> | null
 ): HelixJobStatus | undefined => {
@@ -99,7 +98,9 @@ export const resolveCompassAgent = async (workspace: string): Promise<string> =>
   };
 
   const compass = await findType();
-  if (compass.agent) return compass.agent;
+  if (compass.agent) {
+    return compass.agent;
+  }
   try {
     const created = await agentsRegisterAgent(workspace, {
       name: compass.default_name,
@@ -107,12 +108,18 @@ export const resolveCompassAgent = async (workspace: string): Promise<string> =>
     });
     return created.name ?? compass.default_name;
   } catch (error) {
-    // Created concurrently: use whichever agent won.
-    if (statusOf(error) === 409) {
-      const { agent } = await findType();
-      if (agent) return agent;
+    if (statusOf(error) !== 409) {
+      throw error;
     }
-    throw error;
+    // Either another request created the Compass agent first, or an unrelated agent has the name.
+    const { agent } = await findType();
+    if (agent) {
+      return agent;
+    }
+    throw new Error(
+      `An agent named "${compass.default_name}" already exists and is not a Compass agent. ` +
+        `Create the Compass agent under another name: nemo agents create ${COMPASS_AGENT_TYPE} --name <name> --workspace ${workspace}`
+    );
   }
 };
 
@@ -127,7 +134,12 @@ export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
   overrides: InsightsModelOverrides = {},
-  { since, evaluation_id, storedConfig }: AnalysisRunOptions = {}
+  {
+    since,
+    evaluation_id,
+    storedConfig,
+    resolveAgent = () => resolveCompassAgent(workspace),
+  }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -177,8 +189,7 @@ export const triggerInsightsRun = async (
   try {
     const job = await agentsCreateExecuteJob(workspace, {
       spec: {
-        agent: await resolveCompassAgent(workspace),
-        // Compass reads the agent's Ethos itself when it prepares the run.
+        agent: await resolveAgent(),
         context: {
           agent,
           default_model: defaultModel,
@@ -200,9 +211,12 @@ export const triggerInsightsRuns = async (
   agents: string[],
   overrides: InsightsModelOverrides = {}
 ): Promise<InsightsTriggerResult[]> => {
+  // Resolved on first use, so a batch with no runnable agent never touches the Compass agent.
+  let compassAgent: Promise<string> | undefined;
+  const resolveAgent = () => (compassAgent ??= resolveCompassAgent(workspace));
   const results: InsightsTriggerResult[] = [];
   for (const agent of agents) {
-    results.push(await triggerInsightsRun(workspace, agent, overrides));
+    results.push(await triggerInsightsRun(workspace, agent, overrides, { resolveAgent }));
   }
   return results;
 };

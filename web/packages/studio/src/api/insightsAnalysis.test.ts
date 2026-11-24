@@ -3,7 +3,7 @@
 
 import { agentsCreateExecuteJob, agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import { agentsListPluginManagedAgentTypesRoute } from '@nemo/sdk/generated/agents/plugin-managed-agent-types';
-import type { Agent, PluginManagedAgentTypeInfo } from '@nemo/sdk/generated/agents/schema';
+import type { Agent } from '@nemo/sdk/generated/agents/schema';
 import { compassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -14,7 +14,11 @@ import {
   triggerInsightsRun,
   triggerInsightsRuns,
 } from '@studio/api/insightsAnalysis';
-import { mockAnalysisJob } from '@studio/mocks/handlers/insights';
+import {
+  MOCK_COMPASS_AGENT,
+  mockAnalysisJob,
+  mockCompassAgentType,
+} from '@studio/mocks/handlers/insights';
 import { AxiosError, AxiosHeaders } from 'axios';
 
 vi.mock('@nemo/sdk/generated/compass/compass-analysis-configs', async (importOriginal) => ({
@@ -42,18 +46,6 @@ const createJob = vi.mocked(agentsCreateExecuteJob);
 const registerAgent = vi.mocked(agentsRegisterAgent);
 const listTypes = vi.mocked(agentsListPluginManagedAgentTypesRoute);
 
-const compassType = (agent?: string): PluginManagedAgentTypeInfo => ({
-  type: COMPASS_AGENT_TYPE,
-  title: 'Compass analyst',
-  description: '',
-  default_name: 'compass-analyst',
-  adapter_id: 'nvidia.helix.compass.analyst',
-  context_schema: {},
-  post_run_actions: ['compass.save-insights'],
-  ...(agent ? { agent } : {}),
-});
-
-/** The context of the `index`th execute job created. */
 const contextOf = (index = 0) => createJob.mock.calls[index][1].spec.context;
 
 const config = (overrides: Record<string, unknown> = {}) => ({
@@ -85,7 +77,7 @@ const axiosErrorWithStatus = (status: number, detail?: string) =>
 
 beforeEach(() => {
   vi.resetAllMocks();
-  listTypes.mockResolvedValue([compassType('compass-analyst')]);
+  listTypes.mockResolvedValue([mockCompassAgentType(MOCK_COMPASS_AGENT)]);
   createJob.mockResolvedValue(mockAnalysisJob('email-security-triage', 'created'));
 });
 
@@ -149,7 +141,7 @@ describe('triggerInsightsRun', () => {
 
   it('creates the Compass agent when the workspace has none', async () => {
     getConfig.mockResolvedValue(config());
-    listTypes.mockResolvedValue([compassType()]);
+    listTypes.mockResolvedValue([mockCompassAgentType()]);
     registerAgent.mockResolvedValue({ name: 'compass-analyst' } as Agent);
 
     const result = await triggerInsightsRun('default', 'email-security-triage');
@@ -325,6 +317,15 @@ describe('triggerInsightsRuns', () => {
     }
   });
 
+  it('resolves the Compass agent once for the whole batch', async () => {
+    getConfig.mockImplementation(async (_workspace, agent) => config({ agent }));
+
+    await triggerInsightsRuns('default', ['a', 'b', 'c']);
+
+    expect(createJob).toHaveBeenCalledTimes(3);
+    expect(listTypes).toHaveBeenCalledTimes(1);
+  });
+
   it('returns one result per agent, in order', async () => {
     getConfig.mockImplementation(async (_workspace, agent) => {
       if (agent === 'missing') throw axiosErrorWithStatus(404);
@@ -344,10 +345,19 @@ describe('triggerInsightsRuns', () => {
 describe('resolveCompassAgent', () => {
   it('uses the agent that won a concurrent create', async () => {
     listTypes
-      .mockResolvedValueOnce([compassType()])
-      .mockResolvedValueOnce([compassType('compass-analyst')]);
+      .mockResolvedValueOnce([mockCompassAgentType()])
+      .mockResolvedValueOnce([mockCompassAgentType(MOCK_COMPASS_AGENT)]);
     registerAgent.mockRejectedValue(axiosErrorWithStatus(409));
 
     await expect(resolveCompassAgent('default')).resolves.toBe('compass-analyst');
+  });
+
+  it('explains when an agent that is not a Compass agent has the default name', async () => {
+    listTypes.mockResolvedValue([mockCompassAgentType()]);
+    registerAgent.mockRejectedValue(axiosErrorWithStatus(409));
+
+    await expect(resolveCompassAgent('default')).rejects.toThrow(
+      `nemo agents create ${COMPASS_AGENT_TYPE} --name <name> --workspace default`
+    );
   });
 });
