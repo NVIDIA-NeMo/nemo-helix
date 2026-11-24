@@ -272,11 +272,7 @@ def _resolve_pretrained_model(
 
 
 def _setup_classify_endpoint():
-    """Point Safe Synthesizer's PII inference at the job's model provider route on the platform gateway.
-
-    The gateway is reached over the platform's internal network, often plain HTTP, which Safe Synthesizer
-    accepts only with ``NSS_INFERENCE_ALLOW_HTTP``.
-    """
+    """Point Safe Synthesizer's PII inference at the job's model provider route on the platform gateway."""
     endpoint_path = os.environ.get("CLASSIFY_LLM_ENDPOINT_PATH")
     if endpoint_path:
         models_url = os.environ.get("NHX_MODELS_URL")
@@ -289,7 +285,6 @@ def _setup_classify_endpoint():
         full_url = models_url.rstrip("/") + endpoint_path
         os.environ["NSS_INFERENCE_ENDPOINT"] = full_url
         os.environ.setdefault("NSS_INFERENCE_KEY", "not-needed")
-        os.environ["NSS_INFERENCE_ALLOW_HTTP"] = "true"
         logger.info("Configured PII inference endpoint: %s", full_url)
 
 
