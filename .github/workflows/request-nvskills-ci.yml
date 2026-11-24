@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Request NVSkills CI
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  request:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/nvskills-ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: nvskills-ci-request-${{ github.repository }}-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    steps:
+      # issue_comment runs from the default branch; never execute the PR's code
+      # in the job that holds the central dispatch credential.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Validate request
+        id: request
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { resolveNvskillsRequest } = require('./.github/scripts/request-nvskills-ci.cjs');
+            await resolveNvskillsRequest({ core, github, context });
+
+      - name: Dispatch NVSkills CI
+        if: steps.request.outputs.should_dispatch == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUEST_INPUTS: ${{ steps.request.outputs.inputs }}
+        with:
+          github-token: ${{ secrets.NVSKILLS_CI_DISPATCH_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'NVIDIA',
+              repo: 'nvskills-ci',
+              workflow_id: 'nvskills-ci.yml',
+              ref: 'main',
+              inputs: JSON.parse(process.env.REQUEST_INPUTS),
+            });

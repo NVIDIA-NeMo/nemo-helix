@@ -5,9 +5,9 @@
 name: nemo-customizer
 description: >-
   Fine-tune or train an open model (Nemotron, Llama, Qwen and others) on your own
-  data with NeMo Helix: SFT, LoRA, DPO preference tuning and GRPO reinforcement
-  learning. Picks the backend, prepares the dataset, submits and monitors the job,
-  and reports results. For embedding or reranking retrieval models, use
+  data through the NeMo Helix platform: SFT, LoRA, DPO and GRPO. Selects a backend,
+  prepares data, submits and monitors jobs, deploys outputs and compares evaluations.
+  For embedding or reranking retrieval models, use
   nemo-retrieval-recipes.
 triggers:
   - nemo-customizer

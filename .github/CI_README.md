@@ -21,6 +21,64 @@ reusable actions, and supporting docs.
 
 ### CI Check Workflows
 
+- `request-nvskills-ci.yml`
+  Restores explicit `/nvskills-ci` requests for PRs changing
+  `plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/`.
+  A repository maintainer or admin must post the exact command. The workflow
+  reads the current open, same-repository PR into `main`, paginates changed files
+  (including rename sources), and dispatches the central NVIDIA NVSkills CI
+  service with metadata only. It never executes PR code. Other skills are not
+  opted into local requests yet. The central service independently determines
+  which content to evaluate; this request filter does not restrict its scan scope.
+
+  This pilot is manually requested and is not part of `ci-status.needs`.
+  Do not restore the previous signing-author merge gate: it made skill changes
+  unmergeable when the external pipeline could not sign. First verify a complete
+  run and then agree on a required status check with NVSkills maintainers.
+
+  Setup and publication checklist:
+  1. Keep this workflow and its helper under the existing `.github/` CODEOWNERS rule.
+     Merge the workflow to the default branch before testing comment triggers.
+  2. Configure `NVSKILLS_CI_DISPATCH_TOKEN` with permission to dispatch
+     `nvskills-ci.yml` in `NVIDIA/nvskills-ci`. Confirm the central service's
+     GitHub App can read and sign this repository. `NVIDIA-NeMo/nemo-platform`
+     is listed in its onboarding configuration; confirm the repository's current
+     canonical name and allowed base refs with the service owners.
+  3. Comment `/nvskills-ci` on a same-repository Customizer skill PR into `main`.
+     Follow the central run and its returned `NVSkills CI` status. A successful
+     dispatch alone is not a successful evaluation. Request another run after
+     changing evaluated content. This workflow does not automatically dispatch
+     on PR updates or signing-bot pushes; verify the central run's signature
+     verification result, or request a follow-up run explicitly if needed.
+  4. Verify all three evaluation tiers, with positive baseline uplift for both
+     Claude Code and Codex. Keep the generated `BENCHMARK.md`, `skill-card.md`
+     and `skill.oms.sig` beside the canonical plugin `SKILL.md`. The initial
+     benchmark file explicitly records that evaluation is pending.
+  5. After verification and signing, submit this entry as
+     `components.d/nemo-helix.yml` in `NVIDIA/skills`, using the verified source
+     repository name (the local remote currently uses `nemo-platform`):
+
+     ```yaml
+     name: NeMo Helix
+     repo: NVIDIA-NeMo/nemo-platform
+     description: Fine-tune open models through NeMo Helix with platform jobs, evaluation and deployment.
+     skills:
+       - path: plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/
+         catalog_dir: nemo-customizer
+     ```
+
+     Do not copy the skill into top-level `skills/`; catalog entries can point
+     directly at its canonical plugin directory. The current shared
+     `NVIDIA/skills` team-request workflow only watches `skills/` and
+     `team-skills/`, so this pilot uses a local adapter for the plugin path.
+     After catalog sync, verify installation with
+     `npx skills add nvidia/skills --skill nemo-customizer`.
+
+  Contracts: [central onboarding](https://github.com/NVIDIA/nvskills-ci/blob/main/docs/team-onboarding.md),
+  [central request inputs](https://github.com/NVIDIA/nvskills-ci/blob/main/.github/workflows/nvskills-ci.yml),
+  [catalog entry schema](https://github.com/NVIDIA/skills/blob/main/components.d/README.md),
+  [evaluation requirements](https://github.com/NVIDIA/skills/blob/main/docs/evaluating-agent-skills.mdx).
+
 - `ci.yaml`
   Main source validation workflow. It runs linting, OPA policy WASM build,
   Python unit tests, Python integration tests, OPA policy tests, Studio web
