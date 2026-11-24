@@ -30,6 +30,7 @@ from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef, download_dataset_sync
 from nemo_evaluator.jobs.agent_compiler import compile_agent_eval_job
+from nemo_evaluator.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -678,6 +679,7 @@ class AgentEvalJob(NemoJob):
         async_sdk: AsyncNeMoPlatform | None = None,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
+        config = load_attempt_tasks(config, ctx=ctx, sdk=sdk)
         spec = AgentEvalSpec.model_validate(config)
         tasks = [_to_runtime_task(task) for task in spec.tasks]
         target, prompt_template, params = self._resolve_target(spec.target, ctx, sdk=sdk)

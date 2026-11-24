@@ -787,7 +787,9 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
         expected_entrypoint=expected_entrypoint,
     )
     config = cast(dict[str, Any], step.config)
-    assert len(config["tasks"]) == 1
+    assert config["tasks_from"] == "attempt"
+    assert config["tasks_digest"].startswith("sha256-v1:")
+    assert "tasks" not in config
     assert config["target"]["kind"] == expected_kind
     if expected_endpoint_name is not None:
         endpoint = config["target"].get("model") or config["target"].get("agent")

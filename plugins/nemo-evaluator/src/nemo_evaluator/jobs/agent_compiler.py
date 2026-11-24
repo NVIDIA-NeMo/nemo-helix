@@ -13,10 +13,12 @@ target (e.g. Fabric) carries no endpoint secret of its own.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 from nemo_evaluator.config import config, platform_config
 from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunnerTarget, ModelTarget
+from nemo_evaluator.jobs.attempt_tasks import step_config_without_tasks
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
 from nemo_evaluator.jobs.secret_env import build_task_environment
@@ -28,6 +30,7 @@ from nemo_platform_plugin.jobs.api_factory import (
     PlatformJobStep,
     SubprocessExecutionProviderSpec,
 )
+from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.jobs.image import get_qualified_image
 
 AGENT_EVAL_STEP_NAME = "agent-evaluate"
@@ -42,6 +45,8 @@ GYM_AGENT_EVAL_ENTRYPOINT = ["/app/.venv/bin/python", "-m"]
 AGENT_EVAL_COMMAND = ["nemo_evaluator.tasks.agent_evaluate"]
 ENVIRONMENT_STAGE_STEP_NAME = "stage-environment"
 ENVIRONMENT_STAGE_COMMAND = ["nemo_evaluator.tasks.stage_environment"]
+
+MAX_STEP_CONFIG_BYTES = 1_000_000
 
 
 def compile_agent_eval_job(
@@ -67,6 +72,7 @@ def compile_agent_eval_job(
         )
     )
 
+    _require_step_configs_fit(steps)
     return PlatformJobSpec(steps=steps)
 
 
@@ -117,7 +123,7 @@ def _agent_eval_step(
     return PlatformJobStep(
         name=AGENT_EVAL_STEP_NAME,
         executor=executor,
-        config=spec.model_dump(mode="json"),
+        config=step_config_without_tasks(spec.model_dump(mode="json")),
         environment=_environment(spec, sandbox_plan=sandbox_plan),
     )
 
@@ -194,3 +200,13 @@ def _executor(
         provider="cpu",
         container=ContainerSpec(image=image, entrypoint=entrypoint, command=command),
     )
+
+
+def _require_step_configs_fit(steps: list[PlatformJobStep]) -> None:
+    for step in steps:
+        size = len(json.dumps(step.config).encode("utf-8"))
+        if size > MAX_STEP_CONFIG_BYTES:
+            raise PlatformJobCompilationError(
+                f"the {step.name!r} step's config is {size} bytes, over the {MAX_STEP_CONFIG_BYTES}-byte "
+                "Kubernetes ConfigMap limit; shrink the agent's inline config"
+            )
