@@ -22,6 +22,7 @@ import docker.types
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 from docker.types import LogConfig, Mount
+from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError, probe_docker
 from nemo_helix_plugin.client.errors import NemoClientError
@@ -2125,16 +2126,34 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     container_args["mem_limit"] = memory_limit
 
             if limits.cpu is not None:
-                cpu_limit = limits.cpu
-                # Convert CPU format - Docker expects float/int
-                if cpu_limit.endswith("m"):
-                    # Convert millicores to cores
-                    cpu_cores = int(float(cpu_limit[:-1]) / 1000)
-                    container_args["cpu_count"] = cpu_cores
-                else:
-                    container_args["cpu_count"] = int(cpu_limit)
+                nano_cpus = self._docker_nano_cpus(limits.cpu)
+                if nano_cpus > 0:
+                    container_args["nano_cpus"] = nano_cpus
 
         return container_args
+
+    def _docker_nano_cpus(self, cpu_limit: str) -> int:
+        """Convert a Kubernetes CPU quantity (``"500m"``, ``"2.5"``, ``"4"``) to Docker ``nano_cpus``.
+
+        Kubernetes enforces a CPU limit as a CFS quota, which is what ``nano_cpus`` (``docker run
+        --cpus``) sets. Docker's ``cpu_count`` is Windows-only and ignored by Linux daemons. Docker
+        rejects a quota above the daemon's CPU count, whereas Kubernetes accepts a limit above node
+        capacity and never reaches it, so the quota is capped at the daemon's CPU count. Docker also
+        rejects any quota when the daemon has no CFS quota support (e.g. rootless without the cpu
+        cgroup controller), so the limit is skipped there, as it was before.
+        """
+        nano_cpus = int(parse_quantity(cpu_limit) * 1_000_000_000)
+        daemon_info = self._client.info()
+        if daemon_info.get("CpuCfsQuota") is False:
+            logger.warning(
+                "Docker daemon does not support CPU CFS quota; not applying the job step CPU limit",
+                extra={"cpu_limit": cpu_limit},
+            )
+            return 0
+        daemon_cpus = daemon_info.get("NCPU")
+        if isinstance(daemon_cpus, int) and daemon_cpus > 0:
+            nano_cpus = min(nano_cpus, daemon_cpus * 1_000_000_000)
+        return nano_cpus
 
     def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         containers = self._client.containers.list(

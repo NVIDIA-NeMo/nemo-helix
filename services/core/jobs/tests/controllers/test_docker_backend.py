@@ -338,7 +338,8 @@ def test_docker_job_schedule(docker_job, docker_client_mock, test_job_step):
 
     # Verify resource constraints
     assert kwargs["mem_limit"] == "2g"
-    assert kwargs["cpu_count"] == 5
+    assert kwargs["nano_cpus"] == 5_000_000_000
+    assert "cpu_count" not in kwargs
 
     # Verify mounts are used instead of volumes
     assert "mounts" in kwargs
@@ -408,7 +409,8 @@ def test_docker_job_with_persistence_schedule(docker_job, docker_client_mock, te
 
     # Verify resource constraints
     assert kwargs["mem_limit"] == "2g"
-    assert kwargs["cpu_count"] == 5
+    assert kwargs["nano_cpus"] == 5_000_000_000
+    assert "cpu_count" not in kwargs
 
     # Verify mounts are used instead of volumes
     assert "mounts" in kwargs
@@ -889,9 +891,40 @@ def test_docker_job_schedule_no_resources(docker_job, docker_client_mock):
 
     assert "network" in container_args
 
-    # Should not have mem_limit or cpu_count since no resources were specified
+    # Should not have mem_limit or a CPU limit since no resources were specified
     assert "mem_limit" not in container_args
+    assert "nano_cpus" not in container_args
     assert "cpu_count" not in container_args
+
+
+@pytest.mark.parametrize(
+    ("cpu", "expected_nano_cpus"),
+    [
+        ("4", 4_000_000_000),
+        ("2.5", 2_500_000_000),
+        ("500m", 500_000_000),
+        ("16", 8_000_000_000),  # capped at the daemon's CPU count, which Docker enforces
+    ],
+)
+def test_apply_resource_limits_sets_docker_cpu_quota(docker_job, docker_client_mock, cpu, expected_nano_cpus):
+    """A Kubernetes CPU limit becomes Docker's CPU quota; cpu_count is Windows-only and ignored on Linux."""
+    docker_client_mock.info.return_value = {"NCPU": 8}
+    resources = ComputeResources(limits=ComputeResourceSpec(cpu=cpu))
+
+    container_args = docker_job.apply_resource_limits({}, resources)
+
+    assert container_args["nano_cpus"] == expected_nano_cpus
+    assert "cpu_count" not in container_args
+
+
+def test_apply_resource_limits_skips_cpu_quota_without_cfs_support(docker_job, docker_client_mock):
+    """Docker rejects nano_cpus when the daemon has no CFS quota support (e.g. rootless without the cpu controller)."""
+    docker_client_mock.info.return_value = {"NCPU": 8, "CpuCfsQuota": False}
+    resources = ComputeResources(limits=ComputeResourceSpec(cpu="4", memory="2Gi"))
+
+    container_args = docker_job.apply_resource_limits({}, resources)
+
+    assert container_args == {"mem_limit": "2g"}
 
 
 def test_docker_job_schedule_with_secrets(docker_job, docker_client_mock):
