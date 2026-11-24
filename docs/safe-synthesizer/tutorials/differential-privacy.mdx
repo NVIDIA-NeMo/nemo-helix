@@ -91,8 +91,9 @@ from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuild
 # Configure the client
 client = NemoClient.from_config()
 
-# Use the provider configured during NeMo Helix setup for PII classification.
+# Use the provider configured during NeMo Helix setup for PII replacement.
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
+pii_model_id = "nvidia/nemotron-3-ultra-550b-a55b"
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
     client.models.get_provider(name=provider_id, workspace=provider_workspace)
@@ -138,8 +139,8 @@ print("🔬 Experiment 1: No Differential Privacy (Baseline)")
 builder_baseline = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_train(batch_size=4, gradient_accumulation_steps=32)
     .with_generate(structured_generation={"enabled": True})
     .synthesize()
@@ -177,8 +178,8 @@ print("\n🔬 Experiment 2: Moderate Privacy (ε=6)")
 builder_moderate = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(dp_enabled=True, epsilon=6.0, delta=recommended_delta)
     .with_train(batch_size=4, gradient_accumulation_steps=32)
     .with_generate(structured_generation={"enabled": True})
@@ -211,8 +212,8 @@ print("\n🔬 Experiment 3: Strong Privacy (ε=1)")
 builder_strong = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(dp_enabled=True, epsilon=1.0, delta=recommended_delta)
     .with_train(batch_size=4, gradient_accumulation_steps=32)
     .with_generate(structured_generation={"enabled": True})
@@ -315,8 +316,8 @@ privacy_config = DifferentialPrivacyHyperparams(
 builder_custom = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(config=privacy_config)
     .with_train(batch_size=4, gradient_accumulation_steps=32)
     .with_generate(structured_generation={"enabled": True})
@@ -338,8 +339,8 @@ builder_grouped = (
     .with_data(
         group_training_examples_by="Street"
     )
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(dp_enabled=True, epsilon=8.0)
     .with_train(batch_size=4, gradient_accumulation_steps=32)
     .with_generate(structured_generation={"enabled": True})
@@ -463,8 +464,8 @@ builder_optimized = (
         batch_size=4,
         gradient_accumulation_steps=32,  # Effective batch size of 128
     )
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(
         dp_enabled=True,
         epsilon=8.0,
@@ -523,8 +524,8 @@ builder_improved = (
         batch_size=4,
         gradient_accumulation_steps=32,
     )
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     .with_differential_privacy(
         dp_enabled=True,
         epsilon=6.0,  # Slightly higher

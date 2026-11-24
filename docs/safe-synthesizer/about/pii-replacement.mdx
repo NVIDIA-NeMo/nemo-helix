@@ -150,59 +150,49 @@ Nemotron PII has been specifically fine-tuned to recognize many entity types out
 - `employment_status` - Employment information
 - `company_name` - Organization names
 
-### Custom Entity Types
-
-Beyond these built-in types, you can define custom entities using:
-
-```json
-{
-  "replace_pii": {
-    "globals": {
-      "classify": {
-        "enable_classify": true,
-        "entities": [
-          "first_name",
-          "last_name",
-          "email",
-          "employee_id",
-          "project_code"
-        ]
-      }
-    }
-  }
-}
-```
-
 ## Configuration
 
 PII replacement is configured through the `replace_pii` section. For the full schema, refer to [Configuration Reference -- Replacing PII](https://nvidia-nemo.github.io/Safe-Synthesizer/0.1.13/user-guide/configuration/#replacing-pii) in the upstream Safe Synthesizer docs. For NeMo Helix-specific behavior, refer to [Parameters Reference](/documentation/synthesize-safe-data/about/parameters-reference#pii-replacement-configuration).
 
 ```json
 {
-  "replace_pii": {
-    "globals": {
-      "locales": [
-        "en_US"
-      ]
-    },
-    "steps": [
-      {
-        "rows": {
-          "update": [
-            {
-              "entity": [
-                "email",
-                "phone_number"
-              ],
-              "value": "column.entity | fake"
-            }
-          ]
-        }
+  "pii_model_provider": "default/nvidia-build",
+  "config": {
+    "replace_pii": {
+      "llm": {
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b"
       }
-    ]
+    }
   }
 }
 ```
+
+By default, PII replacement discovers which columns to replace with an LLM. Set `pii_model_provider` to the Inference Gateway provider, as `<workspace>/<provider>`, and `config.replace_pii.llm.model_id` to the model that provider serves. A job that leaves out either one fails when it is created.
+
+To replace PII without an LLM request, give the plan inline in `config.replace_pii.replacement_plan`. An inline plan needs neither `pii_model_provider` nor `llm.model_id`:
+
+```json
+{
+  "config": {
+    "replace_pii": {
+      "replacement_plan": {
+        "columns_to_replace": [
+          {"column_name": "full_name", "entity_type": "full_name", "pattern": "{First} {Last}"},
+          {
+            "column_name": "email",
+            "entity_type": "email",
+            "pattern": "{f}.{last}@{domain}",
+            "depends_on": [{"column_name": "full_name"}]
+          }
+        ],
+        "data_to_sampler_value_mapping": {}
+      }
+    }
+  }
+}
+```
+
+Set `config.enable_replace_pii` to `false` to turn PII replacement off.
 
 ## When to Use PII Replacement
 

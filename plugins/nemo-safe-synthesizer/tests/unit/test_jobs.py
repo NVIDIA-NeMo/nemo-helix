@@ -11,6 +11,7 @@ import pytest
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_safe_synthesizer.config.replace_pii import LLMConfig, PiiReplacementPlan, ReplacePiiConfig
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig as PluginJobConfig
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerParameters
 from nemo_safe_synthesizer_plugin.jobs import generate
@@ -62,10 +63,30 @@ def files_client_patch(mock_files_client):
         yield
 
 
-def _make_spec(data_source: str = DEFAULT_DATA_SOURCE):
+@pytest.fixture(autouse=True)
+def models_client():
+    models_client = MagicMock()
+    provider_response = MagicMock()
+    provider_response.data.return_value = MagicMock(name="provider")
+    models_client.get_provider = AsyncMock(return_value=provider_response)
+    models_client.get_provider_route_openai_url = MagicMock(
+        return_value="http://nhx-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
+    )
+    with patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncModelsClient.from_client", return_value=models_client):
+        yield models_client
+
+
+def _make_spec(
+    data_source: str = DEFAULT_DATA_SOURCE,
+    model_provider: str | None = None,
+    replace_pii: ReplacePiiConfig | None = None,
+):
+    if model_provider is not None and replace_pii is None:
+        replace_pii = ReplacePiiConfig(llm=LLMConfig(model_id="nvidia/nemotron"))
     return PluginJobConfig(
         data_source=data_source,
-        config=SafeSynthesizerParameters(replace_pii=None),
+        pii_model_provider=model_provider,
+        config=SafeSynthesizerParameters(replace_pii=replace_pii),
     )
 
 
@@ -92,7 +113,13 @@ async def test_job_config_compiler_validates_data_source(mock_sdk, mock_files_cl
 
 @pytest.mark.asyncio
 async def test_job_config_compiler_accepts_default_replace_pii_config(mock_sdk):
-    spec = PluginJobConfig.model_validate({"data_source": DEFAULT_DATA_SOURCE, "config": {}})
+    spec = PluginJobConfig.model_validate(
+        {
+            "data_source": DEFAULT_DATA_SOURCE,
+            "pii_model_provider": "default/my-nim",
+            "config": {"replace_pii": {"llm": {"model_id": "nvidia/nemotron"}}},
+        }
+    )
 
     result = await _compile(spec, mock_sdk)
 
@@ -122,6 +149,17 @@ async def test_job_config_compiler_data_source_permission_denied(mock_sdk, mock_
 
     with pytest.raises(PermissionError, match="Access denied to fileset"):
         await _compile(_make_spec(), mock_sdk)
+
+
+@pytest.mark.asyncio
+async def test_job_config_compiler_with_pii_model_provider(mock_sdk, models_client):
+    result = await _compile(_make_spec(model_provider="default/my-nim"), mock_sdk)
+
+    models_client.get_provider.assert_awaited_once_with(name="my-nim", workspace="default")
+    step = next(iter(result["steps"]))
+    assert step["executor"]["provider"] == "gpu"
+    env = {e["name"]: e.get("value") for e in step.get("environment", [])}
+    assert env["CLASSIFY_LLM_ENDPOINT_PATH"] == "/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
 
 
 @pytest.mark.asyncio
@@ -182,7 +220,7 @@ async def test_job_config_compiler_validates_pretrained_model_job(mock_sdk, mock
         {
             "data_source": DEFAULT_DATA_SOURCE,
             "pretrained_model_job": "prior-safe-synth-job",
-            "config": {},
+            "config": {"enable_replace_pii": False},
         }
     )
 
@@ -207,7 +245,7 @@ async def test_plugin_job_config_allows_pretrained_model_job_runtime_config(mock
         {
             "data_source": DEFAULT_DATA_SOURCE,
             "pretrained_model_job": "prior-safe-synth-job",
-            "config": {},
+            "config": {"enable_replace_pii": False},
         }
     )
 
@@ -269,7 +307,7 @@ async def test_job_config_compiler_pretrained_model_job_not_found(mock_sdk, mock
         {
             "data_source": DEFAULT_DATA_SOURCE,
             "pretrained_model_job": "other-ws/prior-safe-synth-job",
-            "config": {},
+            "config": {"enable_replace_pii": False},
         }
     )
 
@@ -329,6 +367,12 @@ def test_plugin_job_config_pretrained_model_job_alone_no_warning(caplog):
     )
 
 
+@pytest.mark.asyncio
+async def test_job_config_compiler_pii_model_provider_wrong_format(mock_sdk):
+    with pytest.raises(HelixJobCompilationError, match="Expected 'workspace/provider_name'"):
+        await _compile(_make_spec(model_provider="no-slash-here"), mock_sdk)
+
+
 def test_plugin_job_config_enable_flags():
     spec = PluginJobConfig.model_validate(
         {"data_source": "default/data#file.csv", "config": {"enable_synthesis": False, "enable_replace_pii": False}}
@@ -345,3 +389,38 @@ def test_plugin_job_config_enable_flags_schema():
     assert "enable_synthesis" not in schema["properties"]
     assert "enable_synthesis" in config_schema["properties"]
     assert "enable_replace_pii" in config_schema["properties"]
+
+
+@pytest.mark.asyncio
+async def test_job_config_compiler_requires_a_provider_for_pii_discovery(mock_sdk, models_client):
+    spec = _make_spec(replace_pii=ReplacePiiConfig())
+
+    with pytest.raises(HelixJobCompilationError, match="Set pii_model_provider"):
+        await _compile(spec, mock_sdk)
+
+    models_client.get_provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_job_config_compiler_requires_the_discovery_model_id(mock_sdk):
+    spec = _make_spec(model_provider="default/my-nim", replace_pii=ReplacePiiConfig())
+
+    with pytest.raises(HelixJobCompilationError, match="replace_pii.llm.model_id"):
+        await _compile(spec, mock_sdk)
+
+
+@pytest.mark.asyncio
+async def test_job_config_compiler_allows_an_inline_plan_without_a_provider(mock_sdk, models_client):
+    spec = _make_spec(replace_pii=ReplacePiiConfig(replacement_plan=PiiReplacementPlan()))
+
+    await _compile(spec, mock_sdk)
+
+    models_client.get_provider.assert_not_awaited()
+
+
+def test_plugin_job_config_default_pii_replacement_discovers_its_plan():
+    spec = PluginJobConfig.model_validate({"data_source": "default/data#file.csv", "config": {}})
+
+    assert spec.config.replace_pii is not None
+    assert spec.config.replace_pii.replacement_plan == "auto_discovery"
+    assert spec.pii_model_provider is None

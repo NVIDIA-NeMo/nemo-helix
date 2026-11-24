@@ -31,7 +31,8 @@ from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuild
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_replace_pii()
+    .with_pii_model_provider("default/nvidia-build")
+    .with_replace_pii(llm={"model_id": "nvidia/nemotron-3-ultra-550b-a55b"})
     .synthesize()
 )
 job = builder.create_job(name="my-job", project="my-project")

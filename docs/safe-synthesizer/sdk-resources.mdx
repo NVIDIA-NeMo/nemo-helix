@@ -57,8 +57,8 @@ df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 job = (
     SafeSynthesizerJobBuilder(client, workspace="default")
     .with_data_source(df)
-    .with_classify_model_provider("default/nvidia-build")
-    .with_replace_pii()
+    .with_pii_model_provider("default/nvidia-build")
+    .with_replace_pii(llm={"model_id": "nvidia/nemotron-3-ultra-550b-a55b"})
     .synthesize()
     .create_job(name=f"safe-synth-job-{int(time.time())}")
 )
@@ -74,8 +74,8 @@ job = (
 | `with_evaluate(config=None, **kwargs)` | Sets evaluation parameters. |
 | `with_differential_privacy(config=None, **kwargs)` | Sets DP-SGD parameters. Pass `dp_enabled=True` to enable DP-SGD. |
 | `with_time_series(config=None, **kwargs)` | Sets time-series parameters. |
-| `with_replace_pii(config=None, **kwargs)` | Enables PII replacement. |
-| `with_classify_model_provider(provider_name)` | Sets the Inference Gateway provider used for PII column classification. Pair with `with_replace_pii()`. |
+| `with_replace_pii(config=None, **kwargs)` | Enables PII replacement. Set the model the PII provider serves with `llm={"model_id": "..."}`. |
+| `with_pii_model_provider(provider_name)` | Sets the Inference Gateway provider PII replacement uses to find PII. Pair with `with_replace_pii(llm={"model_id": ...})`. |
 | `with_hf_token_secret(secret_name)` | Passes a platform secret name as `HF_TOKEN` to the runtime job. |
 | `with_pretrained_model_job(job_name)` | Reuses a prior job's `adapter` result for generation-only synthesis. |
 | `resolve_job_config()` | Uploads data and validates the generated job spec without creating a job. |

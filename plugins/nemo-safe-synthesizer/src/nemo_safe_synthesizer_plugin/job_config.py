@@ -47,6 +47,12 @@ class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
         "synthesis. Accepts either '<job>' in the current workspace or '<workspace>/<job>'. "
         "The plugin resolves the prior job's 'adapter' result from Files.",
     )
+    pii_model_provider: str | None = Field(
+        default=None,
+        description="Inference Gateway model provider, as '<workspace>/<provider>', that PII replacement uses "
+        "to find PII. Required when PII replacement discovers its plan automatically; set the model it serves "
+        "in config.replace_pii.llm.model_id.",
+    )
 
     enable_synthesis: SkipJsonSchema[bool] = Field(
         default=True,

@@ -202,6 +202,7 @@ def test_setup_classify_endpoint_sets_upstream_safe_synthesizer_env(monkeypatch)
     monkeypatch.setenv("NHX_MODELS_URL", "http://models.test")
     monkeypatch.delenv("NSS_INFERENCE_ENDPOINT", raising=False)
     monkeypatch.delenv("NSS_INFERENCE_KEY", raising=False)
+    monkeypatch.delenv("NSS_INFERENCE_ALLOW_HTTP", raising=False)
 
     task_main._setup_classify_endpoint()
 
@@ -210,6 +211,7 @@ def test_setup_classify_endpoint_sets_upstream_safe_synthesizer_env(monkeypatch)
         == "http://models.test/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
     )
     assert task_main.os.environ["NSS_INFERENCE_KEY"] == "not-needed"
+    assert task_main.os.environ["NSS_INFERENCE_ALLOW_HTTP"] == "true"
 
 
 def test_setup_classify_endpoint_preserves_existing_inference_key(monkeypatch):
@@ -217,6 +219,7 @@ def test_setup_classify_endpoint_preserves_existing_inference_key(monkeypatch):
     monkeypatch.setenv("CLASSIFY_LLM_ENDPOINT_PATH", "/route")
     monkeypatch.setenv("NHX_MODELS_URL", "http://models.test/")
     monkeypatch.setenv("NSS_INFERENCE_KEY", "real-key")
+    monkeypatch.delenv("NSS_INFERENCE_ALLOW_HTTP", raising=False)
 
     task_main._setup_classify_endpoint()
 

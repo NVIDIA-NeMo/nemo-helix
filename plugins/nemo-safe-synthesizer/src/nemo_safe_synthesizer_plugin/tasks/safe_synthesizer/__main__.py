@@ -306,20 +306,25 @@ def _resolve_pretrained_model(
 
 
 def _setup_classify_endpoint():
-    """Set up upstream Safe Synthesizer PII classification env vars from platform env vars."""
+    """Point Safe Synthesizer's PII inference at the job's model provider route on the platform gateway.
+
+    The gateway is reached over the platform's internal network, often plain HTTP, which Safe Synthesizer
+    accepts only with ``NSS_INFERENCE_ALLOW_HTTP``.
+    """
     endpoint_path = os.environ.get("CLASSIFY_LLM_ENDPOINT_PATH")
     if endpoint_path:
         models_url = os.environ.get("NHX_MODELS_URL")
         if not models_url:
             logger.warning(
                 "CLASSIFY_LLM_ENDPOINT_PATH is set but NHX_MODELS_URL is not available. "
-                "Column classification may not work correctly."
+                "PII inference may not work correctly."
             )
             return
         full_url = models_url.rstrip("/") + endpoint_path
         os.environ["NSS_INFERENCE_ENDPOINT"] = full_url
         os.environ.setdefault("NSS_INFERENCE_KEY", "not-needed")
-        logger.info("Configured column classification endpoint: %s", full_url)
+        os.environ["NSS_INFERENCE_ALLOW_HTTP"] = "true"
+        logger.info("Configured PII inference endpoint: %s", full_url)
 
 
 def _validate_flat_tabular_data(data: pd.DataFrame) -> None:

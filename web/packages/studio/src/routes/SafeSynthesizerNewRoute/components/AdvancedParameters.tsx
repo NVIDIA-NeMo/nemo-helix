@@ -3,7 +3,6 @@
 
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
-import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { InfoCircle, Reset } from '@nemo/icons/icons';
 import {
@@ -15,6 +14,7 @@ import {
   Tooltip,
   Button,
 } from '@nvidia/foundations-react-core';
+import { PiiReplacementSettings } from '@studio/routes/SafeSynthesizerNewRoute/components/PiiReplacementSettings';
 import {
   DEFAULT_NUM_INPUT_RECORDS_TO_SAMPLE,
   PRETRAINED_MODEL_OPTIONS,
@@ -347,28 +347,7 @@ export const AdvancedParameters = () => {
         </Flex>
       </Stack>
       <Divider orientation="horizontal" width="small" />
-      <Stack gap="density-2xl">
-        <Text kind="label/bold/lg">PII Replacement Configuration</Text>
-        <Flex direction="row" align="center" gap="density-md" className="w-full">
-          <Text kind="label/regular/md" className="min-w-[200px]">
-            enable_replace_pii
-            <Tooltip
-              slotContent="Automatically redact or replace Personally Identifiable Information (PII) prior to training the model. Highly recommended to ensure the model has no chance to learn this sensitive information."
-              side="bottom"
-            >
-              <InfoCircle className="inline ml-density-sm" />
-            </Tooltip>
-          </Text>
-          <div className="flex-1">
-            <ControlledSwitch
-              useControllerProps={{
-                name: 'spec.config.enable_replace_pii',
-                control,
-              }}
-            />
-          </div>
-        </Flex>
-      </Stack>
+      <PiiReplacementSettings />
     </Stack>
   );
 };
