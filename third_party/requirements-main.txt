@@ -46,6 +46,7 @@
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
     #   nemo-automodel-plugin
+    #   nemo-bedrock-plugin
     #   nemo-builder-plugin
     #   nemo-compass-plugin
     #   nemo-customizer-plugin
@@ -56,6 +57,7 @@
     #   nemo-guardrails-plugin
     #   nemo-helix
     #   nemo-helix-ext
+    #   nemo-ngc-plugin
     #   nemo-optimization-plugin
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer-plugin
@@ -140,6 +142,7 @@
     #   nemo-helix
 -e ./plugins/nemo-anonymizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-automodel ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-bedrock ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-builder ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-evals-plugin
@@ -157,6 +160,7 @@
     #   nemo-helix
     #   nhx-platform-seed
 -e ./plugins/nemo-guardrails ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-ngc ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-rl ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-safe-synthesizer
@@ -1332,6 +1336,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-agents-plugin
     #   nemo-anonymizer
     #   nemo-anonymizer-plugin
+    #   nemo-bedrock-plugin
     #   nemo-builder-plugin
     #   nemo-compass
     #   nemo-compass-plugin
@@ -1345,6 +1350,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-helix-ext
     #   nemo-helix-plugin
     #   nemo-helix-tavily-plugin
+    #   nemo-ngc-plugin
     #   nemo-safe-synthesizer
     #   nemo-safe-synthesizer-plugin
     #   nemo-switchyard-plugin
@@ -3096,6 +3102,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-agent-optimization-plugin
     #   nemo-anonymizer
     #   nemo-automodel-plugin
+    #   nemo-bedrock-plugin
     #   nemo-builder-plugin
     #   nemo-compass
     #   nemo-compass-plugin
@@ -3108,6 +3115,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-helix-ext
     #   nemo-helix-plugin
     #   nemo-helix-tavily-plugin
+    #   nemo-ngc-plugin
     #   nemo-optimization-plugin
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer
