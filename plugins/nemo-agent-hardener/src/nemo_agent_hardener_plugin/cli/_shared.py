@@ -26,11 +26,15 @@ from nemo_agent_hardener_plugin.model_config import (
     effective_safety,
 )
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
+from nemo_helix_ext.cli.core.waiters import wait_for_platform_job
 from nemo_helix_plugin.agent_hardener.types import JsonMap, JsonValue
 from nemo_helix_plugin.client.adapter import SyncHelixClient
+from nemo_helix_plugin.jobs.client import JobsClient
 
 # The entity's own Literal is the single source of truth for the valid presets.
 ATTACK_INTENSITIES: tuple[str, ...] = get_args(AgentHardenerManifest.model_fields["attack_intensity"].annotation)
+# A war-game job can run as long as its garak scan, which is capped at 2h.
+JOB_WAIT_TIMEOUT_S = 7200
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,22 @@ def command_context(workspace: str | None, *, preflight: bool = True) -> Command
         base_url=url,
         workspace=workspace or config.default_workspace,
     )
+
+
+def wait_for_job(base_url: str, workspace: str, job_name: str) -> bool:
+    """Follow a submitted platform job to its end; True only if it completed.
+
+    Uses the platform Jobs API (same waiter as ``nemo jobs create --wait``), so local and k8s behave alike.
+    """
+    jobs = JobsClient(base_url=base_url)
+    if wait_for_platform_job(jobs, job_name, workspace=workspace, timeout=JOB_WAIT_TIMEOUT_S):
+        return True
+    error = jobs.get_job(name=job_name, workspace=workspace).data().error_details or {}
+    if error.get("message"):
+        typer.secho(f"Job failed: {error['message']}", fg="red")
+    if error.get("remediation"):
+        typer.echo(f"Fix: {error['remediation']}")
+    return False
 
 
 def parse_env_pairs(pairs: list[str]) -> dict[str, str]:

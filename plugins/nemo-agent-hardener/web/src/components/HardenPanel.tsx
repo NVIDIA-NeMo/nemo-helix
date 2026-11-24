@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { jobFailure } from '@agent-hardener/api/jobFailure';
 import { useHelixSdk } from '@agent-hardener/api/platform';
 import { ConfigDiff } from '@agent-hardener/components/ConfigDiff';
 import { SanityCheckReport } from '@agent-hardener/components/SanityCheckReport';
@@ -213,6 +214,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     },
   });
   const sanityStatus = sanityJobDetail?.status;
+  const sanityFailure = jobFailure(sanityJobDetail);
   const {
     report,
     isLoading: reportLoading,
@@ -479,12 +481,18 @@ export const HardenPanel: FC<HardenPanelProps> = ({
               </Flex>
             </>
           ) : missingReport ? (
-            <Flex align="center" gap="density-sm" className="p-4">
+            <Stack gap="density-xs" className="p-4">
               <Text kind="body/regular/md" className="text-feedback-danger">
-                The sanity check finished without producing a report — it may have failed or been
-                cancelled. Try running it again.
+                {sanityFailure
+                  ? `The sanity check failed: ${sanityFailure.message}`
+                  : 'The sanity check finished without producing a report — it may have failed or been cancelled. Try running it again.'}
               </Text>
-            </Flex>
+              {sanityFailure?.remediation && (
+                <Text kind="body/regular/md" className="text-subtle">
+                  {sanityFailure.remediation}
+                </Text>
+              )}
+            </Stack>
           ) : (
             <Flex align="center" gap="density-sm" className="p-4">
               <Spinner size="small" aria-label="Running sanity check" />

@@ -110,8 +110,24 @@ def test_sdk_sanity_check_composes_and_builds_validate_only_spec(monkeypatch: py
     assert spec["defense_policy"] == "v: 1\n"
 
 
-def test_cli_sanity_check_selects_and_submits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("flags", "job_completed", "exit_code", "waited"),
+    [
+        ([], True, 0, True),
+        ([], False, 1, True),
+        (["--no-wait"], False, 0, False),
+    ],
+)
+def test_cli_sanity_check_submits_then_waits_for_the_job(
+    flags: list[str],
+    job_completed: bool,
+    exit_code: int,
+    waited: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from nemo_agent_hardener_plugin.cli import main as cli_main
+    from nemo_agent_hardener_plugin.cli import war_game
 
     mitigations_file = tmp_path / "mitigations.json"
     mitigations_file.write_text(json.dumps(_mitigations()), encoding="utf-8")
@@ -120,12 +136,14 @@ def test_cli_sanity_check_selects_and_submits(tmp_path: Path, monkeypatch: pytes
     fake_sdk = SimpleNamespace(
         agent_hardener=SimpleNamespace(sanity_check=lambda **kwargs: captured.update(kwargs) or {"name": "job-x"})
     )
+    waited_for: list[str] = []
     monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
         _shared.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(default_workspace="default"))
     )
+    monkeypatch.setattr(war_game, "wait_for_job", lambda _url, _ws, name: waited_for.append(name) or job_completed)
 
     app = cli_main.AgentHardenerCLI().get_cli()
     result = CliRunner().invoke(
@@ -140,14 +158,52 @@ def test_cli_sanity_check_selects_and_submits(tmp_path: Path, monkeypatch: pytes
             "default/hits",
             "--exclude",
             "custom_guardrail_2",
+            *flags,
         ],
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == exit_code, result.output
+    assert waited_for == (["job-x"] if waited else [])
     assert captured["manifest_id"] == "clockbot-hardening"
     assert captured["replay_hitlog_fileset"] == "default/hits"
     # --exclude drops guardrail_2; the rest are kept.
     assert captured["selected_defense_ids"] == ["custom_guardrail_1", "openshell_policy"]
+
+
+@pytest.mark.parametrize(
+    ("completed", "error", "expected_lines"),
+    [
+        (True, None, []),
+        (False, {"message": "victim down", "remediation": "fix it"}, ["Job failed: victim down", "Fix: fix it"]),
+    ],
+)
+def test_wait_for_job_reports_the_platform_failure(
+    completed: bool,
+    error: dict | None,
+    expected_lines: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class _Jobs:
+        def __init__(self, **_kwargs: Any) -> None: ...
+
+        def get_job(self, *, name: str, workspace: str) -> SimpleNamespace:
+            assert (name, workspace) == ("job-x", "default")
+            return SimpleNamespace(data=lambda: SimpleNamespace(error_details=error))
+
+    waited: dict[str, Any] = {}
+    monkeypatch.setattr(_shared, "JobsClient", _Jobs)
+    monkeypatch.setattr(
+        _shared,
+        "wait_for_platform_job",
+        lambda _jobs, name, **kwargs: waited.update(name=name, **kwargs) or completed,
+    )
+
+    assert _shared.wait_for_job("http://localhost:8080", "default", "job-x") is completed
+    assert waited == {"name": "job-x", "workspace": "default", "timeout": _shared.JOB_WAIT_TIMEOUT_S}
+    out = capsys.readouterr().out
+    for line in expected_lines:
+        assert line in out
 
 
 def test_cli_sanity_check_rejects_keep_and_exclude_together(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

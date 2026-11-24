@@ -15,6 +15,7 @@ from nemo_agent_hardener_plugin.cli._shared import (
     models_from_flags,
     validated_defenders,
     validated_intensity,
+    wait_for_job,
 )
 from nemo_agent_hardener_plugin.config import missing_secrets
 from nemo_agent_hardener_plugin.jobs.defenses import defense_ids, select_defense_ids
@@ -221,6 +222,9 @@ def register(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(None, "--exclude", help="Defense id to drop (repeatable)."),
         env_file: str | None = typer.Option(None, "--env-file", help="Dotenv with the agent's secrets."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace for the run."),
+        wait: bool = typer.Option(
+            True, "--wait/--no-wait", help="Wait for the job and exit non-zero unless it completes."
+        ),
     ) -> None:
         """Freeze a chosen subset of a run's recommended defenses and replay the recorded attacks + benign.
 
@@ -256,3 +260,5 @@ def register(app: typer.Typer) -> None:
             workspace=ctx.workspace,
         )
         typer.echo(json.dumps(result, indent=2, default=str))
+        if wait and not wait_for_job(ctx.base_url, ctx.workspace, str(result["name"])):
+            raise typer.Exit(code=1)
