@@ -80,7 +80,7 @@ class CompassSchedulerConfig(BaseModel):
 
     job_profile: str = Field(
         default="default",
-        description="Jobs execution profile used for scheduled Compass jobs.",
+        description="Jobs execution profile for Compass runs, scheduled or on demand, whose job request names none.",
     )
 
 

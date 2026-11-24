@@ -10,14 +10,17 @@ import json
 import httpx
 import pytest
 from nemo_compass_plugin.analyst import CompassAnalyst, CompassContext, CompassPreparedContext
+from nemo_compass_plugin.config import CompassConfig
 from nemo_helix_plugin.agents.plugin_managed_agents import (
     CONFIGURED_DEFAULT_MODEL,
     CONFIGURED_FAST_MODEL,
     HELIX_DEFAULT_SCHEMA_KEY,
     PluginManagedAgentInputError,
+    PreparedRun,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
 from nhx.testing import mock_async_nemo_client
 
 _ETHOS_PATH = "/apis/files/v2/workspaces/team/filesets/support-bot-ethos/-/ETHOS.md"
@@ -69,12 +72,16 @@ def _model_entity(workspace: str, name: str, backend_format: str | None) -> dict
     return entity
 
 
-async def _prepare(platform: _Platform, **context: object) -> CompassPreparedContext:
+async def _prepare_run(platform: _Platform, **context: object) -> PreparedRun[CompassPreparedContext]:
     fields = {"agent": "support-bot", "default_model": "big", **context}
     client = mock_async_nemo_client(platform, AsyncNemoClient, workspace="team")
     prepared = await CompassAnalyst.prepare(CompassContext.model_validate(fields), workspace="team", client=client)
     assert prepared.subject == "support-bot"
-    return prepared.context
+    return prepared
+
+
+async def _prepare(platform: _Platform, **context: object) -> CompassPreparedContext:
+    return (await _prepare_run(platform, **context)).context
 
 
 def test_the_context_schema_is_flat_and_hints_both_models() -> None:
@@ -138,3 +145,16 @@ async def test_an_ethos_the_caller_may_not_read_fails_the_run() -> None:
     """Silently analyzing without an Ethos the caller expected would be worse than refusing."""
     with pytest.raises(PermissionDeniedError):
         await _prepare(_Platform(ethos_status=403))
+
+
+@pytest.mark.parametrize("profile", ["default", "cpu-cluster"])
+async def test_every_run_uses_the_configured_job_profile(profile: str) -> None:
+    config = CompassConfig()
+    config.analysis.job_profile = profile
+    set_nemo_config_override(config)
+    try:
+        prepared = await _prepare_run(_Platform())
+    finally:
+        clear_nemo_config_override(CompassConfig)
+
+    assert prepared.job_profile == profile

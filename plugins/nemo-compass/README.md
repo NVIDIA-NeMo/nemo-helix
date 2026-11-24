@@ -130,7 +130,7 @@ environment wins. All settings live under `analysis`, with the
 | `NEMO_COMPASS_ANALYSIS_TIMEZONE` | `analysis.timezone` | `UTC` | IANA name (e.g. `America/Denver`) the schedule is interpreted in. Converted to the server clock at evaluation time, so runs hold their local hour across DST. An unknown name fails validation. |
 | — (see below) | `analysis.run_at_hour` | `0` | Local hour-of-day, 0–23, that scheduled runs fire. |
 | — (see below) | `analysis.run_on_weekday` | `monday` | Day scheduled runs fire. Used only when frequency is `weekly`. |
-| — (see below) | `analysis.job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
+| — (see below) | `analysis.job_profile` | `default` | Jobs execution profile for Compass runs, scheduled or on demand, whose job request names none. |
 
 ```bash
 export NEMO_COMPASS_ANALYSIS_FREQUENCY=weekly

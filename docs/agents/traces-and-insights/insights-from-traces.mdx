@@ -325,7 +325,7 @@ compass:
     run_at_hour: 0           # local hour of day, 0-23
     run_on_weekday: monday   # used only when frequency is weekly
     timezone: UTC            # IANA name, such as America/Denver
-    job_profile: default     # jobs execution profile for scheduled runs
+    job_profile: default     # jobs execution profile for every Compass run
 ```
 
 | Setting | Default | Description |
@@ -335,7 +335,7 @@ compass:
 | `run_at_hour` | `0` | Hour of day that runs become due, in `timezone`. |
 | `run_on_weekday` | `monday` | Day of week runs become due. Used only with `weekly`. |
 | `timezone` | `UTC` | IANA time zone name. Runs keep their local hour across daylight saving changes. An unknown name fails validation. |
-| `job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
+| `job_profile` | `default` | Jobs execution profile for Compass runs, scheduled or on demand, whose job request names none. |
 
 ## Review Insights
 

@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Annotated, ClassVar
 
 from nemo_compass_plugin.analysis.models import resolve_model_ref
+from nemo_compass_plugin.config import CompassConfig
 from nemo_helix_plugin.agents.ethos import ETHOS_FILENAME, ethos_fileset_name
 from nemo_helix_plugin.agents.plugin_managed_agents import (
     CONFIGURED_DEFAULT_MODEL,
@@ -19,6 +20,7 @@ from nemo_helix_plugin.agents.plugin_managed_agents import (
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -86,7 +88,11 @@ class CompassAnalyst(PluginManagedAgent[CompassContext, CompassPreparedContext])
     async def prepare(
         cls, context: CompassContext, *, workspace: str, client: AsyncNemoClient
     ) -> PreparedRun[CompassPreparedContext]:
-        """Qualify the model refs and read the analyzed agent's Ethos, as the caller."""
+        """Qualify the model refs and read the analyzed agent's Ethos, as the caller.
+
+        Every run uses the configured ``analysis.job_profile`` unless its job request names a profile,
+        whether the scheduler, Studio or a CLI user started it.
+        """
         models_client = AsyncModelsClient.from_client(client)
         default_model = await resolve_model_ref(
             models_client, context.default_model, field="default_model", workspace=workspace
@@ -107,6 +113,7 @@ class CompassAnalyst(PluginManagedAgent[CompassContext, CompassPreparedContext])
                 evaluation_id=context.evaluation_id,
             ),
             subject=context.agent,
+            job_profile=get_nemo_config(CompassConfig).analysis.job_profile,
         )
 
 

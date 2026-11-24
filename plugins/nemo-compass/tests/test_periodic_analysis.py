@@ -936,7 +936,6 @@ async def _controller(
         analysis=CompassSchedulerConfig(
             frequency=Frequency.DAILY,
             run_at_hour=0,
-            job_profile="test-profile",
         )
     )
     async with _async_platform() as client:
@@ -991,7 +990,8 @@ async def test_controller_submits_due_job(monkeypatch: pytest.MonkeyPatch) -> No
         await controller._reconcile_config(config)
 
     [created] = jobs.runs
-    assert created.profile == "test-profile"
+    # Compass's prepare() applies analysis.job_profile to every run, so the scheduler names none.
+    assert created.profile is None
     assert created.spec == {
         "agent": "compass-analyst",
         "context": {

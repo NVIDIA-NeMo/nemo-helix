@@ -366,7 +366,6 @@ class CompassAnalysisController(NemoController):
                 workspace=config.workspace,
                 body=CreateExecuteJobRequest(
                     name=job_name,
-                    profile=self.compass_config.analysis.job_profile,
                     spec={
                         "agent": compass_agent,
                         "context": context,
