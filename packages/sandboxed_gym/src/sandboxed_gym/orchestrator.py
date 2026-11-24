@@ -14,7 +14,6 @@ import signal
 import threading
 import time
 import urllib.error
-import urllib.request
 from atexit import register as register_atexit
 from collections.abc import Callable, Coroutine, Mapping
 from os import kill
@@ -22,7 +21,6 @@ from signal import signal as set_signal_handler
 from types import FrameType
 from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse, urlunsplit
-from urllib.request import urlopen
 
 import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
@@ -34,6 +32,7 @@ from sandboxed_gym.host.models import (
     GymHostSpec,
     GymHostVolumeMount,
     build_bootstrap_env,
+    open_host,
     render_host_error,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
@@ -371,9 +370,8 @@ class SandboxedGymSession:
         else:
             path = "/entries"
         url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
-        request = urllib.request.Request(url, method="GET", headers=self.host.request_headers())
         try:
-            with urlopen(request, timeout=30) as response:
+            with open_host(self.host, url, timeout=30) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -485,15 +483,16 @@ class SandboxedGymSession:
                 retryable=False,
                 origin="client",
             )
-        request = urllib.request.Request(
-            self.host.rollout_url,
-            data=body,
-            method="POST",
-            headers={"Content-Type": "application/json", **self.host.request_headers()},
-        )
         started = time.monotonic()
         try:
-            with urlopen(request, timeout=self._rollout_timeout_s) as response:
+            with open_host(
+                self.host,
+                self.host.rollout_url,
+                method="POST",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                timeout=self._rollout_timeout_s,
+            ) as response:
                 payload = response.read()
         except urllib.error.HTTPError as exc:
             raise self._transport_error(exc.read().decode("utf-8", errors="replace"), exc.code, chunk, started) from exc

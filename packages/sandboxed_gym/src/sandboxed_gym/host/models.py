@@ -11,7 +11,9 @@ Defines the create/spec and config shapes used by ``SandboxedGymHostProvider`` a
 import json
 import os
 from dataclasses import dataclass, field
+from http.client import HTTPResponse
 from typing import Any, Generic, Mapping, TypeVar
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -172,14 +174,39 @@ class GymHostHandle(Generic[TProvider]):
     #: to sandboxed job code and to other jobs.
     headers: Mapping[str, str] = field(default_factory=dict)
     provider: TProvider | None = None
-    #: Credentials this process sends with its own requests to the host and never hands on: they stay
-    #: out of the session descriptor. OpenSandbox's API key goes here, which a server with tenants
-    #: requires on proxied requests and which can reach every sandbox of the tenant.
-    credential_headers: Mapping[str, str] = field(default_factory=dict, repr=False)
+    #: Credentials for this process's own requests to the host, such as OpenSandbox's API key, which a
+    #: server with tenants requires on proxied requests and which can reach every sandbox of the tenant.
+    #: Private, and read only by :func:`open_host`: they never go into the session descriptor, and
+    #: never onto a request that follows a redirect.
+    _credentials: Mapping[str, str] = field(default_factory=dict, repr=False)
 
-    def request_headers(self) -> dict[str, str]:
-        """Headers for a request this process sends to the host: ``headers`` and ``credential_headers``."""
-        return {**self.headers, **self.credential_headers}
+
+class _RefuseRedirects(HTTPRedirectHandler):
+    """Make a redirect an ``HTTPError`` with its 3xx status instead of a new request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+def open_host(
+    host: GymHostHandle,
+    url: str,
+    *,
+    timeout: float,
+    method: str = "GET",
+    data: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> HTTPResponse:
+    """Send a request to the Gym host with its address headers and credentials, refusing redirects.
+
+    The only way the host's credentials go on a request. urllib copies every header onto a
+    redirected request, wherever it points, and the host runs untrusted code whose responses come back
+    through the proxy: following its redirect would send our credentials, and this trusted process's
+    request, wherever it chose. A redirect raises ``HTTPError`` with its 3xx status instead, which
+    callers already handle like any other refused request.
+    """
+    request = Request(url, data=data, method=method, headers={**(headers or {}), **host.headers, **host._credentials})
+    return build_opener(_RefuseRedirects).open(request, timeout=timeout)
 
 
 class SandboxNetworkPolicy(BaseModel):

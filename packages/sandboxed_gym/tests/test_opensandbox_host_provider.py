@@ -31,6 +31,10 @@ HEALTH_URL = "https://sandbox.example/gym-1/health"
 ROLLOUT_URL = "https://sandbox.example/gym-1/rollouts/run"
 
 
+def _handle() -> GymHostHandle:
+    return GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
+
+
 def _raising(error: Exception):
     def _raise(*args: Any, **kwargs: Any):
         raise error
@@ -53,7 +57,7 @@ def test_readiness_timeout_names_the_url_it_polled(
     """
     handle = GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
 
-    def _refuse(url: str, headers: Any) -> dict[str, Any]:
+    def _refuse(handle: Any) -> dict[str, Any]:
         raise ConnectionRefusedError("connection refused")
 
     monkeypatch.setattr(provider, "_get_json", _refuse)
@@ -167,7 +171,7 @@ def test_a_host_that_reports_a_failed_bootstrap_stops_the_poll_immediately(
     handle = GymHostHandle(host_id="gym-1", health_url=HEALTH_URL, rollout_url=ROLLOUT_URL)
     polls = 0
 
-    def _failed(url: str, headers: Any) -> dict[str, Any]:
+    def _failed(handle: Any) -> dict[str, Any]:
         nonlocal polls
         polls += 1
         return {
@@ -198,9 +202,9 @@ def test_a_503_health_response_keeps_the_body_it_carried(
     """The host reports a failed bootstrap as 503, so discarding that body discards the diagnosis."""
     body = json.dumps({"status": "failed", "error": {"message": "boom"}}).encode("utf-8")
     error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(body))
-    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.open_host", _raising(error))
 
-    assert provider._get_json(HEALTH_URL, {}) == {"status": "failed", "error": {"message": "boom"}}
+    assert provider._get_json(_handle()) == {"status": "failed", "error": {"message": "boom"}}
 
 
 def test_a_503_health_response_without_a_body_still_reads_as_starting(
@@ -209,9 +213,9 @@ def test_a_503_health_response_without_a_body_still_reads_as_starting(
 ) -> None:
     """The sandbox proxy 503s before the host exists at all, with no JSON of its own."""
     error = HTTPError(HEALTH_URL, 503, "Service Unavailable", Message(), io.BytesIO(b"<html>no route</html>"))
-    monkeypatch.setattr("sandboxed_gym.host.opensandbox.urlopen", _raising(error))
+    monkeypatch.setattr("sandboxed_gym.host.opensandbox.open_host", _raising(error))
 
-    assert provider._get_json(HEALTH_URL, {}) == {"status": "starting"}
+    assert provider._get_json(_handle()) == {"status": "starting"}
 
 
 def test_a_rendered_error_keeps_every_line_the_host_sent() -> None:

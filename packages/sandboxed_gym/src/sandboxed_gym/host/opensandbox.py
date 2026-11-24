@@ -10,7 +10,6 @@ import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
     from sandboxed_gym.backends._opensandbox_driver import OpenSandboxDriver
@@ -23,6 +22,7 @@ from sandboxed_gym.host.models import (
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    open_host,
     render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
@@ -269,7 +269,7 @@ class OpenSandboxGymHostProvider:
             rollout_url=routes.rollout_url,
             headers=routes.headers,
             provider=provider,
-            credential_headers=self._proxy_credential_headers(),
+            _credentials=self._proxy_credential_headers(),
         )
 
     async def wait_ready(self, handle: "GymHostHandle[OpenSandboxDriver]", timeout_s: float) -> None:
@@ -278,7 +278,7 @@ class OpenSandboxGymHostProvider:
         last_error: Exception | None = None
         while asyncio.get_running_loop().time() < deadline:
             try:
-                body = await asyncio.to_thread(self._get_json, handle.health_url, handle.request_headers())
+                body = await asyncio.to_thread(self._get_json, handle)
                 if body.get("status") == "ready":
                     return
                 if body.get("status") == "failed":
@@ -298,10 +298,9 @@ class OpenSandboxGymHostProvider:
             + (f": {last_error}" if last_error is not None else "")
         )
 
-    def _get_json(self, url: str, headers: Mapping[str, str]) -> dict[str, Any]:
-        request = Request(url, method="GET", headers=dict(headers))
+    def _get_json(self, handle: "GymHostHandle[OpenSandboxDriver]") -> dict[str, Any]:
         try:
-            with urlopen(request, timeout=10) as response:
+            with open_host(handle, handle.health_url, timeout=10) as response:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:
