@@ -3983,24 +3983,22 @@ components:
             result bundle. Omit to publish nowhere.
         tasks:
           title: Tasks
-          description: Resolved task snapshots in execution order. Omitted when the
-            job keeps them outside its record; see `task_count`.
+          description: Resolved task snapshots in execution order. Only archive materialization
+            remains on the worker.
           items:
             $ref: '#/components/schemas/ResolvedTask'
           type: array
+          minItems: 1
         task_count:
           title: Task Count
-          description: Number of tasks the job runs.
+          description: Number of tasks the job runs. Set even when `tasks` is omitted
+            because the job keeps its tasks outside its record.
           type: integer
           minimum: 1.0
       additionalProperties: false
       type: object
       title: AgentEvalSpec
-      description: 'An agent-evaluate job''s spec as job replies show it: its settings
-        and `task_count`.
-
-
-        Only jobs stored before tasks moved out of the job record show `tasks`.'
+      description: Canonical evaluation containing self-contained, resolved task snapshots.
     AgentEvalTaskInput:
       properties:
         id:

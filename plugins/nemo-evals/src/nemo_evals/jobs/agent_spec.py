@@ -1170,21 +1170,24 @@ class FrozenTasks(BaseModel):
 
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
-    """An agent-evaluate job's spec as job replies show it: its settings and `task_count`.
+    """Canonical evaluation containing self-contained, resolved task snapshots."""
 
-    Only jobs stored before tasks moved out of the job record show `tasks`.
-    """
+    # Job replies render this model. A job that keeps its tasks in a file shows `task_count` and no `tasks`.
 
     # Replies describe a stored job, not a request: an offline job whose trials are frozen in a file shows
     # neither `target` nor `trials`, so the request-side ``oneOf`` doesn't apply.
     model_config = ConfigDict(json_schema_extra=None)
 
-    tasks: list[ResolvedTask] | None = Field(
+    tasks: Annotated[list[ResolvedTask], Field(min_length=1)] | None = Field(
         default=None,
-        description="Resolved task snapshots in execution order. Omitted when the job keeps them outside its "
-        "record; see `task_count`.",
+        description="Resolved task snapshots in execution order. Only archive materialization remains on the worker.",
     )
-    task_count: int | None = Field(default=None, ge=1, description="Number of tasks the job runs.")
+    task_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="Number of tasks the job runs. Set even when `tasks` is omitted because the job keeps its "
+        "tasks outside its record.",
+    )
     frozen_tasks: SkipJsonSchema[FrozenTasks | None] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
@@ -1199,11 +1202,8 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     def _require_tasks_or_frozen_tasks(self) -> Self:
         if (self.tasks is None) == (self.frozen_tasks is None):
             raise ValueError("an agent-eval job spec carries either its `tasks` or the file that holds them")
-        if self.tasks is not None:
-            if not self.tasks:
-                raise ValueError("an agent-eval job spec needs at least one task")
-            if self.task_count is None:
-                self.task_count = len(self.tasks)
+        if self.tasks is not None and self.task_count is None:
+            self.task_count = len(self.tasks)
         if self.task_count is None:
             raise ValueError("a job spec that keeps its tasks in a file needs `task_count`")
         return self
