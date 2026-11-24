@@ -159,7 +159,8 @@ async def create_deployment(
 
     # 3. Resolve deployment-time config. NAT workflows need legacy injection;
     # Platform-owned agent configs stay strict and are translated by the runner.
-    resolved_config = _resolve_deployment_config(agent, workspace=workspace)
+    # Off the event loop: a plugin-managed agent's config comes from loading its type.
+    resolved_config = await asyncio.to_thread(_resolve_deployment_config, agent, workspace=workspace)
 
     # 4. Resolve and snapshot the referenced AgentEnvironment. The environment
     # spec is merged into the resolved config (Agent-config-wins precedence); the

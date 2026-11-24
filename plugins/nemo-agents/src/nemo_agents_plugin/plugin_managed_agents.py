@@ -159,7 +159,16 @@ def _load_registered_type(type_id: str, registered: dict[str, list[EntryPoint]])
         raise PluginManagedAgentTypeError(str(exc)) from exc
     except Exception as exc:
         raise PluginManagedAgentTypeError(f"Plugin-managed agent type {type_id!r} failed to import: {exc}") from exc
-    check_plugin_managed_agent_type(loaded, entry_point_name=type_id)
+    try:
+        check_plugin_managed_agent_type(loaded, entry_point_name=type_id)
+    except PluginManagedAgentTypeError:
+        raise
+    except Exception as exc:
+        # The checks call the plugin's own code (config(), context_schema()); a bug there
+        # makes the type unusable, like a failed import, rather than failing every read.
+        raise PluginManagedAgentTypeError(
+            f"Plugin-managed agent type {type_id!r} failed its load checks: {exc}"
+        ) from exc
     return loaded
 
 

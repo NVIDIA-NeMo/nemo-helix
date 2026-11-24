@@ -50,6 +50,7 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -149,7 +150,11 @@ async def _find_agent_of_type(type_id: str, *, workspace: str, entity_client: Ne
     except CLIENT_ERRORS:
         raise
     except Exception as exc:
-        logger.exception("Failed to look up agents of type %r in workspace '%s'", type_id, workspace)
+        logger.exception(
+            "Failed to look up agents of type %r in workspace '%s'",
+            sanitize_for_log(type_id),
+            sanitize_for_log(workspace),
+        )
         raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
     return result.data[0] if result.data else None
 

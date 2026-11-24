@@ -65,7 +65,17 @@ def test_target_descriptors_are_not_adapters(tmp_path: Path) -> None:
     assert installed_adapter_ids(tmp_path) == {"nvidia.fabric.nooa"}
 
 
-@pytest.mark.parametrize("content", ["{not json", "[]", "{}", json.dumps({"adapter_id": ""})])
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json",
+        "[]",
+        "{}",
+        json.dumps({"adapter_id": ""}),
+        json.dumps({"adapter_id": "acme.bad", "config": {"accepts": 7}}),
+        json.dumps({"adapter_id": "acme.bad", "config": {"accepts": "models"}}),
+    ],
+)
 def test_unreadable_manifest_is_skipped(tmp_path: Path, content: str) -> None:
     _write(tmp_path / "broken/broken.fabric-adapter.json", content)
     _write(tmp_path / "good/good.fabric-adapter.json", json.dumps({"adapter_id": "acme.good"}))

@@ -137,6 +137,9 @@ def _scan_adapter_config_accepts(root: Path) -> dict[str, frozenset[str]]:
         if not isinstance(adapter_id, str) or not adapter_id:
             logger.warning("Skipping Fabric adapter manifest %s: it declares no adapter_id.", manifest)
             continue
+        if not isinstance(accepts, list):
+            logger.warning("Skipping Fabric adapter manifest %s: its config.accepts is not a list.", manifest)
+            continue
         accepts_by_id[adapter_id] = frozenset(item for item in accepts if isinstance(item, str))
     return accepts_by_id
 

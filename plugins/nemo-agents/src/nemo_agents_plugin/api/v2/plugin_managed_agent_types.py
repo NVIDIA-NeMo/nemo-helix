@@ -25,13 +25,14 @@ from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
+from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # A workspace holds at most one agent per type, so this bounds the lookup well above any real install.
-_MAX_TYPED_AGENTS = 100
+_TYPED_AGENTS_PAGE_SIZE = 100
 
 
 @router.get(
@@ -58,27 +59,41 @@ async def list_plugin_managed_agent_types_route(
     if not types:
         return []
     try:
-        result = await entity_client.list(
-            Agent,
-            workspace=workspace,
-            page=1,
-            page_size=_MAX_TYPED_AGENTS,
-            sort="created_at",
-            filter_operation=ComparisonOperation(
-                operator=FilterOperator.IN,
-                field="data.plugin_managed_agent.type",
-                value=[type_cls.type_id for type_cls in types],
-            ),
+        agents = await _list_agents_of_types(
+            [type_cls.type_id for type_cls in types], workspace=workspace, entity_client=entity_client
         )
     except CLIENT_ERRORS:
         raise
     except Exception as exc:
-        logger.exception("Failed to list plugin-managed agents in workspace '%s'", workspace)
+        logger.exception("Failed to list plugin-managed agents in workspace '%s'", sanitize_for_log(workspace))
         raise HTTPException(status_code=500, detail="Failed to list plugin-managed agent types.") from exc
 
     # Oldest first, so the agent reported for a type is the one that won any create race.
     agents_by_type: dict[str, str] = {}
-    for agent in result.data:
+    for agent in agents:
         if agent.plugin_managed_agent is not None:
             agents_by_type.setdefault(agent.plugin_managed_agent.type, agent.name)
     return [type_info(type_cls, agent=agents_by_type.get(type_cls.type_id)) for type_cls in types]
+
+
+async def _list_agents_of_types(
+    type_ids: list[str], *, workspace: str, entity_client: NemoEntitiesClient
+) -> list[Agent]:
+    """List the workspace's agents of *type_ids*, oldest first, following pagination."""
+    agents: list[Agent] = []
+    page = 1
+    while True:
+        result = await entity_client.list(
+            Agent,
+            workspace=workspace,
+            page=page,
+            page_size=_TYPED_AGENTS_PAGE_SIZE,
+            sort="created_at",
+            filter_operation=ComparisonOperation(
+                operator=FilterOperator.IN, field="data.plugin_managed_agent.type", value=type_ids
+            ),
+        )
+        agents.extend(result.data)
+        if result.pagination is None or page >= result.pagination.total_pages:
+            return agents
+        page += 1

@@ -11,7 +11,7 @@ Some agents are written by a NeMo Helix plugin rather than by you. A
 **plugin-managed agent type** packages one: the plugin supplies the agent's
 config, the per-run context it accepts, and the post-run actions its jobs may
 choose. You create the agent by type, with no config to write, and run it as an
-[execute-agent job](/documentation/agents/execute-agent-jobs).
+[execute-agent job](/documentation/agents/execute-agents-as-jobs).
 
 | | Registered agent | Plugin-managed agent |
 | --- | --- | --- |
@@ -25,6 +25,7 @@ choose. You create the agent by type, with no config to write, and run it as an
 <Note>
 The examples on this page use an example `my-plugin.reviewer` type,
 described in greater detail in [Write a Plugin-Managed Agent Type](#write-a-plugin-managed-agent-type) below.
+The example code is illustrative: helpers it calls, such as `resolve_model`, are left for your plugin to supply.
 </Note>
 
 ## Create a Plugin-Managed Agent

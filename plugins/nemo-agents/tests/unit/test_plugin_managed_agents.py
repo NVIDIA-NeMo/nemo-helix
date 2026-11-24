@@ -156,13 +156,17 @@ def _stored(name: str = "example-analyst", type_id: str = "example.analyst", wor
     return agent
 
 
-def _list_response(items: list[Agent]) -> MagicMock:
+def _list_response(items: list[Agent], *, page: int = 1, total_pages: int = 1) -> MagicMock:
     response = MagicMock()
     response.data = items
     response.pagination = NemoPaginationInfo(
-        page=1, page_size=20, current_page_size=len(items), total_pages=1, total_results=len(items)
+        page=page, page_size=20, current_page_size=len(items), total_pages=total_pages, total_results=len(items)
     )
     return response
+
+
+def _raise_from_config(cls: Any, *, name: str) -> dict[str, Any]:
+    raise RuntimeError("plugin bug")
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +301,8 @@ def _with_context(model: type[BaseModel]) -> type[PluginManagedAgent]:
             "context declares topic, but its adapter 'nvidia.fabric.claude' does not read",
         ),
         (_variant(FakeReporter, post_run_actions=frozenset({"example.uninstalled"})), "post-run action"),
+        # A bug in the plugin's own code makes the type unusable rather than failing every read.
+        (_variant(FakeReporter, config=classmethod(_raise_from_config)), "failed its load checks: plugin bug"),
     ],
 )
 def test_a_broken_type_fails_to_load_naming_the_problem(
@@ -522,6 +528,20 @@ class TestTypesRoute:
         lookup = entity_client.list.call_args.kwargs["filter_operation"]
         assert lookup.field == "data.plugin_managed_agent.type"
         assert sorted(lookup.value) == ["example.analyst", "example.reporter"]
+
+    def test_finds_agents_beyond_the_first_page(
+        self, client: TestClient, entity_client: AsyncMock, install_plugin_managed_agent_types: InstallTypes
+    ) -> None:
+        install_plugin_managed_agent_types(FakeAnalyst, FakeReporter)
+        entity_client.list.side_effect = [
+            _list_response([_stored(name="my-analyst")], page=1, total_pages=2),
+            _list_response([_stored(name="my-reporter", type_id="example.reporter")], page=2, total_pages=2),
+        ]
+
+        analyst, reporter = client.get(_TYPES).json()
+
+        assert (analyst["agent"], reporter["agent"]) == ("my-analyst", "my-reporter")
+        assert [call.kwargs["page"] for call in entity_client.list.call_args_list] == [1, 2]
 
     def test_lists_nothing_when_no_types_are_installed(
         self, client: TestClient, entity_client: AsyncMock, install_plugin_managed_agent_types: InstallTypes
