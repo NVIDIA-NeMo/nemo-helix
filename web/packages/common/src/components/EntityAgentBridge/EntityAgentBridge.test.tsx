@@ -62,11 +62,23 @@ describe('EntityAgentBridge', () => {
     );
   });
 
-  it('inserts a value literally, even when it contains replacement patterns', () => {
-    wrap(<EntityAgentBridge entity="telemetrySpans" params={{ 'trace-id': 'a$&b$$c' }} />);
+  it.each(["a'; rm -rf ~; '", '$(whoami)', 'a$&b', 'x <workspace>'])(
+    'keeps the placeholder rather than insert the shell-unsafe value %s',
+    async (unsafe) => {
+      wrap(
+        <EntityAgentBridge
+          entity="telemetrySpans"
+          workspace="my-workspace"
+          params={{ 'trace-id': unsafe }}
+        />
+      );
 
-    expect(screen.getByTestId('entity-empty-state-help')).toHaveTextContent('"a$&b$$c"');
-  });
+      await userEvent.click(screen.getByText('CLI'));
+      expect(screen.getByTestId('entity-empty-state-help')).toHaveTextContent(
+        "nemo intake spans list --filter.trace-id '<trace-id>' --workspace my-workspace"
+      );
+    }
+  );
 
   it('leaves a placeholder alone when its param is missing or empty', () => {
     wrap(

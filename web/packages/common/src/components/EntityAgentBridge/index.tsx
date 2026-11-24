@@ -15,19 +15,29 @@ import {
 import { type FC, useState } from 'react';
 
 /**
- * Fills each `<key>` placeholder whose value is known. Unknown or empty values
- * leave their placeholder in place, so the reader still sees what to supply.
+ * Characters that read the same to a shell whether quoted or not. Platform names
+ * stay well inside this set; a value outside it (e.g. an agent name taken from
+ * raw telemetry) could change the copied command, so it is not inserted.
+ */
+const SHELL_SAFE_VALUE = /^[\w@%+=:,./-]+$/;
+
+/**
+ * Fills each `<key>` placeholder whose value is known and shell-safe. Unknown,
+ * empty, or unsafe values leave their placeholder in place, so the reader still
+ * sees what to supply.
  */
 const resolvePlaceholders = (
   text: string | undefined,
   values: Readonly<Record<string, string | undefined>>
-) =>
-  text &&
-  Object.entries(values).reduce(
-    // A replacer function keeps `$&` / `$$` in a value literal instead of as replacement patterns.
-    (resolved, [key, value]) => (value ? resolved.replaceAll(`<${key}>`, () => value) : resolved),
-    text
-  );
+) => {
+  if (!text) return text;
+  // One pass over the original text, so an inserted value is never rescanned for
+  // placeholders; the replacer function keeps `$&` / `$$` in a value literal.
+  return text.replace(/<([^<>]+)>/g, (placeholder, key: string) => {
+    const value = Object.hasOwn(values, key) ? values[key] : undefined;
+    return value && SHELL_SAFE_VALUE.test(value) ? value : placeholder;
+  });
+};
 
 /** Which self-service snippet is showing. */
 type HelpKind = 'cli' | 'agent';
