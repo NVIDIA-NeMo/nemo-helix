@@ -22,11 +22,20 @@ from __future__ import annotations
 
 import json
 
-from nemo_builder_plugin.run.remote import PermanentError, RemoteBuild, RemoteBuildStatus, RemoteImage, step_main
+from nemo_builder_plugin.run.remote import (
+    PermanentError,
+    RemoteBuild,
+    RemoteBuildStatus,
+    RemoteContext,
+    RemoteImage,
+    step_main,
+)
 from nemo_builder_plugin.steps import RemoteBuildStepConfig
 
 OUTCOME_FILE = "nhx-e2e-outcome.json"
 OUTCOMES = ("ready", "failed", "hang")
+#: What every uploaded context's reference starts with.
+CONTEXT_PREFIX = "e2e-context-"
 #: What every build's ID starts with.
 BUILD_ID_PREFIX = "e2e-build-"
 #: What the stand-in reports about each image it "built", beside its handle.
@@ -34,16 +43,18 @@ ATTRIBUTES = {"stand-in": "true"}
 
 
 class ScriptedBuildService:
-    """A ``RemoteBuildService`` in memory: each build ends as its context's outcome file says."""
+    """A ``RemoteBuildService`` in memory: each build ends as its uploaded context's outcome file says."""
 
     def __init__(self, destination: str) -> None:
         #: ``<registry>/<repository>``: where the deployment's build service publishes.
         self._destination = destination
+        #: Each uploaded context's outcome, by the reference ``upload_context`` returned.
+        self._contexts: dict[str, dict[str, str]] = {}
         self._builds: dict[str, dict[str, str]] = {}
 
-    def start(self, build: RemoteBuild) -> str:
+    def upload_context(self, context: RemoteContext) -> str:
         try:
-            outcome = json.loads((build.context / OUTCOME_FILE).read_text(encoding="utf-8"))
+            outcome = json.loads((context.path / OUTCOME_FILE).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             # Not what the file holds: a reason is read by everyone who can read the image.
             raise PermanentError(f"the build context's {OUTCOME_FILE} can't be read ({type(exc).__name__})") from exc
@@ -51,7 +62,16 @@ class ScriptedBuildService:
             raise PermanentError(f"the build context's {OUTCOME_FILE} names none of: {', '.join(OUTCOMES)}")
         if not all(isinstance(key, str) and isinstance(value, str) for key, value in outcome.items()):
             raise PermanentError(f"the build context's {OUTCOME_FILE} must hold strings only")
-        # The same ID for a start the driver repeats: the key is one image in one attempt of one job.
+        # The same reference for an upload the driver repeats: the key is one image in one attempt of one job.
+        reference = f"{CONTEXT_PREFIX}{context.key[:16]}"
+        self._contexts[reference] = outcome
+        return reference
+
+    def start(self, build: RemoteBuild) -> str:
+        outcome = self._contexts.get(build.context)
+        if outcome is None:
+            raise PermanentError(f"no context {build.context} was uploaded")
+        # The same ID for a start the driver repeats.
         build_id = f"{BUILD_ID_PREFIX}{build.key[:16]}"
         self._builds[build_id] = outcome
         return build_id
