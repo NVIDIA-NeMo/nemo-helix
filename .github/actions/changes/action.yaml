@@ -211,6 +211,10 @@ runs:
           automodel:
             - 'services/automodel/**'
             - 'packages/nhx_customization_common/**'
+            # services/automodel/tests import these packages too.
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'
+            - 'plugins/nemo-automodel/**'
             - '.github/workflows/ci.yaml'  # the automodel-tests job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
