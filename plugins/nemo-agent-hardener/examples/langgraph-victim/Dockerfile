@@ -22,7 +22,7 @@ WORKDIR /app
 # was not found in the package registry") where pip reports a misleading conflict on langgraph.
 COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /bin/uv
 RUN uv pip install --system --no-cache \
-      "langgraph>=1.2,<2" \
+      "langgraph>=1.2.14,<2" \
       "langchain-core>=1.4,<2" \
       "langchain-openai>=1.1.9,<2.0" \
       "nemo-relay[langgraph]>=0.11.0,<0.12" \
