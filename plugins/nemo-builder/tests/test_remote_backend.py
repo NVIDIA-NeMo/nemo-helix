@@ -353,7 +353,13 @@ class TestWhereTheStepMayRun:
         with pytest.raises(BackendRejectedError) as refused:
             RemoteBackend(_config(), shared).check(_plan())
         assert "cpu/build-remote runs the remote-build step in the namespace of cpu/build-control" in str(refused.value)
-        assert "Run the remote-build step in a namespace of its own, where only Jobs creates pods" in str(refused.value)
+        # What to do about it is to name both, where neither is named: one named alone is refused as well.
+        remedy = (
+            "Run the remote-build step in a namespace of its own, where only Jobs creates pods"
+            if namespace
+            else "Neither profile names a namespace: name one on both, and give the remote-build step one of its own"
+        )
+        assert remedy in str(refused.value)
 
         # In a namespace of its own it builds, where both profiles name theirs, and so it does where Jobs lists
         # no such profile.
@@ -1068,6 +1074,32 @@ class TestTheJobARowRecords:
         assert jobs.answered[JOB].uid not in stored.model_dump_json()
         assert client.events == ["create_job", "update_conflict:demo-1"]
         assert "image default/demo-1 changed while its build job was being recorded on it" in caplog.text
+
+    async def test_a_row_that_came_to_record_another_job_and_settled_is_returned_as_it_settled(self) -> None:
+        """Another submit of the request recorded its job on the row, and the row then failed, before this
+        submit's write. It is returned as it settled, not as this submit read it: no step completes it now."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        backend = RemoteBackend(_config(), PROFILES)
+        await _submit(client, jobs, backend)
+        jobs.delete(JOB)
+        client.events.clear()
+        later = {"job_uid": "platform-job-later", "job_attempt_id": "attempt-later"}
+
+        def another_submit_records_its_job_and_the_row_fails() -> None:
+            held = client.rows["demo-1"]
+            client.written_elsewhere(
+                "demo-1",
+                provenance=held.provenance.model_copy(update=later),
+                status="failed",
+                status_detail="abandoned",
+            )
+
+        client.before_write = another_submit_records_its_job_and_the_row_fails
+        (row,) = (await _submit(client, jobs, backend)).images
+        assert (row.status, row.status_detail) == ("failed", "abandoned")
+        assert _recorded(row) == ("platform-job-later", "attempt-later")
+        assert client.events == ["create_job", "update_conflict:demo-1"]
 
     async def test_a_resubmit_whose_row_settled_meanwhile_returns_it_as_it_settled(self) -> None:
         """The row records an earlier job, and is failed, as abandoned, before the resubmit writes the job
