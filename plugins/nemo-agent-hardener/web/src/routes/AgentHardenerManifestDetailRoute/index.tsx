@@ -5,6 +5,7 @@ import { BenignInterviewCard } from '@agent-hardener/components/BenignInterviewC
 import { BenignSuiteTable } from '@agent-hardener/components/BenignSuiteTable';
 import type { SuiteRow } from '@agent-hardener/components/hitlTypes';
 import { InterviewPanel } from '@agent-hardener/components/InterviewPanel';
+import { JobFailureNotice } from '@agent-hardener/components/JobFailureNotice';
 import { ReconChecklist } from '@agent-hardener/components/ReconChecklist';
 import { ReviewPanel } from '@agent-hardener/components/ReviewPanel';
 import {
@@ -264,6 +265,15 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
             </Flex>
           }
         />
+
+        {gen.failure && !gen.active ? (
+          <JobFailureNotice
+            title="Benign-suite generation failed"
+            failure={gen.failure}
+            workspace={workspace}
+            jobName={gen.jobName}
+          />
+        ) : null}
 
         {gen.active ? (
           <Panel>

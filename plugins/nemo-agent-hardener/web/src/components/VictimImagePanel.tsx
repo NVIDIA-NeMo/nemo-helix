@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { JobFailureNotice } from '@agent-hardener/components/JobFailureNotice';
 import { useStageVictimContext } from '@agent-hardener/components/useStageVictimContext';
 import {
   Banner,
@@ -84,10 +85,13 @@ export const VictimImagePanel: FC<VictimImagePanelProps> = ({
             </Button>
           ) : null}
         </Flex>
-        {stage.failedJob ? (
-          <Text kind="body/regular/sm" className="text-fg-error">
-            Staging failed. See the logs of job {stage.failedJob}.
-          </Text>
+        {stage.failure && !stage.staging ? (
+          <JobFailureNotice
+            title="Staging failed"
+            failure={stage.failure}
+            workspace={workspace}
+            jobName={stage.jobName}
+          />
         ) : null}
 
         <pre className="overflow-auto rounded bg-surface-sunken p-2 text-xs text-primary">{commands}</pre>

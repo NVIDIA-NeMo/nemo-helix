@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { JobFailure } from '@agent-hardener/api/jobFailure';
+import { useJobFailure } from '@agent-hardener/components/useJobFailure';
 import {
   agentHardenerDownloadVictimContextJobResult,
   useAgentHardenerCreateVictimContextJob,
@@ -19,8 +21,10 @@ export interface StageVictimContext {
   staging: boolean;
   /** The archive is ready to download. */
   ready: boolean;
-  /** The last staging job, when it ended without an archive. */
-  failedJob?: string;
+  /** The last staging job. */
+  jobName: string;
+  /** Why the last staging job ended without an archive. */
+  failure?: JobFailure;
   download: () => Promise<void>;
   downloading: boolean;
   /** File name the archive downloads as; the build commands refer to it. */
@@ -54,6 +58,7 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
   });
   const status = job?.status;
   const terminal = Boolean(status && CJobTerminalStatuses.includes(status));
+  const failure = useJobFailure('Staging the victim build context', jobName, job);
 
   const download = async (): Promise<void> => {
     setDownloading(true);
@@ -71,7 +76,8 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
     start: () => create.mutate({ workspace, data: { spec: { manifest_id: manifestName } } }),
     staging: create.isPending || (Boolean(jobName) && !terminal),
     ready: status === 'completed',
-    failedJob: terminal && status !== 'completed' ? jobName : undefined,
+    jobName,
+    failure,
     download,
     downloading,
     archiveName,

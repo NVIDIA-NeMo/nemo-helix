@@ -34,3 +34,5 @@ export const getAgentHardenerManifestDetailRoute = (
 
 /** Studio routes the plugin links out to. */
 export const getSecretsRoute = (workspace: string): string => `/workspaces/${workspace}/secrets`;
+export const getJobDetailRoute = (workspace: string, jobName: string): string =>
+  `/workspaces/${workspace}/jobs/${encodeURIComponent(jobName)}`;
