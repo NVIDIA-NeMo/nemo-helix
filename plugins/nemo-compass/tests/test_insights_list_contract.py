@@ -42,7 +42,7 @@ def _app(entity_client: AsyncMock, spans_service: AsyncMock) -> FastAPI:
 def test_service_exposes_no_run_or_job_routes() -> None:
     # Compass runs are agents.execute jobs on the compass.analyst agent.
     paths = _app(AsyncMock(), AsyncMock()).openapi()["paths"]
-    assert not any("/analysis-runs" in path or "/jobs/" in path for path in paths)
+    assert not any({"analysis-runs", "jobs"} & set(path.split("/")) for path in paths)
 
 
 def test_api_returns_converted_evidence_and_persists_span_updates() -> None:
