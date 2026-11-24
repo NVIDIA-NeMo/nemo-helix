@@ -191,6 +191,32 @@ platformConfig:
         request_timeout_s: 1200
 ```
 
+## Install an agent CLI into the Gym host
+
+Gym's CLI agents, such as Codex, Claude Code, and OpenCode, install their CLI at startup unless it
+is already on `PATH`. To skip that download or pin a version without rebuilding `nhx-gym-host`,
+install the CLI from an agent bundle image:
+
+```yaml
+platformConfig:
+  evals:
+    sandbox_host_provider_options:
+      agent_bundle:
+        image: registry.example.com/agent-bundles/codex:0.142.5
+        installer: /bundle/install
+        entrypoint: bin/codex
+```
+
+The OpenSandbox server's `nemo-agent-bundle` extension runs `installer /installed-agent` from
+`image` in an init container and mounts the result read-only into the host. The host puts the
+directory containing `entrypoint` first on `PATH` and runs `entrypoint --version` before starting.
+If that fails, the host never becomes ready and the job fails at its startup timeout.
+
+The bundle is a deployment setting: every Gym job on the deployment gets the same CLI. It requires
+the OpenSandbox provider with the NeMo extension installed, and a bundle built for the
+`nhx-gym-host` image's architecture and C library. Evaluator rejects `agent_bundle` with the
+`docker` provider.
+
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.

@@ -43,6 +43,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
+from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
 from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
@@ -244,6 +245,14 @@ def resolve_sandbox_plan(
         connection = dict(host_provider_options.get("connection") or {})
         connection["protocol"] = sandbox_server_protocol
         host_provider_options["connection"] = connection
+    if host_provider_options.get("agent_bundle") is not None:
+        # Only the OpenSandbox server runs the agent-bundle init container.
+        if config.sandbox_host_provider != "opensandbox":
+            raise SandboxUnavailableError(
+                "`sandbox_host_provider_options.agent_bundle` requires `sandbox_host_provider: opensandbox`."
+            )
+        bundle = SandboxAgentBundle.model_validate(host_provider_options["agent_bundle"])
+        host_provider_options["agent_bundle"] = bundle.model_dump(mode="json")
     return SandboxPlan(
         host_provider=config.sandbox_host_provider,
         runtime_image=runtime_image,
