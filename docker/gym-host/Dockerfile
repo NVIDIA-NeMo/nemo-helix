@@ -179,6 +179,8 @@ COPY --from=builder --chown=docker-user:docker-user /home/ubuntu/.cache/uv /home
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
     /usr/local/libexec/docker/cli-plugins/docker-compose
+# Compose v2 also runs standalone when called as docker-compose, the name many scripts and agents use.
+RUN ln -s /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
 COPY docker/gym-host/podman/containers.conf /etc/containers/containers.conf
 COPY --chown=docker-user:docker-user docker/gym-host/podman/storage.conf \
     /home/docker-user/.config/containers/storage.conf
@@ -187,7 +189,7 @@ ENV NHX_GYM_HOST_CONTAINER_ENGINE=rootless-podman \
     DOCKER_HOST=unix:///run/user/1000/podman/podman.sock
 
 FROM podman AS podman-smoke-test
-RUN podman --version && docker --version && docker compose version \
+RUN podman --version && docker --version && docker compose version && docker-compose version \
     && test -u /usr/bin/newuidmap && test -u /usr/bin/newgidmap \
     && test -z "$(find / -xdev -perm -4000 -type f ! -path /usr/bin/newuidmap ! -path /usr/bin/newgidmap -print -quit)" \
     && grep -q '^docker-user:100000:65536$' /etc/subuid \
