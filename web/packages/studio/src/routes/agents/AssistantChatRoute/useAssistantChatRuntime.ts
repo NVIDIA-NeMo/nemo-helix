@@ -626,6 +626,7 @@ export const useAssistantChatRuntime = (options?: UseAssistantChatRuntimeOptions
     appendUserMessage,
     handleReset: resetThread,
     isRunning,
+    messages,
     replaceMessages,
     runtime,
     submitPrompt,
@@ -827,6 +828,8 @@ export const useAssistantChatRuntime = (options?: UseAssistantChatRuntimeOptions
     inputStatus,
     isRunning,
     loadSession,
+    /** The live thread. Felix reads it to see what kind of work is in flight. */
+    messages,
     resolveDecisionRequest,
     resolveInputRequest,
     resolveStudioNavigationRequest,

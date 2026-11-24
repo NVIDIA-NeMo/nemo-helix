@@ -3,16 +3,29 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: entities
-description: NeMo Helix model and dataset CRUD lifecycle through the platform SDK, with strict field matching on final verification entities.
+description: "Explain how NeMo Helix models and datasets are registered and manage model entities with nemo_api(resource='models'). Use when the user asks what models or datasets are registered, or wants to register, update, or remove one."
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-# Entity tasks
+# Models and datasets
 
-- Use `nemo_api` with the `models` or `datasets` resource as appropriate, passing
+Models are registered entities in the workspace, usually created by an
+inference provider or a customization job. Datasets are stored as filesets
+(see the `files` skill).
+
+## Explaining
+
+- Check what exists with `nemo_api(resource="models", action="list", workspace="<active request workspace>")`
+  before suggesting anything.
+- Link to `base_models` for the model list and `filesets` for datasets.
+- If the user wants to train on their own data, point to `customizations`.
+
+## Acting on request
+
+- Use `nemo_api` with the `models` resource for model entities and
+  `files.filesets` for datasets, passing
   `workspace="<active request workspace>"` on every call.
-- Use the exact entity type and name from the instruction.
-- For model/dataset CRUD, create the temporary entity, verify/list/update/delete it, then create the final verification entity.
-- Keep JSON params valid and compact. Final dataset checks often require fields such as `format` and `size` to match exactly.
-- Retrieve or list the final model or dataset and compare every required field,
-  including its exact entity type and name, before reporting success.
+- Use the exact entity name the user gave. Keep JSON `params` valid and
+  compact.
+- After a create or update, retrieve the entity and confirm the fields the
+  user asked for before reporting success.

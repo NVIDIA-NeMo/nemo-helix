@@ -10,6 +10,7 @@ from nemo_studio_assistant.register import (
     deploy_guardrail,
     job_progress,
     nemo_api,
+    search_docs,
     select_agent,
     select_dataset_file,
     select_eval_config,
@@ -28,6 +29,7 @@ TOOLS = (
     job_progress,
     studio_link,
     ask_user_question,
+    search_docs,
 )
 
 

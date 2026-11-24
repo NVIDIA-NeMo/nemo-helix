@@ -4,6 +4,7 @@
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { IconError, Enter, Refresh } from '@nemo/icons/icons';
 import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
+import { FelixAssistant } from '@studio/components/FelixAssistant';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
 import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
@@ -84,8 +85,8 @@ export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => Reac
     : "[grid-template-areas:'logobar_navbar''sidebar_content']";
 
   // Rendered as direct grid children; the provider adds no DOM of its own, so
-  // it can wrap both the nav (pop-out chat) and the outlet (full chat) while
-  // keeping a single shared chat runtime alive across workspace navigation.
+  // it can wrap the page and Felix (the floating assistant) while keeping a
+  // single shared chat runtime alive across workspace navigation.
   const layout = (
     <>
       <GlobalNav sideNav={hideSideNav ? undefined : sideNav} />
@@ -104,6 +105,7 @@ export const PageLayout = ({ sideNav }: { sideNav?: (collapsed: boolean) => Reac
       {ASSISTANT_STUDIO_ENABLED && workspace ? (
         <AssistantChatProvider key={workspace} workspace={workspace}>
           {layout}
+          <FelixAssistant />
         </AssistantChatProvider>
       ) : (
         layout

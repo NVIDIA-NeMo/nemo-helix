@@ -3,22 +3,33 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: garak
-description: NeMo Helix garak playbook for audit target and config CRUD through the platform SDK. Use when the task involves audit targets, audit configs, or probes.
+description: "Explain red-teaming with garak in NeMo Helix and manage audit targets, configs, and jobs with nemo_api(resource='audit.*'). Use when the user asks how to test a model for vulnerabilities, what probes are, or wants to create an audit target, config, or job."
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
-# garak tasks
+# Red-teaming with garak
 
-- Use `nemo_api` with `audit.targets` for target CRUD and `audit.configs`
-  for config CRUD.
-- Use the standard SDK actions: `create`, `list`, `retrieve`, `update`, and
-  `delete`.
-- Pass the target or config fields as compact JSON in `params`.
-- For config create, prefer minimal valid JSON:
-  - `plugins`: `{"probe_spec":"dan.AutoDANCached"}` (or requested probe)
+garak probes a model for weaknesses such as jailbreaks, prompt injection, and
+unsafe output. An audit target says which model to probe, an audit config says
+which probes to run, and an audit job runs a config against a target.
+
+## Explaining
+
+- Suggest red-teaming before a model or agent goes to real users, and again
+  after adding guardrails to see whether they help.
+- Check what exists with `nemo_api(resource="audit.targets", action="list", ...)`
+  and `nemo_api(resource="audit.configs", action="list", ...)`.
+- A small first config with one probe is enough to see how it works.
+
+## Acting on request
+
+- Use `nemo_api` with `audit.targets` and `audit.configs` for `create`, `list`,
+  `retrieve`, `update`, and `delete`, and `audit.jobs` for jobs, passing
+  `workspace="<active request workspace>"` on every call.
+- A minimal valid config:
+  - `plugins`: `{"probe_spec":"dan.AutoDANCached"}`, or the probe the user asked for
   - `reporting`: `{}`
   - `run`: `{}`
   - `system`: `{"lite": true}`
-- Follow full lifecycle: create temp resource, verify/list/update/delete, then create final verification resource.
-- Retrieve or list the final audit resource and compare every required target or
-  config field before reporting success.
+- After creating a resource, retrieve it and confirm the fields the user asked
+  for. After starting a job, call `job_progress` with its name.

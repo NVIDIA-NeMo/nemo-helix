@@ -982,3 +982,7 @@ module = "nhx/studio"
 deps_group = "studio-service"
 # force_include source paths are relative to this bundle entry's source path.
 force_include."../../../../../web/packages/studio/dist" = "nhx/studio/static"
+# Product docs the Studio assistant reads through its studio_docs tool (see nhx/studio/studio_docs.py).
+force_include."../../../../../docs/studio" = "nhx/studio/docs/studio"
+force_include."../../../../../docs/agents" = "nhx/studio/docs/agents"
+force_include."../../../../../docs/cli" = "nhx/studio/docs/cli"

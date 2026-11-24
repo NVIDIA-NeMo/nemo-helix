@@ -5,8 +5,6 @@
 
 from typing import Any
 
-CLAUDE_MCP_SERVER_NAME = "nemo_studio"
-
 APPROVAL_TOOL_NAME = "approval_prompt"
 STUDIO_LINK_TOOL_NAME = "studio_link"
 SELECT_AGENT_TOOL_NAME = "select_agent"
@@ -14,6 +12,12 @@ SELECT_EVAL_CONFIG_TOOL_NAME = "select_eval_config"
 SELECT_DATASET_FILE_TOOL_NAME = "select_dataset_file"
 SELECT_MODEL_TOOL_NAME = "select_model"
 JOB_PROGRESS_TOOL_NAME = "job_progress"
+STUDIO_DOCS_TOOL_NAME = "studio_docs"
+# The published docs site. Page URLs follow the site's navigation tree rather than file paths, so the
+# assistant links only to the site root instead of guessing a page URL.
+STUDIO_DOCS_SITE_URL = "https://docs.nvidia.com/nemo-helix"
+# The Studio chat renders job cards for tool-use parts with this name.
+JOB_PROGRESS_UI_TOOL_NAME = f"{JOB_PROGRESS_TOOL_NAME}"
 
 APPROVAL_TOOL: dict[str, Any] = {
     "name": APPROVAL_TOOL_NAME,
@@ -159,6 +163,32 @@ JOB_PROGRESS_TOOL: dict[str, Any] = {
     },
 }
 
+STUDIO_DOCS_TOOL: dict[str, Any] = {
+    "name": STUDIO_DOCS_TOOL_NAME,
+    "description": (
+        "Read the NeMo product documentation (Studio, agents, and the nemo CLI) that ships with this Studio. "
+        "Call it with no path to get an index of pages, then call it again with a page path to read that page. "
+        "Use it to answer questions about what Studio can do, how a Studio page or workflow works, how to use "
+        "the CLI, or how agents are built and deployed, instead of answering from memory. "
+        "Long pages are returned in parts; pass offset to continue."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Docs page path from the index, such as studio/agents. Omit to list the pages.",
+            },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Character offset to continue reading a long page. Defaults to 0.",
+            },
+        },
+        "additionalProperties": False,
+    },
+}
+
 MCP_TOOLS: list[dict[str, Any]] = [
     APPROVAL_TOOL,
     SELECT_AGENT_TOOL,
@@ -166,20 +196,36 @@ MCP_TOOLS: list[dict[str, Any]] = [
     SELECT_DATASET_FILE_TOOL,
     SELECT_MODEL_TOOL,
     JOB_PROGRESS_TOOL,
+    STUDIO_DOCS_TOOL,
 ]
-
-STUDIO_UI_TOOL_NAMES = (
-    SELECT_AGENT_TOOL_NAME,
-    SELECT_EVAL_CONFIG_TOOL_NAME,
-    SELECT_DATASET_FILE_TOOL_NAME,
-    SELECT_MODEL_TOOL_NAME,
-    JOB_PROGRESS_TOOL_NAME,
-    STUDIO_LINK_TOOL_NAME,
-)
 
 STUDIO_ASSISTANT_CONTEXT = "\n".join(
     [
         "You are NeMo Assistant, running inside NeMo Studio.",
+        (
+            "Your name is Felix, and you are a cat. Felix is the friendly cat mascot of NeMo Studio and the face "
+            "of NeMo Assistant. When the user asks who or what you are, or what your name is, say you are Felix, "
+            "a cat who helps in NeMo Studio. Never say you have no name or that you are not a cat."
+        ),
+        (
+            "Keep a light, playful tone with the occasional gentle bit of cat flavor (for example one 'purr-fect' "
+            "now and then). Use at most one such touch in a reply and skip it in most replies. Never use cat "
+            "flavor in error messages, technical steps, commands, code, or when the user seems frustrated: "
+            "accuracy and clarity always come first."
+        ),
+        (
+            "Do not answer questions about what Studio can do, how a Studio page or workflow works, how to use "
+            "the nemo CLI, or how agents are built and deployed from memory. First call "
+            "studio_docs (no path to list pages, then a page path to read one) and answer "
+            "from what the docs say. If the docs do not cover it, say so rather than guessing."
+        ),
+        (
+            "Answer from the docs in your own words, as something you simply know. Never say or imply where the "
+            "information came from: no 'from the docs', 'according to the documentation', 'the docs say', no page "
+            "titles such as 'About NeMo Studio', and do not mention the studio_docs tool or that you looked "
+            "something up. When your answer relied on the docs, you may end it with one small, unobtrusive "
+            f"Markdown link such as [NeMo docs]({STUDIO_DOCS_SITE_URL}). Never invent deeper docs URLs."
+        ),
         (
             "NeMo Studio and the NeMo Helix API are already installed, set up, and running for this "
             "workspace. Treat the platform as healthy and available."
@@ -202,8 +248,8 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
         (
             "Use CLI commands only to perform work that has no Studio UI equivalent, when the user "
             "explicitly asks for CLI/debugging, or when you must gather data that Studio tools cannot "
-            "provide. For user-facing follow-up, prefer mcp__nemo_studio__studio_link and "
-            "mcp__nemo_studio__job_progress."
+            "provide. For user-facing follow-up, prefer studio_link and "
+            "job_progress."
         ),
         (
             "When you need to prompt the user for input, use a Studio UI tool instead of writing a "
@@ -211,13 +257,13 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
         ),
         (
             "These needs are mandatory tool calls, not plain-text questions: "
-            "use mcp__nemo_studio__select_agent whenever you need the user to name, pick, confirm, or "
+            "use select_agent whenever you need the user to name, pick, confirm, or "
             "disambiguate an agent (including among deployed agents); "
-            "mcp__nemo_studio__select_model for model names; "
-            "mcp__nemo_studio__select_dataset_file whenever you need a fileset, fileset reference, dataset, "
+            "select_model for model names; "
+            "select_dataset_file whenever you need a fileset, fileset reference, dataset, "
             "or input/source data file (for example an anonymizer or evaluation input, or a CSV/Parquet "
             "file) instead of asking for a fileset reference or '<workspace>/<fileset>#<file>' path in text; "
-            "and mcp__nemo_studio__select_eval_config for evaluation config files."
+            "and select_eval_config for evaluation config files."
         ),
         (
             "Never use a plain-text question to choose an agent, model, fileset, "
@@ -227,7 +273,7 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
         (
             "For any question with a finite set of choices that does NOT map to a select_* tool — including "
             "yes/no, multiple-choice, 'pick one of these', or whenever you would offer the user options to "
-            "choose from — you MUST call AskUserQuestion to render a selectable options picker instead of "
+            "choose from — you MUST call ask_user_question to render a selectable options picker instead of "
             "listing the choices in plain text. Only ask a concise plain-text question for genuinely "
             "open-ended, free-form input that has no discrete options."
         ),
@@ -244,7 +290,7 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
         (
             "Whenever you start, submit, or kick off any platform job (for example an anonymizer run, "
             "customization, data designer, safe synthesizer, or evaluation job) and you know its job name, "
-            "you MUST call mcp__nemo_studio__job_progress with that job name before your final response so "
+            "you MUST call job_progress with that job name before your final response so "
             "Studio renders the progress card inline. Do this for every job you launch, not only the first, "
             "and pass job_type or source when known so the card links to the right detail page."
         ),
@@ -254,18 +300,3 @@ STUDIO_ASSISTANT_CONTEXT = "\n".join(
         ),
     ]
 )
-
-
-def qualified_mcp_tool_name(tool_name: str, server_name: str = CLAUDE_MCP_SERVER_NAME) -> str:
-    """Return Claude Code's fully qualified MCP tool name for a Studio tool."""
-    return f"mcp__{server_name}__{tool_name}"
-
-
-def allowed_mcp_tools(server_name: str = CLAUDE_MCP_SERVER_NAME) -> list[str]:
-    """Return the Studio UI tools Claude may call without an approval prompt."""
-    return [qualified_mcp_tool_name(tool_name, server_name) for tool_name in STUDIO_UI_TOOL_NAMES]
-
-
-def permission_prompt_tool(server_name: str = CLAUDE_MCP_SERVER_NAME) -> str:
-    """Return the fully qualified approval prompt tool name."""
-    return qualified_mcp_tool_name(APPROVAL_TOOL_NAME, server_name)

@@ -157,14 +157,14 @@ def test_every_configured_skill_is_packaged() -> None:
     assert config.skills is not None
     assert config.skills.paths == SKILL_PATHS
     skill_files = sorted((AGENT_ROOT / "skills").glob("*/SKILL.md"))
-    assert len(skill_files) == 9
+    assert len(skill_files) == 10
     assert all(skill_file.is_file() for skill_file in skill_files)
     assert all(skill_file.read_text(encoding="utf-8").startswith("---\n") for skill_file in skill_files)
 
     registered = load_agent_config(ETHOS_ROOT / "agent.yaml")
     assert registered.skills is not None
     assert registered.skills.paths == SKILL_PATHS
-    assert len(list((ETHOS_ROOT / "skills").glob("*/SKILL.md"))) == 9
+    assert len(list((ETHOS_ROOT / "skills").glob("*/SKILL.md"))) == 10
     assert config.environment.workspace == "."
     assert registered.environment.workspace == "."
 
@@ -177,9 +177,10 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
+        "experiments",
         "files",
         "guardrails",
         "inference",
@@ -226,9 +227,10 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     assert error is None
     assert {skill["name"] for skill in skills} == {
         "garak",
-        "benchmark-execution",
+        "studio-guide",
         "entities",
         "evals",
+        "experiments",
         "files",
         "guardrails",
         "inference",
@@ -282,14 +284,20 @@ def test_platform_translation_virtualizes_packaged_skill_root() -> None:
     assert translated.skills.paths == ["/skills"]
 
 
-def test_guardrails_skill_is_generic_sdk_workflow_and_copies_match() -> None:
-    source = AGENT_ROOT / "src/nemo_studio_assistant/skills/guardrails/SKILL.md"
-    packaged = AGENT_ROOT / "skills/guardrails/SKILL.md"
-    registered = ETHOS_ROOT / "skills/guardrails/SKILL.md"
-    skill_text = source.read_text(encoding="utf-8")
+def test_registration_skills_mirror_packaged_skills() -> None:
+    packaged_root = AGENT_ROOT / "skills"
+    registered_root = ETHOS_ROOT / "skills"
+    packaged = {path.relative_to(packaged_root): path for path in packaged_root.rglob("*") if path.is_file()}
+    registered = {path.relative_to(registered_root): path for path in registered_root.rglob("*") if path.is_file()}
 
-    assert packaged.read_text(encoding="utf-8") == skill_text
-    assert registered.read_text(encoding="utf-8") == skill_text
+    assert sorted(registered) == sorted(packaged)
+    for relative_path, packaged_path in packaged.items():
+        assert registered[relative_path].read_bytes() == packaged_path.read_bytes(), relative_path
+
+
+def test_guardrails_skill_is_generic_sdk_workflow() -> None:
+    skill_text = (AGENT_ROOT / "skills/guardrails/SKILL.md").read_text(encoding="utf-8")
+
     assert "guardrail.configs" in skill_text
     assert "| List/read backend models | `models` | `list` / `retrieve` |" in skill_text
     assert "inference.virtual_models" in skill_text
@@ -315,6 +323,7 @@ def test_mcp_server_exposes_expected_tools() -> None:
         "job_progress",
         "studio_link",
         "ask_user_question",
+        "search_docs",
     }
     deploy_tool = next(tool for tool in tools if tool.name == "deploy_guardrail")
     blocked_schema = deploy_tool.parameters["properties"]["blocked_message"]
@@ -918,9 +927,9 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
 ) -> None:
     approval_requested = False
 
-    def approve(*_args: object, **_kwargs: object) -> dict[str, str]:
+    def approve(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
         nonlocal approval_requested
-        approval_requested = True
+        approval_requested = approval_requested or tool_name == "approval_prompt"
         return {"behavior": "allow"}
 
     platform = _FakeHelix()
@@ -1144,7 +1153,8 @@ def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch)
     approvals: list[tuple[str, str, dict[str, object], dict[str, object]]] = []
 
     def approve(session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
-        approvals.append((session, tool_name, arguments, kwargs))
+        if tool_name != "assistant_activity":
+            approvals.append((session, tool_name, arguments, kwargs))
         return {"behavior": "allow"}
 
     platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
@@ -1470,3 +1480,282 @@ def test_ask_user_question_accepts_structured_model_input(monkeypatch: pytest.Mo
 
     assert json.loads(response) == {"workspace": "default"}
     assert callback_input == {"tool_name": "AskUserQuestion", "input": {"questions": questions}}
+
+
+def test_ask_user_question_wraps_string_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    callback_input: dict[str, object] = {}
+
+    def callback(_session_id: str, _tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        callback_input.update(arguments)
+        return {"behavior": "allow", "updatedInput": {}}
+
+    monkeypatch.setattr(register, "_call_studio_tool", callback)
+
+    register.ask_user_question(
+        "90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        [{"question": "Continue?", "options": ["Yes", {"label": "No", "description": "Stop here"}]}],
+    )
+
+    assert callback_input["input"] == {
+        "questions": [
+            {"question": "Continue?", "options": [{"label": "Yes"}, {"label": "No", "description": "Stop here"}]}
+        ]
+    }
+
+
+def test_nemo_api_reports_activity_to_studio(monkeypatch: pytest.MonkeyPatch) -> None:
+    session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+    calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **kwargs: object) -> dict[str, str]:
+        calls.append((tool_name, arguments, kwargs))
+        return {"status": "recorded"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api("workspaces", "list", studio_session_id=session_id, workspace="default")
+
+    assert calls == [
+        (
+            "assistant_activity",
+            {"tool_name": "nemo_api", "summary": "list workspaces", "resource": "workspaces", "action": "list"},
+            {"workspace": "default", "timeout": register.STUDIO_ACTIVITY_TIMEOUT_SECONDS},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resource", "action"),
+    [("workspaces", "create"), ("workspaces", "explode"), ("not-a-resource", "list")],
+)
+def test_nemo_api_reports_no_activity_for_denied_or_invalid_calls(
+    monkeypatch: pytest.MonkeyPatch, resource: str, action: str
+) -> None:
+    activity: list[dict[str, object]] = []
+
+    def record(_session: str, tool_name: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, str]:
+        if tool_name == "assistant_activity":
+            activity.append(arguments)
+        return {"behavior": "deny", "message": "declined"}
+
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
+    register.nemo_api(resource, action, studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a", workspace="default")
+
+    assert activity == []
+
+
+def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise RuntimeError("Studio is down")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    response = json.loads(register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a"))
+
+    assert response["status"] in {"ok", "no_results", "unavailable"}
+
+
+def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+        raise AssertionError("no callback expected without a Studio session")
+
+    monkeypatch.setattr(register, "_call_studio_tool", fail)
+
+    register.search_docs("guardrail")
+
+
+_INTAKE = "/apis/intake/v2/workspaces/default"
+_SESSION_ID = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
+
+
+def _experiment(name: str, **fields: Any) -> dict[str, Any]:
+    return {"id": f"exp-{name}", "name": name, "workspace": "default", "default_sort": "-created_at", **fields}
+
+
+def _evaluation(name: str, experiment_ids: list[str], dataset_name: str) -> dict[str, Any]:
+    return {
+        "id": f"eval-{name}",
+        "name": name,
+        "workspace": "default",
+        "experiment_ids": experiment_ids,
+        "dataset_name": dataset_name,
+    }
+
+
+def _record_approvals(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Approve every mutation, returning the inputs the user was asked to approve.
+
+    ``nemo_api`` also reports ``assistant_activity`` to Studio; that is not an approval, so it is ignored here.
+    """
+    approvals: list[dict[str, Any]] = []
+
+    def approve(_session: str, tool_name: str, arguments: dict[str, Any], **_kwargs: object) -> dict[str, str]:
+        if tool_name != "approval_prompt":
+            return {"status": "recorded"}
+        approvals.append(arguments)
+        return {"behavior": "allow"}
+
+    monkeypatch.setattr(register, "_call_studio_tool", approve)
+    return approvals
+
+
+def test_experiments_are_exposed_as_api_resources() -> None:
+    assert "experiments" in register._members_at("")
+    assert register._members_at("experiments") == ["create", "delete", "evaluations", "list", "retrieve", "update"]
+    # Evaluations belong to an experiment and cannot be deleted through the assistant.
+    assert register._members_at("experiments.evaluations") == ["create", "list", "retrieve", "update"]
+
+
+def test_listing_and_retrieving_experiments_needs_no_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix(
+        {
+            ("GET", f"{_INTAKE}/experiments"): lambda _request: _page([_experiment("alpha")]),
+            ("GET", f"{_INTAKE}/experiments/alpha"): _json_route(_experiment("alpha", description="first")),
+        }
+    )
+    _install_client(monkeypatch, platform.client())
+
+    listed = json.loads(register.nemo_api("experiments", "list", workspace="default"))
+    retrieved = json.loads(register.nemo_api("experiments", "retrieve", {"name": "alpha"}, workspace="default"))
+
+    assert [item["name"] for item in listed["data"]] == ["alpha"]
+    assert retrieved["description"] == "first"
+    assert platform.mutations() == []
+
+
+def test_creating_an_experiment_requires_a_studio_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("experiments", "create", {"name": "alpha"}, workspace="default")
+
+    assert response.startswith("Denied:")
+    assert platform.requests == []
+
+
+def test_creating_an_experiment_asks_approval_then_posts_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha", description="d"), status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = json.loads(
+        register.nemo_api(
+            "experiments",
+            "create",
+            {"name": "alpha", "description": "d"},
+            studio_session_id=_SESSION_ID,
+            workspace="default",
+        )
+    )
+
+    assert response["id"] == "exp-alpha"
+    assert [(a["input"]["resource"], a["input"]["action"]) for a in approvals] == [("experiments", "create")]
+    body = json.loads(platform.requests[0].content)
+    assert body["name"] == "alpha"
+    assert body["description"] == "d"
+
+
+def test_creating_an_experiment_with_unknown_fields_never_reaches_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/experiments", _experiment("alpha"), status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments",
+        "create",
+        {"name": "alpha", "bogus": 1},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    # The body is validated when the call is made, after the user approves it, so the approval is still
+    # requested; what matters is that nothing is sent to the platform.
+    assert response.startswith("Error:")
+    assert len(approvals) == 1
+    assert platform.requests == []
+
+
+def test_creating_an_evaluation_without_an_experiment_id_never_reaches_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/evaluations", {}, status=201)
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments.evaluations",
+        "create",
+        {"name": "run-1", "dataset_name": "data"},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    assert response.startswith("Error:")
+    assert "at least one experiment id" in response
+    assert len(approvals) == 1
+    assert platform.requests == []
+
+
+def test_creating_an_evaluation_posts_its_experiment_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", f"{_INTAKE}/evaluations", _evaluation("run-1", ["exp-alpha"], "data"), status=201)
+    _install_client(monkeypatch, platform.client())
+    _record_approvals(monkeypatch)
+
+    response = json.loads(
+        register.nemo_api(
+            "experiments.evaluations",
+            "create",
+            {"name": "run-1", "dataset_name": "data", "experiment_ids": ["exp-alpha"]},
+            studio_session_id=_SESSION_ID,
+            workspace="default",
+        )
+    )
+
+    assert response["experiment_ids"] == ["exp-alpha"]
+    body = json.loads(platform.requests[0].content)
+    assert body["experiment_ids"] == ["exp-alpha"]
+    assert body["dataset_name"] == "data"
+
+
+def test_deleting_an_experiment_requires_a_studio_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("DELETE", f"{_INTAKE}/experiments/alpha", status=204)
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("experiments", "delete", {"name": "alpha"}, workspace="default")
+
+    assert response.startswith("Denied:")
+    assert platform.requests == []
+
+
+def test_experiment_evaluations_have_no_delete_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
+    approvals = _record_approvals(monkeypatch)
+
+    response = register.nemo_api(
+        "experiments.evaluations",
+        "delete",
+        {"name": "run-1"},
+        studio_session_id=_SESSION_ID,
+        workspace="default",
+    )
+
+    assert "Invalid API action 'delete'" in response
+    assert approvals == []
+    assert platform.requests == []
+
+
+def test_experiments_skill_describes_the_create_flow_and_keeps_evaluations_distinct() -> None:
+    skill = (AGENT_ROOT / "skills/experiments/SKILL.md").read_text(encoding="utf-8")
+
+    assert skill.startswith("---\n")
+    assert "name: experiments" in skill
+    assert "`experiments.evaluations`" in skill
+    assert "`evaluation.metrics`" in skill
+    assert "experiment_ids" in skill
+    assert 'destination="experiment_group"' in skill

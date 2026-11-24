@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
-import { getStudioInternalLinkTarget } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLinkTarget';
+import {
+  getAssistantDocsLinkTarget,
+  getStudioInternalLinkTarget,
+} from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLinkTarget';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
@@ -100,5 +103,69 @@ describe('AssistantStudioLink', () => {
 
     expect(screen.queryByRole('link', { name: 'External' })).not.toBeInTheDocument();
     expect(screen.getByText('External')).toBeInTheDocument();
+  });
+
+  it('renders a docs-site link as a small external link that opens in a new tab', () => {
+    render(
+      <MemoryRouter>
+        <AssistantStudioLink href="https://docs.nvidia.com/nemo-helix">
+          NeMo docs
+        </AssistantStudioLink>
+      </MemoryRouter>
+    );
+
+    const link = screen.getByRole('link', { name: 'NeMo docs' });
+
+    expect(link).toHaveAttribute('href', 'https://docs.nvidia.com/nemo-helix');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    // Subtle inline link, not the large Studio page button.
+    expect(link.className).not.toContain('bg-[linear-gradient');
+  });
+
+  it('keeps links to other external sites inert even when they look like docs links', () => {
+    render(
+      <MemoryRouter>
+        <AssistantStudioLink href="https://docs.nvidia.com.evil.example/nemo-helix">
+          Fake docs
+        </AssistantStudioLink>
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByRole('link', { name: 'Fake docs' })).not.toBeInTheDocument();
+    expect(screen.getByText('Fake docs')).toBeInTheDocument();
+  });
+});
+
+describe('getAssistantDocsLinkTarget', () => {
+  it.each([
+    ['https://docs.nvidia.com/nemo-helix', 'https://docs.nvidia.com/nemo-helix'],
+    [
+      'https://docs.nvidia.com/nemo-helix/latest/documentation/studio/agents',
+      'https://docs.nvidia.com/nemo-helix/latest/documentation/studio/agents',
+    ],
+    [
+      'https://docs.nvidia.com/nemo-helix/latest/documentation/studio#overview',
+      'https://docs.nvidia.com/nemo-helix/latest/documentation/studio#overview',
+    ],
+  ])('accepts docs-site link %s', (href, expected) => {
+    expect(getAssistantDocsLinkTarget(href)).toBe(expected);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['empty', ''],
+    ['relative path', '/nemo-helix'],
+    ['plain http', 'http://docs.nvidia.com/nemo-helix'],
+    ['another NVIDIA site', 'https://developer.nvidia.com/nemo-helix'],
+    ['a lookalike host', 'https://docs.nvidia.com.evil.example/nemo-helix'],
+    ['embedded credentials', 'https://docs.nvidia.com@evil.example/nemo-helix'],
+    ['a credentials userinfo on the docs host', 'https://user:pw@docs.nvidia.com/nemo-helix'],
+    ['a lookalike path prefix', 'https://docs.nvidia.com/nemo-helix-evil'],
+    ['a different docs product', 'https://docs.nvidia.com/other-product/latest'],
+    ['path traversal out of the docs root', 'https://docs.nvidia.com/nemo-helix/../other-product'],
+    ['a javascript URL', 'javascript:alert(1)'],
+  ])('rejects %s', (_name, href) => {
+    expect(getAssistantDocsLinkTarget(href)).toBeUndefined();
   });
 });
