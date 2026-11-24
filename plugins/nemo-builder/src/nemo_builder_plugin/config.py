@@ -95,6 +95,14 @@ class RemoteConfig(BaseModel):
             "own identity, such as Workload Identity."
         ),
     )
+    per_workspace: bool = Field(
+        default=True,
+        description=(
+            "Publish each image under `<repository>/<workspace>/<set>/<name>`, as the in-cluster backend does, so "
+            "registry access can be granted per workspace. Set false for a service that publishes only to "
+            "`repository` itself: every workspace's images then share it, told apart by tag."
+        ),
+    )
     platforms: list[str] = Field(
         default_factory=lambda: ["linux/amd64"], min_length=1, description="The platforms the service builds."
     )

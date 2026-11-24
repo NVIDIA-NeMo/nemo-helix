@@ -95,7 +95,7 @@ class TestCompile:
             "demo-1.a",
             "linux/amd64",
             "reg.example.com",
-            "builds/images",
+            "builds/images/default/demo/a",
             compose_system_tag("default", "demo-1.a"),
         )
         assert (image.source.fileset, image.source.context_path) == ("default/ctx", "app")
@@ -103,6 +103,11 @@ class TestCompile:
         assert variable.name == REMOTE_CREDENTIAL_ENV and variable.value is None
         assert variable.from_secret is not None and variable.from_secret.name == "build-service-token"
         assert RemoteBuildStepConfig.model_validate(step.config).uses_credential
+
+    def test_a_service_that_publishes_to_one_repository_shares_it_across_workspaces(self) -> None:
+        backend = RemoteBackend(_config(per_workspace=False), PROFILES)
+        [image] = RemoteBuildStepConfig.model_validate(backend.compile(_plan(backend=backend)).steps[0].config).images
+        assert (image.repository, image.tag) == ("builds/images", compose_system_tag("default", "demo-1.app"))
 
     def test_no_credential_reaches_a_step_that_uses_its_own_identity(self) -> None:
         backend = RemoteBackend(_config(credential_secret=None), PROFILES)
@@ -139,7 +144,11 @@ class TestSubmit:
         await _submit(client)
         assert client.events == ["create:demo-1.app", "create_job"]
         row = client.rows["demo-1.app"]
-        assert (row.status, row.registry, row.repository) == ("pending", "reg.example.com", "builds/images")
+        assert (row.status, row.registry, row.repository) == (
+            "pending",
+            "reg.example.com",
+            "builds/images/default/demo/app",
+        )
 
     @pytest.mark.asyncio
     async def test_a_caller_who_cannot_read_the_credential_is_refused(self) -> None:

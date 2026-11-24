@@ -779,7 +779,8 @@ builder:
   backend: remote
   remote:
     registry: registry.example.com      # where the service publishes (host only)
-    repository: builds/images           # every image goes here, told apart by tag
+    repository: builds/images           # images go under <repository>/<workspace>/<set>/<name>
+    per_workspace: true                 # false for a service that publishes to `repository` only
     profile: build-remote               # Jobs cpu profile that runs the build step
     image: registry.example.com/tools/remote-build:1.0
     command: [remote-build]
@@ -791,7 +792,8 @@ builder:
 
 Submit returns `409` if `remote` or its profile is missing, or if a request uses a copy, `mounts`,
 an `output`, an unsupported platform, or a Dockerfile other than `Dockerfile` at the context root.
-All workspaces share `remote.repository`.
+With `per_workspace: false`, every workspace's images share `remote.repository`, so anyone who can
+pull from it can pull them all.
 
 **Writing a client.** The step image's console script calls `step_main` from
 `nemo_builder_plugin.run.remote`:
@@ -811,7 +813,7 @@ files and directories with `Dockerfile` at the root. If the service takes its ow
 **What the driver does.** For each image still `queued` or `pending`, it uploads the context,
 starts the build and polls it. Upload, start and cancel are retried up to three times. It cancels
 the build on timeout, on `SIGTERM`, or on any error after the start. It marks the row ready only if
-the service published to `<remote.registry>/<remote.repository>` by digest. Images build one at a
+the service published to the row's own repository by digest. Images build one at a
 time, so size the profile's deadline for all of them.
 
 **Credentials and signing.** The credential comes only from the platform secret, so submit refuses
@@ -819,7 +821,7 @@ anyone who can't read it. The step removes it from the environment before the cl
 masks it in logs (the exact string only). The builder doesn't push or sign remote builds; any
 signing is up to the service.
 
-**Known gaps.** `.dockerignore` isn't applied before upload, a failed row's `status_detail` is
+**Known gaps.** Uploaded contexts aren't deleted from the service, `.dockerignore` isn't applied before upload, a failed row's `status_detail` is
 generic (the cause is in the step's log), and `Succeeded.attributes` is logged but not stored.
 
 ## Limitations

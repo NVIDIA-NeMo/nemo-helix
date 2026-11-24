@@ -96,7 +96,11 @@ class RemoteBuildService(Protocol):
     """A build service's client. Each call returns, or raises a :class:`RemoteBuildError`, within a bounded time."""
 
     def upload_context(self, build: RemoteBuild) -> str:
-        """Store ``build.context`` with the service and return its handle. Safe to repeat with one key."""
+        """Store ``build.context`` with the service and return its handle. Safe to repeat with one key.
+
+        Nothing here deletes a stored context afterwards: it stays with the service until the service, or a
+        retention rule on its storage, removes it.
+        """
         ...
 
     def start(self, build: RemoteBuild, context: str) -> str:
@@ -174,7 +178,7 @@ class RemoteBuildDriver:
                 continue
             try:
                 row = self._builder.row(image.name)
-                # `queued` too: the queue controller moves the rows to `pending` only after it creates this job.
+                # Rows are `pending` since 0.10; `queued` is deprecated and accepted only for backward compatibility.
                 if row.status not in ("queued", "pending"):
                     logger.info("%s is already %s; not building it", name, sanitize_for_log(row.status))
                     if row.status != "ready":

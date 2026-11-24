@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
-from nemo_builder_plugin.identity import compose_system_tag
+from nemo_builder_plugin.identity import compose_system_tag, validate_repository
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildImage, RemoteBuildStepConfig
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
@@ -64,11 +64,16 @@ class RemoteBackend:
             raise BackendRejectedError(f"{image.name}: {refusal}")
 
     def destination(self, image: PlannedImage) -> Destination:
-        """The service's one repository, whatever the workspace, with a per-row system tag."""
+        """Under the workspace's own path, as in-cluster builds are, unless the service publishes to one
+        repository only (`per_workspace: false`). Either way with a per-row system tag."""
         remote = self._remote()
+        repository = remote.repository
+        if remote.per_workspace:
+            parts = (remote.repository, image.workspace, image.build_set, image.spec.name)
+            repository = validate_repository("/".join(part for part in parts if part))
         return Destination(
             registry=remote.registry,
-            repository=remote.repository,
+            repository=repository,
             system_tag=compose_system_tag(image.workspace, image.name),
         )
 
