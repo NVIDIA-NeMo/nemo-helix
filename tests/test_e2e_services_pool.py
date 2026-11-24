@@ -1,16 +1,43 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import subprocess
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
 import yaml
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.execution_profiles import DockerJobExecutionProfile
 
 import e2e.services_pool as services_pool
 import e2e.services_pool_fixtures as services_pool_fixtures
+
+
+def test_services_pool_client_uses_the_configured_gateway_ca(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = tmp_path / "gateway-ca.pem"
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", str(bundle))
+    monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("NHX_CONTEXT_NAME", raising=False)
+    observed: list[str | None] = []
+
+    def make_transport(*, verify: str | None = None, **kwargs: Any) -> httpx.Client:
+        observed.append(verify)
+        return httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)), **kwargs)
+
+    monkeypatch.setattr(services_pool_fixtures, "httpx", SimpleNamespace(Client=make_transport))
+    fixture_fn = cast(
+        Callable[[str, services_pool.RunningServices], Iterator[NemoClient]],
+        cast(Any, services_pool_fixtures.services_pool_client).__wrapped__,
+    )
+    instance = services_pool.RunningServices("https://gateway.test", log_path=None, proc=None, config_path=None)
+    for client in fixture_fn(instance.url, instance):
+        assert client.base_url == instance.url
+
+    assert observed == [str(bundle)]
 
 
 def test_docker_quickstart_runs_cpu_jobs_in_task_containers() -> None:
@@ -35,8 +62,8 @@ def test_services_readiness_allows_slow_plugin_startup(monkeypatch) -> None:
         return httpx.Response(200)
 
     monkeypatch.setattr(services_pool, "time", SimpleNamespace(monotonic=lambda: elapsed, sleep=lambda _: None))
-    monkeypatch.setattr(services_pool.httpx, "get", get_status)
-    proc = SimpleNamespace(poll=lambda: None)
+    monkeypatch.setattr(services_pool, "httpx", SimpleNamespace(get=get_status, RequestError=httpx.RequestError))
+    proc = cast(subprocess.Popen[Any], SimpleNamespace(poll=lambda: None))
 
     assert services_pool._wait_for_healthy("http://localhost:8080", proc)
 
@@ -276,7 +303,7 @@ def test_start_services_docker_compose_resolves_dynamic_port_templates(tmp_path,
 
     monkeypatch.setattr(services_pool, "DockerComposeE2EBackend", FakeDockerComposeBackend)
     monkeypatch.setattr(services_pool, "_find_free_port", lambda: 49123)
-    monkeypatch.setattr(services_pool.uuid, "uuid4", lambda: SimpleNamespace(hex="deadbeefcafebabe"))
+    monkeypatch.setattr(services_pool, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="deadbeefcafebabe")))
 
     services = services_pool._start_services_docker_compose(
         config_path,
@@ -576,15 +603,14 @@ def test_describe_active_module_binding_ignores_stale_active_key() -> None:
     assert pool.describe_active_module_binding(module_id) is None
 
 
-def test_read_services_log_tail_streams_last_failure_lines(tmp_path, monkeypatch) -> None:
-    log_path = tmp_path / "services.log"
+def test_read_services_log_tail_streams_last_failure_lines(tmp_path: Path) -> None:
+    class StreamingPath(Path):
+        def read_text(self, *args, **kwargs) -> str:
+            raise AssertionError("services log tail should not materialize the full log with read_text")
+
+    log_path = StreamingPath(tmp_path / "services.log")
     lines = [f"line {index}\n" for index in range(services_pool_fixtures._TAIL_LINES_ON_FAILURE + 3)]
     log_path.write_text("".join(lines), encoding="utf-8")
-
-    def fail_read_text(*args, **kwargs) -> str:
-        raise AssertionError("services log tail should not materialize the full log with read_text")
-
-    monkeypatch.setattr(type(log_path), "read_text", fail_read_text)
 
     assert (
         services_pool_fixtures._read_services_log_tail(log_path)

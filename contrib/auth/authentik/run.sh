@@ -2191,7 +2191,8 @@ run_k8s_tests() {
     validate_k8s_runtime
     if [[ "${K8S_REUSE_CLUSTER}" != "1" && -z "${K8S_CLUSTER_NAME}" ]]; then
         if [[ "${K8S_RUNTIME}" == "k3d" ]]; then
-            K8S_CLUSTER_NAME="nhx-ak-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
+            # k3d caps names at 32 characters; leave room for Linux's seven-digit PIDs.
+            K8S_CLUSTER_NAME="nhx-ak-e2e-$(date -u +%y%m%d%H%M%S)-$$"
         else
             K8S_CLUSTER_NAME="nhx-authentik-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
         fi

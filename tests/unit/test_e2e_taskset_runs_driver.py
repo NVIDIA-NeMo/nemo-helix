@@ -16,6 +16,7 @@ import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ import pytest
 from nemo_helix_plugin.client import client as client_module
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.oidc import NHXOIDCConfig
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.jobs.client import JobsClient
 from nhx_evals_sdk.agent_eval.scores import AgentEvalTaskScore
@@ -36,9 +38,11 @@ from e2e.taskset_runs_driver import (
     EXPECTED_REWARDS,
     FORMAT_OK,
     REWARD,
+    WORKLOAD_SERVICE_ACCOUNT,
     BuildView,
     CliFailed,
     Evidence,
+    JobPod,
     JobView,
     RunDriver,
     Snapshot,
@@ -50,8 +54,12 @@ from e2e.taskset_runs_driver import (
     check_snapshot,
     check_snapshot_unchanged,
     check_task_jobs,
+    check_workload_discovery,
+    check_workload_identity,
     cli_contexts,
+    last_exception,
     login_hint,
+    parse_job_pods,
     parse_results,
     parse_status,
     read_bundle,
@@ -104,6 +112,22 @@ def page(*runs: dict[str, str], pages: int = 1) -> dict[str, Any]:
     return {"data": list(runs), "pagination": {"page": 1, "total_pages": pages, "total_results": len(runs)}}
 
 
+def jobs_api(*jobs: dict[str, Any]) -> NemoClient:
+    """A client whose Jobs API lists ``jobs``; the default lists none, so no test reaches the network."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        pagination = {
+            "page": 1,
+            "page_size": 100,
+            "current_page_size": len(jobs),
+            "total_pages": 1,
+            "total_results": len(jobs),
+        }
+        return httpx.Response(200, json={"data": list(jobs), "pagination": pagination})
+
+    return NemoClient(base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
 def make_driver(
     tmp_path: Path,
     respond: Respond,
@@ -116,7 +140,7 @@ def make_driver(
     nemo = FakeNemo(respond)
     driver = RunDriver(
         nemo,
-        client or NemoClient(base_url="http://platform.test"),
+        client or jobs_api(),
         "ws",
         Evidence(tmp_path / "evidence", invocation="inv"),
         end=clock() + time_left,
@@ -1007,3 +1031,247 @@ def test_cancel_checkers_reject_empty_inputs() -> None:
         check_cancelled_while_queued(parse_status(_queued_cancelled() | {"tasks": []}), [])
     with pytest.raises(AssertionError, match=r"\[cancel\]"):
         check_foreign_job_cancel(parse_results(_foreign_cancel() | {"tasks": []}), "j")
+
+
+# --- Image-build failures and workload identity --------------------------------------------------------------------
+
+_DENIED = "PermissionDeniedError: HTTP 403: Not allowed to read entities in workspace 'ws'"
+
+
+#: When the fake image-build Jobs were created: after any test's ``since``, unless a test says otherwise.
+NOW = "2999-01-01T00:00:00Z"
+SINCE = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def job_body(name: str, status: str, job_id: str, created_at: str = NOW) -> dict[str, Any]:
+    return {
+        "created_at": created_at,
+        "id": job_id,
+        "attempt_id": f"{job_id}-a1",
+        "name": name,
+        "workspace": "ws",
+        "source": "nemo-evals.task-image-build",
+        "platform_spec": {"steps": [{"name": "build", "executor": {"provider": "cpu", "container": {"image": "x"}}}]},
+        "fileset": "fs-1",
+        "status": status,
+    }
+
+
+def pod_body(name: str, job: str, *, service_account: str = WORKLOAD_SERVICE_ACCOUNT, token: bool = True) -> dict:
+    env = [{"name": "NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "value": "/var/run/token"}] if token else []
+    return {
+        "metadata": {"namespace": "nemo", "name": name, "labels": {"nhx.nvidia.com/job_id": job}},
+        "spec": {"serviceAccountName": service_account, "containers": [{"name": "main", "env": env}]},
+        "status": {"phase": "Failed"},
+    }
+
+
+def job_kubectl(*pods: dict[str, Any], log: str = "") -> Callable[[Sequence[str], float], subprocess.CompletedProcess]:
+    def kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if "logs" in args:
+            return subprocess.CompletedProcess(args, 0, log, "")
+        return subprocess.CompletedProcess(args, 0, json.dumps({"items": list(pods)}), "")
+
+    return kubectl
+
+
+#: The image-build Job's log line in NVBug 7083853, as the Job's JSON logger writes it.
+DENIED_LOG = json.dumps({"level": "error", "exception": f"Traceback (most recent call last):\n  ...\n{_DENIED}\n"})
+
+
+def test_parse_job_pods_reads_who_each_pod_runs_as() -> None:
+    pods = parse_job_pods(
+        {"items": [pod_body("p1", "job-1"), pod_body("p2", "job-2", service_account="default", token=False)]}
+    )
+
+    assert pods == [
+        JobPod("nemo", "p1", "job-1", "Failed", WORKLOAD_SERVICE_ACCOUNT, True),
+        JobPod("nemo", "p2", "job-2", "Failed", "default", False),
+    ]
+
+
+def test_last_exception_finds_the_last_error_in_a_json_log() -> None:
+    assert last_exception("starting\n" + DENIED_LOG) == _DENIED
+    assert last_exception("all good\n") is None
+
+
+@pytest.mark.parametrize("path", ["timeout", "exit"])
+def test_submit_fails_with_the_failed_image_builds_cause(tmp_path: Path, path: str) -> None:
+    def respond(args: tuple[str, ...], timeout: int | None) -> subprocess.CompletedProcess[str]:
+        if path == "timeout":
+            raise subprocess.TimeoutExpired(["nemo"], timeout or 0, output=b"", stderr=b"")
+        return done("", returncode=1, stderr="Image build failed")
+
+    driver, _ = make_driver(
+        tmp_path,
+        respond,
+        Clock(),
+        client=jobs_api(job_body("task-image-build-abc-1", "error", "job-1"), job_body("other", "completed", "job-2")),
+        kube_context="kind-e2e",
+        kubectl=job_kubectl(pod_body("p1", "job-1"), log=DENIED_LOG),
+    )
+
+    with pytest.raises(
+        AssertionError, match=r"^\[image-build\] task-image-build-abc-1: PermissionDeniedError: HTTP 403"
+    ):
+        driver.submit("test_1", "--harbor-dir", "d", cap=240)
+
+    test_1 = evidence_file(driver)["test_1"]
+    assert test_1["image_build_failures"] == [
+        {"job": "task-image-build-abc-1", "status": "error", "error": _DENIED, "pods": ["p1"]}
+    ]
+    assert test_1["job_pods"][0]["service_account"] == WORKLOAD_SERVICE_ACCOUNT
+
+
+def test_submit_timeout_without_a_failed_build_raises_the_timeout(tmp_path: Path) -> None:
+    def respond(args: tuple[str, ...], timeout: int | None) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["nemo"], timeout or 0, output=b"", stderr=b"")
+
+    driver, _ = make_driver(
+        tmp_path, respond, Clock(), client=jobs_api(job_body("task-image-build-abc-1", "active", "j"))
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        driver.submit("test_1", "--harbor-dir", "d", cap=240)
+    assert "image_build_failures" not in evidence_file(driver)["test_1"]
+
+
+def test_build_failure_never_masks_the_failure_it_explains(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("gateway down")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=client)
+
+    assert driver.build_failure("test_1", SINCE) is None
+    assert "gateway down" in evidence_file(driver)["test_1"]["image_build_failures_error"]
+
+
+def test_build_failure_without_a_kube_context_uses_the_jobs_error_details(tmp_path: Path) -> None:
+    job = {**job_body("task-image-build-abc-1", "error", "j"), "error_details": {"message": "exit code 1"}}
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(job))
+
+    assert driver.build_failure("build", SINCE) == "[image-build] task-image-build-abc-1: {'message': 'exit code 1'}"
+
+
+def test_build_failure_ignores_a_failed_build_from_before_the_call(tmp_path: Path) -> None:
+    """A reused workspace keeps older failed builds; they must not stand in for this call's failure."""
+    old = job_body("task-image-build-old-1", "error", "j", created_at="2025-12-31T23:00:00Z")
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(old))
+
+    assert driver.build_failure("build", SINCE) is None
+    assert "build" not in driver.evidence.data
+
+
+def test_build_failure_accepts_a_job_at_the_clock_skew_limit(tmp_path: Path) -> None:
+    expired = job_body("task-image-build-old", "error", "old", created_at="2025-12-31T23:59:54Z")
+    # The Jobs API can send a UTC timestamp without the offset.
+    recent = job_body("task-image-build-new", "error", "new", created_at="2025-12-31T23:59:55")
+    driver, _ = make_driver(tmp_path, lambda args, timeout: done(), Clock(), client=jobs_api(expired, recent))
+
+    failure = driver.build_failure("build", SINCE)
+    assert failure is not None and failure.startswith("[image-build] task-image-build-new: ")
+    assert [failure["job"] for failure in evidence_file(driver)["build"]["image_build_failures"]] == [
+        "task-image-build-new"
+    ]
+
+
+def test_build_failure_attributes_pod_logs_to_their_own_jobs(tmp_path: Path) -> None:
+    pods = [
+        pod_body("unrelated", "another-job"),
+        pod_body("second", "task-image-build-second"),  # the label may carry the job name
+        pod_body("first", "id-1"),
+    ]
+    logs = {"first": "BuildError: first failed", "second": "BuildError: second failed"}
+
+    def kubectl(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if "logs" in args:
+            assert args[args.index("-n") + 1] == "nemo"
+            return done(logs[args[args.index("-n") + 2]])
+        assert "--context" in args and args[args.index("--context") + 1] == "kind-e2e"
+        assert "-A" in args and args[args.index("-l") + 1] == "nhx.nvidia.com/job_workspace_id=ws"
+        return done({"items": pods})
+
+    driver, _ = make_driver(
+        tmp_path,
+        lambda args, timeout: done(),
+        Clock(),
+        client=jobs_api(
+            job_body("task-image-build-first", "error", "id-1"),
+            job_body("task-image-build-second", "error", "id-2"),
+        ),
+        kube_context="kind-e2e",
+        kubectl=kubectl,
+    )
+
+    assert driver.build_failure("build", SINCE) == "[image-build] task-image-build-first: BuildError: first failed"
+    assert evidence_file(driver)["build"]["image_build_failures"] == [
+        {"job": "task-image-build-first", "status": "error", "error": logs["first"], "pods": ["first"]},
+        {"job": "task-image-build-second", "status": "error", "error": logs["second"], "pods": ["second"]},
+    ]
+
+
+def test_check_workload_identity_passes_when_every_pod_runs_as_the_job_service_account() -> None:
+    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1"), pod_body("p2", "j2")]}), exchange=True)
+
+
+@pytest.mark.parametrize(
+    ("pods", "message"),
+    [
+        ([], "no Job pods"),
+        ([pod_body("p1", "j1", service_account="default")], "ServiceAccount 'default'"),
+        ([pod_body("p1", "j1", token=False)], "workload token missing"),
+        ([pod_body("p1", "j1"), pod_body("p2", "j2", token=False)], "p2 ran as .*workload token missing"),
+    ],
+)
+def test_check_workload_identity_fails_on_a_pod_acting_as_the_submitter(pods: list[dict], message: str) -> None:
+    with pytest.raises(AssertionError, match=message):
+        check_workload_identity(parse_job_pods({"items": pods}), exchange=True)
+
+
+def test_check_workload_identity_without_exchange_wants_no_workload_token() -> None:
+    check_workload_identity(parse_job_pods({"items": [pod_body("p1", "j1", token=False)]}), exchange=False)
+    with pytest.raises(AssertionError, match=r"exchange is off, but \['p2'\] mounted the workload token"):
+        check_workload_identity(
+            parse_job_pods({"items": [pod_body("p1", "j1", token=False), pod_body("p2", "j2")]}), exchange=False
+        )
+    with pytest.raises(AssertionError, match="no Job pods"):
+        check_workload_identity([], exchange=False)
+
+
+def test_check_workload_discovery() -> None:
+    check_workload_discovery(
+        NHXOIDCConfig(
+            auth_enabled=True,
+            workload_token_exchange_enabled=True,
+            workload_client_id="nemo-helix-workload",
+            workload_token_endpoint="https://idp/token",
+        ),
+        exchange=True,
+    )
+    with pytest.raises(AssertionError, match=r"\[identity\] workload token exchange is off"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=True), exchange=True)
+
+
+def test_check_workload_discovery_without_exchange() -> None:
+    check_workload_discovery(NHXOIDCConfig(auth_enabled=True), exchange=False)
+    with pytest.raises(AssertionError, match="expected auth on and workload token exchange off"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=True, workload_token_exchange_enabled=True), exchange=False)
+    with pytest.raises(AssertionError, match="expected auth on"):
+        check_workload_discovery(NHXOIDCConfig(auth_enabled=False), exchange=False)
+
+
+@pytest.mark.parametrize(("endpoint", "client_id"), [(None, "workload"), ("https://idp/token", None)])
+def test_check_workload_discovery_rejects_incomplete_exchange_config(
+    endpoint: str | None, client_id: str | None
+) -> None:
+    config = NHXOIDCConfig(
+        auth_enabled=True,
+        workload_token_exchange_enabled=True,
+        workload_token_endpoint=endpoint,
+        workload_client_id=client_id,
+    )
+
+    with pytest.raises(AssertionError, match=r"^\[identity\] discovery has no workload token endpoint or client"):
+        check_workload_discovery(config, exchange=True)
