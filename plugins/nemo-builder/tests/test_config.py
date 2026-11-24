@@ -104,3 +104,23 @@ class TestMaxConcurrentBuilds:
     def test_a_config_without_it_doesnt_warn(self, caplog: pytest.LogCaptureFixture) -> None:
         BuilderConfig()
         assert "max_concurrent_builds" not in caplog.text
+
+
+class TestRemote:
+    REMOTE = {"registry": "reg.example.com", "repository": "builds", "profile": "p", "image": "i", "command": ["c"]}
+
+    def test_the_backend_is_in_cluster_unless_set(self) -> None:
+        assert BuilderConfig().backend == "in-cluster"
+        assert BuilderConfig(backend="remote").backend == "remote"
+        with pytest.raises(ValidationError, match="backend"):
+            BuilderConfig.model_validate({"backend": "execution"})
+
+    def test_the_registry_and_repository_are_checked(self) -> None:
+        with pytest.raises(ValidationError, match="without a path"):
+            BuilderConfig.model_validate({"remote": self.REMOTE | {"registry": "reg.example.com/builds"}})
+        with pytest.raises(ValidationError, match="repository"):
+            BuilderConfig.model_validate({"remote": self.REMOTE | {"repository": "a/../b"}})
+
+    def test_the_build_timeout_is_positive(self) -> None:
+        with pytest.raises(ValidationError, match="build_timeout_seconds"):
+            BuilderConfig.model_validate({"remote": self.REMOTE | {"build_timeout_seconds": 0}})

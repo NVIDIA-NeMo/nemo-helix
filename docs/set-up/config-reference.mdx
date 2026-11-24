@@ -928,6 +928,10 @@ Configuration for in-cluster container image builds.
 
 ```yaml wordWrap
 builder:
+  # Where images are built: `in-cluster`, in sandboxes in this cluster; or `remote`, by the build service that `builder.remote` names. | default: 'in-cluster' | values: 'in-cluster' | 'remote'
+  backend: in-cluster
+  # The build service `backend: remote` uses. Unset refuses every remote submit.
+  remote:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:

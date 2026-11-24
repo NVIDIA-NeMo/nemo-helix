@@ -9,7 +9,7 @@ How a build runs is set here, never in the request.
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.identity import (
     PLATFORM_PATTERN,
@@ -31,6 +31,15 @@ from pydantic import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _registry_host(value: str) -> str:
+    if "/" in value:
+        raise ValueError(f"registry must be a host without a path, got {value!r}; the path goes in the repository")
+    try:
+        return validate_registry_host(value)
+    except ImageIdentityError as exc:
+        raise ValueError(f"registry must be a host, optionally with a port, got {value!r}") from exc
 
 
 class SandboxConfig(BaseModel):
@@ -65,12 +74,62 @@ class SandboxConfig(BaseModel):
     )
 
 
+class RemoteConfig(BaseModel):
+    """A build service outside the cluster, with `backend: remote`. The builder names no service: the step
+    image holds its client, and `settings` holds what that client needs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    registry: str = Field(description="Host of the registry the service publishes every image to.")
+    repository: str = Field(description="The one repository, on `registry`, the service publishes every image to.")
+    profile: str = Field(description="The Jobs execution profile, provider `cpu`, the build step runs on.")
+    image: str = Field(description="The step image: it holds the service's client and calls `step_main`.")
+    command: list[str] = Field(min_length=1, description="The step image's command.")
+    credential_secret: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The platform secret holding the service's credential, which the step gets in its environment. "
+            "Null for a step that uses its own identity, such as Workload Identity."
+        ),
+    )
+    platforms: list[str] = Field(
+        default_factory=lambda: ["linux/amd64"], min_length=1, description="The platforms the service builds."
+    )
+    build_timeout_seconds: int = Field(
+        default=1800, gt=0, description="How long one image may build before the step cancels it."
+    )
+    settings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Passed unread to the service's client: an endpoint, project or bucket, say. Never a secret.",
+    )
+
+    _registry = field_validator("registry")(_registry_host)
+
+    @field_validator("repository")
+    @classmethod
+    def _repository_is_a_path(cls, value: str) -> str:
+        return validate_repository(value.strip("/"))
+
+    @field_validator("platforms", mode="before")
+    @classmethod
+    def _platform_names(cls, value: Any) -> Any:
+        return [platform_name(platform) for platform in value] if isinstance(value, list) else value
+
+
 class BuilderConfig(NemoConfig):
     """Configuration for in-cluster container image builds."""
 
     plugin_name: ClassVar[str] = "builder"
     plugin_description: ClassVar[str] = "In-cluster container image builds for NeMo Helix."
 
+    backend: Literal["in-cluster", "remote"] = Field(
+        default="in-cluster",
+        description="Where images are built: `in-cluster`, in sandboxes in this cluster; or `remote`, by the build service that `builder.remote` names.",
+    )
+    remote: RemoteConfig | None = Field(
+        default=None, description="The build service `backend: remote` uses. Unset refuses every remote submit."
+    )
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
     fetch_profile: str = Field(
@@ -139,16 +198,7 @@ class BuilderConfig(NemoConfig):
     @field_validator("registry")
     @classmethod
     def _registry_is_a_host(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if "/" in value:
-            raise ValueError(
-                f"registry must be a host without a path, got {value!r}. Put the path in `repository_prefix`."
-            )
-        try:
-            return validate_registry_host(value)
-        except ImageIdentityError as exc:
-            raise ValueError(f"registry must be a host, optionally with a port, got {value!r}") from exc
+        return None if value is None else _registry_host(value)
 
     @field_validator("repository_prefix")
     @classmethod
