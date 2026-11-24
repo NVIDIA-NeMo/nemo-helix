@@ -845,7 +845,9 @@ def process_checkpoint(
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
     is_llm = model_type == ModelType.LLM
     # A cross-encoder that scores with a causal LM's yes/no logits saves a plain causal LM.
-    causal_reranker = is_cross_encoder and is_causal_reranker_checkpoint(base_model_path)
+    causal_reranker = is_cross_encoder and is_causal_reranker_checkpoint(
+        base_model_path, trust_remote_code=job_trust_remote_code
+    )
     type_label = "" if is_llm else model_type.value
 
     # Resolve chat template using the same priority logic as training:

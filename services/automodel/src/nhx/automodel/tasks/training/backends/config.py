@@ -200,7 +200,9 @@ def _compile_retrieval_config(
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        if is_causal_reranker_checkpoint(customizer_config.model.path):
+        if is_causal_reranker_checkpoint(
+            customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code
+        ):
             # Automodel scores this causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
             del cfg["model"]["pooling"]
@@ -1320,7 +1322,9 @@ def _configure_retrieval_dataset(
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
     causal_reranker = (
-        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
+        causal_reranker_class(customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code)
+        if recipe == TrainingRecipe.CROSS_ENCODER
+        else None
     )
     if recipe == TrainingRecipe.BI_ENCODER:
         collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"

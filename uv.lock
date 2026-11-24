@@ -7860,6 +7860,9 @@ auth-idp-e2e = [
     { name = "pytest" },
     { name = "pytest-timeout" },
 ]
+automodel-tests = [
+    { name = "transformers" },
+]
 builder-steps = [
     { name = "nemo-builder-plugin" },
 ]
@@ -8153,6 +8156,7 @@ auth-idp-e2e = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
 ]
+automodel-tests = [{ name = "transformers", specifier = ">=5.5.0,<5.9.0" }]
 builder-steps = [{ name = "nemo-builder-plugin", editable = "plugins/nemo-builder" }]
 compass = [{ name = "nemo-compass-plugin", editable = "plugins/nemo-compass" }]
 core-services = [

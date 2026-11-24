@@ -84,6 +84,10 @@ scaled-evals = [
 opensandbox-ext = [
   "opensandbox-server==0.2.1",
 ]
+# The automodel service loads checkpoint configs with transformers only inside its training image.
+# Its tests load them for real with this opt-in group; without it they use a stand-in. Opt-in like
+# scaled-evals, so the regular install does not carry transformers.
+automodel-tests = ["transformers>=5.5.0,<5.9.0"]
 # Third-party Tavily plugin, published to PyPI by Tavily.
 tavily = ["nemo-helix-tavily-plugin"]
 dev = [
