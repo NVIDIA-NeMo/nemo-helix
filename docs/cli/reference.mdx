@@ -6574,7 +6574,7 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
+* `--mode`: Runtime backend: subprocess, docker, k8s, openshell, or opensandbox. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
 * `--image, -i`: Container image for docker/k8s/openshell/opensandbox modes. Falls back to the agent's reference.container_image, then deployments.default_image.
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
@@ -6613,7 +6613,7 @@ nemo agents redeploy [OPTIONS]
 * `--label, -l`: Agent label as KEY=VALUE. Repeatable. Replaces the agent's labels; omit to keep them. [default: ]
 * `--clear-labels`: Recreate the agent with no labels. Cannot be combined with `--label`.
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
+* `--mode`: Runtime backend: subprocess, docker, k8s, openshell, or opensandbox. Auto-detected from the existing deployment when omitted.
 * `--image, -i`: Container image for docker/k8s/openshell/opensandbox modes. Auto-detected from the existing deployment when omitted.
 * `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.

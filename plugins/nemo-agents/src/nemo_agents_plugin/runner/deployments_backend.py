@@ -5,7 +5,7 @@
 
 Translates the :class:`~nemo_agents_plugin.runner.backend.RunnerBackend` interface into
 nemo-deployments ``Deployment`` / ``DeploymentConfig`` entity operations. The deployments
-controller reconciles those entities onto a configured executor (docker, k8s, or openshell).
+controller reconciles those entities onto a configured executor (docker, k8s, openshell, or opensandbox).
 
 Long-running only (``restart_policy=Always``). Finite / run-to-completion belongs to
 AgentRun (Razvan RFCs), not AgentDeployment.

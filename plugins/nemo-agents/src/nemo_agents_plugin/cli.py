@@ -1192,7 +1192,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--mode",
             help=(
-                "Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the "
+                "Runtime backend: subprocess, docker, k8s, openshell, or opensandbox. Defaults to subprocess when the "
                 "platform allows it, otherwise to the first enabled mode that needs no --image."
             ),
         ),
@@ -1342,7 +1342,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--mode",
             help=(
-                "Runtime backend: subprocess, docker, k8s, or openshell. "
+                "Runtime backend: subprocess, docker, k8s, openshell, or opensandbox. "
                 "Auto-detected from the existing deployment when omitted."
             ),
         ),
