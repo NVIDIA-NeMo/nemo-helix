@@ -14,7 +14,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sandboxed_gym.backends._opensandbox_driver import (
@@ -33,6 +33,12 @@ from sandboxed_gym.sandbox_types import SandboxHandle, SandboxResources, Sandbox
 requires_opensandbox = pytest.mark.skipif(
     importlib.util.find_spec("opensandbox") is None,
     reason="needs the OpenSandbox SDK; install the `opensandbox` extra to run",
+)
+# The driver imports the SDK inside its methods, so it has no name of its own for a test to patch.
+replaces_sdk_entry_points = pytest.mark.allow_shared_patch(
+    "opensandbox.sandbox.Sandbox.create",
+    "opensandbox.sandbox.Sandbox.connect",
+    "opensandbox.manager.SandboxManager.create",
 )
 
 
@@ -88,7 +94,7 @@ def test_a_named_user_is_refused_rather_than_guessed() -> None:
         _exec_identity("root")
 
 
-def _sdk_messages(*texts: str) -> list[object]:
+def _sdk_messages(*texts: str) -> list[Any]:
     OutputMessage = getattr(importlib.import_module("opensandbox.models.execd"), "OutputMessage")
     return [OutputMessage(text=text, timestamp=0) for text in texts]
 
@@ -185,6 +191,7 @@ def test_every_status_alias_maps_onto_a_real_contract_status() -> None:
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_destroy_sandboxes_matching_lists_every_page_and_kills_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -234,6 +241,7 @@ async def test_destroy_sandboxes_matching_lists_every_page_and_kills_each(
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_destroy_sandboxes_matching_keeps_going_when_one_kill_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -280,6 +288,7 @@ async def test_destroy_sandboxes_matching_refuses_an_empty_selector() -> None:
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_create_reclaims_only_its_creation_id(monkeypatch: pytest.MonkeyPatch) -> None:
     Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
 
@@ -308,6 +317,7 @@ async def test_create_reclaims_only_its_creation_id(monkeypatch: pytest.MonkeyPa
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_cleanup_failure_does_not_mask_create_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -333,6 +343,7 @@ async def test_cleanup_failure_does_not_mask_create_failure(
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_create_passes_the_configured_cap_and_the_episode_requests_separately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -402,6 +413,7 @@ def _patch_sdk(monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]) -> 
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     """The server holds the create POST until the pod is Running.
 
@@ -418,6 +430,7 @@ async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatc
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_the_long_create_timeout_does_not_outlive_the_create_call(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every later SDK client is built from the sandbox's connection.
 
@@ -438,6 +451,7 @@ async def test_the_long_create_timeout_does_not_outlive_the_create_call(monkeypa
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_a_failed_reattach_keeps_the_created_sandbox(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -459,6 +473,7 @@ async def test_a_failed_reattach_keeps_the_created_sandbox(
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_an_operator_connection_is_not_reattached(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     _patch_sdk(monkeypatch, captured)
@@ -472,6 +487,7 @@ async def test_an_operator_connection_is_not_reattached(monkeypatch: pytest.Monk
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_an_operator_request_timeout_is_used_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     _patch_sdk(monkeypatch, captured)
@@ -483,6 +499,7 @@ async def test_an_operator_request_timeout_is_used_as_given(monkeypatch: pytest.
 
 
 @requires_opensandbox
+@replaces_sdk_entry_points
 async def test_a_create_cut_off_by_the_sdk_request_timeout_names_the_timeout_and_the_knob(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
