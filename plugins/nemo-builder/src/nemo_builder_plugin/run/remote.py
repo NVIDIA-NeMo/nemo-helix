@@ -190,6 +190,9 @@ class RemoteContext:
     #: otherwise ``.dockerignore``. What a client owes a context it sends anywhere is said on
     #: :meth:`RemoteBuildService.upload_context`.
     path: Path
+    #: The platform the image is to be built for, as ``RemoteBuild.platform`` will name it. A client of a service
+    #: that builds for fewer platforms refuses one it can't build here, before anything is uploaded.
+    platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
     labels: Mapping[str, str] = field(default_factory=dict)
 
@@ -1293,7 +1296,7 @@ def _build_one(
     destination = f"{row.registry}/{row.repository}"
     # The upload counts against the build's time.
     deadline = clock.monotonic() + config.build_timeout_seconds
-    upload = RemoteContext(key=key, path=context, labels=labels)
+    upload = RemoteContext(key=key, path=context, platform=image.platform, labels=labels)
     # The same `upload` on every try, so a response lost on the way back keeps one upload. No build has started
     # yet, so a failure here leaves nothing to cancel.
     uploaded = _call(
