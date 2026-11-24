@@ -605,10 +605,14 @@ def test_validate_referenced_skill_paths_rejects_agent_root_when_nothing_staged(
         validate_referenced_skill_paths(_fabric_config(skills_paths=["."]), set())
 
 
-def test_validate_referenced_skill_paths_does_not_match_sibling_prefix() -> None:
+@pytest.mark.parametrize("field", ["paths", "skill", "folder"])
+def test_validate_referenced_skill_paths_does_not_match_sibling_prefix(field: str) -> None:
+    config = _fabric_config(skills_paths=["skills/review"])
+    if field != "paths":
+        config["skills"] = {"directories": [{field: "skills/review"}]}
     with pytest.raises(FabricArtifactStagingError, match="skills/review"):
         validate_referenced_skill_paths(
-            _fabric_config(skills_paths=["skills/review"]),
+            config,
             {PurePosixPath("skills/review-notes/SKILL.md")},
         )
 

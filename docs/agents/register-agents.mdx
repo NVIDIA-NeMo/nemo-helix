@@ -13,7 +13,7 @@ description: "Register an agent on NeMo Helix from code, a container image, a re
 There is no compatibility alias; the legacy command fails with
 `No such command 'create'`. Update scripts and CI to use `register` with the same
 arguments, and Python callers from `AgentsResource.create` to
-`AgentsResource.register`. See [Fabric 0.6 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
+`AgentsResource.register`. See [Fabric 0.7 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
 for the version, preflight and telemetry migration checklist.
 </Warning>
 
@@ -122,8 +122,10 @@ format retain the legacy `nat-workflow-v1` default.
 | `default_harness`, `harnesses` | The harness that runs the agent. Each entry sets a `kind` (`deepagents`, `claude`, `codex`, `hermes`, `nooa-bench-agent`, `remote-agent`), plus optional `settings` and a harness-specific `model`. |
 | `models` | Named model bindings. A harness uses `models.default` unless it sets its own `model`. |
 | `instructions.system.content` | The system prompt, shared by every harness. |
-| `skills.paths` | Skill directories relative to `agent.yaml`; each must contain a `SKILL.md`. |
-| `mcp.servers` | MCP servers that expose tools to the harness. |
+| `skills.paths` | Skill directories relative to `agent.yaml`; Deep Agents also accepts folders of skills. |
+| `skills.directories`, `skills.duplicates` | Explicit `skill` or `folder` entries and a duplicate-name policy: `reject`, `first_wins`, or `last_wins`. Use instead of `skills.paths`. |
+| `mcp.servers` | MCP servers that expose tools to the harness, including service-account `authentication` for Deep Agents HTTP servers. |
+| `tools.definitions` | Named tools, such as installed Python tools for Deep Agents. |
 | `tools.enabled` | Optional tool allowlist. Omitted or `null` preserves harness defaults, subject to `blocked`; `[]` denies all tools. |
 | `tools.blocked` | Tool names the harness must not call. |
 | `runtime` | `timeout_seconds` and `max_turns`. |
@@ -145,6 +147,72 @@ or, from a source checkout, `nemo-agents-plugin[mini-swe-agent]`. The public
 [Mini-SWE lifecycle guide](/documentation/agents/mini-swe-agent) covers model
 credentials, deployment, invocation, sessions, telemetry, timeouts and unsupported
 shared capabilities.
+
+### Deep Agents Extensions
+
+Fabric 0.7 supports installed Python tools and middleware on the main Deep Agent:
+
+```yaml
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents:
+        middleware:
+          - ref: acme_agent.middleware:CallCounter
+tools:
+  definitions:
+    convert_units:
+      kind: python
+      ref: acme_agent.tools:convert_units
+```
+
+Install the package in the agent image. A tool reference must name a LangChain
+`BaseTool` instance or subclass, and its tool name must match the definition key.
+Middleware must subclass `AgentMiddleware`, use async hooks such as
+`awrap_model_call`, and retain the default state schema. Constructor arguments go
+under `settings` beside `ref`. Per-subagent custom tools and middleware are not supported.
+
+For MCP OAuth client credentials, declare the secret's environment-variable name:
+
+```yaml
+mcp:
+  servers:
+    tools:
+      transport: streamable-http
+      url: https://tools.example.com/mcp
+      authentication:
+        type: service_account
+        client_id: example-client
+        client_secret_env: MCP_CLIENT_SECRET
+        token_url: https://idp.example.com/oauth2/token
+        scopes: [tools.read]
+```
+
+Supply `MCP_CLIENT_SECRET` through the agent environment's `secrets` mapping.
+Fabric fetches and refreshes tokens. Both URLs require HTTPS; loopback HTTP is
+accepted for local testing. Additional credentials can use `custom_headers` with
+`${ENV_NAME}` references, but do not set `Authorization` alongside service-account
+authentication. Browser sign-in is not supported.
+
+Unavailable MCP servers are skipped at runtime startup, and MCP tool errors are
+returned to the model. Fabric results report skipped servers under
+`output.mcp.unavailable_servers`; job results retain this in `fabric_result`.
+
+Served Deep Agents with the default local filesystem backend get private skill
+copies per conversation. Restart the server to pick up source changes. Fabric
+handles loading and duplicate policies:
+
+```yaml
+skills:
+  directories:
+    - skill: skills/unit-conversion
+    - folder: shared-skills
+  duplicates: reject
+```
+
+Paths resolve relative to `agent.yaml`. Deep Agents defaults to the later source
+when names collide; Fabric results include an `output.skills` report.
 
 ### Bring Your Own Harness
 
@@ -227,7 +295,7 @@ for details.
 [project]
 name = "acme-agent"
 version = "0.1.0"
-dependencies = ["nemo-fabric-adapters-common>=0.6.0,<0.7.0"]
+dependencies = ["nemo-fabric-adapters-common>=0.7.0,<0.8.0"]
 
 [build-system]
 requires = ["hatchling"]

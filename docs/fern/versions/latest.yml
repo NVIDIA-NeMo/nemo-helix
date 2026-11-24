@@ -111,7 +111,7 @@ navigation:
           - section: Migration & Compatibility
             skip-slug: true
             contents:
-              - page: Fabric 0.6 Upgrade and Adapter Support
+              - page: Fabric 0.7 Upgrade and Adapter Support
                 slug: fabric-upgrade
                 path: ../../agents/fabric-upgrade.mdx
       - section: Evaluate Agents & Models
