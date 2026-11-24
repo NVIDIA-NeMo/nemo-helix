@@ -68,6 +68,18 @@ class ModelConfig(BaseModel):
     path: str = Field(description="Local path to the downloaded model directory.")
     name: str | None = Field(default=None, description="Model entity identifier.")
     max_seq_length: int = Field(default=2048)
+    max_pixels: int | None = Field(
+        default=None,
+        description="Shorthand for image_longest_edge. None keeps the checkpoint ceiling.",
+    )
+    image_longest_edge: int | None = Field(
+        default=None,
+        description="Maximum pixels in a resized image. None keeps the checkpoint ceiling.",
+    )
+    image_shortest_edge: int | None = Field(
+        default=None,
+        description="Minimum pixels in a resized image. None keeps the checkpoint floor.",
+    )
     precision: Precision | None = Field(default=None, description="Weight dtype; auto-detected when None.")
     chat_template: str | None = Field(default=None, description="Jinja2 chat template override.")
     trust_remote_code: bool = Field(default=False)

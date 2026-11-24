@@ -14,6 +14,7 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.schema import (
     LearningRateDefault,
     NamespacedModel,
@@ -31,6 +32,7 @@ __all__ = [
     "DatasetSpec",
     "DeploymentParams",
     "ExportSpec",
+    "ImageSize",
     "LoRAParams",
     "MTPSpec",
     "OptimizerSpec",
@@ -261,6 +263,29 @@ class PipelineSpec(AutomodelSchema):
     )
 
 
+class ImageSize(AutomodelSchema):
+    """Pixel-area bounds passed to the vision processor as ``size``.
+
+    Both edges are required. ``longest_edge`` is the maximum pixel count and matches ``max_pixels``.
+    """
+
+    longest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.",
+    )
+    shortest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.",
+    )
+
+    @model_validator(mode="after")
+    def _has_both_edges(self) -> Self:
+        check_image_size_edges(self.longest_edge, self.shortest_edge)
+        return self
+
+
 class TrainingSpec(AutomodelSchema):
     model_config = AutomodelSchema.model_config | {"populate_by_name": True}
 
@@ -275,6 +300,22 @@ class TrainingSpec(AutomodelSchema):
     finetuning_type: Literal["lora", "all_weights", "lora_merged"] = "lora"
     lora: LoRAParams | None = None
     max_seq_length: int = Field(default=2048, gt=0)
+    max_pixels: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not "
+            "pass this name to transformers. Unset keeps the checkpoint ceiling. Rejected for text checkpoints."
+        ),
+    )
+    image_size: ImageSize | None = Field(
+        default=None,
+        description=(
+            "Pixel-area bounds for a vision-language processor, as size.longest_edge and size.shortest_edge. "
+            "Both edges are required, and shortest_edge must be less than longest_edge. Set this or max_pixels, "
+            "not both. Rejected for text checkpoints."
+        ),
+    )
     precision: Literal["bf16", "fp16", "fp32", "fp8"] | None = Field(
         default=None,
         description="Model precision for training. Auto-detected from the checkpoint when unset.",
@@ -336,6 +377,7 @@ class TrainingSpec(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
+        check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
         return self
 
 

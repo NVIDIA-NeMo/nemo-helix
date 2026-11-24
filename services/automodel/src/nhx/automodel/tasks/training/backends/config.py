@@ -50,11 +50,11 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
 )
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -401,6 +401,13 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        cfg["processor"]["size"] = image_size
     freeze_config: dict[str, bool] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
@@ -484,11 +491,16 @@ def _apply_vlm_lora_excludes(cfg: dict[str, Any], customizer_config: TrainingSte
     lora = customizer_config.training.lora
     target = None if lora is None else lora.target_modules
     exclude = None if lora is None else lora.exclude_modules
-    if not lora_uses_default_targets(target, exclude):
+    # PeftConfig takes target_modules or exclude_modules, not both. A named target
+    # list is the caller's filter. An exclude list is unioned with the vision patterns.
+    if target and list(target) != ["*proj"]:
         return
     peft.pop("target_modules", None)
     peft["match_all_linear"] = False
-    peft["exclude_modules"] = list(VLM_LORA_EXCLUDE_MODULES)
+    peft["exclude_modules"] = vlm_lora_exclude_modules(
+        exclude,
+        checkpoint_model_name=customizer_config.model.checkpoint_model_name,
+    )
 
 
 def _configure_vlm_datasets(
@@ -531,8 +543,20 @@ def _configure_vlm_datasets(
         model_name=customizer_config.model.name,
         user_template=customizer_config.model.chat_template,
     )
-    cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
-    cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    # max_length is Automodel's token cap. Setting it also enables the pretokenized
+    # wrapper, which truncates to this length and replaces a sample whose truncation
+    # would split image tokens.
+    seq_length = customizer_config.model.max_seq_length
+    cfg["dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(train_out),
+        "max_length": seq_length,
+    }
+    cfg["validation_dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(val_out),
+        "max_length": seq_length,
+    }
     if chat_template:
         cfg["dataset"]["chat_template"] = chat_template
         cfg["validation_dataset"]["chat_template"] = chat_template

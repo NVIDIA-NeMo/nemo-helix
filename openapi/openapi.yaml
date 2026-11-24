@@ -21120,6 +21120,12 @@ components:
           title: Has Vision Tower
           description: True when the checkpoint config contains a vision tower.
           default: false
+        vision_patch_size:
+          title: Vision Patch Size
+          description: Side length, in pixels, of one image token. Read from the checkpoint
+            vision config as patch_size times the spatial merge. None when the checkpoint
+            does not declare a patch size.
+          type: integer
         has_audio_tower:
           type: boolean
           title: Has Audio Tower

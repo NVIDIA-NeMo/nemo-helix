@@ -237,6 +237,7 @@ def infer_model_cfg_from_hf(
         mamba_config=mamba_config,
         sliding_window_config=sliding_window_config,
         has_vision_tower=inspected.has_vision_tower,
+        vision_patch_size=inspected.vision_patch_size,
         has_audio_tower=inspected.has_audio_tower,
         num_experts=inspected.expert_count,
         num_nextn_predict_layers=inspected.num_nextn_predict_layers,
