@@ -716,7 +716,8 @@ def compile_grpo_config(
         cfg["policy"]["generation"]["vllm_kwargs"] = vllm_kwargs
     # Gym sends rollouts to the worker's own chat-completions server, which vllm_kwargs does not
     # configure. vLLM rejects a request with tools and an "auto" or named tool_choice unless that
-    # server has a tool parser, so give it the parser the model declares for serving.
+    # server has a tool parser, so give it the parser the model declares for serving. The NeMo-RL
+    # worker drops a name its vLLM does not register, with a warning, instead of failing to start.
     if customizer_config.model.tool_call_parser:
         cfg["policy"]["generation"]["vllm_cfg"]["http_server_serving_chat_kwargs"] = {
             "tool_parser": customizer_config.model.tool_call_parser,

@@ -29,7 +29,6 @@ from nhx.rl.app.jobs.compiler import (
     _build_training_step,
     _build_training_step_config,
     platform_job_config_compiler,
-    rollout_tool_call_parser,
 )
 from nhx.rl.app.jobs.training.schemas import OptimizerType, TrainingType
 from nhx.rl.entities.values import FinetuningType
@@ -524,22 +523,29 @@ def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None)
     ],
     ids=["declared-parser", "plugin-parser", "no-parser", "no-tool-config"],
 )
-def test_grpo_rollouts_use_the_model_tool_parser(
-    sandbox_capable: None, tool_call_config: dict[str, Any] | None, expected: str | None
+@pytest.mark.asyncio
+async def test_grpo_rollouts_use_the_model_tool_parser(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+    sandbox_capable: None,
+    tool_call_config: dict[str, Any] | None,
+    expected: str | None,
 ) -> None:
     """Rollouts use the parser the model declares for serving, except one a plugin registers."""
     from nemo_helix_plugin.models.types import ModelSpec, ToolCallConfig
 
-    spec = ModelSpec.model_construct(
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(
         tool_call_config=ToolCallConfig(**tool_call_config) if tool_call_config is not None else None
     )
-    sc = _build_training_step_config(
-        _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
-        trust_remote_code=False,
-        tool_call_parser=rollout_tool_call_parser(spec),
-    )
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(GRPOTraining(type="grpo"), environment="default/env")
 
-    assert sc.model.tool_call_parser == expected
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    training = _steps(spec)[1]
+    assert training["name"] == "grpo-training"
+    assert training["config"]["model"]["tool_call_parser"] == expected
 
 
 def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:
