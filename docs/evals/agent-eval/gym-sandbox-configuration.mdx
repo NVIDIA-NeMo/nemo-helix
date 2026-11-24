@@ -19,7 +19,9 @@ PVC, or egress policy.
   It configures the server connection, credentials, and top-level platform sandbox capability.
 - A Kubernetes or Volcano Jobs execution profile with a shared job-storage PVC. The claim should
   support `ReadWriteMany` when Jobs and OpenSandbox pods can run on different nodes.
-- Published `nhx-tasks` and `nhx-gym-host` images for the platform release.
+- Published `nhx-tasks` and `nhx-gym-host` images for the platform release. Upgrade them together: a
+  Gym host image from an earlier release ignores the job's `env_vars` and `env_secrets`, so its Gym
+  servers start without them.
 - An allowlisted model endpoint reachable from the Gym host.
 
 ## Execution topology
