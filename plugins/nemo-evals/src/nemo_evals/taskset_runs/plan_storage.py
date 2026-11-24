@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Internal Files operations; only TasksetRunStore owns this lifecycle."""
+"""Frozen plans in Files: taskset-run plans, and agent-evaluate jobs' frozen tasks.
+
+Only TasksetRunStore owns a run plan's lifecycle. An agent-evaluate worker only reads its job's frozen tasks,
+through :func:`read_verified_bytes_sync`.
+"""
 
 import logging
 import secrets
@@ -12,7 +16,7 @@ from filesets import parse_fileset_ref
 from nemo_evals.schema_migrations import migrate_schema_fileset_receipt
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.errors import PermissionDeniedError
-from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 logger = logging.getLogger(__name__)
@@ -131,11 +135,34 @@ async def read_verified_bytes(files_client: AsyncFilesClient, plan_ref: str, *, 
         PlanDigestMismatchError: The downloaded bytes do not match the digest.
         Exception: Files download/read failures propagate without being rewrapped.
     """
+    workspace, name, path = _plan_file(plan_ref)
+    response = await files_client.download_file(workspace=workspace, name=name, path=path)
+    return _verified(plan_ref, await response.read(), expected_digest)
+
+
+def read_verified_bytes_sync(files_client: FilesClient, plan_ref: str, *, expected_digest: str) -> bytes:
+    """The synchronous twin of :func:`read_verified_bytes`, for a worker holding a sync client.
+
+    Raises:
+        ValueError: The ref is malformed or lacks a nonempty file fragment.
+        PlanDigestMismatchError: The downloaded bytes do not match the digest.
+        Exception: Files download/read failures propagate without being rewrapped.
+    """
+    workspace, name, path = _plan_file(plan_ref)
+    return _verified(
+        plan_ref, files_client.download_file(workspace=workspace, name=name, path=path).read(), expected_digest
+    )
+
+
+def _plan_file(plan_ref: str) -> tuple[str, str, str]:
+    """``plan_ref``'s workspace, fileset and file path; a plan ref always names one file."""
     workspace, name, path = parse_fileset_ref(plan_ref, workspace_fallback=None)
     if "#" not in plan_ref or not path:
         raise ValueError(f"plan reference must include a nonempty file fragment: {plan_ref!r}")
-    response = await files_client.download_file(workspace=workspace, name=name, path=path)
-    body = await response.read()
+    return workspace, name, path
+
+
+def _verified(plan_ref: str, body: bytes, expected_digest: str) -> bytes:
     actual = sha256(body).hexdigest()
     if actual != expected_digest:
         raise PlanDigestMismatchError(plan_ref, expected_digest, actual)

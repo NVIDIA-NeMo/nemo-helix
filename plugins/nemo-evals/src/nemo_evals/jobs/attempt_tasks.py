@@ -26,6 +26,7 @@ import json
 from typing import Final
 
 from filesets import parse_fileset_ref
+from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError, read_verified_bytes_sync
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
@@ -57,14 +58,13 @@ def frozen_tasks_bytes(spec: dict) -> bytes:
     return canonical.encode("utf-8")
 
 
-def bytes_digest(body: bytes) -> str:
-    """The versioned digest of ``body``."""
-    return _DIGEST_PREFIX + hashlib.sha256(body).hexdigest()
-
-
 def frozen_tasks_digest(spec: dict) -> str:
-    """The versioned digest of ``spec``'s ``tasks`` and ``trials``, as JSON (``model_dump(mode="json")``)."""
-    return bytes_digest(frozen_tasks_bytes(spec))
+    """The versioned digest of ``spec``'s ``tasks`` and ``trials``, as JSON (``model_dump(mode="json")``).
+
+    It is ``sha256-v1:`` and the SHA-256 of :func:`frozen_tasks_bytes`, so it binds a frozen-tasks file whose
+    ``plan_digest`` is that SHA-256.
+    """
+    return _DIGEST_PREFIX + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest()
 
 
 def step_config_without_tasks(spec: dict) -> dict:
@@ -134,36 +134,39 @@ def _frozen_tasks(client: NemoClient, *, workspace: str, job: str, attempt: str,
 
 
 def _read_frozen_tasks_file(client: NemoClient, pointer: object, *, workspace: str, expected: str) -> dict:
-    """Download the frozen-tasks file ``pointer`` names, check its exact bytes against ``expected``, then parse it."""
-    if not isinstance(pointer, dict) or not isinstance(pointer.get("ref"), str):
+    """Download the frozen-tasks file ``pointer`` names, check its exact bytes against ``expected``, then parse it.
+
+    The file is stored and read the way a taskset run's plan is (:mod:`nemo_evals.taskset_runs.plan_storage`).
+    """
+    if not isinstance(pointer, dict) or not isinstance(pointer.get("plan_ref"), str):
         raise AttemptTasksError(f"the attempt's {FROZEN_TASKS_KEY} names no file")
-    ref = pointer["ref"]
-    if pointer.get("digest") != expected:
+    plan_ref = pointer["plan_ref"]
+    plan_digest = pointer.get("plan_digest")
+    if not isinstance(plan_digest, str) or _DIGEST_PREFIX + plan_digest != expected:
         raise AttemptTasksError(
-            f"the attempt's {FROZEN_TASKS_KEY} digest {pointer.get('digest')!r} doesn't match its step config "
+            f"the attempt's {FROZEN_TASKS_KEY} digest {plan_digest!r} doesn't match its step config "
             f"({expected}); refusing to run it"
         )
     try:
-        file_workspace, name, path = parse_fileset_ref(ref, workspace_fallback=None)
+        file_workspace, _, path = parse_fileset_ref(plan_ref, workspace_fallback=None)
     except ValueError as exc:
-        raise AttemptTasksError(f"the attempt's frozen tasks file {ref!r} is not a fileset file ref") from exc
+        raise AttemptTasksError(f"the attempt's frozen tasks file {plan_ref!r} is not a fileset file ref") from exc
     if file_workspace != workspace or path != FROZEN_TASKS_PATH:
         raise AttemptTasksError(
-            f"the attempt's frozen tasks file {ref!r} must be {FROZEN_TASKS_PATH!r} in workspace {workspace!r}"
+            f"the attempt's frozen tasks file {plan_ref!r} must be {FROZEN_TASKS_PATH!r} in workspace {workspace!r}"
         )
-    body = FilesClient.from_client(client).download_file(workspace=file_workspace, name=name, path=path).read()
-    actual = bytes_digest(body)
-    if actual != expected:
+    try:
+        body = read_verified_bytes_sync(FilesClient.from_client(client), plan_ref, expected_digest=plan_digest)
+    except PlanDigestMismatchError as exc:
         raise AttemptTasksError(
-            f"the frozen tasks file {ref!r} doesn't match its step config (expected {expected}, got {actual}); "
-            "refusing to run it"
-        )
+            f"the frozen tasks file {plan_ref!r} doesn't match its step config; refusing to run it"
+        ) from exc
     try:
         frozen = json.loads(body)
     except ValueError as exc:
-        raise AttemptTasksError(f"the frozen tasks file {ref!r} is not JSON") from exc
+        raise AttemptTasksError(f"the frozen tasks file {plan_ref!r} is not JSON") from exc
     if not isinstance(frozen, dict) or not isinstance(frozen.get("tasks"), list):
-        raise AttemptTasksError(f"the frozen tasks file {ref!r} has no task list")
+        raise AttemptTasksError(f"the frozen tasks file {plan_ref!r} has no task list")
     return {"tasks": frozen["tasks"], "trials": frozen.get("trials")}
 
 
@@ -179,7 +182,6 @@ __all__ = [
     "TASKS_FROM_KEY",
     "TASK_SERVICE_NAME",
     "AttemptTasksError",
-    "bytes_digest",
     "frozen_tasks_bytes",
     "frozen_tasks_digest",
     "load_attempt_tasks",

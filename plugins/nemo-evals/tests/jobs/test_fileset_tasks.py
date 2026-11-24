@@ -28,7 +28,6 @@ from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
     TASKS_FROM_KEY,
-    bytes_digest,
     frozen_tasks_bytes,
     load_attempt_tasks,
 )
@@ -506,8 +505,8 @@ def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientC
     frozen = frozen_tasks_bytes(stored)
     compact = {key: value for key, value in stored.items() if key not in ("tasks", "trials")}
     compact[FROZEN_TASKS_KEY] = {
-        "ref": f"default/agent-eval-tasks-0123456789ab#{FROZEN_TASKS_PATH}",
-        "digest": bytes_digest(frozen),
+        "plan_ref": f"default/agent-eval-tasks-0123456789ab#{FROZEN_TASKS_PATH}",
+        "plan_digest": hashlib.sha256(frozen).hexdigest(),
         "task_count": 2,
     }
     # The writer lands separately; here the record is put in the stored shape directly.

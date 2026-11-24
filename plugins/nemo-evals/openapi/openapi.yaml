@@ -5872,16 +5872,16 @@ components:
         submission, optionally published first.
     FrozenTasks:
       properties:
-        ref:
+        plan_ref:
           type: string
           minLength: 1
-          title: Ref
+          title: Plan Ref
           description: The file holding the frozen tasks and trials, as `workspace/fileset#path`.
-        digest:
+        plan_digest:
           type: string
-          pattern: ^sha256-v1:[0-9a-f]{64}$
-          title: Digest
-          description: '`sha256-v1:` and the SHA-256 of the file''s exact bytes.'
+          pattern: ^[0-9a-f]{64}$
+          title: Plan Digest
+          description: SHA-256 of the file's exact bytes.
         task_count:
           type: integer
           minimum: 1.0
@@ -5896,21 +5896,25 @@ components:
       additionalProperties: false
       type: object
       required:
-      - ref
-      - digest
+      - plan_ref
+      - plan_digest
       - task_count
       title: FrozenTasks
       description: 'Where a stored agent-evaluate job keeps the tasks and trials it
         froze at submission.
 
 
-        The file holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON,
-        in a fileset of the job''s
+        The file is stored the way a taskset run stores its plan (:mod:`nemo_evals.taskset_runs.plan_storage`):
+        a
 
-        workspace. ``digest`` covers its exact bytes and equals the step config''s
-        ``tasks_digest``, so the worker
+        file in a fileset of the job''s workspace, named by ``plan_ref`` and bound
+        by ``plan_digest``, the SHA-256
 
-        refuses a file that changed after submission.'
+        of its exact bytes. It holds ``{"tasks": [...], "trials": [...] | null}``
+        as canonical JSON, the bytes the
+
+        step config''s ``tasks_digest`` covers, so the worker refuses a file that
+        changed after submission.'
     GenericAgent:
       properties:
         url:

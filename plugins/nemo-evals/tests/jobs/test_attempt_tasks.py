@@ -3,6 +3,7 @@
 
 """Agent-evaluate step configs leave their tasks on the job attempt, and workers read them back."""
 
+import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -24,7 +25,6 @@ from nemo_evals.jobs.attempt_tasks import (
     TASKS_FROM_ATTEMPT,
     TASKS_FROM_KEY,
     AttemptTasksError,
-    bytes_digest,
     frozen_tasks_bytes,
     frozen_tasks_digest,
     load_attempt_tasks,
@@ -326,8 +326,8 @@ def _frozen(spec: dict, *, ref: str = FILE_REF) -> tuple[dict, bytes]:
     body = frozen_tasks_bytes(spec)
     stored = {key: value for key, value in spec.items() if key not in ("tasks", "trials")}
     stored[FROZEN_TASKS_KEY] = {
-        "ref": ref,
-        "digest": bytes_digest(body),
+        "plan_ref": ref,
+        "plan_digest": hashlib.sha256(body).hexdigest(),
         "task_count": len(spec["tasks"]),
         "trial_count": None if spec.get("trials") is None else len(spec["trials"]),
     }
@@ -415,7 +415,7 @@ def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(
 def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spec: AgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
-    stored[FROZEN_TASKS_KEY]["digest"] = "sha256-v1:" + "f" * 64
+    stored[FROZEN_TASKS_KEY]["plan_digest"] = "f" * 64
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
     with pytest.raises(AttemptTasksError, match="digest .* doesn't match its step config"):
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
@@ -424,7 +424,7 @@ def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spe
 
 def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: AgentEvalSpec) -> None:
     spec = harbor_spec.model_dump(mode="json")
-    assert bytes_digest(frozen_tasks_bytes(spec)) == frozen_tasks_digest(spec)
+    assert "sha256-v1:" + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest() == frozen_tasks_digest(spec)
 
 
 # --- Taskset-run task Jobs ---------------------------------------------------------------------------------

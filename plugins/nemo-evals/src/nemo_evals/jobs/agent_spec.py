@@ -1155,20 +1155,21 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 class FrozenTasks(BaseModel):
     """Where a stored agent-evaluate job keeps the tasks and trials it froze at submission.
 
-    The file holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON, in a fileset of the job's
-    workspace. ``digest`` covers its exact bytes and equals the step config's ``tasks_digest``, so the worker
-    refuses a file that changed after submission.
+    The file is stored the way a taskset run stores its plan (:mod:`nemo_evals.taskset_runs.plan_storage`): a
+    file in a fileset of the job's workspace, named by ``plan_ref`` and bound by ``plan_digest``, the SHA-256
+    of its exact bytes. It holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON, the bytes the
+    step config's ``tasks_digest`` covers, so the worker refuses a file that changed after submission.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    ref: str = Field(
+    plan_ref: str = Field(
         min_length=1,
         description="The file holding the frozen tasks and trials, as `workspace/fileset#path`.",
     )
-    digest: str = Field(
-        pattern=r"^sha256-v1:[0-9a-f]{64}$",
-        description="`sha256-v1:` and the SHA-256 of the file's exact bytes.",
+    plan_digest: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 of the file's exact bytes.",
     )
     task_count: int = Field(ge=1, description="Number of tasks the job runs.")
     trial_count: int | None = Field(
