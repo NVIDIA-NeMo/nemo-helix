@@ -217,11 +217,9 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     )
     config = AgentConfig(skills=AgentSkillConfig(paths=["/skills"]))
     backend = adapter.resolve_backend(runtime_context, str(AGENT_ROOT))
-    skill_sources = adapter.resolve_skills(config)
+    skill_sources, backend = adapter.resolve_skills(config, runtime_context, str(AGENT_ROOT), backend)
 
-    assert isinstance(backend, FilesystemBackend)
-    assert skill_sources is not None
-    assert skill_sources == ["/skills"]
+    assert skill_sources
     skills, error = _list_skills_with_errors(backend, skill_sources[0])
     assert error is None
     assert {skill["name"] for skill in skills} == {

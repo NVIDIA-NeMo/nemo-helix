@@ -13,7 +13,7 @@ description: "Register an agent on NeMo Helix from code, a container image, a re
 There is no compatibility alias; the legacy command fails with
 `No such command 'create'`. Update scripts and CI to use `register` with the same
 arguments, and Python callers from `AgentsResource.create` to
-`AgentsResource.register`. See [Fabric 0.6 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
+`AgentsResource.register`. See [Fabric 0.7 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
 for the version, preflight and telemetry migration checklist.
 </Warning>
 
@@ -227,7 +227,7 @@ for details.
 [project]
 name = "acme-agent"
 version = "0.1.0"
-dependencies = ["nemo-fabric-adapters-common>=0.6.0,<0.7.0"]
+dependencies = ["nemo-fabric-adapters-common>=0.7.0,<0.8.0"]
 
 [build-system]
 requires = ["hatchling"]
