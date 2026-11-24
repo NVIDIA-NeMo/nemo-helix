@@ -194,6 +194,9 @@ class HelixJobStatusResponse(BaseModel):
     steps: list[HelixJobStepStatusResponse]
     created_at: datetime
     updated_at: datetime
+    # The job's custom_fields, so a client that tags its jobs can recognise one from its
+    # status alone, without reading the whole job, whose spec can be large.
+    custom_fields: dict[str, Any] | None = None
 
 
 class HelixJobLog(BaseModel):

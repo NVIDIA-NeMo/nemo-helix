@@ -2171,6 +2171,26 @@ async def test_get_job_status_returns_steps_in_spec_order(
 
 
 @pytest.mark.asyncio
+async def test_get_job_status_returns_custom_fields(mock_dispatcher: JobDispatcher):
+    """A client that tags its jobs reads the tags from the status, without reading the whole job."""
+    job = await mock_dispatcher.create_job(
+        CreateHelixJobRequest(
+            name="tagged-job",
+            source=TestConstants.SOURCE,
+            spec=TestConstants.SPEC_BASIC,
+            platform_spec=TestConstants.PLATFORM_SPEC,
+            custom_fields={"client_request_sha256": "abc123"},
+        ),
+        DEFAULT_WORKSPACE,
+    )
+
+    job_status = await mock_dispatcher.get_job_status(job.name, DEFAULT_WORKSPACE)
+
+    assert job_status is not None
+    assert job_status.custom_fields == {"client_request_sha256": "abc123"}
+
+
+@pytest.mark.asyncio
 async def test_list_steps_across_multiple_workspaces(
     sample_platform_job_request: CreateHelixJobRequest,
 ):

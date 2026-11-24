@@ -1117,6 +1117,7 @@ class JobDispatcher:
             steps=step_statuses,
             created_at=job.created_at,
             updated_at=job.updated_at,
+            custom_fields=job.custom_fields,
         )
 
     def _step_update_would_be_noop(

@@ -32,7 +32,7 @@ from typing import (
 from urllib.parse import quote
 
 from anyio import open_file, to_thread
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
@@ -1337,17 +1337,20 @@ def job_route_factory(
         @router.post(
             "/jobs",
             status_code=status.HTTP_201_CREATED,
+            response_model=TypedJobResponse,
             responses=create_responses,
         )
         async def create_job(
             workspace: str,
             request: TypedJobRequest,
             response: Response,
+            http_request: Request,
             dry_run: _DryRun | None = Depends(dry_run_dependency),
+            minimal: bool = Depends(_prefers_minimal_return),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
             authorize: RequestAuthorizer | None = Depends(get_submission_authorizer),
-        ) -> TypedJobResponse:
+        ) -> TypedJobResponse | Response:
             f"""Create a new job for the {service_name} microservice."""
 
             # A dry run creates no job, so it generates no id: it takes the requested name, or a placeholder.
@@ -1445,6 +1448,9 @@ def job_route_factory(
 
             jobs = AsyncJobsClient.from_client(async_client)
             job_resp = (await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))).data()
+            if minimal:
+                location = f"{http_request.url.path.rstrip('/')}/{quote(job_resp.name, safe='')}"
+                return _minimal_reply(status.HTTP_201_CREATED, location)
             return from_response(job_resp)
 
         async def list_jobs(
@@ -1723,13 +1729,15 @@ def job_route_factory(
 
         @router.post(
             "/jobs/{name}/cancel",
+            response_model=TypedJobResponse,
         )
         async def cancel_job(
             workspace: str,
             name: str,
+            minimal: bool = Depends(_prefers_minimal_return),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
-        ) -> TypedJobResponse:
+        ) -> TypedJobResponse | Response:
             f"""Cancel a job by name for the {service_name} microservice."""
 
             jobs_client = AsyncJobsClient.from_client(async_client)
@@ -1745,6 +1753,8 @@ def job_route_factory(
                     name=checked_job.id if checked_job is not None else name, workspace=workspace
                 )
             ).data()
+            if minimal:
+                return _minimal_reply(status.HTTP_200_OK)
             return from_response(job_resp)
 
         # Logs
@@ -2179,6 +2189,33 @@ def _no_dry_run(request: Request) -> None:
     # Undeclared, the flags would be ignored and a client asking for a dry run would get a real job.
     if {"dry_run", "dry_run_full"} & request.query_params.keys():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This job type does not support dry_run.")
+
+
+_PREFER_DESCRIPTION = (
+    "RFC 7240 preferences. `return=minimal` replies with no body, and `Preference-Applied: return=minimal`, "
+    "instead of the whole job, whose spec can be large: read the job's state from its status route. "
+    "A create's dry run ignores it."
+)
+
+
+def _prefers_minimal_return(
+    prefer: list[str] | None = Header(default=None, description=_PREFER_DESCRIPTION),
+) -> bool:
+    """Whether the request's ``Prefer`` headers ask for ``return=minimal`` (RFC 7240)."""
+    for header in prefer or ():
+        for preference in header.split(","):
+            token, _, value = preference.split(";", 1)[0].partition("=")
+            if token.strip().lower() == "return" and value.strip().strip('"').lower() == "minimal":
+                return True
+    return False
+
+
+def _minimal_reply(status_code: int, location: str | None = None) -> Response:
+    """An empty reply that says ``return=minimal`` was applied, with the job's URL for a create."""
+    headers = {"Preference-Applied": "return=minimal"}
+    if location is not None:
+        headers["Location"] = location
+    return Response(status_code=status_code, headers=headers)
 
 
 async def _dry_run_checks(

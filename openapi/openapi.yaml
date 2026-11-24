@@ -17950,6 +17950,10 @@ components:
           type: string
           format: date-time
           title: Updated At
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
       type: object
       required:
       - id

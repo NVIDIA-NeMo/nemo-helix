@@ -43,6 +43,22 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: prefer
+        in: header
+        required: false
+        schema:
+          description: 'RFC 7240 preferences. `return=minimal` replies with no body,
+            and `Preference-Applied: return=minimal`, instead of the whole job, whose
+            spec can be large: read the job''s state from its status route. A create''s
+            dry run ignores it.'
+          title: Prefer
+          type: array
+          items:
+            type: string
+        description: 'RFC 7240 preferences. `return=minimal` replies with no body,
+          and `Preference-Applied: return=minimal`, instead of the whole job, whose
+          spec can be large: read the job''s state from its status route. A create''s
+          dry run ignores it.'
       requestBody:
         required: true
         content:
@@ -432,6 +448,22 @@ paths:
         schema:
           type: string
           title: Name
+      - name: prefer
+        in: header
+        required: false
+        schema:
+          description: 'RFC 7240 preferences. `return=minimal` replies with no body,
+            and `Preference-Applied: return=minimal`, instead of the whole job, whose
+            spec can be large: read the job''s state from its status route. A create''s
+            dry run ignores it.'
+          title: Prefer
+          type: array
+          items:
+            type: string
+        description: 'RFC 7240 preferences. `return=minimal` replies with no body,
+          and `Preference-Applied: return=minimal`, instead of the whole job, whose
+          spec can be large: read the job''s state from its status route. A create''s
+          dry run ignores it.'
       responses:
         '200':
           description: Successful Response
@@ -1211,6 +1243,10 @@ components:
           type: string
           format: date-time
           title: Updated At
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
       type: object
       required:
       - id
