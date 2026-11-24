@@ -34,6 +34,9 @@ outputs:
   scaled-evals:
     description: "'true' if the temporary scaled-evals plugin changed"
     value: ${{ steps.filter.outputs.scaled-evals }}
+  automodel:
+    description: "'true' if the automodel service or the customization code its tests import changed"
+    value: ${{ steps.filter.outputs.automodel }}
   e2e:
     description: "'true' if any e2e test files changed"
     value: ${{ steps.filter.outputs.e2e }}
@@ -204,6 +207,11 @@ runs:
             - 'packages/nhx_evals_sdk/pyproject.toml'  # declared [project] dependencies
             - 'uv.lock'  # locked versions installed for the package
             - '.github/workflows/ci.yaml'  # smoke job definition
+            - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
+          automodel:
+            - 'services/automodel/**'
+            - 'packages/nhx_customization_common/**'
+            - '.github/workflows/ci.yaml'  # the automodel-tests job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
             - 'plugins/_temporary-scaled-evals/**'
