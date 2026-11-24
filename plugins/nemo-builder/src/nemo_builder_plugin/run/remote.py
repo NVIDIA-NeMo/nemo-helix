@@ -1294,6 +1294,9 @@ def _build_one(
     )
     if not isinstance(uploaded, str) or not uploaded.strip():
         raise ImageFailed("the build service's client uploaded the build context without naming it")
+    if clock.monotonic() >= deadline:
+        # The upload took all of the build's time. A build started now would only be cancelled, so none is.
+        raise ImageFailed(f"timed out after {config.build_timeout_seconds}s, while uploading the build context")
     build = RemoteBuild(
         key=key,
         context=uploaded,

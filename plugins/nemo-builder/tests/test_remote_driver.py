@@ -621,6 +621,24 @@ class TestUploadingTheContext:
         # Five tries, at 0, 2, 6, 14 and 30 seconds. The next wait, 32, would pass the minute.
         assert (len(service.uploaded), clock.now, service.started) == (5, 30.0, [])
 
+    def test_an_upload_that_took_all_of_the_builds_time_starts_nothing(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The upload succeeds, on its first try, after the build's time has passed. A build started then
+        would only be cancelled: none is started, and there is none to read or cancel."""
+        clock = FakeClock()
+
+        class SlowToUpload(FakeService):
+            def upload_context(self, context: RemoteContext) -> str:
+                clock.now += 65
+                return super().upload_context(context)
+
+        service = SlowToUpload([DONE])
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=60), clock=clock) == 1
+        assert (len(service.uploaded), service.started, service.polled, service.cancelled) == (1, [], [], [])
+        assert f"{FAILURE_MARKER} demo-1: timed out after 60s, while uploading the build context" in caplog.text
+
     def test_the_upload_counts_against_the_build_timeout(self, context: Path, tmp_path: Path) -> None:
         """One deadline from before the upload: the time it takes is the start's to lose."""
         clock = FakeClock()
