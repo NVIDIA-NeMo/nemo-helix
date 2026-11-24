@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+image:
+  repository: ""
+  tag: ""
+# The Helix API Service the pod calls Files, the builder and Jobs through.
+helixBaseUrl: http://nemo-helix-api:8080
+# A pull secret for the GitLab registry, created by the deploy side.
+imagePullSecret: ""
+# HelixOperatorConfig fields, as NEMO_HELIX_OPERATOR_<FIELD> env vars, e.g. {OUTPUT_REPOSITORY: nhx-api}.
+config: {}
+deploy:
+  # Grants the pod what `helm upgrade` of the Helix release in this namespace needs: admin of this namespace and the
+  # builds namespace. Anyone who can call the deploy API gets that access, so enable it only with platform auth on
+  # or in a throwaway namespace.
+  enabled: false
+  # The Helix release's builder namespace. Empty means `<release namespace>-builds`, the Helix chart's default.
+  buildsNamespace: ""
