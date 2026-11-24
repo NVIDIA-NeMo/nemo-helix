@@ -181,22 +181,24 @@ class SQLAlchemyFilterRepository(FilterRepository):
     _STRING_OPS = frozenset({FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
     _NULL_EXCLUDING_OPS = _STRING_OPS | {FilterOperator.NIN} | frozenset(_ORDERED_OPS)
 
-    def _compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
-        """One comparison against a column, or against a JSON field when ``is_json``.
+    def _field_compare(self, field: str, operator: FilterOperator, value: Any) -> Any:
+        """One comparison against a column, or against a JSON field.
 
         A missing or null JSON value renders as the text ``null``; it never satisfies
-        ``$startsWith``/``$endsWith``/``$nin`` or an ordered comparison.
+        ``$startsWith``/``$endsWith``/``$nin`` or an ordered comparison. A numeric ordered
+        comparison matches only JSON numbers.
         """
+        element, is_json = self._get_column(field)
         if operator == FilterOperator.EQ:
             return (
                 self._json_eq(element, value) if is_json else element == self._coerce_value_for_column(element, value)
             )
-        comparison = self._non_eq_compare(element, is_json, operator, value)
+        comparison = self._non_eq_compare(field, element, is_json, operator, value)
         if is_json and operator in self._NULL_EXCLUDING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
         return comparison
 
-    def _non_eq_compare(self, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
+    def _non_eq_compare(self, field: str, element: Any, is_json: bool, operator: FilterOperator, value: Any) -> Any:
         if operator in self._STRING_OPS:
             text = self._cast_json_to_text(element) if is_json else cast(element, String)
             if operator == FilterOperator.STARTS_WITH:
@@ -212,14 +214,14 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if not is_json:
             return getattr(element, op)(self._coerce_value_for_column(element, value))
         if isinstance(value, (int, float)):
-            # CASE keeps PostgreSQL from casting the text "null" to a float, which raises.
-            numeric = case((self._json_eq(element, None), None), else_=self._cast_json_to_numeric(element))
-            return getattr(numeric, op)(value)
+            if self._dialect_name is None:
+                return getattr(self._cast_json_to_numeric(element), op)(value)
+            return self._compare_element(self._json_field_value(field), ElemMatchCondition(None, operator, value))
         return getattr(text, op)(str(value))
 
-    def _field_compare(self, field: str, operator: FilterOperator, value: Any) -> Any:
-        column, is_json = self._get_column(field)
-        return self._compare(column, is_json, operator, value)
+    def _json_field_value(self, field: str) -> _ElementValue:
+        *parents, key = field.split(".")[1:]
+        return self._member_value(self._get_json_element(getattr(self.model, "data"), parents), key)
 
     def eq(self, field: str, value: Any) -> Any:
         """Equal comparison."""
@@ -330,18 +332,23 @@ class SQLAlchemyFilterRepository(FilterRepository):
 
     def _element_value(self, elements: Any, target: Any, key: str | None) -> _ElementValue:
         """An array element (or its ``key`` field) as decoded text, with its JSON type."""
+        if key is not None:
+            return self._member_value(target, key)
         if self._dialect_name == "sqlite":
-            if key is None:
-                text, kind = cast(target, String), elements.c.type
-            else:
-                text = cast(type_coerce(target, JSON)[key].as_string(), String)
-                kind = func.json_type(type_coerce(target, String).op("->")(key))
+            return self._typed_value(cast(target, String), elements.c.type)
+        return self._typed_value(target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value))
+
+    def _member_value(self, parent: Any, key: str) -> _ElementValue:
+        """The ``key`` field of the JSON object ``parent`` as decoded text, with its JSON type."""
+        if self._dialect_name == "sqlite":
+            text = cast(type_coerce(parent, JSON)[key].as_string(), String)
+            return self._typed_value(text, func.json_type(type_coerce(parent, String).op("->")(key)))
+        member = type_coerce(parent, JSON)[key]
+        return self._typed_value(member.as_string(), func.json_typeof(member))
+
+    def _typed_value(self, text: Any, kind: Any) -> _ElementValue:
+        if self._dialect_name == "sqlite":
             return _ElementValue(text, kind.in_(["integer", "real"]), kind.in_(["true", "false"]), kind == "text")
-        if key is None:
-            text, kind = target.op("#>>")(literal_column("'{}'::text[]")), func.json_typeof(elements.c.value)
-        else:
-            element = type_coerce(target, JSON)
-            text, kind = element[key].as_string(), func.json_typeof(element[key])
         return _ElementValue(text, kind == "number", kind == "boolean", kind == "string")
 
     def _compare_element(self, element: _ElementValue, condition: ElemMatchCondition) -> Any:
