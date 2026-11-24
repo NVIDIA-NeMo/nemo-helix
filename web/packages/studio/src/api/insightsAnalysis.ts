@@ -1,24 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { agentsCreateExecuteJob, agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
+import { agentsListPluginManagedAgentTypesRoute } from '@nemo/sdk/generated/agents/plugin-managed-agent-types';
+import type { ExecuteJob } from '@nemo/sdk/generated/agents/schema';
 import { compassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import { compassCreateAnalysisRun } from '@nemo/sdk/generated/compass/compass-analysis-runs';
-import type {
-  AnalysisConfig,
-  AnalysisRunResponseJob,
-  CreateAnalysisRunRequest,
-} from '@nemo/sdk/generated/compass/schema';
+import type { AnalysisConfig } from '@nemo/sdk/generated/compass/schema';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
-import { readAgentEthos } from '@studio/api/agents/agentEthos';
 import { AxiosError } from 'axios';
+
+export const COMPASS_AGENT_TYPE = 'compass.analyst';
 
 export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
 
 export interface InsightsTriggerResult {
   agent: string;
   status: InsightsTriggerStatus;
-  /** Name shared by the AnalysisRun and its backing execute job. */
   jobName?: string;
   message?: string;
 }
@@ -40,13 +38,15 @@ export interface InsightsModelOverrides {
   fast_model?: string;
 }
 
-/** `evaluation_id` takes an evaluation's name. */
-export interface AnalysisRunOptions extends Pick<
-  CreateAnalysisRunRequest,
-  'since' | 'evaluation_id'
-> {
+export interface AnalysisRunOptions {
+  /** Analyze only traces from this time on (ISO 8601). */
+  since?: string;
+  /** Analyze only the spans of this evaluation; takes an evaluation's name. */
+  evaluation_id?: string;
   /** Skips the config lookup when the caller already holds the agent's config. */
   storedConfig?: AnalysisConfig;
+  /** Resolves the Compass agent; lets a batch of runs resolve it once. */
+  resolveAgent?: () => Promise<string>;
 }
 
 /**
@@ -60,9 +60,8 @@ export const isQualifiedModelRef = (ref: string): boolean => {
 const isHelixJobStatus = (value: unknown): value is HelixJobStatus =>
   Object.values<unknown>(HelixJobStatus).includes(value);
 
-/** The analysis run's backing job is typed as an open object, so its status is narrowed here. */
 export const analysisJobStatus = (
-  job?: AnalysisRunResponseJob | null
+  job?: Pick<ExecuteJob, 'status'> | null
 ): HelixJobStatus | undefined => {
   const status = job?.status;
   return isHelixJobStatus(status) ? status : undefined;
@@ -83,7 +82,49 @@ const messageOf = (error: unknown): string => {
 };
 
 /**
- * Queues one Compass run per agent.
+ * Returns the name of the workspace's Compass agent, creating it when the workspace has none.
+ *
+ * Saving an analysis config creates the agent, so this only creates it for a workspace
+ * whose config predates the agent type.
+ */
+export const resolveCompassAgent = async (workspace: string): Promise<string> => {
+  const findType = async () => {
+    const types = await agentsListPluginManagedAgentTypesRoute(workspace);
+    const compass = types.find(({ type }) => type === COMPASS_AGENT_TYPE);
+    if (!compass) {
+      throw new Error(`The "${COMPASS_AGENT_TYPE}" agent type is not installed on this platform.`);
+    }
+    return compass;
+  };
+
+  const compass = await findType();
+  if (compass.agent) {
+    return compass.agent;
+  }
+  try {
+    const created = await agentsRegisterAgent(workspace, {
+      name: compass.default_name,
+      plugin_managed_agent: { type: COMPASS_AGENT_TYPE },
+    });
+    return created.name ?? compass.default_name;
+  } catch (error) {
+    if (statusOf(error) !== 409) {
+      throw error;
+    }
+    // Either another request created the Compass agent first, or an unrelated agent has the name.
+    const { agent } = await findType();
+    if (agent) {
+      return agent;
+    }
+    throw new Error(
+      `An agent named "${compass.default_name}" already exists and is not a Compass agent. ` +
+        `Create the Compass agent under another name: nemo agents create ${COMPASS_AGENT_TYPE} --name <name> --workspace ${workspace}`
+    );
+  }
+};
+
+/**
+ * Queues one Compass run per agent, as an execute job on the workspace's Compass agent.
  *
  * The analysis run needs the default/fast model pair, which only exists on the
  * agent's AnalysisConfig — so an agent that has never been enabled reports
@@ -93,7 +134,12 @@ export const triggerInsightsRun = async (
   workspace: string,
   agent: string,
   overrides: InsightsModelOverrides = {},
-  { since, evaluation_id, storedConfig }: AnalysisRunOptions = {}
+  {
+    since,
+    evaluation_id,
+    storedConfig,
+    resolveAgent = () => resolveCompassAgent(workspace),
+  }: AnalysisRunOptions = {}
 ): Promise<InsightsTriggerResult> => {
   const invalidOverride = [overrides.default_model, overrides.fast_model]
     .map((ref) => ref?.trim())
@@ -140,25 +186,20 @@ export const triggerInsightsRun = async (
     };
   }
 
-  const ethos = await readAgentEthos(workspace, agent);
-
   try {
-    const response = await compassCreateAnalysisRun(workspace, {
-      agent,
-      default_model: defaultModel,
-      fast_model: fastModel,
-      ...(ethos ? { ethos } : {}),
-      ...(since ? { since } : {}),
-      ...(evaluation_id ? { evaluation_id } : {}),
+    const job = await agentsCreateExecuteJob(workspace, {
+      spec: {
+        agent: await resolveAgent(),
+        context: {
+          agent,
+          default_model: defaultModel,
+          fast_model: fastModel,
+          ...(since ? { since } : {}),
+          ...(evaluation_id ? { evaluation_id } : {}),
+        },
+      },
     });
-    if (!response.job) {
-      return {
-        agent,
-        status: 'error',
-        message: `Analysis run "${response.run.name}" has no backing job.`,
-      };
-    }
-    return { agent, status: 'started', jobName: response.run.name };
+    return { agent, status: 'started', jobName: job.name };
   } catch (error) {
     return { agent, status: 'error', message: messageOf(error) };
   }
@@ -170,9 +211,12 @@ export const triggerInsightsRuns = async (
   agents: string[],
   overrides: InsightsModelOverrides = {}
 ): Promise<InsightsTriggerResult[]> => {
+  // Resolved on first use, so a batch with no runnable agent never touches the Compass agent.
+  let compassAgent: Promise<string> | undefined;
+  const resolveAgent = () => (compassAgent ??= resolveCompassAgent(workspace));
   const results: InsightsTriggerResult[] = [];
   for (const agent of agents) {
-    results.push(await triggerInsightsRun(workspace, agent, overrides));
+    results.push(await triggerInsightsRun(workspace, agent, overrides, { resolveAgent }));
   }
   return results;
 };
