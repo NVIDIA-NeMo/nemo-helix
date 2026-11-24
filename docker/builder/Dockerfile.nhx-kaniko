@@ -17,7 +17,7 @@ ARG NHX_PYTHON_BASE=nhx-python-base
 FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
 
 # Keep the pinned application's behavior, but rebuild every Go binary with the CA and SSH fixes.
-FROM --platform=$BUILDPLATFORM golang:1.27.3 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS go-builder
 ARG TARGETOS TARGETARCH
 ENV CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOTOOLCHAIN=local
 WORKDIR /src
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -mod=vendor -ldflags="-w -s" -o out/ github.com/awslabs/amazon-ecr-credential-helper/ecr-login/cli/docker-credential-ecr-login && \
     go build -mod=vendor -ldflags="-w -s" -o out/docker-credential-acr-env github.com/osscontainertools/docker-credential-acr && \
     make out/executor out/warmer && \
-    go version -m out/executor | grep -q 'go1.27.3' && \
+    go version -m out/executor | grep -q 'go1.27.4' && \
     for binary in out/*; do \
         go version -m "$binary" | awk \
             '$1 == "dep" && $2 == "golang.org/x/crypto" && $3 != "v0.57.0" { exit 1 } \

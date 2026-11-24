@@ -67,4 +67,23 @@ describe('FilesetActionMenu', () => {
       await screen.findByRole('heading', { name: "Delete fileset 'test-fileset'?" })
     ).toBeInTheDocument();
   });
+
+  it.each([
+    ['dataset', { entity: 'dataset' }],
+    ['fileset', {}],
+  ])('words the delete confirmation for a %s', async (noun, props) => {
+    const user = userEvent.setup();
+    render(<FilesetActionMenu fileset={fileset} {...props} />);
+
+    await openMenu(user);
+    await user.click(screen.getByText('Delete'));
+
+    expect(
+      await screen.findByRole('heading', { name: `Delete ${noun} 'test-fileset'?` })
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`^The ${noun} and its files`))).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: `Delete ${noun[0].toUpperCase()}${noun.slice(1)}` })
+    ).toBeInTheDocument();
+  });
 });

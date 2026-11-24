@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
-RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
