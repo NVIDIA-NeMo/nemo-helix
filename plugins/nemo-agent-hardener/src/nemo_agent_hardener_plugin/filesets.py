@@ -139,7 +139,7 @@ def _git_listed_files(root: Path) -> list[Path] | None:
 
 
 def upload_project_dir(sdk: SyncHelixClient, project_dir: Path, *, workspace: str) -> UploadedFileset:
-    """Zip a local NAT project and return the uploaded fileset reference and allocation ID.
+    """Zip a local agent project and return the uploaded fileset reference and allocation ID.
 
     The counterpart to :func:`download_and_extract_project`: the manifest API and the war-game both
     take a project as a single-zip fileset, so a CLI user's local directory has to become one.
