@@ -770,67 +770,57 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 
 ## Remote backend
 
-With `backend: remote`, a build service outside the cluster builds and publishes each image instead
-of the in-cluster sandboxes. The builder names no service: the deployment supplies a step image that
-holds the service's client.
+Set `backend: remote` to have a build service outside the cluster build and publish images instead
+of the in-cluster sandboxes. The builder doesn't know which service: you supply a step image that
+holds its client.
 
 ```yaml
 builder:
-  backend: remote                       # the default is in-cluster
+  backend: remote
   remote:
-    registry: registry.example.com      # where the service publishes; a host only
-    repository: builds/images           # the one repository every image goes to, told apart by tag and digest
-    profile: build-remote               # Jobs execution profile, provider cpu, for the one build step
+    registry: registry.example.com      # where the service publishes (host only)
+    repository: builds/images           # every image goes here, told apart by tag
+    profile: build-remote               # Jobs cpu profile that runs the build step
     image: registry.example.com/tools/remote-build:1.0
     command: [remote-build]
-    credential_secret: build-service-token   # platform secret in the workspace; null for the pod's own identity
+    credential_secret: build-service-token   # platform secret; null to use the pod's own identity
     platforms: [linux/amd64]
     build_timeout_seconds: 1800
-    settings: {endpoint: https://builds.example.com, bucket: build-contexts}   # passed unread to the client
+    settings: {endpoint: https://builds.example.com}   # passed as-is to the client
 ```
 
-Submit refuses with a `409` a deployment without `remote` or its profile, and a request with a copy,
-`mounts`, an `output`, a platform outside `platforms`, or a Dockerfile other than `Dockerfile` at
-the context's root. Every image publishes to `remote.repository` under its system tag, so workspaces
-share that repository: its registry can't keep one workspace's images from another's.
+Submit returns `409` if `remote` or its profile is missing, or if a request uses a copy, `mounts`,
+an `output`, an unsupported platform, or a Dockerfile other than `Dockerfile` at the context root.
+All workspaces share `remote.repository`.
 
-The job has one step. It runs `step_main` from `nemo_builder_plugin.run.remote`, which the step
-image's console script calls with a factory for its client:
+**Writing a client.** The step image's console script calls `step_main` from
+`nemo_builder_plugin.run.remote`:
 
 ```python
 def main() -> int:
     return step_main(lambda config, credential: MyService(config.settings, credential))
 ```
 
-The client implements `RemoteBuildService`: four calls, each returning or raising a
-`RemoteBuildError` within a bounded time. `upload_context` stores the context and `start` starts the
-build; both are safe to repeat with the build's `key`, which is the same for every retry in one job
-attempt and new in the next. `status` returns `Running`, `Failed` or `Succeeded`, and `cancel` stops
-the build. Raise `RetryableError` for what may pass (a network error, `429`, `5xx`) and
-`PermanentError` for what won't. The context is a gzipped tar of regular files and directories only,
-with `Dockerfile` at its root: no link, device or FIFO, owned by root, set-ID bits dropped. A service
-that takes a timeout of its own should be given `timeout_seconds`, so a build outlives a killed step
-by no more than that.
+`MyService` implements `RemoteBuildService`: `upload_context`, `start`, `status` (returning
+`Running`, `Failed` or `Succeeded`) and `cancel`. Each call must finish in bounded time. Raise
+`RetryableError` for failures worth retrying and `PermanentError` for the rest. `upload_context`
+and `start` must be safe to repeat with the same `key`. The context arrives as a `.tar.gz` of plain
+files and directories with `Dockerfile` at the root. If the service takes its own timeout, pass it
+`timeout_seconds`.
 
-The driver builds the images one at a time. It skips a row that isn't `queued` or `pending`, tries
-`upload_context`, `start` and `cancel` up to three times on a `RetryableError`, polls every ten
-seconds, and cancels a build at `build_timeout_seconds`, on `SIGTERM`, or on any error after it
-started. It completes a row only when the service reports the image at
-`<remote.registry>/<remote.repository>@sha256:...`, through the builder's routes, as
-`service:builder` acting for the submitter, as the push step does. `Succeeded.attributes` is
-logged, not stored. Size the profile's active deadline for the number of images times
-`build_timeout_seconds`.
+**What the driver does.** For each image still `queued` or `pending`, it uploads the context,
+starts the build and polls it. Upload, start and cancel are retried up to three times. It cancels
+the build on timeout, on `SIGTERM`, or on any error after the start. It marks the row ready only if
+the service published to `<remote.registry>/<remote.repository>` by digest. Images build one at a
+time, so size the profile's deadline for all of them.
 
-The builder neither pushes nor signs a remote build: the row records what the service published,
-and signing it, if anything does, is the service's. [Publishing and signing](#publishing-and-signing)
-describes the in-cluster backend only.
+**Credentials and signing.** The credential comes only from the platform secret, so submit refuses
+anyone who can't read it. The step removes it from the environment before the client starts and
+masks it in logs (the exact string only). The builder doesn't push or sign remote builds; any
+signing is up to the service.
 
-The credential reaches the step only from the platform secret, so submit refuses a caller who can't
-read it. `step_main` removes it from the environment before the client exists, so no process the
-client starts inherits it, and replaces it with `[credential]` in what the root logger's handlers
-write, but only as the exact string: a client mustn't log an encoded form of it. The driver applies no
-`.dockerignore`, so the service receives the whole context. A failed row's `status_detail` is the
-generic one; the cause is in the step's log.
+**Known gaps.** `.dockerignore` isn't applied before upload, a failed row's `status_detail` is
+generic (the cause is in the step's log), and `Succeeded.attributes` is logged but not stored.
 
 ## Limitations
 
