@@ -215,6 +215,11 @@ class RemoteBuild:
     #: build's ID is only in the step's memory and its log. The row is then failed once its job has ended, and
     #: the build runs until the service ends it.
     timeout_seconds: int | None = None
+    #: What the request says the image is for: ``helper`` for one that is not the image a workload runs as its
+    #: main container, such as a sidecar, and None for every other. A field of its own, not one of ``labels``:
+    #: those are for the service's records, and this may change what a client asks of the service. See
+    #: :meth:`RemoteBuildService.start`.
+    role: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +302,12 @@ class RemoteBuildService(Protocol):
         A service that takes the context here, from the reference :meth:`upload_context` returned, owes it
         everything :meth:`upload_context` says of a context it sends, and a repeated call keeps the first upload
         for that key.
+
+        ``build.role`` is ``helper`` for an image its request marked as one: an image that is not the one a
+        workload runs as its main container. For such an image a client may leave out a check that starts the
+        image as a main container, which a sidecar need not pass. None is every other image, and an image
+        whose role the client does not know is built as one with none. A client that reads no role builds a
+        helper as any other image, and nothing says so.
 
         Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
         The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
@@ -1306,6 +1317,7 @@ def _build_one(
         platform=image.platform,
         labels=labels,
         timeout_seconds=config.build_timeout_seconds,
+        role=image.role,
     )
     # The same `build` on every try, so a response lost on the way back starts nothing twice. Nothing is started
     # once the job has been told to stop.
@@ -1321,7 +1333,13 @@ def _build_one(
             # A build may be running whose ID never arrived, so this step can't cancel it. Its key finds it.
             exc.ending = f" [a build may be running, started with key {build.key}]"
         raise
-    logger.info("%s is build %s", _quoted(image.image), _quoted(build_id))
+    if image.role is None:
+        logger.info("%s is build %s", _quoted(image.image), _quoted(build_id))
+    else:
+        # Said, so that a helper's line without a role shows a step image from before roles. Nothing else does.
+        logger.info(
+            "%s is build %s, started with role %s", _quoted(image.image), _quoted(build_id), _quoted(image.role)
+        )
     ended = False
     try:
         status = _wait(

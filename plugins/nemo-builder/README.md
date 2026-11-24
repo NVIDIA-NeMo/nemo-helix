@@ -327,9 +327,20 @@ job, and each spec becomes one `ContainerImage` row.
 | `dockerfile` | Path relative to the context, or an absolute path to a file inside one of the spec's `mounts`. `..` is rejected. Defaults to `Dockerfile`. A copy takes none. |
 | `mounts` | Optional. Files the build's `RUN` instructions read that the context mustn't hold: see [Mounting files into a build](#mounting-files-into-a-build). A copy takes none. |
 | `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
+| `role` | Optional. `helper` marks an image that isn't the one a workload runs as its main container, such as a sidecar. It is the only value: the main image names no role. A build in this cluster does nothing with it and builds the image as any other; with `backend: remote`, the build service's client is told (see [Building through a service outside the cluster](#building-through-a-service-outside-the-cluster)). Leave it out of every other spec: see below. |
 | `output.repository`, `output.tag` | Optional. Where the image is published, within your workspace's part of the registry. Tags containing `--` or starting with `sha256-` are reserved for system tags and signatures. |
 
-A misspelt field is a `422`, never silently ignored.
+A misspelt field is a `422`, never silently ignored, and so is a `role` other than `helper`.
+
+A `role` is part of the request, on either backend. The same set with and without it is two
+requests, so marking an image a helper in a set already submitted, or no longer marking it, needs
+the next revision. A spec that names no role is the request it was before the field existed, and
+resubmits as the same revision; `"role": null` is that request too. But send a `role` only where
+you mean `helper`, and otherwise leave the field out, `null` included: an API pod from before the
+field existed refuses a request that carries it, with `422`. The typed client leaves it out for
+you: it never sends a `role` that has no value, whether the spec was built without one, with
+`role=None`, or read from JSON that says `null`. See the upgrade order under
+[Building through a service outside the cluster](#building-through-a-service-outside-the-cluster).
 
 One archive can hold several images' contexts, as a benchmark task with an environment and a test
 image does. Name the archive in each spec, each with its own `context_path`. A build downloads and
@@ -657,6 +668,14 @@ What differs for a caller:
   the task after a refusal, so a task that names a prebuilt image starts no build on this backend:
   its other images are never submitted, and they stay `pending`, with no `builder_image`, on that
   record.
+- A spec's `role` reaches the service's client, with the image's context and platform. For a
+  `helper`, the client may leave out a check that starts the image as a workload's main container,
+  which a sidecar need not pass. What the service does with a role is its client's: the builder
+  checks none of it, and the row doesn't record the role, or whether it was acted on. The step's
+  log names the role it handed the client, in the line that names the image's build
+  (`<image> is build <id>, started with role helper`), and not what the client did with it. A step
+  image from before roles existed ignores the role without saying so, and the helper is built as a
+  main image: its line for the build names no role (see the upgrade order, below).
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
   it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
@@ -815,6 +834,12 @@ What an operator sets up:
   context that holds one. It packs the names of one file (hard links) as one file: the driver has checked where each link leads, rewritten
   those that would lead elsewhere once unpacked, and refused a context that its links would make
   too much of, but it measures one file once, however many names the file has.
+  The client is also handed the image's role (`RemoteBuild.role`), a field of its own beside the
+  build's labels: `helper` for an image its request marked as one, and none for every other. For
+  a helper it may leave out a check that starts the image as a main container. It must build an
+  image whose role it doesn't know as it builds one with none: the step passes on whatever role
+  the job names, and only the API refuses one, at submit. A client that reads no role builds every
+  image as a main image.
 - The Jobs profile, on the `kubernetes_job` backend: a submit is refused on any other. It is
   written in full: a profile added under `jobs.executors`
   inherits nothing from `jobs.executor_defaults`, so it names its own backend, launcher image, ServiceAccount and pod
@@ -993,6 +1018,22 @@ same reason, don't go back to an older release once a remote build is recorded.
 An older `nhx-tasks` image doesn't read the backend a build's record names. After a switch its Job
 uses the build the old backend made, the attempt ends ready with images no request accepts, and
 every request starts another.
+
+Before the first request names a `role`, upgrade every API pod and, with `backend: remote`, the
+deployment's step image, in either order. An API pod from before the field existed refuses a
+request that carries it, with `422`, `null` included: while some pods are older, the same request
+is taken by one pod and refused by the next. A step image from before it ignores a role without
+saying so. The request is taken, its digest covers the role, and the helper is built as a main
+image, with whatever check the service makes of one. The row doesn't say so, and the step's log
+shows it only by what it leaves out: an upgraded step's line for a started build names the role it
+handed the client (`<image> is build <id>, started with role helper`), so a helper's line that
+names no role is a step image from before roles. What the client did with the role is still not
+said. Building it again as a helper then takes the next revision, once the step image is upgraded.
+A request that names no role is the same request before and after the upgrade, in any order: it
+keeps its digest, so a revision submitted before resubmits as itself. The job a submit creates for
+it is the job an older builder created. Going back is safe for the rows, which record no role, but
+an older API pod refuses a resubmit of a revision that names a role, and an older step image
+builds a queued helper as a main image.
 
 ## Publishing and signing
 

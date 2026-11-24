@@ -66,6 +66,16 @@ class TestADeploymentThatCannotBuild:
     def test_a_configured_deployment_honors_every_request(self) -> None:
         ExecutionBackend(_config(), PROFILES).check(_plan(_spec("a"), _spec("b", repository=None)))
 
+    def test_an_image_marked_a_helper_is_taken_and_placed_as_any_other(self) -> None:
+        """A role is for a build service outside the cluster. A build in this cluster does nothing with it."""
+        backend = ExecutionBackend(_config(), PROFILES)
+        helper = _spec("sidecar", repository=None).model_copy(update={"role": "helper"})
+        marked = _plan(_spec("main"), helper)
+        backend.check(marked)
+        plain = _plan(_spec("main"), _spec("sidecar", repository=None))
+        placed = [plan.with_destinations(backend.destination) for plan in (marked, plain)]
+        assert [image.placed for image in placed[0].images] == [image.placed for image in placed[1].images]
+
 
 class TestTheBuildProfiles:
     """The sandbox mounts the fetch step's work volume in the build step's namespace, so the profiles must agree."""

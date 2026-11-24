@@ -1405,6 +1405,17 @@ class TestSubmitting:
     def test_anyone_else_may(self, caller: Caller) -> None:
         assert submit_refusal(caller) is None
 
+    @pytest.mark.parametrize("role", ["main", "helpr", "Helper"])
+    def test_a_role_that_is_not_one_is_a_422_and_nothing_is_written(self, role: str) -> None:
+        entities, client = AsyncMock(), MagicMock()
+        app = _app(entities)
+        app.dependency_overrides[get_nemo_client] = lambda: client
+        body = self.BODY | {"build_specs": [{"source": {"fileset": "fs-a"}, "role": role}]}
+        response = TestClient(app).post(self.BUILDS, json=body)
+        assert response.status_code == 422
+        assert "role" in str(response.json()["detail"])
+        assert entities.mock_calls == client.mock_calls == []
+
     def _post(self, monkeypatch: pytest.MonkeyPatch, config: BuilderConfig | None = None):
         """Submit to a deployment configured as ``config``, whose Jobs has no execution profiles."""
 

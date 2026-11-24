@@ -339,6 +339,21 @@ class TestPublishing:
         assert (push.registry, push.plain_http) == ("registry.local:5000", True)
 
 
+class TestARoleChangesNothing:
+    def test_a_set_with_a_helper_compiles_to_the_job_it_does_without_the_role(self) -> None:
+        """Only a build service outside the cluster is told an image's role. Here a helper is fetched, built,
+        pushed and signed as every image is, so no step's config has anywhere to carry one."""
+        helper = _spec("sidecar").model_copy(update={"role": "helper"})
+        with_the_role = _compile(_set(_spec("main"), helper), config=_config())
+        without = _compile(_set(_spec("main"), _spec("sidecar")), config=_config())
+        assert with_the_role == without
+        # As the Jobs client sends it, too.
+        assert with_the_role.model_dump(mode="json", exclude_unset=True) == without.model_dump(
+            mode="json", exclude_unset=True
+        )
+        assert "helper" not in str(with_the_role.model_dump(mode="json"))
+
+
 class TestNoConfigCarriesAPath:
     def test_no_step_config_mentions_the_work_mount_or_a_sandbox_path(self) -> None:
         spec = _compile(_set(_spec("main", context_path="tests")), config=_config())

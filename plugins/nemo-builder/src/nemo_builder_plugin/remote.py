@@ -279,6 +279,7 @@ class RemoteBackend:
                         source=image.source,
                         dockerfile=image.spec.dockerfile,
                         platform=image.platform,
+                        role=image.spec.role,
                     )
                     for image in plan.images
                 ],

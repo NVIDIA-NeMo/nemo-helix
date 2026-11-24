@@ -126,7 +126,13 @@ def referenced_secrets(spec: HelixJobSpec, workspace: str) -> list[tuple[str, st
 
 
 def request_digest(build_set: BuildSet) -> str:
-    """sha256 of the request's canonical JSON, defaults included, so two spellings of one request match."""
+    """sha256 of the request's canonical JSON, defaults included, so two spellings of one request match.
+
+    A spec's ``role`` is the one field not in it where it has no value: ``BuildSpec`` leaves it out of every
+    dump, by its value and not by whether the request named it. The field came after rows had recorded
+    digests, and a request that names no role is the request it was before, at the digest its rows record.
+    A submit records this same dump on its job, as the job's ``spec``.
+    """
     canonical = json.dumps(build_set.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 

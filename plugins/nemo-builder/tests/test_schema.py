@@ -182,6 +182,62 @@ class TestOutputIsOptional:
             )
 
 
+class TestRoles:
+    def test_a_spec_names_no_role_unless_its_image_is_a_helper(self) -> None:
+        assert BuildSpec(source=FileSetSource(fileset="fs-a")).role is None
+        assert BuildSpec.model_validate({"source": {"fileset": "fs-a"}, "role": "helper"}).role == "helper"
+        assert BuildSpec.model_validate({"source": {"fileset": "fs-a"}, "role": None}).role is None
+
+    @pytest.mark.parametrize("bad", ["main", "helpr", "Helper", "helper ", "sidecar", "", 1, True, ["helper"]])
+    def test_any_other_role_is_refused_as_a_misspelt_field_is(self, bad: object) -> None:
+        """`helper` is the one role there is. The image a workload runs has none to name: `main` would be a
+        second way to say nothing, and a different request by its digest."""
+        with pytest.raises(ValidationError, match="role"):
+            BuildSpec.model_validate({"source": {"fileset": "fs-a"}, "role": bad})
+
+    def test_a_copy_and_a_spec_with_mounts_may_be_helpers_too(self) -> None:
+        """The role says what the image is for, not how it is made: no other field of a spec rules it out."""
+        copy = BuildSpec(source=ImageSource(image="ubuntu:24.04"), role="helper")
+        mount = BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool")
+        mounted = BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=[mount], role="helper")
+        assert (copy.role, mounted.role) == ("helper", "helper")
+
+    @pytest.mark.parametrize("spelt", [{}, {"role": None}], ids=["left-out", "null"])
+    def test_a_role_with_no_value_is_in_no_dump_of_its_spec(self, spelt: dict[str, None]) -> None:
+        """Left out by its value, whether the request named the field or not, and from a dump of every field
+        too: the one a request's digest is taken over and its job records. Each form a spec is written out in
+        is then what it was before a spec could name a role. That holds for the fields its caller set, as a
+        request is sent, too: an API from before roles refuses a field it doesn't know, so a spec that names
+        no role must not carry it."""
+        spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}} | spelt)
+        before_roles = {
+            "name": None,
+            "source": {"fileset": "fs-a", "archive": None, "context_path": None},
+            "output": None,
+            "dockerfile": "Dockerfile",
+            "mounts": [],
+            "platform": None,
+        }
+        assert spec.model_dump() == spec.model_dump(mode="json") == before_roles
+        assert spec.model_dump(mode="json", exclude_unset=True) == {"source": {"fileset": "fs-a"}}
+
+    def test_a_helpers_role_is_in_every_dump_and_is_read_back_from_one(self) -> None:
+        helper = BuildSpec(source=FileSetSource(fileset="fs-a"), role="helper")
+        assert helper.model_dump()["role"] == helper.model_dump(mode="json", exclude_unset=True)["role"] == "helper"
+        assert BuildSpec.model_validate(helper.model_dump(mode="json")) == helper
+
+    def test_filling_in_the_default_platform_keeps_each_specs_role(self) -> None:
+        helper = BuildSpec(name="sidecar", source=FileSetSource(fileset="fs-a"), role="helper")
+        named = BuildSpec(name="named", source=FileSetSource(fileset="fs-a"), platform="linux/arm64", role="helper")
+        build_set = BuildSet(name="demo", revision=1, build_specs=[_spec("main"), helper, named])
+        filled = build_set.with_default_platform("linux/amd64")
+        assert [(spec.platform, spec.role) for spec in filled.build_specs] == [
+            ("linux/amd64", None),
+            ("linux/amd64", "helper"),
+            ("linux/arm64", "helper"),
+        ]
+
+
 class TestBuildSet:
     def test_revision_is_required_and_one_based(self) -> None:
         with pytest.raises(ValidationError, match="revision"):
