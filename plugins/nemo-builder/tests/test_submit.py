@@ -108,6 +108,10 @@ class FakeJobs:
         self.events.append(f"get_job:{name}")
         return ExistingJob(uid=f"platform-job-{name}", custom_fields=self.jobs[name].custom_fields or {})
 
+    async def cancel_job(self, job: str) -> None:
+        # A build in this cluster records no job on its rows, so it never gives one up: no test here lists this.
+        self.events.append(f"cancel_job:{job}")
+
 
 def _config(**overrides: object) -> BuilderConfig:
     settings: dict[str, object] = {
@@ -240,6 +244,7 @@ async def _submit(
         entity_client=entity_client,
         create_job=jobs.create_job,
         get_job=jobs.get_job,
+        cancel_job=jobs.cancel_job,
         secret_readable=secret_readable,
         resolve_upstream=resolve_upstream,
         default_platform=(config or _config()).default_platform,
