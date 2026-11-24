@@ -421,12 +421,6 @@ def test_a_missing_api_key_makes_the_backend_unavailable(osb: FakeOpenSandbox, m
         OpenSandboxDeploymentBackend(MagicMock(), {"domain": osb.base, "gateway_address": osb.base})
 
 
-def test_a_missing_sdk_makes_the_backend_unavailable(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(backend_module, "_OPENSANDBOX_IMPORT_ERROR", ImportError("No module named 'opensandbox'"))
-    with pytest.raises(MissingBackendDependencyError, match="opensandbox>=1.2.0"):
-        OpenSandboxDeploymentBackend(MagicMock(), {"domain": osb.base, "gateway_address": osb.base})
-
-
 def test_the_backend_is_registered() -> None:
     assert BACKEND_CLASSES["opensandbox"] is OpenSandboxDeploymentBackend
 

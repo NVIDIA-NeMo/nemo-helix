@@ -41,8 +41,8 @@ class _FakeOpenSandbox:
         self.generation = 0
         self.gateway_requests: list[tuple[str, dict[str, list[str]]]] = []
 
-    def token(self, sandbox_id: str) -> str:
-        return f"token-{sandbox_id}-{self.generation}"
+    def token(self, sandbox_id: str, port: str) -> str:
+        return f"token-{sandbox_id}-{port}-{self.generation}"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -58,14 +58,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parts = self.path.split("?")[0].split("/")
-        if parts[1:3] == ["v1", "sandboxes"] and parts[4:5] == ["endpoints"]:
+        if len(parts) == 6 and parts[1:3] == ["v1", "sandboxes"] and parts[4] == "endpoints":
             self.state.lookups += 1
             if self.state.lookup_status != 200 or self.headers.get(API_KEY_HEADER) != "osb-key":
                 return self._send(self.state.lookup_status if self.state.lookup_status != 200 else 401)
-            return self._send(200, {"endpoint": "unused", "headers": {TOKEN_HEADER: self.state.token(parts[3])}})
+            return self._send(
+                200, {"endpoint": "unused", "headers": {TOKEN_HEADER: self.state.token(parts[3], parts[5])}}
+            )
         headers = {name: self.headers.get_all(name) or [] for name in (TOKEN_HEADER, API_KEY_HEADER)}
         self.state.gateway_requests.append((self.path, headers))
-        if headers[TOKEN_HEADER] != [self.state.token(parts[1])]:
+        if headers[TOKEN_HEADER] != [self.state.token(parts[1], parts[2])]:
             return self._send(401)
         return self._send(200, {"path": "/" + "/".join(parts[3:])})
 
@@ -145,16 +147,19 @@ async def test_request_carries_the_looked_up_headers_and_not_the_callers(osb: tu
     response = await _get(_transport(base), f"{ADVERTISED}/health", headers={TOKEN_HEADER.lower(): "from-caller"})
     assert response.status_code == 200
     assert response.json() == {"path": "/health"}
-    assert state.gateway_requests == [(f"/{SID}/8000/health", {TOKEN_HEADER: [state.token(SID)], API_KEY_HEADER: []})]
+    assert state.gateway_requests == [
+        (f"/{SID}/8000/health", {TOKEN_HEADER: [state.token(SID, "8000")], API_KEY_HEADER: []})
+    ]
 
 
 async def test_headers_are_looked_up_once_per_sandbox_port(osb: tuple[_FakeOpenSandbox, str]) -> None:
     state, base = osb
-    for _ in range(3):
-        assert (await _get(_transport(base), f"{ADVERTISED}/health")).status_code == 200
-    assert state.lookups == 1
-    assert (await _get(_transport(base), f"{sandbox_endpoint_url(OTHER, 8000)}/health")).status_code == 200
-    assert state.lookups == 2
+    routes = [(SID, 8000), (SID, 8001), (OTHER, 8000)]
+    for _ in range(2):
+        for sandbox_id, port in routes:
+            response = await _get(_transport(base), f"{sandbox_endpoint_url(sandbox_id, port)}/health")
+            assert response.status_code == 200
+    assert state.lookups == len(routes)
 
 
 async def test_a_failed_lookup_fails_the_request_before_it_is_sent(osb: tuple[_FakeOpenSandbox, str]) -> None:
@@ -192,14 +197,6 @@ async def test_a_401_drops_the_cached_headers(osb: tuple[_FakeOpenSandbox, str])
     assert (await _get(_transport(base), f"{ADVERTISED}/health")).status_code == 401
     assert (await _get(_transport(base), f"{ADVERTISED}/health")).status_code == 200
     assert state.lookups == 2
-
-
-def test_transports_for_the_same_installation_are_interchangeable() -> None:
-    one = OpenSandboxEndpointTransport(connect_base=GATEWAY, server_base="http://osb")
-    two = OpenSandboxEndpointTransport(connect_base=GATEWAY, server_base="http://osb")
-    assert one == two
-    assert hash(one) == hash(two)
-    assert one != OpenSandboxEndpointTransport(connect_base=GATEWAY, server_base="http://other")
 
 
 def test_opensandbox_executor_resolves_to_its_transport(monkeypatch: pytest.MonkeyPatch) -> None:

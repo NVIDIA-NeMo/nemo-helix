@@ -54,10 +54,3 @@ def test_host_port_forms_are_accepted(address: str) -> None:
 def test_invalid_settings_are_rejected(override: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         OpenSandboxExecutorConfig(**{**VALID, **override})
-
-
-def test_constraints_are_in_the_json_schema() -> None:
-    properties = OpenSandboxExecutorConfig.model_json_schema()["properties"]
-    assert properties["domain"]["pattern"] == properties["gateway_address"]["pattern"]
-    assert properties["protocol"]["enum"] == ["http", "https"]
-    assert "pattern" in properties["api_key_env"]

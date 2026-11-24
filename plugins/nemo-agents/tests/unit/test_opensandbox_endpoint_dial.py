@@ -135,14 +135,16 @@ def test_invoke_reaches_the_agent_with_the_sandbox_token(
     assert state.lookups == 1
 
 
-def test_invoke_streams(client: TestClient, osb: tuple[_FakeOpenSandbox, OpenSandboxEndpointTransport]) -> None:
+def test_invoke_preserves_sse_response(
+    client: TestClient, osb: tuple[_FakeOpenSandbox, OpenSandboxEndpointTransport]
+) -> None:
     _, transport = osb
     with patch("nemo_agents_plugin.api.v2.gateway.get_deployment_transport", return_value=transport):
         response = client.post(INVOKE + "v1/chat/completions", json={"messages": [], "stream": True})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text.count("data:") == 2
+    assert response.text == 'data: {"n": 1}\n\ndata: [DONE]\n\n'
 
 
 @pytest.mark.parametrize(
