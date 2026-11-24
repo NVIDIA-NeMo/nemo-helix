@@ -155,7 +155,11 @@ export const OptimizerRoute: FC = () => {
                     onClearFilters={dataViewState.resetFilters}
                   />
                 ) : (
-                  <EntityEmptyState entity="optimizerInsights" variant="first-use" />
+                  <EntityEmptyState
+                    entity="optimizerInsights"
+                    variant="first-use"
+                    workspace={workspace}
+                  />
                 ),
               renderErrorState: () => (
                 <ErrorPanel

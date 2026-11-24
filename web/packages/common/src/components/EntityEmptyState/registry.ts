@@ -63,7 +63,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No tests yet',
     subheading: 'Add a test case on the Tests tab, then run it to see its result here.',
     cliCommand:
-      'nemo guardrail check --config <config-name> --messages \'[{"role":"user","content":"<message>"}]\'',
+      'nemo guardrail check --model <workspace>/<model> --guardrails \'{"config_id":"<workspace>/<config-name>"}\' --messages \'[{"role":"user","content":"<message>"}]\'',
     skillPrompt: 'Help me verify my guardrail config with the nemo-guardrails skill',
   },
   datasets: {
@@ -87,7 +87,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No files yet',
     subheading: 'Upload files to this fileset to make them available to agents and jobs.',
     createAction: { label: 'Upload Files' },
-    cliCommand: 'nemo files upload <local-path> --fileset <fileset-name> --workspace <workspace>',
+    cliCommand: 'nemo files upload <local-path> <fileset-name> --workspace <workspace>',
     skillPrompt: 'Help me upload files to a fileset with the nemo-files skill',
   },
   customModels: {
@@ -107,7 +107,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading: 'Deploy a custom model to serve it for inference.',
     createAction: { label: 'Create Deployment' },
     cliCommand: 'nemo inference deployments create <deployment-name> --input-file <config>.json',
-    skillPrompt: 'Help me deploy my first model with the nemo-build-agent skill',
+    skillPrompt: 'Help me deploy my first model with the nemo-customizer skill',
   },
   inferenceProviders: {
     heading: 'No inference providers yet',
@@ -159,16 +159,23 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Detect and protect PII in your datasets through context-aware replacement and rewriting.',
     createAction: { label: 'Anonymize Data' },
-    cliCommand: 'nemo anonymizer run submit --spec-file <run-spec>.yaml --workspace <workspace>',
+    cliCommand: 'nemo anonymizer run --spec-file <run-spec>.yaml --workspace <workspace>',
     skillPrompt: 'Help me create my first anonymizer job with the nemo-anonymizer skill',
   },
   dataDesignerJobs: {
     heading: 'No Data Designer jobs yet',
     subheading: 'Create and manage Data Designer jobs to generate or transform synthetic datasets.',
     createAction: { label: 'New Job' },
-    cliCommand: 'nemo data-designer create run <config-path>.yaml --num-records <n>',
+    cliCommand:
+      'nemo data-designer create <config-path>.yaml --num-records <n> --workspace <workspace>',
     skillPrompt:
       'Help me create my first synthetic dataset with the nemo-data-designer-plugin skill',
+  },
+  // A job writes its own output fileset, so there is nothing for the user to
+  // upload or run here — no create action, CLI command, or skill prompt.
+  dataDesignerJobOutput: {
+    heading: 'No output files yet',
+    subheading: 'This job has not written any files, or they are not visible yet.',
   },
   safeSynthesizerJobs: {
     heading: 'No Safe Synthesizer jobs yet',
@@ -184,32 +191,37 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Apply a model_optimization suggestion or submit an evaluate-agent job to see results here.',
     cliCommand: 'nemo evals agent-evaluate --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt: 'Help me create my first agent evaluation with the nemo-nemo-evals-plugin skill',
+    skillPrompt: 'Help me create my first agent evaluation with the nemo-evals-plugin skill',
   },
   evaluationResults: {
     heading: 'No evaluations yet',
     subheading: 'Submit an evaluation job to score a model or agent against a benchmark.',
     createAction: { label: 'Create Evaluation' },
     cliCommand: 'nemo evals evaluate --spec-file <spec>.json --workspace <workspace>',
-    skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evals-plugin skill',
+    skillPrompt: 'Help me create my first evaluation with the nemo-evals-plugin skill',
   },
   tasks: {
     heading: 'No tasks yet',
     subheading:
       'A task is one unit of agent work with its grading: a Harbor task or an inline instruction scored by metrics.',
     cliCommand: 'nemo evals tasksets create --harbor-dir <path> --workspace <workspace>',
-    skillPrompt: 'Help me publish my first tasks with the nemo-nemo-evals-plugin skill',
+    skillPrompt: 'Help me publish my first tasks with the nemo-evals-plugin skill',
   },
   tasksets: {
     heading: 'No tasksets yet',
     subheading:
       'A taskset groups stored tasks into a versioned suite you can run an agent evaluation against.',
     cliCommand: 'nemo evals tasksets create --harbor-dir <path> --workspace <workspace>',
-    skillPrompt: 'Help me create my first taskset with the nemo-nemo-evals-plugin skill',
+    skillPrompt: 'Help me create my first taskset with the nemo-evals-plugin skill',
   },
   evaluationSessions: {
     heading: 'No test cases',
     subheading: 'Run an experiment to see test case results here.',
+    // Test-case results are an experiments sub-resource (`experiments/{name}/
+    // evaluation-sessions`) with no `nemo` subcommand of its own, so the bridge
+    // is the skill rather than a command that does not exist.
+    skillPrompt:
+      'Help me compare the test case results for an experiment in the "<workspace>" workspace with the nemo-experiments-upload skill, and tell me which run wins and why',
   },
   experiments: {
     heading: 'No experiments yet',
@@ -231,41 +243,82 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   insightExperiments: {
     heading: 'No experiments yet',
     subheading: 'This insight has no linked experiments yet.',
+    cliCommand: 'nemo experiments list --workspace <workspace>',
+    skillPrompt:
+      'Help me compare the evaluation runs across the experiments in the "<workspace>" workspace with the nemo-experiments-upload skill, and pick a winner',
   },
   insightTraces: {
     heading: 'No traces yet',
     subheading: 'This insight has no linked traces yet.',
+    // Quoted for the same reason as the telemetryTraces command: a bare
+    // <trace-id> reads as a shell redirection and dies on paste.
+    cliCommand: "nemo intake traces get '<trace-id>' --workspace <workspace>",
+    skillPrompt:
+      'Help me analyze the traces behind this insight in the "<workspace>" workspace with the nemo-compass skill',
   },
   telemetryTraces: {
     heading: 'No traces yet',
     subheading: 'Trace summaries will appear here after spans are ingested.',
-    cliCommand:
-      'nemo intake ingest otlp v1 traces create --input-file <otlp-traces>.json --workspace <workspace>',
+    cliCommand: 'nemo intake ingest spans create --input-file <spans>.json --workspace <workspace>',
     skillPrompt:
       'Help me import traces into the "<workspace>" workspace with the nemo-intake skill.',
   },
   telemetrySpans: {
     heading: 'No spans yet',
     subheading: 'Spans will appear here once your agent starts sending telemetry.',
+    cliCommand: "nemo intake spans list --filter.trace-id '<trace-id>' --workspace <workspace>",
+    skillPrompt:
+      'Help me analyze the spans in trace "<trace-id>" in the "<workspace>" workspace with the nemo-intake skill — where did this run go wrong?',
   },
   agentMonitorRuns: {
     heading: 'No runs yet',
     subheading:
       'Agent invocations populate this list once telemetry reaches the nemo-agent-telemetry fileset.',
+    cliCommand: "nemo intake spans list --filter.agent-name '<agent-name>' --workspace <workspace>",
+    skillPrompt:
+      'Help me find recurring failures in the recent runs of agent "<agent-name>" in the "<workspace>" workspace with the nemo-compass skill',
   },
   agentOptimizations: {
     heading: 'No optimizations yet',
     subheading:
       "Sweep your agent's parameters against an evaluation to find a config that scores better.",
     cliCommand:
-      'nemo agents optimize --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
-    skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
+      'nemo agents optimize run-strategy --strategy <strategy> --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first agent optimization with the nemo-agents-optimize skill',
     createAction: { label: 'Optimize' },
   },
   agents: {
     heading: 'No agents yet',
     subheading: 'Build and deploy an agent to see it listed here.',
-    cliCommand: 'nemo agents register --name <agent-name> --agent-config <agent.yaml>',
+    cliCommand:
+      'nemo agents register --name <agent-name> --agent-config <agent.yaml> --workspace <workspace>',
     skillPrompt: 'Help me create my first agent with the nemo-build-agent skill',
+  },
+  optimizationTrials: {
+    heading: 'No trials',
+    subheading:
+      'Each trial is one parameter set the study scored. They appear here as the study runs.',
+    // A trial is not created directly — it is produced by a study — so the
+    // bridge re-runs the study rather than offering a create command.
+    cliCommand:
+      'nemo agents optimize run-strategy --strategy <strategy> --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
+    skillPrompt:
+      'Help me understand why this optimization study recorded no trials, and re-run it, with the nemo-agents-optimize skill',
+  },
+
+  // NeMo Assistant surfaces. These are in-app chat state, not platform
+  // entities, so they deliberately carry no `cliCommand` or `skillPrompt`:
+  // there is nothing a coding agent could run to populate them.
+  assistantSessions: {
+    heading: 'No chats yet',
+    subheading: 'NeMo Assistant sessions appear here once you start a conversation.',
+  },
+  assistantArtifacts: {
+    heading: 'No artifacts yet',
+    subheading: 'Selections and outputs from this conversation appear here.',
+  },
+  assistantSkills: {
+    heading: 'No skills found',
+    subheading: 'NeMo Assistant skills appear here once they are available in this workspace.',
   },
 };

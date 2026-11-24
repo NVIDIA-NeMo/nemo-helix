@@ -98,6 +98,7 @@ export const OverviewTab: FC<OverviewTabProps> = ({
               navigate(getIntakeTracesRoute(workspace, { agentName: agent?.name }))
             }
             onRunAgent={onRunAgent}
+            workspace={workspace}
             isPending={isPending}
             caption={bucketAdverbForRange(range)}
             error={traceMetricsError}
@@ -111,6 +112,7 @@ export const OverviewTab: FC<OverviewTabProps> = ({
             experiment.name && navigate(getExperimentDetailRoute(workspace, experiment.name))
           }
           onRunEvaluation={onRunEvaluation}
+          workspace={workspace}
         />
       </Stack>
       <Stack gap="density-2xl" className="w-full shrink-0 lg:w-90">
