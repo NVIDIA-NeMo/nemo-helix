@@ -91,6 +91,18 @@ outputs:
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
     value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
+  cpu-api:
+    description: "'true' if API build inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.api-docker == 'true' }}
+  cpu-tasks:
+    description: "'true' if shared task image inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.tasks-docker == 'true' }}
+  cpu-build-tools:
+    description: "'true' if build tooling image inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.tooling-docker == 'true' }}
+  cpu-gym-host:
+    description: "'true' if Gym host build inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.gym-host-docker == 'true' }}
   auth-idp:
     description: "'true' if auth-idp tests or their containerized E2E harness inputs changed"
     value: ${{ steps.filter.outputs.auth-idp == 'true' }}
@@ -269,6 +281,50 @@ runs:
           docker-scripts:
             - 'script/install_duckdb_extensions.sh'
             - 'script/build_policy_wasm.sh'
+          cpu-shared:
+            - 'docker-bake.hcl'
+            - '.dockerignore'
+            - 'Makefile'
+            - 'docker/Dockerfile.bake'
+            - 'docker/base/Dockerfile.nhx-python-base'
+            - 'docker/scripts/**'
+            - 'docker/removals/**'
+            - '.github/workflows/build-cpu-smoke-images.yaml'
+            - '.github/actions/bake-cache-branch/**'
+            - '.github/actions/free-disk-space/**'
+            - '.github/actions/changes/action.yaml'
+            - '.github/workflows/ci.yaml'
+          api-docker:
+            - 'docker/Dockerfile.nhx-api'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/base/Dockerfile.nhx-studio-ui'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'docker/base/Dockerfile.policy-wasm'
+            - 'docker/fastembed-cache-empty/**'
+            - 'skills/**'
+            - 'README.md'
+          tasks-docker:
+            - 'docker/Dockerfile.nhx-tasks'
+            - 'docker/Dockerfile.nhx-gym-tasks'
+            - 'docker/Dockerfile.nhx-agent-hardener-tasks'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'docker/locks/nhx-gym-tasks/**'
+            - 'docker/locks/nhx-agent-hardener-tasks/**'
+            - 'skills/**'
+            - 'README.md'
+          tooling-docker:
+            - 'docker/builder/**'
+            - 'docker/Dockerfile.nhx-agent-installer'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/sources/**'
+            - 'skills/**'
+            - 'README.md'
+          gym-host-docker:
+            - 'docker/gym-host/**'
+            - 'docker/locks/nhx-gym-host/**'
+            - 'packages/nhx_build_tools/**'
+            - 'packages/sandboxed_gym/**'
           helm:
             - 'k8s/**'
             - 'tools/lint/lint-helm.sh'

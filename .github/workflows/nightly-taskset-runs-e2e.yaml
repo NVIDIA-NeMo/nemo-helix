@@ -63,21 +63,44 @@ jobs:
           echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
           echo "copies=$(python3 -c "import json, sys; print(json.dumps(list(range(1, int(sys.argv[1]) + 1))))" "${REPEAT}")" >> "${GITHUB_OUTPUT}"
 
-  build-images:
-    name: Build images
+  build-api-images:
+    name: Build API images
     needs: [plan]
-    permissions:
+    permissions: &cpu-image-permissions
       contents: read
       packages: write
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
+      family: api
       source_sha: ${{ needs.plan.outputs.source_sha }}
-      checkout_ref: ${{ needs.plan.outputs.source_sha }}  # build exactly the commit under test
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}
+      publish: true
+
+  build-task-images:
+    name: Build task images
+    needs: [plan]
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: tasks
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}
+      publish: true
+
+  build-tooling-images:
+    name: Build tooling images
+    needs: [plan]
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: build-tools
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      checkout_ref: ${{ needs.plan.outputs.source_sha }}
       publish: true
 
   kind-taskset-runs-e2e:
     name: Kind taskset runs e2e (${{ matrix.copy }})
-    needs: [plan, build-images]
+    needs: [plan, build-api-images, build-task-images, build-tooling-images]
     runs-on: ubuntu-latest
     # kind, OpenSandbox and the pre-pulls, then pytest's 49-minute timeout.
     timeout-minutes: 120
@@ -91,8 +114,8 @@ jobs:
     env:
       KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-taskset-runs-${{ matrix.copy }}
       KUBE_NAMESPACE: nemo-helix
-      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-images.outputs.image_registry }}
-      NHX_E2E_IMAGE_TAG: ${{ needs.build-images.outputs.image_tag }}
+      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+      NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -227,7 +250,7 @@ jobs:
 
   report:
     name: Report
-    needs: [plan, build-images, kind-taskset-runs-e2e]
+    needs: [plan, build-api-images, build-task-images, build-tooling-images, kind-taskset-runs-e2e]
     # Its own job: a job whose dependency failed is skipped, so an alert inside the e2e job would miss a failed build.
     if: always() && (github.event_name == 'schedule' || inputs.classify_for != '')
     runs-on: ubuntu-latest

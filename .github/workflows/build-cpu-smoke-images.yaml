@@ -1,15 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# The CPU smoke images (nhx-api, nhx-tasks, nhx-builder-tasks, nhx-kaniko, ...) for one commit, tagged with its SHA.
-# The same steps as ci.yaml's build-cpu-smoke-images, driven by inputs instead of the caller's event, so a scheduled
-# caller builds and publishes exactly what a dispatched one does.
+# Build one CPU image family for a commit, using the same tags for CI and E2E.
 
 name: Build CPU smoke images
 
 on:
   workflow_call:
     inputs:
+      family:
+        description: Bake image family (api, tasks, build-tools, or gym-host).
+        required: true
+        type: string
+      write_cache:
+        description: Allow eligible refs to export the registry cache.
+        type: boolean
+        default: false
       source_sha:
         description: The commit the images are named for; their tag unless image_tag is set.
         required: true
@@ -52,7 +58,8 @@ env:
 
 jobs:
   build:
-    name: Build CPU smoke images
+    name: Build ${{ inputs.family }} images
+    if: inputs.family != 'gym-host' || inputs.publish
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -100,8 +107,9 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           IMAGE_TAG: ${{ inputs.image_tag }}
           PUBLISH: ${{ inputs.publish }}
+          FAMILY: ${{ inputs.family }}
           CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
-          CACHE_TARGET_BRANCH: ${{ steps.cache-branch.outputs.target-branch }}
+          CACHE_TARGET_BRANCH: ${{ inputs.write_cache && steps.cache-branch.outputs.target-branch || '' }}
         run: |
           set -euo pipefail
 
@@ -112,6 +120,13 @@ jobs:
           # From the input only: a called workflow inherits its caller's event, so reading it here would make a
           # scheduled caller build without publishing.
           publish_images="${PUBLISH}"
+          case "$FAMILY" in
+            api|tasks|build-tools|gym-host) target="docker-$FAMILY" ;;
+            *) printf 'Unknown Docker image family: %s\n' "$FAMILY" >&2; exit 1 ;;
+          esac
+          if [[ "$publish_images" == true ]]; then
+            target="$target-ci"
+          fi
 
           {
             printf 'IMAGE_REGISTRY=%s\n' "$image_registry"
@@ -119,11 +134,14 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-            printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
-            printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
-            printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
-            printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
+            if [[ "$FAMILY" == api ]]; then
+              printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
+              printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
+              printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
+              printf 'FASTEMBED_MODEL_REPO=%s\n' "qdrant/all-MiniLM-L6-v2-onnx"
+              printf 'FASTEMBED_MODEL_REVISION=%s\n' "main"
+            fi
+            printf 'BAKE_TARGET=%s\n' "$target"
             printf 'PUBLISH_IMAGES=%s\n' "$publish_images"
             printf 'BAKE_CACHE_SOURCE_BRANCH=%s\n' "$CACHE_SOURCE_BRANCH"
             printf 'BAKE_CACHE_TARGET_BRANCH=%s\n' "$CACHE_TARGET_BRANCH"
@@ -135,6 +153,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Prepare fastembed model cache directory
+        if: inputs.family == 'api'
         shell: bash
         run: |
           set -euo pipefail
@@ -142,6 +161,7 @@ jobs:
           touch "${FASTEMBED_CACHE_DIR}/.cache-context"
 
       - name: Restore fastembed model cache
+        if: inputs.family == 'api'
         id: fastembed-cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -149,14 +169,14 @@ jobs:
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
       - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           cache-dependency-glob: uv.lock
 
       - name: Populate fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -179,25 +199,20 @@ jobs:
 
       - name: Print Docker bake graph
         shell: bash
-        run: |
-          target=docker-cpu
-          if [ "${PUBLISH_IMAGES}" = "true" ]; then
-            target=docker-cpu-ci
-          fi
-          make docker-print TARGET="${target}"
+        run: make docker-print TARGET="${BAKE_TARGET}"
 
       - name: Build CPU images
         if: env.PUBLISH_IMAGES != 'true'
         shell: bash
-        run: make docker-load TARGET=docker-cpu
+        run: make docker-load TARGET="${BAKE_TARGET}"
 
       - name: Build and publish CPU images
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
-        run: make docker-push TARGET=docker-cpu-ci
+        run: make docker-push TARGET="${BAKE_TARGET}"
 
       - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         continue-on-error: true
         with:
