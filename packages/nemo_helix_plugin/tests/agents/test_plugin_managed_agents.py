@@ -131,7 +131,7 @@ def test_is_instance_matches_only_agents_of_the_type() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("found", [True, False])
-async def test_find_agent_filters_by_type(found: bool) -> None:
+async def test_find_agent_returns_the_oldest_agent_of_the_type(found: bool) -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -159,6 +159,8 @@ async def test_find_agent_filters_by_type(found: bool) -> None:
     [request] = seen
     assert request.url.path == "/apis/agents/v2/workspaces/research/agents"
     assert json.loads(request.url.params["filter"]) == {"plugin_managed_agent.type": "example.one"}
+    # Oldest first, matching the types route, so every caller picks the same agent.
+    assert request.url.params["sort"] == "created_at"
 
 
 class TestRegisterAgentRequest:

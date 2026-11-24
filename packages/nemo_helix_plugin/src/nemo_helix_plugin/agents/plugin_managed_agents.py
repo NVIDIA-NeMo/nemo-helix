@@ -230,11 +230,19 @@ class PluginManagedAgent(Generic[ContextT, PreparedContextT]):
 
     @classmethod
     async def find_agent(cls, *, workspace: str, client: AsyncNemoClient) -> Agent | None:
-        """Return the workspace's agent of this type, or ``None`` when it has none."""
+        """Return the workspace's agent of this type, or ``None`` when it has none.
+
+        Should the workspace hold more than one, this is the oldest, the same
+        agent the plugin-managed agent types route reports.
+        """
         agents_client = AsyncAgentsClient.from_client(client)
         response = await agents_client.list_agents(
             workspace=workspace,
-            query_params={"filter": json.dumps({"plugin_managed_agent.type": cls.type_id}), "page_size": 1},
+            query_params={
+                "filter": json.dumps({"plugin_managed_agent.type": cls.type_id}),
+                "sort": "created_at",
+                "page_size": 1,
+            },
         )
         items = response.page().items
         return items[0] if items else None
