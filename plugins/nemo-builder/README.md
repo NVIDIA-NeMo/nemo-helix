@@ -888,8 +888,9 @@ What an operator sets up:
   that record is as sure as the namespace is closed. So the remote-build profile must name a
   namespace where no other workload and no user may create pods. Never the build namespace
   while the in-cluster build's profiles are deployed: its `build-control` step may create pods
-  there (see [Security](#security)). While Jobs lists the `control_profile`, a submit is refused
-  unless both profiles name a `namespace` and the two differ. A profile that names none, or an
+  there (see [Security](#security)). While Jobs lists the `control_profile` on the
+  `kubernetes_job` backend, a submit is refused unless both profiles name a `namespace` and the
+  two differ. A profile that names none, or an
   empty one, runs its steps in the namespace of Jobs' own controller, which the builder can't
   read: two such profiles share that namespace, and one may share the namespace the other
   names, so either is refused. The builder can't see what else may create pods where the step
@@ -904,8 +905,8 @@ token exchange off, unless `allow_unverified_completion` is set: the answer name
 what turning it on accepts. One with platform auth on whose settings for token exchange can't be
 read, whatever that setting is: `complete` admits no one there, since the platform may be
 verifying its workloads. And one with platform auth and workload token exchange on, while Jobs
-lists the in-cluster build step's profile, unless that profile and the remote-build profile each
-name a `namespace` and the two differ.
+lists the in-cluster build step's profile on `kubernetes_job`, unless that profile and the
+remote-build profile each name a `namespace` and the two differ.
 
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
 under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
@@ -1009,7 +1010,7 @@ than the image is `ready` with; and for an image built in this cluster, if the c
 | `200` | The image is `ready` as the request would have written it, now or already. |
 | `403` | The caller lacks the permission, or doesn't act for the image's submitter. Or, for an image the `remote` backend built, the caller isn't shown to be a step of the attempt the image's row records. Under workload token exchange: its token names no workload, the platform has no job step on record for it, or it is a step of another job or of another run of the build's job. With platform auth on and no exchange: the deployment doesn't set `allow_unverified_completion`. |
 | `404` | No such image: none of that name, or the one the caller was checked against was deleted before it was written. |
-| `409` | The image has already settled: `failed`, or `ready` at another digest, or `ready` with another `runtime_config` than the request carries (for an image this cluster built: only when the request carries one, and it is another than the row records). Or the request carries `external` for an image this cluster builds. Or, for an image the `remote` backend built, the request names no build (`external.build_id`), or carries another `external` than the image is `ready` with. Or another row took the image's name while it was being completed. |
+| `409` | The image has already settled: `failed`, or `ready` at another digest, or `ready` with another `runtime_config` than the request carries (an image this cluster built conflicts only on what its row records: not when the request carries none, not when the row records none, and not on a `user` the row does not record; an image the `remote` backend built must match exactly, none included). Or the request carries `external` for an image this cluster builds. Or, for an image the `remote` backend built, the request names no build (`external.build_id`), or carries another `external` than the image is `ready` with. Or another row took the image's name while it was being completed. |
 | `422` | The body failed validation: `digest` isn't a sha256 digest, or a field is unknown, a key inside `external` included. |
 | `503` | For an image the `remote` backend built: its row doesn't yet record the job its submit created, or the platform's record of the caller's workload, or the deployment's settings, couldn't be read. Nothing was written. The step tries again, for up to five minutes. |
 
@@ -1056,7 +1057,9 @@ They are checked at the first submit, not when the platform starts: an invalid s
 key under `remote` or `sandbox`, refuses every submit with `409` `backend_rejected`. The answer
 names the setting, or `builder` for a check made on the section as a whole (one that spans settings,
 or the scheme of `registry`); a section that can't be read at all is answered without a name. The
-API log has the check's own sentence.
+API log has the check's own sentence, without the value it refused. For a section that can't be read
+it has the kind of error, and the setting a variable was for, not the parser's own sentence, which
+may quote a value.
 A key directly under `builder` that isn't a setting is ignored, with a warning in the API log at the
 first submit: a misspelt `backend` leaves builds in this cluster.
 
@@ -1233,15 +1236,19 @@ remote-build step fetches a context as `fetch` does. What else differs is in
   record later either: the job's ID and attempt come only from Jobs' answer to the create,
   which that submit alone held, and a job found under the name afterwards can't be told from
   one that someone else put there. Once the rows have settled, the same request returns them,
-  and the next `revision` builds again. The API log names each row that was not written, and
-  the submit's answer shows it: a `pending` row with no `provenance.job_uid`, or with an
-  earlier job's. Read such a row once more, since a write whose answer was lost may have been
+  and the next `revision` builds again. The API log names each row that was not written, or
+  the job, where Jobs' answer gave no ID or attempt for it. The submit's answer shows it for a
+  row that submit created: `pending`, with no `provenance.job_uid`. A row left recording an
+  earlier job looks in the answer like any recorded row, since the answer names the job and
+  not its ID: compare the row's `provenance.job_uid` with the `id` Jobs reports for that job.
+  Read such a row once more, since a write whose answer was lost may have been
   made. If it still does not record the job, and the platform uses workload token exchange,
   cancel the job rather than wait for it: its step asks the service to stop the build, the row
   is failed once the job has ended, and the next `revision` builds. The same holds for a row a
   builder wrote before rows recorded their job. It holds too for a row left recording an
   earlier job, when the build's job was deleted, the same request created another, and that
-  submit's write failed, except that the new job's step is answered `403` at once. So is a
+  submit's write failed, except that the new job's step is answered `403` at once, and its
+  line says `it was built, but the builder refused to complete it`. So is a
   step of the new job that asks before that write is made: the platform's record of a step
   names its job by name, so nothing tells it from a rerun of the earlier job, or from a step
   of another job put under the name, and neither of those is kept waiting. A submit writes its

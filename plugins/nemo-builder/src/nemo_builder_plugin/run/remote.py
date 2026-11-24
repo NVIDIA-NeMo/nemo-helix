@@ -1226,7 +1226,8 @@ def _complete(
 
     The image is built and published, and only this call is left; completing is safe to repeat. The first try
     is made even when the job has been told to stop. No other is made once it has: a pod told to stop has
-    seconds, and one try may take them all.
+    seconds, and one try may take them all. Nor is one made once the time for completing has passed, which a
+    wait that fitted when it began may end after: a sleep ends no sooner than it was asked to.
     """
     deadline = clock.monotonic() + COMPLETION_SECONDS
     waits = 0
@@ -1247,8 +1248,8 @@ def _complete(
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
         logger.warning("completing %s failed (%s); trying again in %.0fs", image, _quoted(failure), wait)
         clock.sleep(wait)
-        if cancelled():
-            # The stop cut the wait short. As before the wait, no other try is made.
+        if cancelled() or clock.monotonic() >= deadline:
+            # The stop cut the wait short, or the wait ended late. As before the wait, no other try is made.
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
 
 
@@ -1293,6 +1294,9 @@ def _build_one(
     )
     if not isinstance(uploaded, str) or not uploaded.strip():
         raise ImageFailed("the build service's client uploaded the build context without naming it")
+    if clock.monotonic() >= deadline:
+        # The upload took all of the build's time. A build started now would only be cancelled, so none is.
+        raise ImageFailed(f"timed out after {config.build_timeout_seconds}s, while uploading the build context")
     build = RemoteBuild(
         key=key,
         context=uploaded,
@@ -1440,26 +1444,26 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
 
     def longest_first(texts: set[str]) -> list[str]:
         # So that one form is never left as the remains of another.
-        return sorted(texts - {""}, key=len, reverse=True)
+        return [re.escape(text) for text in sorted(texts - {""}, key=len, reverse=True)]
 
-    def ways(*, with_the_mark: bool) -> list[str]:
-        # The whole secret before any one line of it: as it may be written, then as any URL holds it, since
-        # encoders differ in which characters they leave alone. Tried the other way round, a line would be
-        # taken out of the middle of the whole, and the rest left.
-        written = [re.escape(form) for form in longest_first(forms) if (REDACTED in form) is with_the_mark]
-        in_a_url = [_in_a_url(secret)] if (REDACTED in secret) is with_the_mark else []
-        one_line = [re.escape(part) for part in longest_first(parts) if (REDACTED in part) is with_the_mark]
-        return [*written, *in_a_url, *one_line]
-
-    # A mark that is already in the text is found too, and its own text takes its place. So it is read past
-    # whole, and what it stands for is not read again: a short credential may be part of the mark itself.
-    # Before it come the ways of writing a secret that themselves hold the mark's text. Those are found only
-    # with the marks in them: read between the marks alone, such a secret was passed on whole.
-    tried = [*ways(with_the_mark=True), re.escape(REDACTED), *ways(with_the_mark=False)]
+    # The whole secret before any one line of it: as it may be written, then as any URL holds it, since encoders
+    # differ in which characters they leave alone. Tried the other way round, a line would be taken out of the
+    # middle of the whole, and the rest left.
+    #
+    # Last, a mark that is already in the text, whose own text takes its place: it is read past whole, and what
+    # it stands for is not read again, since a short credential may be part of the mark itself. A way of
+    # writing the secret that holds the mark's text is found before that, with the marks in it: read between
+    # the marks alone, such a secret was passed on whole. Any other way that begins where a mark does would
+    # end inside it, which nothing found may.
+    tried = [*longest_first(forms), _in_a_url(secret), *longest_first(parts), re.escape(REDACTED)]
     found = re.compile(f"(?:{'|'.join(tried)}){_NOT_IN_A_MARK}")
 
     def redact(text: str) -> str:
-        return found.sub(REDACTED, text)
+        # Until nothing more is found: what is left on either side of a mark may spell, with the mark, a
+        # credential that holds the mark's own text.
+        while (redacted := found.sub(REDACTED, text)) != text:
+            text = redacted
+        return text
 
     return redact
 
