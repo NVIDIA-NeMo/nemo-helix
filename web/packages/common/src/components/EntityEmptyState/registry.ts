@@ -237,8 +237,9 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   optimizerInsights: {
     heading: 'No insights yet',
     subheading: 'Run an optimizer analysis on an agent to surface insights here.',
+    // Creates the workspace's Compass agent first when it has none.
     cliCommand:
-      'nemo agents execute --agent compass-analyst --spec \'{"context": {"agent": "<agent-name>"}}\' --workspace <workspace>',
+      '(nemo agents get compass-analyst --workspace <workspace> || nemo agents create compass.analyst --workspace <workspace>) && nemo agents execute --agent compass-analyst --spec \'{"context": {"agent": "<agent-name>"}}\' --workspace <workspace>',
     skillPrompt: 'Help me run my first analysis of my agent with the nemo-compass skill',
   },
   insightExperiments: {

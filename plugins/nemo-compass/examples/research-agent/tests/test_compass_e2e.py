@@ -161,6 +161,15 @@ def _nemo(*args: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
     return result
 
 
+def _compass_agent_name() -> str | None:
+    """Return the test workspace's ``compass.analyst`` agent, or None when it has none."""
+    listed = _nemo("--output-format", "json", "agents", "types", "--workspace", WORKSPACE)
+    for entry in json.loads(listed.stdout):
+        if entry.get("type") == "compass.analyst":
+            return entry.get("agent")
+    return None
+
+
 def _require_keys() -> None:
     env = _subprocess_env()
     missing = [key for key in ("NVIDIA_API_KEY", "TAVILY_API_KEY") if not env.get(key)]
@@ -476,16 +485,21 @@ def test_compass_creates_insight_end_to_end(platform_server: str) -> None:  # no
     trace_count = _wait_for_traces(MIN_TRACES, SPAN_VISIBLE_TIMEOUT_S)
     assert trace_count >= MIN_TRACES, f"expected >= {MIN_TRACES} traces for {TEST_AGENT}, saw {trace_count}"
 
-    # 4. Run Compass: create the workspace's Compass agent, run it on the test
-    #    agent (the CLI fills in its configured models), and wait for the job.
-    _nemo("agents", "create", "compass.analyst", "--workspace", WORKSPACE)
+    # 4. Run Compass: find the workspace's Compass agent by type (a previous run
+    #    against this data dir may have created it), create it if absent, run it
+    #    on the test agent (the CLI fills in its configured models), and wait.
+    compass_agent = _compass_agent_name()
+    if compass_agent is None:
+        _nemo("agents", "create", "compass.analyst", "--workspace", WORKSPACE)
+        compass_agent = _compass_agent_name()
+    assert compass_agent, "nemo agents create compass.analyst created no Compass agent"
     submitted = _nemo(
         "--output-format",
         "json",
         "agents",
         "execute",
         "--agent",
-        "compass-analyst",
+        compass_agent,
         "--spec",
         json.dumps({"context": {"agent": TEST_AGENT}}),
         "--workspace",
