@@ -15,8 +15,10 @@ import {
 import { TargetPanel } from '@agent-hardener/components/TargetPanel';
 import { useGenerateBenignSuite } from '@agent-hardener/components/useGenerateBenignSuite';
 import { useRunWarGame } from '@agent-hardener/components/useRunWarGame';
+import { VictimImagePanel } from '@agent-hardener/components/VictimImagePanel';
 import {
   getAgentHardenerGetManifestQueryKey,
+  useAgentHardenerGetExecutionSettings,
   useAgentHardenerGetManifest,
   useAgentHardenerRefreshManifest,
   useAgentHardenerUpdateManifest,
@@ -58,6 +60,10 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
   const { data: manifest, isLoading } = useAgentHardenerGetManifest(workspace, agentHardenerManifestName, {
     query: { enabled: Boolean(agentHardenerManifestName) },
   });
+  // Where war-games run in a container, each manifest needs a pre-built victim image before anything can run.
+  const { data: execution } = useAgentHardenerGetExecutionSettings(workspace);
+  const victimImageRequired = Boolean(execution?.victim_image_required);
+  const blockedOnVictimImage = victimImageRequired && !manifest?.victim_image;
 
   // Seed the editable state once the manifest loads. The `seeded` ref below is what keeps this
   // one-shot — the query does get refetched, since saving the manifest invalidates its key.
@@ -237,14 +243,22 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
           slotDescription={manifest?.agent ? `Hardens ${manifest.agent}` : undefined}
           slotActions={
             <Flex gap="density-sm">
-              <Button kind="secondary" disabled={gen.active} onClick={() => gen.start()}>
+              <Button
+                kind="secondary"
+                disabled={gen.active || blockedOnVictimImage}
+                onClick={() => gen.start()}
+              >
                 {gen.active
                   ? 'Generating…'
                   : suite.length
                     ? 'Regenerate benign suite'
                     : 'Generate benign suite'}
               </Button>
-              <Button color="brand" disabled={runWarGame.isPending} onClick={openRunDialog}>
+              <Button
+                color="brand"
+                disabled={runWarGame.isPending || blockedOnVictimImage}
+                onClick={openRunDialog}
+              >
                 Run war-game
               </Button>
             </Flex>
@@ -288,6 +302,22 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
               ) : null}
             </Stack>
           </Panel>
+        ) : null}
+
+        {manifest && victimImageRequired ? (
+          <VictimImagePanel
+            workspace={workspace}
+            manifestName={agentHardenerManifestName}
+            victimImage={manifest.victim_image ?? ''}
+            saving={updateManifest.isPending}
+            onSave={(victimImage) =>
+              updateManifest.mutate({
+                workspace,
+                name: agentHardenerManifestName,
+                data: { victim_image: victimImage },
+              })
+            }
+          />
         ) : null}
 
         {manifest ? (

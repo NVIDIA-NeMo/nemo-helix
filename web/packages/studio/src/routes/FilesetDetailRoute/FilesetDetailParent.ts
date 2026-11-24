@@ -15,6 +15,8 @@ import { createContext, useContext } from 'react';
  */
 export interface FilesetDetailParent {
   label: string;
+  /** Lowercase singular noun for what the page shows, used in delete wording. */
+  entity: string;
   /** Only filesets of this purpose belong here; the page sends others to Filesets. */
   purpose?: FilesetPurpose;
   getListRoute: (workspace: string) => string;
@@ -27,6 +29,7 @@ export interface FilesetDetailParent {
 
 export const FILESETS_PARENT: FilesetDetailParent = {
   label: 'Filesets',
+  entity: 'fileset',
   getListRoute: getWorkspaceFilesetsRoute,
   getDetailRoute: getFilesetDetailRoute,
 };

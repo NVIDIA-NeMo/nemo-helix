@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nemo agent-hardener doctor | setup | init | refresh | status`` — host provisioning and target lifecycle.
+"""``nemo agent-hardener doctor | setup | init | stage | refresh | status`` — host provisioning and target lifecycle.
 
 agent-hardener is never imported: it runs in its own venv, invoked by subprocess.
 """
@@ -9,6 +9,7 @@ agent-hardener is never imported: it runs in its own venv, invoked by subprocess
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ import yaml
 from nemo_agent_hardener_plugin.cli import checks, credentials, provisioning
 from nemo_agent_hardener_plugin.cli._shared import (
     command_context,
+    json_mapping,
     json_string_list,
     models_from_flags,
     parse_env_pairs,
@@ -375,6 +377,38 @@ def register(app: typer.Typer) -> None:
             )
             typer.echo(f"  rendered  {out_path}")
         typer.echo(f"\nNext: nemo agent-hardener synth-benign --manifest-id {manifest_name}")
+
+    @app.command()
+    def stage(
+        manifest_id: str = typer.Option(..., "--manifest-id", help="Saved manifest whose victim to stage."),
+        workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
+    ) -> None:
+        """Stage a saved manifest's victim build context, to build the victim image yourself.
+
+        Needed where war-games run in a container (NeMo Helix on Kubernetes): those jobs cannot build the
+        victim, so they run it from a registry image you build from this context. Needs `nemo agent-hardener
+        setup`, not Docker or OpenShell.
+        """
+        # No preflight: staging needs the agent-hardener venv only, which the job itself checks.
+        ctx = command_context(workspace, preflight=False)
+        result = ctx.agent_hardener.stage_victim_context(manifest_id=manifest_id, workspace=ctx.workspace)
+        if result.get("status") != "completed":
+            error = json_mapping(result.get("error"))
+            typer.secho(f"Error: could not stage manifest '{manifest_id}' — {error.get('message', result)}", fg="red")
+            if remediation := error.get("remediation"):
+                typer.echo(f"  {remediation}")
+            raise typer.Exit(code=1)
+
+        archive = shlex.quote(str(result["context_archive"]))
+        image = "<registry>/<image>:<tag>"
+        scope = f" --workspace {shlex.quote(workspace)}" if workspace else ""
+        typer.secho(f"Staged the victim build context: {archive}", fg="green")
+        typer.echo(
+            "\nBuild and push it to a registry the OpenShell gateway can pull from, then record the image:\n"
+            f"  docker build -t {image} - < {archive}\n"
+            f"  docker push {image}\n"
+            f"  nemo agent-hardener manifest set {shlex.quote(manifest_id)}{scope} --victim-image {image}"
+        )
 
     @app.command()
     def refresh(

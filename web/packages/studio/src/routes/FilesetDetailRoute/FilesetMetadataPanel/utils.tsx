@@ -7,6 +7,7 @@ import { TagList } from '@studio/routes/FilesetDetailRoute/FilesetMetadataPanel/
 import { getModelSource } from '@studio/routes/FilesetDetailRoute/utils';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
 import { getFormattedTrainingType } from '@studio/util/customizations';
+import { getHuggingFaceRepoUrl } from '@studio/util/huggingFaceUrl';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ReactNode } from 'react';
 
@@ -56,7 +57,7 @@ const getSourceRows = (fileset: FilesetOutput): MetadataRow[] => {
       value:
         storage.type === 'huggingface' ? (
           <Anchor
-            href={`https://huggingface.co/${source.path}`}
+            href={getHuggingFaceRepoUrl(storage.repo_type, source.path, storage.endpoint)}
             target="_blank"
             rel="noopener noreferrer"
           >
