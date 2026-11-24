@@ -127,14 +127,19 @@ def _network_policy(create_options: Mapping[str, Any]) -> Any:
     return NetworkPolicy.model_validate(policy)
 
 
-def _extensions(create_options: Mapping[str, Any]) -> dict[str, str] | None:
-    """Operator-configured OpenSandbox server extensions, such as ``bootstrap.execd.isolation``.
+def _extensions(create_options: Mapping[str, Any], spec: SandboxSpec) -> dict[str, str] | None:
+    """OpenSandbox server extensions: the operator's, such as ``bootstrap.execd.isolation``, and the host's.
 
-    Only the deployment's create options carry these; nothing on a ``SandboxSpec`` can, so a job or an
-    episode request can't reach them. The server receives them as strings.
+    The deployment's create options carry the operator's. The job-host provider adds its own, such as the
+    agent bundle, through ``provider_options``; the broker refuses provider_options on episode requests, so
+    neither a job nor an episode can set any. The server receives them as strings. A name both set is refused
+    rather than letting one silently replace the other.
     """
-    extensions = create_options.get("extensions")
-    return {str(k): str(v) for k, v in extensions.items()} if extensions else None
+    operator = {str(k): str(v) for k, v in (create_options.get("extensions") or {}).items()}
+    host = {str(k): str(v) for k, v in (spec.provider_options.get("extensions") or {}).items()}
+    if both := sorted(operator.keys() & host.keys()):
+        raise ValueError(f"sandbox create options must not set the extensions the Gym host sets: {', '.join(both)}")
+    return {**operator, **host} or None
 
 
 def _volumes(spec: SandboxSpec) -> list[Any]:
@@ -306,11 +311,9 @@ class OpenSandboxDriver:
                 resource=_resource_limits(self._create_options),
                 resource_requests=_resource_requests(spec) or None,
                 network_policy=_network_policy(self._create_options),
-                extensions=_extensions(self._create_options),
+                extensions=_extensions(self._create_options, spec),
                 entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
                 volumes=_volumes(spec) or None,
-                # Set only by the job-host provider; the broker refuses provider_options on episode requests.
-                extensions=dict(spec.provider_options.get("extensions") or {}) or None,
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),

@@ -24,6 +24,7 @@ from sandboxed_gym.backends._opensandbox_driver import (
     CREATE_REQUEST_HEADROOM_S,
     OpenSandboxDriver,
     _exec_identity,
+    _extensions,
     _joined_output,
     _resource_limits,
     _resource_requests,
@@ -380,6 +381,34 @@ async def test_create_forwards_the_configured_server_extensions(monkeypatch: pyt
     await driver.create(spec_with())
 
     assert captured["extensions"] == {"bootstrap.execd.isolation": "enable"}
+
+
+@requires_opensandbox
+async def test_create_sends_the_operators_and_the_hosts_extensions_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The Docker-enabled host's isolation comes from the operator; an agent bundle comes from the host provider.
+    # A deployment can use both, and the SDK takes a single extensions argument.
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    driver = OpenSandboxDriver(create={"extensions": {"bootstrap.execd.isolation": "enable"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    await driver.create(SandboxSpec(image="img:1", provider_options={"extensions": {"agent-bundle": "{}"}}))
+
+    assert captured["extensions"] == {"bootstrap.execd.isolation": "enable", "agent-bundle": "{}"}
+
+
+def test_an_extension_both_the_operator_and_the_host_set_is_refused() -> None:
+    spec = SandboxSpec(image="img:1", provider_options={"extensions": {"agent-bundle": "{}"}})
+
+    with pytest.raises(ValueError, match="agent-bundle"):
+        _extensions({"extensions": {"agent-bundle": "{}"}}, spec)
 
 
 class _FakeSandbox:
