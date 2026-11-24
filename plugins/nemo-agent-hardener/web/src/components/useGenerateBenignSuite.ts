@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { JobFailure } from '@agent-hardener/api/jobFailure';
 import { useHelixSdk } from '@agent-hardener/api/platform';
 import {
   pendingInterview,
@@ -16,6 +17,7 @@ import {
   type ReconStep,
 } from '@agent-hardener/components/swarm/swarmModel';
 import { useSwarmEvents } from '@agent-hardener/components/swarm/useSwarmEvents';
+import { useJobFailure } from '@agent-hardener/components/useJobFailure';
 import {
   agentHardenerListRuns,
   useAgentHardenerCreateSynthBenignJob,
@@ -27,9 +29,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface GenerateBenignSuite {
   start: () => void;
-  active: boolean; // a generate job is running or awaiting input
+  active: boolean; // a generate job is being submitted, running, or awaiting input
   starting: boolean; // job submitted, still resolving its run / first events
   status?: string;
+  jobName: string;
+  failure?: JobFailure; // why the last generate job ended without a suite
   activity?: string; // live label for the current lifecycle stage (sandbox build, victim health, recon…)
   recon: ReconStep[];
   interview: InterviewPrompt | null;
@@ -74,6 +78,7 @@ export const useGenerateBenignSuite = (
   // answer with no UI asking for it. From the user's side the interview simply vanished, and the
   // job held its sandbox until the HITL timeout, which then collided with the next attempt.
   const adoptedFor = useRef('');
+  const [adopted, setAdopted] = useState(false);
   useEffect(() => {
     if (jobName || adoptedFor.current === manifestName) return;
     adoptedFor.current = manifestName;
@@ -88,6 +93,7 @@ export const useGenerateBenignSuite = (
       if (run?.job_id) {
         setRunName(run.name ?? '');
         setJobName(run.job_id);
+        setAdopted(true);
       }
     })();
   }, [workspace, manifestName, jobName]);
@@ -98,6 +104,7 @@ export const useGenerateBenignSuite = (
         setRunName('');
         completedFor.current = '';
         adoptedFor.current = manifestName; // this session supersedes anything we might adopt
+        setAdopted(false);
         setJobName(job.name);
         void resolveRun(job.name);
       },
@@ -122,6 +129,7 @@ export const useGenerateBenignSuite = (
 
   const status = job?.status;
   const terminal = Boolean(status && CJobTerminalStatuses.includes(status));
+  const failure = useJobFailure('Benign-suite generation', jobName, job, { announce: !adopted });
 
   // Declared after `terminal` so the event poll can stop with the job; the synth run emits nothing once
   // its job reaches a terminal status.
@@ -142,9 +150,12 @@ export const useGenerateBenignSuite = (
         workspace,
         data: { spec: { manifest_id: manifestName, driver: 'service' } },
       }),
-    active: Boolean(jobName) && !terminal,
-    starting: Boolean(jobName) && !runName,
+    // Counted from the click, not from job creation, so a second click cannot queue a duplicate job.
+    active: create.isPending || (Boolean(jobName) && !terminal),
+    starting: create.isPending || (Boolean(jobName) && !runName),
     status,
+    jobName,
+    failure,
     activity,
     recon,
     interview,
