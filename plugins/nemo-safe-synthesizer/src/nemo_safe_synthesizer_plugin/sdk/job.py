@@ -139,7 +139,7 @@ class SafeSynthesizerJob:
         return ReportHtml(html=data.decode("utf-8"))
 
     def fetch_report_data(self) -> EvaluationReportData:
-        """Fetch the structured data behind the evaluation report: scores, tables, and Plotly figures."""
+        """Fetch the structured data behind the evaluation report: scores, per-metric results and Plotly charts, and column statistics."""
         data = self._jobs.download_job_result(
             name="evaluation-report-data", job=self._reference(), workspace=self._workspace
         ).read()

@@ -14,7 +14,11 @@ from nemo_helix_plugin.jobs.constants import (
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
 )
-from nemo_safe_synthesizer.config.evaluation_report_data import REPORT_DATA_SCHEMA_VERSION, EvaluationReportData
+from nemo_safe_synthesizer.config.evaluation_report_data import (
+    REPORT_DATA_SCHEMA_VERSION,
+    EvaluationReportData,
+    Metrics,
+)
 
 
 def import_task_main_without_heavy_runtime(monkeypatch):
@@ -127,14 +131,10 @@ def _report_data() -> EvaluationReportData:
             "schema_version": REPORT_DATA_SCHEMA_VERSION,
             "library_version": "test",
             "job_id": "safe-synth-job",
-            "sections": {
-                "synthetic_quality": False,
-                "data_privacy": False,
-                "transformed_columns": False,
-                "time_series": False,
-            },
+            "scores": {"synthetic_quality": None, "data_privacy": None},
+            "metrics": dict.fromkeys(Metrics.model_fields),
+            "columns": [],
             "differential_privacy": {"enabled": False, "epsilon": None, "delta": None},
-            "tooltips": {},
         }
     )
 
