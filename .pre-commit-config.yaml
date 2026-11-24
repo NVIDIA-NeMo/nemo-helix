@@ -113,7 +113,7 @@ repos:
         name: Check Node.js and pnpm versions
         entry: flox -q activate --dir . -- ./tools/lint/check-node-version.sh
         language: system
-        files: '^(Makefile|\.nvmrc|web/package\.json|tools/nodejs/\.flox/env/manifest\.toml|\.github/workflows/ci\.yaml|\.github/actions/build-nemo-helix-wheel/action\.yaml)$'
+        files: '^(Makefile|\.nvmrc|web/package\.json|tools/nodejs/\.flox/env/manifest\.toml|\.github/actions/setup-web/action\.yaml|\.github/actions/build-nemo-helix-wheel/action\.yaml)$'
         pass_filenames: false
       - id: copyright-fix
         name: Fix copyright headers
