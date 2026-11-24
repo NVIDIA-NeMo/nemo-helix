@@ -27,6 +27,11 @@ update external service-identity and job-source filters. Existing classes, types
 permissions, and entity kinds retain their names. Older jobs remain stored in the
 core Jobs service but do not appear in lists filtered by the new sources.
 
+If Builder builds through a remote build service (`builder.backend: remote`), see
+[Building through a service outside the cluster](../nemo-builder/README.md#building-through-a-service-outside-the-cluster)
+for the order to upgrade in, and why Evals can't go back to an older release once
+a remote build is recorded.
+
 ## Fileset cleanup
 
 Metric bundles, taskset plans, and registered-agent snapshots retain their fileset IDs
