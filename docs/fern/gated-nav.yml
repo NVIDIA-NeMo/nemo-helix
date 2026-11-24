@@ -58,6 +58,15 @@
     path: ../../auth/security-model.mdx
   - page: Troubleshooting
     path: ../../auth/troubleshooting.mdx
+# Publish when the Builder's `remote` backend ships. The page goes under Kubernetes Deployment >
+# Setup > Helm in versions/latest.yml, after `Configure Harbor Taskset Runs`. Then link to it from
+# set-up/helm/harbor-sandbox-profiles.mdx (Task image builds), which points at the Builder
+# plugin's README until then.
+- section: Kubernetes Deployment
+  contents:
+  - page: Build Images Through a Remote Build Service
+    slug: builder-remote-backend
+    path: ../../set-up/helm/builder-remote-backend.mdx
 - section: Safe Synthesizer
   contents:
   - page: Data Synthesis
