@@ -57,6 +57,7 @@ from nemo_builder_plugin.run.remote import (
     RemoteBuild,
     RemoteBuildError,
     RemoteBuildStatus,
+    RemoteContext,
     RemoteImage,
     RetryableError,
     fetch_context,
@@ -172,16 +173,20 @@ class LateClock(FakeClock):
 
 
 class FakeService:
-    """Answers ``start``, ``status`` and ``cancel`` from scripts. The last entry of a script repeats."""
+    """Answers ``upload_context``, ``start``, ``status`` and ``cancel`` from scripts. The last entry of a script
+    repeats."""
 
     def __init__(
         self,
         statuses: list[RemoteBuildStatus | Exception],
         *,
+        upload: list[str | Exception] | None = None,
         start: list[str | Exception] | None = None,
         cancel: Exception | list[Exception | None] | None = None,
     ) -> None:
         self._statuses = list(statuses)
+        self._upload: list[str | Exception] = list(upload or ["context-1"])
+        self.uploaded: list[RemoteContext] = []
         self._start: list[str | Exception] = list(start or ["build-1"])
         #: What each ``cancel`` raises; None is a cancel the service takes.
         self._cancel: list[Exception | None] = list(cancel) if isinstance(cancel, list) else [cancel]
@@ -192,6 +197,13 @@ class FakeService:
     @staticmethod
     def _next(script: list[_T]) -> _T:
         return script.pop(0) if len(script) > 1 else script[0]
+
+    def upload_context(self, context: RemoteContext) -> str:
+        self.uploaded.append(context)
+        answer = self._next(self._upload)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
     def start(self, build: RemoteBuild) -> str:
         self.started.append(build)
@@ -337,8 +349,14 @@ class TestABuildThatSucceeds:
     def test_the_service_is_handed_the_context_the_platform_and_a_key(self, context: Path, tmp_path: Path) -> None:
         service = FakeService([DONE])
         _run(service, FakeBuilder(), context, tmp_path)
+        (upload,) = service.uploaded
+        assert (upload.key, upload.path, upload.labels) == (
+            idempotency_key(ATTEMPT, "demo-1"),
+            context,
+            {"workspace": "default", "image": "demo-1", "job": "job-uid-1"},
+        )
         (build,) = service.started
-        assert build.context == context
+        assert build.context == "context-1"
         assert build.platform == "linux/amd64"
         assert build.key == idempotency_key(ATTEMPT, "demo-1")
         assert build.labels == {"workspace": "default", "image": "demo-1", "job": "job-uid-1"}
@@ -499,6 +517,102 @@ class TestABuildThatSucceeds:
         clock = FakeClock()
         assert _run(FakeService([DONE]), builder, context, tmp_path, clock=clock) == 0
         assert (len(builder.completed), clock.sleeps) == (1, [2.0])
+
+
+class TestUploadingTheContext:
+    """The context goes to the service in a step of its own, before any build starts from it."""
+
+    def test_the_context_is_uploaded_before_the_build_starts_from_it(self, context: Path, tmp_path: Path) -> None:
+        calls: list[str] = []
+
+        class Ordered(FakeService):
+            def upload_context(self, context: RemoteContext) -> str:
+                calls.append("upload")
+                return super().upload_context(context)
+
+            def start(self, build: RemoteBuild) -> str:
+                calls.append(f"start from {build.context}")
+                return super().start(build)
+
+        service = Ordered([DONE], upload=["uploaded-context-7"])
+        assert _run(service, FakeBuilder(), context, tmp_path) == 0
+        assert calls == ["upload", "start from uploaded-context-7"]
+        (upload,), (build,) = service.uploaded, service.started
+        # One key for both steps: the service can tie a build to the upload it was started from.
+        assert upload.key == build.key and upload.labels == build.labels
+
+    def test_a_lost_response_repeats_the_same_upload(self, context: Path, tmp_path: Path) -> None:
+        service = FakeService([DONE], upload=[RetryableError("connection reset"), "context-1"])
+        builder = FakeBuilder()
+
+        assert _run(service, builder, context, tmp_path) == 0
+
+        first, second = service.uploaded
+        assert first == second
+        assert len(service.started) == 1 and len(builder.completed) == 1
+
+    @pytest.mark.parametrize(
+        ("upload", "reason"),
+        [
+            ([PermanentError("413: context too large")], "uploading the build context: 413: context too large"),
+            ([RetryableError("connection reset"), KeyError("id")], "uploading the build context: unexpected KeyError"),
+            (["  "], "the build service's client uploaded the build context without naming it"),
+            ([""], "the build service's client uploaded the build context without naming it"),
+            ([None], "the build service's client uploaded the build context without naming it"),
+        ],
+        ids=["refused", "then-a-bug", "blank-reference", "empty-reference", "no-reference"],
+    )
+    def test_an_upload_that_fails_starts_nothing_and_cancels_nothing(
+        self,
+        upload: list[str | Exception],
+        reason: str,
+        context: Path,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        service = FakeService([DONE], upload=upload)
+        builder = FakeBuilder()
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, tmp_path) == 1
+        assert service.started == [] and service.cancelled == [] and builder.completed == []
+        assert f"{FAILURE_MARKER} demo-1: {reason}" in caplog.text
+        # No build was started, so there is none to look for by its key.
+        assert "a build may be running" not in caplog.text
+
+    def test_an_upload_that_keeps_failing_is_given_up_after_the_patience_for_a_start(
+        self, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        service = FakeService([DONE], upload=[RetryableError("connection reset")])
+        clock = FakeClock()
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=3600), clock=clock) == 1
+        # Given up on well before the build's own hour, and not after a few tries.
+        assert START_PATIENCE_SECONDS - MAX_BACKOFF_SECONDS <= clock.now <= START_PATIENCE_SECONDS
+        tries = len(service.uploaded)
+        assert (
+            f"{FAILURE_MARKER} demo-1: uploading the build context failed {tries} times over {clock.now:.0f}s"
+            in caplog.text
+        )
+        assert service.started == []
+
+    def test_an_upload_that_is_kept_waiting_is_given_up_at_the_build_timeout(
+        self, context: Path, tmp_path: Path
+    ) -> None:
+        clock = FakeClock()
+        service = FakeService([DONE], upload=[OverBudgetError("busy")])
+        assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=60), clock=clock) == 1
+        # Five tries, at 0, 2, 6, 14 and 30 seconds. The next wait, 32, would pass the minute.
+        assert (len(service.uploaded), clock.now, service.started) == (5, 30.0, [])
+
+    def test_the_upload_counts_against_the_build_timeout(self, context: Path, tmp_path: Path) -> None:
+        """One deadline from before the upload: the time it takes is the start's to lose."""
+        clock = FakeClock()
+        busy = OverBudgetError("busy")
+        service = FakeService([DONE], upload=[busy, busy, busy, busy, "context-1"], start=[busy])
+        assert _run(service, FakeBuilder(), context, tmp_path, config=_config(timeout=60), clock=clock) == 1
+        # Uploaded at 30 seconds. Starts at 30, 32, 36 and 44: the next wait, 16, would reach the minute. A start
+        # on its own gets five tries in the minute.
+        assert (len(service.uploaded), len(service.started), clock.now) == (5, 4, 44.0)
 
 
 class TestRetrying:
@@ -800,7 +914,7 @@ class TestABuildThatFails:
 
         with caplog.at_level(logging.ERROR):
             assert _run(service, FakeBuilder(), context, tmp_path, cancelled=lambda: True, fetch=fetch) == 1
-        assert (fetched, service.started) == ([], [])
+        assert (fetched, service.uploaded, service.started) == ([], [], [])
         assert f"{FAILURE_MARKER} demo-1: {STOPPED}" in caplog.text
         assert "a build may be running" not in caplog.text
 
@@ -814,7 +928,7 @@ class TestABuildThatFails:
             return context
 
         assert _run(service, FakeBuilder(), context, tmp_path, cancelled=lambda: bool(fetched), fetch=fetch) == 1
-        assert (fetched, service.started, service.cancelled) == (["demo-1"], [], [])
+        assert (fetched, service.uploaded, service.started, service.cancelled) == (["demo-1"], [], [], [])
 
     def test_a_stop_during_a_backoff_cancels_the_build(self, context: Path, tmp_path: Path) -> None:
         """A pod has about 30 seconds from the signal. A backoff is up to a minute."""
@@ -1476,9 +1590,9 @@ class TestTheContext:
         seen: list[str] = []
 
         class Reading(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                seen.append((build.context / "Dockerfile").read_text())
-                return super().start(build)
+            def upload_context(self, context: RemoteContext) -> str:
+                seen.append((context.path / "Dockerfile").read_text())
+                return super().upload_context(context)
 
         config = _config(dockerfile="services/feed/Dockerfile")
         assert _run(Reading([DONE]), FakeBuilder(), context, tmp_path, config=config) == 0
@@ -1496,10 +1610,10 @@ class TestTheContext:
         handed: list[dict[str, str]] = []
 
         class Looking(FakeService):
-            def start(self, build: RemoteBuild) -> str:
+            def upload_context(self, context: RemoteContext) -> str:
                 names = ("private.env", "Dockerfile.dockerignore", ".dockerignore")
-                handed.append({name: (build.context / name).read_text() for name in names})
-                return super().start(build)
+                handed.append({name: (context.path / name).read_text() for name in names})
+                return super().upload_context(context)
 
         config = _config(dockerfile="services/feed/Dockerfile")
         assert _run(Looking([DONE]), FakeBuilder(), context, tmp_path, config=config) == 0
@@ -1516,9 +1630,9 @@ class TestTheContext:
         handed: list[list[str]] = []
 
         class Looking(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                handed.append(sorted(path.name for path in build.context.iterdir()))
-                return super().start(build)
+            def upload_context(self, context: RemoteContext) -> str:
+                handed.append(sorted(path.name for path in context.path.iterdir()))
+                return super().upload_context(context)
 
         assert _run(Looking([DONE]), FakeBuilder(), context, tmp_path) == 0
         assert handed == [[".dockerignore", "Dockerfile", "app.py", "local.env", "services"]]
@@ -2184,9 +2298,9 @@ class TestTheImagesOfOneSet:
         seen: list[str] = []
 
         class Reading(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                seen.append((build.context / read).read_text())
-                return super().start(build)
+            def upload_context(self, context: RemoteContext) -> str:
+                seen.append((context.path / read).read_text())
+                return super().upload_context(context)
 
         return Reading, seen
 
@@ -2196,10 +2310,10 @@ class TestTheImagesOfOneSet:
         seen: list[str] = []
 
         class Changing(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                seen.append((build.context / "version").read_text())
+            def upload_context(self, context: RemoteContext) -> str:
+                seen.append((context.path / "version").read_text())
                 files["version"] = "second"
-                return super().start(build)
+                return super().upload_context(context)
 
         builder = FakeBuilder()
         assert _run(Changing([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 0
@@ -2229,9 +2343,9 @@ class TestTheImagesOfOneSet:
         built: list[str] = []
 
         class Reading(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                built.append((build.context / "Dockerfile").read_text())
-                return super().start(build)
+            def upload_context(self, context: RemoteContext) -> str:
+                built.append((context.path / "Dockerfile").read_text())
+                return super().upload_context(context)
 
         assert _run(Reading([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=self._sources(files), config=config) == 0
         assert built == ["FROM one\n", "FROM root\n", "FROM two\n"]
@@ -2321,10 +2435,10 @@ class TestTheImagesOfOneSet:
         seen: list[str] = []
 
         class Changing(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                seen.append((build.context / "version").read_text())
+            def upload_context(self, context: RemoteContext) -> str:
+                seen.append((context.path / "version").read_text())
                 files["version"] = "second"
-                return super().start(build)
+                return super().upload_context(context)
 
         fileset = {"fileset": "default/fs-a"}
         config = self._set(fileset | {"context_path": first}, fileset | {"context_path": second})
@@ -2356,15 +2470,15 @@ class TestTheImagesOfOneSet:
         read: list[bool] = []
 
         class Measuring(FakeService):
-            def start(self, build: RemoteBuild) -> str:
+            def upload_context(self, context: RemoteContext) -> str:
                 (download,) = (tmp_path / "scratch").glob("source-*/payload")
-                names = [build.context / "payload", *(build.context / "names").iterdir()]
+                names = [context.path / "payload", *(context.path / "names").iterdir()]
                 files = {name.stat().st_ino: name.stat() for name in names}
                 sizes = sum(status.st_size for status in files.values())
                 copies.append((len(names), len(files), sizes, {status.st_mode & 0o777 for status in files.values()}))
                 downloads.append((download.stat().st_ino in files, download.stat().st_nlink))
                 read.append(all(name.read_bytes() == payload for name in names))
-                return super().start(build)
+                return super().upload_context(context)
 
         assert _run(Measuring([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=_config("a", "b")) == 0
         # Thirty-three names and one file of 64 KiB, as it was, in each image's copy.
@@ -2511,11 +2625,11 @@ class TestTheImagesOfOneSet:
         seen: list[tuple[str, str | None]] = []
 
         class Reading(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                shared = build.context / "shared"
+            def upload_context(self, context: RemoteContext) -> str:
+                shared = context.path / "shared"
                 written = os.readlink(shared) if shared.is_symlink() else None
-                seen.append(((build.context / "Dockerfile").read_text(), written))
-                return super().start(build)
+                seen.append(((context.path / "Dockerfile").read_text(), written))
+                return super().upload_context(context)
 
         builder = FakeBuilder()
         assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
@@ -2529,9 +2643,9 @@ class TestTheImagesOfOneSet:
         held: list[int] = []
 
         class Looking(FakeService):
-            def start(self, build: RemoteBuild) -> str:
+            def upload_context(self, context: RemoteContext) -> str:
                 held.append(sum(path.name.startswith("source-") for path in (tmp_path / "scratch").iterdir()))
-                return super().start(build)
+                return super().upload_context(context)
 
         first, second = ({"fileset": "default/fs-a", "archive": f"{name}.tar.gz"} for name in ("one", "two"))
         config = self._set(first, first, second, second)
@@ -2579,11 +2693,11 @@ class TestTheImagesOfOneSet:
         seen: list[tuple[str, str | None]] = []
 
         class Reading(FakeService):
-            def start(self, build: RemoteBuild) -> str:
-                again = build.context / "again"
+            def upload_context(self, context: RemoteContext) -> str:
+                again = context.path / "again"
                 written = os.readlink(again) if again.is_symlink() else None
-                seen.append(((build.context / "Dockerfile").read_text(), written))
-                return super().start(build)
+                seen.append(((context.path / "Dockerfile").read_text(), written))
+                return super().upload_context(context)
 
         builder = FakeBuilder()
         assert _run(Reading([DONE]), builder, tmp_path, tmp_path, fetch=fetch, config=config) == 0
@@ -2626,9 +2740,9 @@ class TestTheImagesOfOneSet:
         held: list[list[str]] = []
 
         class Looking(FakeService):
-            def start(self, build: RemoteBuild) -> str:
+            def upload_context(self, context: RemoteContext) -> str:
                 held.append(sorted(path.name[:6] for path in (tmp_path / "scratch").iterdir()))
-                return super().start(build)
+                return super().upload_context(context)
 
         config = self._set({"fileset": "default/fs-a"}, {"fileset": "default/fs-b"})
         assert _run(Looking([DONE]), FakeBuilder(), tmp_path, tmp_path, fetch=fetch, config=config) == 0
@@ -2639,7 +2753,7 @@ class TestTheImagesOfOneSet:
         """Nothing to share, so no second copy of what may be a large context."""
         service = FakeService([DONE])
         assert _run(service, FakeBuilder(), context, tmp_path) == 0
-        assert service.started[0].context == context
+        assert service.uploaded[0].path == context
 
 
 class LinkReads:
@@ -3159,9 +3273,9 @@ class Inspecting(FakeService):
         super().__init__([DONE])
         self.handed: dict[str, Handed] = {}
 
-    def start(self, build: RemoteBuild) -> str:
-        self.handed[build.labels["image"]] = Handed.of(build.context)
-        return super().start(build)
+    def upload_context(self, context: RemoteContext) -> str:
+        self.handed[context.labels["image"]] = Handed.of(context.path)
+        return super().upload_context(context)
 
 
 @dataclass
@@ -3381,21 +3495,21 @@ class TestAContextFromASharedDownload:
     def test_an_images_copy_is_of_its_directory_alone_and_nothing_is_written_where_it_was_unpacked(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """What the first image's build is started with, and what the download is at that moment."""
+        """What the first image's context is uploaded from, and what the download is at that moment."""
         scratch = (tmp_path / "scratch").resolve()
         #: Where the context is, what the image's directory holds, and each link of the download as written.
         seen: dict[str, Any] = {}
 
         class Noting(Inspecting):
-            def start(self, build: RemoteBuild) -> str:
-                if build.labels["image"] == "a":
+            def upload_context(self, context: RemoteContext) -> str:
+                if context.labels["image"] == "a":
                     (download,) = scratch.glob(f"source-*/fetched/unpacked/{FILESET}/{ARCHIVE}")
-                    seen["where"] = build.context.relative_to(scratch).parts
+                    seen["where"] = context.path.relative_to(scratch).parts
                     seen["copied"] = sorted(
-                        path.relative_to(build.context.parent).as_posix() for path in build.context.parent.rglob("*")
+                        path.relative_to(context.path.parent).as_posix() for path in context.path.parent.rglob("*")
                     )
                     seen["download"] = Handed.of(download)
-                return super().start(build)
+                return super().upload_context(context)
 
         shared = _built(tmp_path, caplog, _fetching(BY_A_LINK_BESIDE_IT)[0], "app", "tools", service=Noting())
 

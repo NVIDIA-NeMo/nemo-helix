@@ -23,6 +23,7 @@ from nemo_builder_plugin.run.remote import (
     JobAttempt,
     RemoteBuild,
     RemoteBuildStatus,
+    RemoteContext,
     RemoteImage,
     fetch_context,
     run_remote_build,
@@ -297,11 +298,14 @@ class TestWhatARemoteBuildHandsItsService:
         handed: list[tuple[str, list[str], bytes]] = []
 
         class Service:
-            def start(self, build: RemoteBuild) -> str:
-                dockerfile = (build.context / "Dockerfile").read_bytes()
+            def upload_context(self, context: RemoteContext) -> str:
+                dockerfile = (context.path / "Dockerfile").read_bytes()
                 handed.append(
-                    (build.labels["image"], TestWhatARemoteBuildHandsItsService._files(build.context), dockerfile)
+                    (context.labels["image"], TestWhatARemoteBuildHandsItsService._files(context.path), dockerfile)
                 )
+                return f"context-{context.labels['image']}"
+
+            def start(self, build: RemoteBuild) -> str:
                 return f"build-{build.labels['image']}"
 
             def status(self, build_id: str) -> RemoteBuildStatus:

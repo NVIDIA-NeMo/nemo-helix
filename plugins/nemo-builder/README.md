@@ -770,14 +770,15 @@ What differs for a caller:
   submit, and their completions are answered `403`. To build again, submit the next revision.
 - A `ready` row doesn't show that its own build made the image it names, nor whose image that is,
   nor that the image starts as the row says: see [Security](#security).
-- A build that starts while the service is unreachable is tried again for up to ten minutes, less
-  if its timeout is sooner, and one already running is waited on until its timeout. A longer outage fails each queued build as it
+- An upload or a start that fails while the service is unreachable is tried again for up to ten
+  minutes each, less if the build's timeout is sooner, and a build already running is waited on until its timeout. A longer outage fails each queued build as it
   reaches a slot.
 
 What an operator sets up:
 
 - The step image. Its program is a few lines around `run/remote.py`'s `step_main`, which takes a
-  factory for a `RemoteBuildService`: three methods, `start`, `status` and `cancel`, and three error
+  factory for a `RemoteBuildService`: four methods, `upload_context`, then `start`, then
+  `status` until the build ends, and `cancel` when the driver gives a build up, and three error
   types that tell the driver whether to repeat a call, wait, or fail the image. The driver does the
   rest: the context, the deadline, polling, cancelling when the job is told to stop, and completing
   rows. A client that can read the published image's config reports how the image starts, with
@@ -785,12 +786,14 @@ What an operator sets up:
   completion: the driver reads nothing from the registry itself. `start` must give the service
   the build's time limit (`RemoteBuild.timeout_seconds`) as the build's own deadline, wherever the
   service takes one: nothing else ends the build of a step that is killed (see
-  [Reliability](#reliability)). Each of the three calls must bound its own time: the driver can't
+  [Reliability](#reliability)). Each of the four calls must bound its own time: the driver can't
   interrupt one, and a pod has about 30 seconds from the stop signal to cancel its build. `cancel`
   must be safe to repeat, and must return normally for a build that has already ended: the driver
   asks up to three times, and takes any error to mean the build may still be running.
-  The client is handed the build context as a directory (`RemoteBuild.context`), all of it. Before
-  anything leaves the step, it must apply the ignore file at the context's root
+  The client is handed the build context as a directory in `upload_context` (`RemoteContext.path`),
+  all of it, and returns the service's reference to the upload, which the driver hands `start` as
+  `RemoteBuild.context`. Both calls must be safe to repeat with one key: a repeated upload keeps
+  the first. Before anything leaves the step, it must apply the ignore file at the context's root
   (`Dockerfile.dockerignore`, or else `.dockerignore`), which the driver leaves there as a regular
   file: rules applied only by the service come too late for a file that must not leave the
   cluster. The Dockerfile and that ignore file are sent whatever the rules say, as a container

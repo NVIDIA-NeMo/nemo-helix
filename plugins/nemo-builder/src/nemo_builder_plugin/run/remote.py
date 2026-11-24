@@ -8,7 +8,8 @@ A build service's step image ships a small program around :func:`step_main`::
     raise SystemExit(step_main(lambda config, credential: MyBuildService(credential)))
 
 Everything that is the same for every service is here: fetching the context, the deadline, polling, retrying,
-cancelling when the job is told to stop, and completing each row. A service implements three calls.
+cancelling when the job is told to stop, and completing each row. A service implements four calls: it takes an
+image's build context, starts a build from it, reports where the build is, and cancels it.
 
 Each image that isn't built gets one line in the step's log, marked :data:`FAILURE_MARKER`. Jobs keeps the end of a
 failed step's log on the job, and settling reads the line from there (see ``settle``), so it is the last thing the
@@ -78,7 +79,8 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 POLL_SECONDS = 10.0
 #: The longest it waits between two tries of one call.
 MAX_BACKOFF_SECONDS = 60.0
-#: How long it goes on repeating a start that fails for no stated reason, before giving the image up: long enough
+#: How long it goes on repeating an upload or a start that fails for no stated reason, before giving the image up,
+#: for each of the two calls apart: long enough
 #: to ride out a service's restart, short enough that a deployment pointed at the wrong place says so.
 START_PATIENCE_SECONDS = 600.0
 #: How long it keeps trying to complete a row whose image is built, when the builder can't be reached.
@@ -160,7 +162,9 @@ class RetryableError(RemoteBuildError):
     """The call may not have happened: repeat the same call.
 
     Raised by ``start``, it may also mean a build was started whose ID never arrived. The driver can't cancel a
-    build it can't name, so when it gives such a start up it reports the build's key.
+    build it can't name, so when it gives such a start up it reports the build's key. Raised by ``upload_context``,
+    it may mean the service kept an upload whose reference never arrived: the driver repeats the call with the same
+    key, and a client that keeps the first upload for a key returns its reference.
     """
 
 
@@ -174,17 +178,31 @@ class PermanentError(RemoteBuildError):
 
 
 @dataclass(frozen=True, slots=True)
-class RemoteBuild:
-    """One image for a service to build."""
+class RemoteContext:
+    """One image's build context, for a service to take before a build starts from it."""
 
-    #: Stable for this job attempt and image. ``start`` twice with one key starts one build.
+    #: Stable for this job attempt and image, and the same as the build's. ``upload_context`` twice with one key
+    #: keeps one upload.
     key: str
     #: The build context, with the Dockerfile at its root. It is the whole context, as the step holds it on
     #: disk: nothing has applied its ignore rules, so what a build leaves out is still in it. The ignore file
     #: a builder reads is at its root, as a regular file: ``Dockerfile.dockerignore`` if there is one, and
     #: otherwise ``.dockerignore``. What a client owes a context it sends anywhere is said on
-    #: :meth:`RemoteBuildService.start`.
-    context: Path
+    #: :meth:`RemoteBuildService.upload_context`.
+    path: Path
+    #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteBuild:
+    """One image for a service to build."""
+
+    #: Stable for this job attempt and image. ``start`` twice with one key starts one build.
+    key: str
+    #: The service's reference to the image's build context, as :meth:`RemoteBuildService.upload_context`
+    #: returned it for this key.
+    context: str
     platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
     labels: Mapping[str, str] = field(default_factory=dict)
@@ -234,19 +252,18 @@ class RemoteBuildService(Protocol):
     the job's stop signal only between calls, and a pod has about 30 seconds from that signal to cancel its build.
     """
 
-    def start(self, build: RemoteBuild) -> str:
-        """Start building, and return the service's ID for the build.
+    def upload_context(self, context: RemoteContext) -> str:
+        """Send the service the image's build context, and return the service's reference to it.
 
-        Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
-        call must send the service the same request, so an implementation that uploads the context keeps the first
-        upload for that key and reuses it. The ID is not empty: it is what the image's row names the build by.
+        The driver uploads each image's context before :meth:`start`, and hands :meth:`start` what it returns, as
+        ``RemoteBuild.context``. A service that takes the context with the build itself returns whatever its
+        ``start`` finds the context by, such as the path. The reference is not empty.
 
-        Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
-        The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
-        nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
-        ends the build.
+        Safe to repeat with the same ``context.key``: the driver calls again when a response is lost. A
+        repeated call keeps the first upload for that key and returns the same reference, so a later
+        :meth:`start` sends the service the same request.
 
-        ``build.context`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
+        ``context.path`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
         An implementation that sends the context anywhere first applies the ignore file at the context's
         root, as a container build does, and sends nothing those rules leave out: the Dockerfile's own,
         ``Dockerfile.dockerignore``, if there is one, and otherwise ``.dockerignore``. The Dockerfile and
@@ -264,6 +281,24 @@ class RemoteBuildService(Protocol):
         context that its links, followed, would make more of than a source may unpack to, but it measures
         one file once, however many names the file has: sent as a file for each name, it is as many times
         its size.
+        """
+        ...
+
+    def start(self, build: RemoteBuild) -> str:
+        """Start building from the uploaded context, and return the service's ID for the build.
+
+        Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
+        call sends the service the same request. The ID is not empty: it is what the image's row names the
+        build by.
+
+        A service that takes the context here, from the reference :meth:`upload_context` returned, owes it
+        everything :meth:`upload_context` says of a context it sends, and a repeated call keeps the first upload
+        for that key.
+
+        Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
+        The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
+        nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
+        ends the build.
         """
         ...
 
@@ -1240,16 +1275,31 @@ def _build_one(
         raise
     except (ArchiveRefused, NemoHTTPError, NemoTransportError, OSError, ValueError) as exc:
         raise ImageFailed(f"cannot fetch its build context: {exc}") from exc
-    build = RemoteBuild(
-        key=idempotency_key(attempt, image.image),
-        context=context,
-        platform=image.platform,
-        labels={"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid},
-        timeout_seconds=config.build_timeout_seconds,
-    )
+    key = idempotency_key(attempt, image.image)
+    labels = {"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid}
     # The row was written with the service's repository at submit. An image anywhere else isn't the row's.
     destination = f"{row.registry}/{row.repository}"
+    # The upload counts against the build's time.
     deadline = clock.monotonic() + config.build_timeout_seconds
+    upload = RemoteContext(key=key, path=context, labels=labels)
+    # The same `upload` on every try, so a response lost on the way back keeps one upload. No build has started
+    # yet, so a failure here leaves nothing to cancel.
+    uploaded = _call(
+        "uploading the build context",
+        lambda: service.upload_context(upload),
+        clock=clock,
+        deadline=deadline,
+        cancelled=cancelled,
+    )
+    if not isinstance(uploaded, str) or not uploaded.strip():
+        raise ImageFailed("the build service's client uploaded the build context without naming it")
+    build = RemoteBuild(
+        key=key,
+        context=uploaded,
+        platform=image.platform,
+        labels=labels,
+        timeout_seconds=config.build_timeout_seconds,
+    )
     # The same `build` on every try, so a response lost on the way back starts nothing twice. Nothing is started
     # once the job has been told to stop.
     try:
