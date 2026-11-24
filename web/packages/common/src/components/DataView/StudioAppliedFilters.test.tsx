@@ -125,6 +125,28 @@ describe('StudioAppliedFilters', () => {
     expect(screen.getByText('LoRA, Full')).toBeInTheDocument();
   });
 
+  it('maps custom filter values to labels when the filter provides options', () => {
+    const { column } = makeColumn('kind', {
+      filterValue: { lora: true, full: true },
+      header: 'Kind',
+      meta: {
+        filter: {
+          type: 'custom',
+          options: [
+            { value: 'lora', label: 'LoRA' },
+            { value: 'full', label: 'Full' },
+          ],
+          renderFilter: () => <div />,
+        },
+      },
+    });
+    mockColumns.set('kind', column);
+
+    render(<StudioAppliedFilters />);
+
+    expect(screen.getByText('LoRA, Full')).toBeInTheDocument();
+  });
+
   it('renders a tag for an array filter value showing element values not indices', () => {
     const { column } = makeColumn('base_model', {
       filterValue: ['llama-3', 'mistral-7b'],

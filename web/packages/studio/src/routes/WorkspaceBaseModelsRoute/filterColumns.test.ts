@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  isSupportedFilter,
   makeFilterColumns,
   toModelEntityFilter,
 } from '@studio/routes/WorkspaceBaseModelsRoute/filterColumns';
@@ -29,17 +30,20 @@ describe('toModelEntityFilter', () => {
     expect(
       toModelEntityFilter({
         customizable: { fine_tunable: true },
-        lora: { adapters: true, lora_enabled: true },
+        lora: 'adapters',
         family: ' llama ',
         model_providers: 'default/nvidia-build',
       })
     ).toEqual({
       fileset: true,
       adapters: true,
-      lora_enabled: true,
       family: { $like: 'llama' },
       model_providers: 'default/nvidia-build',
     });
+  });
+
+  it('maps Serving enabled to lora_enabled', () => {
+    expect(toModelEntityFilter({ lora: 'lora_enabled' })).toEqual({ lora_enabled: true });
   });
 
   it('adds the name search as a substring match', () => {
@@ -49,21 +53,59 @@ describe('toModelEntityFilter', () => {
   it('ignores Fine-tunable and Has adapters while Customizer is disabled', () => {
     mockEnvironment.customizerEnabled = false;
     expect(
-      toModelEntityFilter({
-        customizable: { fine_tunable: true },
-        lora: { adapters: true, lora_enabled: true },
-      })
-    ).toEqual({ lora_enabled: true });
+      toModelEntityFilter({ customizable: { fine_tunable: true }, lora: 'adapters' })
+    ).toBeUndefined();
+  });
+});
+
+describe('isSupportedFilter', () => {
+  it('accepts offered LoRA options and other filters', () => {
+    expect(isSupportedFilter({ id: 'lora', value: 'adapters' })).toBe(true);
+    expect(isSupportedFilter({ id: 'customizable', value: { fine_tunable: true } })).toBe(true);
+    expect(isSupportedFilter({ id: 'family', value: 'llama' })).toBe(true);
+  });
+
+  it('rejects LoRA values that are not offered options', () => {
+    expect(isSupportedFilter({ id: 'lora', value: { adapters: true } })).toBe(false);
+    expect(isSupportedFilter({ id: 'lora', value: 'unknown' })).toBe(false);
+  });
+
+  it('rejects Customizer-only filters while Customizer is disabled', () => {
+    mockEnvironment.customizerEnabled = false;
+    expect(isSupportedFilter({ id: 'customizable', value: { fine_tunable: true } })).toBe(false);
+    expect(isSupportedFilter({ id: 'lora', value: 'adapters' })).toBe(false);
+    expect(isSupportedFilter({ id: 'lora', value: 'lora_enabled' })).toBe(true);
   });
 });
 
 describe('makeFilterColumns', () => {
-  it('orders filters to match the Models API spec and leaves Fine-tunable to the toolbar', () => {
-    // Stub accessor returns the column def, so the result is the list of defs.
-    const makeColumns = makeFilterColumns('ws') as unknown as (helper: {
-      accessor: (_: unknown, def: { id: string }) => { id: string };
-    }) => { id: string }[];
-    const ids = makeColumns({ accessor: (_, def) => def }).map((col) => col.id);
-    expect(ids).toEqual(['lora', 'family', 'model_providers', 'created_at', 'updated_at']);
+  // Stub accessor returns the column def, so the result is the list of defs.
+  const getColumns = () =>
+    (
+      makeFilterColumns('ws') as unknown as (helper: {
+        accessor: (_: unknown, def: ColumnDef) => ColumnDef;
+      }) => ColumnDef[]
+    )({ accessor: (_, def) => def });
+
+  interface ColumnDef {
+    id: string;
+    enableColumnFilter?: boolean;
+  }
+
+  it('orders filters to match the Models API spec', () => {
+    expect(getColumns().map((col) => col.id)).toEqual([
+      'customizable',
+      'lora',
+      'family',
+      'model_providers',
+      'created_at',
+      'updated_at',
+    ]);
+  });
+
+  it('keeps Fine-tunable out of the filter panel, leaving it to the toolbar', () => {
+    expect(getColumns().find((col) => col.id === 'customizable')?.enableColumnFilter).toBe(false);
+    mockEnvironment.customizerEnabled = false;
+    expect(getColumns().map((col) => col.id)).not.toContain('customizable');
   });
 });

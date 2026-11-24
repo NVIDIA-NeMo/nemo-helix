@@ -79,6 +79,8 @@ export type DataViewColumnFilterDef<TData> = {
   | {
       /** Provide a fully custom filter component. */
       type: 'custom';
+      /** Labels for the applied-filter chip; `renderFilter` renders its own controls. */
+      options?: FilterItem[];
       renderFilter: (props: {
         column: Column<TData>;
         setValue: (value: FilterValue) => void;

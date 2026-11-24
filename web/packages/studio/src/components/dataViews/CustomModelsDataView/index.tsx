@@ -37,6 +37,7 @@ import { Anchor, Button, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,
+  FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
   toFinetuningTypeFilterState,
   toSelectedFinetuningTypes,
@@ -328,6 +329,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
             filter: {
               type: 'custom',
               label: 'Finetuning Type',
+              options: FINETUNING_TYPE_FILTER_OPTIONS,
               renderFilter: ({ setValue, value }) => (
                 <FinetuningTypeFilterField
                   value={toSelectedFinetuningTypes(value)}

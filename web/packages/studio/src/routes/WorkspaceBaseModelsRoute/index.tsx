@@ -46,6 +46,7 @@ import { getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
 import {
   CUSTOMIZABLE_FILTER_ID,
   FINE_TUNABLE_KEY,
+  isSupportedFilter,
   makeFilterColumns,
   toModelEntityFilter,
 } from '@studio/routes/WorkspaceBaseModelsRoute/filterColumns';
@@ -83,6 +84,12 @@ export const WorkspaceBaseModelsRoute: FC = () => {
   const dataViewState = useStudioDataViewState<Record<string, unknown>>({
     defaultSort: [{ id: 'name', desc: false }],
   });
+
+  const { set: setColumnFilters, state: columnFilters } = dataViewState.columnFiltering;
+  useEffect(() => {
+    if (columnFilters.every(isSupportedFilter)) return;
+    setColumnFilters(columnFilters.filter(isSupportedFilter));
+  }, [columnFilters, setColumnFilters]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [selectedModel, setSelectedModel] = useState<ModelEntity | null>(null);

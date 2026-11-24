@@ -14,12 +14,27 @@ export const FINE_TUNABLE_KEY = 'fine_tunable';
 
 /**
  * One "LoRA" filter for two API fields: `adapters` (trained adapters are attached to the model)
- * and `lora_enabled` (its latest deployment config can load adapters). Each checked option maps
- * to `field: true`.
+ * and `lora_enabled` (its latest deployment config can load adapters). Single-select, since the
+ * API can only AND them (`lora_enabled` must be a top-level equality), not OR them.
  */
 const LORA_FILTER_ID = 'lora';
 const LORA_ADAPTERS = 'adapters';
 const LORA_ENABLED = 'lora_enabled';
+// Adapters come from Customizer runs, so hide that option while it's disabled.
+const getLoraOptions = () => [
+  ...(CUSTOMIZER_ENABLED ? [{ value: LORA_ADAPTERS, label: 'Has adapters' }] : []),
+  { value: LORA_ENABLED, label: 'Serving enabled' },
+];
+
+/**
+ * Whether toModelEntityFilter applies this filter. Shared URLs can carry ones it ignores (e.g.
+ * Customizer-only filters while Customizer is disabled); drop those so no stale chip shows.
+ */
+export const isSupportedFilter = ({ id, value }: { id: string; value: unknown }) => {
+  if (id === CUSTOMIZABLE_FILTER_ID) return CUSTOMIZER_ENABLED;
+  if (id === LORA_FILTER_ID) return getLoraOptions().some((option) => option.value === value);
+  return true;
+};
 
 const toOptionalString = (value: unknown) =>
   typeof value === 'string' && value ? value : undefined;
@@ -34,21 +49,29 @@ const toOptionalString = (value: unknown) =>
 export const makeFilterColumns =
   (workspace: string): ComponentProps<typeof DataView.Root<ModelEntity>>['makeColumns'] =>
   ({ accessor }) => [
+    // Set by the toolbar's Fine-tunable checkbox; kept out of the panel, but labels its chip.
+    ...(CUSTOMIZER_ENABLED
+      ? [
+          accessor(() => '', {
+            id: CUSTOMIZABLE_FILTER_ID,
+            header: 'Fine-tunable',
+            enableSorting: false,
+            enableColumnFilter: false,
+            meta: {
+              filter: {
+                type: 'multi-select',
+                label: 'Fine-tunable',
+                options: [{ value: FINE_TUNABLE_KEY, label: 'Fine-tunable' }],
+              },
+            },
+          }),
+        ]
+      : []),
     accessor(() => '', {
       id: LORA_FILTER_ID,
       header: 'LoRA',
       enableSorting: false,
-      meta: {
-        filter: {
-          type: 'multi-select',
-          label: 'LoRA',
-          options: [
-            // Adapters come from Customizer runs, so hide that option while it's disabled.
-            ...(CUSTOMIZER_ENABLED ? [{ value: LORA_ADAPTERS, label: 'Has adapters' }] : []),
-            { value: LORA_ENABLED, label: 'Serving enabled' },
-          ],
-        },
-      },
+      meta: { filter: { type: 'single-select', label: 'LoRA', options: getLoraOptions() } },
     }),
     // `spec.family` is only set on models with a checkpoint fileset, once spec analysis has run.
     accessor(() => '', {
@@ -93,7 +116,7 @@ export const makeFilterColumns =
 
 /**
  * Builds the Models API filter from DataView column filter state and the name search:
- * Fine-tunable becomes `fileset: true`, LoRA options become booleans, and `family` / name become
+ * Fine-tunable becomes `fileset: true`, the LoRA option becomes a boolean, and `family` / name become
  * substring matches.
  */
 export const toModelEntityFilter = (
@@ -110,9 +133,8 @@ export const toModelEntityFilter = (
   if (CUSTOMIZER_ENABLED && customizable && Object.keys(customizable).length > 0) {
     filter.fileset = true;
   }
-  const loraOptions = lora && typeof lora === 'object' ? lora : {};
-  if (CUSTOMIZER_ENABLED && LORA_ADAPTERS in loraOptions) filter.adapters = true;
-  if (LORA_ENABLED in loraOptions) filter.lora_enabled = true;
+  if (CUSTOMIZER_ENABLED && lora === LORA_ADAPTERS) filter.adapters = true;
+  if (lora === LORA_ENABLED) filter.lora_enabled = true;
   const familyText = toOptionalString(family)?.trim();
   if (familyText) filter.family = { $like: familyText };
   const name = searchText?.trim();
