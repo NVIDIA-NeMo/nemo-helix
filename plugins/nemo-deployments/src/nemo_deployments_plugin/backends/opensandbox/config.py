@@ -69,6 +69,15 @@ class OpenSandboxExecutorConfig(BaseModel):
     request_timeout_seconds: float = Field(
         default=60.0, gt=0, description="Timeout for calls to the OpenSandbox server and to execd."
     )
+    create_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        description=(
+            "Timeout for the create-sandbox call. The OpenSandbox server holds the call until the sandbox pod "
+            "is running, for up to its kubernetes.sandbox_create_timeout_seconds, and then reports why the "
+            "pod did not start. Set this longer than that server setting."
+        ),
+    )
 
     def service_transport(self) -> EndpointTransport:
         """Transport for sandbox endpoints advertised by this executor."""

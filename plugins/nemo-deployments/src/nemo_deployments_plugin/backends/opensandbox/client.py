@@ -55,6 +55,7 @@ class OpenSandboxClient:
         self._server_base = f"{config.protocol}://{config.domain}"
         self._gateway_base = f"{config.protocol}://{config.gateway_address}"
         timeout = httpx.Timeout(config.request_timeout_seconds)
+        self._create_timeout = httpx.Timeout(config.create_timeout_seconds)
         self._server = httpx.AsyncClient(
             base_url=f"{self._server_base}/v1", headers={API_KEY_HEADER: api_key}, timeout=timeout
         )
@@ -77,7 +78,9 @@ class OpenSandboxClient:
     # -- lifecycle API ---------------------------------------------------------------------------
 
     async def create_sandbox(self, body: dict[str, Any]) -> dict[str, Any]:
-        response = await self._request(self._server, "POST", "/sandboxes", "create sandbox", json=body)
+        response = await self._request(
+            self._server, "POST", "/sandboxes", "create sandbox", json=body, timeout=self._create_timeout
+        )
         return response.json()
 
     async def list_sandboxes(self, metadata: dict[str, str]) -> list[dict[str, Any]]:

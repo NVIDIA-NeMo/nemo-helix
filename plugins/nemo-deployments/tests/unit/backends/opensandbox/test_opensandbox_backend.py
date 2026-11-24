@@ -259,6 +259,20 @@ async def test_server_errors_are_unknown_on_read_and_failed_on_create(
     assert (await _create(backend)).status == "FAILED"
 
 
+async def test_create_outlasts_the_request_timeout(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    osb.create_delay = 0.5
+    backend = _backend(osb, monkeypatch, request_timeout_seconds=0.1, create_timeout_seconds=5)
+    assert (await _create(backend)).status == "STARTING"
+
+
+async def test_create_fails_after_the_create_timeout(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    osb.create_delay = 0.5
+    backend = _backend(osb, monkeypatch, create_timeout_seconds=0.1)
+    created = await _create(backend)
+    assert created.status == "FAILED"
+    assert created.status_message == "create sandbox failed: ReadTimeout"
+
+
 async def test_launch_waits_for_execd(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _backend(osb, monkeypatch)
     await _create(backend)

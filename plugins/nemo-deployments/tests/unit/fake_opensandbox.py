@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -41,6 +42,7 @@ class FakeOpenSandbox:
     interrupted: list[str] = field(default_factory=list)
     probes: list[str] = field(default_factory=list)
     initial_state: str = "Running"
+    create_delay: float = 0.0
     server_status: int | None = None
     patch_status: int | None = None
     execd_status: int | None = None
@@ -99,6 +101,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(state.server_status, {"code": "BROKEN", "message": "server is broken"})
         if parts == ["sandboxes"] and self.command == "POST":
             request = json.loads(body)
+            time.sleep(state.create_delay)
             sandbox_id = state.add(request.get("metadata") or {}, state.initial_state)
             state.create_bodies.append({**request, "_id": sandbox_id})
             return self._send(202, state.sandboxes[sandbox_id])
