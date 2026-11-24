@@ -640,6 +640,8 @@ A failed row's `status_detail` starts with one of these:
 | --- | --- |
 | `not built: its build job ended (<status>) without publishing it: <reason>` | The job ended and the image wasn't completed. `<reason>` is the step's line for the image, or else Jobs' own message. In a set of many images, some rows have no reason |
 | `not built: its build job was not found (never created, or deleted)` | The row is five minutes old and has no job. Submit the next revision |
+| `not built: its build job could not be recorded on its images, and was cancelled` | The submit created the build's job but couldn't record it on the image's row, so it cancelled the job and answered `503` with `x-should-retry: false`. Sending the same request again returns these failed rows; submit the next revision |
+| `not built: its build job could not be recorded on its images, and could not be cancelled` | As above, but the cancel failed too, and the `503` names the job. Its step builds no image whose row is failed; cancel the job to stop any build it had already begun |
 | `not built: <set> revision <n> was already submitted under another backend` | Part of this revision was already submitted under the other backend, so the rows this request wrote were failed. Submit the next revision |
 | `not built: <set> revision <n> belongs to a different request` | Part of this revision is held by another request, so the rows this request wrote were failed. Submit the next revision |
 
