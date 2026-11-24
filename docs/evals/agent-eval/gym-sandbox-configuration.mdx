@@ -91,12 +91,14 @@ another.
 | `sandbox_host_provider_options` | `{}` | Provider-specific connection options. Helm supplies the OpenSandbox protocol separately. |
 | `sandbox_environment_sub_path` | `environment` | Read-only environment location within job storage. |
 | `sandbox_workspace_sub_path` | `workspace` | Read-write Gym workspace location within job storage. |
-| `sandbox_resources` | unset | CPU and memory requests for each Gym host. Set these on shared clusters. |
+| `sandbox_resources` | unset | CPU, memory and `ephemeral-storage` requests for each Gym host. Set these on shared clusters. |
 | `sandbox_policy_base_urls` | `[]` | Model or inference base URLs the Gym host may reach. |
 | `sandbox_egress_allow` | `[]` | Additional allowed destinations in `host:port` form. |
 | `sandbox_episode_backend` | `opensandbox` | Provider for nested episode sandboxes requested by an environment. |
 | `sandbox_allow_insecure_memory_backend` | `false` | Second opt-in required for the non-isolating local memory backend. |
 | `sandbox_approved_images` | `[]` | Images allowed for nested episode sandboxes. Empty rejects every episode request. |
+| `sandbox_container_storage_size` | unset | Docker-enabled image only: most its containers may store, such as `100Gi`. Unset means 30Gi. |
+| `sandbox_container_storage_discard` | `false` | Docker-enabled image only: return space freed by deleted images to the node during the job. |
 
 Evaluator requires at least one entry across `sandbox_policy_base_urls` and
 `sandbox_egress_allow`. The OpenSandbox provider applies a deny-by-default policy and adds the
@@ -285,8 +287,41 @@ platformConfig:
       - production.cloudfront.docker.com:443
 ```
 
-Container images are stored in a 30 GiB sparse file in the Gym host's ephemeral storage. GPU access
-is not supported yet.
+GPU access is not supported yet.
+
+### Container storage
+
+Images, containers and volumes live in one ext4 filesystem inside a sparse file in the Gym host's
+ephemeral storage. Its size is a ceiling for everything the job's rollouts pull and write together, not
+an allocation: until something is written, the file takes about 0.5% of its size on the node, mostly the
+filesystem's journal. It holds slightly less than its size, since ext4 keeps some for itself. The file
+lasts as long as the Gym host, so every job starts empty.
+
+```yaml
+platformConfig:
+  evals:
+    # The ceiling, as a Kubernetes quantity. Unset means 30Gi; the minimum is 1Gi.
+    sandbox_container_storage_size: 100Gi
+    # Give space freed by deleted images and containers back to the node during the job.
+    sandbox_container_storage_discard: true
+    # Reserve node disk for the host: the storage plus what the host writes outside it.
+    sandbox_resources:
+      cpu: "4"
+      memory: 16Gi
+      ephemeral-storage: 110Gi
+```
+
+- **Discard.** Without it, space freed inside the file stays allocated on the node until the Gym host
+  ends. With it, every delete also frees the space on the node, which costs some extra I/O.
+- **Reserving disk.** The size reserves nothing. Without an `ephemeral-storage` request, the scheduler
+  doesn't account for the host's disk use, and hosts that fill their storage can put a node under disk
+  pressure, where Kubernetes evicts pods. A request makes the scheduler place each host only where that
+  much disk is free, so it also limits how many hosts fit on a node. Requests are sent in whole GiB,
+  rounded up, and must not exceed an `ephemeral-storage` limit set in
+  `sandbox_host_provider_options.create.resource`.
+- **Images.** These settings need the Docker-enabled image, and a job is refused when they are set
+  with the default image or the local `docker` host provider. Upgrade the Evaluator and the Gym host
+  image together before setting them: an older Docker-enabled image ignores `discard`.
 
 To pull private images, create a NeMo Helix secret holding the registry token and pass it to the job
 through `env_secrets`, like any other job credential. Add the registry, and the host it redirects

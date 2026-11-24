@@ -9,7 +9,8 @@ from typing import Any, ClassVar, Literal, Self
 
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sandboxed_gym.quantity import quantity_bytes
 
 
 class HarborSandboxProfileConfig(BaseModel):
@@ -288,6 +289,11 @@ class TasksetRunsConfig(BaseModel):
         return self
 
 
+#: Smallest container storage an operator may configure. It catches a unit typo such as "30" (30 bytes); a real
+#: environment needs as much as its images unpack to.
+MIN_CONTAINER_STORAGE_BYTES = 2**30
+
+
 class EvaluatorConfig(NemoConfig):
     """Configuration namespace for the evals plugin."""
 
@@ -381,10 +387,24 @@ class EvaluatorConfig(NemoConfig):
     )
     sandbox_resources: dict[str, str] | None = Field(
         default=None,
-        description="Resource requests for the sandboxed Gym host, e.g. {'cpu': '2', 'memory': '8Gi'}. "
+        description="Resource requests for the sandboxed Gym host, e.g. {'cpu': '2', 'memory': '8Gi', "
+        "'ephemeral-storage': '40Gi'}. `ephemeral-storage` is sent as a request in whole GiB, rounded up. "
         "Left unset the host is scheduled with no request, which on a shared cluster means it competes "
         "unbounded and is first to be evicted. No default is guessed: a Gym host's footprint depends on "
         "the environment it runs.",
+    )
+    sandbox_container_storage_size: str | None = Field(
+        default=None,
+        description="For a Gym host image with a container engine: the most its containers, images and "
+        "volumes may store, as a Kubernetes quantity such as `100Gi`. The storage is a sparse file, so this "
+        "is a ceiling, not an allocation. Unset keeps the image's default of 30Gi. It does not reserve node "
+        "disk; set `ephemeral-storage` in `sandbox_resources` for that.",
+    )
+    sandbox_container_storage_discard: bool = Field(
+        default=False,
+        description="For a Gym host image with a container engine: mount its storage file with `discard`, "
+        "so space freed by deleting images or containers goes back to the node during the job instead of "
+        "when the host ends, at the cost of extra I/O on every delete.",
     )
     sandbox_policy_base_urls: tuple[str, ...] = Field(
         default=(),
@@ -404,6 +424,14 @@ class EvaluatorConfig(NemoConfig):
         "every episode create is refused, matching the broker's own closed default -- a run that needs "
         "episodes must be granted its images explicitly.",
     )
+
+    @field_validator("sandbox_container_storage_size")
+    @classmethod
+    def _container_storage_size_is_a_quantity(cls, value: str | None) -> str | None:
+        if value is not None and quantity_bytes(value) < MIN_CONTAINER_STORAGE_BYTES:
+            raise ValueError(f"sandbox_container_storage_size {value!r} is below the 1Gi minimum")
+        return value
+
     allow_insecure_cloudpickle_metrics: bool = Field(
         default=False,
         description="Accept and run cloudpickle metric bundles. A cloudpickle bundle is arbitrary Python "
