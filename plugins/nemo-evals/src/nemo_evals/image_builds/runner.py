@@ -24,6 +24,7 @@ from nemo_evals.harbor.archive_io import download_verified_async
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
+    BuildRefused,
     ImageBuilder,
     adopt_or_build,
     archive_source,
@@ -129,8 +130,10 @@ async def _build(
 
     build.status = "running"
     build.images = images
-    for image in images:
-        await _submit(builder, image, definition, rebuild=build.rebuild)
+    for image in _in_submit_order(images):
+        if not await _submit(builder, image, definition, rebuild=build.rebuild):
+            # The refused image has failed the build: the images left are not submitted, and stay pending.
+            break
     build = await entities.update(build)
 
     started = clock()
@@ -164,6 +167,15 @@ def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
                 f"{image.type} is pinned to {image.platform} by the task, and the request asks for {requested}",
             )
         image.platform = requested
+
+
+def _in_submit_order(images: list[BuildImage]) -> list[BuildImage]:
+    """The images in the order they are submitted: prebuilt ones first, then the rest, each in the plan's order.
+
+    A deployment that copies no image refuses a task that names one. Asking for the copies first has such a task
+    refused before any of its Dockerfile images starts building. The record keeps the plan's order.
+    """
+    return sorted(images, key=lambda image: image.image is None)
 
 
 def _settled(images: list[BuildImage]) -> bool:
@@ -237,19 +249,32 @@ async def downloaded_archive(files: AsyncFilesClient, source: HarborArchiveSourc
 
 async def _submit(
     builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool = False
-) -> None:
+) -> bool:
+    """Submit one image's build or copy and record where it stands; False when Builder refused the request itself.
+
+    The image then fails with Builder's own sentence, and the caller submits nothing more. Any other error the
+    client reports (a :class:`NemoClientError`) fails this image alone. Giving up on a build other requests keep
+    submitting (:func:`adopt_or_build`) is not caught: it is raised, and the build then fails as a
+    ``task-builder error`` with no images recorded.
+    """
     try:
         if image.image is not None:
             builder_image = await _submit_copy(builder, image)
         else:
             builder_image = await _submit_build(builder, image, definition, rebuild=rebuild)
+    except BuildRefused as exc:
+        logger.info("Submitting nothing after %s: %s", image.type, exc)
+        image.status = "failed"
+        image.error = f"Builder refused the build: {exc.detail}"
+        return False
     except NemoClientError as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"
-        return
+        return True
     image.builder_image = builder_image.name
     image.build_job = builder_image.provenance.job.rpartition("/")[2]
     apply_builder_image(image, builder_image)
+    return True
 
 
 async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerImage:

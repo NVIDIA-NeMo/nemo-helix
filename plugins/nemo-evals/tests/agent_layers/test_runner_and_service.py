@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from nemo_builder_plugin.entities import (
     IN_CLUSTER_BACKEND,
@@ -37,6 +38,7 @@ from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.planning import ImagePlanError
 from nemo_evals.image_builds.service import BuildJob
 from nemo_evals.jobs.agent_layer_build import INSTALLER_ARCHIVE, agent_layer_build_job_request, is_job_for
+from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
@@ -413,6 +415,26 @@ async def test_a_compose_task_gets_no_layer(entity_store, store_task, monkeypatc
     layer = await _run(entity_store, spec, _Builder(), _Files(), tmp_path)
 
     assert layer.status == "failed" and "compose" in (layer.error or "")
+
+
+async def test_a_layer_builder_refuses_fails_with_the_build_it_refused_and_its_sentence(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """A layer is one image, so a refusal fails the layer itself, worded as any error of its submit is."""
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    spec, _ = await _requested(entity_store, store_task)
+
+    class _Refusing(_Builder):
+        async def submit(self, **request: Any):
+            body = {"detail": "this backend takes no mounts", "code": "backend_rejected"}
+            raise ConflictError(httpx.Response(409, json=body))
+
+    layer = await _run(entity_store, spec, _Refusing(), _Files(), tmp_path)
+
+    assert (layer.status, layer.image) == ("failed", None)
+    assert layer.error is not None
+    assert layer.error.startswith("agent-layer error: Builder refused build harbor-agent-")
+    assert layer.error.endswith("-1: this backend takes no mounts")
 
 
 async def test_a_request_starts_the_layers_job_once(entity_store, store_task) -> None:

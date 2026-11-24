@@ -112,6 +112,17 @@ def _refuses_the_request(conflict: ConflictError) -> bool:
     return isinstance(code, str) and code in _REFUSALS
 
 
+class BuildRefused(RuntimeError):
+    """Builder refused the request for a build itself, and would refuse it under any revision.
+
+    ``detail`` is Builder's own sentence for why.
+    """
+
+    def __init__(self, build: str, detail: str) -> None:
+        super().__init__(f"Builder refused build {build}: {detail}")
+        self.detail = detail
+
+
 async def ensure_build(
     builder: ImageBuilder,
     *,
@@ -125,7 +136,8 @@ async def ensure_build(
     A pending revision whose job has ended, or has none, counts as failed: Builder leaves it pending for good.
     So does one Builder refuses as another request's: the same name can mean another platform once the
     deployment's default changes. And so does one submitted under another backend, after the deployment changed its
-    backend. A 409 by which Builder refuses the request itself, whatever its revision, is raised instead.
+    backend. A 409 by which Builder refuses the request itself, whatever its revision, is raised instead, as a
+    :class:`BuildRefused` with Builder's own detail.
     """
     newest: ContainerImage | None = None
     revision = 1
@@ -134,19 +146,41 @@ async def ensure_build(
         revision += 1
     if newest is not None and not await _abandoned(builder, newest):
         try:
-            return await builder.submit(
-                name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
+            return await _submit_unless_refused(
+                builder, name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
             )
-        except ConflictError as exc:
-            if _refuses_the_request(exc):
-                # Builder refuses the request itself, and would refuse it under any revision.
-                raise
+        except ConflictError:
             logger.info(
                 "Builder holds %s-%d for another request, or under another backend; submitting the next revision",
                 name,
                 revision - 1,
             )
-    return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform)
+    return await _submit_unless_refused(
+        builder, name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+    )
+
+
+async def _submit_unless_refused(
+    builder: ImageBuilder,
+    *,
+    name: str,
+    revision: int,
+    source: FileSetSource | ImageSource,
+    dockerfile: str | None,
+    platform: str | None,
+) -> SubmitBuildResponse:
+    """Submit one revision, raising a 409 by which Builder refuses the request itself as a :class:`BuildRefused`.
+
+    Builder says so by the 409's code. Any other 409 is raised as it is.
+    """
+    try:
+        return await builder.submit(
+            name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+        )
+    except ConflictError as exc:
+        if _refuses_the_request(exc):
+            raise BuildRefused(f"{name}-{revision}", exc.detail) from exc
+        raise
 
 
 #: Submits that may each lose a race for the next revision before :func:`adopt_or_build` gives up.
@@ -169,8 +203,8 @@ async def adopt_or_build(
     a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one, or one made
     before ``built_after``, gets the next revision. Builder refuses a revision another request holds, so a submit
     that loses that race reads the winner's build instead. A 409 by which Builder refuses the request itself
-    is reported as a refusal, with Builder's own detail, whether it says so by its code or leaves no row at the
-    revision.
+    is raised as a :class:`BuildRefused`, with Builder's own detail, whether it says so by its code or leaves no row
+    at the revision. Giving up on a build other requests keep submitting is not one.
     """
     for _ in range(_ADOPT_ATTEMPTS):
         newest, revision = await _newest(builder, name)
@@ -186,7 +220,7 @@ async def adopt_or_build(
             # wrote meanwhile must not hide a refusal of this one. A Builder that gives no code leaves no row
             # either: a lost race leaves the winner's revision behind; a refusal doesn't.
             if _refuses_the_request(exc) or await builder.get_image(f"{name}-{revision}") is None:
-                raise RuntimeError(f"Builder refused build {name}-{revision}: {exc.detail}") from exc
+                raise BuildRefused(f"{name}-{revision}", exc.detail) from exc
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
             continue
         return submitted.images[0]
