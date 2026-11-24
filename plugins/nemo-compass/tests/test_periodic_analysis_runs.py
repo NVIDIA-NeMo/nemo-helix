@@ -189,22 +189,17 @@ async def test_failed_status_write_prevents_submission(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("agent, expected", [("demo", True), ("another-agent", False)])
-@pytest.mark.parametrize("inline", [False, True], ids=["compass-analyst", "inline-analysis-run"])
-async def test_overlap_query_only_reads_active_jobs_and_matches_agent(agent, expected, inline) -> None:
+async def test_overlap_query_only_reads_active_jobs_and_matches_agent(agent, expected) -> None:
     controller, _, jobs = _controller()
 
     async def items():
-        if inline:
-            # An analysis-runs API job: inline, so it has no subject, only the tag.
-            yield SimpleNamespace(spec={}, custom_fields={"insights_analysis_agent": agent})
-        else:
-            yield _compass_run(agent)
+        yield _compass_run(agent)
 
     jobs.list_jobs.return_value = MagicMock(items=items)
     assert await controller._has_active_job(_config()) is expected
     query = json.loads(jobs.list_jobs.await_args.kwargs["query_params"]["filter"])
     assert set(query["status"]["$in"]) == {status.value for status in HelixJobStatus.non_terminals()}
-    assert query["source"] == {"$in": ["nemo-agents-plugin-execute", "insights"]}
+    assert query["source"] == "nemo-agents-plugin-execute"
     jobs.get_job.assert_not_awaited()
 
 

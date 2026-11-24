@@ -10825,7 +10825,6 @@ nemo compass [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `analysis`: Manage periodic agent analysis opt-in state.
-* `analysis-runs`: Submit and inspect on-demand analysis runs.
 
 #### nemo compass analysis
 
@@ -10925,125 +10924,6 @@ nemo compass analysis status [OPTIONS]
 **Pagination Options:**
 
 * `--all-pages`: Fetch all pages
-
-#### nemo compass analysis-runs
-
-Submit and inspect on-demand analysis runs.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `create`: Submit an analysis run for an agent.
-* `list`: List analysis runs.
-* `get`: Get one analysis run, joined with the live state of its...
-
-##### nemo compass analysis-runs create
-
-Submit an analysis run for an agent.
-
-The run is backed by an agents.execute job that shares its name.
-With `--wait`, exits non-zero if that job does not complete.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs create [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Name of the agent whose telemetry should be analyzed.
-* `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
-* `--fast-model`: Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.
-* `--since`: ISO-8601 lower bound enforced on Compass's trace/span reads.
-* `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
-* `--evaluation-id`: Restrict the run to spans from one evaluation.
-* `--timeout-seconds <FLOAT>`: Timeout applied to the backing execute-agent job.
-* `--wait`: Poll the run until its backing job reaches a terminal state.
-* `--poll-timeout <FLOAT>`: How long `--wait` polls before giving up. [default: 900.0]
-* `--poll-interval <FLOAT>`: Seconds between `--wait` polls. [default: 5.0]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
-
-##### nemo compass analysis-runs list
-
-List analysis runs. Job state is not joined — read one run to get it.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs list [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Only list runs that analyzed this agent.
-* `--workspace, -w`: Workspace to inspect. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--page <INTEGER>`: Page number (1-indexed). [default: 1]
-* `--page-size <INTEGER>`: Items per page. [default: 20]
-* `--sort`: Sort field; prefix with '-' for descending. [default: -created_at]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
-* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
-* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
-
-**Pagination Options:**
-
-* `--all-pages`: Fetch all pages
-
-##### nemo compass analysis-runs get
-
-Get one analysis run, joined with the live state of its backing job.
-
-A null job means submission never landed: no job exists under the
-run's name, and the run can be resubmitted.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs get [OPTIONS] NAME
-```
-
-**Arguments:**
-
-* `<NAME>`: Name of the analysis run.
-
-**Options:**
-
-* `--workspace, -w`: Workspace the run belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--wait`: Poll until the run's backing job reaches a terminal state.
-* `--poll-timeout <FLOAT>`: How long `--wait` polls before giving up. [default: 900.0]
-* `--poll-interval <FLOAT>`: Seconds between `--wait` polls. [default: 5.0]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ### nemo safe-synthesizer
 

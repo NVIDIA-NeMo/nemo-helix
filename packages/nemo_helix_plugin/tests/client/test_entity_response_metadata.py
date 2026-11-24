@@ -23,7 +23,7 @@ class MetadataWidget(NemoEntity, entity_type="response_metadata_widget"):
 
 
 class WidgetEnvelope(BaseModel):
-    """A response model that nests an entity, like ``AnalysisRunResponse.run``."""
+    """A response model that nests an entity under a field."""
 
     widget: MetadataWidget
     status: str
