@@ -8,6 +8,7 @@ from __future__ import annotations
 import collections
 import errno
 import filecmp
+import importlib.util
 import io
 import itertools
 import json
@@ -27,7 +28,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from types import FrameType, SimpleNamespace
+from types import FrameType, ModuleType, SimpleNamespace
 from typing import Any, NamedTuple, TypeVar, cast
 
 import httpx
@@ -5290,3 +5291,74 @@ class TestTheStepProgram:
             client_log.removeHandler(handler)
             client_log.propagate = True
         assert printed == ["sent Authorization: Bearer [credential]"]
+
+
+class TestTheKindE2EsStandIn:
+    """The step program ``e2e/test_builder_remote.py`` mounts into the remote-build step: a service that ends each
+    build as a file in its context says. That test runs only on a cluster, so a stand-in the driver refuses would
+    otherwise show only there, as a build that never becomes ready."""
+
+    @pytest.fixture
+    def step_program(self) -> ModuleType:
+        """The stand-in, loaded from where the e2e test reads it. A missing file fails."""
+        path = Path(__file__).resolve().parents[3] / "e2e/resources/builder_remote/remote_build_step.py"
+        spec = importlib.util.spec_from_file_location("remote_build_step", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_a_ready_outcome_completes_the_row_with_the_reported_digest_and_handle(
+        self, step_program: ModuleType, context: Path, tmp_path: Path
+    ) -> None:
+        """The stand-in's reference passes the driver's own check of where an image was published, and at what."""
+        outcome = {"outcome": "ready", "digest": DIGEST, "image_id": "e2e-image-1"}
+        (context / step_program.OUTCOME_FILE).write_text(json.dumps(outcome))
+        builder = FakeBuilder()
+
+        assert _run(step_program.make_service(_config(), None), builder, context, tmp_path) == 0
+
+        build_id = f"{step_program.BUILD_ID_PREFIX}{idempotency_key(ATTEMPT, 'demo-1')[:16]}"
+        handle = ExternalImage(image_id="e2e-image-1", build_id=build_id, attributes={"stand-in": "true"})
+        assert builder.completed == [("demo-1", DIGEST, handle)]
+
+    def test_a_failed_outcome_logs_the_reason_on_the_line_settling_reads(
+        self, step_program: ModuleType, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The reason the e2e test looks for on the failed row is the one line the step logs for the image."""
+        outcome = {"outcome": "failed", "reason": "stand-in-refused-1234"}
+        (context / step_program.OUTCOME_FILE).write_text(json.dumps(outcome))
+        builder = FakeBuilder()
+
+        with caplog.at_level(logging.ERROR):
+            assert _run(step_program.make_service(_config(), None), builder, context, tmp_path) == 1
+
+        assert builder.completed == []
+        build_id = f"{step_program.BUILD_ID_PREFIX}{idempotency_key(ATTEMPT, 'demo-1')[:16]}"
+        found = [match.groups() for line in _marked_lines(caplog.text) if (match := _FAILURE_LINE.match(line))]
+        assert found == [("demo-1", f"the build service reports it failed: stand-in-refused-1234 [build {build_id}]")]
+
+    def test_a_held_build_is_cancelled_once_the_job_is_told_to_stop(
+        self, step_program: ModuleType, context: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """What the e2e test's cancelled build rests on. On the cluster, Jobs may keep none of a cancelled step's
+        log, so only here is the line it ends on read every time."""
+        (context / step_program.OUTCOME_FILE).write_text(json.dumps({"outcome": "hang"}))
+        service = step_program.make_service(_config(), None)
+        builder = FakeBuilder()
+        clock = FakeClock()
+
+        def told_to_stop() -> bool:
+            """After two polls, by the clock: the stand-in keeps no count of its polls, as a ``FakeService`` does."""
+            return clock.now >= 2 * POLL_SECONDS
+
+        with caplog.at_level(logging.ERROR):
+            assert _run(service, builder, context, tmp_path, clock=clock, cancelled=told_to_stop) == 1
+
+        assert builder.completed == []
+        # Held, poll after poll, until the stop: at a stage the driver didn't know, the build would end at the first.
+        assert clock.sleeps == [POLL_SECONDS] * 2
+        # The stand-in took the cancel: what follows the reason says nothing of a build left running.
+        build_id = f"{step_program.BUILD_ID_PREFIX}{idempotency_key(ATTEMPT, 'demo-1')[:16]}"
+        found = [match.groups() for line in _marked_lines(caplog.text) if (match := _FAILURE_LINE.match(line))]
+        assert found == [("demo-1", f"{STOPPED} [build {build_id}]")]

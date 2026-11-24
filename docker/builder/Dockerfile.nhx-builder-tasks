@@ -90,10 +90,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
     VIRTUAL_ENV=/app/.venv \
     PYTHONUNBUFFERED=1
 
-# A missing dependency fails the build rather than a job.
+# A missing dependency fails the build rather than a job. `run.remote` is none of this image's own steps: the Kind
+# e2e of the remote backend (e2e/test_builder_remote.py) runs the remote-build step's driver in this image.
 FROM runtime AS smoke-test
 RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push' \
-    && python -c 'import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push' \
+    && python -c 'import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push, nemo_builder_plugin.run.remote' \
     && crane version
 
 FROM runtime

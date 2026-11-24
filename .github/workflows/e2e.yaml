@@ -425,17 +425,87 @@ jobs:
             --no-cov \
             --junitxml=report-kubernetes-builder-e2e.xml
 
-          # A skipped test here means a marker or feature selected the wrong tests, so it fails the job.
-          python3 - <<'EOF'
+      # builder.backend is one setting for the whole deployment, so the remote backend is tested on this same
+      # release, upgraded in place once the in-cluster tests have passed, and not on a cluster of its own. With
+      # auth off only: with auth on, a remote build needs workload token exchange, which no Kind values file
+      # turns on, or a setting that accepts completions nothing can verify.
+      #
+      # Keep in step with the "Install NeMo Helix" step of .github/actions/setup-kind-cluster, which installed
+      # this release, and with the helm-extra-args the setup step above gave it: the same install, plus one
+      # values file. The script upgrades with what it is handed and reuses no values, so anything the install
+      # passed and this step doesn't is dropped from the release. Whatever isn't set here is the install
+      # script's own default. tests/auth_idp/static/test_authentik_kubernetes_demo.py holds the two together.
+      - name: Switch the builder to the remote backend
+        if: matrix.auth == 'off'
+        shell: bash
+        env:
+          NAMESPACE: nemo-helix
+          NHX_E2E_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          HELM_VALUES: e2e/k8s/values/kind.yaml
+          HELM_EXTRA_ARGS: >-
+            -f e2e/k8s/values/builder.yaml
+            --set-file builder.devRegistry.password=${{ runner.temp }}/builder-registry-password
+            -f e2e/k8s/values/builder-remote.yaml
+          REQUIRE_NHX_E2E_IMAGES: "true"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Render first: values the chart can't render then fail here, as that, and not as a failed upgrade.
+          read -r -a helm_extra_args <<< "${HELM_EXTRA_ARGS}"
+          helm template nemo-helix k8s/helm -n "${NAMESPACE}" -f "${HELM_VALUES}" "${helm_extra_args[@]}" > /dev/null
+          e2e/k8s/scripts/install_helm_e2e.sh
+          # The script's readiness check passes while a Deployment still has a ready pod of the old revision,
+          # which would go on building in the cluster. Wait for every rollout to finish.
+          kubectl -n "${NAMESPACE}" get deployments -l app.kubernetes.io/instance=nemo-helix -o name \
+            | xargs -r -n 1 kubectl -n "${NAMESPACE}" rollout status --timeout=10m
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          e2e/k8s/scripts/wait_for_api.sh "${NHX_E2E_CLUSTER_URL}/cluster-info" 120
+
+      - name: Run remote builder e2e tests
+        if: matrix.auth == 'off'
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+          NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
+          NHX_E2E_KUBE_NAMESPACE: nemo-helix
+        run: |
+          set -euo pipefail
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+
+          uv run --frozen pytest \
+            e2e/test_builder_remote.py \
+            -v \
+            --feature builder-remote \
+            --run-e2e \
+            --no-cov \
+            --junitxml=report-kubernetes-builder-remote-e2e.xml
+
+      # A skipped test means a marker or feature selected the wrong tests, so it fails the job.
+      - name: Check that no builder e2e test was skipped
+        shell: bash
+        env:
+          AUTH: ${{ matrix.auth }}
+        run: |
+          set -euo pipefail
+          reports=(report-kubernetes-builder-e2e.xml)
+          if [ "${AUTH}" = "off" ]; then
+            reports+=(report-kubernetes-builder-remote-e2e.xml)
+          fi
+          python3 - "${reports[@]}" <<'EOF'
+          import sys
           import xml.etree.ElementTree as ET
 
-          root = ET.parse("report-kubernetes-builder-e2e.xml").getroot()
-          suites = [root] if root.tag == "testsuite" else list(root)
-          tests = sum(int(suite.get("tests", 0)) for suite in suites)
-          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
-          if tests == 0 or skipped:
-              raise SystemExit(f"builder e2e ran {tests} tests and skipped {skipped}: expected none skipped")
-          print(f"builder e2e: {tests} tests, none skipped")
+          for report in sys.argv[1:]:
+              root = ET.parse(report).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root)
+              tests = sum(int(suite.get("tests", 0)) for suite in suites)
+              skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
+              if tests == 0 or skipped:
+                  raise SystemExit(f"{report}: ran {tests} tests and skipped {skipped}: expected none skipped")
+              print(f"{report}: {tests} tests, none skipped")
           EOF
 
       - name: Finalize Kind builder e2e
@@ -444,7 +514,7 @@ jobs:
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-builder-e2e-auth-${{ matrix.auth }}-kubernetes-artifacts
-          junit-report: report-kubernetes-builder-e2e.xml
+          junit-report: report-kubernetes-builder-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
 
   kind-network-policy-smoke:

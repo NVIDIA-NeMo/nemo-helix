@@ -13,8 +13,9 @@ the cluster build its images: see
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
 listed below. That is the in-cluster build. Building through a service outside the cluster has run
-only in this plugin's tests, against a stand-in for a build service: this repository holds no
-service's client or step image, and that path has not been run on a cluster.
+in this plugin's tests and on a Kind cluster, with platform auth off, both against a stand-in for a
+build service: this repository holds no service's client or step image, and that path has not been
+run against a real build service.
 
 ## Quickstart (minikube)
 
@@ -1511,9 +1512,14 @@ uv run --frozen ruff check plugins/nemo-builder && uv run --frozen ty check plug
 The tests need no cluster, registry or running platform.
 
 `e2e/test_builder.py` does: CI's `kind-builder-e2e` job runs it on kind, once with platform auth off and once
-with it on, after a merge to `main` or on a manual run of `ci.yaml`, not on pull requests. It builds two
-images, checks them with crane and cosign, and with auth on checks who may complete an image. Its docstring
-lists what it needs to run against another cluster.
+with it on, after a merge to `main`, on a manual run of `e2e.yaml`, or on a pull request labelled `e2e`. It
+builds two images, checks them with crane and cosign, and with auth on checks who may complete an image. Its
+docstring lists what it needs to run against another cluster.
+
+`e2e/test_builder_remote.py` needs a cluster too: one whose platform, with auth off, is upgraded with
+`e2e/k8s/values/builder-remote.yaml`. It is run with `--feature builder-remote`. The same job runs it once the
+tests above have passed, on its auth-off run only, against a stand-in for a build service: the remote-build
+step runs a program from a ConfigMap the test creates, which builds and publishes nothing.
 
 | File | What it holds |
 |---|---|
