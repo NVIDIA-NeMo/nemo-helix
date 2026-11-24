@@ -486,12 +486,12 @@ The build context is selected automatically:
 The complete context is copied to `/workspace`, so files referenced relative to
 `agent.yaml` retain the same relationship inside the image.
 
-Each `skills.paths` entry must:
+Each `skills.paths` or `skills.directories` source must:
 
 - Be relative to `agent.yaml`.
 - Resolve inside the selected build context.
 - Reference a directory.
-- Contain a readable `SKILL.md`.
+- Contain a readable `SKILL.md`, or immediate child skill directories for a folder source.
 
 #### Flag reference
 
