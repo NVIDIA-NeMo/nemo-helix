@@ -73,11 +73,18 @@ def emit_command_invoked(task_status: TaskStatusEnum, duration_sec: float) -> No
         if not (state.started and state.command_parts):
             # Bare ``--help`` and usage errors before a command resolves never emit.
             return
+        from nemo_helix_plugin.telemetry.events import command_tool_category, invocation_origin
+
         from nemo_helix_ext.cli.telemetry.emit import emit_event
         from nemo_helix_ext.cli.telemetry.events import CommandInvokedEvent
 
+        command = " ".join(state.command_parts)
+        origin = invocation_origin()
         event = CommandInvokedEvent(
-            command=" ".join(state.command_parts),
+            command=command,
+            invocation_origin=origin,
+            agent_mode=origin == "agent",
+            tool_category=command_tool_category(command),
             duration_sec=max(0.0, duration_sec),
             task_status=task_status,
         )
