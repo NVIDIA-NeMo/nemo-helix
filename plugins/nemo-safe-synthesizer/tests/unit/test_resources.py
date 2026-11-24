@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoTransportError, UnprocessableEntityError
+from nemo_safe_synthesizer.config.evaluation_report_data import EvaluationReportData
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 from nemo_safe_synthesizer_plugin.sdk.resources import (
@@ -298,19 +299,24 @@ def test_safe_synthesizer_job_fetch_summary_parses_json() -> None:
 
 def test_safe_synthesizer_job_fetch_report_data_parses_json() -> None:
     mock_jobs = MagicMock()
-    mock_jobs.download_job_result.return_value = _binary_resp(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "components": {
-                    "synthetic_quality_score": {
-                        "name": "Synthetic Quality Score",
-                        "score": {"grade": "Good", "score": 7.1},
-                    }
-                },
-            }
-        ).encode()
-    )
+    payload = {
+        **dict.fromkeys(EvaluationReportData.model_fields),
+        "schema_version": 1,
+        "library_version": "test",
+        "sections": {
+            "synthetic_quality": True,
+            "data_privacy": False,
+            "transformed_columns": False,
+            "time_series": False,
+        },
+        "differential_privacy": {"enabled": False, "epsilon": None, "delta": None},
+        "tooltips": {},
+        "synthetic_quality_score": {
+            "name": "Synthetic Quality Score",
+            "score": {"raw_score": 7.1, "score": 7.1, "grade": "Very Good", "notes": None},
+        },
+    }
+    mock_jobs.download_job_result.return_value = _binary_resp(json.dumps(payload).encode())
     job = _make_job(mock_jobs)
 
     report_data = job.fetch_report_data()
@@ -318,7 +324,8 @@ def test_safe_synthesizer_job_fetch_report_data_parses_json() -> None:
     mock_jobs.download_job_result.assert_called_once_with(
         name="evaluation-report-data", job="platform-job-original", workspace="default"
     )
-    assert report_data.components["synthetic_quality_score"].score.score == 7.1
+    assert report_data.synthetic_quality_score is not None
+    assert report_data.synthetic_quality_score.score.score == 7.1
 
 
 def test_safe_synthesizer_job_fetch_logs_follows_pagination() -> None:

@@ -33,10 +33,10 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_safe_synthesizer.config.evaluation_report_data import EvaluationReportData
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
 from nemo_safe_synthesizer_plugin.config import config as plugin_config
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig, parse_pretrained_model_job_ref
-from nemo_safe_synthesizer_plugin.report_data import REPORT_DATA_RESULT_NAME, SafeSynthesizerReportData
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -55,8 +55,8 @@ RESULT_ROUTES: list[HelixJobResultRoute] = [
         serializer=FileResultSerializer(),
     ),
     HelixJobResultRoute(
-        name=REPORT_DATA_RESULT_NAME,
-        serializer=PydanticResultSerializer(model=SafeSynthesizerReportData),
+        name="evaluation-report-data",
+        serializer=PydanticResultSerializer(model=EvaluationReportData),
     ),
     HelixJobResultRoute(
         name="adapter",

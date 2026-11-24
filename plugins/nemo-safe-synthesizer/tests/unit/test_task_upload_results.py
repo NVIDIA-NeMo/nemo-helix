@@ -14,7 +14,7 @@ from nemo_helix_plugin.jobs.constants import (
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
 )
-from nemo_safe_synthesizer_plugin.report_data import SafeSynthesizerReportData
+from nemo_safe_synthesizer.config.evaluation_report_data import REPORT_DATA_SCHEMA_VERSION, EvaluationReportData
 
 
 def import_task_main_without_heavy_runtime(monkeypatch):
@@ -62,6 +62,7 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
             model_dump=lambda: {"row_count": 1, "num_completion_tokens": 42},
         ),
         evaluation_report_html=None,
+        evaluation_report_data=None,
     )
 
     task_main.upload_results(result=result, adapter_path=adapter_path)
@@ -119,11 +120,31 @@ def _patch_upload_dependencies(task_main, monkeypatch):
     return jobs_client, uploaded
 
 
-def _evaluated_result():
+def _report_data() -> EvaluationReportData:
+    return EvaluationReportData.model_validate(
+        {
+            **dict.fromkeys(EvaluationReportData.model_fields),
+            "schema_version": REPORT_DATA_SCHEMA_VERSION,
+            "library_version": "test",
+            "job_id": "safe-synth-job",
+            "sections": {
+                "synthetic_quality": False,
+                "data_privacy": False,
+                "transformed_columns": False,
+                "time_series": False,
+            },
+            "differential_privacy": {"enabled": False, "epsilon": None, "delta": None},
+            "tooltips": {},
+        }
+    )
+
+
+def _evaluated_result(report_data: EvaluationReportData | None):
     return SimpleNamespace(
         synthetic_data=pd.DataFrame({"value": [1]}),
         summary=SimpleNamespace(num_completion_tokens=None, model_dump=lambda: {"row_count": 1}),
         evaluation_report_html="<html></html>",
+        evaluation_report_data=report_data,
     )
 
 
@@ -134,14 +155,10 @@ def _created_result_names(jobs_client) -> list[str]:
 def test_upload_results_uploads_report_data(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     jobs_client, uploaded = _patch_upload_dependencies(task_main, monkeypatch)
-    report = object()
-    report_data = SafeSynthesizerReportData(job_id="safe-synth-job")
-    build_report_data = MagicMock(return_value=report_data)
-    monkeypatch.setattr(task_main, "build_report_data", build_report_data)
+    report_data = _report_data()
 
-    task_main.upload_results(result=_evaluated_result(), report=report)
+    task_main.upload_results(result=_evaluated_result(report_data))
 
-    build_report_data.assert_called_once_with(report)
     assert _created_result_names(jobs_client) == [
         "synthetic-data",
         "summary",
@@ -155,12 +172,11 @@ def test_upload_results_uploads_report_data(monkeypatch):
     )
 
 
-def test_upload_results_skips_report_data_when_building_it_fails(monkeypatch):
+def test_upload_results_skips_report_data_when_the_library_has_none(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     jobs_client, uploaded = _patch_upload_dependencies(task_main, monkeypatch)
-    monkeypatch.setattr(task_main, "build_report_data", MagicMock(side_effect=TypeError("unserializable")))
 
-    task_main.upload_results(result=_evaluated_result(), report=object())
+    task_main.upload_results(result=_evaluated_result(None))
 
     assert _created_result_names(jobs_client) == ["synthetic-data", "summary", "evaluation-report"]
     assert "results/attempt-123/evaluation-report-data" not in uploaded
@@ -169,7 +185,6 @@ def test_upload_results_skips_report_data_when_building_it_fails(monkeypatch):
 def test_upload_results_keeps_the_adapter_when_the_report_data_upload_fails(tmp_path, monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     jobs_client, uploaded = _patch_upload_dependencies(task_main, monkeypatch)
-    monkeypatch.setattr(task_main, "build_report_data", MagicMock(return_value=SafeSynthesizerReportData()))
     file_manager = task_main.FilesetFileManager.return_value
     upload = file_manager.upload.side_effect
 
@@ -183,19 +198,7 @@ def test_upload_results_keeps_the_adapter_when_the_report_data_upload_fails(tmp_
     adapter_path.mkdir()
     (adapter_path / "adapter_config.json").write_text("{}", encoding="utf-8")
 
-    task_main.upload_results(result=_evaluated_result(), adapter_path=adapter_path, report=object())
+    task_main.upload_results(result=_evaluated_result(_report_data()), adapter_path=adapter_path)
 
     assert _created_result_names(jobs_client) == ["synthetic-data", "summary", "evaluation-report", "adapter"]
     assert "results/attempt-123/evaluation-report-data" not in uploaded
-
-
-def test_upload_results_skips_report_data_without_a_report(monkeypatch):
-    task_main = import_task_main_without_heavy_runtime(monkeypatch)
-    jobs_client, _ = _patch_upload_dependencies(task_main, monkeypatch)
-    build_report_data = MagicMock()
-    monkeypatch.setattr(task_main, "build_report_data", build_report_data)
-
-    task_main.upload_results(result=_evaluated_result())
-
-    build_report_data.assert_not_called()
-    assert "evaluation-report-data" not in _created_result_names(jobs_client)
