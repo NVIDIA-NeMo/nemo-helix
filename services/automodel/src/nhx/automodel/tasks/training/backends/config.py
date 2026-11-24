@@ -771,8 +771,9 @@ def _build_schedule(
         "local_batch_size": customizer_config.batch.micro_batch_size,
         "max_steps": max_steps,
         "num_epochs": epochs,
-        # On this signal Automodel saves a checkpoint, skips validation, and stops, on every rank.
-        # The pause poller sends it to global rank 0.
+        # Automodel installs a preemption handler for this signal. A pause sets that handler's flag on
+        # global rank 0, and at the next step Automodel saves a checkpoint, skips validation, and stops
+        # on every rank.
         "preemption_signal": PAUSE_SIGNAL.name,
     }
 
