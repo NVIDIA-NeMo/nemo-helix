@@ -8,8 +8,10 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from filesets import AsyncFilesetFileSystem, FilesetFileSystem
+from filesets import AsyncFilesetFileSystem, FilesetFileSystem, FilesetPathError, parse_fileset_ref
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nhx_evals_sdk.retrieval.beir import BeirDataset
 from pydantic import Field, RootModel
@@ -107,6 +109,31 @@ def download_dataset_sync(
 ) -> Path:
     """Download a FilesetRef dataset to a local directory using the sync client."""
     return _download_fileset_ref_sync(client, dataset, destination, recursive=recursive)
+
+
+async def require_dataset_accessible(client: AsyncHelixClient, dataset: FilesetRef, *, workspace: str) -> None:
+    """Fail fast when the caller cannot read a dataset fileset (or its concrete file).
+
+    Raises ``ValueError`` for a malformed or missing reference and ``PermissionError`` when the caller
+    may not read it, so a job is never accepted for a dataset it could only fail to download.
+    """
+    try:
+        fs_workspace, fs_name, path = parse_fileset_ref(dataset.root, workspace_fallback=workspace)
+    except FilesetPathError as exc:
+        raise ValueError(f"invalid dataset FileSet reference: {dataset.root!r}") from exc
+    qualified = f"{fs_workspace}/{fs_name}" + (f"#{path}" if path else "")
+    files_client = client_from_platform(client, AsyncFilesClient)
+    try:
+        await files_client.get_fileset(workspace=fs_workspace, name=fs_name)
+        if path and not is_fileset_glob_pattern(path):
+            response = await files_client.download_file(workspace=fs_workspace, name=fs_name, path=path)
+            async with response.stream(chunk_size=1) as chunks:
+                async for _ in chunks:
+                    break
+    except PermissionDeniedError as exc:
+        raise PermissionError(f"access denied to dataset {qualified}") from exc
+    except NotFoundError as exc:
+        raise ValueError(f"dataset {qualified} does not exist") from exc
 
 
 def load_beir_dataset(path: str | Path) -> BeirDataset:

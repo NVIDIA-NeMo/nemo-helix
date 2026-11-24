@@ -52,6 +52,9 @@ from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.commands import add_job_commands
+from nemo_helix_plugin.files.metadata import FilesetMetadata
+from nemo_helix_plugin.files.storage_config import LocalStorageConfig
+from nemo_helix_plugin.files.types import FilesetOutput, FilesetPurpose
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -1681,3 +1684,73 @@ def test_evaluate_job_rejects_unresolved_model_ref_on_cloudpickle_metric_before_
 
     with pytest.raises(ValueError, match="EvaluateSpec metric models must be resolved before run: default/judge"):
         _run_evaluate_job(config, tmp_path)
+
+
+def _fileset_response(request: httpx.Request) -> httpx.Response:
+    fileset = FilesetOutput(
+        id="fileset-qa",
+        workspace="default",
+        name="qa",
+        description="",
+        purpose=FilesetPurpose.DATASET,
+        storage=LocalStorageConfig(path="/data/qa"),
+        metadata=FilesetMetadata(),
+        custom_fields={},
+        project="",
+        created_at="2026-11-24T00:00:00Z",
+        updated_at="2026-11-24T00:00:00Z",
+    )
+    return httpx.Response(200, json=fileset.model_dump(mode="json"), request=request)
+
+
+def _files_sdk(handler: Callable[[httpx.Request], httpx.Response]) -> AsyncNemoClient:
+    return AsyncNemoClient(
+        base_url="http://platform.test",
+        workspace="default",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+
+async def _to_spec_with_dataset(sdk: AsyncNemoClient, dataset: str) -> object:
+    return await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {
+                "metrics": [
+                    _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.model_output}}"))
+                ],
+                "dataset": dataset,
+            }
+        ),
+        workspace="default",
+        entity_client=None,
+        async_sdk=sdk,
+        is_local=False,
+    )
+
+
+@pytest.mark.parametrize("missing", ["fileset", "file"])
+async def test_to_spec_rejects_a_dataset_deleted_before_submit(missing: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if missing == "fileset" or request.url.path.endswith("/-/samples.jsonl"):
+            return httpx.Response(404, json={"detail": "not found"}, request=request)
+        return _fileset_response(request)
+
+    with pytest.raises(ValueError, match=r"dataset default/qa#samples.jsonl does not exist"):
+        await _to_spec_with_dataset(_files_sdk(handler), "default/qa#samples.jsonl")
+
+
+async def test_to_spec_maps_an_unreadable_dataset_to_permission_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"detail": "forbidden"}, request=request)
+
+    with pytest.raises(PermissionError, match=r"access denied to dataset default/qa"):
+        await _to_spec_with_dataset(_files_sdk(handler), "default/qa#samples.jsonl")
+
+
+async def test_to_spec_accepts_a_dataset_that_exists() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/-/samples.jsonl"):
+            return httpx.Response(200, stream=httpx.ByteStream(b'{"a": 1}\n'), request=request)
+        return _fileset_response(request)
+
+    assert isinstance(await _to_spec_with_dataset(_files_sdk(handler), "default/qa#samples.jsonl"), EvaluateSpec)

@@ -21,7 +21,7 @@ import nemo_evals.shared.metric_bundles.inline  # noqa: F401
 from fastapi import HTTPException, status
 from nemo_evals.api.dependencies import delegated_service_client
 from nemo_evals.api.schemas import MetricInline
-from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
+from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync, require_dataset_accessible
 from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
     caller_model_read_authorizer,
@@ -388,6 +388,10 @@ class _EvaluateJobBase(NemoJob):
             if exc.status_code == status.HTTP_403_FORBIDDEN:
                 raise PermissionError(exc.detail) from exc
             raise
+        if async_sdk is not None and isinstance(submit_spec.dataset, FilesetRef):
+            # Checked as the caller so a dataset deleted (or unreadable) before submit is a 422/403 here
+            # rather than a job that only fails once it downloads the dataset.
+            await require_dataset_accessible(async_sdk, submit_spec.dataset, workspace=workspace)
         return EvaluateSpec(
             metrics=metrics,
             dataset=submit_spec.dataset,
