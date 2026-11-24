@@ -189,8 +189,14 @@ class RemoteBackend:
             raise BackendRejectedError(
                 f"Jobs execution profile cpu/{self._remote.profile} runs the remote-build step in the namespace of "
                 f"cpu/{name}, whose steps may create pods there. Under workload token exchange the builder relies "
-                "on nothing but Jobs creating pods where the remote-build step runs. Run the remote-build step "
-                "in a namespace of its own, where only Jobs creates pods"
+                "on nothing but Jobs creating pods where the remote-build step runs. "
+                + (
+                    # Naming one on the step alone would only be refused again, for the other's sake.
+                    "Neither profile names a namespace: name one on both, and give the remote-build step one of "
+                    "its own, where only Jobs creates pods"
+                    if step_namespace is None
+                    else "Run the remote-build step in a namespace of its own, where only Jobs creates pods"
+                )
             )
 
     def check(self, plan: BuildPlan) -> None:
