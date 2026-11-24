@@ -94,6 +94,10 @@ class ModelConfig(BaseModel):
         default=None,
         description="Architecture class name from the model spec.",
     )
+    tool_call_parser: str | None = Field(
+        default=None,
+        description="vLLM tool call parser from the model spec's tool_call_config, for GRPO rollouts.",
+    )
 
 
 class DPOConfig(BaseModel):
