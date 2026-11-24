@@ -2135,7 +2135,6 @@ components:
       properties:
         schema_version:
           type: integer
-          const: 1
           title: Schema Version
           default: 1
         library_version:

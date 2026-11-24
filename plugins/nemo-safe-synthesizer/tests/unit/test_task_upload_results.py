@@ -110,7 +110,7 @@ def _patch_upload_dependencies(task_main, monkeypatch):
     uploaded: dict[str, str] = {}
 
     def upload(local_path, remote_path):
-        uploaded[remote_path] = local_path.read_text(encoding="utf-8")
+        uploaded[remote_path] = local_path.read_text(encoding="utf-8") if local_path.is_file() else ""
         return f"test-workspace/job-results-safe-synth-job#{remote_path}"
 
     file_manager = MagicMock()
@@ -163,6 +163,29 @@ def test_upload_results_skips_report_data_when_building_it_fails(monkeypatch):
     task_main.upload_results(result=_evaluated_result(), report=object())
 
     assert _created_result_names(jobs_client) == ["synthetic-data", "summary", "evaluation-report"]
+    assert "results/attempt-123/evaluation-report-data" not in uploaded
+
+
+def test_upload_results_keeps_the_adapter_when_the_report_data_upload_fails(tmp_path, monkeypatch):
+    task_main = import_task_main_without_heavy_runtime(monkeypatch)
+    jobs_client, uploaded = _patch_upload_dependencies(task_main, monkeypatch)
+    monkeypatch.setattr(task_main, "build_report_data", MagicMock(return_value=SafeSynthesizerReportData()))
+    file_manager = task_main.FilesetFileManager.return_value
+    upload = file_manager.upload.side_effect
+
+    def upload_failing_for_report_data(local_path, remote_path):
+        if remote_path.endswith("evaluation-report-data"):
+            raise OSError("files service unavailable")
+        return upload(local_path, remote_path)
+
+    file_manager.upload.side_effect = upload_failing_for_report_data
+    adapter_path = tmp_path / "adapter"
+    adapter_path.mkdir()
+    (adapter_path / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+    task_main.upload_results(result=_evaluated_result(), adapter_path=adapter_path, report=object())
+
+    assert _created_result_names(jobs_client) == ["synthetic-data", "summary", "evaluation-report", "adapter"]
     assert "results/attempt-123/evaluation-report-data" not in uploaded
 
 

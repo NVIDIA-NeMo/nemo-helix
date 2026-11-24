@@ -147,13 +147,24 @@ def _load_local_dataset(path: str) -> pd.DataFrame:
     return cast(pd.DataFrame, hf_dataset.to_pandas())
 
 
-def _write_report_data(report: EvaluationReportLike, path: Path) -> bool:
+def _upload_report_data(
+    report: EvaluationReportLike,
+    *,
+    file_manager: FilesetFileManager,
+    client: NemoClient,
+    workspace: str,
+    job_id: str,
+    attempt_id: str,
+) -> None:
     try:
-        path.write_text(build_report_data(report).model_dump_json(), encoding="utf-8")
+        payload = build_report_data(report).model_dump_json()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_data_path = Path(temp_dir) / "report-data.json"
+            report_data_path.write_text(payload, encoding="utf-8")
+            artifact_url = file_manager.upload(report_data_path, f"results/{attempt_id}/{REPORT_DATA_RESULT_NAME}")
+        _create_job_result(client, workspace, job_id, attempt_id, REPORT_DATA_RESULT_NAME, artifact_url)
     except Exception:
-        logger.exception("Failed to build evaluation report data; skipping the %s result", REPORT_DATA_RESULT_NAME)
-        return False
-    return True
+        logger.exception("Failed to publish evaluation report data; skipping the %s result", REPORT_DATA_RESULT_NAME)
 
 
 def upload_results(
@@ -213,15 +224,20 @@ def upload_results(
             artifact_url = file_manager.upload(report_html_path, f"results/{attempt_id}/evaluation-report")
             _create_job_result(client, workspace, job_id, attempt_id, "evaluation-report", artifact_url)
 
-        report_data_path = temp_path / "report-data.json"
-        if report is not None and _write_report_data(report, report_data_path):
-            artifact_url = file_manager.upload(report_data_path, f"results/{attempt_id}/{REPORT_DATA_RESULT_NAME}")
-            _create_job_result(client, workspace, job_id, attempt_id, REPORT_DATA_RESULT_NAME, artifact_url)
-
     if adapter_path is not None and adapter_path.exists():
         embed_run_config_in_adapter(adapter_path)
         artifact_url = file_manager.upload(adapter_path, f"results/{attempt_id}/adapter")
         _create_job_result(client, workspace, job_id, attempt_id, "adapter", artifact_url)
+
+    if report is not None:
+        _upload_report_data(
+            report,
+            file_manager=file_manager,
+            client=client,
+            workspace=workspace,
+            job_id=job_id,
+            attempt_id=attempt_id,
+        )
 
 
 def _create_job_result(

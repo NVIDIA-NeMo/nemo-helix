@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import datetime
 import json
 import sys
 from types import ModuleType, SimpleNamespace
@@ -11,12 +12,14 @@ import pytest
 from nemo_safe_synthesizer.package_info import __version__ as nss_version
 from nemo_safe_synthesizer_plugin.report_data import (
     REPORT_DATA_SCHEMA_VERSION,
+    SafeSynthesizerReportData,
     build_report_data,
     evaluation_report_of,
     to_json_safe,
 )
 
 RENDERED_HTML = "<div>rendered plotly</div>"
+RAW_TRAINING_VALUE = "secret-ssn-123-45-6789@example.com"
 
 
 class FakeFigure:
@@ -30,6 +33,22 @@ class FakeFigure:
                 "layout": {"title": {"text": self.label}, "template": {"layout": {"font": {"size": 12}}}},
             }
         )
+
+
+def _field_features(raw_value: str) -> dict:
+    return {
+        "name": "email",
+        "type": "other",
+        "count": 1,
+        "unique_values_list": [raw_value],
+        "unique_count": 1,
+        "unique_percent": 100.0,
+        "missing_count": 0,
+        "missing_percent": 0.0,
+        "min_str_length": len(raw_value),
+        "max_str_length": len(raw_value),
+        "avg_str_length": float(len(raw_value)),
+    }
 
 
 def _score(grade: str = "Good", score: float | None = 7.0) -> dict:
@@ -117,7 +136,16 @@ def report():
             "score": _score(),
             "evaluation_fields": [
                 {"name": "age", "distribution_distance": 0.1, "column_statistics": None},
-                {"name": "email", "distribution_distance": float("nan"), "column_statistics": pii_column_statistics},
+                {
+                    "name": "email",
+                    "training_field_features": _field_features(RAW_TRAINING_VALUE),
+                    "synthetic_field_features": _field_features(RAW_TRAINING_VALUE),
+                    "training_distribution": {RAW_TRAINING_VALUE: 100.0},
+                    "synthetic_distribution": {RAW_TRAINING_VALUE: 100.0},
+                    "distribution_distance": float("nan"),
+                    "distribution_stability": None,
+                    "column_statistics": pii_column_statistics,
+                },
             ],
             "column_statistics": {"email": pii_column_statistics},
             "figures": [{"name1": "age", "name2": "email", "figure": RENDERED_HTML}],
@@ -262,6 +290,55 @@ def test_build_report_data_emits_strict_json(report, fake_figure_modules):
     assert components["dataset_statistics"]["training_rows"] == 100
     assert components["column_distribution_stability"]["evaluation_fields"][1]["distribution_distance"] is None
     assert components["autocorrelation_similarity"]["details"]["profiles"][0]["acf"] == [1.0, None]
+
+
+def test_build_report_data_keeps_raw_training_values_out(report, fake_figure_modules):
+    payload = build_report_data(report).model_dump(mode="json")
+    email_field = payload["components"]["column_distribution_stability"]["evaluation_fields"][1]
+
+    assert RAW_TRAINING_VALUE not in json.dumps(payload)
+    assert email_field == {
+        "name": "email",
+        "distribution_distance": None,
+        "distribution_stability": None,
+        "training_field_features": {
+            "type": "other",
+            "count": 1,
+            "unique_count": 1,
+            "unique_percent": 100.0,
+            "missing_count": 0,
+            "missing_percent": 0.0,
+            "avg_str_length": 34.0,
+        },
+        "synthetic_field_features": email_field["training_field_features"],
+        "column_statistics": {
+            "assigned_type": "email",
+            "detected_entity_counts": {"email": 3},
+            "is_transformed": True,
+            "transform_functions": ["fake", "hash"],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (np.datetime64("2026-01-02T03:04:05"), "2026-01-02T03:04:05"),
+        (pd.Timestamp("2026-01-02T03:04:05"), "2026-01-02T03:04:05"),
+        (np.timedelta64(90, "s"), "P0DT0H1M30S"),
+        (pd.Timedelta(np.timedelta64(5400, "s")), "P0DT1H30M0S"),
+        (datetime.timedelta(seconds=5), "P0DT0H0M5S"),
+        (np.datetime64("NaT", "s"), None),
+        (np.timedelta64("NaT", "s"), None),
+        (pd.NaT, None),
+    ],
+)
+def test_to_json_safe_writes_dates_and_durations_as_iso_strings(value, expected):
+    assert to_json_safe(value) == expected
+
+
+def test_report_data_accepts_newer_schema_versions():
+    assert SafeSynthesizerReportData.model_validate({"schema_version": 2}).schema_version == 2
 
 
 def test_to_json_safe_rejects_unknown_types():

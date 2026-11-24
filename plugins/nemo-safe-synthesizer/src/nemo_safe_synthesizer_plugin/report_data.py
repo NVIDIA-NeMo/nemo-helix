@@ -3,8 +3,6 @@
 
 """Structured data behind the Safe Synthesizer evaluation report, for rendering it outside the HTML template."""
 
-from __future__ import annotations
-
 import datetime
 import importlib
 import json
@@ -12,7 +10,7 @@ import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
@@ -20,10 +18,36 @@ from nemo_safe_synthesizer.package_info import __version__ as nss_version
 from pydantic import BaseModel, ConfigDict, Field
 
 REPORT_DATA_RESULT_NAME = "evaluation-report-data"
-REPORT_DATA_SCHEMA_VERSION: Literal[1] = 1
+REPORT_DATA_SCHEMA_VERSION = 1
 
 _RENDERED_HTML_KEYS = frozenset({"figure", "figure_overview", "figures", "html", "template"})
 _PII_VALUE_KEYS = frozenset({"detected_entity_values"})
+
+# Field profiles also hold every distinct raw training value, so only the keys the report shows are kept.
+_EVALUATION_FIELD_KEYS = (
+    "name",
+    "distribution_distance",
+    "distribution_stability",
+    "training_field_features",
+    "synthetic_field_features",
+    "column_statistics",
+)
+_FIELD_FEATURE_KEYS = (
+    "type",
+    "count",
+    "unique_count",
+    "unique_percent",
+    "missing_count",
+    "missing_percent",
+    "avg_str_length",
+)
+_COLUMN_STATISTICS_KEYS = (
+    "assigned_type",
+    "assigned_entity",
+    "detected_entity_counts",
+    "is_transformed",
+    "transform_functions",
+)
 
 _FIGURES_MODULE = "nemo_safe_synthesizer.evaluation.components.multi_modal_figures"
 _AUTOCORRELATION_FIGURES_MODULE = "nemo_safe_synthesizer.evaluation.components.autocorrelation_similarity_figures"
@@ -86,7 +110,7 @@ class ReportDifferentialPrivacy(BaseModel):
 class SafeSynthesizerReportData(BaseModel):
     """Everything the Safe Synthesizer Quality & Privacy report shows, keyed by component."""
 
-    schema_version: Literal[1] = REPORT_DATA_SCHEMA_VERSION
+    schema_version: int = REPORT_DATA_SCHEMA_VERSION
     library_version: str | None = Field(default=None, description="nemo-safe-synthesizer version that built it.")
     job_id: str | None = None
     flags: ReportFlags = Field(default_factory=ReportFlags)
@@ -138,7 +162,11 @@ def _component_key(name: str) -> str:
 
 
 def _build_card(card_context: Mapping[str, Any], figures: list[FigureEntry]) -> ReportCard:
-    fields = {key: to_json_safe(value) for key, value in card_context.items() if key not in _RENDERED_HTML_KEYS}
+    fields = {
+        key: to_json_safe(_allowlisted(key, value))
+        for key, value in card_context.items()
+        if key not in _RENDERED_HTML_KEYS
+    }
     score = card_context["score"]
     fields["score"] = to_json_safe({key: value for key, value in score.items() if key != "figure"})
 
@@ -151,6 +179,32 @@ def _build_card(card_context: Mapping[str, Any], figures: list[FigureEntry]) -> 
         {**row_extras.get(title, {}), "title": title, "figure": figure_to_json(figure)} for title, figure in figures
     ]
     return ReportCard.model_validate(fields)
+
+
+def _allowlisted(key: str, value: Any) -> Any:
+    if key == "evaluation_fields":
+        return [_evaluation_field(field) for field in value or []]
+    if key == "column_statistics":
+        return {column: _pick(statistics, _COLUMN_STATISTICS_KEYS) for column, statistics in (value or {}).items()}
+    return value
+
+
+def _evaluation_field(field: Mapping[str, Any]) -> dict[str, Any] | None:
+    picked = _pick(field, _EVALUATION_FIELD_KEYS)
+    if picked is None:
+        return None
+    for features_key in ("training_field_features", "synthetic_field_features"):
+        if features_key in picked:
+            picked[features_key] = _pick(picked[features_key], _FIELD_FEATURE_KEYS)
+    if "column_statistics" in picked:
+        picked["column_statistics"] = _pick(picked["column_statistics"], _COLUMN_STATISTICS_KEYS)
+    return picked
+
+
+def _pick(value: Mapping[str, Any] | None, keys: Sequence[str]) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {key: value[key] for key in keys if key in value}
 
 
 def figure_to_json(figure: Any) -> dict[str, Any]:
@@ -174,6 +228,16 @@ def to_json_safe(value: Any) -> Any:
         return [to_json_safe(item) for item in value]
     if isinstance(value, np.ndarray):
         return to_json_safe(value.tolist())
+    if isinstance(value, np.datetime64):
+        value = pd.Timestamp(value)
+    elif isinstance(value, (np.timedelta64, datetime.timedelta)):
+        value = pd.Timedelta(value)
+    if value is pd.NaT:
+        return None
+    if isinstance(value, pd.Timedelta):
+        return value.isoformat()
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
     if isinstance(value, np.generic):
         return to_json_safe(value.item())
     if isinstance(value, Enum):
@@ -182,8 +246,6 @@ def to_json_safe(value: Any) -> Any:
         return value if math.isfinite(value) else None
     if value is None or isinstance(value, (str, int, bool)):
         return value
-    if isinstance(value, (datetime.date, datetime.datetime, pd.Timestamp)):
-        return value.isoformat()
     raise TypeError(f"Cannot serialize {type(value).__name__} in evaluation report data")
 
 
