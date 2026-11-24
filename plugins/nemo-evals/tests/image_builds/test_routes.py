@@ -298,6 +298,42 @@ def test_a_build_whose_job_ended_without_a_result_is_failed_and_retried(client, 
     assert abandoned["error"] == f"task-builder job {first['job']} ended (error) without a result"
 
 
+@pytest.mark.parametrize(
+    ("asking", "answer"), [("client", "1"), ("remote_client", "2")], ids=["same-backend", "switched-to-remote"]
+)
+def test_a_build_its_job_settles_ready_as_it_is_failed_as_abandoned_answers_only_if_its_backend_matches(
+    request, store_task, entity_store, jobs, monkeypatch, asking: str, answer: str
+) -> None:
+    """The request finds the Job ended with no result and fails the build, while the Job's last write lands first.
+
+    The build then reads ready, with images the cluster built: an answer to a deployment that builds in the
+    cluster, and not to one that now builds remotely, which starts the next attempt, as for any ready build.
+    """
+    asking_client = request.getfixturevalue(asking)
+    digest = _store(store_task)
+    first = asking_client.post(f"{_BASE}/{digest}/image-builds").json()
+    jobs.statuses[first["job"]] = "completed"
+    real_update = entity_store.update
+
+    async def settled_first(entity, **kwargs):
+        if isinstance(entity, TaskImageBuildEntity) and entity.status == "failed" and entity.attempt == 1:
+            monkeypatch.setattr(entity_store, "update", real_update)
+            # The Job's write, from the record as the request read it: the request's own write is then stale.
+            settled = await entity_store.get(
+                TaskImageBuildEntity, name=entity.name, workspace=entity.workspace, parent=entity._parent
+            )
+            settled.status, settled.images = "ready", [_ready_image()]
+            await real_update(settled)
+        return await real_update(entity, **kwargs)
+
+    monkeypatch.setattr(entity_store, "update", settled_first)
+
+    again = asking_client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    assert again["id"] == answer
+    assert asking_client.get(f"{_BASE}/{digest}/image-builds/1").json()["status"] == "ready"
+
+
 def test_a_lost_job_is_created_again_on_the_next_request(client, store_task, jobs) -> None:
     digest = _store(store_task)
     jobs.refuse = InternalServerError(httpx.Response(500, json={"detail": "jobs is down"}))
