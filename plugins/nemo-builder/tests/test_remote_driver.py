@@ -31,7 +31,7 @@ from nemo_builder_plugin.run.remote import (
 )
 from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, ContextSource, RemoteBuildImage, RemoteBuildStepConfig
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.jobs.constants import NEMO_JOB_ATTEMPT_ID_ENVVAR, NEMO_JOB_UID_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR
 
 REPOSITORY = "reg.example.com/builds"
 DIGEST = "sha256:" + "a" * 64
@@ -122,7 +122,7 @@ def _image(name: str) -> RemoteBuildImage:
 
 
 def _driver(
-    service: RemoteBuildService, rows: FakeRows, *names: str, stop: FakeStop | None = None, attempt: str = "1"
+    service: RemoteBuildService, rows: FakeRows, *names: str, stop: FakeStop | None = None
 ) -> RemoteBuildDriver:
     stop = stop or FakeStop()
     return RemoteBuildDriver(
@@ -132,7 +132,6 @@ def _driver(
         RemoteBuildStepConfig(images=[_image(n) for n in names or ("a",)], build_timeout_seconds=60),
         workspace="default",
         job_uid="uid",
-        attempt_id=attempt,
         credential=CREDENTIAL,
         stop=stop,
         monotonic=lambda: stop.now,
@@ -153,7 +152,7 @@ def test_each_image_is_built_and_completed_at_its_digest(tmp_path: Path) -> None
         "reg.example.com/builds:default--b",
     ]
     assert len({build.key for build in service.builds}) == 2
-    assert service.builds[0].key == idempotency_key("uid", "1", "a") != idempotency_key("uid", "2", "a")
+    assert service.builds[0].key == idempotency_key("uid", "a") != idempotency_key("other-job", "a")
     assert service.named("cancel") == []
 
 
@@ -280,7 +279,6 @@ class TestStepMain:
         # And the redacting filters it adds to the root logger's handlers, pytest's own among them.
         request.addfinalizer(_remove_redacting_filters)
         monkeypatch.setenv(NEMO_JOB_UID_ENVVAR, "uid")
-        monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "1")
         seen: list[str | None] = []
 
         def make_service(step: RemoteBuildStepConfig, credential: str | None) -> FakeService:

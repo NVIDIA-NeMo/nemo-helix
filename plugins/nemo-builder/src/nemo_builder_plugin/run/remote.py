@@ -35,11 +35,7 @@ from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildImage, R
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.jobs.constants import (
-    EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
-    NEMO_JOB_ATTEMPT_ID_ENVVAR,
-    NEMO_JOB_UID_ENVVAR,
-)
+from nemo_helix_plugin.jobs.constants import EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, NEMO_JOB_UID_ENVVAR
 from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -61,7 +57,7 @@ class PermanentError(RemoteBuildError):
 
 @dataclass(frozen=True, slots=True)
 class RemoteBuild:
-    #: The same for every call of one image in one job attempt, and new on a rerun.
+    #: The same for every call of one image in one job, a rerun of the job included.
     key: str
     #: A gzipped tar of regular files and directories only, with ``Dockerfile`` at its root.
     context: Path
@@ -128,8 +124,8 @@ class ImageFailed(Exception):
     """One image was not built. The message is the reason, which may hold a service's words: redact it to log it."""
 
 
-def idempotency_key(job_uid: str, attempt_id: str, image: str) -> str:
-    return hashlib.sha256("\0".join((job_uid, attempt_id, image)).encode()).hexdigest()
+def idempotency_key(job_uid: str, image: str) -> str:
+    return hashlib.sha256("\0".join((job_uid, image)).encode()).hexdigest()
 
 
 class RemoteBuildDriver:
@@ -147,7 +143,6 @@ class RemoteBuildDriver:
         *,
         workspace: str,
         job_uid: str,
-        attempt_id: str,
         credential: str | None,
         stop: threading.Event,
         monotonic: Callable[[], float] = time.monotonic,
@@ -159,7 +154,6 @@ class RemoteBuildDriver:
         self._config = config
         self._workspace = workspace
         self._job_uid = job_uid
-        self._attempt_id = attempt_id
         self._credential = credential
         self._stop = stop
         self._monotonic = monotonic
@@ -206,7 +200,7 @@ class RemoteBuildDriver:
         except (ContextRefused, ArchiveRefused) as exc:
             raise ImageFailed(f"refusing the context: {exc}") from None
         build = RemoteBuild(
-            key=idempotency_key(self._job_uid, self._attempt_id, image.name),
+            key=idempotency_key(self._job_uid, image.name),
             context=context,
             platform=image.platform,
             target=f"{image.registry}/{image.repository}:{image.tag}",
@@ -339,9 +333,9 @@ def step_main(make_service: Callable[[RemoteBuildStepConfig, str | None], Remote
         logger.error("a credential secret is configured, but %s is unset or empty", REMOTE_CREDENTIAL_ENV)
         return 1
     workspace, _ = job_identity()
-    job_uid, attempt_id = os.environ.get(NEMO_JOB_UID_ENVVAR), os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR)
-    if not job_uid or not attempt_id:
-        logger.error("%s and %s must both be set", NEMO_JOB_UID_ENVVAR, NEMO_JOB_ATTEMPT_ID_ENVVAR)
+    job_uid = os.environ.get(NEMO_JOB_UID_ENVVAR)
+    if not job_uid:
+        logger.error("%s must be set", NEMO_JOB_UID_ENVVAR)
         return 1
     # As `service:builder`, acting for the submitter, as the in-cluster push step does.
     client = get_task_nemo_client("builder")
@@ -361,7 +355,6 @@ def step_main(make_service: Callable[[RemoteBuildStepConfig, str | None], Remote
         config,
         workspace=workspace,
         job_uid=job_uid,
-        attempt_id=attempt_id,
         credential=credential,
         stop=stop,
     )
