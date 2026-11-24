@@ -199,10 +199,9 @@ Unavailable MCP servers are skipped at runtime startup, and MCP tool errors are
 returned to the model. Fabric results report skipped servers under
 `output.mcp.unavailable_servers`; job results retain this in `fabric_result`.
 
-Fabric also loads skills directly from their configured directories. Conversation
-workspaces remain isolated, but skill files are shared and writable when their
-filesystem permissions allow it. Use read-only skill mounts if agents must not
-change them. For explicit sources and duplicate handling:
+Served Deep Agents with the default local filesystem backend get private skill
+copies per conversation. Restart the server to pick up source changes. Fabric
+handles loading and duplicate policies:
 
 ```yaml
 skills:

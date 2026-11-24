@@ -331,30 +331,116 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
         assert not (tmp_path / "workspace").exists()
 
 
-@pytest.mark.parametrize("skills", [{"paths": ["skills/review"]}, {"directories": [{"folder": "skills"}]}])
-def test_startup_preserves_skill_sources_with_private_workspaces(
+@pytest.mark.parametrize("policy", [None, "first_wins", "last_wins", "reject"])
+@pytest.mark.parametrize("overlapping", [False, True])
+def test_startup_copies_skill_sources_into_private_workspaces(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
-    skills: dict[str, Any],
+    policy: str | None,
+    overlapping: bool,
 ) -> None:
+    from nemo_fabric_adapter_contract.models import AgentSkillConfig
+    from nemo_fabric_adapters.common.lifecycle import LifecycleError
+    from nemo_fabric_adapters.deepagents.skills import plan_skills
+
+    asset = tmp_path / "asset.txt"
+    asset.write_text("original asset")
+    for name in ("skills", "other"):
+        bundle = tmp_path / name / "review"
+        bundle.parent.mkdir(parents=True)
+        if overlapping and name == "other":
+            bundle.symlink_to(tmp_path / "skills/review")
+            continue
+        bundle.mkdir()
+        (bundle / "SKILL.md").write_text(f"---\nname: review\ndescription: Review inputs\n---\n{name}\n")
+        (bundle / "asset.txt").symlink_to(asset)
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["skills"] = skills
-    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
+    sources = ["skills/review", "other"]
+    directories = [{"skill": "skills/review"}, {"folder": "other"}]
+    if overlapping:
+        sources.append("skills/review")
+        directories.append({"skill": "skills/review"})
+    config["skills"] = {"paths": sources} if policy is None else {"directories": directories, "duplicates": policy}
+    start_runtime = AsyncMock(
+        side_effect=lambda *args, **kwargs: SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED)
+    )
     fabric = Fabric()
     monkeypatch.setattr(fabric, "start_runtime", start_runtime)
+    config_path = _write_agent_config(tmp_path, config)
 
-    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+    app = create_fabric_serving_app(config_path)
     with TestClient(app) as client:
         app.state.session_manager._fabric = fabric
         assert client.portal is not None
-        session = client.portal.call(app.state.session_manager.open_session)
+        first = client.portal.call(app.state.session_manager.open_session)
         runtime_config = start_runtime.call_args.args[0]
-        assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
-        assert runtime_config.skills.model_dump(exclude_none=True) == app.state.agent_config.skills.model_dump(
-            exclude_none=True
+        assert tmp_path / runtime_config.environment.workspace == first.workspace_dir
+        skills = runtime_config.skills
+        paths = skills.paths if policy is None else [skills.directories[0].skill, skills.directories[1].folder]
+        copied = [Path(paths[0]), Path(paths[1]) / "review"]
+        assert all(path.resolve().is_relative_to(first.workspace_dir) for path in copied)
+        assert all((path / "asset.txt").read_text() == "original asset" for path in copied)
+        assert all(not (path / "asset.txt").is_symlink() for path in copied)
+        assert app.state.agent_config.skills.model_dump(exclude_unset=True) == config["skills"]
+        contract_skills = AgentSkillConfig.from_mapping(skills.model_dump(exclude_none=True))
+        if policy == "reject" and not overlapping:
+            with pytest.raises(LifecycleError):
+                plan_skills(contract_skills, first.workspace_dir)
+        else:
+            mounts = plan_skills(contract_skills, first.workspace_dir)
+            assert mounts.load is not None
+            selected = copied[0 if policy == "first_wins" else 1]
+            assert [skill.path for skill in mounts.load.selected] == [selected.resolve()]
+
+        original_manifest = (tmp_path / "skills/review/SKILL.md").read_text()
+        (copied[0] / "SKILL.md").write_text("conversation edit")
+        (copied[0] / "asset.txt").write_text("conversation edit")
+        if overlapping:
+            assert (copied[1] / "SKILL.md").read_text() == "conversation edit"
+        asset.write_text("source changed after startup")
+        second = client.portal.call(app.state.session_manager.open_session)
+        second_config = start_runtime.call_args.args[0]
+        second_source = Path(
+            second_config.skills.paths[0] if policy is None else second_config.skills.directories[0].skill
         )
+        assert second_source.is_relative_to(second.workspace_dir)
+        assert (second_source / "SKILL.md").read_text() == original_manifest
+        assert (tmp_path / "skills/review/SKILL.md").read_text() == original_manifest
+        assert (second_source / "asset.txt").read_text() == "original asset"
+        assert asset.read_text() == "source changed after startup"
+        baseline = app.state.workspace_baseline
+    assert not first.workspace_dir.exists()
+    assert not second.workspace_dir.exists()
+    assert not list(baseline.parent.glob("skills-*"))
+
+    restarted = create_fabric_serving_app(config_path)
+    with TestClient(restarted) as client:
+        restarted.state.session_manager._fabric = fabric
+        assert client.portal is not None
+        client.portal.call(restarted.state.session_manager.open_session)
+        refreshed = start_runtime.call_args.args[0].skills
+        source = Path(refreshed.paths[0] if policy is None else refreshed.directories[0].skill)
+        assert (source / "asset.txt").read_text() == "source changed after startup"
+        assert restarted.state.workspace_baseline == baseline
+
+
+def test_failed_skill_snapshot_cleans_up_partial_copy(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+) -> None:
+    (tmp_path / "SKILL.md").write_text("---\nname: root\ndescription: Root skill\n---\n")
+    config = _example_config()
+    config["harnesses"]["hermes"]["kind"] = "deepagents"
+    config["environment"] = {"workspace": "."}
+    config["skills"] = {"paths": [".", "missing"]}
+    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
+
+    with pytest.raises(FileNotFoundError), TestClient(app):
+        pass
+
+    assert not list((tmp_path / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
 
 
 @pytest.mark.parametrize("socket_fd", [None, 123])
