@@ -85,12 +85,12 @@ async def compile_merge(
         raise HelixJobCompilationError(f"Adapter '{spec.adapter}' was trained on '{adapter.model}', not '{base_ref}'.")
     if adapter.lora_config is None:
         raise HelixJobCompilationError(f"Adapter '{spec.adapter}' is not a LoRA adapter: it records no lora_config.")
-    # The upload writes the fileset named output.name; a fileset name can differ from its entity's name.
+    # The downloads and the guard share these refs. A bare fileset name means the job's workspace to the
+    # file_io task, whatever workspace its entity is in, and the upload writes to output.name there.
+    base_fileset = FileSetRef.model_validate(_require_fileset_for_download(base.fileset, base_ref))
+    adapter_fileset = FileSetRef.model_validate(adapter.fileset)
     inputs = {base_ref, f"{ref.workspace}/{ref.name}"}
-    for entity, fileset in ((base, base.fileset), (adapter, adapter.fileset)):
-        if fileset:
-            parsed = parse_entity_ref(fileset, entity.workspace)
-            inputs.add(f"{parsed.workspace}/{parsed.name}")
+    inputs |= {f"{fs.workspace or workspace}/{fs.name}" for fs in (base_fileset, adapter_fileset)}
     if f"{workspace}/{spec.output.name}" in inputs:
         raise HelixJobCompilationError(
             f"output.name '{spec.output.name}' would overwrite the base model, the adapter, or one of their filesets."
@@ -104,11 +104,8 @@ async def compile_merge(
         return HelixJobStep(name=name, executor=executor, environment=env, config=task.model_dump(mode="json"), **extra)
 
     downloads = [
-        DownloadItem(
-            src=FileSetRef.model_validate(_require_fileset_for_download(base.fileset, base_ref)),
-            dest=DEFAULT_MODEL_PATH,
-        ),
-        DownloadItem(src=FileSetRef.model_validate(adapter.fileset), dest=ADAPTER_PATH),
+        DownloadItem(src=base_fileset, dest=DEFAULT_MODEL_PATH),
+        DownloadItem(src=adapter_fileset, dest=ADAPTER_PATH),
     ]
     merge = MergeAdapterStepConfig(
         trust_remote_code=bool(base.trust_remote_code),

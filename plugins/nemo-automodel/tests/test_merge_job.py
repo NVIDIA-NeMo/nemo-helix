@@ -62,8 +62,10 @@ def _platform(base: ModelEntity, adapter: Adapter | None) -> AsyncCustomizationH
     )
 
 
-async def _compile(base: ModelEntity | None = None, adapter: Adapter | None = None, **spec: Any):
-    body = {"model": "bolt", "adapter": "cord-lora", "output": {"name": "bolt-cord"}, **spec}
+async def _compile(
+    base: ModelEntity | None = None, adapter: Adapter | None = None, adapter_ref: str = "cord-lora", **spec: Any
+):
+    body = {"model": "bolt", "adapter": adapter_ref, "output": {"name": "bolt-cord"}, **spec}
     platform = _platform(base or _model(), adapter or _adapter())
     return await compile_merge("default", AutomodelMergeSpec.model_validate(body), platform, "gpu")
 
@@ -101,6 +103,12 @@ async def test_a_vision_checkpoint_is_merged_with_the_image_text_class_and_its_c
         ({"output": {"name": "cord-lora"}}, "would overwrite"),
         ({"output": {"name": "bolt-weights"}}, "would overwrite"),  # the base's fileset, not its entity name
         ({"adapter": _adapter(fileset="default/cord-files"), "output": {"name": "cord-files"}}, "would overwrite"),
+        # A bare fileset name is the job workspace's fileset, even on an adapter that lives in another workspace.
+        (
+            {"adapter": _adapter(workspace="other", fileset="weights"), "adapter_ref": "other/cord-lora"}
+            | {"output": {"name": "weights"}},
+            "would overwrite",
+        ),
         ({"base": _model(spec=ModelSpec(**SPEC_FIELDS, head_type="embedding"))}, "not a causal"),
         ({"base": _model(fileset=None)}, "has no fileset"),
     ],
