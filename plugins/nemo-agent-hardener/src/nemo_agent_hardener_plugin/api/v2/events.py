@@ -39,9 +39,9 @@ def _get_client() -> NemoClient:
 
 
 def _events_path(workspace: str, run_name: str) -> Path:
-    """Durable per-run events log: ``<state_dir>/run-events/<workspace>/<safe-run-name>.jsonl``."""
+    """Durable per-run events log: ``<run_events_dir>/<workspace>/<safe-run-name>.jsonl``."""
     safe = "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in run_name) or "run"
-    return AgentHardenerConfig.get().state_dir / "run-events" / workspace / f"{safe}.jsonl"
+    return AgentHardenerConfig.get().run_events_dir / workspace / f"{safe}.jsonl"
 
 
 class EventIn(BaseModel):

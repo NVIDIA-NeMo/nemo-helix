@@ -49,8 +49,6 @@ export interface FilesetCreateModalProps {
   onClose: () => void;
   workspace: string;
   purpose: SupportedPurpose;
-  /** Where to go after create (default: the Filesets detail page) */
-  getDetailRoute?: typeof getFilesetDetailRoute;
 }
 
 /** "Lean" create modal for filesets. Heading and post-create navigation differ
@@ -65,7 +63,6 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
   onClose,
   workspace,
   purpose,
-  getDetailRoute = getFilesetDetailRoute,
 }) => {
   const toast = useToast();
   const navigate = useNavigate();
@@ -206,7 +203,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
       //   Local    -> Files tab (where the user uploads next)
       handleClose();
       navigate(
-        getDetailRoute(fileset.workspace, fileset.name, {
+        getFilesetDetailRoute(fileset.workspace, fileset.name, {
           tab: isExternal ? FilesetDetailTab.Card : FilesetDetailTab.Files,
         })
       );
@@ -221,7 +218,6 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
       toast,
       navigate,
       handleClose,
-      getDetailRoute,
     ]
   );
 

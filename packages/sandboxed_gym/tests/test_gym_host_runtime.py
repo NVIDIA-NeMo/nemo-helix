@@ -43,6 +43,34 @@ class _FakeRolloutHelper:
         return [_one(row) for row in examples]
 
 
+@pytest.mark.asyncio
+async def test_rollout_dispatch_preprocesses_metadata_for_newer_gym():
+    calls = []
+
+    class PreprocessingHelper(_FakeRolloutHelper):
+        def preprocess_examples(self, examples):
+            calls.append("preprocess")
+            return [{**row, "_ng_task_index": index, "_ng_rollout_index": 0} for index, row in enumerate(examples)]
+
+        def run_examples(self, examples, head_server_config=None):
+            calls.append("dispatch")
+            # Match the legacy environment adapter's direct indexed access:
+            # raw examples previously failed here with KeyError('_ng_task_index').
+            for row in examples:
+                assert row["_ng_task_index"] == 0
+                assert row["_ng_rollout_index"] == 0
+            return super().run_examples(examples, head_server_config)
+
+    examples = [{"agent_ref": {"name": "math_with_judge"}, runtime.SG_EXAMPLE_ID: 42}]
+    results = await runtime._collect_rollout_results(examples, None, PreprocessingHelper())
+
+    assert calls == ["preprocess", "dispatch"]
+    assert results[0]["_ng_task_index"] == 0
+    assert results[0]["_ng_rollout_index"] == 0
+    assert results[0][runtime.SG_EXAMPLE_ID] == 42
+    assert examples == [{"agent_ref": {"name": "math_with_judge"}, runtime.SG_EXAMPLE_ID: 42}]
+
+
 @pytest.fixture
 def ready_server():
     runtime._READY = True
