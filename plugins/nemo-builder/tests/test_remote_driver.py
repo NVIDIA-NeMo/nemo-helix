@@ -367,9 +367,10 @@ class TestABuildThatSucceeds:
         service = FakeService([DONE])
         _run(service, FakeBuilder(), context, tmp_path)
         (upload,) = service.uploaded
-        assert (upload.key, upload.path, upload.labels) == (
+        assert (upload.key, upload.path, upload.platform, upload.labels) == (
             idempotency_key(ATTEMPT, "demo-1"),
             context,
+            "linux/amd64",
             {"workspace": "default", "image": "demo-1", "job": "job-uid-1"},
         )
         (build,) = service.started
@@ -556,7 +557,7 @@ class TestUploadingTheContext:
         assert calls == ["upload", "start from uploaded-context-7"]
         (upload,), (build,) = service.uploaded, service.started
         # One key for both steps: the service can tie a build to the upload it was started from.
-        assert upload.key == build.key and upload.labels == build.labels
+        assert (upload.key, upload.platform, upload.labels) == (build.key, build.platform, build.labels)
 
     def test_a_lost_response_repeats_the_same_upload(self, context: Path, tmp_path: Path) -> None:
         service = FakeService([DONE], upload=[RetryableError("connection reset"), "context-1"])
