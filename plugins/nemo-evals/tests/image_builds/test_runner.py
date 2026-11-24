@@ -42,6 +42,7 @@ from nemo_evals.image_builds.runner import (
     TaskImageBuildSpec,
     apply_builder_image,
     read_task_archive,
+    refresh_images,
     run_task_image_build,
 )
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
@@ -290,6 +291,21 @@ async def test_an_image_a_remote_build_service_built_records_its_handle_and_back
     for image, sent in zip(build.images, stored._get_data_fields()["images"], strict=True):
         assert set(sent) == {*build_image_keys, "external_image_id", "builder_backend"}
         assert (sent["external_image_id"], sent["builder_backend"]) == (image.external_image_id, REMOTE_BACKEND)
+
+
+async def test_a_building_image_that_learns_its_backend_is_saved_though_its_status_stays() -> None:
+    """A record from before images named a backend can be mid-build when a release that records it is rolled out:
+    the next read finds the image still building, by the remote backend. That is a change to save."""
+    image = BuildImage(type="main", source="dockerfile", status="building", builder_image="img-1")
+
+    class Reading:
+        async def get_image(self, name: str) -> ContainerImage | None:
+            return _container_image(name, backend=REMOTE_BACKEND)
+
+    assert await refresh_images(Reading(), [image]) is True  # ty: ignore[invalid-argument-type]
+    assert (image.status, image.builder_backend) == ("building", REMOTE_BACKEND)
+    # Read again, nothing is new.
+    assert await refresh_images(Reading(), [image]) is False  # ty: ignore[invalid-argument-type]
 
 
 async def test_a_remote_image_is_recorded_with_its_backend_from_its_submit(
