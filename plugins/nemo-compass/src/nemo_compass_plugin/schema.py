@@ -113,8 +113,8 @@ class CreateAnalysisRunRequest(BaseModel):
     )
     fast_model: NonBlankString = Field(
         description=(
-            "Model Entity used for context summarization, in the same form as default_model. "
-            "Required for the same reason."
+            "A second, typically faster Model Entity Compass uses for part of its analysis, in the same form as "
+            "default_model. Required for the same reason."
         ),
     )
     ethos: NonBlankString | None = Field(

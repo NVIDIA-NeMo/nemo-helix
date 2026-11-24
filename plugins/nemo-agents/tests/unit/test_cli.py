@@ -539,7 +539,7 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
                     "    type: object",
                     "    additionalProperties: false",
                     "  default_input: Analyze recent runs.",
-                    "  post_run_actions: [insights.analysis, agents.noop]",
+                    "  post_run_actions: [compass.save-insights, agents.noop]",
                     "",
                 ]
             )
@@ -580,7 +580,7 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
             "reference": {"fileset": "default/agent-source"},
             "context_schema": {"type": "object", "additionalProperties": False},
             "default_input": "Analyze recent runs.",
-            "post_run_actions": ["agents.noop", "insights.analysis"],
+            "post_run_actions": ["agents.noop", "compass.save-insights"],
         }
     else:
         assert not set(registration_fields) & sent.keys()

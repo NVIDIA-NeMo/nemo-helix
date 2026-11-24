@@ -835,7 +835,7 @@ class TestAgentRunDeclarations:
                 "name": "analyst",
                 "context_schema": context_schema,
                 "default_input": "Analyze recent traces.",
-                "post_run_actions": ["insights.analysis", "agents.noop"],
+                "post_run_actions": ["compass.save-insights", "agents.noop"],
             },
         )
 
@@ -843,9 +843,9 @@ class TestAgentRunDeclarations:
         created: Agent = mock_entity_client.create.call_args.args[0]
         assert created.context_schema == context_schema
         assert created.default_input == "Analyze recent traces."
-        assert created.post_run_actions == {"agents.noop", "insights.analysis"}
+        assert created.post_run_actions == {"agents.noop", "compass.save-insights"}
         # Serialized as a sorted array of unique strings.
-        assert resp.json()["post_run_actions"] == ["agents.noop", "insights.analysis"]
+        assert resp.json()["post_run_actions"] == ["agents.noop", "compass.save-insights"]
 
     def test_register_defaults_post_run_actions_to_noop(
         self, client: TestClient, mock_entity_client: AsyncMock

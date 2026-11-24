@@ -3,8 +3,9 @@
 
 """Periodic Compass analysis scheduler.
 
-Execution belongs to AnalysisRuns/agents.execute; only cadence, overlap checks,
-and the incremental success cursor remain owned by this controller.
+Each run is an ``agents.execute`` job on the workspace's ``compass.analyst``
+agent; only cadence, overlap checks, and the incremental success cursor are
+owned by this controller.
 """
 
 from __future__ import annotations
@@ -16,14 +17,15 @@ from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
 from nemo_compass_plugin.analysis.backend import make_backend
-from nemo_compass_plugin.analysis_runs import mint_analysis_run_name, submit_analysis_run
+from nemo_compass_plugin.analysis_runs import mint_analysis_run_name
+from nemo_compass_plugin.analyst import COMPASS_ANALYST_TYPE_ID, SAVE_INSIGHTS_ACTION_KIND, CompassAnalyst
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
 from nemo_compass_plugin.schedule import is_due
-from nemo_compass_plugin.schema import CreateAnalysisRunRequest
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.controller import NemoController
@@ -36,7 +38,6 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
-from nemo_helix_plugin.models.client import AsyncModelsClient
 
 logger = logging.getLogger(__name__)
 
@@ -292,18 +293,61 @@ class CompassAnalysisController(NemoController):
             tz=ZoneInfo(compass.timezone),
         )
 
+    async def _compass_agent_name(self, workspace: str) -> str | None:
+        """Return the name of *workspace*'s Compass agent, or None when it has none."""
+        agent = await CompassAnalyst.find_agent(workspace=workspace, client=self.client)
+        return agent.name if agent is not None else None
+
+    async def _create_execute_job(self, *, workspace: str, body: CreateExecuteJobRequest) -> None:
+        await AsyncAgentsClient.from_client(self.client).create_execute_job(workspace=workspace, body=body)
+
+    async def _record_error(self, config: AnalysisConfig, status: AnalysisRunStatus | None, message: str) -> None:
+        """Mark the agent's analysis as failed with *message*, unless it already is."""
+        if status is not None and status.status == AnalysisConfigStatus.ERROR and status.last_error == message:
+            return
+        logger.warning(
+            "Insights analysis for agent '%s' in workspace '%s': %s", config.agent, config.workspace, message
+        )
+        updated = (
+            status.model_copy()
+            if status is not None
+            else AnalysisRunStatus(name=config.agent, workspace=config.workspace, agent=config.agent)
+        )
+        updated.status = AnalysisConfigStatus.ERROR
+        updated.last_error = message
+        updated.last_completed_at = datetime.now(timezone.utc)
+        if status is None:
+            await self.entities.create(updated)
+        else:
+            await self.entities.update(updated)
+
     async def _submit_analysis_job(
         self,
         config: AnalysisConfig,
         status: AnalysisRunStatus | None,
         submitted_at: datetime,
     ) -> None:
-        request = CreateAnalysisRunRequest(
-            agent=config.agent,
-            since=status.last_successful_run_at if status is not None else None,
-            default_model=config.default_model,
-            fast_model=config.fast_model or config.default_model,
-        )
+        compass_agent = await self._compass_agent_name(config.workspace)
+        if compass_agent is None:
+            # Saving the analysis config creates the agent, as the user; this
+            # service principal never does. A config saved before that existed
+            # needs it created once.
+            await self._record_error(
+                config,
+                status,
+                f"Workspace '{config.workspace}' has no Compass agent; run "
+                f"`nemo agents create {COMPASS_ANALYST_TYPE_ID} --workspace {config.workspace}`, "
+                f"adding `--name <name>` if another agent is already named '{CompassAnalyst.default_name}'.",
+            )
+            return
+        since = status.last_successful_run_at if status is not None else None
+        context: JsonObject = {
+            "agent": config.agent,
+            "default_model": config.default_model,
+            "fast_model": config.fast_model or config.default_model,
+        }
+        if since is not None:
+            context["since"] = since.isoformat()
         job_name = mint_analysis_run_name()
         pending = (
             status.model_copy()
@@ -317,20 +361,36 @@ class CompassAnalysisController(NemoController):
         pending.last_error = ""
         # Persist the name before the request: even a timeout or process crash
         # leaves a specific job to check on the next controller pass.
-        if status is None:
-            await self.entities.create(pending)
-        else:
-            await self.entities.update(pending)
-        await submit_analysis_run(
-            workspace=config.workspace,
-            request=request,
-            agents_client=AsyncAgentsClient.from_client(self.client),
-            models_client=AsyncModelsClient.from_client(self.client),
-            entity_client=self.entities,
-            name=job_name,
-            profile=self.compass_config.analysis.job_profile,
-            base_url=self.compass_config.analysis.base_url,
-        )
+        pending = await (self.entities.create(pending) if status is None else self.entities.update(pending))
+        try:
+            await self._create_execute_job(
+                workspace=config.workspace,
+                body=CreateExecuteJobRequest(
+                    name=job_name,
+                    spec={
+                        "agent": compass_agent,
+                        "context": context,
+                        "post_run_action": {"kind": SAVE_INSIGHTS_ACTION_KIND},
+                    },
+                ),
+            )
+        except NemoHTTPError as exc:
+            if exc.status_code >= 500 or exc.status_code == 409:
+                # The job may exist anyway: a server error can follow its creation, and a
+                # conflict means a job already has this name. Leave the attempt pending so
+                # the next pass resolves it by name, as after a timeout.
+                logger.warning(
+                    "Submitting insights analysis job '%s' for agent '%s' failed with HTTP %d; "
+                    "checking for it on the next pass",
+                    job_name,
+                    config.agent,
+                    exc.status_code,
+                )
+                return
+            # Rejected before any job was created (an unknown model, say):
+            # record why instead of leaving a pending attempt to time out.
+            await self._record_error(config, pending, f"Analysis job was rejected: {exc.detail}")
+            return
         logger.info(
             "Submitted insights analysis job '%s' for agent '%s' in workspace '%s'",
             job_name,
@@ -340,4 +400,10 @@ class CompassAnalysisController(NemoController):
 
 
 def _job_targets_agent(job: HelixJobResponse, agent: str) -> bool:
+    """Whether *job* is a Compass run analyzing *agent*."""
+    spec = job.spec or {}
+    if spec.get("plugin_managed_agent_type") == COMPASS_ANALYST_TYPE_ID:
+        return spec.get("subject") == agent
+    # An inline run from the analysis-runs API has no subject, only this tag.
+    # Goes when that API does.
     return (job.custom_fields or {}).get("insights_analysis_agent") == agent

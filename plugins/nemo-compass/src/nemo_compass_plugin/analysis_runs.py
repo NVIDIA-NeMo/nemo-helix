@@ -25,17 +25,15 @@ from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisRunPerms
-from nemo_compass_plugin.analysis.agent_config import (
-    AGENT_CONFIG_FORMAT,
-    build_compass_agent_config,
-    build_compass_run_context,
-)
+from nemo_compass_plugin.analysis.models import ModelLookupClient, resolve_model_ref
+from nemo_compass_plugin.analyst import SAVE_INSIGHTS_ACTION_KIND, CompassAnalyst, CompassPreparedContext
 from nemo_compass_plugin.authz import scope
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
-from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
+from nemo_helix_plugin.agents.plugin_managed_agents import PluginManagedAgentInputError
+from nemo_helix_plugin.agents.types import NEMO_AGENTS_SPEC_CONFIG_FORMAT, CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -45,22 +43,17 @@ from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nemo_helix_plugin.models.types import ModelEntity
-from nemo_helix_plugin.nooa_model_client import supported_backend_format
 from nemo_helix_plugin.schema import PaginationData
 from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_ACTION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
+# The config name of an inline Compass run, which has no Agent entity to name it.
+COMPASS_AGENT_NAME = "compass"
 
 router = APIRouter(tags=["Compass Analysis Runs"])
 _JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
-
-
-class ModelLookupClient(Protocol):
-    def get_model(self, *, name: str, workspace: str | None = None) -> Awaitable[NemoResponse[ModelEntity]]: ...
 
 
 class ExecuteJobClient(Protocol):
@@ -116,7 +109,6 @@ async def submit_analysis_run(
     entity_client: NemoEntitiesClient,
     name: str | None = None,
     profile: str | None = None,
-    base_url: str | None = None,
 ) -> AnalysisRunResponse:
     """Shared submission path for the API and the Compass scheduler.
 
@@ -145,7 +137,7 @@ async def submit_analysis_run(
         logger.exception("Failed to record analysis run for agent '%s'", safe_agent)
         raise HTTPException(status_code=500, detail="Failed to record the analysis run.") from exc
 
-    spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name, base_url=base_url)
+    spec = build_execute_agent_job_config(request)
     try:
         job = (
             await agents_client.create_execute_job(
@@ -154,7 +146,8 @@ async def submit_analysis_run(
                     spec=spec,
                     name=saved.name,
                     profile=profile,
-                    # Preserve the stored job tag so the scheduler can recognize runs created before the rename.
+                    # An inline run has no spec.subject, so this tag is how the
+                    # scheduler's overlap check sees it. Goes with this module.
                     custom_fields={"insights_analysis_agent": request.agent},
                 ),
             )
@@ -269,113 +262,58 @@ async def _resolve_model_refs(
     is what gets stored and put in the job spec, because Compass only accepts
     qualified refs.
     """
-    default_model = await _resolve_model_ref(
-        client,
-        request.default_model,
-        field="default_model",
-        workspace=workspace,
-    )
-    fast_model = await _resolve_model_ref(
-        client,
-        request.fast_model,
-        field="fast_model",
-        workspace=workspace,
-    )
-    return request.model_copy(update={"default_model": default_model, "fast_model": fast_model})
-
-
-async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
-    """Return ``<workspace>/<name>`` for an existing Model Entity Compass can call, or raise 422."""
-    match ref.split("/"):
-        case [name]:
-            model_workspace = workspace
-        case [model_workspace, name] if model_workspace and name:
-            pass
-        case _:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{field} must be a Model Entity name or '<workspace>/<name>' ref, got {ref!r}.",
-            )
-
     try:
-        model_entity = (await client.get_model(name=name, workspace=model_workspace)).data()
-    except NotFoundError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{field} '{model_workspace}/{name}' is not a known Model Entity.",
-        ) from exc
+        default_model = await resolve_model_ref(
+            client, request.default_model, field="default_model", workspace=workspace
+        )
+        fast_model = await resolve_model_ref(client, request.fast_model, field="fast_model", workspace=workspace)
+    except PluginManagedAgentInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NemoHTTPError as exc:
         raise HTTPException(status_code=exc.status_code, detail=_error_detail(exc)) from exc
     except NemoTransportError as exc:
         # Same reasoning as the submit path: an unreachable dependency is not
         # the caller's bad request, and nothing has been recorded yet.
-        logger.warning("Could not reach the Models service to validate %s %r: %s", field, ref, exc)
+        logger.warning("Could not reach the Models service to validate the model refs: %s", exc)
         raise HTTPException(
             status_code=503, detail="Could not reach the Models service to validate the model refs."
         ) from exc
-    # Compass job would otherwise start and fail when it builds its model
-    # clients, after the run is recorded and a pod has been scheduled.
-    try:
-        supported_backend_format(model_entity)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"{field}: {exc}") from exc
-    return f"{model_workspace}/{name}"
+    return request.model_copy(update={"default_model": default_model, "fast_model": fast_model})
 
 
-def build_execute_agent_job_config(
-    request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
-) -> JsonObject:
-    """Translate a high-level Compass request into a generic execute-agent job config."""
-    action_config: JsonObject = {
-        "agent": request.agent,
-        "workspace": workspace,
-    }
+def build_execute_agent_job_config(request: CreateAnalysisRunRequest) -> JsonObject:
+    """Translate a high-level Compass request into a generic execute-agent job config.
+
+    The run is inline, but in ``compass.analyst``'s shape: its config is the
+    type's, and its context is already what the type's ``prepare`` would
+    produce (the model refs were resolved by the caller, and the Ethos is the
+    request's own), so the adapter has one code path.
+    """
+    context = CompassPreparedContext(
+        agent=request.agent,
+        default_model=request.default_model,
+        fast_model=request.fast_model,
+        ethos=request.ethos,
+        since=request.since,
+        evaluation_id=request.evaluation_id,
+    )
     payload = _json_object(
         {
-            "agent": _inline_compass(request, base_url=base_url),
-            "input": _analysis_prompt(request.agent),
-            "context": build_compass_run_context(since=request.since, evaluation_id=request.evaluation_id),
-            "post_run_action": {
-                "kind": COMPASS_ANALYSIS_ACTION_KIND,
-                "config": action_config,
+            "agent": {
+                # AgentInline defaults to the legacy NAT format, matching the Agent
+                # entity; Compass is a Fabric spec agent, so say so explicitly.
+                "config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+                "config": CompassAnalyst.config(name=COMPASS_AGENT_NAME),
             },
+            "input": CompassAnalyst.default_input,
+            "context": context.model_dump(mode="json", exclude_none=True),
+            "post_run_action": {"kind": SAVE_INSIGHTS_ACTION_KIND},
         }
     )
     if request.timeout_seconds is not None:
         payload["timeout_seconds"] = request.timeout_seconds
 
     return payload
-
-
-def _inline_compass(request: CreateAnalysisRunRequest, *, base_url: str | None = None) -> JsonObject:
-    """Build the ``agent`` arm of the execute job as an inline definition.
-
-    Compass has no Agent entity: its config is composed here from the
-    request's model pair; its read scope travels in the job's ``context``.
-    ``ExecuteAgentJobConfig.agent`` also accepts an entity ref, so pointing a
-    run at a stored Compass is a small change if a use case appears.
-    """
-    return _json_object(
-        {
-            # AgentInline defaults to the legacy NAT format, matching the Agent
-            # entity; Compass is a Fabric spec agent, so say so explicitly.
-            "config_format": AGENT_CONFIG_FORMAT,
-            "config": build_compass_agent_config(
-                agent=request.agent,
-                base_url=base_url,
-                default_model=request.default_model,
-                fast_model=request.fast_model,
-                ethos=request.ethos,
-                # Compass's self-observability builds its own OTLP exporter from
-                # the operator's local CLI config, which does not exist in a task
-                # pod, so on a cluster it exports unauthenticated at best. Telemetry
-                # for these runs belongs in the agent config's relay endpoints,
-                # where the agents layer already carries auth; until that is wired,
-                # a run must not depend on it.
-                enable_observability=False,
-            ),
-        }
-    )
 
 
 def _error_detail(error: NemoHTTPError) -> object:
@@ -386,7 +324,3 @@ def _error_detail(error: NemoHTTPError) -> object:
         if detail is not None:
             return detail
     return body if body is not None else error.detail
-
-
-def _analysis_prompt(agent: str) -> str:
-    return f"Analyze recent telemetry and maintain durable insights for {agent}."

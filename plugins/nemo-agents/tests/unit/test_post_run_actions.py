@@ -85,29 +85,24 @@ def test_an_unregistered_kind_is_an_error_naming_the_installed_kinds(monkeypatch
 
 
 def test_the_installed_compass_action_resolves() -> None:
-    """Guards the real environment: insights.analysis is declared twice on disk."""
-    resolved = resolve_post_run_action("insights.analysis")
+    """Guards the real environment: compass.save-insights is declared twice on disk."""
+    resolved = resolve_post_run_action("compass.save-insights")
 
-    assert resolved.__name__ == "CompassAnalysisAction"
+    assert resolved.__name__ == "SaveInsightsAction"
 
 
 def test_a_valid_action_config_is_accepted() -> None:
-    validate_post_run_action_config("insights.analysis", {"agent": "demo-agent", "workspace": "default"})
+    validate_post_run_action_config("compass.save-insights", {})
 
 
 def test_an_unknown_action_config_key_is_rejected() -> None:
-    """``extra="forbid"`` catches a renamed or typo'd key on the create request."""
+    """``extra="forbid"`` catches a removed or typo'd key on the create request."""
     with pytest.raises(ValueError) as excinfo:
-        validate_post_run_action_config("insights.analysis", {"agent": "demo", "workspac": "default"})
+        validate_post_run_action_config("compass.save-insights", {"workspac": "default"})
 
     message = str(excinfo.value)
-    assert "insights.analysis" in message, "the caller supplied a kind, so the error should name it"
+    assert "compass.save-insights" in message, "the caller supplied a kind, so the error should name it"
     assert "workspac" in message
-
-
-def test_a_wrongly_typed_action_config_value_is_rejected() -> None:
-    with pytest.raises(ValueError):
-        validate_post_run_action_config("insights.analysis", {"local_only": "yes-please"})
 
 
 def test_the_noop_action_accepts_an_empty_config() -> None:
@@ -142,7 +137,7 @@ def test_the_installed_actions_are_listed_with_their_display_metadata() -> None:
         title=NoopPostRunAction.title,
         description=NoopPostRunAction.description,
     )
-    assert listed["insights.analysis"].title == "Compass analysis"
+    assert listed["compass.save-insights"].title == "Save Compass insights"
 
 
 def test_listing_collapses_duplicate_declarations_and_sorts_by_kind(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -105,7 +105,15 @@ paths:
       tags:
       - Compass Analysis Configs
       summary: Update Analysis Config
-      description: Partially update periodic analysis state for one agent.
+      description: 'Partially update periodic analysis state for one agent.
+
+
+        Also creates the workspace''s Compass agent (`compass.analyst`) if it has
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: update_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__patch
       parameters:
       - name: workspace
@@ -177,7 +185,15 @@ paths:
       tags:
       - Compass Analysis Configs
       summary: Enable Analysis Config
-      description: Enable periodic insights analysis for one agent.
+      description: 'Enable periodic insights analysis for one agent.
+
+
+        Also creates the workspace''s Compass agent (`compass.analyst`) if it has
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: enable_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__enable_post
       parameters:
       - name: workspace
@@ -829,7 +845,8 @@ components:
         fast_model:
           type: string
           title: Fast Model
-          description: Workspace-qualified Model Entity the run used for context summarization.
+          description: Workspace-qualified fast Model Entity the run used for part
+            of its analysis.
           default: ''
         id:
           type: string
@@ -1034,8 +1051,9 @@ components:
           type: string
           minLength: 1
           title: Fast Model
-          description: Model Entity used for context summarization, in the same form
-            as default_model. Required for the same reason.
+          description: A second, typically faster Model Entity Compass uses for part
+            of its analysis, in the same form as default_model. Required for the same
+            reason.
         ethos:
           title: Ethos
           description: 'Optional Ethos Markdown for the agent under test. Sent inline

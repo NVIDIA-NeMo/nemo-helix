@@ -10862,7 +10862,7 @@ nemo compass analysis enable [OPTIONS]
 * `--agent`: Name of the agent to opt in to periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
-* `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
+* `--fast-model`: Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.
 
 **Help:**
 
@@ -10964,7 +10964,7 @@ nemo compass analysis-runs create [OPTIONS]
 * `--agent`: Name of the agent whose telemetry should be analyzed.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
-* `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
+* `--fast-model`: Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.
 * `--since`: ISO-8601 lower bound enforced on Compass's trace/span reads.
 * `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
 * `--evaluation-id`: Restrict the run to spans from one evaluation.
