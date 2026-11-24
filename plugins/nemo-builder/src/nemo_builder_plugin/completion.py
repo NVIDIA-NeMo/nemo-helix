@@ -215,7 +215,10 @@ async def step_refusal(
     if step.job_uid is not None and step.job_uid != row.provenance.job_uid:
         return f"{only}: the caller is a step of another job, created under its build job's name"
     if step.attempt_id != row.provenance.job_attempt_id:
-        # Which of the two, the record doesn't say where it names a job only by its name.
+        # Which of the two, the record doesn't say where it names a job only by its name. So this is refused,
+        # not put off as a row that records no job is: a rerun kept waiting would hold its slot for a row
+        # that never admits it. A step of a job that a resubmit created is refused with them, should it ask
+        # before that submit has written its job on the row.
         return (
             f"{only}: the caller is a step of another run than the one its submit created, a rerun of its build "
             "job or a job created under that job's name since"
@@ -270,11 +273,13 @@ def _starts_as_recorded(row: ContainerImage, runtime_config: ImageRuntimeConfig 
     A row a build service built records what its one step sent, and that step sends the same on every try: a
     repeat carries exactly that, none included. A row built in this cluster may have been completed by a builder
     from before it recorded this, or the image's ``USER``. A push step whose completion is repeated across the
-    upgrade sends them for an image that is published, so it is held only to what the row does record.
+    upgrade sends them for an image that is published, so it is held only to what the row does record. A repeat
+    that carries none is held to nothing: a client that sends only the digest, or a push step that could not
+    read the image's config, says nothing of how the image starts that the row could differ from.
     """
     recorded = row.runtime_config
     if row.provenance.backend == IN_CLUSTER_BACKEND:
-        if recorded is None:
+        if recorded is None or runtime_config is None:
             return True
         if recorded.user is None and runtime_config is not None:
             runtime_config = runtime_config.model_copy(update={"user": None})
@@ -352,9 +357,10 @@ async def complete(
         in_cluster = row.provenance.backend == IN_CLUSTER_BACKEND
         if external is not None and in_cluster:
             raise CompletionConflict(f"{name} is built in this cluster; no build service has a handle for it")
-        if not in_cluster and (external is None or external.build_id is None):
-            # A remote row is ready only with the name of the build that made it. It shows which build, not who
-            # is calling: any caller can name one. Who is calling is asked before this (`step_refusal`).
+        if not in_cluster and (external is None or external.build_id is None or not external.build_id.strip()):
+            # A remote row is ready only with the name of the build that made it, and a blank one names none:
+            # the remote-build step refuses such a build too. It shows which build, not who is calling: any
+            # caller can name one. Who is calling is asked before this (`step_refusal`).
             raise CompletionConflict(f"{name} is built by a build service; its completion must name the build")
         if settled(row, digest, external, runtime_config):
             return row
