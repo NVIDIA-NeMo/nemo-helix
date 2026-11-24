@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import sandboxed_gym.host.opensandbox as gym_host_opensandbox
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
@@ -45,6 +46,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfileConfig,
     KubernetesJobStorageConfig,
 )
+from nhx_sandbox import harbor_opensandbox_services as opensandbox_services
 
 
 def target(**overrides: Any) -> GymRunnerTarget:
@@ -258,6 +260,20 @@ def test_sandbox_server_protocol_does_not_change_the_docker_host_provider() -> N
 
     assert plan is not None
     assert plan.host_provider_options == {"root_dir": "/tmp/gym"}
+
+
+def test_agent_bundle_is_validated_and_only_opensandbox_hosts_accept_it() -> None:
+    bundle = {"image": "nvcr.io/x/codex:1", "installer": "/install", "entrypoint": "bin/codex"}
+    plan = capable_plan(sandbox_host_provider_options={"agent_bundle": bundle})
+    assert plan.host_provider_options["agent_bundle"] == bundle
+    # The host provider sends the bundle under the key the OpenSandbox extension reads.
+    assert gym_host_opensandbox.AGENT_BUNDLE_EXTENSION_KEY == opensandbox_services.AGENT_BUNDLE_EXTENSION_KEY
+    assert gym_host_opensandbox.INSTALLED_AGENT_DIR == opensandbox_services.INSTALLED_AGENT_DIR
+
+    with pytest.raises(ValueError, match="entrypoint"):
+        capable_plan(sandbox_host_provider_options={"agent_bundle": {**bundle, "entrypoint": "../codex"}})
+    with pytest.raises(SandboxUnavailableError, match="opensandbox"):
+        capable_plan(sandbox_host_provider="docker", sandbox_host_provider_options={"agent_bundle": bundle})
 
 
 # --------------------------------------------------------------------------------------------

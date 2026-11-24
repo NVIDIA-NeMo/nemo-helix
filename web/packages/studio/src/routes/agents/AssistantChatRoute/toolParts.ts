@@ -7,6 +7,7 @@ import {
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
   ASSISTANT_THINKING_TOOL_NAME,
+  ASSISTANT_UNKNOWN_WORK_DURATION_LABEL,
   ASSISTANT_WORK_DETAILS_LABEL,
   createAssistantCollapsedStudioDetailsPart,
   createAssistantCollapsedThinkingPart,
@@ -138,7 +139,7 @@ const getStudioDetailsLabel = ({
   if (elapsedDuration) return `worked for ${elapsedDuration}`;
 
   if (summaryFields.detailsLabel?.toLowerCase().startsWith('worked for ')) {
-    return summaryFields.detailsLabel.toLowerCase() === 'worked for unknown'
+    return summaryFields.detailsLabel.toLowerCase() === ASSISTANT_UNKNOWN_WORK_DURATION_LABEL
       ? ASSISTANT_WORK_DETAILS_LABEL
       : summaryFields.detailsLabel;
   }

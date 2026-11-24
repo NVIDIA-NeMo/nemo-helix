@@ -6,11 +6,12 @@ import {
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { ChartTree, Trash } from '@nemo/icons/icons';
+import { Trash } from '@nemo/icons/icons';
 import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
 import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
@@ -117,12 +118,11 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
         attributes={{
           DataViewRoot: { data: pageRows, totalCount: experiments.length },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                className="py-density-3xl"
-                icon={<ChartTree className="size-16" />}
-                header="No experiments yet"
-                emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="experiments"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
               />
             ),
           },

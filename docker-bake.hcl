@@ -134,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "f34b91df909e4d9f8fa2faec66ce95fb746a07fa" # soluwalana/RL nhx/rl-20261110
+  default = "6014fd297b25165b71bb37a34247a19f0dc091d3" # soluwalana/RL nhx/rl-20261110
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -1309,7 +1309,6 @@ target "nhx-automodel-base-builder" {
   target          = "nhx-automodel-base"
   context         = "."
   dockerfile      = "docker/automodel/Dockerfile.nhx-automodel-base"
-  no-cache-filter = ["automodel-clone"]
   cache-to        = maybe_registry_cache_to("nhx-automodel-base")
   cache-from      = maybe_registry_cache_from("nhx-automodel-base")
   tags            = base_tags("nhx-automodel-base")

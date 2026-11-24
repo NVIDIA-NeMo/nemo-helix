@@ -354,7 +354,11 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
                 onClearFilters={dataViewState.resetFilters}
               />
             ) : (
-              <EntityEmptyState entity="evaluationSessions" variant="first-use" />
+              <EntityEmptyState
+                entity="evaluationSessions"
+                variant="first-use"
+                workspace={workspace}
+              />
             ),
         },
       }}

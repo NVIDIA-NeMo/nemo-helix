@@ -69,13 +69,14 @@ class _Recorder:
         defer(publish)
         return input_spec
 
-    def compile(self, *args: object) -> HelixJobSpec:
-        del args
+    def compile(self, workspace: str, input_spec: _Spec, spec: _Spec, *args: object) -> HelixJobSpec:
+        del workspace, input_spec, args
         self.events.append("compile")
         if self.refuse_compile:
             raise HelixJobCompilationError("no such profile")
         executor = GPUExecutionProviderSpec(provider="gpu", profile="default", container=ContainerSpec(image="w:1"))
-        return HelixJobSpec(steps=[HelixJobStep(name="work", executor=executor, config={})])
+        config = {"published": spec.published}
+        return HelixJobSpec(steps=[HelixJobStep(name="work", executor=executor, config=config)])
 
 
 def _post(
@@ -112,9 +113,17 @@ def test_a_deferred_write_runs_after_compile_and_its_spec_is_the_one_created() -
 
     _, jobs = _post(recorder)
 
-    assert recorder.events == ["transform", "compile", "deferred write"]
+    assert recorder.events == ["transform", "compile", "deferred write", "compile"]
     body = jobs.create_job.await_args.kwargs["body"]
     assert body.spec["published"] is True
+
+
+def test_the_created_platform_spec_is_compiled_from_the_written_spec() -> None:
+    """A worker that checks its step config against the stored spec refuses a step config compiled before the write."""
+    _, jobs = _post(_Recorder())
+
+    body = jobs.create_job.await_args.kwargs["body"]
+    assert body.platform_spec.steps[0].config == {"published": True}
 
 
 @pytest.mark.parametrize(

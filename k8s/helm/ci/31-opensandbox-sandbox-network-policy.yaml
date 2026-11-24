@@ -16,3 +16,5 @@ opensandbox:
           - namespaceSelector:
               matchLabels:
                 kubernetes.io/metadata.name: opensandbox-gateway
+    probeSourceCIDRs:
+      - 10.54.0.0/16

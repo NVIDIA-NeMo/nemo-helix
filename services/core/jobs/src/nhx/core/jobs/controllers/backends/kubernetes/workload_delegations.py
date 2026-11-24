@@ -12,7 +12,7 @@ from kubernetes import client
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import (
-    WorkloadDelegationConflictError,
+    WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationEntity,
     WorkloadDelegationScope,
     build_kubernetes_pod_uid_workload_delegation,
@@ -103,7 +103,7 @@ class KubernetesPodBoundWorkloadDelegationManager:
             )
             try:
                 self._register_workload_delegation(delegation)
-            except WorkloadDelegationConflictError:
+            except WorkloadDelegationAlreadyActiveError:
                 logger.debug(
                     "Kubernetes workload delegation already exists",
                     extra={"delegation_name": delegation_name},
