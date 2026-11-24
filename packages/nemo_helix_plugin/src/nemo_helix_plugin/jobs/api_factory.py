@@ -223,6 +223,20 @@ class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
         return self
 
 
+class DescriptionOnlyJobUpdate(BaseModel):
+    """Mutable plugin job description. This job's definition can't be replaced, so a ``spec`` is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+
+    @model_validator(mode="after")
+    def validate_update(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        return self
+
+
 class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     id: str
     name: str
@@ -324,6 +338,18 @@ def _validate_jobs_filter_values(operation: FilterOperation) -> None:
             _validate_jobs_filter_values(child)
 
 
+def _spec_adapter(schema: object) -> TypeAdapter[Any]:
+    """A validator for a job spec schema whose errors never echo the rejected input.
+
+    A model sets ``hide_input_in_errors`` on itself, but a union of models is validated by the union's
+    own adapter, which would put a rejected credential back into the error text. Spec errors reach
+    HTTP responses, so a union gets that setting here.
+    """
+    if _is_union_type(_unwrap_annotated_schema(schema)):
+        return TypeAdapter(schema, config=ConfigDict(hide_input_in_errors=True))
+    return TypeAdapter(schema)
+
+
 @overload
 def handle_job_spec_mismatch(job_input: Type[JobConfigT], spec: object) -> JobConfigT: ...
 
@@ -338,7 +364,7 @@ def handle_job_spec_mismatch(job_input: Type[JobConfigT] | JobSchemaLike, spec: 
     by the jobs microservice.
     """
     try:
-        type_adapter = TypeAdapter(job_input)
+        type_adapter = _spec_adapter(job_input)
         job_spec = type_adapter.validate_python(spec)
     except Exception as e:
         # What happens here is that we received a functional microservice job config back from
@@ -944,6 +970,8 @@ def job_route_factory(
     job_discriminator: str | None = None,
     legacy_job_filter: FilterOperation | None = None,
     dry_run_checks: DryRunChecks | None = None,
+    *,
+    allow_spec_update: bool = True,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -992,6 +1020,8 @@ def job_route_factory(
             given the canonical spec and the compiled platform spec, such as reading a few dataset
             rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
             step's execution profile is configured.
+        allow_spec_update: Whether ``PATCH /jobs/{name}`` may replace a job's spec. When ``False``,
+            the update body takes only ``description``, so a ``spec`` in it is refused with 422.
 
     Example with separate input/output types:
         ```python
@@ -1090,10 +1120,14 @@ def job_route_factory(
         (BaseJob[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
-    TypedJobUpdate = type(
-        f"{job_type}JobUpdate",
-        (BaseJobUpdate[BaseModel],),
-        {"__annotations__": {"spec": job_input | None}, "spec": None},
+    TypedJobUpdate = (
+        type(
+            f"{job_type}JobUpdate",
+            (BaseJobUpdate[BaseModel],),
+            {"__annotations__": {"spec": job_input | None}, "spec": None},
+        )
+        if allow_spec_update
+        else type(f"{job_type}JobUpdate", (DescriptionOnlyJobUpdate,), {})
     )
     TypedJobAttempt = type(
         f"{job_type}JobAttempt",
@@ -1278,7 +1312,7 @@ def job_route_factory(
             control=job_resp.control,
         )
 
-    job_output_adapter = TypeAdapter(job_output)
+    job_output_adapter = _spec_adapter(job_output)
 
     def validate_own_job(job: HelixJob, name: str, workspace: str) -> HelixJob:
         """Refuse a job these routes do not serve, before acting on it.
@@ -1572,7 +1606,8 @@ def job_route_factory(
             update_identifier = existing_job.id if existing_job is not None else name
             if "description" in request.model_fields_set:
                 update_fields["description"] = request.description
-            if "spec" in request.model_fields_set:
+            # Only a job whose definition can be replaced has a ``spec`` on its update body.
+            if isinstance(request, BaseJobUpdate) and "spec" in request.model_fields_set:
                 assert request.spec is not None
                 if existing_job is None:
                     existing_job = (await jobs.get_job(name=name, workspace=workspace)).data()

@@ -16,7 +16,7 @@ from pathlib import Path
 from time import monotonic
 from typing import TypeAlias
 
-from nemo_evals.jobs.agent_spec import AgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalJobSpec
 from nemo_evals.jobs.evaluate import EvaluateSpec
 from nemo_evals.sdk.utils import filter_aggregate_scores
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
@@ -31,7 +31,7 @@ EvaluatorJob: TypeAlias = BaseJob[EvaluateSpec]
 #: The agent counterpart. Separate because the two jobs' specs genuinely differ — an agent job
 #: carries tasks and a runner target where a row job carries metrics and a dataset — so reusing
 #: `EvaluatorJob` here would fail validation on every field of the spec that came back.
-AgentEvaluatorJob: TypeAlias = BaseJob[AgentEvalSpec]
+AgentEvaluatorJob: TypeAlias = BaseJob[AgentEvalJobSpec]
 
 _TERMINAL_FAILURE_STATUSES = frozenset({"error", "cancelled", "failed"})
 _TERMINAL_SUCCESS_STATUS = "completed"

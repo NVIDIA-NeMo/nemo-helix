@@ -24,7 +24,14 @@ from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
-from nemo_evals.jobs.attempt_tasks import TASKS_FROM_KEY, load_attempt_tasks
+from nemo_evals.jobs.attempt_tasks import (
+    FROZEN_TASKS_KEY,
+    FROZEN_TASKS_PATH,
+    TASKS_FROM_KEY,
+    bytes_digest,
+    frozen_tasks_bytes,
+    load_attempt_tasks,
+)
 from nemo_evals.jobs.fileset_tasks import gym_reward_metric
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
@@ -34,6 +41,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.types import UpdateHelixJobRequest
 from nhx.core.entities.service import EntitiesService
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
@@ -461,3 +469,60 @@ def test_invalid_sources_are_refused(tasks: dict[str, Any], message: str) -> Non
 def test_a_fileset_source_needs_a_gym_target() -> None:
     with pytest.raises(ValueError, match="needs a `gym` target, not precomputed `trials`"):
         AgentEvalInputSpec.model_validate({"trials": [], "tasks": {"fileset": FILE}})
+
+
+# --- Stored shape and definition updates ---------------------------------------------------------------
+
+
+def test_a_jobs_definition_cannot_be_replaced_but_its_description_can(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"))
+    created = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
+    )
+    assert created.status_code < 300, created.text
+    route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{created.json()['name']}"
+
+    refused = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
+    described = ctx.test_client.patch(route, json={"description": "golden run"})
+
+    assert refused.status_code == 422, refused.text
+    assert described.status_code == 200, described.text
+    assert described.json()["description"] == "golden run"
+    assert described.json()["spec"]["tasks"] == created.json()["spec"]["tasks"]
+
+
+def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+    created = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
+    )
+    assert created.status_code < 300, created.text
+    name = created.json()["name"]
+    jobs = JobsClient.from_client(ctx.client)
+    job = jobs.get_job(name=name, workspace="default").data()
+    stored = dict(job.spec)
+    frozen = frozen_tasks_bytes(stored)
+    compact = {key: value for key, value in stored.items() if key not in ("tasks", "trials")}
+    compact[FROZEN_TASKS_KEY] = {
+        "ref": f"default/agent-eval-tasks-0123456789ab#{FROZEN_TASKS_PATH}",
+        "digest": bytes_digest(frozen),
+        "task_count": 2,
+    }
+    # The writer lands separately; here the record is put in the stored shape directly.
+    jobs.update_job(
+        name=name, workspace="default", body=UpdateHelixJobRequest(spec=compact, platform_spec=job.platform_spec)
+    )
+
+    route = "/apis/evals/v2/workspaces/default/agent-evaluate/jobs"
+    one = ctx.test_client.get(f"{route}/{name}")
+    listed = ctx.test_client.get(route)
+    described = ctx.test_client.patch(f"{route}/{name}", json={"description": "still owned"})
+
+    assert one.status_code == 200, one.text
+    assert "tasks" not in one.json()["spec"]
+    assert one.json()["spec"][FROZEN_TASKS_KEY]["task_count"] == 2
+    assert listed.status_code == 200, listed.text
+    assert [job["spec"][FROZEN_TASKS_KEY]["task_count"] for job in listed.json()["data"]] == [2]
+    assert described.status_code == 200, described.text

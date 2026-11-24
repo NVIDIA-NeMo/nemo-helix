@@ -12,6 +12,11 @@ differs.
 The digest covers the wire JSON exactly as the job stores it, not re-validated models: free-form fields
 (a task's ``reference``, a trial's ``metadata``) would otherwise hash differently on each side, and the
 digest would depend on the worker's model defaults.
+
+An attempt's spec holds the tasks in one of two shapes. Jobs stored with their tasks inline carry ``tasks``
+(and ``trials``) in the spec. Jobs stored with their tasks frozen in a file carry :data:`FROZEN_TASKS_KEY`
+instead, naming that file and the digest of its exact bytes; the worker downloads it and checks those bytes
+against the step config's digest before parsing them.
 """
 
 from __future__ import annotations
@@ -20,8 +25,10 @@ import hashlib
 import json
 from typing import Final
 
+from filesets import parse_fileset_ref
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_task_nemo_client
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.client import JobsClient
 
@@ -30,6 +37,10 @@ TASKS_DIGEST_KEY: Final = "tasks_digest"
 TASKS_FROM_ATTEMPT: Final = "attempt"
 _DIGEST_PREFIX: Final = "sha256-v1:"
 _FROZEN_KEYS: Final = ("tasks", "trials")
+#: The stored-spec key naming the file that holds a job's frozen tasks and trials.
+FROZEN_TASKS_KEY: Final = "frozen_tasks"
+#: The path of that file inside its fileset.
+FROZEN_TASKS_PATH: Final = "tasks.json"
 
 #: The service the agent-evaluate task runs as (see :mod:`nemo_evals.tasks.agent_evaluate`).
 TASK_SERVICE_NAME: Final = "evals"
@@ -39,11 +50,21 @@ class AttemptTasksError(RuntimeError):
     """The worker could not load its frozen tasks from its job attempt, or they don't match the step config."""
 
 
-def frozen_tasks_digest(spec: dict) -> str:
-    """The versioned digest of ``spec``'s ``tasks`` and ``trials``, as JSON (``model_dump(mode="json")``)."""
+def frozen_tasks_bytes(spec: dict) -> bytes:
+    """``spec``'s ``tasks`` and ``trials`` as canonical JSON bytes: what the digest covers, and what a frozen-tasks file holds."""
     frozen = {key: spec.get(key) for key in _FROZEN_KEYS}
     canonical = json.dumps(frozen, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return _DIGEST_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical.encode("utf-8")
+
+
+def bytes_digest(body: bytes) -> str:
+    """The versioned digest of ``body``."""
+    return _DIGEST_PREFIX + hashlib.sha256(body).hexdigest()
+
+
+def frozen_tasks_digest(spec: dict) -> str:
+    """The versioned digest of ``spec``'s ``tasks`` and ``trials``, as JSON (``model_dump(mode="json")``)."""
+    return bytes_digest(frozen_tasks_bytes(spec))
 
 
 def step_config_without_tasks(spec: dict) -> dict:
@@ -82,23 +103,68 @@ def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | No
     job, attempt_id = ctx.job_id, ctx.attempt_id
     try:
         if client is not None:
-            spec = _attempt_spec(client, workspace=ctx.workspace, job=job, attempt=attempt_id)
+            frozen = _frozen_tasks(client, workspace=ctx.workspace, job=job, attempt=attempt_id, expected=expected)
         else:
             with get_task_nemo_client(TASK_SERVICE_NAME, workspace=ctx.workspace) as task_client:
-                spec = _attempt_spec(task_client, workspace=ctx.workspace, job=job, attempt=attempt_id)
+                frozen = _frozen_tasks(
+                    task_client, workspace=ctx.workspace, job=job, attempt=attempt_id, expected=expected
+                )
+    except AttemptTasksError:
+        raise
     except Exception as exc:
         raise AttemptTasksError(f"could not read the tasks of job {job!r} from its attempt {attempt_id!r}") from exc
+    rest.update(frozen)
+    return rest
+
+
+def _frozen_tasks(client: NemoClient, *, workspace: str, job: str, attempt: str, expected: str) -> dict:
+    """The attempt's ``tasks`` and ``trials``, from its spec or from the file its spec names, checked against ``expected``."""
+    spec = _attempt_spec(client, workspace=workspace, job=job, attempt=attempt)
+    if FROZEN_TASKS_KEY in spec:
+        return _read_frozen_tasks_file(client, spec[FROZEN_TASKS_KEY], workspace=workspace, expected=expected)
     if not isinstance(spec.get("tasks"), list):
-        raise AttemptTasksError(f"attempt {attempt_id!r} of job {job!r} has no task list in its spec")
+        raise AttemptTasksError(f"attempt {attempt!r} of job {job!r} has no task list in its spec")
     actual = frozen_tasks_digest(spec)
     if actual != expected:
         raise AttemptTasksError(
-            f"the tasks on attempt {attempt_id!r} of job {job!r} don't match its step config "
+            f"the tasks on attempt {attempt!r} of job {job!r} don't match its step config "
             f"(expected {expected}, got {actual}); refusing to run them"
         )
-    rest["tasks"] = spec["tasks"]
-    rest["trials"] = spec.get("trials")
-    return rest
+    return {"tasks": spec["tasks"], "trials": spec.get("trials")}
+
+
+def _read_frozen_tasks_file(client: NemoClient, pointer: object, *, workspace: str, expected: str) -> dict:
+    """Download the frozen-tasks file ``pointer`` names, check its exact bytes against ``expected``, then parse it."""
+    if not isinstance(pointer, dict) or not isinstance(pointer.get("ref"), str):
+        raise AttemptTasksError(f"the attempt's {FROZEN_TASKS_KEY} names no file")
+    ref = pointer["ref"]
+    if pointer.get("digest") != expected:
+        raise AttemptTasksError(
+            f"the attempt's {FROZEN_TASKS_KEY} digest {pointer.get('digest')!r} doesn't match its step config "
+            f"({expected}); refusing to run it"
+        )
+    try:
+        file_workspace, name, path = parse_fileset_ref(ref, workspace_fallback=None)
+    except ValueError as exc:
+        raise AttemptTasksError(f"the attempt's frozen tasks file {ref!r} is not a fileset file ref") from exc
+    if file_workspace != workspace or path != FROZEN_TASKS_PATH:
+        raise AttemptTasksError(
+            f"the attempt's frozen tasks file {ref!r} must be {FROZEN_TASKS_PATH!r} in workspace {workspace!r}"
+        )
+    body = FilesClient.from_client(client).download_file(workspace=file_workspace, name=name, path=path).read()
+    actual = bytes_digest(body)
+    if actual != expected:
+        raise AttemptTasksError(
+            f"the frozen tasks file {ref!r} doesn't match its step config (expected {expected}, got {actual}); "
+            "refusing to run it"
+        )
+    try:
+        frozen = json.loads(body)
+    except ValueError as exc:
+        raise AttemptTasksError(f"the frozen tasks file {ref!r} is not JSON") from exc
+    if not isinstance(frozen, dict) or not isinstance(frozen.get("tasks"), list):
+        raise AttemptTasksError(f"the frozen tasks file {ref!r} has no task list")
+    return {"tasks": frozen["tasks"], "trials": frozen.get("trials")}
 
 
 def _attempt_spec(client: NemoClient, *, workspace: str, job: str, attempt: str) -> dict:
@@ -106,11 +172,15 @@ def _attempt_spec(client: NemoClient, *, workspace: str, job: str, attempt: str)
 
 
 __all__ = [
+    "FROZEN_TASKS_KEY",
+    "FROZEN_TASKS_PATH",
     "TASKS_DIGEST_KEY",
     "TASKS_FROM_ATTEMPT",
     "TASKS_FROM_KEY",
     "TASK_SERVICE_NAME",
     "AttemptTasksError",
+    "bytes_digest",
+    "frozen_tasks_bytes",
     "frozen_tasks_digest",
     "load_attempt_tasks",
     "step_config_without_tasks",

@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
+from types import UnionType
 from typing import Any, ClassVar
 
 from nemo_helix_plugin._base import _NamedPlugin
@@ -178,6 +179,13 @@ class NemoJob(_NamedPlugin):
 
     spec_schema: ClassVar[type[BaseModel] | None] = None
     input_spec_schema: ClassVar[type[BaseModel] | None] = None
+    #: What the job routes store and return, when it differs from ``spec_schema``. Requires
+    #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``; a union lets a
+    #: job keep rendering the records it stored before its stored shape changed.
+    stored_spec_schema: ClassVar[type[BaseModel] | UnionType | None] = None
+    #: Whether ``PATCH`` may replace a job's spec. A job whose stored spec points at inputs frozen
+    #: at submission turns this off, so each job keeps the one definition it was accepted with.
+    allow_spec_update: ClassVar[bool] = True
 
     # ------------------------------------------------------------------ #
     # API routes                                                         #

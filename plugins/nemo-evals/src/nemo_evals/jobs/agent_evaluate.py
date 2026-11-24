@@ -26,6 +26,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import UnionType
 from typing import Any, ClassVar, Literal
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
@@ -48,6 +49,7 @@ from nemo_evals.jobs.agent_compiler import (
 from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
+    AgentEvalJobSpec,
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
@@ -257,6 +259,10 @@ class _AgentEvalJobBase(NemoJob):
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
+    #: Jobs render as either stored shape: tasks frozen in a file, or (every job stored before that) inline.
+    stored_spec_schema: ClassVar[type[BaseModel] | UnionType | None] = AgentEvalJobSpec
+    #: A job keeps the definition it was accepted with; a changed evaluation is a new job.
+    allow_spec_update: ClassVar[bool] = False
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs

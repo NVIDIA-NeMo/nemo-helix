@@ -129,9 +129,11 @@ def add_job_routes(
     resolved_service_name = service_name or _derive_service_name(job_cls)
     job_type = _derive_job_type(job_cls)
     job_input = job_cls.input_spec_schema or job_cls.spec_schema
-    # When input_spec_schema is declared, the stored shape is the canonical
-    # spec_schema; otherwise input and stored shapes coincide.
-    job_output = job_cls.spec_schema if job_cls.input_spec_schema is not None else None
+    # When input_spec_schema is declared, the stored shape is stored_spec_schema, or else the
+    # canonical spec_schema; otherwise input and stored shapes coincide.
+    if job_cls.stored_spec_schema is not None and job_cls.input_spec_schema is None:
+        raise TypeError(f"{job_cls.__name__}.stored_spec_schema requires input_spec_schema to be declared.")
+    job_output = (job_cls.stored_spec_schema or job_cls.spec_schema) if job_cls.input_spec_schema is not None else None
     input_to_output = _adapt_to_spec(job_cls) if job_cls.input_spec_schema is not None else None
 
     router = job_route_factory(
@@ -147,6 +149,7 @@ def add_job_routes(
         authz=authz,
         jobs_list_filter=job_cls.jobs_list_filter,
         dry_run_checks=_adapt_dry_run_checks(job_cls),
+        allow_spec_update=job_cls.allow_spec_update,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 

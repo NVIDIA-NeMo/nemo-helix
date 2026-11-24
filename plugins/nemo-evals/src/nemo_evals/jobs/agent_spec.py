@@ -966,37 +966,18 @@ def validate_single_kind(tasks: Sequence[ResolvedTask]) -> str:
     return next(iter(kinds))
 
 
-class _AgentEvalSpecCommon(BaseModel):
-    """Fields shared by the submitter input and canonical agent-eval specs (everything but ``tasks``)."""
+class _AgentEvalSettings(BaseModel):
+    """Fields every agent-eval spec shares: the input, the canonical spec and the stored spec."""
 
-    # ``oneOf`` mirrors the ``_require_exactly_one_trial_source`` validator into the OpenAPI schema, so
-    # the generated contract (and clients) reject a target-less or both-supplied request instead of
-    # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
-    # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
-    # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
     # ``hide_input_in_errors`` keeps a nested target's rejected credential out of the error text; pydantic
     # has no per-field option, so every field's error loses its ``input_value``.
-    model_config = ConfigDict(
-        extra="forbid",
-        hide_input_in_errors=True,
-        json_schema_extra={
-            "oneOf": [
-                {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},
-                {"required": ["trials"], "properties": {"trials": {"not": {"type": "null"}}}},
-            ]
-        },
-    )
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     target: Target | None = Field(
         default=None,
         description="What generates trials online: a Model or Agent endpoint, or an agent runner (e.g. a "
         "Fabric harness). Endpoint targets carry their own request config (prompt template / inference "
         "params). Mutually exclusive with `trials`.",
-    )
-    trials: list[AgentEvalTrial] | None = Field(
-        default=None,
-        description="Precomputed trials to score directly (offline eval), instead of generating them from a "
-        "`target`. Mutually exclusive with `target`.",
     )
     max_concurrent_tasks: int = Field(
         default=4,
@@ -1043,6 +1024,30 @@ class _AgentEvalSpecCommon(BaseModel):
                 "Supply the name the published trajectories should be recorded under."
             )
         return self
+
+
+class _AgentEvalSpecCommon(_AgentEvalSettings):
+    """Fields shared by the submitter input and canonical agent-eval specs (everything but ``tasks``)."""
+
+    # ``oneOf`` mirrors the ``_require_exactly_one_trial_source`` validator into the OpenAPI schema, so
+    # the generated contract (and clients) reject a target-less or both-supplied request instead of
+    # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
+    # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
+    # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "oneOf": [
+                {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},
+                {"required": ["trials"], "properties": {"trials": {"not": {"type": "null"}}}},
+            ]
+        },
+    )
+
+    trials: list[AgentEvalTrial] | None = Field(
+        default=None,
+        description="Precomputed trials to score directly (offline eval), instead of generating them from a "
+        "`target`. Mutually exclusive with `target`.",
+    )
 
     @model_validator(mode="after")
     def _require_exactly_one_trial_source(self) -> Self:
@@ -1145,3 +1150,51 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
         data = self.model_dump(mode="json")
         data["tasks"] = [data["tasks"][index]]
         return AgentEvalSpec.model_validate(data)
+
+
+class FrozenTasks(BaseModel):
+    """Where a stored agent-evaluate job keeps the tasks and trials it froze at submission.
+
+    The file holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON, in a fileset of the job's
+    workspace. ``digest`` covers its exact bytes and equals the step config's ``tasks_digest``, so the worker
+    refuses a file that changed after submission.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str = Field(
+        min_length=1,
+        description="The file holding the frozen tasks and trials, as `workspace/fileset#path`.",
+    )
+    digest: str = Field(
+        pattern=r"^sha256-v1:[0-9a-f]{64}$",
+        description="`sha256-v1:` and the SHA-256 of the file's exact bytes.",
+    )
+    task_count: int = Field(ge=1, description="Number of tasks the job runs.")
+    trial_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="Number of precomputed trials an offline job scores. Unset for a job with a `target`.",
+    )
+
+
+class AgentEvalStoredSpec(_AgentEvalSettings):
+    """An agent-evaluate job as stored: its settings, with its tasks and trials kept in a file.
+
+    Keeping the tasks out of the job record keeps the record, each attempt's copy of it and every job reply
+    the same size whatever the number of tasks.
+    """
+
+    frozen_tasks: FrozenTasks = Field(description="The file holding the tasks and trials this job runs.")
+
+    @model_validator(mode="after")
+    def _require_exactly_one_trial_source(self) -> Self:
+        # The stored counterpart of AgentEvalSpec's check: an offline job's trials are in the file.
+        if (self.target is None) == (self.frozen_tasks.trial_count is None):
+            raise ValueError("a stored agent-eval spec needs exactly one of `target` or frozen trials")
+        return self
+
+
+#: What an agent-evaluate job stores and returns: the stored shape, or the canonical spec with its tasks
+#: inline, which every job stored before the stored shape still has.
+AgentEvalJobSpec = AgentEvalStoredSpec | AgentEvalSpec
