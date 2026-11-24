@@ -164,16 +164,18 @@ class ImageBuildService:
         latest = first_page.data[0] if first_page.data else None
         # Another platform's build is no answer to this request, so only builds for this one are reused.
         newest = await self._newest_for(head, task_revision.content_hash, request.platform)
-        if newest is not None and newest.status == "ready" and not request.rebuild and self._from_backend(newest):
-            return ImageBuild.from_entity(newest)
         if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._ensure_job(newest)
                 return ImageBuild.from_entity(newest)
+            # The Job may record a result just as it is failed here: the record then reads as the Job left it.
             newest = await self._fail_abandoned(newest, job.status)
-            if newest.status != "failed":
+            if newest.status not in ("ready", "failed"):
                 return ImageBuild.from_entity(newest)
+        # A build that ended ready, before this request or just now, is held to the same rule.
+        if newest is not None and newest.status == "ready" and not request.rebuild and self._from_backend(newest):
+            return ImageBuild.from_entity(newest)
 
         attempt = 1 if latest is None else latest.attempt + 1
         task = f"{workspace}/{name}"
