@@ -90,8 +90,12 @@ _MAX_TRACEBACK_CHARS = 8192
 # stopped before the trial finished with it, whatever the backend (nhx_sandbox.core.termination).
 # Matched by name, since the published SDK doesn't ship nhx_sandbox; keep the two in step.
 _SANDBOX_TERMINATION_GLOB = "nemo-sandbox-termination-*.json"
-#: Error type of a trial whose sandbox stopped under it (out of memory, evicted, out of lifetime, deleted).
+#: Error type of a trial whose sandbox stopped under it (evicted, out of lifetime, deleted, or for a reason not known).
 SANDBOX_TERMINATED_ERROR_TYPE = "SandboxTerminated"
+#: Error type of a trial whose sandbox ran out of memory, which kills every process in it.
+SANDBOX_OUT_OF_MEMORY_ERROR_TYPE = "SandboxOutOfMemory"
+# The cause a termination record gives for a sandbox that ran out of memory (nhx_sandbox's TerminationCause).
+_OUT_OF_MEMORY_CAUSE = "out_of_memory"
 _HARBOR_EXTRA_REQUIRED_MESSAGE = (
     "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
     "If NeMo Helix is installed as a package, run: uv pip install 'nemo-helix[harbor]' "
@@ -663,7 +667,8 @@ def _with_sandbox_termination(error: TrialError, terminations: Sequence[Mapping[
         terminations: Records from :func:`_sandbox_terminations`.
 
     Returns:
-        ``error`` unchanged when no sandbox stopped, else a :data:`SANDBOX_TERMINATED_ERROR_TYPE` error.
+        ``error`` unchanged when no sandbox stopped, a :data:`SANDBOX_OUT_OF_MEMORY_ERROR_TYPE` error when one ran
+        out of memory, else a :data:`SANDBOX_TERMINATED_ERROR_TYPE` error.
     """
     if not terminations:
         return error
@@ -673,8 +678,9 @@ def _with_sandbox_termination(error: TrialError, terminations: Sequence[Mapping[
         for record in terminations
     )
     harbor = f"{error.type}: {error.message}" if error.message else error.type
+    out_of_memory = any(record.get("cause") == _OUT_OF_MEMORY_CAUSE for record in terminations)
     return TrialError(
-        type=SANDBOX_TERMINATED_ERROR_TYPE,
+        type=SANDBOX_OUT_OF_MEMORY_ERROR_TYPE if out_of_memory else SANDBOX_TERMINATED_ERROR_TYPE,
         message=f"{causes}. Harbor then reported {harbor}",
         traceback=error.traceback,
         occurred_at=error.occurred_at,

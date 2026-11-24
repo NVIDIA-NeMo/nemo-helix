@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
+    SANDBOX_OUT_OF_MEMORY_ERROR_TYPE,
     SANDBOX_TERMINATED_ERROR_TYPE,
     _trial_from_harbor_result,
 )
@@ -64,6 +65,16 @@ def test_a_stopped_sandbox_replaces_the_follow_on_error(tmp_path: Path) -> None:
     # Harbor's traceback and timestamp are the evidence for what failed next; both are kept.
     assert trial.error.traceback == _FOLLOW_ON_ERROR["exception_traceback"]
     assert trial.error.occurred_at is not None and trial.error.occurred_at.isoformat() == "2026-10-30T13:05:10"
+    assert trial.status is AgentEvalTrialStatus.PARTIAL
+
+
+def test_a_sandbox_that_ran_out_of_memory_has_its_own_error_type(tmp_path: Path) -> None:
+    """So a run's summary counts trials the task's memory limit ended apart from the platform's own failures."""
+    oom = {**_EVICTED, "cause": "out_of_memory", "detail": "the sandbox ran out of memory"}
+    trial = _trial(tmp_path, exception_info=_FOLLOW_ON_ERROR, records={"a": oom, "b": {**_EVICTED, "sandbox_id": "b"}})
+
+    assert trial.error is not None
+    assert trial.error.type == SANDBOX_OUT_OF_MEMORY_ERROR_TYPE
     assert trial.status is AgentEvalTrialStatus.PARTIAL
 
 
