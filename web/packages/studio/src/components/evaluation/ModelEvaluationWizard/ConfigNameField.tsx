@@ -20,7 +20,7 @@ export const ConfigNameField: FC = () => {
     control,
     formState: { errors },
   } = useFormContext<EvaluationFormValues>();
-  const { preview, status } = useConfigNameStatus();
+  const { preview, status, conflictMessage } = useConfigNameStatus();
 
   return (
     <ControlledTextInput
@@ -34,6 +34,7 @@ export const ConfigNameField: FC = () => {
           schemaError: errors.name?.message,
           describe: 'Saved as a fileset so later runs can reuse this configuration.',
         }),
+        ...(conflictMessage && { slotError: conflictMessage }),
       }}
     />
   );

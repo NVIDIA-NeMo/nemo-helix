@@ -14,7 +14,7 @@ import { useEffect } from 'react';
 import { type Control, type FieldValues, type Path, useWatch } from 'react-hook-form';
 import { useDebounce } from 'use-debounce';
 
-const nameCheckParams = (name: string): FilesListFilesetsParams => ({
+export const nameCheckParams = (name: string): FilesListFilesetsParams => ({
   page_size: 1,
   filter: { name },
 });
