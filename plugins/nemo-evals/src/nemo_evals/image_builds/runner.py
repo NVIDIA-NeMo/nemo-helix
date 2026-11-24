@@ -346,9 +346,10 @@ async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> boo
             image.error = f"Builder image record {image.builder_image} no longer exists"
             changed = True
             continue
-        before = image.status
+        before = (image.status, image.builder_backend)
         apply_builder_image(image, current)
-        changed = changed or image.status != before
+        # The backend too: an image still building can learn which backend builds it with no change of status.
+        changed = changed or (image.status, image.builder_backend) != before
     return changed
 
 
