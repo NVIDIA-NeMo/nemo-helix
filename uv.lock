@@ -4476,7 +4476,7 @@ requires-dist = [
     { name = "kubernetes", specifier = ">=29.0.0" },
     { name = "nemo-helix", marker = "extra == 'service'", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic", specifier = ">=2.12.0" },
 ]
 provides-extras = ["service"]
 
@@ -6878,7 +6878,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'models-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-agent-optimization-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=2.10.6" },
-    { name = "pydantic", marker = "extra == 'nemo-builder-plugin'", specifier = ">=2.0.0" },
+    { name = "pydantic", marker = "extra == 'nemo-builder-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-compass-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-customizer-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.10.6" },
@@ -6893,7 +6893,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nhx-customization-common'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nhx-sandbox'", specifier = ">=2.10.0" },
-    { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'rl-service'", specifier = ">=2.10.6" },

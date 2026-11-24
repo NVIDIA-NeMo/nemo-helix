@@ -160,6 +160,11 @@ class RemoteBackend:
         namespace (`control_profile`), so a remote-build profile in that namespace is refused while Jobs lists
         that profile. What else may create pods where the step runs is the deployment's to see to: the
         builder can't read it.
+
+        A profile that names no namespace runs its steps in the namespace of Jobs' own controller, which Jobs
+        takes from that process's environment and the builder can't read. So the two profiles are known to be
+        apart only where both name a namespace. Two that name none share one, and one that names none may
+        share the namespace the other names: both are refused.
         """
         name = self._config.control_profile
         control = next((p for p in self._profiles if (p.provider, p.profile) == ("cpu", name)), None)
@@ -167,7 +172,20 @@ class RemoteBackend:
             profile, KubernetesJobExecutionProfile
         ):
             return
-        if control.config.namespace == profile.config.namespace:
+        # As Jobs reads them: an empty namespace is one left unset.
+        step_namespace = profile.config.namespace or None
+        control_namespace = control.config.namespace or None
+        if (step_namespace is None) != (control_namespace is None):
+            unnamed = self._remote.profile if step_namespace is None else name
+            raise BackendRejectedError(
+                f"Jobs execution profile cpu/{unnamed} names no namespace, so its steps run in the namespace of "
+                "Jobs' own controller, which the builder can't read. Nothing then shows that the remote-build "
+                f"step (cpu/{self._remote.profile}) runs apart from the steps of cpu/{name}, which may create "
+                "pods where they run. Under workload token exchange the builder relies on nothing but Jobs "
+                "creating pods where the remote-build step runs. Name a namespace on both profiles, and give "
+                "the remote-build step one of its own, where only Jobs creates pods"
+            )
+        if control_namespace == step_namespace:
             raise BackendRejectedError(
                 f"Jobs execution profile cpu/{self._remote.profile} runs the remote-build step in the namespace of "
                 f"cpu/{name}, whose steps may create pods there. Under workload token exchange the builder relies "
