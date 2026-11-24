@@ -10,6 +10,7 @@ import {
 import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat/index';
+import { ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
 import {
   ThemeProvider as KaizenThemeProvider,
@@ -136,14 +137,15 @@ interface CompletionRequestWithSignal {
   signal?: AbortSignal;
 }
 
-const renderAssistantChat = (element: ReactElement) =>
-  render(
-    <KaizenThemeProvider className="h-full" density="standard" theme="light">
-      <MockToastProvider>
-        <TooltipProvider>{element}</TooltipProvider>
-      </MockToastProvider>
-    </KaizenThemeProvider>
-  );
+const withProviders = (element: ReactElement) => (
+  <KaizenThemeProvider className="h-full" density="standard" theme="light">
+    <MockToastProvider>
+      <TooltipProvider>{element}</TooltipProvider>
+    </MockToastProvider>
+  </KaizenThemeProvider>
+);
+
+const renderAssistantChat = (element: ReactElement) => render(withProviders(element));
 
 const StaticAssistantChatThread = ({
   hideAssistantMessageActions,
@@ -182,6 +184,80 @@ const StaticAssistantChatThread = ({
     </AssistantRuntimeProvider>
   );
 };
+
+const ToolCallIdPart: ToolCallMessagePartComponent = ({ toolName, toolCallId }) => (
+  <div data-testid="tool-part">{`${toolName}:${toolCallId}`}</div>
+);
+
+const ControlledAssistantChatThread = ({
+  isRunning = false,
+  messages,
+}: {
+  isRunning?: boolean;
+  messages: readonly ThreadMessageLike[];
+}) => {
+  const runtime = useExternalStoreRuntime<ThreadMessageLike>({
+    messages,
+    isRunning,
+    onNew: async () => undefined,
+    convertMessage: (message) => message,
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <AssistantChatThread
+        hideAssistantMessageActions
+        placeholder="Task prompt"
+        onReset={() => undefined}
+        toolCallPartComponent={ToolCallIdPart}
+      />
+    </AssistantRuntimeProvider>
+  );
+};
+
+const createDeferred = () => {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};
+
+const searchToolCallChunk = {
+  ...createCompletionChunk(''),
+  choices: [
+    {
+      index: 0,
+      delta: {
+        tool_calls: [{ index: 0, id: 'call_a', function: { name: 'search', arguments: '{}' } }],
+      },
+      finish_reason: null,
+      logprobs: null,
+    },
+  ],
+} as ChatCompletionChunk;
+
+const createWorkStream = (beforeAnswer?: Promise<void>): Stream<ChatCompletionChunk> =>
+  ({
+    controller: new AbortController(),
+    async *[Symbol.asyncIterator]() {
+      yield createReasoningCompletionChunk('Plan.');
+      yield searchToolCallChunk;
+      await beforeAnswer;
+      yield createCompletionChunk('It is sunny.');
+    },
+  }) as unknown as Stream<ChatCompletionChunk>;
+
+const createCollapsedDetailsPart = (label: string) =>
+  ({
+    type: 'tool-call',
+    toolCallId: 'assistant-collapsed-studio-details',
+    toolName: ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
+    args: {
+      label,
+      parts: [{ type: 'tool-call', toolCallId: 'call_a', toolName: 'search', args: {} }],
+    },
+  }) as const;
 
 describe('AssistantChat', () => {
   beforeEach(() => {
@@ -275,8 +351,9 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('Done.')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
-      'Thought processWeighing options.'
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent(/^Thought/);
+    expect(screen.getByTestId('assistant-work-thought')).toHaveTextContent(
+      'ThoughtWeighing options.'
     );
   });
 
@@ -305,37 +382,14 @@ describe('AssistantChat', () => {
     expect(onMessageComplete.mock.calls[0][0].tokensPerSec).toBeGreaterThan(0);
   });
 
-  it('passes streamed reasoning and tool calls to the tool call part component', async () => {
-    const toolCallChunk = {
-      ...createCompletionChunk(''),
-      choices: [
-        {
-          index: 0,
-          delta: {
-            tool_calls: [{ index: 0, id: 'call_a', function: { name: 'search', arguments: '{}' } }],
-          },
-          finish_reason: null,
-          logprobs: null,
-        },
-      ],
-    } as ChatCompletionChunk;
-    const stream = {
-      controller: new AbortController(),
-      async *[Symbol.asyncIterator]() {
-        yield createReasoningCompletionChunk('Plan.');
-        yield toolCallChunk;
-        yield createCompletionChunk('It is sunny.');
-      },
-    } as unknown as Stream<ChatCompletionChunk>;
-    mocks.createChatCompletion.mockResolvedValueOnce(stream);
+  it('groups streamed reasoning and tool calls and hands tool calls to the part component', async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(createWorkStream());
 
     renderAssistantChat(
       <AssistantChat
         model="test-model"
         workspace="default"
-        toolCallPartComponent={({ toolName, args }) => (
-          <div data-testid="tool-part">{`${toolName}:${String(args.label ?? '')}`}</div>
-        )}
+        toolCallPartComponent={ToolCallIdPart}
       />
     );
 
@@ -343,11 +397,142 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
+    const group = screen.getByTestId('assistant-work-group');
+    expect(within(group).getByTestId('tool-part')).toHaveTextContent('search:call_a');
+    expect(within(group).getByTestId('assistant-work-thought')).toHaveTextContent('Plan.');
+    expect(within(group).getByTestId('assistant-work-group-label')).toHaveTextContent(
+      'Ran 1 tool call'
+    );
+  });
+
+  it('keeps the work group open while the reply runs, then collapses it', async () => {
+    const finish = createDeferred();
+    mocks.createChatCompletion.mockResolvedValueOnce(createWorkStream(finish.promise));
+
+    renderAssistantChat(
+      <AssistantChat
+        model="test-model"
+        workspace="default"
+        toolCallPartComponent={ToolCallIdPart}
+      />
+    );
+
+    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Weather?');
+    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+    expect(await screen.findByTestId('tool-part')).toBeVisible();
+    expect(screen.getByTestId('assistant-work-group')).toHaveAttribute('open');
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent('Thinking…');
+
+    finish.resolve();
+
+    expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByTestId('tool-part')).toHaveTextContent(
-        'AssistantCollapsedStudioDetails:Work details'
+      expect(screen.getByTestId('assistant-work-group')).not.toHaveAttribute('open')
+    );
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent('Ran 1 tool call');
+  });
+
+  it('keeps the reader’s toggle of the work group during and after the run', async () => {
+    const user = userEvent.setup();
+    const finish = createDeferred();
+    mocks.createChatCompletion.mockResolvedValueOnce(createWorkStream(finish.promise));
+
+    renderAssistantChat(
+      <AssistantChat
+        model="test-model"
+        workspace="default"
+        toolCallPartComponent={ToolCallIdPart}
+      />
+    );
+
+    await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Weather?');
+    await user.click(screen.getByRole('button', { name: /Submit/i }));
+    await screen.findByTestId('tool-part');
+
+    await user.click(screen.getByTestId('assistant-work-group-label'));
+    expect(screen.getByTestId('assistant-work-group')).not.toHaveAttribute('open');
+
+    await user.click(screen.getByTestId('assistant-work-group-label'));
+    expect(screen.getByTestId('assistant-work-group')).toHaveAttribute('open');
+
+    finish.resolve();
+
+    expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-work-group')).toHaveAttribute('open');
+  });
+
+  it('keeps the reader’s toggle when the runtime reshapes the reply on completion', async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderAssistantChat(
+      <ControlledAssistantChatThread
+        isRunning
+        messages={[
+          {
+            id: 'assistant-reply',
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'Let me check.' },
+              { type: 'tool-call', toolCallId: 'call_a', toolName: 'search', args: {} },
+            ],
+            status: { type: 'running' },
+          },
+        ]}
+      />
+    );
+
+    await user.click(screen.getByTestId('assistant-work-group-label'));
+    await user.click(screen.getByTestId('assistant-work-group-label'));
+    expect(screen.getByTestId('assistant-work-group')).toHaveAttribute('open');
+
+    rerender(
+      withProviders(
+        <ControlledAssistantChatThread
+          messages={[
+            {
+              id: 'assistant-reply',
+              role: 'assistant',
+              content: [
+                createCollapsedDetailsPart('worked for 42s'),
+                { type: 'text', text: 'It is sunny.' },
+              ],
+              status: { type: 'complete', reason: 'stop' },
+            },
+          ]}
+        />
       )
     );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent(
+        'Ran 1 tool call · worked for 42s'
+      )
+    );
+    expect(screen.getByTestId('assistant-work-group')).toHaveAttribute('open');
+  });
+
+  it.each([
+    { label: 'worked for 42s', expected: 'Ran 1 tool call · worked for 42s' },
+    { label: 'worked for unknown', expected: 'Ran 1 tool call' },
+    { label: 'Work details', expected: 'Ran 1 tool call' },
+  ])('labels saved work details "$label" as "$expected"', ({ label, expected }) => {
+    renderAssistantChat(
+      <ControlledAssistantChatThread
+        messages={[
+          {
+            id: 'assistant-reply',
+            role: 'assistant',
+            content: [createCollapsedDetailsPart(label), { type: 'text', text: 'It is sunny.' }],
+            status: { type: 'complete', reason: 'stop' },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent(
+      new RegExp(`^${expected}$`)
+    );
+    expect(screen.getByTestId('assistant-work-group')).not.toHaveAttribute('open');
   });
 
   it(

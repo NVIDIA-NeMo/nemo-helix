@@ -30,6 +30,19 @@ export const TOOL_LABELS: Record<string, string> = {
   Write: 'Write file',
 };
 
+/** Other names that model and MCP tools use for the built-in tools above. */
+export const TOOL_NAME_ALIASES: Record<string, readonly string[]> = {
+  AskUserQuestion: ['AskUser'],
+  Bash: ['ExecuteCommand', 'RunCommand', 'Shell'],
+  Edit: ['EditFile'],
+  Grep: ['SearchText'],
+  LS: ['ListDir', 'ListDirectory', 'ListFiles'],
+  Read: ['ReadFile'],
+  WebFetch: ['FetchUrl'],
+  WebSearch: ['SearchWeb'],
+  Write: ['CreateFile', 'WriteFile'],
+};
+
 export const TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
   Bash: WindowTerminal,
   Edit: Pencil,

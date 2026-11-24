@@ -7,9 +7,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from collections.abc import Callable
+from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path
+from typing import ParamSpec, TypeVar
+from uuid import UUID, uuid4
 
-from nemo_helix_ext.cli.telemetry.events import HelixTelemetryEvent
+import click
+
+from nemo_helix_ext.cli.telemetry.events import HelixTelemetryEvent, OnboardingStepEvent, TaskStatusEnum
 from nemo_helix_ext.cli.telemetry.handler import TelemetryHandler, _telemetry_enabled
 from nemo_helix_ext.cli.telemetry.session import get_session_id
 
@@ -21,6 +28,9 @@ _TELEMETRY_SUPPRESSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 _invocation_opt_out = False
+_onboarding_attempt: ContextVar[UUID | None] = ContextVar("onboarding_attempt", default=None)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _NOTICE_TEXT = (
     "NeMo Helix CLI telemetry is on by default and sends anonymous usage data to improve the product. "
@@ -75,6 +85,8 @@ def emit_event(event: HelixTelemetryEvent) -> None:
     try:
         if not telemetry_opted_in():
             return
+        if isinstance(event, OnboardingStepEvent) and (attempt_id := _onboarding_attempt.get()) is not None:
+            event = event.model_copy(update={"onboarding_attempt_id": attempt_id})
         # No retries on the CLI exit path: a synchronous send blocks the user's command,
         # so cap the worst case at one bounded send (SEND_TIMEOUT_SECONDS) rather than
         # retrying against a slow or unreachable endpoint while the user waits.
@@ -83,6 +95,39 @@ def emit_event(event: HelixTelemetryEvent) -> None:
         handler.stop()
     except _TELEMETRY_SUPPRESSED_EXCEPTIONS:  # noqa: BLE001
         logger.debug("Failed to emit telemetry event", exc_info=True)
+
+
+def track_onboarding(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Correlate one opted-in setup invocation, never later invocations or workloads."""
+
+    @wraps(func)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if not telemetry_opted_in():
+            return func(*args, **kwargs)
+        token = _onboarding_attempt.set(uuid4())
+        status = TaskStatusEnum.COMPLETED
+        try:
+            emit_event(OnboardingStepEvent(step="setup_started", task_status=TaskStatusEnum.UNDEFINED))
+            return func(*args, **kwargs)
+        except (KeyboardInterrupt, click.Abort):
+            status = TaskStatusEnum.CANCELED
+            raise
+        except click.exceptions.Exit as exc:
+            status = TaskStatusEnum.COMPLETED if exc.exit_code == 0 else TaskStatusEnum.ERROR
+            raise
+        except SystemExit as exc:
+            status = TaskStatusEnum.COMPLETED if exc.code in (None, 0) else TaskStatusEnum.ERROR
+            raise
+        except BaseException:
+            status = TaskStatusEnum.ERROR
+            raise
+        finally:
+            try:
+                emit_event(OnboardingStepEvent(step="setup_finished", task_status=status))
+            finally:
+                _onboarding_attempt.reset(token)
+
+    return wrapped
 
 
 def _notice_marker_path() -> Path:

@@ -121,7 +121,8 @@ Full template:
 | `lora.target_modules` | `null` | e.g. `["q_proj","v_proj"]`; null = platform default targets |
 | `lora.exclude_modules` | `null` | Patterns to exclude from LoRA, e.g. `["*.out_proj"]` |
 | `lora.use_triton` | `true` | Use the optimized Triton LoRA kernel |
-| `max_seq_length` | `2048` | Truncate/pack to this length; lower if OOM |
+| `max_seq_length` | `2048` | Token cap. With `image_size` or `max_pixels`, this must exceed the tokens one image can use at that ceiling, plus the text tokens in each row. The model spec's `vision_patch_size` is the side of one image token. A shorter cap is rejected, but only when the model spec has `vision_patch_size`. Without it the check is skipped and a short cap can truncate rows, so work out the image token count yourself. Lower it if the run OOMs |
+| `image_size` | `null` | `{longest_edge, shortest_edge}` pixel-area bounds. Both required, `shortest_edge` < `longest_edge`. Set this or `max_pixels`, not both. Vision-language checkpoints only |
 | `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint. Exception: full-weight distillation with `Adam`/`AdamW` keeps the student in fp32, because those optimizers hold no separate fp32 copy of the weights. Set `precision` to override |
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
 | `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
@@ -273,7 +274,9 @@ Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `tra
 
 `retrieval.temperature` is the loss softmax temperature. Unset means `0.02` for `bi_encoder` and `1.0` for `cross_encoder`. Lower values sharpen the contrast between the positive and the negatives. For a Qwen3 causal reranker it is the only temperature setting; Automodel's Qwen3-Reranker example recipe uses `0.3`.
 
-`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+`retrieval.pooling` (`avg`, `cls`, or `last`) and `retrieval.normalize` set how a `bi_encoder` turns its token vectors into one embedding. Leave them unset to keep what the base was pretrained with: its Sentence Transformers files, else its config's `pooling`, else `avg` with normalization. Both supported bases use `avg` with normalization. The HF output, `lora_merged` included, carries Sentence Transformers files (`modules.json`, `1_Pooling/`) with this pooling and the job's `query_prefix`/`passage_prefix` as prompts, so vLLM and Sentence Transformers pool it the way it trained.
+
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit `embeddings` pooled the way the model trained (`retrieval.pooling` and `normalize`). Cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
 
 **Qwen3 causal rerankers** (a `cross_encoder` job on a `Qwen3ForCausalLM` base such as Qwen3-Reranker) have no score head:
 - **Training prompt.** Helix trains them on Qwen3-Reranker's own prompt: system message, `<Instruct>`/`<Query>`/`<Document>`, then the empty think block. Classifier rerankers keep `question:{query} \n \n passage:{passage}`.

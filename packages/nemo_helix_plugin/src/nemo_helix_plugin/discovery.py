@@ -96,6 +96,7 @@ _ALL_SURFACE_GROUPS = (
     "nemo.inference_middleware",
     "nemo.customization.contributors",
     "nemo.seed",
+    "nemo.models.metadata_sources",
 )
 
 # Surface groups whose entry-point keys are dot-separated as
@@ -119,6 +120,7 @@ _SURFACE_ALLOWLIST_ENV_VARS: dict[str, str] = {
     "nemo.inference_middleware": "NEMO_PLUGIN_INFERENCE_MIDDLEWARE_ALLOWLIST",
     "nemo.customization.contributors": "NEMO_PLUGIN_CUSTOMIZATION_CONTRIBUTORS_ALLOWLIST",
     "nemo.seed": "NEMO_PLUGIN_SEED_ALLOWLIST",
+    "nemo.models.metadata_sources": "NEMO_PLUGIN_MODEL_METADATA_SOURCES_ALLOWLIST",
 }
 
 CUSTOMIZATION_CONTRIBUTORS_GROUP = "nemo.customization.contributors"

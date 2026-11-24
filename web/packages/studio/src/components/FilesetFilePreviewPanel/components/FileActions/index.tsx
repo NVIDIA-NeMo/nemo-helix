@@ -102,17 +102,15 @@ export const FileActions: FC<Props> = ({
 
   return (
     <>
-      <div className="absolute top-4 right-19">
-        <QuickActionsMenuRoot
-          ariaLabel="Open file actions menu"
-          actions={[
-            { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
-            { label: 'Download', onSelect: downloadFile },
-            { label: 'Rename', onSelect: openModalWithFile('rename') },
-          ]}
-          deleteAction={{ onSelect: openModalWithFile('delete') }}
-        />
-      </div>
+      <QuickActionsMenuRoot
+        ariaLabel="Open file actions menu"
+        actions={[
+          { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
+          { label: 'Download', onSelect: downloadFile },
+          { label: 'Rename', onSelect: openModalWithFile('rename') },
+        ]}
+        deleteAction={{ onSelect: openModalWithFile('delete') }}
+      />
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open

@@ -318,17 +318,21 @@ func TestSessionBearerOverUDS(t *testing.T) {
 	}
 }
 
-func TestSessionRejectsSyntheticHostOverTCP(t *testing.T) {
-	t.Setenv(workloadIdentityTokenFileEnv, "")
-	t.Setenv("NHX_ACCESS_TOKEN_FILE", "/unused-must-reject-before-reading")
-	endpoint, err := ParseEndpoint(UDSBaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session := NewSessionFromEnv()
-	_, err = session.SecretClient(endpoint, nil).GetSecret(context.Background(), "ws", "key")
-	if err == nil || !strings.Contains(err.Error(), "credentials require HTTPS") {
-		t.Fatalf("expected unsafe TCP destination rejection, got %v", err)
+func TestSessionRejectsBearerOverPlainHTTP(t *testing.T) {
+	for _, baseURL := range []string{UDSBaseURL, "http://nemo-helix-api:8080", "http://nemo-helix-api.nemo-helix.svc:8080"} {
+		t.Run(baseURL, func(t *testing.T) {
+			t.Setenv(workloadIdentityTokenFileEnv, "")
+			t.Setenv("NHX_ACCESS_TOKEN_FILE", "/unused-must-reject-before-reading")
+			endpoint, err := ParseEndpoint(baseURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := NewSessionFromEnv()
+			_, err = session.SecretClient(endpoint, nil).GetSecret(context.Background(), "ws", "key")
+			if err == nil || !strings.Contains(err.Error(), "credentials require HTTPS") {
+				t.Fatalf("expected unsafe TCP destination rejection, got %v", err)
+			}
+		})
 	}
 }
 
