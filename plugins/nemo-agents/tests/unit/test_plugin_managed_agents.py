@@ -117,6 +117,7 @@ class FakeAnalyst(PluginManagedAgent[AnalystContext, AnalystPreparedContext]):
         return PreparedRun(
             context=AnalystPreparedContext(target=context.target, model=model, notes="prepared"),
             subject=context.target,
+            job_profile="analyst-profile",
         )
 
 
@@ -588,6 +589,7 @@ class TestExecute:
         assert step.request.context == request_context
         assert step.context == {"target": "bot", "model": "default/fast-one", "notes": "prepared"}
         assert step.subject == "bot"
+        assert step.job_profile == "analyst-profile"
         assert step.plugin_managed_agent_type == "example.analyst"
         assert step.agent_ref == "default/example-analyst"
         assert step.input == "Analyze the target agent."
@@ -627,6 +629,41 @@ class TestExecute:
 
         assert step.context == {"topic": "x"}
         assert step.subject is None
+        assert step.job_profile is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "type_cls, requested, expected",
+        [
+            (FakeAnalyst, None, "analyst-profile"),
+            (FakeAnalyst, "sandbox", "sandbox"),
+            (FakeReporter, None, "default"),
+        ],
+    )
+    async def test_runs_on_the_requested_profile_then_the_types(
+        self,
+        install_plugin_managed_agent_types: InstallTypes,
+        type_cls: type[PluginManagedAgent],
+        requested: str | None,
+        expected: str,
+    ) -> None:
+        install_plugin_managed_agent_types(type_cls)
+        step = await _to_spec(
+            _stored(name=type_cls.default_name, type_id=type_cls.type_id),
+            context={"target": "bot", "model": "m"} if type_cls is FakeAnalyst else {"topic": "x"},
+            input="Go.",
+        )
+
+        compiled = await ExecuteAgentJob.compile(
+            workspace="default",
+            spec=step,
+            entity_client=MagicMock(),
+            job_name=None,
+            async_sdk=MagicMock(),
+            profile=requested,
+        )
+
+        assert compiled.steps[0].executor.profile == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

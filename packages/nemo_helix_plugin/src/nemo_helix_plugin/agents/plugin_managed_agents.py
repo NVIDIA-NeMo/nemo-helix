@@ -93,6 +93,9 @@ class PreparedRun(Generic[_RunContextT]):
     #: with ``filter[spec.subject]``. Its meaning is the type's own: a type that reviews another agent
     #: might use that agent's name. ``None`` when the run has no natural subject.
     subject: str | None = None
+    #: The jobs execution profile the run uses when the request names none, such as one set in the
+    #: plugin's own config. A profile in the request still wins. ``None`` leaves it to the platform default.
+    job_profile: str | None = None
 
 
 class _AgentLike(Protocol):

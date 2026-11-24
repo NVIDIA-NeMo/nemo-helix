@@ -381,6 +381,9 @@ class ExecuteAgentStepConfig(BaseModel):
     # An opaque string whose meaning the type defines; None when the type gave
     # none, and for agents that are not plugin-managed.
     subject: str | None = None
+    # The jobs execution profile the plugin-managed agent type's ``prepare``
+    # chose, used when the request names none. None for every other agent.
+    job_profile: str | None = None
     # The plugin-managed agent type that prepared this run, recorded so a job
     # says what it is without looking up an agent that may since have changed.
     plugin_managed_agent_type: str | None = None
@@ -467,6 +470,7 @@ class ExecuteAgentJob(NemoJob):
             validate_context(request.context, source.context_schema)
         agent_input = _resolve_input(request.input, source)
         subject: str | None = None
+        job_profile: str | None = None
         if source.plugin_managed_type is None:
             run_context = request.context
         else:
@@ -478,6 +482,7 @@ class ExecuteAgentJob(NemoJob):
             )
             run_context = prepared.context.model_dump(mode="json")
             subject = prepared.subject
+            job_profile = prepared.job_profile
 
         _validate_agent_config_format(source.config_format)
         resolved_agent_config = resolve_agent_config_for_deployment(
@@ -556,6 +561,7 @@ class ExecuteAgentJob(NemoJob):
             agent_ref=source.ref,
             context=run_context,
             subject=subject,
+            job_profile=job_profile,
             plugin_managed_agent_type=source.plugin_managed_type.type_id if source.plugin_managed_type else None,
             workdir=workdir,
             compute=resolved_env.compute_spec,
@@ -581,7 +587,8 @@ class ExecuteAgentJob(NemoJob):
         step_config = ExecuteAgentStepConfig.model_validate(spec)
 
         executor = CPUExecutionProviderSpec(
-            profile=profile or "default",
+            # The request's profile, then the one a plugin-managed agent type chose.
+            profile=profile or step_config.job_profile or "default",
             provider="cpu",
             container=ContainerSpec(
                 image=cls._execution_image(step_config.request.image),

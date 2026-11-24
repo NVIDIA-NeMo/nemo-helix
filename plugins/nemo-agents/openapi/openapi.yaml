@@ -4620,6 +4620,9 @@ components:
         subject:
           title: Subject
           type: string
+        job_profile:
+          title: Job Profile
+          type: string
         plugin_managed_agent_type:
           title: Plugin Managed Agent Type
           type: string
