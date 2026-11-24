@@ -410,11 +410,19 @@ def test_a_zero_report_interval_is_kept_rather_than_read_as_absent(finetune: Mod
 # --------------------------------------------------------------------------- #
 
 
+class _SignalHandler:
+    """The flag Automodel's preemption handler sets, which the scheduler gathers from every rank."""
+
+    def __init__(self) -> None:
+        self._signal_received = False
+
+
 class _Scheduler:
     def __init__(self, max_steps: int = 40, num_epochs: int = 2) -> None:
         self.max_steps, self.num_epochs = max_steps, num_epochs
         self.step, self.epoch, self.is_last_batch = 0, 0, False
         self.sigterm_flag = False
+        self.sig_handler: _SignalHandler | None = _SignalHandler()
 
 
 class _Sample:
@@ -695,19 +703,25 @@ def test_only_global_rank_zero_watches_for_a_pause(
     assert fake_poller.started[0].stopped
 
 
-def test_a_pause_signals_this_process(
-    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, fake_poller: type[_FakePoller]
+@pytest.mark.parametrize("has_handler", [True, False], ids=["preemption-handler", "no-handler"])
+def test_a_pause_sets_the_preemption_flag_the_scheduler_gathers(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, fake_poller: type[_FakePoller], has_handler: bool
 ) -> None:
-    """Automodel shares the signal with every rank at the next step, so rank 0's own pid is enough."""
+    """The flag is set directly, so the pause does not depend on which handler owns the signal in the process."""
     monkeypatch.setenv("RANK", "0")
-    sent: list[tuple[int, int]] = []
-    monkeypatch.setattr(finetune, "kill", lambda pid, sig: sent.append((pid, sig)))
-    wrapper, _ = _wrapper(finetune, monkeypatch, _FakeRecipe())
-    wrapper.run_train_validation_loop()
+    recipe = _FakeRecipe()
+    handler = recipe.step_scheduler.sig_handler if has_handler else None
+    recipe.step_scheduler.sig_handler = handler
+    wrapper, _ = _wrapper(finetune, monkeypatch, recipe)
 
+    if handler is None:
+        with pytest.raises(RuntimeError, match="preemption handler"):
+            wrapper.run_train_validation_loop()
+        return
+    wrapper.run_train_validation_loop()
     fake_poller.started[0].on_pause()
 
-    assert sent == [(finetune.os.getpid(), finetune.PAUSE_SIGNAL)]
+    assert handler._signal_received is True
 
 
 class _PausingRecipe(_FakeRecipe):
