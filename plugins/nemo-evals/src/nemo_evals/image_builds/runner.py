@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage
+from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -39,6 +39,7 @@ from nemo_evals.image_builds.models import (
     BuildImage,
     TaskImageBuildEntity,
     build_entity_name,
+    recorded_backend,
 )
 from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
 from nemo_evals.revisions import get_revision
@@ -131,8 +132,8 @@ async def _build(
     build.status = "running"
     build.images = images
     for image in _in_submit_order(images):
-        if not await _submit(builder, image, definition, rebuild=build.rebuild):
-            # The refused image has failed the build: the images left are not submitted, and stay pending.
+        if not await _submit(builder, image, definition, rebuild=build.rebuild, backend=build.expected_backend):
+            # That image has failed the build: the images left are not submitted, and stay pending.
             break
     build = await entities.update(build)
 
@@ -248,20 +249,22 @@ async def downloaded_archive(files: AsyncFilesClient, source: HarborArchiveSourc
 
 
 async def _submit(
-    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool = False
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool, backend: str
 ) -> bool:
-    """Submit one image's build or copy and record where it stands; False when Builder refused the request itself.
+    """Submit one image's build or copy and record where it stands; False when the caller is to submit nothing more.
 
-    The image then fails with Builder's own sentence, and the caller submits nothing more. Any other error the
-    client reports (a :class:`NemoClientError`) fails this image alone. Giving up on a build other requests keep
-    submitting (:func:`adopt_or_build`) is not caught: it is raised, and the build then fails as a
-    ``task-builder error`` with no images recorded.
+    That is when Builder refused the request itself: the image then fails with Builder's own sentence. And it is
+    when Builder answered the request with a row under another backend than ``backend``, the one the build's images
+    must come from: the image then fails with a sentence that names both backends (:func:`backends_disagree`), as
+    every image after it would. Any other error the client reports (a :class:`NemoClientError`) fails this image
+    alone. Giving up on a build other requests keep submitting (:func:`adopt_or_build`) is not caught: it is raised,
+    and the build then fails as a ``task-builder error`` with no images recorded.
     """
     try:
         if image.image is not None:
             builder_image = await _submit_copy(builder, image)
         else:
-            builder_image = await _submit_build(builder, image, definition, rebuild=rebuild)
+            builder_image = await _submit_build(builder, image, definition, rebuild=rebuild, backend=backend)
     except BuildRefused as exc:
         logger.info("Submitting nothing after %s: %s", image.type, exc)
         image.status = "failed"
@@ -273,8 +276,35 @@ async def _submit(
         return True
     image.builder_image = builder_image.name
     image.build_job = builder_image.provenance.job.rpartition("/")[2]
+    built_by = builder_image.provenance.backend
+    if built_by != backend:
+        # A build of another backend is never adopted, and a submit is answered under Builder's own backend. So this
+        # is a row under the backend Builder builds with: one it took just now, for this request or for another
+        # that asked for the revision first, or one a copy or a rebuild submitted again. Builder builds with another
+        # backend than this build was requested for, and the next image would get the same answer. The image names
+        # the row and its backend, and nothing else of it: it is not this build's.
+        image.builder_backend = recorded_backend(built_by)
+        image.status = "failed"
+        image.error = backends_disagree(built_by, backend)
+        return False
     apply_builder_image(image, builder_image)
     return True
+
+
+def backends_disagree(actual: str, expected: str) -> str:
+    """The error of an image Builder answered for under its ``actual`` backend, in a build that expects ``expected``.
+
+    A build requested before a deployment switched ``builder.backend``, and run after, differs this way once: the
+    next request reads the new backend. So does one requested while the API could tell no backend, which expects
+    the in-cluster one, when its Job submits after Builder's section is repaired to name another. A deployment
+    whose evals API reads another ``builder.backend`` than its Builder does differs on every request. The Job
+    can't tell which, so the sentence says what to do in that order.
+    """
+    return (
+        f"Builder builds with the {actual!r} backend, and this build was requested for {expected!r}: request the "
+        "build again; if it fails the same way, the evals API reads another builder.backend than Builder does, so "
+        "set both to one backend"
+    )
 
 
 async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerImage:
@@ -296,9 +326,12 @@ async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerIma
 
 
 async def _submit_build(
-    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool, backend: str
 ) -> ContainerImage:
     """Use the build of a context with the same files when there is one, from any task; submit this task's otherwise.
+
+    Only a build ``backend`` made is used: one another backend made is where that backend published it, so this
+    task's request is submitted as the next revision.
 
     A rebuild submits this task's request whatever is there: a ready build of a request naming no platform may be for
     the default platform before it changed, and only Builder knows the default now.
@@ -311,7 +344,9 @@ async def _submit_build(
             builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform
         )
         return submitted.images[0]
-    return await adopt_or_build(builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform)
+    return await adopt_or_build(
+        builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform, backend=backend
+    )
 
 
 async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> bool:
@@ -363,8 +398,8 @@ def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> Non
     cluster's and without a handle, and the row an image names doesn't change backend. A handle that the read
     which finds the row ready didn't carry isn't picked up later: a ready image isn't read again.
     """
-    backend = builder_image.provenance.backend
-    if backend != IN_CLUSTER_BACKEND:
+    backend = recorded_backend(builder_image.provenance.backend)
+    if backend is not None:
         image.builder_backend = backend
     if builder_image.status == "ready":
         image.status = "ready"

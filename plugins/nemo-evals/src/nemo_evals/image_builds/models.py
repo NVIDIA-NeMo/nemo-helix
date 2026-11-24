@@ -9,7 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
-from nemo_builder_plugin.entities import ImageRuntimeConfig
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ImageRuntimeConfig
 from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
@@ -104,6 +104,19 @@ class BuildImage(BaseModel):
     )
     error: str | None = None
 
+    @property
+    def built_by(self) -> str:
+        """The Builder backend that builds the image: the in-cluster one when the image names none.
+
+        Meaningful once Builder has a row for the image. An image without one names no backend either.
+        """
+        return self.builder_backend or IN_CLUSTER_BACKEND
+
+
+def recorded_backend(backend: str) -> str | None:
+    """How a record names a Builder backend: the in-cluster one is left out, as on every record before there were two."""
+    return None if backend == IN_CLUSTER_BACKEND else backend
+
 
 class TaskImageBuildEntity(EntityBase):
     """One attempt at building every container image a task's contents need.
@@ -128,8 +141,26 @@ class TaskImageBuildEntity(EntityBase):
             "same contents, which may be for the default platform before it changed."
         ),
     )
+    # Left out of the record when unset, so a deployment that builds in-cluster stores the record it always stored.
+    # Not `builder_backend`, which on each image of the record is the backend that built the image: the two differ
+    # on a build that failed because Builder builds with another backend than the one expected.
+    expected_builder_backend: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The Builder backend this attempt's images must come from, when it isn't the in-cluster one: "
+            "`builder.backend` as the evals API read it when the build was requested. The task-builder Job reads it "
+            "here, because Job workers don't read the platform config file. Left out for the in-cluster backend, "
+            "when the API could read no backend there, and on any record made before this field existed."
+        ),
+    )
     images: list[BuildImage] = Field(default_factory=list)
     error: str | None = None
+
+    @property
+    def expected_backend(self) -> str:
+        """The Builder backend this attempt's images must come from: the in-cluster one when the record names none."""
+        return self.expected_builder_backend or IN_CLUSTER_BACKEND
 
 
 class ImageBuildRequest(BaseModel):

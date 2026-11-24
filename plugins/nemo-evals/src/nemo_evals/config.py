@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, Self
 
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -419,6 +420,35 @@ class EvaluatorConfig(NemoConfig):
 def get_config() -> EvaluatorConfig:
     """Return the Evals plugin configuration singleton."""
     return EvaluatorConfig.get()
+
+
+def expected_builder_backend() -> str | None:
+    """The Builder backend this deployment's task images must come from, which the evals API gives a build service.
+
+    It is the backend ``builder.backend`` names in the configuration this process reads, through Builder's own
+    config class: Builder's default when the section names none, and Builder's environment variables as Builder
+    reads them. Where the evals API and Builder read one configuration, that is the backend Builder builds with.
+    A deployment whose evals API reads another sets ``builder.backend`` there to the backend its Builder builds with.
+
+    None when the backend can't be told: the ``builder`` section can't be read, or names a backend Builder doesn't
+    have. Builder refuses every submit then, and its refusal says why. The build service then turns down no ready
+    build for the backend that built it, and an attempt it starts names no backend
+    (``nemo_evals.image_builds.service.ImageBuildService``). Reading a build doesn't fail.
+
+    For the API only. A Job worker doesn't read the platform config file: a build's Job takes the backend from the
+    build's record, where the API wrote it.
+    """
+    # Imported here: the module loads both backends, which nothing else in evals needs.
+    from nemo_builder_plugin.backends import BACKENDS
+
+    try:
+        backend = BuilderConfig.get().backend
+    except ValueError:
+        # Nothing of the error is logged here: it may quote what it couldn't read, and a setting may hold a
+        # credential. Builder logs it when it refuses a submit, and takes the refused value out of a validation
+        # message.
+        return None
+    return backend if backend in BACKENDS else None
 
 
 config = get_config()

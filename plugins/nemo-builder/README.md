@@ -925,11 +925,56 @@ remote-build profile each name a `namespace` and the two differ.
 Switching a deployment's backend doesn't move its images. A resubmit of a revision that was submitted
 under the other backend, and whose rows are still there, is refused: with `code` `backend_changed` when the new backend can take the request (submit
 the next revision), and otherwise as any request it can't take is, under any revision
-(`backend_rejected` or `missing_secrets`, for example). Evals goes on using the
-task builds it has, and builds an image again, on the new backend, only when asked to `rebuild`.
-On `remote`, a task that names a prebuilt image keeps the build it has but can't be built again, by
+(`backend_rejected` or `missing_secrets`, for example).
+
+Evals takes its task images from the backend `backend` names. It reads the setting from the
+configuration its API reads: where that is the builder's own, switching `backend` switches Evals
+too, and there is nothing to set under `evals`. A deployment whose Evals API reads another
+configuration than the builder does sets `backend` there too, to the backend the builder builds
+with. A request for a task's image build returns the
+task's ready build only when that backend built every image of it. Otherwise the request starts the
+next attempt, which uses no build the other backend made and submits, as the next revision, each
+Dockerfile image whose newest build at the builder is the other backend's, or has failed.
+So after a switch a task is built again, on the new backend, the next time its build
+is requested, with or without `rebuild`. Only the newest build of an image is read, so that holds
+after a switch back too: an image the other backend built in between is built again, although the
+first backend's older build is still there.
+A build still running when the setting changes is returned
+as it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
+`nemo evals runs submit` nor `nemo evals tasksets build-images --wait` sends a request for a task
+whose newest build is ready: request each taskset's builds once with
+`nemo evals tasksets build-images <taskset>`. Until a new build of a task is requested, a run takes
+the task's ready build, whichever backend built it. From that request on, a run takes only the new
+attempt, once it is ready, and a failed attempt leaves the task without a build a run takes.
+
+Agent layers follow a rule of their own: only `execution` builds one, because a layer build needs
+`mounts` and `remote` refuses them. A layer this cluster built is used until it is too old for the
+run, whatever `backend` is now, and a row another backend made under a layer's name is refused
+(`layer_not_built_in_cluster`). On `remote`, a layer that is too old can't be built again: its
+attempt fails, the task runs on its own image, and its trials install the agent during setup.
+
+If a task's build was requested for another backend than the builder builds with, the first image
+of it the builder takes fails with an error that names both backends, and Evals submits nothing
+more of that task. An image the builder refuses instead, as `remote` refuses a prebuilt image, fails
+with the builder's refusal. That is one failed build for each request. Taking the image would make a
+ready build that no request accepts, so every request would build the task again without saying why.
+A build requested before a switch, whose Job submits an image after it, fails this way once, and
+needs only to be requested again. In a deployment whose Evals API reads another `backend` than the
+builder does, every attempt that submits an image fails this way, until `backend` is the builder's
+in the configuration the Evals API reads. Such an attempt can submit an image built from a
+Dockerfile once more, as the next revision, which the builder builds too. With `rebuild`, no build
+starts when the image's newest build at the builder is one the builder's own backend made for this
+task and hasn't failed: the attempt rejoins that build.
+`nemo evals tasksets build-images --wait`, and `nemo evals runs submit` from a Harbor source,
+request a failed task's build a second time by themselves, so one command can make two. While the
+two backends differ, the build the builder started goes on running, under the backend Evals doesn't
+expect, and nothing uses or cancels it. Once Evals expects the builder's backend, the next request's
+attempt uses the newest such build, unless it failed, in place of submitting another; if the builder
+is switched to the backend Evals expected instead, that build stays unused.
+
+On `remote`, a task that names a prebuilt image can't be built, by a request after the switch, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
-failed attempt is then the task's newest build. Upgrade every API pod and
+failed attempt is then the task's newest build, which a run doesn't take. Upgrade every API pod and
 the `builder-settle` controller before setting `backend: remote`: an API pod from before the
 setting existed ignores it and builds in this cluster, and refuses a remote step's completion, and
 an older controller writes a row back without the backend that built it. A remote build's row
@@ -945,6 +990,9 @@ Evals fails every listing of that revision's builds, so requesting a build or a 
 submitting a taskset run that includes it all fail, and an older CLI's `tasksets build-images`, and
 its `runs submit` when it builds images from a Harbor source, fail for the whole taskset. For the
 same reason, don't go back to an older release once a remote build is recorded.
+An older `nhx-tasks` image doesn't read the backend a build's record names. After a switch its Job
+uses the build the old backend made, the attempt ends ready with images no request accepts, and
+every request starts another.
 
 ## Publishing and signing
 
@@ -1074,8 +1122,16 @@ or the scheme of `registry`); a section that can't be read at all is answered wi
 API log has the check's own sentence, without the value it refused. For a section that can't be read
 it has the kind of error, and the setting a variable was for, not the parser's own sentence, which
 may quote a value.
-A key directly under `builder` that isn't a setting is ignored, with a warning in the API log at the
-first submit: a misspelt `backend` leaves builds in this cluster.
+Evals reads `backend` from the section too. While the section is invalid or can't be read, or
+`backend` names no backend, a request for a task's build returns the task's ready build, whichever
+backend built it. An attempt started meanwhile expects `execution`, and fails with the builder's
+refusal when it submits an image. On a deployment that built with `remote`, every such attempt
+submits one, since it uses no build the builder has; if its Job submits only after the section is
+repaired, the image fails with the error that names both backends instead, once: request the build
+again.
+A key directly under `builder` that isn't a setting is ignored, with a warning in the API log the
+first time the section is read, which is at the first submit, or before it when Evals first reads
+`backend`: a misspelt `backend` leaves builds in this cluster.
 
 ```yaml
 builder:

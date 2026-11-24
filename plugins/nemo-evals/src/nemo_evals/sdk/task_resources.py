@@ -291,6 +291,8 @@ class EvaluatorTasksResource:
         ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
         omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
         starts the next attempt; ``rebuild`` starts one over a ready build too, as after the default changes.
+        A ready build is not returned either when another Builder backend than the deployment's built one of its
+        images, as after the deployment switches its backend: the next attempt starts.
         """
         response = self._client.create_task_image_build(
             name=name,
@@ -642,6 +644,8 @@ class AsyncEvaluatorTasksResource:
         ``revision`` is a digest or a tag. ``platform``, such as ``linux/arm64``, builds every image for it;
         omitted, each image follows the task's own pin or the deployment's default. After a failed build, this
         starts the next attempt; ``rebuild`` starts one over a ready build too, as after the default changes.
+        A ready build is not returned either when another Builder backend than the deployment's built one of its
+        images, as after the deployment switches its backend: the next attempt starts.
         """
         response = await self._client.create_task_image_build(
             name=name,

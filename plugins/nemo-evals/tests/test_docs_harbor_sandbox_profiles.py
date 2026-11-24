@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Keep the Harbor sandbox profiles admin guide on the ``evals.runs`` config contract.
+"""Keep the Harbor sandbox profiles admin guide on the ``evals.runs`` config contract and the task image build rule.
 
 Offline: nothing here renders the chart or contacts a deployment.
 """
@@ -10,15 +10,25 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
-from nemo_evals.config import HarborSandboxProfileConfig, HarborTaskJobsConfig, RunControllerConfig, TasksetRunsConfig
+from nemo_builder_plugin.config import BuilderConfig
+from nemo_evals.config import (
+    HarborSandboxProfileConfig,
+    HarborTaskJobsConfig,
+    RunControllerConfig,
+    TasksetRunsConfig,
+    expected_builder_backend,
+)
 from nemo_evals.harbor.remote.profile import OpenSandboxClientSettings
+from nemo_evals.image_builds.runner import backends_disagree
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 ROOT = Path(__file__).resolve().parents[3]
 GUIDE = ROOT / "docs/set-up/helm/harbor-sandbox-profiles.mdx"
 LIMITS = "## Run limits and controller"
+IMAGE_BUILDS = "## Task image builds"
 LINKING = [
     ROOT / "docs/evals/agent-eval/harbor-kubernetes.mdx",
     ROOT / "skills/nemo-evals-plugin/references/harbor-kubernetes.md",
@@ -63,8 +73,17 @@ def _run_fields() -> dict[str, FieldInfo]:
     return fields | {f"controller.{name}": f for name, f in RunControllerConfig.model_fields.items()}
 
 
+def _section(heading: str) -> str:
+    """One second-level section of the guide, from its heading to the next."""
+    return heading + GUIDE.read_text().split(heading, 1)[1].split("\n## ", 1)[0]
+
+
 def _limits_section() -> str:
-    return LIMITS + GUIDE.read_text().split(LIMITS, 1)[1].split("\n## ", 1)[0]
+    return _section(LIMITS)
+
+
+def _image_builds_section() -> str:
+    return _section(IMAGE_BUILDS)
 
 
 def _rows(text: str) -> dict[str, str]:
@@ -74,6 +93,10 @@ def _rows(text: str) -> dict[str, str]:
 
 def _profile_rows() -> dict[str, str]:
     return _rows(GUIDE.read_text().replace(_limits_section(), ""))
+
+
+def _yaml_blocks(text: str) -> list[dict[str, Any]]:
+    return [yaml.safe_load(block) for block in re.findall(r"```yaml\n(.*?)```", text, re.DOTALL)]
 
 
 def _slug(heading: str) -> str:
@@ -102,7 +125,8 @@ def _assert_defaults(rows: dict[str, str], fields: dict[str, FieldInfo]) -> None
 
 
 def _recipes() -> list[dict[str, Any]]:
-    runs = [yaml.safe_load(block) for block in re.findall(r"```yaml\n(.*?)```", GUIDE.read_text(), re.DOTALL)]
+    """Every ``evals.runs`` recipe: all of the guide's YAML outside the image builds section, which sets none."""
+    runs = _yaml_blocks(GUIDE.read_text().replace(_image_builds_section(), ""))
     return [recipe["platformConfig"]["evals"]["runs"] for recipe in runs]
 
 
@@ -120,6 +144,27 @@ def test_every_run_limit_is_documented_with_its_default() -> None:
     rows = _rows(_limits_section())
     assert rows.keys() == _run_fields().keys()
     _assert_defaults(rows, _run_fields())
+
+
+def test_the_backend_switch_recipe_sets_builders_key_alone_and_evals_expects_that_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An admin who follows the recipe changes one key. Evals, reading the same configuration, follows it."""
+    recipes = _yaml_blocks(_image_builds_section())
+    assert recipes, "no backend switch recipe"
+    for recipe in recipes:
+        config = recipe["platformConfig"]
+        assert config.keys() == {"builder"}, "the recipe sets a key outside builder"
+        builder = BuilderConfig.model_validate(config["builder"])
+        monkeypatch.setattr(BuilderConfig, "get", classmethod(lambda cls, builder=builder: builder))
+        assert expected_builder_backend() == builder.backend == "remote"
+
+
+def test_the_guide_quotes_the_error_of_a_build_whose_backends_differ() -> None:
+    """An admin searches the guide for the error a failed build shows, so the two must read the same."""
+    quoted = re.search(r"`(Builder builds with [^`]+)`", _image_builds_section())
+    assert quoted, "the guide doesn't quote the error"
+    assert quoted.group(1) == backends_disagree("remote", "execution")
 
 
 def test_run_limit_recipes_validate() -> None:

@@ -3011,7 +3011,11 @@ paths:
         Repeating the request while a build is running, or after it succeeded, returns
         that build.
 
-        After a failed build, it starts the next attempt.'
+        After a failed build, it starts the next attempt. It also starts the next
+        attempt after a build that succeeded
+
+        when another Builder backend than the deployment''s built one of that build''s
+        images.'
       operationId: request_task_image_build_apis_evals_v2_workspaces__workspace__tasks__name__revisions__revision__image_builds_post
       parameters:
       - name: workspace

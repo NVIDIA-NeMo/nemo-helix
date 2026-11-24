@@ -343,7 +343,8 @@ def taskset_members(evaluator: Evaluator, ref: str) -> list[str]:
 # --- Image builds -----------------------------------------------------------------------------------------
 # Prebuilt images go through a build too: it copies them into the platform's registry (#2986). A request is
 # idempotent per task revision: it returns the build that's ready or in progress, and starts the next attempt
-# only after a failure, or once it finds the build's Job ended. Reads never start or repair a build.
+# only after a failure, once it finds the build's Job ended, or over a ready build that holds an image another
+# Builder backend than the deployment's built. Reads never start or repair a build.
 
 BUILD_REPAIR_SECONDS = 300.0
 """How long ``--wait`` follows a build by reads alone before requesting it again, which repairs a dead Job."""
@@ -399,7 +400,8 @@ def wait_for_builds(
     Returns the last builds. A task whose newest build is already ready gets no request: a request costs the API a
     build check per task, on every submit of the same tasks. Between polls only reads go out. A request goes out again only to start a task's one retry, or after
     ``BUILD_REPAIR_SECONDS`` without a request, since only a request notices a build whose Job died. A request
-    that answers with another id means the followed attempt ended. A failed attempt prints its error; a task's
+    that answers with another id means the followed attempt ended, or turned ready holding an image of another
+    Builder backend than the deployment's, which is handled the same way. A failed attempt prints its error; a task's
     second failure settles it ``failed``. A read error keeps the last known state, ``BUILD_READ_FAILURES`` in a
     row raise.
     """
@@ -445,7 +447,9 @@ def wait_for_builds(
                 ):
                     requested_at[ref] = clock()
                     answer = evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
-                    if answer.id != build.id:  # the request found this attempt's Job ended and started the next
+                    # The request found this attempt's Job ended, or the attempt ready with an image of another
+                    # Builder backend than the deployment's, and started the next.
+                    if answer.id != build.id:
                         current = evaluator.tasks.get_image_build(name, build.id, revision=digest, workspace=workspace)
                         ended(ref, current, answer)
                         continue

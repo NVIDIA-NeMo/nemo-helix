@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity
@@ -30,6 +31,35 @@ from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, 
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 _BASE = "/v2/workspaces/default/tasks/sort-task/revisions"
+# The backend of a deployment that builds through a build service outside the cluster.
+REMOTE_BACKEND = "remote"
+# Every key a build is returned with, in order. Which backend its images must come from is not one of them.
+BUILD_KEYS = [
+    "id",
+    "task",
+    "revision",
+    "status",
+    "job",
+    "allowed_registries",
+    "platform",
+    "images",
+    "error",
+    "created_at",
+    "updated_at",
+]
+# Every key a build's record was stored with before it could name the backend its images must come from, in order.
+RECORD_KEYS = [
+    "task",
+    "revision_digest",
+    "attempt",
+    "status",
+    "job",
+    "allowed_registries",
+    "platform",
+    "rebuild",
+    "images",
+    "error",
+]
 
 
 class _Jobs:
@@ -75,16 +105,45 @@ def authorizer() -> _Authorizer:
     return _Authorizer()
 
 
-@pytest.fixture
-def client(entity_store, jobs, authorizer) -> TestClient:
+def _routes(service: ImageBuildService) -> TestClient:
     app = FastAPI()
     app.include_router(image_builds_routes.router, prefix="/v2/workspaces/{workspace}")
-    app.dependency_overrides[get_image_build_service] = lambda: ImageBuildService(entity_store, jobs, authorizer)
+    app.dependency_overrides[get_image_build_service] = lambda: service
     return TestClient(app)
+
+
+@pytest.fixture
+def client(entity_store, jobs, authorizer) -> TestClient:
+    """The routes of a deployment that names no Builder backend: its task images come from the in-cluster one."""
+    return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=IN_CLUSTER_BACKEND))
+
+
+@pytest.fixture
+def remote_client(entity_store, jobs, authorizer) -> TestClient:
+    """The routes of a deployment whose task images must come from a remote build service, over the same store."""
+    return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=REMOTE_BACKEND))
+
+
+@pytest.fixture
+def untold_client(entity_store, jobs, authorizer) -> TestClient:
+    """The routes of a deployment whose Builder backend can't be told, as while Builder's section can't be read."""
+    return _routes(ImageBuildService(entity_store, jobs, authorizer, builder_backend=None))
 
 
 def _store(store_task, **kwargs) -> str:
     return asyncio.run(store_task(**kwargs))
+
+
+def _stored(entity_store, digest: str, attempt: int) -> TaskImageBuildEntity:
+    """The record of one attempt, as the task-builder Job reads it."""
+
+    async def read() -> TaskImageBuildEntity:
+        head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+        return await entity_store.get(
+            TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
+        )
+
+    return asyncio.run(read())
 
 
 def _set_status(
@@ -105,10 +164,13 @@ def _set_status(
     asyncio.run(update())
 
 
-def _ready_image(*, external_image_id: str | None = None, builder_backend: str | None = None) -> BuildImage:
-    """A ready main image; the two arguments are what a remote build service's build adds to it."""
+def _ready_image(
+    *, external_image_id: str | None = None, builder_backend: str | None = None, image_type: str = "main"
+) -> BuildImage:
+    """A ready image, the main one unless ``image_type`` names another; the other two arguments are what a remote
+    build service's build adds to it."""
     return BuildImage(
-        type="main",
+        type=image_type,
         source="dockerfile",
         status="ready",
         builder_image="harbor-env-abc-1",
@@ -234,6 +296,42 @@ def test_a_build_whose_job_ended_without_a_result_is_failed_and_retried(client, 
     abandoned = client.get(f"{_BASE}/{digest}/image-builds/1").json()
     assert abandoned["status"] == "failed"
     assert abandoned["error"] == f"task-builder job {first['job']} ended (error) without a result"
+
+
+@pytest.mark.parametrize(
+    ("asking", "answer"), [("client", "1"), ("remote_client", "2")], ids=["same-backend", "switched-to-remote"]
+)
+def test_a_build_its_job_settles_ready_as_it_is_failed_as_abandoned_answers_only_if_its_backend_matches(
+    request, store_task, entity_store, jobs, monkeypatch, asking: str, answer: str
+) -> None:
+    """The request finds the Job ended with no result and fails the build, while the Job's last write lands first.
+
+    The build then reads ready, with images the cluster built: an answer to a deployment that builds in the
+    cluster, and not to one that now builds remotely, which starts the next attempt, as for any ready build.
+    """
+    asking_client = request.getfixturevalue(asking)
+    digest = _store(store_task)
+    first = asking_client.post(f"{_BASE}/{digest}/image-builds").json()
+    jobs.statuses[first["job"]] = "completed"
+    real_update = entity_store.update
+
+    async def settled_first(entity, **kwargs):
+        if isinstance(entity, TaskImageBuildEntity) and entity.status == "failed" and entity.attempt == 1:
+            monkeypatch.setattr(entity_store, "update", real_update)
+            # The Job's write, from the record as the request read it: the request's own write is then stale.
+            settled = await entity_store.get(
+                TaskImageBuildEntity, name=entity.name, workspace=entity.workspace, parent=entity._parent
+            )
+            settled.status, settled.images = "ready", [_ready_image()]
+            await real_update(settled)
+        return await real_update(entity, **kwargs)
+
+    monkeypatch.setattr(entity_store, "update", settled_first)
+
+    again = asking_client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    assert again["id"] == answer
+    assert asking_client.get(f"{_BASE}/{digest}/image-builds/1").json()["status"] == "ready"
 
 
 def test_a_lost_job_is_created_again_on_the_next_request(client, store_task, jobs) -> None:
@@ -403,10 +501,10 @@ def test_an_image_this_cluster_built_is_returned_key_for_key_as_before(
 
 
 def test_an_image_a_remote_build_service_built_is_returned_with_its_handle_and_backend(
-    client, store_task, entity_store
+    remote_client, store_task, entity_store
 ) -> None:
     digest = _store(store_task)
-    client.post(f"{_BASE}/{digest}/image-builds")
+    remote_client.post(f"{_BASE}/{digest}/image-builds")
     _set_status(
         entity_store,
         digest,
@@ -415,7 +513,7 @@ def test_an_image_a_remote_build_service_built_is_returned_with_its_handle_and_b
         images=[_ready_image(external_image_id="image-7f3a", builder_backend="remote")],
     )
 
-    for image in _returned(client, digest):
+    for image in _returned(remote_client, digest):
         assert (image["external_image_id"], image["builder_backend"]) == ("image-7f3a", "remote")
 
 
@@ -425,3 +523,166 @@ def test_the_published_schema_names_the_handle_and_backend_without_requiring_the
 
     assert {"external_image_id", "builder_backend"} <= set(schema["properties"])
     assert not {"external_image_id", "builder_backend"} & set(schema.get("required", []))
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "answer"),
+    [
+        ("client", "client", "1"),
+        ("remote_client", "remote_client", "1"),
+        ("client", "remote_client", "2"),
+        ("remote_client", "client", "2"),
+    ],
+    ids=["in-cluster", "remote", "switched-to-remote", "switched-back"],
+)
+def test_a_ready_build_answers_a_request_only_while_its_images_come_from_the_deployments_backend(
+    request, store_task, entity_store, jobs, before: str, after: str, answer: str
+) -> None:
+    """A deployment that switches its Builder backend needs each task's images built again, by the new one.
+
+    An image the cluster built names no backend, as on every build recorded before an image could name one.
+    """
+    requested, repeated = request.getfixturevalue(before), request.getfixturevalue(after)
+    digest = _store(store_task)
+    requested.post(f"{_BASE}/{digest}/image-builds")
+    built_by = REMOTE_BACKEND if before == "remote_client" else None
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=built_by)])
+
+    again = repeated.post(f"{_BASE}/{digest}/image-builds")
+
+    assert again.status_code == 202
+    assert (again.json()["id"], again.json()["status"]) == (answer, "ready" if answer == "1" else "pending")
+    assert len(jobs.created) == int(answer)
+    # The build that was there stays as it was, whichever build answered.
+    assert repeated.get(f"{_BASE}/{digest}/image-builds/1").json()["status"] == "ready"
+
+
+@pytest.mark.parametrize("asking", ["client", "remote_client"], ids=["in-cluster", "remote"])
+def test_a_ready_build_with_one_image_another_backend_built_is_no_answer_to_either_deployment(
+    request, store_task, entity_store, jobs, asking: str
+) -> None:
+    """Every image must come from the deployment's backend: a run takes all of a build's images or none.
+
+    The build holds a main image the cluster built and a verifier image a remote build service built. The other
+    backend's image is the last one for the in-cluster deployment and the first one for the remote deployment, so
+    a rule that reads one end of the list answers one of the two with the build.
+    """
+    routes = request.getfixturevalue(asking)
+    digest = _store(store_task)
+    routes.post(f"{_BASE}/{digest}/image-builds")
+    _set_status(
+        entity_store,
+        digest,
+        1,
+        "ready",
+        images=[
+            _ready_image(),
+            _ready_image(builder_backend=REMOTE_BACKEND, image_type="verifier"),
+        ],
+    )
+
+    again = routes.post(f"{_BASE}/{digest}/image-builds").json()
+
+    assert (again["id"], again["status"]) == ("2", "pending")
+    assert len(jobs.created) == 2
+
+
+def test_the_attempt_a_remote_deployment_starts_names_the_backend_on_its_record_for_its_job(
+    client, remote_client, store_task, entity_store
+) -> None:
+    """The task-builder Job reads the record, not the platform config file, so the setting travels there."""
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds")
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
+
+    started = remote_client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    record = _stored(entity_store, digest, int(started["id"]))
+    assert (record.attempt, record.expected_builder_backend) == (2, REMOTE_BACKEND)
+    assert record.expected_backend == REMOTE_BACKEND
+    assert record._get_data_fields()["expected_builder_backend"] == REMOTE_BACKEND
+    # The build that answers names it nowhere but on its images, once they are built.
+    assert list(started) == BUILD_KEYS
+
+
+def test_a_deployment_that_names_no_backend_stores_and_returns_a_build_key_for_key_as_before(
+    client, store_task, entity_store
+) -> None:
+    """Its images must come from the in-cluster backend, which neither the record nor the answer spells out."""
+    digest = _store(store_task)
+
+    started = client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    record = _stored(entity_store, digest, 1)
+    assert (record.expected_builder_backend, record.expected_backend) == (None, IN_CLUSTER_BACKEND)
+    assert list(record._get_data_fields()) == RECORD_KEYS
+    assert list(started) == BUILD_KEYS
+    assert list(client.get(f"{_BASE}/{digest}/image-builds/1").json()) == BUILD_KEYS
+    assert list(client.get(f"{_BASE}/{digest}/image-builds").json()["data"][0]) == BUILD_KEYS
+
+
+def test_a_build_still_running_is_returned_whichever_backend_it_was_requested_for(
+    client, remote_client, store_task, jobs
+) -> None:
+    """A task has one attempt at a time. The switch is seen by the request that follows the attempt's end."""
+    digest = _store(store_task)
+    first = client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    again = remote_client.post(f"{_BASE}/{digest}/image-builds")
+
+    assert (again.status_code, again.json()["id"]) == (202, first["id"])
+    assert list(jobs.created) == [first["job"]]
+
+
+def test_a_rebuild_starts_a_new_attempt_over_a_ready_build_of_the_deployments_backend(
+    remote_client, store_task, entity_store
+) -> None:
+    digest = _store(store_task)
+    remote_client.post(f"{_BASE}/{digest}/image-builds")
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=REMOTE_BACKEND)])
+
+    rebuilt = remote_client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
+
+    assert (rebuilt["id"], rebuilt["status"]) == ("2", "pending")
+    record = _stored(entity_store, digest, 2)
+    assert (record.rebuild, record.expected_builder_backend) == (True, REMOTE_BACKEND)
+
+
+@pytest.mark.parametrize("built_by", ["client", "remote_client"], ids=["in-cluster", "remote"])
+def test_while_the_backend_cant_be_told_a_ready_build_answers_whichever_backend_built_it(
+    request, untold_client, store_task, entity_store, jobs, built_by: str
+) -> None:
+    """Builder refuses every submit then, so an attempt started over the build could have nothing built.
+
+    One that failed would be the task's newest build, and a run takes no failed one.
+    """
+    digest = _store(store_task)
+    request.getfixturevalue(built_by).post(f"{_BASE}/{digest}/image-builds")
+    backend = REMOTE_BACKEND if built_by == "remote_client" else None
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image(builder_backend=backend)])
+
+    again = untold_client.post(f"{_BASE}/{digest}/image-builds")
+
+    assert (again.status_code, again.json()["id"], again.json()["status"]) == (202, "1", "ready")
+    assert len(jobs.created) == 1
+
+
+def test_while_the_backend_cant_be_told_an_attempt_names_none_and_its_build_answers_the_next_request(
+    untold_client, store_task, entity_store, jobs
+) -> None:
+    """The attempt's Job expects the in-cluster backend, as for a record that could name none: not one attempt a request."""
+    digest = _store(store_task)
+
+    started = untold_client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    record = _stored(entity_store, digest, 1)
+    assert (started["id"], record.expected_builder_backend, record.expected_backend) == ("1", None, IN_CLUSTER_BACKEND)
+    assert list(record._get_data_fields()) == RECORD_KEYS
+    _set_status(entity_store, digest, 1, "ready", images=[_ready_image()])
+    assert untold_client.post(f"{_BASE}/{digest}/image-builds").json()["id"] == "1"
+    assert len(jobs.created) == 1
+
+
+def test_a_service_given_no_backend_is_one_whose_backend_cant_be_told(entity_store, jobs, authorizer) -> None:
+    """As a run's preparer builds it, only to read builds. The routes' service is given the deployment's backend."""
+    assert ImageBuildService(entity_store, jobs, authorizer).builder_backend is None

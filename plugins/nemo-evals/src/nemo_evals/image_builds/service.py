@@ -20,6 +20,7 @@ from nemo_evals.image_builds.models import (
     TaskImageBuildEntity,
     build_entity_name,
     build_job_name,
+    recorded_backend,
 )
 from nemo_evals.image_builds.planning import parse_task_config
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
@@ -109,20 +110,37 @@ class ImageBuildService:
     """Image builds of task revisions, stored under the task and keyed by revision digest.
 
     Revisions with the same contents share builds: their images are the same.
+
+    ``builder_backend`` is the Builder backend this deployment's task images must come from: the one its Builder
+    is configured to build with (``builder.backend``), which the API resolves
+    (``nemo_evals.config.expected_builder_backend``). None, the default, says the backend can't be told, as while
+    Builder's configuration can't be read, or that the caller only reads builds. A request then returns a ready
+    build whichever backend built it, and an attempt it starts names no backend.
     """
 
-    def __init__(self, entity_client: EntityClient, jobs: BuildJobs, authorize_builds: AuthorizeBuilds) -> None:
+    def __init__(
+        self,
+        entity_client: EntityClient,
+        jobs: BuildJobs,
+        authorize_builds: AuthorizeBuilds,
+        *,
+        builder_backend: str | None = None,
+    ) -> None:
         self.entity_client = entity_client
         self.jobs = jobs
         self.authorize_builds = authorize_builds
+        self.builder_backend = builder_backend
 
     async def request_build(
         self, workspace: str, name: str, revision: str, request: ImageBuildRequest
     ) -> ImageBuild | None:
         """Start a build of a revision, or return the one already running or done.
 
-        A new attempt starts only when none for the requested platform is pending, running or ready. Returns
-        ``None`` when the task doesn't exist.
+        A new attempt starts only when none for the requested platform is pending, running or ready. A ready build
+        is the answer only when this deployment's Builder backend built every image of it: one that holds an image
+        another backend built is followed by the next attempt, which builds the images again. While that backend
+        can't be told, a ready build is the answer whichever backend built it. Returns ``None`` when the task
+        doesn't exist.
 
         Raises:
             RevisionNotFoundError: ``revision`` names no revision of the task.
@@ -146,16 +164,18 @@ class ImageBuildService:
         latest = first_page.data[0] if first_page.data else None
         # Another platform's build is no answer to this request, so only builds for this one are reused.
         newest = await self._newest_for(head, task_revision.content_hash, request.platform)
-        if newest is not None and newest.status == "ready" and not request.rebuild:
-            return ImageBuild.from_entity(newest)
         if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._ensure_job(newest)
                 return ImageBuild.from_entity(newest)
+            # The Job may record a result just as it is failed here: the record then reads as the Job left it.
             newest = await self._fail_abandoned(newest, job.status)
-            if newest.status != "failed":
+            if newest.status not in ("ready", "failed"):
                 return ImageBuild.from_entity(newest)
+        # A build that ended ready, before this request or just now, is held to the same rule.
+        if newest is not None and newest.status == "ready" and not request.rebuild and self._from_backend(newest):
+            return ImageBuild.from_entity(newest)
 
         attempt = 1 if latest is None else latest.attempt + 1
         task = f"{workspace}/{name}"
@@ -170,6 +190,10 @@ class ImageBuildService:
             allowed_registries=request.allowed_registries,
             platform=request.platform,
             rebuild=request.rebuild,
+            # When the backend can't be told, none is recorded, and the attempt's Job expects the in-cluster one as
+            # for a record from before it could name one. Builder, reading the same configuration, refuses what
+            # that Job submits and says why.
+            expected_builder_backend=None if self.builder_backend is None else recorded_backend(self.builder_backend),
         )
         build._parent = head.id
         try:
@@ -220,6 +244,18 @@ class ImageBuildService:
         except NemoEntityNotFoundError:
             return None
         return ImageBuild.from_entity(build)
+
+    def _from_backend(self, build: TaskImageBuildEntity) -> bool:
+        """Whether this deployment's Builder backend built every image of ``build``.
+
+        An image that names no backend is the in-cluster backend's, as every image was before there was another.
+        While the deployment's backend can't be told, no build is turned down for the backend that built it:
+        Builder refuses every submit then, so the attempt that followed could have nothing built, and one that
+        failed would be the task's newest build.
+        """
+        if self.builder_backend is None:
+            return True
+        return all(image.built_by == self.builder_backend for image in build.images)
 
     async def _revision(self, workspace: str, name: str, revision: str) -> tuple[TaskEntity, TaskRevisionEntity] | None:
         try:
