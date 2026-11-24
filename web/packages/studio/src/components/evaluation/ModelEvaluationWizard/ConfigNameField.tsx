@@ -13,7 +13,8 @@ import { useFormContext } from 'react-hook-form';
  *
  * The name becomes the fileset name verbatim, so it is checked for conflicts the
  * same way the agent flow checks an experiment name: sanitize, debounce, then
- * ask whether a fileset already answers to it.
+ * ask whether a fileset already answers to it. Whatever holds the name (a dataset
+ * or an earlier config) is a fileset, so the conflict copy says that.
  */
 export const ConfigNameField: FC = () => {
   const {
@@ -33,6 +34,9 @@ export const ConfigNameField: FC = () => {
           status,
           schemaError: errors.name?.message,
           describe: 'Saved as a fileset so later runs can reuse this configuration.',
+        }),
+        ...(status === 'conflict' && {
+          slotError: `A fileset named ${preview} already exists in this workspace. Choose a different configuration name.`,
         }),
       }}
     />
