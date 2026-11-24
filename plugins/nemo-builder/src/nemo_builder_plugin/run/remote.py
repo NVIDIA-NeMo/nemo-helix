@@ -1440,26 +1440,26 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
 
     def longest_first(texts: set[str]) -> list[str]:
         # So that one form is never left as the remains of another.
-        return sorted(texts - {""}, key=len, reverse=True)
+        return [re.escape(text) for text in sorted(texts - {""}, key=len, reverse=True)]
 
-    def ways(*, with_the_mark: bool) -> list[str]:
-        # The whole secret before any one line of it: as it may be written, then as any URL holds it, since
-        # encoders differ in which characters they leave alone. Tried the other way round, a line would be
-        # taken out of the middle of the whole, and the rest left.
-        written = [re.escape(form) for form in longest_first(forms) if (REDACTED in form) is with_the_mark]
-        in_a_url = [_in_a_url(secret)] if (REDACTED in secret) is with_the_mark else []
-        one_line = [re.escape(part) for part in longest_first(parts) if (REDACTED in part) is with_the_mark]
-        return [*written, *in_a_url, *one_line]
-
-    # A mark that is already in the text is found too, and its own text takes its place. So it is read past
-    # whole, and what it stands for is not read again: a short credential may be part of the mark itself.
-    # Before it come the ways of writing a secret that themselves hold the mark's text. Those are found only
-    # with the marks in them: read between the marks alone, such a secret was passed on whole.
-    tried = [*ways(with_the_mark=True), re.escape(REDACTED), *ways(with_the_mark=False)]
+    # The whole secret before any one line of it: as it may be written, then as any URL holds it, since encoders
+    # differ in which characters they leave alone. Tried the other way round, a line would be taken out of the
+    # middle of the whole, and the rest left.
+    #
+    # Last, a mark that is already in the text, whose own text takes its place: it is read past whole, and what
+    # it stands for is not read again, since a short credential may be part of the mark itself. A way of
+    # writing the secret that holds the mark's text is found before that, with the marks in it: read between
+    # the marks alone, such a secret was passed on whole. Any other way that begins where a mark does would
+    # end inside it, which nothing found may.
+    tried = [*longest_first(forms), _in_a_url(secret), *longest_first(parts), re.escape(REDACTED)]
     found = re.compile(f"(?:{'|'.join(tried)}){_NOT_IN_A_MARK}")
 
     def redact(text: str) -> str:
-        return found.sub(REDACTED, text)
+        # Until nothing more is found: what is left on either side of a mark may spell, with the mark, a
+        # credential that holds the mark's own text.
+        while (redacted := found.sub(REDACTED, text)) != text:
+            text = redacted
+        return text
 
     return redact
 

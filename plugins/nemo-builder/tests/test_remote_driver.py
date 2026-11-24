@@ -159,6 +159,23 @@ class FakeClock:
         return Clock(monotonic=self.monotonic, sleep=self.sleep, pause=self.pause)
 
 
+class _ListedFirst:
+    """The driver's ``os``, whose walk is given each directory's subdirectories with one name put first. A file
+    system lists a directory's entries in an order of its own, which a test on one disk can't choose."""
+
+    def __init__(self, first: str) -> None:
+        self._first = first
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(os, name)
+
+    def walk(self, top: Path) -> Iterator[tuple[str, list[str], list[str]]]:
+        for directory, directories, files in os.walk(top):
+            # In place: the walk goes on into them in the order this list is left in.
+            directories.sort(key=lambda name: name != self._first)
+            yield directory, directories, files
+
+
 class LateClock(FakeClock):
     """A clock whose sleeps end later than they were asked to, as a sleep does on a node that is busy."""
 
@@ -2217,27 +2234,28 @@ class TestTheContext:
         with pytest.raises(ImageFailed, match="bytes with its links followed"):
             stage_context(context, "Dockerfile")
 
-    @pytest.mark.parametrize("made_first", ["a", "b"], ids=["a-made-first", "b-made-first"])
+    @pytest.mark.parametrize("listed_first", ["a", "b"], ids=["a-listed-first", "b-listed-first"])
     @pytest.mark.parametrize(("aliased", "times"), [("a", 2), ("b", 1)], ids=["a-link-to-a", "a-link-to-b"])
     def test_one_file_named_in_two_directories_is_measured_the_same_whichever_a_listing_puts_first(
-        self, aliased: str, times: int, made_first: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, aliased: str, times: int, listed_first: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """`a/payload` and `b/payload` are one file, and `again` is a link to one of the two directories: a
         walk that follows links comes to that one twice. The file is counted in the first of its
         directories the walk comes to, and the walk takes directories in the order of their names: in `a`,
         so twice when the link leads to `a`, and once when it leads to `b`. Taken in the order a directory
         lists them, which no file system promises, the same context came to a thousand bytes more or
-        less by where it was unpacked. The two directories are made here in either order."""
+        less by where it was unpacked. The walk is given the two directories here in either order: a real
+        disk lists them in one order of its own, whichever was made first."""
         context = tmp_path / "measured"
         context.mkdir()
         (context / "Dockerfile").write_text("FROM scratch\n")
-        other = "b" if made_first == "a" else "a"
-        for name in (made_first, other):
+        for name in ("a", "b"):
             (context / name).mkdir()
-        (context / made_first / "payload").write_bytes(b"x" * 1000)
-        os.link(context / made_first / "payload", context / other / "payload")
+        (context / "a" / "payload").write_bytes(b"x" * 1000)
+        os.link(context / "a" / "payload", context / "b" / "payload")
         (context / "again").symlink_to(aliased)
         size = len("FROM scratch\n") + times * 1000
+        monkeypatch.setattr(driver, "os", _ListedFirst(listed_first))
 
         monkeypatch.setattr(driver, "MAX_UNPACKED_BYTES", size)
         assert stage_context(context, "Dockerfile") == context
@@ -4804,6 +4822,12 @@ class TestTheStepProgram:
                 "line 2 of the key is malformed: [credential]",
             ),
             ("k3y-[cred\nential]-9f2a", "refused k3y-[credential]-9f2a", "refused [credential]"),
+            (
+                "[credential]%25",
+                "GET /builds?key=%5Bcredential%5D%2525 failed",
+                "GET /builds?key=[credential] failed",
+            ),
+            ("k3y-[credential]-9f2a", "k3y-k3y-[credential]-9f2a-9f2a", "[credential]"),
         ],
         ids=[
             "in-its-middle",
@@ -4812,6 +4836,8 @@ class TestTheStepProgram:
             "in-a-url-that-leaves-brackets-as-they-are",
             "in-one-line-of-several",
             "only-as-a-log-line-writes-it",
+            "ending-in-a-percent-sign-in-a-url-that-encodes-it",
+            "between-copies-of-its-own-two-ends",
         ],
     )
     def test_a_credential_that_holds_the_marks_own_text_is_taken_out_whole(
