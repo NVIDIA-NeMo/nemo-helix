@@ -10,6 +10,7 @@ import io
 import json
 import tarfile
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Literal
 from unittest.mock import Mock
 
@@ -171,6 +172,8 @@ class _Builder:
         self.submits: list[FileSetSource | ImageSource] = []
         #: The platform each submit named, by Builder name.
         self.platforms: dict[str, str | None] = {}
+        #: The role the newest submit under each Builder name named: None when it named none.
+        self.roles: dict[str, str | None] = {}
 
     async def get_image(self, name: str) -> ContainerImage | None:
         context = self.images.get(name)
@@ -195,8 +198,10 @@ class _Builder:
         dockerfile: str | None,
         platform: str | None,
         mounts: Sequence[BuildMount] = (),
+        role: str | None = None,
     ) -> SubmitBuildResponse:
         self.platforms[name] = platform
+        self.roles[name] = role
         what = source.image if isinstance(source, ImageSource) else source.context_path
         assert what is not None
         if what in self.refusals:
@@ -258,9 +263,12 @@ async def _start(
     config: dict,
     allowed: list[str] | None = None,
     platform: str | None = None,
-    backend: str = IN_CLUSTER_BACKEND,
+    backend: str | None = IN_CLUSTER_BACKEND,
 ) -> TaskImageBuildSpec:
-    """Store the task and request its first build, on a deployment whose task images must come from ``backend``."""
+    """Store the task and request its first build, on a deployment whose task images must come from ``backend``.
+
+    None is a deployment whose backend the API can't tell.
+    """
     digest = await store_task(config=config)
     service = ImageBuildService(entity_store, _Jobs(), _allow, builder_backend=backend)
     request = ImageBuildRequest(allowed_registries=allowed or [], platform=platform)
@@ -691,21 +699,14 @@ async def test_a_rebuild_builder_refuses_fails_its_image_and_submits_nothing_aft
     assert await _stored_build(entity_store, again) == rebuilt
 
 
-@pytest.fixture
-def compose_archive(monkeypatch, tmp_path) -> None:
-    """A task whose compose file adds a service it builds and a service it names an image for.
+def _serve_compose_task(monkeypatch, tmp_path: Path, files: dict[str, str]) -> None:
+    """Serve a whole task as the task's download: one that holds ``files``, its compose file among them.
 
     A compose task is extracted to be planned, so its archive is a whole task, packed as publishing packs one.
     """
     root = tmp_path / "sort-task"
-    for name, text in {
-        "task.toml": "",
-        "instruction.md": "Sort the list.\n",
-        "environment/Dockerfile": "FROM python:3.12\n",
-        "environment/docker-compose.yaml": "services:\n  db:\n    build: ./db\n  cache:\n    image: redis:7\n",
-        "environment/db/Dockerfile": "FROM postgres:16\n",
-        "tests/test.sh": "exit 0\n",
-    }.items():
+    task = {"task.toml": "", "instruction.md": "Sort the list.\n", "tests/test.sh": "exit 0\n"} | files
+    for name, text in task.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -716,6 +717,35 @@ def compose_archive(monkeypatch, tmp_path) -> None:
         output.write(packed.read_bytes())
 
     monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", download)
+
+
+@pytest.fixture
+def compose_archive(monkeypatch, tmp_path) -> None:
+    """A task whose compose file adds a service it builds and a service it names an image for."""
+    _serve_compose_task(
+        monkeypatch,
+        tmp_path,
+        {
+            "environment/Dockerfile": "FROM python:3.12\n",
+            "environment/docker-compose.yaml": "services:\n  db:\n    build: ./db\n  cache:\n    image: redis:7\n",
+            "environment/db/Dockerfile": "FROM postgres:16\n",
+        },
+    )
+
+
+@pytest.fixture
+def built_compose_archive(monkeypatch, tmp_path) -> None:
+    """A compose task whose images are all built from Dockerfiles: ``main``, a service, and a separate verifier's."""
+    _serve_compose_task(
+        monkeypatch,
+        tmp_path,
+        {
+            "environment/Dockerfile": "FROM python:3.12\n",
+            "environment/docker-compose.yaml": "services:\n  db:\n    build: ./db\n",
+            "environment/db/Dockerfile": "FROM postgres:16\n",
+            "tests/Dockerfile": "FROM python:3.12-slim\n",
+        },
+    )
 
 
 #: Every image of ``compose_archive``'s task with a prebuilt verifier, by what Builder is sent for it, in plan order.
@@ -762,6 +792,134 @@ async def test_the_record_lists_images_in_the_order_the_task_plans_them(
     assert [(image.type, image.source) for image in build.images] == list(_COMPOSE_IMAGES.values())
     stored = await _stored_build(entity_store, spec)
     assert [(image.type, image.source) for image in stored.images] == list(_COMPOSE_IMAGES.values())
+
+
+#: The build context of each image of ``built_compose_archive``'s task with a separate verifier, in plan order.
+_BUILT_COMPOSE_CONTEXTS = ("sort-task/environment", "sort-task/environment/db", "sort-task/tests")
+
+
+def _build_set(image: BuildImage) -> str:
+    """The Builder name ``image`` was submitted under: its row's name, without the revision."""
+    assert image.builder_image is not None
+    return image.builder_image.rsplit("-", 1)[0]
+
+
+def _name_without_a_role(image: BuildImage) -> str:
+    """The Builder name of a Dockerfile image that names no role: the one it had before a build could name one."""
+    assert image.context_digest is not None and image.dockerfile is not None
+    return builder_name(context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform)
+
+
+def _name_as_a_helper(image: BuildImage) -> str:
+    """The Builder name of a Dockerfile image submitted as a helper."""
+    assert image.context_digest is not None and image.dockerfile is not None
+    return builder_name(
+        context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform, role="helper"
+    )
+
+
+async def test_a_build_for_a_remote_backend_submits_a_compose_services_image_as_a_helper_and_no_other(
+    entity_store, store_task, built_compose_archive
+) -> None:
+    """A remote build service may test-run an image it builds as a main container, which a sidecar need not pass.
+
+    ``main`` and a separate verifier's image each run as the main container of a sandbox of their own. They name
+    no role, under the names they have without one. The service's image is a helper, under a name that says so.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=REMOTE_BACKEND)
+    builder = _Builder(dict.fromkeys(_BUILT_COMPOSE_CONTEXTS, "ready"), backend=REMOTE_BACKEND)
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    main, db, verifier = build.images
+    assert [image.type for image in build.images] == ["main", "service/db", "verifier"]
+    assert builder.roles == {
+        _name_without_a_role(main): None,
+        _name_as_a_helper(db): "helper",
+        _name_without_a_role(verifier): None,
+    }
+    # Each image's row is of the name its submit went under.
+    assert [_build_set(image) for image in build.images] == list(builder.roles)
+    assert _name_as_a_helper(db) != _name_without_a_role(db)
+
+
+async def test_a_rebuild_for_a_remote_backend_submits_a_compose_services_image_as_a_helper_again(
+    entity_store, store_task, built_compose_archive
+) -> None:
+    """A rebuild submits each image again as the request it was: the helper as a helper, under its own name."""
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=REMOTE_BACKEND)
+    builder = _Builder(dict.fromkeys(_BUILT_COMPOSE_CONTEXTS, "ready"), backend=REMOTE_BACKEND)
+    first = await _run(entity_store, spec, builder)
+    again = await _request_again(entity_store, spec, backend=REMOTE_BACKEND, rebuild=True)
+    builder.roles.clear()
+
+    rebuilt = await _run(entity_store, again, builder)
+
+    assert (again.attempt, rebuilt.status, len(builder.submits)) == (2, "ready", 6)
+    assert [image.builder_image for image in rebuilt.images] == [image.builder_image for image in first.images]
+    main, db, verifier = rebuilt.images
+    assert builder.roles == {
+        _name_without_a_role(main): None,
+        _name_as_a_helper(db): "helper",
+        _name_without_a_role(verifier): None,
+    }
+
+
+async def test_a_compose_service_that_names_a_published_image_is_copied_with_no_role_for_a_remote_backend(
+    entity_store, store_task, compose_archive
+) -> None:
+    """Only a service built from a Dockerfile is a helper: a copy is asked for as it always was.
+
+    A remote build service copies no image today, so what a copy of a sidecar should tell it isn't decided. The
+    double takes the copy, to show what Builder is asked for.
+    """
+    spec = await _start(entity_store, store_task, config={}, backend=REMOTE_BACKEND)
+    builder = _Builder(dict.fromkeys(_COMPOSE_IMAGES, "ready"), backend=REMOTE_BACKEND)
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    main, db, cache = build.images
+    assert [(image.type, image.source) for image in build.images] == [
+        ("main", "dockerfile"),
+        ("service/db", "dockerfile"),
+        ("service/cache", "prebuilt"),
+    ]
+    assert builder.roles == {
+        copy_builder_name("docker.io/library/redis:7"): None,
+        _name_without_a_role(main): None,
+        _name_as_a_helper(db): "helper",
+    }
+    assert _build_set(cache) == copy_builder_name("docker.io/library/redis:7")
+
+
+@pytest.mark.parametrize("backend", [IN_CLUSTER_BACKEND, None], ids=["in-cluster", "a-backend-the-api-cant-tell"])
+async def test_a_build_that_expects_the_in_cluster_backend_submits_a_compose_task_with_no_role_under_the_names_it_had(
+    entity_store, store_task, compose_archive, backend: str | None
+) -> None:
+    """A deployment that builds in-cluster sends Builder what it always sent, under the names its builds are kept by.
+
+    Its build's record names no backend, as does one requested while the API could tell none: both expect the
+    in-cluster backend, and no image of either names a role, a compose service's included.
+    """
+    spec = await _start(entity_store, store_task, config=_PREBUILT_VERIFIER, backend=backend)
+    assert (await _stored_build(entity_store, spec)).expected_builder_backend is None
+    builder = _Builder(dict.fromkeys(_COMPOSE_IMAGES, "ready"))
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    main, db, cache, verifier = build.images
+    assert [image.type for image in build.images] == ["main", "service/db", "service/cache", "verifier"]
+    assert builder.roles == {
+        copy_builder_name("docker.io/library/redis:7"): None,
+        copy_builder_name("ghcr.io/org/verify:1"): None,
+        _name_without_a_role(main): None,
+        _name_without_a_role(db): None,
+    }
+    # Each image's row is of the name its submit went under: the copies were asked for first.
+    assert [_build_set(image) for image in (cache, verifier, main, db)] == list(builder.roles)
 
 
 @pytest.mark.parametrize(
@@ -1093,6 +1251,39 @@ async def test_main_and_verifier_with_identical_contexts_share_one_build(entity_
     assert build.images[0].image_ref == build.images[1].image_ref
 
 
+@pytest.mark.parametrize(
+    ("backend", "builds"), [(IN_CLUSTER_BACKEND, 1), (REMOTE_BACKEND, 2)], ids=["in-cluster", "remote"]
+)
+async def test_main_and_a_compose_service_with_identical_contexts_share_one_build_only_in_cluster(
+    entity_store, store_task, monkeypatch, tmp_path, backend: str, builds: int
+) -> None:
+    """This cluster builds an image the same whatever it runs as, so the two share one build, as they always did.
+
+    A remote build service may test-run the one as a main container and not the other. They are two requests,
+    and Builder keeps one request under a name: so the helper is built under a name of its own.
+    """
+    _serve_compose_task(
+        monkeypatch,
+        tmp_path,
+        {
+            "environment/docker-compose.yaml": "services:\n  main:\n    build: ./app\n  twin:\n    build: ./twin\n",
+            "environment/app/Dockerfile": "FROM python:3.12\n",
+            "environment/twin/Dockerfile": "FROM python:3.12\n",
+        },
+    )
+    spec = await _start(entity_store, store_task, config={}, backend=backend)
+    builder = _Builder({"sort-task/environment/app": "ready", "sort-task/environment/twin": "ready"}, backend=backend)
+
+    build = await _run(entity_store, spec, builder)
+
+    main, twin = build.images
+    assert (build.status, main.type, twin.type) == ("ready", "main", "service/twin")
+    assert main.context_digest == twin.context_digest
+    assert len(builder.submits) == builds
+    assert (main.builder_image == twin.builder_image) == (builds == 1)
+    assert (main.image_ref == twin.image_ref) == (builds == 1)
+
+
 # Every key a build was recorded with before it could name the backend its images must come from, in order.
 BUILD_RECORD_KEYS = [
     "task",
@@ -1199,6 +1390,44 @@ async def test_after_a_deployment_switches_backend_the_next_request_builds_the_t
     ]
     assert await _request_again(entity_store, again, backend=after) == again
     assert len(builder.submits) == 4
+
+
+@pytest.mark.parametrize(
+    ("backend", "other"),
+    [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["back-to-the-cluster", "back-to-a-remote-service"],
+)
+async def test_after_a_switch_back_a_compose_services_image_uses_the_build_its_backend_made_before(
+    entity_store, store_task, built_compose_archive, backend: str, other: str
+) -> None:
+    """A remote backend's build of a helper is under a name of its own, so it is never in front of this cluster's.
+
+    Nor is this cluster's in front of it. After a switch to the other backend and back, ``main`` and the verifier's
+    image are built again, as the operator guide and Builder's README say of an image the other backend built in
+    between. The service's image is not: the newest build of the name it has for the first backend is still that
+    backend's, whichever of the two it is.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=backend)
+    builder = _Builder(dict.fromkeys(_BUILT_COMPOSE_CONTEXTS, "ready"), backend=backend)
+    first = await _run(entity_store, spec, builder)
+    builder.backend = other
+    switched = await _request_again(entity_store, spec, backend=other)
+    between = await _run(entity_store, switched, builder)
+    assert (between.status, len(builder.submits)) == ("ready", 6)
+    assert [image.built_by for image in between.images] == [other] * 3
+
+    builder.backend = backend
+    back = await _request_again(entity_store, switched, backend=backend)
+    again = await _run(entity_store, back, builder)
+
+    assert (back.attempt, again.status) == (3, "ready")
+    assert [image.built_by for image in again.images] == [backend] * 3
+    main, db, verifier = again.images
+    assert db.builder_image == first.images[1].builder_image
+    assert [main.builder_image, verifier.builder_image] == [
+        f"{_name_without_a_role(image)}-3" for image in (main, verifier)
+    ]
+    assert _submitted_in_order(builder)[6:] == ["sort-task/environment", "sort-task/tests"]
 
 
 async def test_a_deployment_that_did_not_switch_uses_the_build_another_task_made(
@@ -1324,6 +1553,50 @@ async def test_once_evals_expects_builders_backend_the_next_request_uses_the_bui
     assert built.images[0].builder_image == failed.images[0].builder_image
     assert _submitted_in_order(builder) == ["sort-task/environment", "sort-task/tests"]
     assert await _request_again(entity_store, again, backend=builders) == again
+
+
+@pytest.mark.parametrize(
+    ("expected", "builders"),
+    [(IN_CLUSTER_BACKEND, REMOTE_BACKEND), (REMOTE_BACKEND, IN_CLUSTER_BACKEND)],
+    ids=["evals-not-told-of-the-remote-service", "builder-not-switched"],
+)
+async def test_once_evals_expects_builders_backend_the_build_builder_took_of_a_compose_services_image_stays_unused(
+    entity_store, store_task, built_compose_archive, expected: str, builders: str
+) -> None:
+    """The exception to the test above, as the operator guide and Builder's README say.
+
+    A service's image is named with a role only in a build requested for a remote backend. So the build Builder
+    took of it while the two backends differed is under the name the failed attempt asked for, and an attempt that
+    expects Builder's backend asks for the other: it submits the image, and never reads that build.
+
+    A service's image is submitted while the backends differ only when ``main`` is not, as here: the expected
+    backend built ``main`` before Builder was switched, and the service's image was not built then.
+    """
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, backend=expected)
+    builder = _Builder(
+        dict.fromkeys(_BUILT_COMPOSE_CONTEXTS, "ready"),
+        refusals={"sort-task/environment/db": _forbidden()},
+        backend=expected,
+    )
+    await _run(entity_store, spec, builder)
+    builder.refusals.clear()
+    builder.backend = builders
+    again = await _request_again(entity_store, spec, backend=expected)
+    failed = await _run(entity_store, again, builder)
+    assert (failed.status, failed.error) == ("failed", f"service/db: {backends_disagree(builders, expected)}")
+    assert _submitted_in_order(builder)[2:] == ["sort-task/environment/db"]
+
+    agreed = await _request_again(entity_store, again, backend=builders)
+    built = await _run(entity_store, agreed, builder)
+
+    assert (agreed.attempt, built.status, built.error) == (3, "ready", None)
+    assert [image.built_by for image in built.images] == [builders] * 3
+    taken, db = failed.images[1], built.images[1]
+    names = {REMOTE_BACKEND: _name_as_a_helper(db), IN_CLUSTER_BACKEND: _name_without_a_role(db)}
+    assert (taken.builder_image, taken.built_by) == (f"{names[expected]}-1", builders)
+    assert db.builder_image == f"{names[builders]}-1"
+    # Every image is submitted, the service's too: `main` and the verifier's because the other backend built them.
+    assert _submitted_in_order(builder)[3:] == list(_BUILT_COMPOSE_CONTEXTS)
 
 
 async def test_a_copy_builder_took_under_another_backend_fails_its_image_the_same_way(

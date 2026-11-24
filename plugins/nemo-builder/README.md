@@ -675,7 +675,13 @@ What differs for a caller:
   log names the role it handed the client, in the line that names the image's build
   (`<image> is build <id>, started with role helper`), and not what the client did with it. A step
   image from before roles existed ignores the role without saying so, and the helper is built as a
-  main image: its line for the build names no role (see the upgrade order, below).
+  main image: its line for the build names no role (see the upgrade order, below). Evals names
+  `helper` for one kind of image: that of a Compose task's service which it builds from a
+  Dockerfile, in a build requested for `remote`. A task's main image and a separate verifier's
+  name no role, since each runs as the main container of its own sandbox. Neither does a
+  published image that a service names, which is a copy, nor any image of a build requested for
+  `execution`. Evals builds a helper under a build set name of its own, so the same context built
+  as a main image is another build.
 - A Dockerfile that isn't `Dockerfile` at the context root is copied to the root for the build, in
   place of any `Dockerfile` already there. Its own ignore file (`<its path>.dockerignore`) goes with
   it, as `Dockerfile.dockerignore`, and one that belonged to the replaced `Dockerfile` is removed, so
@@ -963,7 +969,10 @@ Dockerfile image whose newest build at the builder is the other backend's, or ha
 So after a switch a task is built again, on the new backend, the next time its build
 is requested, with or without `rebuild`. Only the newest build of an image is read, so that holds
 after a switch back too: an image the other backend built in between is built again, although the
-first backend's older build is still there.
+first backend's older build is still there. The exception is a Compose service's image that Evals
+builds as a helper for `remote` (see what differs for a caller, above). That build is under a build
+set name of its own, so it is never in front of the build this cluster made of the image: after a
+switch back, the build each backend made of it is used again, while it is the newest of its name.
 A build still running when the setting changes is returned
 as it is, and keeps the backend it was requested for. Evals requests no build by itself, and neither
 `nemo evals runs submit` nor `nemo evals tasksets build-images --wait` sends a request for a task
@@ -995,7 +1004,11 @@ request a failed task's build a second time by themselves, so one command can ma
 two backends differ, the build the builder started goes on running, under the backend Evals doesn't
 expect, and nothing uses or cancels it. Once Evals expects the builder's backend, the next request's
 attempt uses the newest such build, unless it failed, in place of submitting another; if the builder
-is switched to the backend Evals expected instead, that build stays unused.
+is switched to the backend Evals expected instead, that build stays unused. The exception is the
+build of a Compose service's image from a Dockerfile, which stays unused in both cases. Its build
+set name carries a role only in a build requested for `remote`. So once Evals expects the builder's
+backend, the next attempt asks for another name than the build was started under, and submits the
+image again unless the newest build of that name is one it can use.
 
 On `remote`, a task that names a prebuilt image can't be built, by a request after the switch, by
 `rebuild` or for a new revision: Evals asks for the copy each time, the backend refuses it, and the
@@ -1020,7 +1033,9 @@ uses the build the old backend made, the attempt ends ready with images no reque
 every request starts another.
 
 Before the first request names a `role`, upgrade every API pod and, with `backend: remote`, the
-deployment's step image, in either order. An API pod from before the field existed refuses a
+deployment's step image, in either order. With `backend: remote`, Evals sends such a request when
+it builds a Compose task that has a service built from a Dockerfile.
+An API pod from before the field existed refuses a
 request that carries it, with `422`, `null` included: while some pods are older, the same request
 is taken by one pod and refused by the next. A step image from before it ignores a role without
 saying so. The request is taken, its digest covers the role, and the helper is built as a main

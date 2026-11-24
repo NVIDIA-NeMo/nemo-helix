@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND, ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -24,6 +24,7 @@ from nemo_evals.harbor.archive_io import download_verified_async
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
+    HELPER_ROLE,
     BuildRefused,
     ImageBuilder,
     adopt_or_build,
@@ -41,7 +42,7 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
     recorded_backend,
 )
-from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
+from nemo_evals.image_builds.planning import SERVICE_TYPE_PREFIX, ImagePlanError, TaskArchive, plan_images
 from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.errors import InternalServerError, NemoClientError, NemoTransportError
 from nemo_helix_plugin.entities import EntityClient
@@ -335,18 +336,50 @@ async def _submit_build(
 
     A rebuild submits this task's request whatever is there: a ready build of a request naming no platform may be for
     the default platform before it changed, and only Builder knows the default now.
+
+    An image Builder is told is a helper (:func:`_builder_role`) is submitted with that role, under a name that
+    carries it. So it uses only a build made as a helper, and the same context built as a main image is another
+    build: a remote build service may test-run the one as a main container and not the other.
     """
     assert image.context_path is not None and image.dockerfile is not None and image.context_digest is not None
-    name = builder_name(context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform)
+    role = _builder_role(image, backend)
+    name = builder_name(
+        context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform, role=role
+    )
     source = archive_source(definition.source.fileset_ref, image.context_path)
     if rebuild:
         submitted = await ensure_build(
-            builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform
+            builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform, role=role
         )
         return submitted.images[0]
     return await adopt_or_build(
-        builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform, backend=backend
+        builder,
+        name=name,
+        source=source,
+        dockerfile=image.dockerfile,
+        platform=image.platform,
+        backend=backend,
+        role=role,
     )
+
+
+def _builder_role(image: BuildImage, backend: str) -> str | None:
+    """The role Builder is told an image built from a Dockerfile has, in a build that expects ``backend``.
+
+    Builder's role, not the image's ``type``, which older records called its role. A remote build service may
+    test-run each image it builds as a main container, which a sidecar need not pass. So in a build that expects
+    another backend than this cluster's, a compose service's image is a helper. ``main`` and a separate verifier's
+    image name no role: each runs as the main container of its own sandbox.
+
+    A build that expects the in-cluster backend, as one whose record names no backend does, names no role for any
+    image. It sends the requests it always sent, under the names it always had.
+    """
+    # Asked only of an image built from a Dockerfile. A compose service that names a published image is a copy
+    # (`_submit_copy`), and a copy gets no role here: the remote backend refuses copies today, and what the copy
+    # of a sidecar should name is a later decision.
+    if backend == IN_CLUSTER_BACKEND or not image.type.startswith(SERVICE_TYPE_PREFIX):
+        return None
+    return HELPER_ROLE
 
 
 async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> bool:

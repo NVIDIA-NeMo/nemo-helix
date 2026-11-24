@@ -4745,7 +4745,7 @@ components:
         context_digest:
           title: Context Digest
           description: Digest of every file in the build context, for a `dockerfile`
-            image. Tasks whose contexts digest the same share one build.
+            image. Images whose contexts digest the same can share one build.
           type: string
         image:
           title: Image
