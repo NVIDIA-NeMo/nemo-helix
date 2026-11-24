@@ -149,7 +149,6 @@ def add_job_routes(
         authz=authz,
         jobs_list_filter=job_cls.jobs_list_filter,
         dry_run_checks=_adapt_dry_run_checks(job_cls),
-        allow_spec_update=job_cls.allow_spec_update,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 

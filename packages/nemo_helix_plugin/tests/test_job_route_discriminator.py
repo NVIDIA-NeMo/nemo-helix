@@ -245,7 +245,7 @@ class _WriteOnlyJobsClient(_JobsClient):
         return _Response(job)
 
 
-def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None, allow_spec_update: bool = True) -> FastAPI:
+def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None) -> FastAPI:
     async def allow(_method: str, _path: str) -> None:
         return None
 
@@ -258,7 +258,6 @@ def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None, allow_
             platform_job_config_compiler=_compiler,
             route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
             job_discriminator="war-game",
-            allow_spec_update=allow_spec_update,
         ),
         prefix="/war/{workspace}",
     )
@@ -527,27 +526,6 @@ def test_definition_update_preserves_marker_and_write_only_permissions(body: dic
         assert caller.updated_name == "id-war-1"
         assert getattr(caller.updated_body, "spec") == {"value": "updated", _DISCRIMINATOR_KEY: "war-game"}
         assert response.json()["spec"] == {"value": "updated"}
-
-
-def test_a_job_whose_definition_cannot_be_replaced_refuses_a_spec_update() -> None:
-    caller = _JobsClient({"war-1": _job("war-1", "war-game")})
-    client = TestClient(_build_app(caller, allow_spec_update=False))
-    with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=_InternalNemoClient(caller)):
-        response = client.patch("/war/default/jobs/war-1", json={"spec": {"value": "updated"}})
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"] == "This job's spec can't be replaced; submit a new job instead."
-    assert caller.action_calls == []
-
-
-def test_a_job_whose_definition_cannot_be_replaced_still_takes_a_new_description() -> None:
-    caller = _WriteOnlyJobsClient()
-    ownership = _JobsClient({"war-1": _job("war-1", "war-game")})
-    client = TestClient(_build_app(caller, allow_spec_update=False))
-    with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=_InternalNemoClient(ownership)):
-        response = client.patch("/war/default/jobs/war-1", json={"description": "updated"})
-    assert response.status_code == 200, response.text
-    assert caller.action_calls == ["update"]
-    assert getattr(caller.updated_body, "spec", None) is None
 
 
 class _AttemptJobsClient(_JobsClient):

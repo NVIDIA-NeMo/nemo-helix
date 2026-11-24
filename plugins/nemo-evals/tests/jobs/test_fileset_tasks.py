@@ -472,25 +472,25 @@ def test_a_fileset_source_needs_a_gym_target() -> None:
         AgentEvalInputSpec.model_validate({"trials": [], "tasks": {"fileset": FILE}})
 
 
-# --- Stored shape and definition updates ---------------------------------------------------------------
+# --- Stored shape and spec updates ---------------------------------------------------------------------
 
 
-def test_a_jobs_definition_cannot_be_replaced_but_its_description_can(ctx: ClientContext) -> None:
+def test_a_spec_update_resolves_the_tasks_again_and_replies_with_their_count(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"))
     created = ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
         json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
     )
     assert created.status_code < 300, created.text
+    assert created.json()["spec"]["task_count"] == 1
     route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{created.json()['name']}"
 
-    refused = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
-    described = ctx.test_client.patch(route, json={"description": "golden run"})
+    _upload(ctx, _row("q1"), _row("q2"))
+    updated = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
 
-    assert refused.status_code == 422, refused.text
-    assert described.status_code == 200, described.text
-    assert described.json()["description"] == "golden run"
-    assert described.json()["spec"]["tasks"] == created.json()["spec"]["tasks"]
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["spec"]["task_count"] == 2
+    assert len(updated.json()["spec"]["tasks"]) == 2
 
 
 def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientContext) -> None:

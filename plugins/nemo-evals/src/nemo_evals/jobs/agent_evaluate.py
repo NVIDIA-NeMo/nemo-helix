@@ -260,8 +260,6 @@ class _AgentEvalJobBase(NemoJob):
     spec_schema: ClassVar[type[BaseModel] | None] = ResolvedAgentEvalSpec
     #: What replies show: the job's settings and task count, with the resolved tasks kept out of the record.
     stored_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
-    #: A job keeps the definition it was accepted with; a changed evaluation is a new job.
-    allow_spec_update: ClassVar[bool] = False
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs

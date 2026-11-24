@@ -956,8 +956,6 @@ def job_route_factory(
     job_discriminator: str | None = None,
     legacy_job_filter: FilterOperation | None = None,
     dry_run_checks: DryRunChecks | None = None,
-    *,
-    allow_spec_update: bool = True,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -1006,8 +1004,6 @@ def job_route_factory(
             given the canonical spec and the compiled platform spec, such as reading a few dataset
             rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
             step's execution profile is configured.
-        allow_spec_update: Whether ``PATCH /jobs/{name}`` may replace a job's spec. When ``False``,
-            an update that sets ``spec`` is refused with 422; ``description`` can still change.
 
     Example with separate input/output types:
         ```python
@@ -1577,11 +1573,6 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Update a job for the {service_name} microservice."""
 
-            if not allow_spec_update and "spec" in request.model_fields_set:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="This job's spec can't be replaced; submit a new job instead.",
-                )
             jobs = AsyncJobsClient.from_client(async_client)
             existing_job = await _require_mutation_target_in_collection(
                 name=name,

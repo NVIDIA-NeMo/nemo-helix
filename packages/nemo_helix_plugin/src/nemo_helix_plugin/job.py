@@ -183,9 +183,6 @@ class NemoJob(_NamedPlugin):
     #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``; a union lets a
     #: job keep rendering the records it stored before its stored shape changed.
     stored_spec_schema: ClassVar[type[BaseModel] | UnionType | None] = None
-    #: Whether ``PATCH`` may replace a job's spec. A job whose stored spec points at inputs frozen
-    #: at submission turns this off, so each job keeps the one definition it was accepted with.
-    allow_spec_update: ClassVar[bool] = True
 
     # ------------------------------------------------------------------ #
     # API routes                                                         #
