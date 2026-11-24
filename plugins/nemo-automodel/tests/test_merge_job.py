@@ -99,6 +99,8 @@ async def test_a_vision_checkpoint_is_merged_with_the_image_text_class_and_its_c
         ({"adapter": _adapter(lora_config=None)}, "lora_config"),
         ({"output": {"name": "bolt"}}, "would overwrite"),
         ({"output": {"name": "cord-lora"}}, "would overwrite"),
+        ({"output": {"name": "bolt-weights"}}, "would overwrite"),  # the base's fileset, not its entity name
+        ({"adapter": _adapter(fileset="default/cord-files"), "output": {"name": "cord-files"}}, "would overwrite"),
         ({"base": _model(spec=ModelSpec(**SPEC_FIELDS, head_type="embedding"))}, "not a causal"),
         ({"base": _model(fileset=None)}, "has no fileset"),
     ],

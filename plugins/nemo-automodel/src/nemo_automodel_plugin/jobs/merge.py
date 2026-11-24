@@ -85,8 +85,16 @@ async def compile_merge(
         raise HelixJobCompilationError(f"Adapter '{spec.adapter}' was trained on '{adapter.model}', not '{base_ref}'.")
     if adapter.lora_config is None:
         raise HelixJobCompilationError(f"Adapter '{spec.adapter}' is not a LoRA adapter: it records no lora_config.")
-    if f"{workspace}/{spec.output.name}" in (base_ref, f"{ref.workspace}/{ref.name}"):
-        raise HelixJobCompilationError(f"output.name '{spec.output.name}' would overwrite the base model or adapter.")
+    # The upload writes the fileset named output.name; a fileset name can differ from its entity's name.
+    inputs = {base_ref, f"{ref.workspace}/{ref.name}"}
+    for entity, fileset in ((base, base.fileset), (adapter, adapter.fileset)):
+        if fileset:
+            parsed = parse_entity_ref(fileset, entity.workspace)
+            inputs.add(f"{parsed.workspace}/{parsed.name}")
+    if f"{workspace}/{spec.output.name}" in inputs:
+        raise HelixJobCompilationError(
+            f"output.name '{spec.output.name}' would overwrite the base model, the adapter, or one of their filesets."
+        )
     await validate_output_name_not_in_flight(spec.output.name, workspace, platform)
 
     cpu, env = _get_cpu_resources(), _get_base_environment()
