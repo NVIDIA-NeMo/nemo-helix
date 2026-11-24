@@ -820,7 +820,9 @@ What an operator sets up:
   asks up to three times, and takes any error to mean the build may still be running.
   The client is handed the build context as a directory in `upload_context` (`RemoteContext.path`),
   all of it, and returns the service's reference to the upload, which the driver hands `start` as
-  `RemoteBuild.context`. Both calls must be safe to repeat with one key: a repeated upload keeps
+  `RemoteBuild.context`. `upload_context` is also told the platform the image is for
+  (`RemoteContext.platform`), so a client can refuse one its service doesn't build before
+  uploading anything. Both calls must be safe to repeat with one key: a repeated upload keeps
   the first. Before anything leaves the step, it must apply the ignore file at the context's root
   (`Dockerfile.dockerignore`, or else `.dockerignore`), which the driver leaves there as a regular
   file: rules applied only by the service come too late for a file that must not leave the
