@@ -168,8 +168,18 @@ class GymHostHandle(Generic[TProvider]):
     host_id: str
     health_url: str
     rollout_url: str
+    #: Headers the host's address needs, which may be handed on: the session descriptor carries them
+    #: to sandboxed job code and to other jobs.
     headers: Mapping[str, str] = field(default_factory=dict)
     provider: TProvider | None = None
+    #: Credentials this process sends with its own requests to the host and never hands on: they stay
+    #: out of the session descriptor. OpenSandbox's API key goes here, which a server with tenants
+    #: requires on proxied requests and which can reach every sandbox of the tenant.
+    credential_headers: Mapping[str, str] = field(default_factory=dict, repr=False)
+
+    def request_headers(self) -> dict[str, str]:
+        """Headers for a request this process sends to the host: ``headers`` and ``credential_headers``."""
+        return {**self.headers, **self.credential_headers}
 
 
 class SandboxNetworkPolicy(BaseModel):

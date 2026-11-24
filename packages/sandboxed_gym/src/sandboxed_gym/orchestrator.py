@@ -371,7 +371,7 @@ class SandboxedGymSession:
         else:
             path = "/entries"
         url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
-        request = urllib.request.Request(url, method="GET", headers=dict(self.host.headers))
+        request = urllib.request.Request(url, method="GET", headers=self.host.request_headers())
         try:
             with urlopen(request, timeout=30) as response:
                 body = json.loads(response.read().decode("utf-8"))
@@ -489,7 +489,7 @@ class SandboxedGymSession:
             self.host.rollout_url,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json", **self.host.headers},
+            headers={"Content-Type": "application/json", **self.host.request_headers()},
         )
         started = time.monotonic()
         try:

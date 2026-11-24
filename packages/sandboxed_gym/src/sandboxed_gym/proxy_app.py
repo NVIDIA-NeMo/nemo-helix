@@ -97,7 +97,7 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
         request = urllib.request.Request(
             session.host.health_url,
             method="GET",
-            headers=dict(session.host.headers),
+            headers=session.host.request_headers(),
         )
         try:
             with urlopen(request, timeout=30) as response:
@@ -136,7 +136,7 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
             method="POST",
             headers={
                 "Content-Type": request.headers.get("content-type", "application/json"),
-                **session.host.headers,
+                **session.host.request_headers(),
             },
         )
         # Opened off the event loop, and awaited before streaming so the upstream status and
