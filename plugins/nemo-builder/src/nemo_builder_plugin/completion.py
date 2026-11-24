@@ -281,7 +281,7 @@ def _starts_as_recorded(row: ContainerImage, runtime_config: ImageRuntimeConfig 
     if row.provenance.backend == IN_CLUSTER_BACKEND:
         if recorded is None or runtime_config is None:
             return True
-        if recorded.user is None and runtime_config is not None:
+        if recorded.user is None:
             runtime_config = runtime_config.model_copy(update={"user": None})
     return recorded == runtime_config
 
