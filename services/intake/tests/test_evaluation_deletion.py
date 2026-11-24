@@ -247,3 +247,27 @@ async def test_cancelled_cleanup_keeps_name_and_claim_reserved() -> None:
     assert error.value.status_code == 409
     assert service.delete_evaluation_sessions.await_count == 1
     service.rename_evaluation_references.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_cleanup_error_logs_identifiers_without_line_breaks(caplog: pytest.LogCaptureFixture) -> None:
+    entity = _evaluation(deleted=True)
+    entity.deletion_name = "evaluation-deleted-target"
+    client = _client(entity)
+    service = SimpleNamespace(
+        delete_evaluation_sessions=AsyncMock(side_effect=RuntimeError("unexpected storage failure")),
+        rename_evaluation_references=AsyncMock(),
+    )
+    with pytest.raises(RuntimeError, match="unexpected storage failure"):
+        await _cleanup_evaluation_sessions(
+            cast(IntakeSpansService, service),
+            cast(EntityClient, client),
+            entity,
+            workspace="default\r\nforged-entry",
+        )
+    record = next(record for record in caplog.records if "Evaluation cleanup needs recovery" in record.message)
+    assert "\r" not in record.getMessage()
+    assert "\n" not in record.getMessage()
+    assert "defaultforged-entry" in record.getMessage()
+    assert str(entity.id) in record.getMessage()
+    assert entity.deletion_owner is not None

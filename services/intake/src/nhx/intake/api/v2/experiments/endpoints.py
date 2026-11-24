@@ -991,7 +991,11 @@ async def _cleanup_evaluation_sessions(
     except Exception:
         # An uncertain final rename must not trigger any further telemetry writes.
         # Retain the claim on unexpected errors; a retry reloads authoritative state.
-        logger.exception("Evaluation cleanup needs recovery: %s/%s", workspace, entity.id)
+        logger.exception(
+            "Evaluation cleanup needs recovery: %s/%s",
+            workspace.replace("\r", "").replace("\n", ""),
+            str(entity.id).replace("\r", "").replace("\n", ""),
+        )
         raise
 
 

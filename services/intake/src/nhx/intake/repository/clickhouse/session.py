@@ -71,6 +71,10 @@ class ClickHouseSessionRepository(SessionRepository):
     async def list_evaluation_session_ids(
         self, *, workspace: str, evaluation_name: str, after: str | None, limit: int
     ) -> list[str]:
+        # Retained source references rediscover sessions after their spans were
+        # tombstoned. Live index references catch unfinished root cleanup. Both
+        # branches are needed to repair partial writes; filtering the source to
+        # live rows would lose that recovery path.
         keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
         values = ", ".join(f"attributes_string[%(evaluation_key_{index})s]" for index in range(len(keys)))
         rows = await self._executor.fetch_all(
