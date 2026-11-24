@@ -1017,6 +1017,7 @@ async def test_controller_reports_a_workspace_without_a_compass_agent(monkeypatc
     [status] = jobs.saved_statuses
     assert status.status == AnalysisConfigStatus.ERROR
     assert "nemo agents create compass.analyst --workspace default" in status.last_error
+    assert "--name <name>" in status.last_error
 
 
 @pytest.mark.asyncio

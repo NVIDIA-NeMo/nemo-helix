@@ -336,7 +336,8 @@ class CompassAnalysisController(NemoController):
                 config,
                 status,
                 f"Workspace '{config.workspace}' has no Compass agent; run "
-                f"`nemo agents create {COMPASS_ANALYST_TYPE_ID} --workspace {config.workspace}`.",
+                f"`nemo agents create {COMPASS_ANALYST_TYPE_ID} --workspace {config.workspace}`, "
+                f"adding `--name <name>` if another agent is already named '{CompassAnalyst.default_name}'.",
             )
             return
         since = status.last_successful_run_at if status is not None else None
