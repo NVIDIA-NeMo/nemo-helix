@@ -146,6 +146,18 @@ EXPOSE 8080
 CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime AS smoke-test
+# The prefetch above only warns when it fails, and a sandbox with no index egress cannot build these
+# venvs at run time. Gym skips a component's build when its venv has bin/python and bin/activate.
+# Gym adds a legacy_agent environment server for an agent that declares none, so that venv is
+# needed too.
+RUN for component in responses_api_agents/simple_agent responses_api_models/inference_provider \
+        resources_servers/mcqa environment_servers/legacy_agent; do \
+      venv="/opt/gym_venvs/${component}/.venv"; \
+      if ! test -x "${venv}/bin/python" || ! test -f "${venv}/bin/activate"; then \
+        echo "prefetched Gym venv missing or incomplete: ${venv}" >&2; \
+        exit 1; \
+      fi; \
+    done
 RUN gym --help >/dev/null \
     && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
         -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \
