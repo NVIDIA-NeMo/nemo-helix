@@ -13,7 +13,7 @@ export function getDatasetNameError(
   name: string,
   opts: { taken: boolean; workspace: string }
 ): string | undefined {
-  if (opts.taken) return `A Dataset named ${name} already exists in ${opts.workspace}`;
+  if (opts.taken) return `A fileset named ${name} already exists in ${opts.workspace}`;
   if (name === '') return 'Enter a name for this Dataset';
   if (!/^[a-z]/.test(name)) return 'Names must start with a lowercase letter';
   if (name.length < ENTITY_NAME_MIN_LENGTH)

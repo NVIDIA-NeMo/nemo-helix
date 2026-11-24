@@ -39,10 +39,10 @@ describe('getDatasetNameError (spec 3.1, 3.2)', () => {
 
   it('duplicate message wins over format errors and names workspace', () => {
     expect(getDatasetNameError('taken-name', { taken: true, workspace: 'team-a' })).toBe(
-      'A Dataset named taken-name already exists in team-a'
+      'A fileset named taken-name already exists in team-a'
     );
     expect(getDatasetNameError('Bad Name', { taken: true, workspace: 'team-a' })).toBe(
-      'A Dataset named Bad Name already exists in team-a'
+      'A fileset named Bad Name already exists in team-a'
     );
   });
 });

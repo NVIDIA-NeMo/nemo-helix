@@ -371,7 +371,7 @@ describe('CreateDatasetPanel', () => {
     await user.type(field('Name'), 'existing-generic');
     await user.tab();
     expect(
-      await screen.findByText(`A Dataset named existing-generic already exists in ${WS}`)
+      await screen.findByText(`A fileset named existing-generic already exists in ${WS}`)
     ).toBeInTheDocument();
     expect(createButton()).toBeDisabled();
 
@@ -618,7 +618,7 @@ describe('CreateDatasetPanel', () => {
 
     await user.click(createButton());
     expect(
-      await screen.findByText(`A Dataset named alpaca already exists in ${WS}`)
+      await screen.findByText(`A fileset named alpaca already exists in ${WS}`)
     ).toBeInTheDocument();
     expect(onCreated).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();

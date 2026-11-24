@@ -7,7 +7,7 @@ import {
   getFilesListFilesetsQueryKey,
   useFilesListFilesets,
 } from '@nemo/sdk/generated/platform/files';
-import type { FilesetOutput, FilesListFilesetsParams } from '@nemo/sdk/generated/platform/schema';
+import type { FilesListFilesetsParams } from '@nemo/sdk/generated/platform/schema';
 import { nameCheckStatus, type NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import type { QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -38,14 +38,13 @@ export const invalidateFilesetNameCheck = (
     queryKey: getFilesListFilesetsQueryKey(workspace, nameCheckParams(name)),
   });
 
-/** Whether the fileset name `candidate` is free in `workspace`, and on a conflict the fileset
- *  that holds it; pass '' to skip the check. `ownName` is a fileset this form already created,
- *  so finding it is not a conflict. */
-export function useFilesetNameConflict(
+/** Whether the fileset name `candidate` is free in `workspace`; pass '' to skip the check.
+ *  `ownName` is a fileset this form already created, so finding it is not a conflict. */
+export function useFilesetNameStatus(
   workspace: string,
   candidate: string,
   { ownName }: { ownName?: string } = {}
-): { status: NameCheckStatus; conflict?: FilesetOutput } {
+): NameCheckStatus {
   const [debouncedName] = useDebounce(candidate, DEFAULT_DEBOUNCE_MS);
   const conflictQuery = useFilesListFilesets(workspace, nameCheckParams(debouncedName), {
     query: {
@@ -57,18 +56,9 @@ export function useFilesetNameConflict(
     },
   });
 
-  if (ownName && candidate === ownName) return { status: undefined };
-  const status = nameCheckStatus(candidate, debouncedName, conflictQuery);
-  return { status, conflict: status === 'conflict' ? conflictQuery.data?.data?.[0] : undefined };
+  if (ownName && candidate === ownName) return undefined;
+  return nameCheckStatus(candidate, debouncedName, conflictQuery);
 }
-
-/** Whether the fileset name `candidate` is free in `workspace`; pass '' to skip the check.
- *  `ownName` is a fileset this form already created, so finding it is not a conflict. */
-export const useFilesetNameStatus = (
-  workspace: string,
-  candidate: string,
-  options?: { ownName?: string }
-): NameCheckStatus => useFilesetNameConflict(workspace, candidate, options).status;
 
 interface UseWatchedFilesetNameStatusOptions<T extends FieldValues> {
   control: Control<T>;

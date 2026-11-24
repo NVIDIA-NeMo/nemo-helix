@@ -2,29 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import type { EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
-import { useFilesetNameConflict } from '@studio/components/filesets/hooks/useFilesetNameStatus';
+import { useFilesetNameStatus } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useFormContext, useWatch } from 'react-hook-form';
-
-const TAKEN_BY: Partial<Record<FilesetPurpose, string>> = {
-  [FilesetPurpose.dataset]: 'a dataset',
-  [FilesetPurpose.model]: 'a model',
-};
-
-/**
- * The error for a configuration name another fileset holds. Configurations and datasets share
- * the fileset namespace, so a dataset's name is taken even though no configuration uses it.
- * A generic fileset may or may not be a saved configuration, so it is only called a fileset.
- */
-export const configNameTakenMessage = (
-  purpose: FilesetPurpose | undefined,
-  workspace: string
-): string =>
-  `This name is already used by ${(purpose && TAKEN_BY[purpose]) ?? 'a fileset'} in the ` +
-  `${workspace} workspace. Choose a different configuration name.`;
 
 /**
  * Whether the typed configuration name is free.
@@ -33,11 +15,7 @@ export const configNameTakenMessage = (
  * becomes the fileset name verbatim, and the check is a fetch rather than a
  * schema rule, so nothing in `formState` carries it.
  */
-export function useConfigNameStatus(): {
-  preview: string;
-  status: NameCheckStatus;
-  conflictMessage?: string;
-} {
+export function useConfigNameStatus(): { preview: string; status: NameCheckStatus } {
   const workspace = useWorkspaceFromPath();
   const { control } = useFormContext<EvaluationFormValues>();
   const name = useWatch({ control, name: 'name' });
@@ -45,12 +23,5 @@ export function useConfigNameStatus(): {
   // Unlike the fileset create forms, this field sanitizes what is typed, so the check runs
   // on the sanitized preview rather than only on an already-valid name.
   const preview = toValidEntityName(name ?? '', '');
-  const { status, conflict } = useFilesetNameConflict(workspace, preview);
-
-  return {
-    preview,
-    status,
-    conflictMessage:
-      status === 'conflict' ? configNameTakenMessage(conflict?.purpose, workspace) : undefined,
-  };
+  return { preview, status: useFilesetNameStatus(workspace, preview) };
 }

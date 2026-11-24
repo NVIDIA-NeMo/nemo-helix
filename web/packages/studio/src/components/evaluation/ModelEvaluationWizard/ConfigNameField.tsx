@@ -4,7 +4,8 @@
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import type { EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
 import { useConfigNameStatus } from '@studio/components/evaluation/ModelEvaluationWizard/useConfigNameStatus';
-import { nameFieldSlots } from '@studio/components/form/entityNameCheck';
+import { nameFieldSlots, nameTakenMessage } from '@studio/components/form/entityNameCheck';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type { FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 
@@ -13,14 +14,16 @@ import { useFormContext } from 'react-hook-form';
  *
  * The name becomes the fileset name verbatim, so it is checked for conflicts the
  * same way the agent flow checks an experiment name: sanitize, debounce, then
- * ask whether a fileset already answers to it.
+ * ask whether a fileset already answers to it. A conflict names the fileset, not a
+ * configuration: datasets share the namespace, so the holder is often not a configuration.
  */
 export const ConfigNameField: FC = () => {
   const {
     control,
     formState: { errors },
   } = useFormContext<EvaluationFormValues>();
-  const { preview, status, conflictMessage } = useConfigNameStatus();
+  const { preview, status } = useConfigNameStatus();
+  const workspace = useWorkspaceFromPath();
 
   return (
     <ControlledTextInput
@@ -34,7 +37,9 @@ export const ConfigNameField: FC = () => {
           schemaError: errors.name?.message,
           describe: 'Saved as a fileset so later runs can reuse this configuration.',
         }),
-        ...(conflictMessage && { slotError: conflictMessage }),
+        ...(status === 'conflict' && {
+          slotError: nameTakenMessage('fileset', preview, workspace),
+        }),
       }}
     />
   );
