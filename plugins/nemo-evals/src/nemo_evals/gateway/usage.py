@@ -19,6 +19,8 @@ class CallApi(StrEnum):
     CHAT_COMPLETIONS = "chat.completions"
     RESPONSES = "responses"
     MESSAGES = "messages"
+    EMBEDDINGS = "embeddings"
+    TEXT_COMPLETIONS = "completions"
     SYSTEMONE = "systemone"
     OTHER = "other"
 
@@ -31,9 +33,24 @@ class CallApi(StrEnum):
             return cls.RESPONSES
         if path == "messages":
             return cls.MESSAGES
+        if path == "embeddings":
+            return cls.EMBEDDINGS
+        if path == "completions":
+            return cls.TEXT_COMPLETIONS
         if path == "systemone":
             return cls.SYSTEMONE
         return cls.OTHER
+
+    @property
+    def gen_ai_operation(self) -> str | None:
+        """Return the OpenTelemetry GenAI operation for a recognized inference API."""
+        if self in {self.CHAT_COMPLETIONS, self.RESPONSES, self.MESSAGES}:
+            return "chat"
+        if self is self.EMBEDDINGS:
+            return "embeddings"
+        if self is self.TEXT_COMPLETIONS:
+            return "text_completion"
+        return None
 
 
 @dataclass
@@ -62,6 +79,9 @@ class TokenUsage:
         counts = {
             "gen_ai.usage.input_tokens": self.input_tokens,
             "nemo.usage.uncached_input_tokens": self.uncached_input_tokens,
+            "gen_ai.usage.cache_read.input_tokens": self.cached_input_tokens or None,
+            "gen_ai.usage.cache_write.input_tokens": self.cache_write_input_tokens or None,
+            # Older Intake versions read these aliases during a rolling upgrade.
             "gen_ai.usage.cached_tokens": self.cached_input_tokens,
             "llm.token_count.prompt_details.cache_write": self.cache_write_input_tokens,
             "gen_ai.usage.output_tokens": self.output_tokens,
@@ -118,6 +138,8 @@ def usage_from_payload(api: CallApi, payload: Mapping[str, Any]) -> TokenUsage |
         )
     if not isinstance(usage, Mapping):
         return None
+    if api is CallApi.EMBEDDINGS:
+        return TokenUsage(uncached_input_tokens=_count(usage, "prompt_tokens"))
     return _openai_usage(
         _count(usage, "prompt_tokens"),
         _count(usage, "prompt_tokens_details", "cached_tokens"),

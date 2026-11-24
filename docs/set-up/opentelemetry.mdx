@@ -105,3 +105,19 @@ Verify the replacement paths before stopping stdout/stderr scraping for a namesp
 7. Disable scraping only for verified sources, then repeat checks through a pod
    restart and a job completion/failure. Monitor for missing expected logs and
    restore scraping if the replacement route is incomplete.
+
+
+## GenAI workload telemetry
+
+Console and direct OTLP application logs describe platform activity. AI-operation
+spans, metrics, and events come from workload instrumentation, using the
+[OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
+for fields such as `gen_ai.operation.name`, `gen_ai.provider.name`, and input/output
+token usage. Enabling application log export does not create that instrumentation.
+See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
+for supported workload telemetry ingestion paths.
+
+For new instrumentation, follow upstream's opt-in content-capture guidance:
+model prompts/completions and tool-call arguments/results can contain
+sensitive data and should remain uncaptured unless explicitly enabled. The generic
+application-log filter does not redact content recorded in workload telemetry.

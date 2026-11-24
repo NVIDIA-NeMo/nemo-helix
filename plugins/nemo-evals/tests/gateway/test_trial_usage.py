@@ -79,6 +79,18 @@ from nemo_evals.gateway.usage import CallApi, TokenUsage, model_from_payload, us
             id="messages-stream",
         ),
         pytest.param(
+            CallApi.EMBEDDINGS,
+            [{"usage": {"prompt_tokens": 11, "total_tokens": 11}}],
+            TokenUsage(uncached_input_tokens=11),
+            id="embeddings-body",
+        ),
+        pytest.param(
+            CallApi.TEXT_COMPLETIONS,
+            [{"usage": {"prompt_tokens": 11, "completion_tokens": 4}}],
+            TokenUsage(uncached_input_tokens=11, output_tokens=4),
+            id="text-completion-body",
+        ),
+        pytest.param(
             CallApi.SYSTEMONE,
             [{"answers": {}, "usage": {"input_tokens": 121, "output_tokens": 1, "decision_positions": 1}}],
             TokenUsage(uncached_input_tokens=121, output_tokens=1),
@@ -127,6 +139,8 @@ def test_input_total_counts_every_class_once() -> None:
     assert usage.attributes() == {
         "gen_ai.usage.input_tokens": 45,
         "nemo.usage.uncached_input_tokens": 10,
+        "gen_ai.usage.cache_read.input_tokens": 30,
+        "gen_ai.usage.cache_write.input_tokens": 5,
         "gen_ai.usage.cached_tokens": 30,
         "llm.token_count.prompt_details.cache_write": 5,
         "gen_ai.usage.output_tokens": 8,
@@ -140,7 +154,9 @@ def test_input_total_counts_every_class_once() -> None:
         ("/v1/responses", CallApi.RESPONSES),
         ("v1/messages", CallApi.MESSAGES),
         ("v1/systemone", CallApi.SYSTEMONE),
-        ("v1/embeddings", CallApi.OTHER),
+        ("v1/embeddings", CallApi.EMBEDDINGS),
+        ("v1/completions", CallApi.TEXT_COMPLETIONS),
+        ("v1/responses/resp_saved", CallApi.OTHER),
     ],
 )
 def test_api_is_read_from_the_path(path: str, api: CallApi) -> None:

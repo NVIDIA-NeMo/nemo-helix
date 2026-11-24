@@ -183,6 +183,37 @@ def test_span_attribute_catalog_maps_bounded_openinference_token_details():
     assert bags.raw_attributes_json() is None
 
 
+@pytest.mark.parametrize("include_legacy_aliases", [False, True])
+def test_genai_cache_counts_round_trip_using_existing_storage_keys(include_legacy_aliases: bool):
+    source = {
+        "gen_ai.usage.cache_read.input_tokens": 5,
+        "gen_ai.usage.cache_write.input_tokens": 7,
+    }
+    if include_legacy_aliases:
+        source.update(
+            {
+                "gen_ai.usage.cached_tokens": 15,
+                "gen_ai.usage.input_cache_tokens": 16,
+                "llm.token_count.prompt_details.cache_read": 17,
+                "llm.token_count.cached": 18,
+                "llm.token_count.prompt_details.cache_write": 19,
+            }
+        )
+
+    semantic, consumed_keys = SpanSemanticAttributes.from_source_attributes(source)
+    bags = semantic.to_bags()
+    bags.put_unhandled_source_attributes(source, consumed_keys=consumed_keys)
+    restored = SpanSemanticAttributes.from_bags(bags)
+
+    assert bags.number == {
+        "llm.token_count.cached": 5,
+        "llm.token_count.prompt_details.cache_write": 7,
+    }
+    assert bags.raw_attributes_json() is None
+    assert restored.cached_tokens == 5
+    assert restored.prompt_cache_write_tokens == 7
+
+
 def test_span_attribute_catalog_preserves_unknown_token_details_as_raw():
     source_attributes = {"llm.token_count.prompt_details.vendor_specific": 9}
     semantic, consumed_keys = SpanSemanticAttributes.from_source_attributes(source_attributes)

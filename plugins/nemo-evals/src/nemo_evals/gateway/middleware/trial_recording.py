@@ -72,6 +72,8 @@ class _ObservedCall:
         self.token = token
         self.served_model_name = served_model_name
         self.api = CallApi.from_path(request.path)
+        # Request middleware can translate between APIs before sending the call.
+        self.upstream_api = CallApi.from_path((ctx.proxied_request or request).path)
         self.usage = TokenUsage()
         self.response_model: str | None = None
         self.agent_headers = {
@@ -82,7 +84,7 @@ class _ObservedCall:
     def observe(self, payload: object) -> None:
         if not isinstance(payload, Mapping):
             return
-        if (usage := usage_from_payload(self.api, payload)) is not None:
+        if (usage := usage_from_payload(self.upstream_api, payload)) is not None:
             self.usage.merge(usage)
         self.response_model = model_from_payload(payload) or self.response_model
 
@@ -92,12 +94,13 @@ class _ObservedCall:
         proxied = self.ctx.proxied_request
         model = (proxied.body if proxied is not None else self.ctx.original_request.body).get("model")
         attributes: dict[str, object] = {
-            "gen_ai.operation.name": "chat",
             "nemo.virtual_model": f"{self.ctx.workspace}/{self.ctx.virtual_model_name}",
             "nemo.inference.api": self.api.value,
             **{f"{AGENT_HEADER_ATTRIBUTE_PREFIX}{name}": value for name, value in self.agent_headers.items()},
             **self.usage.attributes(),
         }
+        if routing_span is None and (operation := self.upstream_api.gen_ai_operation) is not None:
+            attributes["gen_ai.operation.name"] = operation
         if isinstance(model, str):
             attributes["gen_ai.request.model"] = model
         if self.response_model is not None:
