@@ -22,6 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.environment import (
+    ensure_local_workspace_dir,
     prepare_deepagents_skills,
     prepare_deepagents_workspace_baseline,
     release_runtime_base_dir,
@@ -404,13 +405,17 @@ def create_fabric_serving_app(
 
     mcp_status_cache = McpStatusCache()
 
+    async def mcp_server_cwd() -> Path | None:
+        # Runtime stdio servers start in the agent workspace, so relative commands and args resolve there.
+        return await asyncio.to_thread(ensure_local_workspace_dir, app.state.agent_config, app.state.base_dir)
+
     @app.get("/v1/mcp/servers")
     async def list_mcp_servers() -> McpStatusResponse:
-        return await mcp_status_cache.get(app.state.agent_config)
+        return await mcp_status_cache.get(app.state.agent_config, cwd=await mcp_server_cwd())
 
     @app.get("/v1/mcp/servers/{name}")
     async def get_mcp_server(name: str) -> McpServerStatus:
-        status = await mcp_status_cache.get_server(app.state.agent_config, name)
+        status = await mcp_status_cache.get_server(app.state.agent_config, name, cwd=await mcp_server_cwd())
         if status is None:
             raise HTTPException(status_code=404, detail=f"MCP server '{name}' is not declared by this agent.")
         return status
