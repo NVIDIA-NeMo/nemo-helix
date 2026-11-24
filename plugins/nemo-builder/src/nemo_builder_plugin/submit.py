@@ -344,16 +344,22 @@ async def _record_job_on(
     """``row`` with the job recorded on it, on condition of the version it was read at. As it is, if it no
     longer waits, or the job can't be recorded."""
     current = row
+    # What the row said of its job when this submit read it, before its create: nothing, or an earlier job of
+    # the request, deleted since.
+    held = (row.provenance.job_uid, row.provenance.job_attempt_id)
     try:
         for again in (False, True):
             if again:
                 # It changed since this submit read it. Read once more, and written only if it is still the row
-                # this submit holds and records no job. One recorded meanwhile is of a later create. One that
-                # was there already, an earlier job of the request, is written over by the first write alone:
-                # after a change, nothing here tells it from a later one.
+                # this submit holds and says of its job what it said then. Jobs gives no two jobs one ID, so no
+                # other create has been recorded on such a row: something else about it changed. A row that
+                # says anything else records another submit's job, and is left to it.
                 current = await entity_client.get(ContainerImage, name=row.name, workspace=row.workspace)
-                recorded = current.provenance.job_uid is not None or current.provenance.job_attempt_id is not None
-                if current.id != row.id or recorded:
+                recorded = (current.provenance.job_uid, current.provenance.job_attempt_id)
+                if current.id == row.id and recorded == (uid, attempt_id):
+                    # This submit's own write, made though its answer was lost: no one else holds these IDs.
+                    return current
+                if current.id != row.id or recorded != held:
                     break
             if current.status != "pending":
                 # Settled meanwhile, or adopted as it was: no step completes it now.

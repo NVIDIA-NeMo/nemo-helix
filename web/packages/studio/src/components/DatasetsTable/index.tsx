@@ -9,11 +9,10 @@ import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/sche
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import { Button } from '@nvidia/foundations-react-core';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';
-import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { useFilesetsTable } from '@studio/components/FilesetsTable/useFilesetsTable';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { NewDatasetPanel } from '@studio/components/NewDatasetButton/NewDatasetPanel';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
-import { getDatasetDetailRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC, ReactNode } from 'react';
 
@@ -32,7 +31,6 @@ export interface DatasetsTableProps {
  */
 export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderRowActions }) => {
   const {
-    workspace,
     hasSearchOrFilters,
     dataViewState,
     datasetsResponse,
@@ -52,7 +50,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
     getDatasetRoute,
     purposeFilter: FilesetPurpose.dataset,
   });
-  const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
+  const [createPanelOpen, openCreatePanel, closeCreatePanel] = useBoolean(false);
 
   const makeColumns = makeDatasetsTableColumns({
     renderRowActions:
@@ -60,20 +58,33 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
       ((dataset) => renderRowActions(dataset, { onDatasetDeleted: handleDatasetDeleted })),
   });
 
+  // Shares NewDatasetPanel with NewDatasetButton. Rendered beside every list state, at the same position, so it
+  // stays mounted: a creation finishing after Cancel is still reported, and a list refetch failing while the
+  // panel is open keeps its draft and upload retry state.
+  const panel = <NewDatasetPanel open={createPanelOpen} onClose={closeCreatePanel} />;
+
   if (isPending) {
-    return <Loading description="Loading datasets..." />;
+    return (
+      <>
+        <Loading description="Loading datasets..." />
+        {panel}
+      </>
+    );
   }
 
   if (error) {
     return (
-      <ErrorMessage
-        message="Failed to fetch datasets"
-        slotFooter={
-          <Button type="button" kind="tertiary" onClick={() => refetch()}>
-            Retry
-          </Button>
-        }
-      />
+      <>
+        <ErrorMessage
+          message="Failed to fetch datasets"
+          slotFooter={
+            <Button type="button" kind="tertiary" onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        />
+        {panel}
+      </>
     );
   }
 
@@ -118,23 +129,13 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderR
                 <EntityEmptyState
                   entity="datasets"
                   variant="first-use"
-                  onCreate={openCreateModal}
+                  onCreate={openCreatePanel}
                 />
               ),
           },
         }}
       />
-
-      {/* Same create flow as NewDatasetButton in the page header. */}
-      {createModalOpen && (
-        <FilesetCreateModal
-          open={createModalOpen}
-          onClose={closeCreateModal}
-          workspace={workspace}
-          purpose={FilesetPurpose.dataset}
-          getDetailRoute={getDatasetDetailRoute}
-        />
-      )}
+      {panel}
     </>
   );
 };

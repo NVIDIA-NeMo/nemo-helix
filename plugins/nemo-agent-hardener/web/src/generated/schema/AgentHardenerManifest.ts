@@ -47,6 +47,8 @@ export interface AgentHardenerManifest {
   dockerfile?: string;
   /** In-container glob patterns scoping which processes may egress; agent-hardener requires them because the layout of an image it did not write cannot be inferred. */
   binaries?: string[];
+  /** Registry image built from this manifest's `agent-hardener stage` context. Required where the job cannot build the victim itself (Kubernetes); empty means the run builds it with Docker. */
+  victim_image?: string;
   /** The resolved agent-hardener.yaml content (for display). */
   manifest_yaml?: string;
   /** Victim port the war-game will target. */

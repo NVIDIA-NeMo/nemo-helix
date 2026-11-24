@@ -8,7 +8,8 @@ A build service's step image ships a small program around :func:`step_main`::
     raise SystemExit(step_main(lambda config, credential: MyBuildService(credential)))
 
 Everything that is the same for every service is here: fetching the context, the deadline, polling, retrying,
-cancelling when the job is told to stop, and completing each row. A service implements three calls.
+cancelling when the job is told to stop, and completing each row. A service implements four calls: it takes an
+image's build context, starts a build from it, reports where the build is, and cancels it.
 
 Each image that isn't built gets one line in the step's log, marked :data:`FAILURE_MARKER`. Jobs keeps the end of a
 failed step's log on the job, and settling reads the line from there (see ``settle``), so it is the last thing the
@@ -17,6 +18,7 @@ driver logs for an image, and nothing a submitter chooses is logged with a line 
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -77,7 +79,8 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 POLL_SECONDS = 10.0
 #: The longest it waits between two tries of one call.
 MAX_BACKOFF_SECONDS = 60.0
-#: How long it goes on repeating a start that fails for no stated reason, before giving the image up: long enough
+#: How long it goes on repeating an upload or a start that fails for no stated reason, before giving the image up,
+#: for each of the two calls apart: long enough
 #: to ride out a service's restart, short enough that a deployment pointed at the wrong place says so.
 START_PATIENCE_SECONDS = 600.0
 #: How long it keeps trying to complete a row whose image is built, when the builder can't be reached.
@@ -108,6 +111,11 @@ MAX_LINK_STEPS = 100 * MAX_UNPACKED_ENTRIES
 MAX_LINK_PATH_CHARS = 2 * 4096
 #: What takes a credential's place in a text.
 REDACTED = "[credential]"
+#: Fails where a mark that is already in a text has begun and not yet ended, at each place in it. What is taken
+#: out of a text never ends there: the rest of the mark would be left beside the new one, as text.
+_NOT_IN_A_MARK = "".join(
+    f"(?!(?<={re.escape(REDACTED[:at])}){re.escape(REDACTED[at:])})" for at in range(1, len(REDACTED))
+)
 #: What an ignore file that belongs to one Dockerfile is named: the Dockerfile's name, then this. By itself, it
 #: is the name of the context's own ignore file, which a builder reads for a Dockerfile that has none.
 _IGNORE_SUFFIX = ".dockerignore"
@@ -154,7 +162,9 @@ class RetryableError(RemoteBuildError):
     """The call may not have happened: repeat the same call.
 
     Raised by ``start``, it may also mean a build was started whose ID never arrived. The driver can't cancel a
-    build it can't name, so when it gives such a start up it reports the build's key.
+    build it can't name, so when it gives such a start up it reports the build's key. Raised by ``upload_context``,
+    it may mean the service kept an upload whose reference never arrived: the driver repeats the call with the same
+    key, and a client that keeps the first upload for a key returns its reference.
     """
 
 
@@ -168,17 +178,31 @@ class PermanentError(RemoteBuildError):
 
 
 @dataclass(frozen=True, slots=True)
-class RemoteBuild:
-    """One image for a service to build."""
+class RemoteContext:
+    """One image's build context, for a service to take before a build starts from it."""
 
-    #: Stable for this job attempt and image. ``start`` twice with one key starts one build.
+    #: Stable for this job attempt and image, and the same as the build's. ``upload_context`` twice with one key
+    #: keeps one upload.
     key: str
     #: The build context, with the Dockerfile at its root. It is the whole context, as the step holds it on
     #: disk: nothing has applied its ignore rules, so what a build leaves out is still in it. The ignore file
     #: a builder reads is at its root, as a regular file: ``Dockerfile.dockerignore`` if there is one, and
     #: otherwise ``.dockerignore``. What a client owes a context it sends anywhere is said on
-    #: :meth:`RemoteBuildService.start`.
-    context: Path
+    #: :meth:`RemoteBuildService.upload_context`.
+    path: Path
+    #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteBuild:
+    """One image for a service to build."""
+
+    #: Stable for this job attempt and image. ``start`` twice with one key starts one build.
+    key: str
+    #: The service's reference to the image's build context, as :meth:`RemoteBuildService.upload_context`
+    #: returned it for this key.
+    context: str
     platform: str
     #: Where the image came from, for the service's own records: ``workspace``, ``image`` and ``job``.
     labels: Mapping[str, str] = field(default_factory=dict)
@@ -228,19 +252,18 @@ class RemoteBuildService(Protocol):
     the job's stop signal only between calls, and a pod has about 30 seconds from that signal to cancel its build.
     """
 
-    def start(self, build: RemoteBuild) -> str:
-        """Start building, and return the service's ID for the build.
+    def upload_context(self, context: RemoteContext) -> str:
+        """Send the service the image's build context, and return the service's reference to it.
 
-        Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
-        call must send the service the same request, so an implementation that uploads the context keeps the first
-        upload for that key and reuses it. The ID is not empty: it is what the image's row names the build by.
+        The driver uploads each image's context before :meth:`start`, and hands :meth:`start` what it returns, as
+        ``RemoteBuild.context``. A service that takes the context with the build itself returns whatever its
+        ``start`` finds the context by, such as the path. The reference is not empty.
 
-        Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
-        The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
-        nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
-        ends the build.
+        Safe to repeat with the same ``context.key``: the driver calls again when a response is lost. A
+        repeated call keeps the first upload for that key and returns the same reference, so a later
+        :meth:`start` sends the service the same request.
 
-        ``build.context`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
+        ``context.path`` is the whole context, as it is on disk: the driver applies no ignore rules to it.
         An implementation that sends the context anywhere first applies the ignore file at the context's
         root, as a container build does, and sends nothing those rules leave out: the Dockerfile's own,
         ``Dockerfile.dockerignore``, if there is one, and otherwise ``.dockerignore``. The Dockerfile and
@@ -258,6 +281,24 @@ class RemoteBuildService(Protocol):
         context that its links, followed, would make more of than a source may unpack to, but it measures
         one file once, however many names the file has: sent as a file for each name, it is as many times
         its size.
+        """
+        ...
+
+    def start(self, build: RemoteBuild) -> str:
+        """Start building from the uploaded context, and return the service's ID for the build.
+
+        Safe to repeat with the same ``build.key``: the driver calls again when a response is lost. A repeated
+        call sends the service the same request. The ID is not empty: it is what the image's row names the
+        build by.
+
+        A service that takes the context here, from the reference :meth:`upload_context` returned, owes it
+        everything :meth:`upload_context` says of a context it sends, and a repeated call keeps the first upload
+        for that key.
+
+        Wherever the service takes a deadline for a build, give it ``build.timeout_seconds`` as this build's.
+        The driver cancels a build it gives up, or is told to stop. A step that is killed outright cancels
+        nothing, and nothing else holds the build's ID to cancel it by: only the service's own deadline then
+        ends the build.
         """
         ...
 
@@ -447,7 +488,8 @@ def stage_context(context: Path, dockerfile: str, *, into: Path | None = None) -
     ignore, staged_ignore = named.with_name(named.name + _IGNORE_SUFFIX), context / (ROOT_DOCKERFILE + _IGNORE_SUFFIX)
     if moved and staged_ignore.is_dir() and not staged_ignore.is_symlink():
         raise ImageFailed(f"the build context has a directory named {staged_ignore.name} at its root")
-    has_ignore = ignore.is_file()
+    # Not the path's own `is_file`: the name is the Dockerfile's with more added, and may be one no file can have.
+    has_ignore = _is_file(ignore)
     #: Each ignore file to write at the root, with the file whose content it gets.
     brought: dict[Path, Path] = {}
     if has_ignore and not (
@@ -535,6 +577,32 @@ def _dockerfile(context: Path, dockerfile: str) -> Path:
     if source is None or context not in source.parents:
         raise ImageFailed(f"dockerfile {dockerfile!r} is not a file inside the build context")
     return source
+
+
+def _is_file(path: Path) -> bool:
+    """Whether ``path`` leads to a file, where a name too long for its directory is the name of no file.
+
+    For a path made by adding to a name a submitter chose, as a Dockerfile's own ignore file is looked for.
+    Asked of the system, so the answer is the same on any Python: a path's own ``is_file`` raises for what
+    the system refuses outright before Python 3.14, and takes all of it for no file from then on. Neither
+    is right here. A name longer than its directory holds is the name of no file: a Dockerfile named that
+    close to the limit has no ignore file of its own, and is built with the context's. A path that is too
+    long as a whole, though each of its names fits, may still lead to a file, which a builder that reads
+    from the context's root would find: taken for missing, the Dockerfile would be staged without its
+    ignore file. So that is raised, with whatever else the system refuses, and fails the image.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+            # Nothing is there, or a link that leads nowhere: as a path's own `is_file` has it on any Python.
+            return False
+        if exc.errno == errno.ENAMETOOLONG:
+            # The longest name the directory holds. Less than none where the system sets no limit.
+            longest = os.pathconf(path.parent, "PC_NAME_MAX")
+            if 0 <= longest < len(os.fsencode(path.name)):
+                return False
+        raise
 
 
 def _rewrite(context: Path, rewritten: Mapping[str, str]) -> None:
@@ -759,6 +827,11 @@ def _links(context: Path, follower: _Follower) -> _Links:
     #: counts it once. Counted for each name, a source that was let through could be refused here.
     counted: set[tuple[int, int]] = set()
     for directory, directories, files in os.walk(context):
+        # In the order of their names, which is then the order the walk takes them in. A file with more
+        # than one name is counted in the first directory the walk comes to that holds one, and a walk
+        # that follows links may come to one such directory more often than to another. A directory lists
+        # its entries in no promised order: by that, one context came to more on one disk than on another.
+        directories.sort()
         here = Path(directory)
         on = links.ways.setdefault(here, [])
         #: What the directory holds with each link to a file counted as the file, and of that, its own files.
@@ -838,7 +911,8 @@ def _kept_inside(root: Path, link: Path, follower: _Follower) -> str | None:
     Such a link leads inside the context only while the context is where it is, under the name it has. It
     becomes the way from its own directory to what its path names, with the links on the way there followed
     and that one not, should it be a link too: it still names the link it named. Where what it names is
-    beside the context, a link there that leads back in, it becomes the way to where that leads.
+    beside the context, a link there that leads back in, it becomes the way to where that leads. A path
+    that ends in a separator leads only to a directory, and is rewritten to end in one.
 
     One that leads nowhere is rewritten too, to where its path comes to. If that is out of the context, a
     path through a loop of links that climbs out after it, the context is refused: nothing says where such
@@ -856,7 +930,10 @@ def _kept_inside(root: Path, link: Path, follower: _Follower) -> str | None:
         to = follower.end(directory, link.name)
     if not _inside(context, to):
         raise _leads_out(link.relative_to(root).as_posix())
-    return os.path.relpath(to, directory)
+    rewritten = os.path.relpath(to, directory)
+    # A path that ends in a separator, or in `.` after one, leads to a directory or to nothing. Written
+    # without it, a link that led nowhere, for ending at a file, would lead to that file.
+    return rewritten + os.sep if written.rpartition(os.sep)[2] in ("", os.curdir) else rewritten
 
 
 def _stays_inside(root: str, directory: str, written: str, follower: _Follower) -> bool:
@@ -936,7 +1013,8 @@ def _call(
     With ``at_the_deadline``, a wait that would pass the deadline is cut to end on it, and the call is made once
     more there: right for a read of a build that is running, which costs nothing and may find it done. Without,
     the call is given up as soon as its next try would come too late: right for a start, which would only be
-    cancelled.
+    cancelled. It is given up after a wait as well, if the wait ended at the deadline or past it: a sleep ends
+    no sooner than it was asked to, and on a busy node it ends later.
     """
     failures = waits = 0
     # Once a try has failed for no stated reason, the call may have happened: whoever gives it up is told so.
@@ -979,6 +1057,11 @@ def _call(
         wait = min(wait, remaining)
         logger.warning("%s failed (%s); trying again in %.0fs", what, _quoted(str(failure)), wait)
         clock.sleep(wait)
+        # The wait fitted when it began, and may have ended late. A stop is said first, as before any try.
+        if not at_the_deadline and clock.monotonic() >= deadline and not cancelled():
+            raise ImageFailed(
+                f"{what}: {failure}; the build timeout passed before it could be tried again", maybe_called=lost
+            ) from failure
 
 
 def _cancel(service: RemoteBuildService, build_id: str, *, clock: Clock) -> bool:
@@ -1141,7 +1224,9 @@ def _complete(
 ) -> ContainerImage:
     """Complete the row, trying for :data:`COMPLETION_SECONDS` while the builder can't be reached.
 
-    The image is built and published, and only this call is left; completing is safe to repeat.
+    The image is built and published, and only this call is left; completing is safe to repeat. The first try
+    is made even when the job has been told to stop. No other is made once it has: a pod told to stop has
+    seconds, and one try may take them all.
     """
     deadline = clock.monotonic() + COMPLETION_SECONDS
     waits = 0
@@ -1162,6 +1247,9 @@ def _complete(
             raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
         logger.warning("completing %s failed (%s); trying again in %.0fs", image, _quoted(failure), wait)
         clock.sleep(wait)
+        if cancelled():
+            # The stop cut the wait short. As before the wait, no other try is made.
+            raise ImageFailed(f"it was built, but the builder could not be told: {failure}") from failure
 
 
 def _build_one(
@@ -1187,16 +1275,31 @@ def _build_one(
         raise
     except (ArchiveRefused, NemoHTTPError, NemoTransportError, OSError, ValueError) as exc:
         raise ImageFailed(f"cannot fetch its build context: {exc}") from exc
-    build = RemoteBuild(
-        key=idempotency_key(attempt, image.image),
-        context=context,
-        platform=image.platform,
-        labels={"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid},
-        timeout_seconds=config.build_timeout_seconds,
-    )
+    key = idempotency_key(attempt, image.image)
+    labels = {"workspace": attempt.workspace, "image": image.image, "job": attempt.job_uid}
     # The row was written with the service's repository at submit. An image anywhere else isn't the row's.
     destination = f"{row.registry}/{row.repository}"
+    # The upload counts against the build's time.
     deadline = clock.monotonic() + config.build_timeout_seconds
+    upload = RemoteContext(key=key, path=context, labels=labels)
+    # The same `upload` on every try, so a response lost on the way back keeps one upload. No build has started
+    # yet, so a failure here leaves nothing to cancel.
+    uploaded = _call(
+        "uploading the build context",
+        lambda: service.upload_context(upload),
+        clock=clock,
+        deadline=deadline,
+        cancelled=cancelled,
+    )
+    if not isinstance(uploaded, str) or not uploaded.strip():
+        raise ImageFailed("the build service's client uploaded the build context without naming it")
+    build = RemoteBuild(
+        key=key,
+        context=uploaded,
+        platform=image.platform,
+        labels=labels,
+        timeout_seconds=config.build_timeout_seconds,
+    )
     # The same `build` on every try, so a response lost on the way back starts nothing twice. Nothing is started
     # once the job has been told to stop.
     try:
@@ -1337,16 +1440,26 @@ def _redactor(secret: str | None) -> Callable[[str], str]:
 
     def longest_first(texts: set[str]) -> list[str]:
         # So that one form is never left as the remains of another.
-        return [re.escape(text) for text in sorted(texts - {""}, key=len, reverse=True)]
+        return sorted(texts - {""}, key=len, reverse=True)
 
-    # The whole secret before any one line of it: as it may be written, then as any URL holds it, since encoders
-    # differ in which characters they leave alone. Tried the other way round, a line would be taken out of the
-    # middle of the whole, and the rest left.
-    found = re.compile("|".join([*longest_first(forms), _in_a_url(secret), *longest_first(parts)]))
+    def ways(*, with_the_mark: bool) -> list[str]:
+        # The whole secret before any one line of it: as it may be written, then as any URL holds it, since
+        # encoders differ in which characters they leave alone. Tried the other way round, a line would be
+        # taken out of the middle of the whole, and the rest left.
+        written = [re.escape(form) for form in longest_first(forms) if (REDACTED in form) is with_the_mark]
+        in_a_url = [_in_a_url(secret)] if (REDACTED in secret) is with_the_mark else []
+        one_line = [re.escape(part) for part in longest_first(parts) if (REDACTED in part) is with_the_mark]
+        return [*written, *in_a_url, *one_line]
+
+    # A mark that is already in the text is found too, and its own text takes its place. So it is read past
+    # whole, and what it stands for is not read again: a short credential may be part of the mark itself.
+    # Before it come the ways of writing a secret that themselves hold the mark's text. Those are found only
+    # with the marks in them: read between the marks alone, such a secret was passed on whole.
+    tried = [*ways(with_the_mark=True), re.escape(REDACTED), *ways(with_the_mark=False)]
+    found = re.compile(f"(?:{'|'.join(tried)}){_NOT_IN_A_MARK}")
 
     def redact(text: str) -> str:
-        # What is already taken out is not read again: a short credential may be part of the mark itself.
-        return REDACTED.join(found.sub(REDACTED, part) for part in text.split(REDACTED))
+        return found.sub(REDACTED, text)
 
     return redact
 

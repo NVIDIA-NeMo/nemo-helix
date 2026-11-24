@@ -10,12 +10,9 @@
  * its affiliates is strictly prohibited.
  */
 
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import type { ButtonProps } from '@nvidia/foundations-react-core';
 import { CreateButton } from '@studio/components/common/CreateButton';
-import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
-import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getDatasetDetailRoute } from '@studio/routes/utils';
+import { NewDatasetPanel } from '@studio/components/NewDatasetButton/NewDatasetPanel';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import type { FC } from 'react';
 
@@ -26,22 +23,13 @@ interface Props extends Omit<ButtonProps, 'onClick'> {
 
 export const NewDatasetButton: FC<Props> = ({ ...buttonProps }) => {
   const [isOpen, setOpen, setClosed] = useBoolean(false);
-  const workspace = useWorkspaceFromPath();
 
   return (
     <>
       <CreateButton onClick={() => setOpen()} {...buttonProps}>
         Create Dataset
       </CreateButton>
-      {isOpen && (
-        <FilesetCreateModal
-          open={isOpen}
-          onClose={setClosed}
-          workspace={workspace}
-          purpose={FilesetPurpose.dataset}
-          getDetailRoute={getDatasetDetailRoute}
-        />
-      )}
+      <NewDatasetPanel open={isOpen} onClose={setClosed} />
     </>
   );
 };
