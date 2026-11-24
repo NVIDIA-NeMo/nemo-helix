@@ -6,7 +6,8 @@
 Container image builds for NeMo Helix. You submit Dockerfiles whose build context is in a Files
 fileset. The plugin builds them with kaniko, in a sandbox pod that holds no credentials. Then it
 pushes each image to the deployment's registry, signs it with your workspace's key, and records it
-as a `ContainerImage` you can pin by digest.
+as a `ContainerImage` you can pin by digest. With the [remote backend](#remote-backend), a build
+service outside the cluster builds and publishes the images instead.
 
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
@@ -657,6 +658,7 @@ Operator settings live under `builder:` in the platform config, which with the c
 
 ```yaml
 builder:
+  backend: in-cluster                            # the default; remote: see Remote backend
   registry: us-central1-docker.pkg.dev           # a host only, never host/path; http://host for plain HTTP
   repository_prefix: my-project/my-repo          # images land at <prefix>/<workspace>/...
   # The push step's platform secrets, in the submitting workspace. These are the defaults; null turns one off.
@@ -684,6 +686,9 @@ without logging in; set both or neither. With `signing_key_secret` `null`, it pu
 unsigned. Both suit a local registry rather than a shared one: anything that can reach a registry
 open to anonymous pushes can overwrite any workspace's images, and an unsigned image can be checked
 only against the digest its row records.
+
+The settings above, `sandbox` and the build profiles are the in-cluster backend's. The remote
+backend reads `default_platform` and its own `remote` section: see [Remote backend](#remote-backend).
 
 `config/minikube-values.yaml` is the quickstart's chart values. They work, but they are local-only in
 the ways their header lists, auth being off among them; don't start a shared deployment from them.
@@ -807,12 +812,18 @@ with `Dockerfile` at its root: no link, device or FIFO, owned by root, set-ID bi
 that takes a timeout of its own should be given `timeout_seconds`, so a build outlives a killed step
 by no more than that.
 
-The driver builds the images one at a time. It skips a row that isn't `pending`, polls every ten
+The driver builds the images one at a time. It skips a row that isn't `queued` or `pending`, tries
+`upload_context`, `start` and `cancel` up to three times on a `RetryableError`, polls every ten
 seconds, and cancels a build at `build_timeout_seconds`, on `SIGTERM`, or on any error after it
 started. It completes a row only when the service reports the image at
 `<remote.registry>/<remote.repository>@sha256:...`, through the builder's routes, as
-`service:builder` acting for the submitter, as the push step does. `Succeeded.attributes` is logged, not stored. Size the profile's active deadline
-for the number of images times `build_timeout_seconds`.
+`service:builder` acting for the submitter, as the push step does. `Succeeded.attributes` is
+logged, not stored. Size the profile's active deadline for the number of images times
+`build_timeout_seconds`.
+
+The builder neither pushes nor signs a remote build: the row records what the service published,
+and signing it, if anything does, is the service's. [Publishing and signing](#publishing-and-signing)
+describes the in-cluster backend only.
 
 The credential reaches the step only from the platform secret, so submit refuses a caller who can't
 read it. `step_main` removes it from the environment before the client exists, so no process the
