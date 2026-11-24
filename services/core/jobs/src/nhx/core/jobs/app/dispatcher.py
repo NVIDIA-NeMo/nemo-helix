@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -200,6 +201,11 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
     maximum = jobs_config.storage.maximum_pause_ttl_seconds
     if pause_ttl_seconds > maximum:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
+
+
+def _task_state(task: HelixJobTask) -> tuple[Any, ...]:
+    """The fields a task update can change, copied so later in-place merges do not alter them."""
+    return (task.status, copy.deepcopy(task.status_details), copy.deepcopy(task.error_details), task.error_stack)
 
 
 def _keep_reported_cause(reported: dict[str, Any] | None, update: dict[str, Any]) -> dict[str, Any]:
@@ -1545,7 +1551,11 @@ class JobDispatcher:
         attempt = await self.store.get_by_id(HelixJobAttempt, attempt.id)
         if attempt.job != job.id or attempt.workspace != workspace:
             return None
-        attempt.status_details = self._update_status_details_object(dict(attempt.status_details), status_details)
+        merged = self._update_status_details_object(dict(attempt.status_details), status_details)
+        if merged == attempt.status_details:
+            # Already reflected, so a repeated report does not rewrite the attempt.
+            return attempt
+        attempt.status_details = merged
         return await self.store.update(attempt)
 
     @staticmethod
@@ -1940,6 +1950,7 @@ class JobDispatcher:
                 extra={"task": task.id, "job": job_name, "step": step.name, "workspace": step.workspace},
             )
         else:
+            before = _task_state(task)
             current_status = HelixJobStatus(task.status)
             new_status = HelixJobStatus(task_update.status)
             if not current_status.can_transition_to(new_status):
@@ -1977,17 +1988,21 @@ class JobDispatcher:
             if task_update.error_stack:
                 task.error_stack = task_update.error_stack
 
-            task = await self.store.update(task)
-            logger.info(
-                "Updating job task",
-                extra={
-                    "task": task.id,
-                    "job": job_name,
-                    "step": step.name,
-                    "workspace": step.workspace,
-                    "status": task.status,
-                },
-            )
+            # A write that changes nothing is not progress, so it leaves updated_at alone. The
+            # Kubernetes controller re-sends each pod's details on every pass, and counting those
+            # writes would keep a stalled task, such as a hung upload, from ever looking stale.
+            if _task_state(task) != before:
+                task = await self.store.update(task)
+                logger.info(
+                    "Updating job task",
+                    extra={
+                        "task": task.id,
+                        "job": job_name,
+                        "step": step.name,
+                        "workspace": step.workspace,
+                        "status": task.status,
+                    },
+                )
 
         current_step = await self.store.get_by_id(HelixJobStep, step.id)
         if current_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
@@ -1999,6 +2014,9 @@ class JobDispatcher:
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,
         # but users query job status via the jobs API. Without this propagation,
         # job.status_details would be empty and users couldn't see training progress.
+        # Propagated even when the task did not change: a report that repeats the task's details
+        # still repairs an attempt whose earlier propagation failed. The attempt skips the write when
+        # it already holds them.
         if task_update.status_details:
             try:
                 attempt = await self.get_attempt(step.attempt_id)

@@ -12,7 +12,7 @@ import gc
 import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import Any, TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1013,6 +1013,39 @@ async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_re
         "step": 12,
         "pod": {"name": "pod-1", "phase": "Running"},
     }
+
+    # The controller re-sends the same pod details every pass. That write is not progress, so it
+    # leaves updated_at alone and a stalled task still reads as stale. It still repairs an attempt
+    # whose earlier propagation failed, and rewrites nothing once the attempt holds the details.
+    attempt = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    attempt.status_details = {}
+    await mock_store.update(attempt)
+    writes: dict[type, int] = {HelixJobTask: 0, HelixJobAttempt: 0}
+    store_update = mock_store.update
+
+    async def recording_update(entity: Any) -> Any:
+        if type(entity) in writes:
+            writes[type(entity)] += 1
+        return await store_update(entity)
+
+    mock_store.update = recording_update  # type: ignore[method-assign]
+    repeat = HelixJobTaskUpdate(
+        status=HelixJobStatus.ACTIVE, status_details={"pod": {"name": "pod-1", "phase": "Running"}}
+    )
+    progress = HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE, status_details={"step": 13})
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, repeat, step)
+    assert writes == {HelixJobTask: 0, HelixJobAttempt: 1}
+    repaired = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    assert repaired.status_details["pod"] == {"name": "pod-1", "phase": "Running"}
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, repeat, step)
+    assert writes == {HelixJobTask: 0, HelixJobAttempt: 1}
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, progress, step)
+    assert writes == {HelixJobTask: 1, HelixJobAttempt: 2}
+    stored = await mock_dispatcher.get_task(step.id, task.name, workspace=DEFAULT_WORKSPACE)
+    assert stored is not None and stored.status_details["step"] == 13
 
 
 CLASSIFIED_ERROR = {
