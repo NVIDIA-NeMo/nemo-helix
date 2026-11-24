@@ -223,20 +223,6 @@ class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
         return self
 
 
-class DescriptionOnlyJobUpdate(BaseModel):
-    """Mutable plugin job description. This job's definition can't be replaced, so a ``spec`` is refused."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
-
-    @model_validator(mode="after")
-    def validate_update(self) -> Self:
-        if not self.model_fields_set:
-            raise ValueError("at least one mutable job field is required")
-        return self
-
-
 class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     id: str
     name: str
@@ -1021,7 +1007,7 @@ def job_route_factory(
             rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
             step's execution profile is configured.
         allow_spec_update: Whether ``PATCH /jobs/{name}`` may replace a job's spec. When ``False``,
-            the update body takes only ``description``, so a ``spec`` in it is refused with 422.
+            an update that sets ``spec`` is refused with 422; ``description`` can still change.
 
     Example with separate input/output types:
         ```python
@@ -1120,14 +1106,10 @@ def job_route_factory(
         (BaseJob[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
-    TypedJobUpdate = (
-        type(
-            f"{job_type}JobUpdate",
-            (BaseJobUpdate[BaseModel],),
-            {"__annotations__": {"spec": job_input | None}, "spec": None},
-        )
-        if allow_spec_update
-        else type(f"{job_type}JobUpdate", (DescriptionOnlyJobUpdate,), {})
+    TypedJobUpdate = type(
+        f"{job_type}JobUpdate",
+        (BaseJobUpdate[BaseModel],),
+        {"__annotations__": {"spec": job_input | None}, "spec": None},
     )
     TypedJobAttempt = type(
         f"{job_type}JobAttempt",
@@ -1595,6 +1577,11 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Update a job for the {service_name} microservice."""
 
+            if not allow_spec_update and "spec" in request.model_fields_set:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="This job's spec can't be replaced; submit a new job instead.",
+                )
             jobs = AsyncJobsClient.from_client(async_client)
             existing_job = await _require_mutation_target_in_collection(
                 name=name,
@@ -1606,8 +1593,7 @@ def job_route_factory(
             update_identifier = existing_job.id if existing_job is not None else name
             if "description" in request.model_fields_set:
                 update_fields["description"] = request.description
-            # Only a job whose definition can be replaced has a ``spec`` on its update body.
-            if isinstance(request, BaseJobUpdate) and "spec" in request.model_fields_set:
+            if "spec" in request.model_fields_set:
                 assert request.spec is not None
                 if existing_job is None:
                     existing_job = (await jobs.get_job(name=name, workspace=workspace)).data()

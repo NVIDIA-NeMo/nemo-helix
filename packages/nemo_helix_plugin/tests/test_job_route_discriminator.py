@@ -535,6 +535,7 @@ def test_a_job_whose_definition_cannot_be_replaced_refuses_a_spec_update() -> No
     with patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", return_value=_InternalNemoClient(caller)):
         response = client.patch("/war/default/jobs/war-1", json={"spec": {"value": "updated"}})
     assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "This job's spec can't be replaced; submit a new job instead."
     assert caller.action_calls == []
 
 

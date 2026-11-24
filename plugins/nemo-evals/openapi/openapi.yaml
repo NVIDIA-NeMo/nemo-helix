@@ -4285,6 +4285,8 @@ components:
           title: Description
           nullable: true
           type: string
+        spec:
+          $ref: '#/components/schemas/AgentEvalInputSpec'
       additionalProperties: false
       type: object
       title: AgentEvaluateJobUpdate
