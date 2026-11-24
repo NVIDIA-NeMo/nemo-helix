@@ -37,11 +37,13 @@ import { Anchor, Button, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,
-  FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
+  toFinetuningTypeFilterState,
+  toSelectedFinetuningTypes,
 } from '@studio/components/dataViews/CustomModelsDataView/constants';
 import { getDeployAction } from '@studio/components/dataViews/CustomModelsDataView/deployAction';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
+import { FinetuningTypeFilterField } from '@studio/components/dataViews/CustomModelsDataView/FinetuningTypeFilterField';
 import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindTag';
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
@@ -63,7 +65,7 @@ type SearchQuery = Record<string, unknown>;
 interface CustomModelsFilterParams {
   name?: string;
   base_model?: string;
-  finetuning_type?: FinetuningType;
+  finetuning_type?: string[];
   created_at?: DatetimeFilter;
   updated_at?: DatetimeFilter;
 }
@@ -81,19 +83,13 @@ function buildCustomModelsFilter(fields: CustomModelsFilterParams): string | und
     });
   }
 
-  if (finetuning_type) {
-    if (finetuning_type === 'lora') {
-      conditions.push({
-        $or: [{ 'data.finetuning_type': { $eq: finetuning_type } }, HAS_ADAPTERS],
-      });
-    } else {
-      conditions.push({
-        'data.finetuning_type': { $eq: finetuning_type },
-      });
-    }
+  if (finetuning_type?.length) {
+    const byType = { 'data.finetuning_type': { $in: finetuning_type } };
+    // LoRA runs attach adapters to the base model rather than creating a new model entity.
+    conditions.push(finetuning_type.includes('lora') ? { $or: [byType, HAS_ADAPTERS] } : byType);
   }
 
-  if (!base_model && !finetuning_type) {
+  if (!base_model && !finetuning_type?.length) {
     conditions.push(DEFAULT_CUSTOM_MODELS_FILTER);
   }
 
@@ -156,7 +152,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     return buildCustomModelsFilter({
       name: dataViewState.debouncedSearchBar || undefined,
       base_model: filterMap.get('base_model') as string | undefined,
-      finetuning_type: filterMap.get('finetuning_type') as FinetuningType | undefined,
+      finetuning_type: toSelectedFinetuningTypes(filterMap.get('finetuning_type')),
       created_at: filterMap.get('created_at') as DatetimeFilter | undefined,
       updated_at: filterMap.get('updated_at') as DatetimeFilter | undefined,
     });
@@ -251,7 +247,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     (finetuningType: FinetuningType) => {
       dataViewState.columnFiltering.set((prev: DataView.TanstackTable.ColumnFiltersState) => {
         const filtered = prev.filter((f) => f.id !== 'finetuning_type');
-        return [...filtered, { id: 'finetuning_type', value: finetuningType }];
+        return [...filtered, { id: 'finetuning_type', value: { [finetuningType]: true } }];
       });
     },
     [dataViewState.columnFiltering]
@@ -330,9 +326,14 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           enableSorting: false,
           meta: {
             filter: {
-              type: 'single-select',
+              type: 'custom',
               label: 'Finetuning Type',
-              options: FINETUNING_TYPE_FILTER_OPTIONS,
+              renderFilter: ({ setValue, value }) => (
+                <FinetuningTypeFilterField
+                  value={toSelectedFinetuningTypes(value)}
+                  onValueChange={(v) => setValue(toFinetuningTypeFilterState(v))}
+                />
+              ),
             },
           },
           cell: ({ row }) =>
