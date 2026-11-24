@@ -2,13 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpose';
 import type { EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
-import {
-  nameCheckParams,
-  useFilesetNameStatus,
-} from '@studio/components/filesets/hooks/useFilesetNameStatus';
+import { useFilesetNameConflict } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -49,19 +45,12 @@ export function useConfigNameStatus(): {
   // Unlike the fileset create forms, this field sanitizes what is typed, so the check runs
   // on the sanitized preview rather than only on an already-valid name.
   const preview = toValidEntityName(name ?? '', '');
-  const status = useFilesetNameStatus(workspace, preview);
-
-  // Same query key as the check above, so a conflict reads the fileset it already found.
-  const conflict = useFilesListFilesets(workspace, nameCheckParams(preview), {
-    query: { enabled: status === 'conflict', staleTime: 0, retry: false },
-  });
+  const { status, conflict } = useFilesetNameConflict(workspace, preview);
 
   return {
     preview,
     status,
     conflictMessage:
-      status === 'conflict'
-        ? configNameTakenMessage(conflict.data?.data?.[0]?.purpose, workspace)
-        : undefined,
+      status === 'conflict' ? configNameTakenMessage(conflict?.purpose, workspace) : undefined,
   };
 }
