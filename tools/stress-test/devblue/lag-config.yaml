@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Platform config for the AIRCORE-1703 latency experiments in the tbray-dev dev pod.
+# Auth is on with the embedded PDP; the database comes from DATABASE_URL (see start-lag-platform.sh),
+# which points at Postgres through toxiproxy so round trips can be slowed on demand.
+service:
+  host: 0.0.0.0
+  port: 8090
+
+platform:
+  runtime: kubernetes
+  base_url: http://localhost:8090
+  image_pull_secrets:
+    - name: nvcrimagepullsecret
+
+auth:
+  enabled: true
+  policy_decision_point_base_url: http://localhost:8090
+  allow_unsigned_jwt: true
+  admin_email: lag-admin@example.com
+
+jobs:
+  enable_subprocess_executor: true
+  executor_defaults:
+    kubernetes_job:
+      namespace: tbray-dev
+  executors:
+    - provider: subprocess
+      profile: default
+      backend: subprocess
+      config: {}
+
+secrets:
+  allow_key_creation: true

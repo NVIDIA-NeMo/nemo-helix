@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Postgres with a toxiproxy sidecar for the AIRCORE-1703 latency experiments.
+#
+# Port 5432 is Postgres directly. Port 5433 is the same Postgres through toxiproxy, whose latency
+# toxic adds a fixed delay to every server-to-client chunk, so each database round trip pays it
+# once. Port 8474 is the toxiproxy admin API. Data lives in an emptyDir: deleting the pod wipes it.
+#
+#   kubectl --context nemo-dev-blue -n tbray-dev apply -f pg-lag.yaml
+#   kubectl --context nemo-dev-blue -n tbray-dev delete -f pg-lag.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pg-lag
+  labels:
+    app: pg-lag
+spec:
+  containers:
+    - name: postgres
+      image: docker.io/library/postgres:16
+      args:
+        - -c
+        - shared_preload_libraries=pg_stat_statements
+        - -c
+        - pg_stat_statements.track_utility=on
+        - -c
+        - max_connections=400
+      env:
+        - name: POSTGRES_USER
+          value: nhx
+        - name: POSTGRES_PASSWORD
+          value: nhx-lag
+        - name: POSTGRES_DB
+          value: nhx
+      ports:
+        - containerPort: 5432
+      resources:
+        requests: {cpu: "2", memory: 4Gi}
+        limits: {cpu: "4", memory: 8Gi}
+      readinessProbe:
+        exec:
+          command: [pg_isready, -U, nhx, -d, nhx]
+        periodSeconds: 5
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+    - name: toxiproxy
+      image: ghcr.io/shopify/toxiproxy:2.9.0
+      args: [-host=0.0.0.0, -port=8474]
+      ports:
+        - containerPort: 8474
+        - containerPort: 5433
+      resources:
+        requests: {cpu: 500m, memory: 256Mi}
+        limits: {cpu: "2", memory: 1Gi}
+  volumes:
+    - name: data
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-lag
+spec:
+  selector:
+    app: pg-lag
+  ports:
+    - {name: postgres, port: 5432, targetPort: 5432}
+    - {name: proxied, port: 5433, targetPort: 5433}
+    - {name: toxiproxy-api, port: 8474, targetPort: 8474}

@@ -1,0 +1,62 @@
+--- a/services/core/entities/src/nhx/core/entities/app/repository/__init__.py
++++ b/services/core/entities/src/nhx/core/entities/app/repository/__init__.py
+@@ -6,6 +6,8 @@
+ Provides abstract interfaces and implementations for database operations.
+ """
+ 
++import os
++
+ from nhx.core.entities.app.database import create_async_engine_for_entities
+ from nhx.core.entities.app.repository.account_credential import (
+     AccountCredentialConflictError,
+@@ -52,7 +54,9 @@
+             )
+         return  # Already initialized
+ 
+-    _async_engine = create_async_engine_for_entities(config)
++    _async_engine = create_async_engine_for_entities(
++        config, pool_pre_ping=os.environ.get("LAG_POOL_PRE_PING", "1") != "0"
++    )
+     _async_session_maker = async_sessionmaker(bind=_async_engine, class_=AsyncSession, expire_on_commit=False)
+ 
+ 
+--- a/services/core/entities/src/nhx/core/entities/app/repository/account_identity.py
++++ b/services/core/entities/src/nhx/core/entities/app/repository/account_identity.py
+@@ -5,6 +5,8 @@
+ 
+ from __future__ import annotations
+ 
++import os
++import time
+ from dataclasses import dataclass
+ from typing import Any, Literal
+ 
+@@ -36,6 +38,9 @@
+     subject: str
+ 
+ 
++_IDENTITY_CACHE: dict[tuple[str, str], tuple[float, AccountIdentityRecord]] = {}
++
++
+ class AccountIdentityStore:
+     """Resolve or materialize account identities against the entities database."""
+ 
+@@ -44,8 +49,17 @@
+ 
+     async def get_active_identity(self, *, issuer: str, subject: str) -> AccountIdentityRecord | None:
+         """Return the active identity for ``issuer``/``subject`` if present."""
++        ttl = float(os.environ.get("LAG_ACCOUNT_CACHE_TTL", "0"))
++        key = (issuer, subject)
++        if ttl > 0:
++            hit = _IDENTITY_CACHE.get(key)
++            if hit is not None and hit[0] > time.monotonic():
++                return hit[1]
+         async with self.session_maker() as session:
+-            return await self._get_active_identity(session, issuer=issuer, subject=subject)
++            record = await self._get_active_identity(session, issuer=issuer, subject=subject)
++        if ttl > 0 and record is not None:
++            _IDENTITY_CACHE[key] = (time.monotonic() + ttl, record)
++        return record
+ 
+     async def resolve_or_materialize(
+         self,

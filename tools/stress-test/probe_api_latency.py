@@ -19,6 +19,10 @@ authenticated request into network, authentication and authorization, and entity
 
 Privilege checks record the status code and the reported total for listings we may or may not be
 allowed to see cluster-wide. Every request is a GET.
+
+With ``--base-url`` and ``--principal-id`` the probe identifies itself with ``X-NHX-Principal-*``
+headers instead of a CLI context's bearer token. That is the path internal service calls take, and
+it needs no identity provider, so it suits a test platform with auth enabled.
 """
 
 from __future__ import annotations
@@ -31,12 +35,28 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from nemo_helix_plugin.client.client import NemoClient
 
 SERVER_TIMING_HEADERS = ("x-envoy-upstream-service-time", "server-timing")
+
+
+class Identity(Protocol):
+    def request_headers(self) -> dict[str, str] | None: ...
+
+
+@dataclass(frozen=True)
+class PrincipalHeaders:
+    principal_id: str
+    email: str | None = None
+
+    def request_headers(self) -> dict[str, str]:
+        headers = {"X-NHX-Principal-Id": self.principal_id}
+        if self.email:
+            headers["X-NHX-Principal-Email"] = self.email
+        return headers
 
 
 @dataclass(frozen=True)
@@ -47,7 +67,7 @@ class Rung:
     headers: tuple[tuple[str, str], ...] = ()
 
 
-def _headers(client: NemoClient, rung: Rung) -> dict[str, str]:
+def _headers(client: Identity, rung: Rung) -> dict[str, str]:
     if rung.headers:
         return dict(rung.headers)
     if not rung.authenticated:
@@ -55,7 +75,7 @@ def _headers(client: NemoClient, rung: Rung) -> dict[str, str]:
     return dict(client.request_headers() or {})
 
 
-def _get(http: httpx.Client, client: NemoClient, rung: Rung) -> dict[str, object]:
+def _get(http: httpx.Client, client: Identity, rung: Rung) -> dict[str, object]:
     headers = _headers(client, rung)
     began = time.perf_counter()
     try:
@@ -84,16 +104,14 @@ def _total(response: httpx.Response) -> object:
     return None
 
 
-def _names(http: httpx.Client, client: NemoClient, path: str) -> list[str]:
+def _names(http: httpx.Client, client: Identity, path: str) -> list[str]:
     response = http.get(path, headers=_headers(client, Rung("names", path)))
     if response.status_code != 200:
         return []
     return [item["name"] for item in response.json().get("data", []) if isinstance(item, dict) and "name" in item]
 
 
-def _choose_targets(
-    http: httpx.Client, client: NemoClient, workspace: str | None
-) -> tuple[str, str | None, str | None]:
+def _choose_targets(http: httpx.Client, client: Identity, workspace: str | None) -> tuple[str, str | None, str | None]:
     """Pick a workspace to read, a workspace with no jobs, and one existing job name."""
     workspaces = _names(http, client, "/apis/entities/v2/workspaces?page_size=100")
     if workspace:
@@ -162,8 +180,14 @@ def _summarize(records: list[dict[str, Any]]) -> dict[str, object]:
 
 
 def run(args: argparse.Namespace) -> int:
-    client = NemoClient.from_config(context=args.context)
-    base_url = client.base_url.rstrip("/")
+    client: Identity
+    if args.principal_id:
+        client = PrincipalHeaders(args.principal_id, args.principal_email)
+        base_url = args.base_url.rstrip("/")
+    else:
+        nemo_client = NemoClient.from_config(context=args.context)
+        client = nemo_client
+        base_url = (args.base_url or nemo_client.base_url).rstrip("/")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with httpx.Client(base_url=base_url, timeout=args.timeout) as http, out.open("a", encoding="utf-8") as handle:
@@ -205,7 +229,10 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--context", required=True)
+    parser.add_argument("--context", help="CLI context whose token and base URL to use")
+    parser.add_argument("--base-url", help="Platform URL; overrides the context's")
+    parser.add_argument("--principal-id", help="Send X-NHX-Principal-Id instead of a bearer token")
+    parser.add_argument("--principal-email", help="X-NHX-Principal-Email to send with --principal-id")
     parser.add_argument("--workspace", help="Workspace to read first; defaults to one with jobs")
     parser.add_argument("--out", required=True, help="JSONL file for every sample")
     parser.add_argument("--samples", type=int, default=20)
@@ -214,7 +241,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--rungs", nargs="+", help="Only run rungs whose label contains one of these strings")
     parser.add_argument("--skip-privileges", action="store_true")
-    return run(parser.parse_args(argv))
+    args = parser.parse_args(argv)
+    if args.principal_id and not args.base_url:
+        parser.error("--principal-id needs --base-url")
+    if not args.principal_id and not args.context:
+        parser.error("give --context, or --base-url with --principal-id")
+    return run(args)
 
 
 if __name__ == "__main__":
