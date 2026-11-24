@@ -14,6 +14,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import signal
 import tempfile
 import threading
@@ -34,7 +35,11 @@ from nemo_builder_plugin.steps import REMOTE_CREDENTIAL_ENV, RemoteBuildImage, R
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.jobs.constants import NEMO_JOB_ATTEMPT_ID_ENVVAR, NEMO_JOB_UID_ENVVAR
+from nemo_helix_plugin.jobs.constants import (
+    EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
+)
 from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -181,7 +186,11 @@ class RemoteBuildDriver:
                     if row.status != "ready":
                         failures += 1
                     continue
-                self.build_one(image, scratch / str(index))
+                try:
+                    self.build_one(image, scratch / str(index))
+                finally:
+                    # One image's files at a time: a set of many large contexts must not fill the pod's disk.
+                    shutil.rmtree(scratch / str(index), ignore_errors=True)
             except Exception as exc:
                 # Any error: one image must not cost the rest of the set.
                 reason = str(exc) if isinstance(exc, ImageFailed) else f"{type(exc).__name__}: {exc}"
@@ -204,8 +213,11 @@ class RemoteBuildDriver:
             timeout_seconds=self._config.build_timeout_seconds,
             settings=self._config.settings,
         )
+        # The upload counts against the build's time: no build is started once that time has passed.
         deadline = self._monotonic() + build.timeout_seconds
         handle = self._call("uploading the context", lambda: self._service.upload_context(build))
+        if self._monotonic() >= deadline:
+            raise ImageFailed(f"the upload took the whole {build.timeout_seconds}s; no build was started")
         build_id = self._call("starting the build", lambda: self._service.start(build, handle))
         logger.info("%s is building as %s", sanitize_for_log(image.name), sanitize_for_log(build_id))
         try:
@@ -249,10 +261,14 @@ class RemoteBuildDriver:
         """Poll until the build ends. Raises :class:`ImageFailed`, for the caller to cancel, at the deadline, on
         SIGTERM or on a status call that fails for good."""
         while True:
+            if self._stop.is_set():
+                raise ImageFailed("stopped while the build ran")
             try:
                 status = self._service.status(build_id)
                 if isinstance(status, Succeeded | Failed):
                     return status
+                if not isinstance(status, Running):
+                    raise ImageFailed(f"the service's client reported {type(status).__name__}, not a status")
             except RetryableError as exc:
                 logger.warning(
                     "reading %s failed (%s)", sanitize_for_log(build_id), sanitize_for_log(self.redact(str(exc)))
@@ -285,7 +301,7 @@ class RemoteBuildDriver:
         """The digest, only if the service published to the image's own repository."""
         repository, _, digest = result.reference.rpartition("@")
         expected = f"{image.registry}/{image.repository}"
-        if repository != expected or not re.match(DIGEST_PATTERN, digest):
+        if repository != expected or not re.fullmatch(DIGEST_PATTERN, digest):
             raise ImageFailed(f"the service reported {result.reference!r}, not an image in {expected} by digest")
         return digest
 
@@ -298,6 +314,8 @@ class _Redacting(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = record.getMessage().replace(self._credential, "[credential]")
         record.args = None
+        if record.exc_text:
+            record.exc_text = record.exc_text.replace(self._credential, "[credential]")
         if record.exc_info:
             text = logging.Formatter().formatException(record.exc_info)
             record.exc_text, record.exc_info = text.replace(self._credential, "[credential]"), None
@@ -316,6 +334,10 @@ def step_main(make_service: Callable[[RemoteBuildStepConfig, str | None], Remote
         for handler in logging.getLogger().handlers:
             handler.addFilter(_Redacting(credential))
     config = RemoteBuildStepConfig.model_validate(read_step_config())
+    if config.uses_credential and credential is None:
+        # Fail closed: a client that falls back to the pod's own identity must not do so by accident.
+        logger.error("a credential secret is configured, but %s is unset or empty", REMOTE_CREDENTIAL_ENV)
+        return 1
     workspace, _ = job_identity()
     job_uid, attempt_id = os.environ.get(NEMO_JOB_UID_ENVVAR), os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR)
     if not job_uid or not attempt_id:
@@ -343,5 +365,8 @@ def step_main(make_service: Callable[[RemoteBuildStepConfig, str | None], Remote
         credential=credential,
         stop=stop,
     )
-    with tempfile.TemporaryDirectory(prefix="nhx-remote-build-") as scratch:
+    # On the task storage Jobs mounts on every job pod, which a read-only root filesystem leaves writable.
+    with tempfile.TemporaryDirectory(
+        prefix="nhx-remote-build-", dir=os.environ.get(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR)
+    ) as scratch:
         return driver.run(Path(scratch))

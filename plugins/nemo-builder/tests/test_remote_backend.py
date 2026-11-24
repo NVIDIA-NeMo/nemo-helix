@@ -102,11 +102,13 @@ class TestCompile:
         [variable] = step.environment or []
         assert variable.name == REMOTE_CREDENTIAL_ENV and variable.value is None
         assert variable.from_secret is not None and variable.from_secret.name == "build-service-token"
+        assert RemoteBuildStepConfig.model_validate(step.config).uses_credential
 
     def test_no_credential_reaches_a_step_that_uses_its_own_identity(self) -> None:
         backend = RemoteBackend(_config(credential_secret=None), PROFILES)
         [step] = backend.compile(_plan(backend=backend)).steps
         assert not step.environment
+        assert not RemoteBuildStepConfig.model_validate(step.config).uses_credential
 
 
 async def _submit(client: FakeEntityClient, unreadable: frozenset[str] = frozenset()) -> None:

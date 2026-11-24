@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_builder_plugin.config import BuilderConfig
+from nemo_builder_plugin.config import BuilderConfig, RemoteConfig
 from pydantic import ValidationError
 
 
@@ -120,6 +120,12 @@ class TestRemote:
             BuilderConfig.model_validate({"remote": self.REMOTE | {"registry": "reg.example.com/builds"}})
         with pytest.raises(ValidationError, match="repository"):
             BuilderConfig.model_validate({"remote": self.REMOTE | {"repository": "a/../b"}})
+
+    def test_platforms_are_normalized_and_deduplicated_whatever_the_sequence(self) -> None:
+        remote = RemoteConfig.model_validate(self.REMOTE | {"platforms": ("linux/x86_64", "linux/amd64")})
+        assert remote.platforms == ["linux/amd64"]
+        with pytest.raises(ValidationError, match="platforms"):
+            RemoteConfig.model_validate(self.REMOTE | {"platforms": ("not-a-platform",)})
 
     def test_the_build_timeout_is_positive(self) -> None:
         with pytest.raises(ValidationError, match="build_timeout_seconds"):

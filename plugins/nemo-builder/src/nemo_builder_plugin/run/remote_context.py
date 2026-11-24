@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import shutil
 import stat
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -34,7 +35,10 @@ def _context_dir(layout: WorkLayout, source: ContextSource) -> Path:
         path = Path(layout.archive(source.fileset, source.archive))
     else:
         path = Path(layout.fileset(source.fileset))
-    for part in PurePosixPath(source.context_path or ".").parts:
+    relative = PurePosixPath(source.context_path or ".")
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ContextRefused(f"context_path {source.context_path!r} must be relative, without '..'")
+    for part in relative.parts:
         path = path / part
         if not stat.S_ISDIR(_mode(path)):
             raise ContextRefused(f"context_path {source.context_path!r} is not a directory in the source")
@@ -74,11 +78,19 @@ def _entries(context: Path) -> list[tuple[str, bool]]:
 
 
 def pack_context(files: FilesClient, source: ContextSource, *, workspace: str, scratch: Path) -> Path:
-    """Fetch ``source`` under ``scratch`` and pack it to ``scratch/context.tar.gz``, which is returned."""
-    layout = WorkLayout(PurePosixPath(scratch / "work"))
+    """Fetch ``source`` under ``scratch`` and pack it to ``scratch/context.tar.gz``, which is returned. What was
+    fetched is removed once it is packed, so only the tar stays on disk."""
+    work = scratch / "work"
+    try:
+        return _pack(files, source, workspace=workspace, work=work, packed=scratch / "context.tar.gz")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _pack(files: FilesClient, source: ContextSource, *, workspace: str, work: Path, packed: Path) -> Path:
+    layout = WorkLayout(PurePosixPath(work))
     fetch_source(files, layout, source, workspace=workspace)
     context = _context_dir(layout, source)
-    packed = scratch / "context.tar.gz"
     with packed.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
         with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tar:
             for name, is_dir in _entries(context):

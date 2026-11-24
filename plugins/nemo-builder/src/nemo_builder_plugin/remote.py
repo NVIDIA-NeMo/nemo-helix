@@ -94,6 +94,7 @@ class RemoteBackend:
             ],
             build_timeout_seconds=remote.build_timeout_seconds,
             settings=remote.settings,
+            uses_credential=remote.credential_secret is not None,
         )
         step = HelixJobStepSpec(
             name=STEP_NAME,

@@ -58,6 +58,18 @@ def test_a_fileset_context_packs_its_own_files_the_same_every_time(tmp_path: Pat
     assert all(m.isreg() or m.isdir() for m in members.values())
     assert all((m.uid, m.gid, m.mtime) == (0, 0, 0) for m in members.values())
     assert packed.read_bytes() == _pack(tmp_path / "b", source, FILESET).read_bytes()
+    # Only the tar stays: what was fetched is gone once it is packed.
+    assert sorted(path.name for path in (tmp_path / "a").iterdir()) == ["context.tar.gz"]
+
+
+@pytest.mark.parametrize("context_path", ["/etc", "app/../other"])
+def test_an_archives_context_path_outside_the_archive_is_refused(tmp_path: Path, context_path: str) -> None:
+    """Submit refuses these. A step config that holds one anyway is refused before a path is built from it."""
+    archive = _archive(("Dockerfile", b"FROM scratch", None))
+    source = ContextSource.model_construct(fileset="default/ctx", archive="c.tar", context_path=context_path)
+    with pytest.raises(ContextRefused, match="relative"):
+        _pack(tmp_path, source, {"c.tar": archive})
+    assert not (tmp_path / "work").exists()
 
 
 def test_an_archive_context_drops_set_id_bits(tmp_path: Path) -> None:

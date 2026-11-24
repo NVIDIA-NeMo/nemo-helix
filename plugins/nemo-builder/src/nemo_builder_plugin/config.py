@@ -14,6 +14,7 @@ from typing import Any, ClassVar, Literal, Self
 from nemo_builder_plugin.identity import (
     PLATFORM_PATTERN,
     ImageIdentityError,
+    Platform,
     normalize_registry,
     platform_name,
     validate_registry_host,
@@ -89,8 +90,9 @@ class RemoteConfig(BaseModel):
         default=None,
         min_length=1,
         description=(
-            "The platform secret holding the service's credential, which the step gets in its environment. "
-            "Null for a step that uses its own identity, such as Workload Identity."
+            "The platform secret holding the service's credential, which the step gets in its environment: "
+            "`<workspace>/<name>`, or a bare name read from the submitting workspace. Null for a step that uses its "
+            "own identity, such as Workload Identity."
         ),
     )
     platforms: list[str] = Field(
@@ -111,17 +113,19 @@ class RemoteConfig(BaseModel):
     def _repository_is_a_path(cls, value: str) -> str:
         return validate_repository(value.strip("/"))
 
-    @field_validator("platforms", mode="before")
+    @field_validator("platforms")
     @classmethod
-    def _platform_names(cls, value: Any) -> Any:
-        return [platform_name(platform) for platform in value] if isinstance(value, list) else value
+    def _platform_names(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(Platform.parse(platform)) for platform in value))
 
 
 class BuilderConfig(NemoConfig):
-    """Configuration for in-cluster container image builds."""
+    """Configuration for container image builds, in this cluster or by a remote build service."""
 
     plugin_name: ClassVar[str] = "builder"
-    plugin_description: ClassVar[str] = "In-cluster container image builds for NeMo Helix."
+    plugin_description: ClassVar[str] = (
+        "Container image builds for NeMo Helix, in-cluster or by a remote build service."
+    )
 
     backend: Literal["in-cluster", "remote"] = Field(
         default="in-cluster",

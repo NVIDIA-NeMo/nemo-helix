@@ -208,12 +208,50 @@ def test_sigterm_cancels_the_build_and_starts_no_other(tmp_path: Path) -> None:
         f"elsewhere.example.com/builds@{DIGEST}",
         f"{REPOSITORY}:latest",
         f"{REPOSITORY}@sha256:abc",
+        f"{REPOSITORY}@{DIGEST}\n",
     ],
 )
 def test_an_image_published_anywhere_else_is_not_completed(tmp_path: Path, reference: str) -> None:
     rows = FakeRows("a")
     assert _driver(FakeService([Succeeded(reference)]), rows).run(tmp_path) == 1
     assert rows.completed == []
+
+
+def test_each_images_files_are_removed_once_it_is_done(tmp_path: Path) -> None:
+    assert _driver(FakeService(), FakeRows("a", "b"), "a", "b").run(tmp_path) == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_no_build_is_started_once_the_upload_took_the_builds_time(tmp_path: Path) -> None:
+    stop = FakeStop()
+
+    class SlowUpload(FakeService):
+        def upload_context(self, build: RemoteBuild) -> str:
+            stop.now += 61
+            return super().upload_context(build)
+
+    service = SlowUpload()
+    assert _driver(service, FakeRows("a"), stop=stop).run(tmp_path) == 1
+    assert service.named("start") == [] and service.named("cancel") == []
+
+
+def test_a_stop_during_the_start_cancels_without_reading_the_build(tmp_path: Path) -> None:
+    stop = FakeStop()
+
+    class StoppedDuringStart(FakeService):
+        def start(self, build: RemoteBuild, context: str) -> str:
+            stop.set()
+            return super().start(build, context)
+
+    service = StoppedDuringStart()
+    assert _driver(service, FakeRows("a"), stop=stop).run(tmp_path) == 1
+    assert service.named("status") == [] and service.named("cancel") == ["cancel"]
+
+
+def test_a_status_that_is_none_of_the_three_fails_fast_and_cancels(tmp_path: Path) -> None:
+    service = FakeService([cast(Status, "building")])
+    assert _driver(service, FakeRows("a")).run(tmp_path) == 1
+    assert service.named("status") == ["status"] and service.named("cancel") == ["cancel"]
 
 
 def test_the_credential_never_reaches_a_log_or_a_row(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -231,7 +269,7 @@ class TestStepMain:
         self, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
     ) -> Callable[..., tuple[int, list[str | None]]]:
         config = RemoteBuildStepConfig(images=[_image("a")], build_timeout_seconds=60)
-        monkeypatch.setattr(remote, "read_step_config", lambda: config.model_dump())
+        monkeypatch.setattr(remote, "read_step_config", lambda: config.model_dump() | getattr(request, "param", {}))
         monkeypatch.setattr(remote, "job_identity", lambda: ("default", "job"))
         monkeypatch.setattr(remote, "get_task_nemo_client", lambda name: None)
         monkeypatch.setattr(remote, "client_from_platform", lambda client, kind: None)
@@ -239,6 +277,8 @@ class TestStepMain:
         # step_main installs its own SIGTERM handler: put the test process's back afterwards.
         previous = signal.getsignal(signal.SIGTERM)
         request.addfinalizer(lambda: signal.signal(signal.SIGTERM, previous))
+        # And the redacting filters it adds to the root logger's handlers, pytest's own among them.
+        request.addfinalizer(_remove_redacting_filters)
         monkeypatch.setenv(NEMO_JOB_UID_ENVVAR, "uid")
         monkeypatch.setenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, "1")
         seen: list[str | None] = []
@@ -265,3 +305,14 @@ class TestStepMain:
 
     def test_a_step_without_a_credential_gets_none(self, run: Callable[..., Any]) -> None:
         assert run() == (0, [None])
+
+    @pytest.mark.parametrize("run", [{"uses_credential": True}], indirect=True)
+    def test_a_configured_credential_that_did_not_arrive_stops_the_step(self, run: Callable[..., Any]) -> None:
+        assert run() == (1, [])
+        assert run(**{REMOTE_CREDENTIAL_ENV: ""}) == (1, [])
+
+
+def _remove_redacting_filters() -> None:
+    for handler in logging.getLogger().handlers:
+        for found in [f for f in handler.filters if isinstance(f, remote._Redacting)]:
+            handler.removeFilter(found)

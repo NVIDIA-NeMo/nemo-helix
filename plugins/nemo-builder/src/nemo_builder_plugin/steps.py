@@ -209,3 +209,5 @@ class RemoteBuildStepConfig(BaseModel):
     images: list[RemoteBuildImage] = Field(min_length=1)
     build_timeout_seconds: int = Field(gt=0)
     settings: dict[str, str] = Field(default_factory=dict, description="`builder.remote.settings`, for the client.")
+    #: Whether a credential secret is configured: the step then refuses to run without it.
+    uses_credential: bool = False
