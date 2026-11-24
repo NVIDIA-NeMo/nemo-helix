@@ -17,7 +17,8 @@ from nemo_builder_plugin.steps import ContextSource, SandboxMount
 class Destination:
     registry: str
     repository: str
-    #: The tag the build pushes for the image, and no caller can: ``<workspace>--<image>``.
+    #: The tag the in-cluster build pushes for the image, and no caller can: ``<workspace>--<image>``. A backend
+    #: that pushes no tag puts the image's name here, and nothing reads it as a tag.
     system_tag: str
 
     @property

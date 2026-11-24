@@ -60,11 +60,16 @@ class _Builder:
         *,
         job: str | None = "active",
         conflicting: frozenset[int] = frozenset(),
+        code: str | None = None,
     ) -> None:
         self.statuses = revisions
         self.job = job
         #: Revisions Builder holds for another request.
         self.conflicting = conflicting
+        #: What kind of 409 it answers a conflicting revision with, when it says: a refusal has a code.
+        self.code = code
+        #: The 409 itself, when it is not Builder's own: what a proxy in front of it answers, say.
+        self.response: httpx.Response | None = None
         self.submitted: list[int] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
@@ -88,7 +93,8 @@ class _Builder:
     ) -> SubmitBuildResponse:
         self.submitted.append(revision)
         if revision in self.conflicting:
-            raise ConflictError(httpx.Response(409, json={"detail": "a revision names one request"}))
+            body = {"detail": "a revision names one request"} | ({"code": self.code} if self.code else {})
+            raise ConflictError(self.response or httpx.Response(409, json=body))
         return _submitted(name, revision)
 
     async def image_platforms(self, image: str) -> list[str]:
@@ -119,6 +125,27 @@ async def test_ensure_build_resubmits_the_newest_revision_unless_it_failed(
 async def test_ensure_build_moves_past_a_revision_builder_holds_for_another_request() -> None:
     """Such as one built for the platform the deployment used to default to."""
     builder = _Builder(["ready"], conflicting=frozenset({1}))
+
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [1, 2]
+    assert submitted.job == "builder-harbor-env-0123456789ab-2"
+
+
+@pytest.mark.parametrize("code", ["backend_rejected", "missing_secrets"])
+async def test_ensure_build_raises_what_builder_refuses_outright(code: str) -> None:
+    """A refusal says so in its code: the next revision would be refused the same way, so it isn't tried."""
+    builder = _Builder(["ready"], conflicting=frozenset({1, 2}), code=code)
+
+    with pytest.raises(ConflictError):
+        await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [1]
+
+
+async def test_ensure_build_moves_past_a_revision_another_backend_built() -> None:
+    """The deployment's backend changed: that revision's image is where the old backend published it."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}), code="backend_changed")
 
     submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
@@ -191,6 +218,51 @@ async def test_adopt_or_build_reports_a_refusal_that_wrote_no_build() -> None:
         await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
     assert builder.submitted == [1]
+
+
+@pytest.mark.parametrize("code", ["missing_secrets", "backend_rejected"])
+async def test_adopt_or_build_raises_a_refusal_even_when_another_request_wrote_the_row_meanwhile(code: str) -> None:
+    """What Builder says is read first. A row that appears after the refusal is another request's, and says
+    nothing about whether this one can be built."""
+    builder = _Builder([], conflicting=frozenset({1}), code=code)
+
+    async def race(name: str) -> ContainerImage | None:
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "ready") if revision == 1 and builder.submitted else None
+
+    builder.get_image = race  # ty: ignore[invalid-assignment]
+    with pytest.raises(RuntimeError, match="Builder refused build harbor-env-0123456789ab-1: a revision names"):
+        await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    assert builder.submitted == [1]
+
+
+@pytest.mark.parametrize(
+    "code", [["backend_rejected"], {"is": "missing_secrets"}, 409], ids=["list", "mapping", "number"]
+)
+async def test_a_code_that_is_no_code_is_not_taken_for_a_refusal(code: object) -> None:
+    """Whatever a proxy or a later Builder puts there: it is read, not looked up."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+    builder.code = code  # ty: ignore[invalid-assignment]
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    # A revision another request holds, as a 409 with no code is: the next one is submitted.
+    assert (builder.submitted, submitted.images[0].name) == ([1, 2], "harbor-env-0123456789ab-2")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(409, text="<html>conflict</html>"),
+        httpx.Response(409, json=["backend_rejected"]),
+        httpx.Response(409, json="backend_rejected"),
+    ],
+    ids=["not-json", "a-list", "a-string"],
+)
+async def test_a_409_whose_body_is_no_object_is_not_taken_for_a_refusal(response: httpx.Response) -> None:
+    """An ingress in front of Builder answers with a page of its own. It is no refusal of the request."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+    builder.response = response
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+    assert (builder.submitted, submitted.images[0].name) == ([1, 2], "harbor-env-0123456789ab-2")
 
 
 def test_archive_source_splits_a_fileset_reference() -> None:

@@ -924,10 +924,37 @@ safe_synthesizer:
 
 ### `builder`
 
-Configuration for in-cluster container image builds.
+Configuration for container image builds.
 
 ```yaml wordWrap
 builder:
+  # Which backend builds: `execution`, in this cluster, or `remote`, through a build service outside it (see `remote`). Any other value refuses every submit. | default: 'execution'
+  backend: execution
+  remote:
+    # Host of the registry the service publishes every image to. Unset, with `backend: remote`, every submit is refused.
+    registry:
+    # The one repository the service publishes to, in every workspace's name: an image is told apart by its digest. Unset, with `backend: remote`, every submit is refused.
+    repository:
+    # The Jobs execution profile, provider `cpu` on the `kubernetes_job` backend, the remote-build step runs on. Its `max_active_jobs` caps the build jobs that run at once. A job is one set, built an image at a time, so running jobs wait on at most that many builds at the service: set it to what the service lets this deployment queue. Its `ttl_seconds_active` is the only time limit Jobs puts on the step once its pod is running, and Jobs counts it from when the build was submitted: it must cover the longest a build waits for a slot, then `build_timeout_seconds` for each image. A profile whose limit is below the builds' own, plus two minutes, is refused. That check is a floor: it leaves out the time to fetch each build context and, once an image is built, up to five minutes of reporting it to the builder. | default: 'build-remote'
+    profile: build-remote
+    # The image the remote-build step runs: one that holds the service's step program. Unset, the profile's `default_task_image`, which must then be set.
+    image:
+    # The step program in that image, and its arguments.
+    command:
+    - remote-build
+    # The platform secret holding the service's credential, which Jobs fetches as the build's submitter and the step reads from its environment, whether or not the platform uses workload token exchange. Write it as `<workspace>/<name>` for one credential the whole deployment builds with: a bare name is read from the workspace the build is submitted in, so every workspace that builds would need its own. Every user who may build must be able to read it. Null when the step's Jobs profile mounts the credential instead: any user who may create a job can name that profile, and read a credential it mounts.
+    credential_secret:
+    # The platforms the service builds, as `os/architecture`. A spec for any other is refused.
+    platforms:
+    - linux/amd64
+    # How many images one build set may hold. A larger set is refused. | default: 1
+    max_specs_per_set: 1
+    # Take a spec whose Dockerfile isn't `Dockerfile` at the context root: the step puts that file at the root of the context it hands the service, in place of any `Dockerfile` already there. A build that copies its own root `Dockerfile` into the image then copies the named one. The Dockerfile's own ignore file (`<its path>.dockerignore`) goes to the root with it. False refuses such a spec. | default: True
+    allow_dockerfile_path: true
+    # How long the step waits for one image, from when it asks the service to start, before it cancels the build and fails the image. Time the service makes the step wait for its queue counts. The step gives the same limit to the service's client, to pass to its service as the build's own deadline: only a service that enforces one ends a build whose step was killed. | default: 3600
+    build_timeout_seconds: 3600
+    # Build where nothing can show who completes an image: with platform auth on and workload token exchange off. The platform then takes a request's identity from headers that anything able to reach its API can set, so the builder cannot tell an image's own remote-build step from any other caller, and by default it refuses every submit and every completion of a remote build. True accepts exactly that: anything able to reach the API can make a `pending` image `ready` at a digest, with a build and a runtime configuration, of its choosing. It changes nothing with platform auth off, where no caller is checked, nor with workload token exchange on, where only a step of the job the image's submit created completes it. | default: False
+    allow_unverified_completion: false
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
@@ -949,9 +976,9 @@ builder:
   push_profile: build-push
   # Deprecated and ignored since 0.11: Jobs caps builds now. Set the build profiles' `max_active_jobs` instead, which the Helm chart's `builder.maxConcurrentBuilds` does.
   max_concurrent_builds:
-  # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
+  # Host of the registry the in-cluster build publishes every image to, with an optional port; prefix it with `http://` for plain HTTP. Unset, with `backend: execution`, every submit is refused.
   registry:
-  # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
+  # Path the in-cluster build publishes every image under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. Not used with `backend: remote`. | default: ''
   repository_prefix: ''
   # The platform a build or copy is for when its request names none, as `os/architecture`. Set it to your nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac. Changing it doesn't rebuild task images evals already has: request their builds with `rebuild` set. | default: 'linux/amd64'
   default_platform: linux/amd64

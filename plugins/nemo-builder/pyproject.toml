@@ -3,12 +3,13 @@
 
 [project]
 name = "nemo-builder-plugin"
-description = "In-cluster container image builds for NeMo Helix."
+description = "Container image builds for NeMo Helix."
 requires-python = ">=3.11,<3.15"
 version = "0.1.0"
 dependencies = [
   "nemo-helix-plugin",
-  "pydantic>=2.0.0",
+  # The first pydantic whose fields take `exclude_if`: entities.py leaves a row's unset job IDs out with it.
+  "pydantic>=2.12.0",
   "cryptography>=42.0.0",
   "httpx>=0.27.0",
   "kubernetes>=29.0.0",

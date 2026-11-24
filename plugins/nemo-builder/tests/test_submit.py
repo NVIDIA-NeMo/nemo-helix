@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import httpx
 import pytest
@@ -20,6 +19,8 @@ from nemo_builder_plugin.steps import FetchStepConfig, PushStepConfig, Supervise
 from nemo_builder_plugin.submit import (
     JOB_SOURCE,
     BuildConflict,
+    CreatedJob,
+    ExistingJob,
     InvalidBuildRequest,
     MissingSecrets,
     SubmitResult,
@@ -77,7 +78,7 @@ class FakeJobs:
         self.events = events
         self.jobs: dict[str, CreateHelixJobRequest] = {}
 
-    async def create_job(self, request: CreateHelixJobRequest) -> CreateHelixJobRequest:
+    async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
         assert request.name is not None
         if request.name in self.jobs:
             self.events.append("job_conflict")
@@ -86,11 +87,16 @@ class FakeJobs:
             )
         self.events.append("create_job")
         self.jobs[request.name] = request
-        return request
+        # As Jobs answers a create: with the job's own ID, and its first attempt's.
+        return CreatedJob(uid=f"platform-job-{request.name}", attempt_id=f"attempt-of-{request.name}")
 
-    async def get_job_fields(self, name: str) -> Mapping[str, Any]:
+    async def get_job(self, name: str) -> ExistingJob:
         self.events.append(f"get_job:{name}")
-        return self.jobs[name].custom_fields or {}
+        return ExistingJob(uid=f"platform-job-{name}", custom_fields=self.jobs[name].custom_fields or {})
+
+    async def cancel_job(self, job: str) -> None:
+        # A build in this cluster records no job on its rows, so it never gives one up: no test here lists this.
+        self.events.append(f"cancel_job:{job}")
 
 
 def _config(**overrides: object) -> BuilderConfig:
@@ -142,7 +148,8 @@ async def _submit(
         workspace="default",
         entity_client=entity_client,
         create_job=jobs.create_job,
-        get_job_fields=jobs.get_job_fields,
+        get_job=jobs.get_job,
+        cancel_job=jobs.cancel_job,
         secret_readable=secret_readable,
         resolve_upstream=resolve_upstream,
         default_platform=(config or _config()).default_platform,
@@ -179,6 +186,26 @@ class TestOrdering:
         provenance = result.images[0].provenance
         assert (provenance.job, provenance.spec) == ("default/builder-demo-1", "img0")
 
+    @pytest.mark.asyncio
+    async def test_a_row_built_in_this_cluster_is_written_once_and_records_no_more_of_its_job(self) -> None:
+        """Only a row that is completed on its caller's word records which job its submit created. Jobs answers
+        this submit's create with an ID and an attempt too, and the row is as it was before a row could hold
+        them: not written again, and stored without them."""
+        client = FakeEntityClient()
+        result = await _submit(client)
+        assert not [event for event in client.events if event.startswith("update")]
+        for row in (*result.images, *client.rows.values()):
+            assert (row.provenance.job_uid, row.provenance.job_attempt_id) == (None, None)
+            assert set(row._get_data_fields()["provenance"]) == {
+                "build_set",
+                "revision",
+                "spec",
+                "job",
+                "request_digest",
+                "upstream",
+                "backend",
+            }
+
 
 class TestResubmission:
     """Settled by the unique-name index, not a read-then-write, and by the request digest."""
@@ -201,6 +228,26 @@ class TestResubmission:
         ]
         assert [i.name for i in second.images] == [i.name for i in first.images]
         assert len(client.rows) == 2 and len(jobs.jobs) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_job_under_the_builds_name_is_its_own_by_the_digest_it_carries(self) -> None:
+        """As it always was for a build in this cluster, whose rows record no more of their job than its name:
+        a job that says it is of this request is taken for the build's, whoever created it, and no row is
+        read again or written to find out."""
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        jobs.jobs["builder-demo-1"] = CreateHelixJobRequest.model_construct(
+            name="builder-demo-1",
+            custom_fields={"request_digest": request_digest(_set().with_default_platform("linux/amd64"))},
+        )
+        result = await _submit(client, jobs)
+        assert client.events == [
+            "create:demo-1.img0",
+            "create:demo-1.img1",
+            "job_conflict",
+            "get_job:builder-demo-1",
+        ]
+        assert [image.status for image in result.images] == ["pending", "pending"]
 
     @pytest.mark.asyncio
     async def test_a_different_request_at_the_same_revision_is_refused_and_adopts_nothing(self) -> None:
@@ -391,7 +438,7 @@ class TestCopies:
         entities = FakeEntityClient()
 
         class _Unavailable(FakeJobs):
-            async def create_job(self, request: CreateHelixJobRequest) -> CreateHelixJobRequest:
+            async def create_job(self, request: CreateHelixJobRequest) -> CreatedJob:
                 raise RuntimeError("jobs unavailable")
 
         with pytest.raises(RuntimeError):

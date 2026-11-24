@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.compile import compile_build_set
 from nemo_builder_plugin.config import BuilderConfig
+from nemo_builder_plugin.entities import IN_CLUSTER_BACKEND
 from nemo_builder_plugin.identity import compose_system_tag, validate_repository
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
 from nemo_helix_plugin.config import get_platform_config
@@ -29,6 +30,10 @@ SANDBOX_IMAGE = "nhx-kaniko"
 
 class ExecutionBackend:
     """:class:`~nemo_builder_plugin.backend.Backend` for builds in this cluster."""
+
+    name = IN_CLUSTER_BACKEND
+    #: Its rows, its submit and its completion are as they were before a row could record its job.
+    binds_rows_to_job = False
 
     def __init__(self, config: BuilderConfig, profiles: Sequence[ExecutionProfile]) -> None:
         """``profiles`` are the platform's Jobs execution profiles, which say where the build's steps run."""

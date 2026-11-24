@@ -3,9 +3,13 @@
 
 """``ContainerImage``: one row per image a build publishes.
 
-The builder writes a row ``pending`` when the build is submitted. It becomes ``ready`` when the image's push step
-has pushed and signed the image and completes it, or ``failed`` when the submit is refused, or once its job is found
-to have ended without completing it (see ``settle``). The builder never changes a row after that, but it isn't the
+The builder writes a row ``pending`` when the build is submitted, before the job that builds it exists. A row a
+remote build service builds is written again once that job does, with the job's ID and its first attempt's (see
+``Provenance.job_uid``). It becomes ``ready`` when the step that built the
+image completes it: the push step, once it has pushed and signed the image, or a remote-build step, once its build
+service has published it. It becomes ``failed`` when the submit is refused, when a submit gives its build up
+because the job could not be recorded on its rows, or once its job is found to have ended without completing it
+(see ``settle``). The builder never changes a row after that, but it isn't the
 only way to write one: see the README's Security limitations.
 
 ``queued`` is deprecated: 0.10's builder wrote it when it queued a build itself (see :class:`QueuedBuild`). Rows it
@@ -19,10 +23,20 @@ from typing import Literal
 from nemo_builder_plugin.identity import DIGEST_PATTERN
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 #: The entity store filters JSON integers as int64, so a larger revision would be stored but never found.
 MAX_REVISION = 2**63 - 1
+
+#: `provenance.backend` of a row this cluster builds, and of every row from before the field existed.
+IN_CLUSTER_BACKEND = "execution"
+
+#: The longest ID of a job, or of one of its attempts, a row records. The platform's are a few dozen characters.
+MAX_JOB_ID = 256
+
+
+def _is_unset(value: object) -> bool:
+    return value is None
 
 
 class UpstreamImage(BaseModel):
@@ -45,15 +59,97 @@ class Provenance(BaseModel):
     spec: str | None = Field(
         default=None, description="The `BuildSpec.name` this row came from, or None for the set's unnamed spec."
     )
-    job: str = Field(pattern=ENTITY_REF_PATTERN, description="`<workspace>/<name>` of the build job.")
+    job: str = Field(
+        pattern=ENTITY_REF_PATTERN,
+        description=(
+            "`<workspace>/<name>` of the build job. A name is not one job for good: another job can take it once "
+            "this one is deleted, or before it exists."
+        ),
+    )
+    # Left out of a row that has none, so a row built in this cluster is stored, and read, as it always was.
+    job_uid: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_JOB_ID,
+        exclude_if=_is_unset,
+        description=(
+            "The ID Jobs gave the build job this row's submit created, which no later job is given. Written once "
+            "that job exists, for an image a remote build service builds. Under workload token exchange, only a "
+            "step of that job's first attempt completes the image; with platform auth off, or where the "
+            "deployment sets `builder.remote.allow_unverified_completion`, it is compared with nothing. None "
+            "until then, and for an image this cluster builds."
+        ),
+    )
+    job_attempt_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_JOB_ID,
+        exclude_if=_is_unset,
+        description=(
+            "The ID of that job's first attempt, the one that runs the request as the builder compiled it. A "
+            "rerun of the job is another attempt, and may run a specification changed since. Written with "
+            "`job_uid`."
+        ),
+    )
     request_digest: str = Field(
         pattern=DIGEST_PATTERN,
         description=(
             "sha256 of the canonical JSON of the `BuildSet`. Tells a retry of the same request from a "
-            "different request that reuses its revision. Every signature carries it."
+            "different request that reuses its revision. Every signature the builder makes carries it."
         ),
     )
     upstream: UpstreamImage | None = Field(default=None, description="For a copy, the image it copies.")
+    backend: str = Field(
+        default=IN_CLUSTER_BACKEND,
+        max_length=64,
+        description=(
+            "The builder backend the row was submitted under, as `builder.backend` named it. A row written before "
+            "this field existed reads as `execution`, the only backend there was."
+        ),
+    )
+
+
+#: A remote build service's own facts about an image: a few short strings, never a document.
+MAX_EXTERNAL_ATTRIBUTES = 32
+MAX_EXTERNAL_VALUE = 512
+MAX_EXTERNAL_KEY = 128
+
+
+class ExternalImage(BaseModel):
+    """What a remote build service calls the image it built, written when the row becomes ``ready``.
+
+    The builder stores these for a consumer that uses the same service. It reads none of them for itself. It
+    only requires that a completion carries a ``build_id``, and that a second completion carries the same three.
+    """
+
+    image_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EXTERNAL_VALUE,
+        description="The service's own handle for the image, if it has one. Not necessarily unique to a row.",
+    )
+    build_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_EXTERNAL_VALUE,
+        description="The service's record of the build, for operators.",
+    )
+    attributes: dict[str, str] = Field(
+        default_factory=dict,
+        max_length=MAX_EXTERNAL_ATTRIBUTES,
+        description="A few facts the service reports about the build, such as its builder's version.",
+    )
+
+    @field_validator("attributes")
+    @classmethod
+    def _attributes_are_short(cls, value: dict[str, str]) -> dict[str, str]:
+        for key, item in value.items():
+            if len(key) > MAX_EXTERNAL_KEY or len(item) > MAX_EXTERNAL_VALUE:
+                raise ValueError(
+                    f"attribute {key[:32]!r} is too long: a key holds {MAX_EXTERNAL_KEY} characters, "
+                    f"a value {MAX_EXTERNAL_VALUE}"
+                )
+        return value
 
 
 class ImageRuntimeConfig(BaseModel):
@@ -98,13 +194,25 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
     digest: str | None = Field(
         default=None,
         pattern=DIGEST_PATTERN,
-        description="The manifest digest the push step pushed under the system tag, and signed.",
+        description=(
+            "The manifest digest the image is published at: the one its push step pushed under the system tag and "
+            "signed, or the one a remote build service published."
+        ),
     )
     runtime_config: ImageRuntimeConfig | None = Field(
         default=None,
         description=(
-            "How the image starts by default, read from its config when it became `ready`. None for an image "
-            "completed before Builder recorded it, or whose config couldn't be read."
+            "How the image starts by default: read from its config when it became `ready`, or, for an image a "
+            "remote build service built, what the service's client reported. None for an image completed before "
+            "Builder recorded it, one whose config couldn't be read, or one whose build service's client reported "
+            "none."
+        ),
+    )
+    external: ExternalImage | None = Field(
+        default=None,
+        description=(
+            "What a remote build service calls the image, written when the row becomes `ready`. None for an image "
+            "this cluster built."
         ),
     )
 
