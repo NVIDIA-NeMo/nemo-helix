@@ -46,13 +46,23 @@ Compass reads telemetry; it cannot create it. Confirm all three:
   or the submission supplies explicit model references. The Platform must have
   Jobs and an `agents.execute` runtime available to execute the analysis.
 
-Compass runs as the workspace's Compass agent, `compass-analyst`. Check that it
-exists, and create it if it doesn't:
+Compass runs as the workspace's Compass agent: its one agent of type
+`compass.analyst`. Find it by type, since it may have been created with a name
+other than the default:
 
 ```bash
-nemo agents get compass-analyst --workspace "<workspace>" || \
-  nemo agents create compass.analyst --workspace "<workspace>"
+nemo agents types --workspace "<workspace>" --output-format json
 ```
+
+The `compass.analyst` entry's `agent` field names the workspace's Compass agent.
+If it is null, create one; it is named `compass-analyst` unless you pass
+`--name`:
+
+```bash
+nemo agents create compass.analyst --workspace "<workspace>"
+```
+
+The commands below use `compass-analyst`; substitute the name you found.
 
 An Ethos is optional. It gives Compass the agent's intent, constraints, and
 success criteria. Code and traces don't contain that context. Without it,

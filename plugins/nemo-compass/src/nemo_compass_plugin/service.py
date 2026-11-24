@@ -48,6 +48,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import PaginationData
 from nemo_helix_plugin.service import NemoService, RouterSpec
 from nhx.intake.entities.experiments import ExperimentGroup
@@ -426,9 +427,13 @@ async def _ensure_compass_agent(client: AsyncNemoClient, *, workspace: str) -> N
     except ConflictError:
         # Created concurrently, or the name is taken by another agent; in the
         # latter case the scheduler reports the missing Compass agent.
-        logger.info("Compass agent not created in workspace '%s': conflict", workspace)
+        logger.info("Compass agent not created in workspace '%s': conflict", sanitize_for_log(workspace))
     except (NemoHTTPError, NemoTransportError) as exc:
-        logger.warning("Could not create the Compass agent in workspace '%s': %s", workspace, exc)
+        logger.warning(
+            "Could not create the Compass agent in workspace '%s': %s",
+            sanitize_for_log(workspace),
+            sanitize_for_log(exc),
+        )
 
 
 def _build_analysis_configs_router() -> APIRouter:
@@ -451,6 +456,8 @@ def _build_analysis_configs_router() -> APIRouter:
         """Enable periodic insights analysis for one agent.
 
         Also creates the workspace's Compass agent (`compass.analyst`) if it has none.
+        That is best effort: if the caller may not create agents, the config is still
+        saved, and the scheduler reports the missing agent on the analysis status.
         """
         await _ensure_compass_agent(client, workspace=workspace)
         config, created = await _get_or_create_analysis_config(
@@ -577,6 +584,8 @@ def _build_analysis_configs_router() -> APIRouter:
         """Partially update periodic analysis state for one agent.
 
         Also creates the workspace's Compass agent (`compass.analyst`) if it has none.
+        That is best effort: if the caller may not create agents, the config is still
+        saved, and the scheduler reports the missing agent on the analysis status.
         """
         try:
             config = await entity_client.get(AnalysisConfig, name=agent, workspace=workspace)

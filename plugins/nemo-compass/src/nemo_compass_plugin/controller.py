@@ -375,7 +375,19 @@ class CompassAnalysisController(NemoController):
                 ),
             )
         except NemoHTTPError as exc:
-            # Rejected outright (an unknown model, say): no job exists, so
+            if exc.status_code >= 500 or exc.status_code == 409:
+                # The job may exist anyway: a server error can follow its creation, and a
+                # conflict means a job already has this name. Leave the attempt pending so
+                # the next pass resolves it by name, as after a timeout.
+                logger.warning(
+                    "Submitting insights analysis job '%s' for agent '%s' failed with HTTP %d; "
+                    "checking for it on the next pass",
+                    job_name,
+                    config.agent,
+                    exc.status_code,
+                )
+                return
+            # Rejected before any job was created (an unknown model, say):
             # record why instead of leaving a pending attempt to time out.
             await self._record_error(config, pending, f"Analysis job was rejected: {exc.detail}")
             return

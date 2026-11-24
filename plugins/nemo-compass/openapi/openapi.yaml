@@ -109,7 +109,11 @@ paths:
 
 
         Also creates the workspace''s Compass agent (`compass.analyst`) if it has
-        none.'
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: update_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__patch
       parameters:
       - name: workspace
@@ -185,7 +189,11 @@ paths:
 
 
         Also creates the workspace''s Compass agent (`compass.analyst`) if it has
-        none.'
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: enable_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__enable_post
       parameters:
       - name: workspace

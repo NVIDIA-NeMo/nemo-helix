@@ -1039,6 +1039,26 @@ async def test_controller_records_why_a_job_was_rejected(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [500, 503, 409])
+async def test_controller_keeps_an_attempt_pending_when_the_job_may_exist(
+    monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    """A server error can follow the job's creation, so the next pass resolves the attempt by name."""
+    config = AnalysisConfig(
+        name="research-agent", workspace="default", agent="research-agent", default_model="default/gpt-5"
+    )
+    failed = NemoHTTPError(httpx.Response(status_code, json={"detail": "upstream failed"}))
+
+    async with _controller(monkeypatch, create_error=failed) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    status = jobs.saved_statuses[-1]
+    assert status.status == AnalysisConfigStatus.RUNNING
+    assert status.last_submitted_job
+    assert status.last_error == ""
+
+
+@pytest.mark.asyncio
 async def test_controller_defers_legacy_config_without_persisted_models(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
