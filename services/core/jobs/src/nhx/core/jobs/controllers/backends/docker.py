@@ -2142,7 +2142,15 @@ chmod -R 777 {job_vol}/{storage_subpath}
         rejects any quota when the daemon has no CFS quota support (e.g. rootless without the cpu
         cgroup controller), so the limit is skipped there, as it was before.
         """
-        nano_cpus = int(parse_quantity(cpu_limit) * 1_000_000_000)
+        cores = parse_quantity(cpu_limit)
+        if not cores.is_finite() or cores < 0:
+            raise ValueError("Docker CPU limit must be finite and non-negative")
+        # Preserve the existing zero-means-no-limit behavior.
+        if cores == 0:
+            return 0
+        nano_cpus = int(cores * 1_000_000_000)
+        if nano_cpus <= 0:
+            raise ValueError("Docker CPU limit must be at least one nanocore")
         daemon_info = self._client.info()
         if daemon_info.get("CpuCfsQuota") is False:
             logger.warning(
