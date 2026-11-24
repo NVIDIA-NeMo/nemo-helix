@@ -37,7 +37,9 @@ _AUTH_HEADER_PATTERNS: tuple[str, ...] = (
 # start with lowercase alpha, require at least one more valid character, allow single hyphens between non-hyphen chars,
 # and do not end in hyphen.
 _ENTITY_NAME_SEGMENT = r"[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}"
-_QUALIFIED_MODEL_REF_PATTERN = rf"^{_ENTITY_NAME_SEGMENT}/{_ENTITY_NAME_SEGMENT}$"
+_QUALIFIED_MODEL_REF_PATTERN = (
+    rf"^{_ENTITY_NAME_SEGMENT}/{_ENTITY_NAME_SEGMENT}(?:&adapters/{_ENTITY_NAME_SEGMENT}/{_ENTITY_NAME_SEGMENT})?$"
+)
 
 RankingContract: TypeAlias = Literal[
     "nim-ranking-v1",
@@ -86,9 +88,13 @@ _ModelRefRoot = Annotated[
     str,
     Field(
         pattern=_QUALIFIED_MODEL_REF_PATTERN,
-        description="Reference to a model (format: workspace/name).",
+        description=(
+            "Reference to a model (format: workspace/name). A LoRA adapter is named by its base model plus "
+            "the adapter: workspace/name&adapters/adapter_workspace/adapter_name."
+        ),
         examples=[
             "workspace/model_name",
+            "workspace/model_name&adapters/workspace/adapter_name",
         ],
     ),
 ]

@@ -45,6 +45,7 @@ from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClie
 from nemo_helix_plugin.models import endpoints
 from nemo_helix_plugin.models.refs import (
     ResolvedModelReference,
+    adapter_model_reference,
     first_provider_ref,
     is_passthrough_virtual_model,
     model_entity_route_openai_url,
@@ -52,6 +53,7 @@ from nemo_helix_plugin.models.refs import (
     resolved_model_reference,
     resolved_virtual_model_reference,
     served_model_name_for_entity,
+    split_adapter_ref,
     warn_provider_host_url_resolution_failure,
 )
 from nemo_helix_plugin.models.types import ModelDeployment, ModelEntity, ModelProvider
@@ -325,6 +327,12 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
             NemoHTTPError | NemoTransportError: The VirtualModel lookup failed otherwise; resolving without it could
                 name the entity when a VirtualModel owns the name.
         """
+        base_ref, adapter = split_adapter_ref(ref)
+        if adapter is not None:
+            base = self.resolve_model_reference(base_ref)
+            return adapter_model_reference(
+                base, ref=ref, openai_route_base_url=self.get_openai_route_base_url(workspace=base_ref.split("/")[0])
+            )
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         route_only = passthrough = False
         try:
@@ -542,6 +550,12 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
             NemoHTTPError | NemoTransportError: The VirtualModel lookup failed otherwise; resolving without it could
                 name the entity when a VirtualModel owns the name.
         """
+        base_ref, adapter = split_adapter_ref(ref)
+        if adapter is not None:
+            base = await self.resolve_model_reference(base_ref)
+            return adapter_model_reference(
+                base, ref=ref, openai_route_base_url=self.get_openai_route_base_url(workspace=base_ref.split("/")[0])
+            )
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         route_only = passthrough = False
         try:

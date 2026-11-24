@@ -38,7 +38,7 @@ from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
-from nemo_helix_plugin.models.refs import parse_workspace_name_ref
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref, split_adapter_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
@@ -189,9 +189,10 @@ class HelixMetricModelResolver(ModelResolver):
     authorize: SourceReadAuthorizer | None = None
 
     async def resolve_model(self, model_ref: ModelRef) -> Model:
-        workspace, name = parse_workspace_name_ref(
-            model_ref.root, label="ModelRef", expected_format="workspace/model_name"
-        )
+        # An adapter ref is checked as its base model: the caller needs to read the base to use the adapter
+        # the gateway routes through it, and the gateway enforces access to the adapter itself.
+        base_ref, _ = split_adapter_ref(model_ref.root)
+        workspace, name = parse_workspace_name_ref(base_ref, label="ModelRef", expected_format="workspace/model_name")
         readable = await _readable_kind(self.authorize, workspace, name)
         try:
             resolved = await self.models_client.resolve_model_reference(model_ref.root)
