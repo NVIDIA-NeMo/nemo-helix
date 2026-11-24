@@ -46,6 +46,7 @@ from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
     BackendChanged,
     BuildConflict,
+    BuildNotRecorded,
     CreatedJob,
     ExistingJob,
     InvalidBuildRequest,
@@ -317,7 +318,8 @@ def _build_router() -> APIRouter:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. Jobs starts the job once
-        its build profiles have room (their `max_active_jobs`).
+        its build profiles have room (their `max_active_jobs`). With `backend: remote`, 503 if the job could
+        not be recorded on its images: the job is cancelled and the images are failed, where they can be.
         """
         refusal = submit_refusal(caller)
         if refusal is not None:
@@ -332,6 +334,13 @@ def _build_router() -> APIRouter:
         async def get_job(name: str) -> ExistingJob:
             job = (await jobs_client.get_job(workspace=workspace, name=name)).data()
             return ExistingJob(uid=job.id, custom_fields=job.custom_fields or {})
+
+        async def cancel_job(job: str) -> None:
+            # As the builder, as a settled row is written: one who may create a job need not be let cancel
+            # one. ``job`` is the ID Jobs answered this submit's own create with, which Jobs reads before a
+            # name, or the job's name where Jobs named no ID.
+            async with get_async_nemo_client(as_service="builder", internal=True) as as_builder:
+                (await AsyncJobsClient.from_client(as_builder).cancel_job(workspace=workspace, name=job)).data()
 
         secrets_client = AsyncSecretsClient.from_client(client)
 
@@ -360,6 +369,7 @@ def _build_router() -> APIRouter:
                 entity_client=entity_client,
                 create_job=create_job,
                 get_job=get_job,
+                cancel_job=cancel_job,
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
                 default_platform=config.default_platform,
@@ -374,6 +384,12 @@ def _build_router() -> APIRouter:
             raise Refused(CODE_BACKEND_CHANGED, str(exc)) from exc
         except BuildConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except BuildNotRecorded as exc:
+            # The job was created and given up. Said to be final where the request, sent again, would build
+            # nothing: a client that sends it again of its own accord would be answered the failed rows, and
+            # its caller shown no error. Not where the job was gone and the rows were left as they were.
+            headers = {"x-should-retry": "false"} if exc.final else None
+            raise HTTPException(status_code=503, detail=str(exc), headers=headers) from exc
         except UpstreamUnavailable as exc:
             raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
         except PermissionDeniedError as exc:

@@ -84,3 +84,5 @@ def _rows_are_read_again_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """A submit that finds a job under its build's name, on rows that don't record it, reads the rows a few
     more times before it refuses, a moment apart. No test waits out the moments."""
     monkeypatch.setattr(submit, "ADOPT_PAUSE_SECONDS", 0)
+    # Nor the moments between the tries to record a build's job on a row, or to cancel one given up.
+    monkeypatch.setattr(submit, "RECORD_PAUSE_SECONDS", 0)
