@@ -196,3 +196,27 @@ def test_legacy_zero_is_ignored_but_run_zero_rejected(tmp_path: Path, monkeypatc
     with pytest.raises(AgentHardenerRunError):
         manifest_mod._materialize_manifest(client, "saved", ctx, {"port": 0})
     assert record.data["port"] == 0
+
+
+def test_a_saved_victim_image_reaches_every_command_through_the_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = SimpleNamespace(data={"agent_fileset": "default/bundle", "victim_image": "reg.example/victim:1"})
+    client = SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **kwargs: record))
+    manifest = {"agent": {"port": 8000}, "overrides": {"victim_control": {"config": {"policy_path": "p.yaml"}}}}
+    monkeypatch.setattr(manifest_mod, "_materialize_from_bundle", lambda *_args: deepcopy(manifest))
+
+    path = manifest_mod._materialize_manifest(client, "saved", make_job_context(tmp_path))
+
+    config = yaml.safe_load(Path(path).read_text())["overrides"]["victim_control"]["config"]
+    assert config == {"policy_path": "p.yaml", "image": "reg.example/victim:1"}
+
+
+def test_without_a_victim_image_the_run_builds_the_victim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    record = SimpleNamespace(data={"agent_fileset": "default/bundle"})
+    client = SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **kwargs: record))
+    monkeypatch.setattr(manifest_mod, "_materialize_from_bundle", lambda *_args: {"agent": {"port": 8000}})
+
+    path = manifest_mod._materialize_manifest(client, "saved", make_job_context(tmp_path))
+
+    assert "overrides" not in yaml.safe_load(Path(path).read_text())

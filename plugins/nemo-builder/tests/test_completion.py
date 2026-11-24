@@ -125,6 +125,24 @@ class TestComplete:
         assert again.status == "ready" and rows.writes == 1
 
     @pytest.mark.asyncio
+    async def test_the_same_digest_again_without_a_runtime_config_is_accepted_and_writes_nothing(self) -> None:
+        """A repeat that carries only the digest says nothing the row could differ from."""
+        rows = FakeRows(_row())
+        runtime_config = ImageRuntimeConfig(entrypoint=["/bin/app"], user="")
+        await complete(rows, workspace="ws-a", name="build-1-0", digest=DIGEST, runtime_config=runtime_config)
+        again = await _complete(rows)
+        assert (again.status, again.runtime_config, rows.writes) == ("ready", runtime_config, 1)
+        # One that says the image starts another way is still refused.
+        with pytest.raises(CompletionConflict, match="another runtime configuration"):
+            await complete(
+                rows,
+                workspace="ws-a",
+                name="build-1-0",
+                digest=DIGEST,
+                runtime_config=ImageRuntimeConfig(entrypoint=["/altered"], user=""),
+            )
+
+    @pytest.mark.asyncio
     async def test_another_digest_on_a_ready_row_is_a_conflict(self) -> None:
         rows = FakeRows(_row())
         await _complete(rows)
