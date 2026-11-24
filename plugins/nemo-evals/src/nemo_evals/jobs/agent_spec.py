@@ -40,6 +40,7 @@ from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
 from nhx_evals_sdk.values import Agent, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.agents import AgentBase
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, JsonValue, Tag, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 logger = logging.getLogger(__name__)
 
@@ -966,18 +967,37 @@ def validate_single_kind(tasks: Sequence[ResolvedTask]) -> str:
     return next(iter(kinds))
 
 
-class _AgentEvalSettings(BaseModel):
-    """Fields every agent-eval spec shares: the input, the canonical spec and the stored spec."""
+class _AgentEvalSpecCommon(BaseModel):
+    """Fields shared by the submitter input and canonical agent-eval specs (everything but ``tasks``)."""
 
+    # ``oneOf`` mirrors the ``_require_exactly_one_trial_source`` validator into the OpenAPI schema, so
+    # the generated contract (and clients) reject a target-less or both-supplied request instead of
+    # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
+    # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
+    # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
     # ``hide_input_in_errors`` keeps a nested target's rejected credential out of the error text; pydantic
     # has no per-field option, so every field's error loses its ``input_value``.
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        hide_input_in_errors=True,
+        json_schema_extra={
+            "oneOf": [
+                {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},
+                {"required": ["trials"], "properties": {"trials": {"not": {"type": "null"}}}},
+            ]
+        },
+    )
 
     target: Target | None = Field(
         default=None,
         description="What generates trials online: a Model or Agent endpoint, or an agent runner (e.g. a "
         "Fabric harness). Endpoint targets carry their own request config (prompt template / inference "
         "params). Mutually exclusive with `trials`.",
+    )
+    trials: list[AgentEvalTrial] | None = Field(
+        default=None,
+        description="Precomputed trials to score directly (offline eval), instead of generating them from a "
+        "`target`. Mutually exclusive with `target`.",
     )
     max_concurrent_tasks: int = Field(
         default=4,
@@ -1024,30 +1044,6 @@ class _AgentEvalSettings(BaseModel):
                 "Supply the name the published trajectories should be recorded under."
             )
         return self
-
-
-class _AgentEvalSpecCommon(_AgentEvalSettings):
-    """Fields shared by the submitter input and canonical agent-eval specs (everything but ``tasks``)."""
-
-    # ``oneOf`` mirrors the ``_require_exactly_one_trial_source`` validator into the OpenAPI schema, so
-    # the generated contract (and clients) reject a target-less or both-supplied request instead of
-    # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
-    # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
-    # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
-    model_config = ConfigDict(
-        json_schema_extra={
-            "oneOf": [
-                {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},
-                {"required": ["trials"], "properties": {"trials": {"not": {"type": "null"}}}},
-            ]
-        },
-    )
-
-    trials: list[AgentEvalTrial] | None = Field(
-        default=None,
-        description="Precomputed trials to score directly (offline eval), instead of generating them from a "
-        "`target`. Mutually exclusive with `target`.",
-    )
 
     @model_validator(mode="after")
     def _require_exactly_one_trial_source(self) -> Self:
@@ -1110,8 +1106,12 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         return self
 
 
-class AgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical evaluation containing self-contained, resolved task snapshots."""
+class ResolvedAgentEvalSpec(_AgentEvalSpecCommon):
+    """Canonical evaluation containing self-contained, resolved task snapshots.
+
+    This is the spec submission builds, compile reads and the worker runs. It never leaves the service: a
+    stored job keeps its resolved tasks in a file, and job replies render :class:`AgentEvalSpec`.
+    """
 
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
         description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
@@ -1139,7 +1139,7 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
         validate_single_kind(self.tasks)
         return self
 
-    def only_task(self, index: int) -> AgentEvalSpec:
+    def only_task(self, index: int) -> ResolvedAgentEvalSpec:
         """A new validated spec running only ``tasks[index]``; everything else equal. Never mutates this spec.
 
         Raises:
@@ -1149,7 +1149,7 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
             raise IndexError(f"task index {index} is outside 0..{len(self.tasks) - 1}")
         data = self.model_dump(mode="json")
         data["tasks"] = [data["tasks"][index]]
-        return AgentEvalSpec.model_validate(data)
+        return ResolvedAgentEvalSpec.model_validate(data)
 
 
 class FrozenTasks(BaseModel):
@@ -1158,44 +1158,52 @@ class FrozenTasks(BaseModel):
     The file is stored the way a taskset run stores its plan (:mod:`nemo_evals.taskset_runs.plan_storage`): a
     file in a fileset of the job's workspace, named by ``plan_ref`` and bound by ``plan_digest``, the SHA-256
     of its exact bytes. It holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON, the bytes the
-    step config's ``tasks_digest`` covers, so the worker refuses a file that changed after submission.
+    step config's ``tasks_digest`` covers, so the worker refuses a file that changed after submission. The
+    service sets it; it never appears in a request or a reply.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    plan_ref: str = Field(
-        min_length=1,
-        description="The file holding the frozen tasks and trials, as `workspace/fileset#path`.",
-    )
-    plan_digest: str = Field(
-        pattern=r"^[0-9a-f]{64}$",
-        description="SHA-256 of the file's exact bytes.",
-    )
-    task_count: int = Field(ge=1, description="Number of tasks the job runs.")
-    trial_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="Number of precomputed trials an offline job scores. Unset for a job with a `target`.",
-    )
+    plan_ref: str = Field(min_length=1)
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    trial_count: int | None = Field(default=None, ge=0)
 
 
-class AgentEvalStoredSpec(_AgentEvalSettings):
-    """An agent-evaluate job as stored: its settings, with its tasks and trials kept in a file.
+class AgentEvalSpec(_AgentEvalSpecCommon):
+    """An agent-evaluate job's spec as job replies show it: its settings and `task_count`.
 
-    Keeping the tasks out of the job record keeps the record, each attempt's copy of it and every job reply
-    the same size whatever the number of tasks.
+    Only jobs stored before tasks moved out of the job record show `tasks`.
     """
 
-    frozen_tasks: FrozenTasks = Field(description="The file holding the tasks and trials this job runs.")
+    # Replies describe a stored job, not a request: an offline job whose trials are frozen in a file shows
+    # neither `target` nor `trials`, so the request-side ``oneOf`` doesn't apply.
+    model_config = ConfigDict(json_schema_extra=None)
+
+    tasks: list[ResolvedTask] | None = Field(
+        default=None,
+        description="Resolved task snapshots in execution order. Omitted when the job keeps them outside its "
+        "record; see `task_count`.",
+    )
+    task_count: int | None = Field(default=None, ge=1, description="Number of tasks the job runs.")
+    frozen_tasks: SkipJsonSchema[FrozenTasks | None] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _require_exactly_one_trial_source(self) -> Self:
-        # The stored counterpart of AgentEvalSpec's check: an offline job's trials are in the file.
-        if (self.target is None) == (self.frozen_tasks.trial_count is None):
-            raise ValueError("a stored agent-eval spec needs exactly one of `target` or frozen trials")
+        # Overrides the request-side check: an offline job's frozen trials are counted in ``frozen_tasks``.
+        frozen_trials = self.frozen_tasks is not None and self.frozen_tasks.trial_count is not None
+        if (self.target is None) == (self.trials is None and not frozen_trials):
+            raise ValueError("an agent-eval job spec needs exactly one of `target` or trials")
         return self
 
-
-#: What an agent-evaluate job stores and returns: the stored shape, or the canonical spec with its tasks
-#: inline, which every job stored before the stored shape still has.
-AgentEvalJobSpec = AgentEvalStoredSpec | AgentEvalSpec
+    @model_validator(mode="after")
+    def _require_tasks_or_frozen_tasks(self) -> Self:
+        if (self.tasks is None) == (self.frozen_tasks is None):
+            raise ValueError("an agent-eval job spec carries either its `tasks` or the file that holds them")
+        if self.tasks is not None:
+            if not self.tasks:
+                raise ValueError("an agent-eval job spec needs at least one task")
+            if self.task_count is None:
+                self.task_count = len(self.tasks)
+        if self.task_count is None:
+            raise ValueError("a job spec that keeps its tasks in a file needs `task_count`")
+        return self

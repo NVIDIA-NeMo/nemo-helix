@@ -37,7 +37,7 @@ import httpx
 import pytest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, HarborBuiltinAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget, ResolvedAgentEvalSpec
 from nemo_evals.jobs.harbor_task_dispatch import TASK_JOB_SOURCE
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.jobs.taskset_bundle import BUNDLE_JOB_SOURCE
@@ -674,7 +674,7 @@ class Sim:
         Its deadlines count ``queue_timeout`` from now until its first slot, then ``timeout`` from that slot.
         """
         name = f"run-{label}"
-        spec = AgentEvalSpec(
+        spec = ResolvedAgentEvalSpec(
             tasks=[self._make_task(f"{label}-t{i}") for i in range(tasks)],
             target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
         )

@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, HarborRunnerTarget
+from nemo_evals.jobs.agent_spec import HarborRunnerTarget, ResolvedAgentEvalSpec
 from nemo_evals.jobs.registered_agent_resolution import resolve_registered_agent
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -78,7 +78,7 @@ async def test_registered_agent_gateway_is_not_loopback_in_harbor(
     assert isinstance(target, HarborRunnerTarget)
 
     # Cross the persisted job boundary before building the SDK runtime that launches Harbor.
-    spec = AgentEvalSpec.model_validate(
+    spec = ResolvedAgentEvalSpec.model_validate(
         {
             "tasks": [
                 {"id": "probe", "spec": {"kind": "evaluator", "intent": "Reply DONE", "inputs": {}, "metrics": []}}
@@ -86,7 +86,7 @@ async def test_registered_agent_gateway_is_not_loopback_in_harbor(
             "target": target.model_dump(mode="json"),
         }
     )
-    spec = AgentEvalSpec.model_validate_json(spec.model_dump_json())
+    spec = ResolvedAgentEvalSpec.model_validate_json(spec.model_dump_json())
     storage = StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent")
     storage.ephemeral.mkdir()
     storage.persistent.mkdir()

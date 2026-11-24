@@ -49,7 +49,7 @@ from nemo_evals.image_builds.service import (
 )
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
-    AgentEvalSpec,
+    ResolvedAgentEvalSpec,
     ResolvedTask,
     registered_agent_files_receipt,
     registered_agent_source,
@@ -353,7 +353,7 @@ class TasksetRunService:
 
     async def _start_agent_layers(
         self,
-        spec: AgentEvalSpec,
+        spec: ResolvedAgentEvalSpec,
         harbor: HarborTaskJobsConfig,
         prepared: list[PreparedHarborEnvironment],
         *,
@@ -667,7 +667,7 @@ class TasksetRunService:
         return ImageBuildService(self._entities, jobs, builder_authorizer(self._authorizer))
 
     async def _resolve_publication(
-        self, req: TasksetRunInput, workspace: str, spec: AgentEvalSpec, *, taskset_ref: str
+        self, req: TasksetRunInput, workspace: str, spec: ResolvedAgentEvalSpec, *, taskset_ref: str
     ) -> RunIntakePublication | None:
         """Resolve ``publication.intake`` for the plan: the Experiment's id, the agent and the dataset.
 
@@ -765,7 +765,7 @@ class TasksetRunService:
             raise RunEvaluationError(plan.run_id, f"creating its Intake Evaluation failed: {exc}") from exc
         return [f"Intake: Evaluation {plan.run_id} in Experiment {plan.intake.experiment}"]
 
-    async def _resolve(self, req: TasksetRunInput, workspace: str) -> tuple[TasksetRef, AgentEvalSpec]:
+    async def _resolve(self, req: TasksetRunInput, workspace: str) -> tuple[TasksetRef, ResolvedAgentEvalSpec]:
         """Pin before resolving so a concurrent publication cannot replace task members.
 
         Args:
@@ -797,7 +797,7 @@ class TasksetRunService:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (ValueError, NemoEntityNotFoundError, RevisionNotFoundError) as exc:
             raise TasksetRunResolutionError(str(exc)) from exc
-        if not isinstance(spec, AgentEvalSpec):
+        if not isinstance(spec, ResolvedAgentEvalSpec):
             raise TypeError("AgentEvalJob.to_spec returned an unexpected spec type")
         return pinned, spec
 

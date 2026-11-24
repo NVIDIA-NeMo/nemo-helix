@@ -10,7 +10,7 @@ from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefin
 from nemo_evals.config import HarborTaskJobsConfig
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, FabricConfigSource, FabricRunnerTarget, ResolvedTask
+from nemo_evals.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget, ResolvedAgentEvalSpec, ResolvedTask
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
@@ -23,7 +23,9 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 @pytest.fixture
 def plan(
-    resolved_spec: AgentEvalSpec, sandbox_policy: ResolvedHarborSandboxPolicy, harbor_config: HarborTaskJobsConfig
+    resolved_spec: ResolvedAgentEvalSpec,
+    sandbox_policy: ResolvedHarborSandboxPolicy,
+    harbor_config: HarborTaskJobsConfig,
 ) -> TasksetRunPlan:
     """Bind the resolved-spec fixture to a fixed keyed run and pinned taskset revision.
 
@@ -77,14 +79,14 @@ def store(entity_store, files_client: AsyncFilesClient) -> TasksetRunStore:
 
 
 @pytest.fixture
-def resolved_spec() -> AgentEvalSpec:
+def resolved_spec() -> ResolvedAgentEvalSpec:
     """Build a fresh fully resolved evaluation spec without external services.
 
     No fixture inputs are needed. The returned spec contains one evaluator task,
     an inline exact-match metric bundle, and a Fabric target so plan validation
     exercises real nested models without metric or target resolution requests.
     """
-    return AgentEvalSpec(
+    return ResolvedAgentEvalSpec(
         tasks=[
             ResolvedTask(
                 id="task-1",

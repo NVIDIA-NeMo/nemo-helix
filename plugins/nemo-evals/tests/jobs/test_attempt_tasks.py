@@ -16,7 +16,7 @@ from nemo_evals.jobs import agent_compiler
 from nemo_evals.jobs import attempt_tasks as attempt_tasks_module
 from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalJobSpec, AgentEvalSpec, AgentEvalStoredSpec
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedAgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
@@ -41,7 +41,6 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobSpec, HelixJobStatus
-from pydantic import TypeAdapter
 
 BASE = "http://platform.test"
 JOB = "eval-job"
@@ -63,7 +62,7 @@ def _ctx(*, job_id: str | None = JOB, attempt_id: str | None = ATTEMPT) -> JobCo
     return ctx
 
 
-def _compiled(spec: AgentEvalSpec) -> HelixJobSpec:
+def _compiled(spec: ResolvedAgentEvalSpec) -> HelixJobSpec:
     return HelixJobSpec.model_validate(compile_agent_eval_job(spec, use_subprocess=True).model_dump(mode="json"))
 
 
@@ -120,7 +119,7 @@ class _TaskClients:
 # --- Compile -----------------------------------------------------------------------------------------------
 
 
-def test_the_step_config_carries_a_digest_of_the_tasks_instead_of_the_tasks(harbor_spec: AgentEvalSpec) -> None:
+def test_the_step_config_carries_a_digest_of_the_tasks_instead_of_the_tasks(harbor_spec: ResolvedAgentEvalSpec) -> None:
     dumped = harbor_spec.model_dump(mode="json")
     (step,) = _compiled(harbor_spec).steps
     assert "tasks" not in step.config and "trials" not in step.config
@@ -132,16 +131,16 @@ def test_the_step_config_carries_a_digest_of_the_tasks_instead_of_the_tasks(harb
 
 
 def test_the_step_config_does_not_grow_with_the_task_count(
-    harbor_spec: AgentEvalSpec, harbor_resolved_task: Callable[..., Any]
+    harbor_spec: ResolvedAgentEvalSpec, harbor_resolved_task: Callable[..., Any]
 ) -> None:
     many = harbor_spec.model_copy(update={"tasks": [harbor_resolved_task(f"task-{i}") for i in range(300)]})
     (few_step,) = _compiled(harbor_spec).steps
-    (many_step,) = _compiled(AgentEvalSpec.model_validate(many.model_dump(mode="json"))).steps
+    (many_step,) = _compiled(ResolvedAgentEvalSpec.model_validate(many.model_dump(mode="json"))).steps
     assert len(json.dumps(many_step.config)) == len(json.dumps(few_step.config))
 
 
 def test_a_step_config_kubernetes_cannot_hold_is_refused_at_compile(
-    harbor_spec: AgentEvalSpec, monkeypatch: pytest.MonkeyPatch
+    harbor_spec: ResolvedAgentEvalSpec, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(agent_compiler, "MAX_STEP_CONFIG_BYTES", 100)
     with pytest.raises(HelixJobCompilationError, match="'agent-evaluate' step's config is .* bytes"):
@@ -193,32 +192,34 @@ def test_the_digest_changes_with_any_task_or_trial_change(change: Callable[[dict
 # --- Worker ------------------------------------------------------------------------------------------------
 
 
-def _stored_and_compiled(spec: AgentEvalSpec) -> tuple[dict, HelixJobSpec, dict]:
+def _stored_and_compiled(spec: ResolvedAgentEvalSpec) -> tuple[dict, HelixJobSpec, dict]:
     """The job record's spec as the Jobs API stores it, the compiled job, and its step config."""
     stored = {**json.loads(json.dumps(spec.model_dump(mode="json"))), "kind": "agent-evaluate"}
     compiled = _compiled(spec)
     return stored, compiled, compiled.steps[-1].config
 
 
-def test_a_marked_config_gets_its_tasks_back_from_its_own_attempt(harbor_spec: AgentEvalSpec) -> None:
+def test_a_marked_config_gets_its_tasks_back_from_its_own_attempt(harbor_spec: ResolvedAgentEvalSpec) -> None:
     stored, compiled, config = _stored_and_compiled(harbor_spec)
     platform = _Platform(_attempt_body(stored, compiled))
     restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
     assert platform.paths == [f"/apis/jobs/v2/workspaces/default/jobs/{JOB}/attempts/{ATTEMPT}"]
-    assert AgentEvalSpec.model_validate(restored) == harbor_spec
+    assert ResolvedAgentEvalSpec.model_validate(restored) == harbor_spec
 
 
 @pytest.mark.parametrize("job_class", [AgentEvalJob, AsyncAgentEvalJob])
 def test_both_workers_run_the_attempts_tasks(
-    harbor_spec: AgentEvalSpec, monkeypatch: pytest.MonkeyPatch, job_class: type[AgentEvalJob | AsyncAgentEvalJob]
+    harbor_spec: ResolvedAgentEvalSpec,
+    monkeypatch: pytest.MonkeyPatch,
+    job_class: type[AgentEvalJob | AsyncAgentEvalJob],
 ) -> None:
     stored, compiled, config = _stored_and_compiled(harbor_spec)
     platform = _Platform(_attempt_body(stored, compiled))
-    seen: list[AgentEvalSpec] = []
+    seen: list[ResolvedAgentEvalSpec] = []
 
     def run(self: object, config: dict, **_: object) -> dict:
         # The real run validates the config against the spec, which forbids unknown keys.
-        seen.append(AgentEvalSpec.model_validate(config))
+        seen.append(ResolvedAgentEvalSpec.model_validate(config))
         return {"status": "completed"}
 
     if job_class is AgentEvalJob:
@@ -233,7 +234,7 @@ def test_both_workers_run_the_attempts_tasks(
 
 
 def test_the_async_worker_reads_through_a_provider_built_task_client(
-    harbor_spec: AgentEvalSpec, monkeypatch: pytest.MonkeyPatch
+    harbor_spec: ResolvedAgentEvalSpec, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The read uses a task client the platform's provider builds (its CA, transport and routing), then closes it.
 
@@ -253,12 +254,12 @@ def test_the_async_worker_reads_through_a_provider_built_task_client(
     assert async_client.mock_calls == []
 
 
-def test_a_config_without_the_marker_reads_nothing(harbor_spec: AgentEvalSpec) -> None:
+def test_a_config_without_the_marker_reads_nothing(harbor_spec: ResolvedAgentEvalSpec) -> None:
     config = harbor_spec.model_dump(mode="json")
     assert load_attempt_tasks(config, ctx=_ctx(job_id=None, attempt_id=None), client=None) is config
 
 
-def test_tasks_that_dont_match_the_digest_are_refused(harbor_spec: AgentEvalSpec) -> None:
+def test_tasks_that_dont_match_the_digest_are_refused(harbor_spec: ResolvedAgentEvalSpec) -> None:
     stored, compiled, config = _stored_and_compiled(harbor_spec)
     stored["tasks"] = stored["tasks"][:1]
     platform = _Platform(_attempt_body(stored, compiled))
@@ -266,7 +267,7 @@ def test_tasks_that_dont_match_the_digest_are_refused(harbor_spec: AgentEvalSpec
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
 
 
-def test_a_failed_read_fails_the_run(harbor_spec: AgentEvalSpec) -> None:
+def test_a_failed_read_fails_the_run(harbor_spec: ResolvedAgentEvalSpec) -> None:
     _, _, config = _stored_and_compiled(harbor_spec)
     platform = _Platform(None, status_code=403)
     with pytest.raises(AttemptTasksError, match="could not read the tasks"):
@@ -282,7 +283,7 @@ def test_a_failed_read_fails_the_run(harbor_spec: AgentEvalSpec) -> None:
     ],
 )
 def test_a_config_the_worker_cannot_trust_is_refused(
-    harbor_spec: AgentEvalSpec, override: dict, ctx: JobContext, message: str
+    harbor_spec: ResolvedAgentEvalSpec, override: dict, ctx: JobContext, message: str
 ) -> None:
     _, _, config = _stored_and_compiled(harbor_spec)
     with pytest.raises(AttemptTasksError, match=message):
@@ -325,16 +326,18 @@ def _frozen(spec: dict, *, ref: str = FILE_REF) -> tuple[dict, bytes]:
     """The stored spec that keeps ``spec``'s tasks and trials in a file, and that file's bytes."""
     body = frozen_tasks_bytes(spec)
     stored = {key: value for key, value in spec.items() if key not in ("tasks", "trials")}
+    stored["task_count"] = len(spec["tasks"])
     stored[FROZEN_TASKS_KEY] = {
         "plan_ref": ref,
         "plan_digest": hashlib.sha256(body).hexdigest(),
-        "task_count": len(spec["tasks"]),
         "trial_count": None if spec.get("trials") is None else len(spec["trials"]),
     }
     return stored, body
 
 
-def test_a_job_stored_with_its_tasks_in_a_file_gets_them_back_from_that_file(harbor_spec: AgentEvalSpec) -> None:
+def test_a_job_stored_with_its_tasks_in_a_file_gets_them_back_from_that_file(
+    harbor_spec: ResolvedAgentEvalSpec,
+) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
@@ -342,19 +345,29 @@ def test_a_job_stored_with_its_tasks_in_a_file_gets_them_back_from_that_file(har
     restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
 
     assert platform.paths == [f"/apis/jobs/v2/workspaces/default/jobs/{JOB}/attempts/{ATTEMPT}", FILE_PATH]
-    assert AgentEvalSpec.model_validate(restored) == harbor_spec
+    assert ResolvedAgentEvalSpec.model_validate(restored) == harbor_spec
 
 
-def test_the_stored_shape_validates_and_renders_as_the_job_spec(harbor_spec: AgentEvalSpec) -> None:
+def test_a_job_stored_with_its_tasks_in_a_file_replies_without_them(harbor_spec: ResolvedAgentEvalSpec) -> None:
     stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
-    assert isinstance(AgentEvalStoredSpec.model_validate(stored), AgentEvalStoredSpec)
-    rendered = TypeAdapter(AgentEvalJobSpec)
-    assert isinstance(rendered.validate_python(stored), AgentEvalStoredSpec)
-    # Every job stored before the file existed keeps rendering with its tasks inline.
-    assert isinstance(rendered.validate_python(harbor_spec.model_dump(mode="json")), AgentEvalSpec)
+
+    reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
+
+    assert reply["tasks"] is None
+    assert reply["task_count"] == len(harbor_spec.tasks)
+    assert FROZEN_TASKS_KEY not in reply  # the service's own pointer never reaches a reply
 
 
-def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: AgentEvalSpec) -> None:
+def test_a_job_stored_with_its_tasks_inline_replies_with_them_and_their_count(
+    harbor_spec: ResolvedAgentEvalSpec,
+) -> None:
+    reply = AgentEvalSpec.model_validate(harbor_spec.model_dump(mode="json")).model_dump(mode="json")
+
+    assert reply["tasks"] == harbor_spec.model_dump(mode="json")["tasks"]
+    assert reply["task_count"] == len(harbor_spec.tasks)
+
+
+def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: ResolvedAgentEvalSpec) -> None:
     spec = {"target": None, "tasks": [{"id": "t"}], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
     config = step_config_without_tasks(spec)
     stored, body = _frozen(spec)
@@ -368,17 +381,17 @@ def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: AgentEv
 
 @pytest.mark.parametrize(("online", "trial_count"), [(True, 2), (False, None)], ids=["both", "neither"])
 def test_a_stored_spec_needs_exactly_one_trial_source(
-    harbor_spec: AgentEvalSpec, online: bool, trial_count: int | None
+    harbor_spec: ResolvedAgentEvalSpec, online: bool, trial_count: int | None
 ) -> None:
     stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
     stored[FROZEN_TASKS_KEY]["trial_count"] = trial_count
     if not online:
         stored["target"] = None
-    with pytest.raises(ValueError, match="exactly one of `target` or frozen trials"):
-        AgentEvalStoredSpec.model_validate(stored)
+    with pytest.raises(ValueError, match="exactly one of `target` or trials"):
+        AgentEvalSpec.model_validate(stored)
 
 
-def test_a_frozen_tasks_file_that_changed_is_refused(harbor_spec: AgentEvalSpec) -> None:
+def test_a_frozen_tasks_file_that_changed_is_refused(harbor_spec: ResolvedAgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
     platform = _FrozenPlatform(_attempt_body(stored, compiled), body.replace(b'"tasks"', b'"tasks" '))
@@ -386,7 +399,7 @@ def test_a_frozen_tasks_file_that_changed_is_refused(harbor_spec: AgentEvalSpec)
         load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
 
 
-def test_a_missing_frozen_tasks_file_fails_the_run(harbor_spec: AgentEvalSpec) -> None:
+def test_a_missing_frozen_tasks_file_fails_the_run(harbor_spec: ResolvedAgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
     platform = _FrozenPlatform(_attempt_body(stored, compiled), None)
@@ -402,7 +415,7 @@ def test_a_missing_frozen_tasks_file_fails_the_run(harbor_spec: AgentEvalSpec) -
     ],
 )
 def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(
-    harbor_spec: AgentEvalSpec, ref: str, message: str
+    harbor_spec: ResolvedAgentEvalSpec, ref: str, message: str
 ) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=ref)
@@ -412,7 +425,7 @@ def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(
     assert FILE_PATH not in platform.paths
 
 
-def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spec: AgentEvalSpec) -> None:
+def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spec: ResolvedAgentEvalSpec) -> None:
     _, compiled, config = _stored_and_compiled(harbor_spec)
     stored, body = _frozen(harbor_spec.model_dump(mode="json"))
     stored[FROZEN_TASKS_KEY]["plan_digest"] = "f" * 64
@@ -422,7 +435,7 @@ def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spe
     assert FILE_PATH not in platform.paths
 
 
-def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: AgentEvalSpec) -> None:
+def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: ResolvedAgentEvalSpec) -> None:
     spec = harbor_spec.model_dump(mode="json")
     assert "sha256-v1:" + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest() == frozen_tasks_digest(spec)
 
@@ -450,4 +463,4 @@ def test_taskset_run_task_jobs_never_read_their_attempt(
         AsyncAgentEvalJob, "_run_with_client", lambda self, config, **_: seen.append(config) or {"status": "completed"}
     )
     HarborTaskAgentEvalJob().run(task_spec.model_dump(mode="json"), ctx=_ctx(), async_client=MagicMock())
-    assert [AgentEvalSpec.model_validate(config) for config in seen] == [task_spec.spec]
+    assert [ResolvedAgentEvalSpec.model_validate(config) for config in seen] == [task_spec.spec]

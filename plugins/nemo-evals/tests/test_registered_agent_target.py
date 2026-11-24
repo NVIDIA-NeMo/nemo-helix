@@ -21,7 +21,6 @@ from nemo_evals.jobs.agent_spec import (
     REGISTERED_AGENT_GYM_COMPONENT,
     REGISTERED_AGENT_HARBOR_IMPORT_PATH,
     AgentEvalInputSpec,
-    AgentEvalSpec,
     FabricConfigSource,
     FabricRunnerTarget,
     GymRunnerTarget,
@@ -29,6 +28,7 @@ from nemo_evals.jobs.agent_spec import (
     HarborImportedAgentSource,
     HarborRunnerTarget,
     RegisteredAgentSource,
+    ResolvedAgentEvalSpec,
     registered_agent_config_needs_files,
     registered_agent_files,
     registered_agent_files_receipt,
@@ -65,7 +65,7 @@ def _by_agent(
     return FabricRunnerTarget(source=RegisteredAgentSource(agent=agent, environment=environment), **kwargs)
 
 
-#: A canonical task snapshot, in the shape `AgentEvalSpec.tasks` carries after submission.
+#: A canonical task snapshot, in the shape `ResolvedAgentEvalSpec.tasks` carries after submission.
 _RESOLVED_TASK: dict[str, Any] = {"id": "t", "spec": {"kind": "evaluator", "intent": "x", "inputs": {}, "metrics": []}}
 
 
@@ -298,7 +298,7 @@ async def test_the_published_agent_name_survives_resolution(mocker: MockerFixtur
         input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
     )
 
-    assert isinstance(spec, AgentEvalSpec)
+    assert isinstance(spec, ResolvedAgentEvalSpec)
     assert isinstance(spec.target, FabricRunnerTarget) and spec.target.config is not None
     assert target_agent_identity(spec.target) == ("calculator-agent", None)
 
@@ -683,7 +683,7 @@ def test_a_submitted_harbor_registered_agent_owns_its_fabric_config() -> None:
 
 def test_canonical_spec_refuses_an_unresolved_harbor_registered_agent() -> None:
     with pytest.raises(ValidationError, match="must be resolved before run"):
-        AgentEvalSpec.model_validate(
+        ResolvedAgentEvalSpec.model_validate(
             {"tasks": [_RESOLVED_TASK], "target": {"kind": "harbor", "source": {"agent": "calc"}}}
         )
     resolved = {
@@ -691,7 +691,7 @@ def test_canonical_spec_refuses_an_unresolved_harbor_registered_agent() -> None:
         "source": {"agent": "dev/calc"},
         "agent_kwargs": {"fabric_config": {"harness": {"adapter_id": "x"}}},
     }
-    AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
+    ResolvedAgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
 
 
 def test_harbor_timeout_multipliers_reach_the_runtime(tmp_path: Path) -> None:
@@ -720,7 +720,7 @@ def test_staged_harbor_agent_files_become_the_fabric_config_bundle(tmp_path: Pat
     runtime, _, _ = AgentEvalJob._resolve_target(target, ctx)
     config = getattr(runtime, "_config")
     assert config.agent_kwargs["fabric_config_bundle"] == str(ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR)
-    spec = AgentEvalSpec.model_validate(
+    spec = ResolvedAgentEvalSpec.model_validate(
         {"tasks": [_RESOLVED_TASK], "target": {"kind": "harbor", **target.model_dump(mode="json", exclude={"kind"})}}
     )
     assert [step.name for step in compile_agent_eval_job(spec, use_subprocess=True).steps] == [
@@ -831,7 +831,7 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
             )
         }
     )
-    spec = AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target.model_dump(mode="json")})
+    spec = ResolvedAgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target.model_dump(mode="json")})
 
     with pytest.raises(HelixJobCompilationError, match="no such execution profile"):
         await AgentEvalJob.compile(
@@ -913,18 +913,18 @@ def test_a_registered_agent_names_the_agent_for_publication() -> None:
 
 def test_canonical_spec_refuses_an_unresolved_registered_agent() -> None:
     with pytest.raises(ValidationError, match="must be resolved before run"):
-        AgentEvalSpec.model_validate(
+        ResolvedAgentEvalSpec.model_validate(
             {"tasks": [_RESOLVED_TASK], "target": {"kind": "fabric", "source": {"agent": "calc"}}}
         )
     resolved = {"kind": "fabric", "source": {"agent": "dev/calc"}, "resolved_config": {"harness": {"adapter_id": "x"}}}
-    AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
+    ResolvedAgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved})
 
 
 # --- Job side --------------------------------------------------------------------------------------------
 
 
-def _spec(target: dict[str, Any]) -> AgentEvalSpec:
-    return AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target})
+def _spec(target: dict[str, Any]) -> ResolvedAgentEvalSpec:
+    return ResolvedAgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target})
 
 
 def test_fabric_env_secrets_reach_the_job_environment_through_the_compiler() -> None:

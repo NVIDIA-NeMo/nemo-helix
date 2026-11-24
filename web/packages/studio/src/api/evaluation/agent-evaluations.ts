@@ -49,12 +49,9 @@ export const evalConfigName = (job: AgentEvaluateJob): string | null => {
   return typeof name === 'string' && name.length > 0 ? name : null;
 };
 
-/** How many tasks a job runs: counted in its frozen-tasks file, or (jobs stored before that) its inline list. */
-export const taskCountForJob = (job: AgentEvaluateJob): number | null => {
-  const spec = job.spec;
-  if (!spec) return null;
-  return 'frozen_tasks' in spec ? spec.frozen_tasks.task_count : spec.tasks.length;
-};
+/** How many tasks a job runs. Jobs keep their tasks out of the reply, so count from `task_count`. */
+export const taskCountForJob = (job: AgentEvaluateJob): number | null =>
+  job.spec?.task_count ?? job.spec?.tasks?.length ?? null;
 
 export const fetchAgentEvalJobs = async (
   workspace: string,

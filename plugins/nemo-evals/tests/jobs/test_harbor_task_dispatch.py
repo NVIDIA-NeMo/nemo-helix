@@ -30,11 +30,11 @@ from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_default
 from nemo_evals.jobs import harbor_task_dispatch
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
-    AgentEvalSpec,
     HarborBuiltinAgentSource,
     HarborGatewayModel,
     HarborRunnerTarget,
     RegisteredAgentSource,
+    ResolvedAgentEvalSpec,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import GATEWAY_URL_OVERRIDE_ENVVAR
@@ -206,7 +206,11 @@ async def test_registered_agent_files_are_staged_first_on_the_dispatcher_image(t
         }
     )
     spec = task_spec.model_copy(
-        update={"spec": AgentEvalSpec.model_validate(task_spec.spec.model_copy(update={"target": target}).model_dump())}
+        update={
+            "spec": ResolvedAgentEvalSpec.model_validate(
+                task_spec.spec.model_copy(update={"target": target}).model_dump()
+            )
+        }
     )
     stage, dispatch = (await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")).steps
     assert isinstance(stage.executor, CPUExecutionProvider)

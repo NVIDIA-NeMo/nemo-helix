@@ -3676,6 +3676,13 @@ components:
             an agent runner (e.g. a Fabric harness). Endpoint targets carry their
             own request config (prompt template / inference params). Mutually exclusive
             with `trials`.'
+        trials:
+          title: Trials
+          description: Precomputed trials to score directly (offline eval), instead
+            of generating them from a `target`. Mutually exclusive with `target`.
+          items:
+            $ref: '#/components/schemas/AgentEvalTrial'
+          type: array
         max_concurrent_tasks:
           type: integer
           minimum: 1.0
@@ -3716,13 +3723,6 @@ components:
           - $ref: '#/components/schemas/PublicationSpec'
           description: Where the completed run publishes its results, beyond its own
             result bundle. Omit to publish nowhere.
-        trials:
-          title: Trials
-          description: Precomputed trials to score directly (offline eval), instead
-            of generating them from a `target`. Mutually exclusive with `target`.
-          items:
-            $ref: '#/components/schemas/AgentEvalTrial'
-          type: array
         tasks:
           anyOf:
           - $ref: '#/components/schemas/TasksetRef'
@@ -3921,19 +3921,6 @@ components:
       - data
       title: AgentEvalResultsPage
     AgentEvalSpec:
-      oneOf:
-      - properties:
-          target:
-            not:
-              type: 'null'
-        required:
-        - target
-      - properties:
-          trials:
-            not:
-              type: 'null'
-        required:
-        - trials
       properties:
         target:
           anyOf:
@@ -3947,46 +3934,6 @@ components:
             an agent runner (e.g. a Fabric harness). Endpoint targets carry their
             own request config (prompt template / inference params). Mutually exclusive
             with `trials`.'
-        max_concurrent_tasks:
-          type: integer
-          minimum: 1.0
-          title: Max Concurrent Tasks
-          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
-            concurrent scoring calls only (trials are bounded by the runner). Other
-            runners: concurrent trials and scoring calls. For model and agent targets,
-            target.params.parallelism bounds concurrent inference requests during
-            trial generation. On Kubernetes runs it applies per task Job; the task-Job
-            cap is execution.max_concurrent_task_jobs.'
-          default: 4
-        fail_fast:
-          type: boolean
-          title: Fail Fast
-          description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job.
-          default: false
-        labels:
-          additionalProperties:
-            type: string
-          type: object
-          title: Labels
-          description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
-            mode, backend).
-        result_ignore_patterns:
-          items:
-            type: string
-            minLength: 1
-          type: array
-          title: Result Ignore Patterns
-          description: Files to leave out of the saved result bundle. `*.ext` and
-            `name` match files at any depth, `name/` matches directories with that
-            name at any depth (folder globs allowed), and `dir/sub/` matches that
-            directory at the bundle root, with each folder name a glob such as `sub*`.
-            Omit to keep every file.
-        publication:
-          allOf:
-          - $ref: '#/components/schemas/PublicationSpec'
-          description: Where the completed run publishes its results, beyond its own
-            result bundle. Omit to publish nowhere.
         trials:
           title: Trials
           description: Precomputed trials to score directly (offline eval), instead
@@ -3994,34 +3941,6 @@ components:
           items:
             $ref: '#/components/schemas/AgentEvalTrial'
           type: array
-        tasks:
-          items:
-            $ref: '#/components/schemas/ResolvedTask'
-          type: array
-          minItems: 1
-          title: Tasks
-          description: Resolved task snapshots in execution order. Only archive materialization
-            remains on the worker.
-      additionalProperties: false
-      type: object
-      required:
-      - tasks
-      title: AgentEvalSpec
-      description: Canonical evaluation containing self-contained, resolved task snapshots.
-    AgentEvalStoredSpec:
-      properties:
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/ModelTarget'
-          - $ref: '#/components/schemas/AgentTarget'
-          - $ref: '#/components/schemas/FabricRunnerTarget'
-          - $ref: '#/components/schemas/GymRunnerTarget'
-          - $ref: '#/components/schemas/HarborRunnerTarget'
-          title: Target
-          description: 'What generates trials online: a Model or Agent endpoint, or
-            an agent runner (e.g. a Fabric harness). Endpoint targets carry their
-            own request config (prompt template / inference params). Mutually exclusive
-            with `trials`.'
         max_concurrent_tasks:
           type: integer
           minimum: 1.0
@@ -4062,23 +3981,26 @@ components:
           - $ref: '#/components/schemas/PublicationSpec'
           description: Where the completed run publishes its results, beyond its own
             result bundle. Omit to publish nowhere.
-        frozen_tasks:
-          allOf:
-          - $ref: '#/components/schemas/FrozenTasks'
-          description: The file holding the tasks and trials this job runs.
+        tasks:
+          title: Tasks
+          description: Resolved task snapshots in execution order. Omitted when the
+            job keeps them outside its record; see `task_count`.
+          items:
+            $ref: '#/components/schemas/ResolvedTask'
+          type: array
+        task_count:
+          title: Task Count
+          description: Number of tasks the job runs.
+          type: integer
+          minimum: 1.0
       additionalProperties: false
       type: object
-      required:
-      - frozen_tasks
-      title: AgentEvalStoredSpec
-      description: 'An agent-evaluate job as stored: its settings, with its tasks
-        and trials kept in a file.
+      title: AgentEvalSpec
+      description: 'An agent-evaluate job''s spec as job replies show it: its settings
+        and `task_count`.
 
 
-        Keeping the tasks out of the job record keeps the record, each attempt''s
-        copy of it and every job reply
-
-        the same size whatever the number of tasks.'
+        Only jobs stored before tasks moved out of the job record show `tasks`.'
     AgentEvalTaskInput:
       properties:
         id:
@@ -4216,10 +4138,7 @@ components:
           type: string
           format: date-time
         spec:
-          anyOf:
-          - $ref: '#/components/schemas/AgentEvalStoredSpec'
-          - $ref: '#/components/schemas/AgentEvalSpec'
-          title: Spec
+          $ref: '#/components/schemas/AgentEvalSpec'
         status:
           $ref: '#/components/schemas/HelixJobStatus'
         status_details:
@@ -4263,10 +4182,7 @@ components:
           type: integer
           title: Seq
         spec:
-          anyOf:
-          - $ref: '#/components/schemas/AgentEvalStoredSpec'
-          - $ref: '#/components/schemas/AgentEvalSpec'
-          title: Spec
+          $ref: '#/components/schemas/AgentEvalSpec'
         status:
           $ref: '#/components/schemas/HelixJobStatus'
         status_details:
@@ -5870,51 +5786,6 @@ components:
       title: FilesetTaskSource
       description: A Gym jsonl dataset file in a FileSet, converted into tasks at
         submission, optionally published first.
-    FrozenTasks:
-      properties:
-        plan_ref:
-          type: string
-          minLength: 1
-          title: Plan Ref
-          description: The file holding the frozen tasks and trials, as `workspace/fileset#path`.
-        plan_digest:
-          type: string
-          pattern: ^[0-9a-f]{64}$
-          title: Plan Digest
-          description: SHA-256 of the file's exact bytes.
-        task_count:
-          type: integer
-          minimum: 1.0
-          title: Task Count
-          description: Number of tasks the job runs.
-        trial_count:
-          title: Trial Count
-          description: Number of precomputed trials an offline job scores. Unset for
-            a job with a `target`.
-          type: integer
-          minimum: 0.0
-      additionalProperties: false
-      type: object
-      required:
-      - plan_ref
-      - plan_digest
-      - task_count
-      title: FrozenTasks
-      description: 'Where a stored agent-evaluate job keeps the tasks and trials it
-        froze at submission.
-
-
-        The file is stored the way a taskset run stores its plan (:mod:`nemo_evals.taskset_runs.plan_storage`):
-        a
-
-        file in a fileset of the job''s workspace, named by ``plan_ref`` and bound
-        by ``plan_digest``, the SHA-256
-
-        of its exact bytes. It holds ``{"tasks": [...], "trials": [...] | null}``
-        as canonical JSON, the bytes the
-
-        step config''s ``tasks_digest`` covers, so the worker refuses a file that
-        changed after submission.'
     GenericAgent:
       properties:
         url:

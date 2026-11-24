@@ -23,7 +23,7 @@ from nemo_evals.api.fields import MetadataItem, TaskInputs
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, ResolvedAgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
@@ -103,14 +103,16 @@ def _tasks(*, snapshot: str | None = TASKSET) -> dict[str, Any]:
     return {"fileset": FILE} if snapshot is None else {"fileset": FILE, "snapshot": snapshot}
 
 
-def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> AgentEvalSpec:
+def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> ResolvedAgentEvalSpec:
     """Submit through the job route and return the frozen spec the job holds."""
     response = ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(tasks), "profile": "default"}
     )
     assert response.status_code < 300, response.text
     job = ctx.test_client.get(f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{response.json()['name']}")
-    return AgentEvalSpec.model_validate(job.raise_for_status().json()["spec"])
+    shown = job.raise_for_status().json()["spec"]
+    assert shown.pop("task_count") == len(shown["tasks"])
+    return ResolvedAgentEvalSpec.model_validate(shown)
 
 
 def _refused(ctx: ClientContext, tasks: dict[str, Any]) -> str:
@@ -504,10 +506,10 @@ def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientC
     stored = dict(job.spec)
     frozen = frozen_tasks_bytes(stored)
     compact = {key: value for key, value in stored.items() if key not in ("tasks", "trials")}
+    compact["task_count"] = 2
     compact[FROZEN_TASKS_KEY] = {
         "plan_ref": f"default/agent-eval-tasks-0123456789ab#{FROZEN_TASKS_PATH}",
         "plan_digest": hashlib.sha256(frozen).hexdigest(),
-        "task_count": 2,
     }
     # The writer lands separately; here the record is put in the stored shape directly.
     jobs.update_job(
@@ -520,8 +522,10 @@ def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientC
     described = ctx.test_client.patch(f"{route}/{name}", json={"description": "still owned"})
 
     assert one.status_code == 200, one.text
-    assert "tasks" not in one.json()["spec"]
-    assert one.json()["spec"][FROZEN_TASKS_KEY]["task_count"] == 2
+    assert one.json()["spec"].get("tasks") is None
+    assert one.json()["spec"]["task_count"] == 2
+    assert FROZEN_TASKS_KEY not in one.json()["spec"]  # the service's own pointer never reaches a reply
     assert listed.status_code == 200, listed.text
-    assert [job["spec"][FROZEN_TASKS_KEY]["task_count"] for job in listed.json()["data"]] == [2]
+    assert [job["spec"]["task_count"] for job in listed.json()["data"]] == [2]
+    assert all(FROZEN_TASKS_KEY not in job["spec"] for job in listed.json()["data"])
     assert described.status_code == 200, described.text

@@ -4,7 +4,7 @@
 from typing import Any, cast
 
 import pytest
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, ResolvedAgentEvalSpec
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.kinds.types import SubmitContext
 from nemo_evals.task_refs import validate_execution_support
@@ -35,8 +35,8 @@ def _snapshot(**changes) -> dict[str, Any]:
 
 
 def test_resolved_tasks_round_trip_with_definitions():
-    spec = AgentEvalSpec.model_validate({"tasks": [_snapshot()], "target": {"kind": "harbor"}})
-    restored = AgentEvalSpec.model_validate_json(spec.model_dump_json())
+    spec = ResolvedAgentEvalSpec.model_validate({"tasks": [_snapshot()], "target": {"kind": "harbor"}})
+    restored = ResolvedAgentEvalSpec.model_validate_json(spec.model_dump_json())
     assert restored == spec
     assert restored.model_dump()["tasks"][0]["spec"]["config"] == {"verifier": {"timeout_sec": 60}}
 
@@ -52,7 +52,7 @@ def test_resolved_tasks_round_trip_with_definitions():
 )
 def test_canonical_task_requires_qualified_identity_and_digest(changes):
     with pytest.raises(ValidationError):
-        AgentEvalSpec.model_validate({"tasks": [_snapshot(**changes)], "target": {"kind": "harbor"}})
+        ResolvedAgentEvalSpec.model_validate({"tasks": [_snapshot(**changes)], "target": {"kind": "harbor"}})
 
 
 def test_direct_refs_are_public_inputs():
@@ -99,7 +99,7 @@ def test_canonical_tasks_reject_invalid_snapshots(case, error):
     elif case == "archive":
         tasks[0]["spec"]["source"]["fileset_ref"] = "files#archive"
     with pytest.raises(ValueError, match=error):
-        spec = AgentEvalSpec.model_validate({"tasks": tasks, "target": target})
+        spec = ResolvedAgentEvalSpec.model_validate({"tasks": tasks, "target": target})
         validate_execution_support(spec.tasks, target=spec.target, adapters=KIND_ADAPTERS)
 
 
@@ -113,7 +113,7 @@ def test_canonical_tasks_reject_invalid_snapshots(case, error):
 def test_legacy_pinned_jobs_are_rejected(source):
     source["scoring"] = [{"task_ref": f"default/task#{DIGEST}", "metrics": [], "views": {}}]
     with pytest.raises(ValidationError):
-        AgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
+        ResolvedAgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
 
 
 def test_preparation_without_clients_fails_before_allocating_inputs(tmp_path):
@@ -295,7 +295,7 @@ def test_harbor_snapshot_invariants_on_json_reload(change):
     else:
         snapshot["spec"].pop("kind")
     with pytest.raises(ValidationError):
-        AgentEvalSpec.model_validate_json(json.dumps({"tasks": [snapshot], "target": {"kind": "harbor"}}))
+        ResolvedAgentEvalSpec.model_validate_json(json.dumps({"tasks": [snapshot], "target": {"kind": "harbor"}}))
 
 
 @pytest.mark.parametrize(
@@ -307,7 +307,7 @@ def test_harbor_snapshot_invariants_on_json_reload(change):
 )
 def test_previous_canonical_list_shapes_are_rejected(task):
     with pytest.raises(ValidationError):
-        AgentEvalSpec.model_validate({"tasks": [task], "trials": []})
+        ResolvedAgentEvalSpec.model_validate({"tasks": [task], "trials": []})
 
 
 @pytest.mark.parametrize("mismatch", [None, "instruction", "identity"])
