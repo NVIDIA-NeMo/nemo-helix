@@ -1551,7 +1551,11 @@ class JobDispatcher:
         attempt = await self.store.get_by_id(HelixJobAttempt, attempt.id)
         if attempt.job != job.id or attempt.workspace != workspace:
             return None
-        attempt.status_details = self._update_status_details_object(dict(attempt.status_details), status_details)
+        merged = self._update_status_details_object(dict(attempt.status_details), status_details)
+        if merged == attempt.status_details:
+            # Already reflected, so a repeated report does not rewrite the attempt.
+            return attempt
+        attempt.status_details = merged
         return await self.store.update(attempt)
 
     @staticmethod
@@ -1929,7 +1933,6 @@ class JobDispatcher:
                     error_details=step.error_details if step.status == HelixJobStatus.ERROR else None,
                 )
 
-        changed = True
         if not task:
             task = await self.store.create(
                 HelixJobTask(
@@ -1988,8 +1991,7 @@ class JobDispatcher:
             # A write that changes nothing is not progress, so it leaves updated_at alone. The
             # Kubernetes controller re-sends each pod's details on every pass, and counting those
             # writes would keep a stalled task, such as a hung upload, from ever looking stale.
-            changed = _task_state(task) != before
-            if changed:
+            if _task_state(task) != before:
                 task = await self.store.update(task)
                 logger.info(
                     "Updating job task",
@@ -2012,7 +2014,10 @@ class JobDispatcher:
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,
         # but users query job status via the jobs API. Without this propagation,
         # job.status_details would be empty and users couldn't see training progress.
-        if task_update.status_details and changed:
+        # Propagated even when the task did not change: a report that repeats the task's details
+        # still repairs an attempt whose earlier propagation failed. The attempt skips the write when
+        # it already holds them.
+        if task_update.status_details:
             try:
                 attempt = await self.get_attempt(step.attempt_id)
                 if attempt is not None:
