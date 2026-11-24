@@ -211,7 +211,7 @@ enabled-plugins = [
   "nemo-safe-synthesizer-plugin",
   "nemo-switchyard-plugin",
   "nemo-agents-plugin",
-  "nemo-deployments-plugin[docker,k8s,openshell]",
+  "nemo-deployments-plugin[docker,k8s,openshell,opensandbox]",
   # OpenShell job backend SDK; the jobs service itself is a root dependency.
   "nhx-jobs[openshell]",
   "nemo-customizer-plugin",

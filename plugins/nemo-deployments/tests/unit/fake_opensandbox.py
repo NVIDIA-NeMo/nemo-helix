@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlsplit
 
 API_KEY = "osb-key"
 SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access"
@@ -47,46 +47,69 @@ class FakeOpenSandbox:
     patch_status: int | None = None
     execd_status: int | None = None
     app_status: int = 200
+    secure_token_generation: int = 0
 
     def add(self, metadata: dict[str, str], state: str = "Running") -> str:
         sandbox_id = str(uuid.uuid4())
-        self.sandboxes[sandbox_id] = {"id": sandbox_id, "status": {"state": state}, "metadata": dict(metadata)}
+        self.sandboxes[sandbox_id] = {
+            "id": sandbox_id,
+            "image": {"uri": "registry.example/agent:1"},
+            "status": {"state": state, "lastTransitionAt": "2026-01-01T00:00:00Z"},
+            "metadata": dict(metadata),
+            "entrypoint": ["tail", "-f", "/dev/null"],
+            "createdAt": "2026-01-01T00:00:00Z",
+        }
         return sandbox_id
 
     def secure_token(self, sandbox_id: str) -> str:
-        return f"secure-{sandbox_id}"
+        return f"secure-{sandbox_id}-{self.secure_token_generation}"
 
     def execd_token(self, sandbox_id: str) -> str | None:
         body = next((b for b in self.create_bodies if b.get("_id") == sandbox_id), None)
         return (body or {}).get("env", {}).get("EXECD_ACCESS_TOKEN")
 
 
-def _multipart_fields(content_type: str, body: bytes) -> dict[str, bytes]:
+def _multipart_parts(content_type: str, body: bytes) -> list[tuple[str, bytes]]:
+    """Name and payload of each part, in order."""
     boundary = content_type.split("boundary=", 1)[1].encode()
-    fields: dict[str, bytes] = {}
+    parts: list[tuple[str, bytes]] = []
     for part in body.split(b"--" + boundary):
         head, _, payload = part.partition(b"\r\n\r\n")
         name = re.search(rb'name="([^"]+)"', head)
         if name is not None:
-            fields[name[1].decode()] = payload.removesuffix(b"\r\n")
-    return fields
+            parts.append((name[1].decode(), payload.removesuffix(b"\r\n")))
+    return parts
 
 
 class _Handler(BaseHTTPRequestHandler):
     state: FakeOpenSandbox
 
-    def _send(self, status: int, body: Any = None, text: str | None = None) -> None:
+    def _send(
+        self, status: int, body: Any = None, text: str | None = None, headers: dict[str, str] | None = None
+    ) -> None:
         payload = text.encode() if text is not None else json.dumps(body if body is not None else {}).encode()
+        headers = {"content-type": "text/plain" if text is not None else "application/json", **(headers or {})}
         self.send_response(status)
-        self.send_header("content-type", "text/plain" if text is not None else "application/json")
         self.send_header("content-length", str(len(payload)))
+        for name, value in headers.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
+
+    def _body(self) -> bytes:
+        if self.headers.get("transfer-encoding", "").lower() != "chunked":
+            return self.rfile.read(int(self.headers.get("content-length") or 0))
+        body = b""
+        while size := int(self.rfile.readline().split(b";")[0], 16):
+            body += self.rfile.read(size)
+            self.rfile.readline()
+        self.rfile.readline()
+        return body
 
     def _handle(self) -> None:
         url = urlsplit(self.path)
         parts = url.path.strip("/").split("/")
-        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        body = self._body()
         if parts[0] == "v1":
             return self._server(parts[1:], parse_qs(url.query), body)
         return self._gateway(parts, parse_qs(url.query), body)
@@ -106,13 +129,20 @@ class _Handler(BaseHTTPRequestHandler):
             state.create_bodies.append({**request, "_id": sandbox_id})
             return self._send(202, state.sandboxes[sandbox_id])
         if parts == ["sandboxes"] and self.command == "GET":
-            wanted = dict(pair.split("=", 1) for pair in query.get("metadata", [""])[0].split("&") if pair)
+            wanted = dict(parse_qsl(query.get("metadata", [""])[0]))
             items = [
                 sandbox
                 for sandbox in state.sandboxes.values()
                 if all(sandbox["metadata"].get(key) == value for key, value in wanted.items())
             ]
-            return self._send(200, {"items": items, "pagination": {"hasNextPage": False}})
+            pagination = {
+                "page": 1,
+                "pageSize": int(query.get("pageSize", ["20"])[0]),
+                "totalItems": len(items),
+                "totalPages": 1,
+                "hasNextPage": False,
+            }
+            return self._send(200, {"items": items, "pagination": pagination})
         sandbox = state.sandboxes.get(parts[1]) if len(parts) > 1 else None
         if sandbox is None:
             return self._send(404, {"code": "NOT_FOUND", "message": "no such sandbox"})
@@ -124,7 +154,7 @@ class _Handler(BaseHTTPRequestHandler):
                     sandbox["metadata"].pop(key, None)
                 else:
                     sandbox["metadata"][key] = value
-            return self._send(200, sandbox["metadata"])
+            return self._send(200, sandbox)
         if parts[2:3] == ["endpoints"]:
             return self._send(
                 200, {"endpoint": "unused", "headers": {SECURE_ACCESS_HEADER: state.secure_token(parts[1])}}
@@ -150,17 +180,22 @@ class _Handler(BaseHTTPRequestHandler):
         if self.headers.get(EXECD_TOKEN_HEADER) != state.execd_token(sandbox_id):
             return self._send(401)
         if rest == ["files", "upload"]:
-            fields = _multipart_fields(self.headers["content-type"], body)
-            metadata = json.loads(fields["metadata"])
-            content = fields["file"]
-            state.files.setdefault(sandbox_id, {})[metadata["path"]] = (content, metadata["mode"])
+            uploaded = _multipart_parts(self.headers["content-type"], body)
+            for (_, metadata_json), (_, content) in zip(uploaded[::2], uploaded[1::2], strict=True):
+                metadata = json.loads(metadata_json)
+                state.files.setdefault(sandbox_id, {})[metadata["path"]] = (content, metadata["mode"])
             return self._send(200)
         if rest == ["command"] and self.command == "POST":
             request = json.loads(body)
             command_id = uuid.uuid4().hex
             state.commands[command_id] = FakeCommand(argv=request["argv"], envs=request.get("envs") or {})
-            events = [{"type": "init", "text": command_id}, {"type": "execution_complete"}]
-            return self._send(200, text="\n\n".join(json.dumps(event) for event in events) + "\n\n")
+            now = int(time.time() * 1000)
+            events = [
+                {"type": "init", "text": command_id, "timestamp": now},
+                {"type": "execution_complete", "timestamp": now},
+            ]
+            stream = "\n\n".join(json.dumps(event) for event in events) + "\n\n"
+            return self._send(200, text=stream, headers={"content-type": "text/event-stream"})
         if rest == ["command"] and self.command == "DELETE":
             state.interrupted.append(query["id"][0])
             return self._send(200)
@@ -170,7 +205,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"code": "NOT_FOUND", "message": "no such command"})
             return self._send(200, {"id": rest[2], "running": command.running, "exit_code": command.exit_code})
         if rest[:1] == ["command"] and rest[2:] == ["logs"]:
-            return self._send(200, text=state.commands[rest[1]].output)
+            output = state.commands[rest[1]].output
+            return self._send(200, text=output, headers={"EXECD-COMMANDS-TAIL-CURSOR": str(len(output))})
         return self._send(404)
 
     def log_message(self, format: str, *args: Any) -> None:

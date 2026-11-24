@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-from ipaddress import ip_address
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from nemo_deployments_plugin.backends.opensandbox.endpoint import OpenSandboxEndpointTransport
 from nemo_deployments_plugin.endpoint_transport import EndpointTransport
@@ -28,14 +27,6 @@ class PlatformEgressConfig(BaseModel):
 
     def url(self) -> str:
         return f"{self.scheme}://{self.host}:{self.port}"
-
-    def egress_rule(self) -> dict[str, Any]:
-        """OpenSandbox allow rule. Only an IP target can be limited to the port."""
-        try:
-            ip_address(self.host)
-        except ValueError:
-            return {"action": "allow", "target": self.host}
-        return {"action": "allow", "target": self.host, "ports": [self.port]}
 
 
 class OpenSandboxExecutorConfig(BaseModel):

@@ -7,6 +7,8 @@ The sandbox starts with an idle entrypoint. Once it is running, ``read_status`` 
 config files through execd, starts the serve command as an execd background command with the
 deployment's environment, and reports READY when the readiness probe passes. The serve command's
 id and the ready flag are kept in the sandbox's metadata.
+
+The backend needs the ``opensandbox`` extra.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import hashlib
 import hmac
 import logging
 import os
+from ipaddress import ip_address
 from typing import Any
 
 from nemo_deployments_plugin.backends.base import (
@@ -31,12 +34,7 @@ from nemo_deployments_plugin.backends.labels import (
     MANAGED_BY_KEY,
     deployment_identity_labels,
 )
-from nemo_deployments_plugin.backends.opensandbox.client import (
-    EXECD_ACCESS_TOKEN_ENV,
-    OpenSandboxClient,
-    OpenSandboxError,
-)
-from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig
+from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig, PlatformEgressConfig
 from nemo_deployments_plugin.backends.opensandbox.endpoint import sandbox_endpoint_url
 from nemo_deployments_plugin.backends.workload_identity import (
     workload_identity_activation_error,
@@ -50,7 +48,23 @@ from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
+_OPENSANDBOX_IMPORT_ERROR: ImportError | None = None
+try:
+    from opensandbox.exceptions import SandboxApiException, SandboxException
+    from opensandbox.models.execd import RunCommandOpts
+    from opensandbox.models.filesystem import WriteEntry
+    from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxImageSpec, SandboxInfo
+
+    from .client import EXECD_ACCESS_TOKEN_ENV, Execd, OpenSandboxClient, describe
+except ImportError as exc:
+    _OPENSANDBOX_IMPORT_ERROR = exc
+
 logger = logging.getLogger(__name__)
+
+_OPENSANDBOX_INSTALL_HINT = (
+    "The 'opensandbox' package is required for OpenSandboxDeploymentBackend. "
+    'Install it with: uv pip install "opensandbox>=1.2.0"'
+)
 
 SERVE_COMMAND_KEY = "nemo.nvidia.com/serve-command"
 SERVE_READY_KEY = "nemo.nvidia.com/serve-ready"
@@ -60,13 +74,13 @@ _DEAD_STATES = frozenset({"Failed", "Terminated", "Stopping"})
 _STARTING_STATES = frozenset({"Pending", "Resuming"})
 _LOG_TAIL_CHARS = 2000
 
-Sandbox = dict[str, Any]
-
 
 class OpenSandboxDeploymentBackend(DeploymentBackend):
     """Manage deployments as OpenSandbox sandboxes through the lifecycle and execd APIs."""
 
     def init(self) -> None:
+        if _OPENSANDBOX_IMPORT_ERROR is not None:
+            raise MissingBackendDependencyError(_OPENSANDBOX_INSTALL_HINT) from _OPENSANDBOX_IMPORT_ERROR
         self._executor_config = OpenSandboxExecutorConfig.model_validate(self._config)
         api_key = os.environ.get(self._executor_config.api_key_env)
         if not api_key:
@@ -87,13 +101,15 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
         return hmac.new(self._api_key.encode(), f"{workspace}/{name}".encode(), hashlib.sha256).hexdigest()
 
     @staticmethod
-    async def _sandboxes(client: OpenSandboxClient, workspace: str, name: str) -> tuple[Sandbox | None, list[Sandbox]]:
+    async def _sandboxes(
+        client: OpenSandboxClient, workspace: str, name: str
+    ) -> tuple[SandboxInfo | None, list[SandboxInfo]]:
         """The deployment's live sandbox, if any, and its failed or terminating ones."""
         sandboxes = await client.list_sandboxes(
             {MANAGED_BY_KEY: MANAGED_BY_LABEL, DEPLOYMENT_WORKSPACE_LABEL: workspace, DEPLOYMENT_NAME_LABEL: name}
         )
-        live = [sandbox for sandbox in sandboxes if _state(sandbox) not in _DEAD_STATES]
-        dead = [sandbox for sandbox in sandboxes if _state(sandbox) in _DEAD_STATES]
+        live = [sandbox for sandbox in sandboxes if sandbox.status.state not in _DEAD_STATES]
+        dead = [sandbox for sandbox in sandboxes if sandbox.status.state in _DEAD_STATES]
         return (live[0] if live else None), dead
 
     async def _load_config(self, workspace: str, config_name: str) -> DeploymentConfig:
@@ -128,18 +144,6 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
             ),
         }
         egress = self._executor_config.platform_egress
-        body: dict[str, Any] = {
-            "image": {"uri": container.image},
-            "entrypoint": _IDLE_ENTRYPOINT,
-            "timeout": None,
-            "resourceLimits": dict(container.resources.limits) or dict(self._executor_config.default_resources),
-            "metadata": metadata,
-            "env": {EXECD_ACCESS_TOKEN_ENV: self._execd_token(workspace, name)},
-            "networkPolicy": {"defaultAction": "deny", "egress": [egress.egress_rule()] if egress else []},
-            "secureAccess": True,
-        }
-        if container.resources.requests:
-            body["resourceRequests"] = dict(container.resources.requests)
 
         try:
             async with self._client() as client:
@@ -148,35 +152,50 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
                     return await self._status(client, workspace, name, live)
                 # Drift recovery: a failed sandbox is replaced, not restarted.
                 for sandbox in dead:
-                    await client.delete_sandbox(sandbox["id"])
-                created = await client.create_sandbox(body)
-        except OpenSandboxError as exc:
-            return _failed(str(exc))
-        return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox {created.get('id')} created")
+                    await client.delete_sandbox(sandbox.id)
+                created = await client.sandbox_creator.create_sandbox(
+                    spec=SandboxImageSpec(image=container.image),
+                    entrypoint=_IDLE_ENTRYPOINT,
+                    env={EXECD_ACCESS_TOKEN_ENV: self._execd_token(workspace, name)},
+                    metadata=metadata,
+                    timeout=None,
+                    resource=dict(container.resources.limits) or dict(self._executor_config.default_resources),
+                    resource_requests=dict(container.resources.requests) or None,
+                    network_policy=NetworkPolicy(
+                        default_action="deny", egress=[_egress_rule(egress)] if egress else []
+                    ),
+                    extensions={},
+                    volumes=None,
+                    secure_access=True,
+                )
+        except SandboxException as exc:
+            return _failed(describe("create sandbox", exc))
+        return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox {created.id} created")
 
     async def read_status(self, *, workspace: str, name: str) -> BackendStatusUpdate:
         try:
             async with self._client() as client:
                 live, dead = await self._sandboxes(client, workspace, name)
                 if live is None:
-                    detail = (dead[0].get("status") or {}).get("message") if dead else None
+                    detail = dead[0].status.message if dead else None
                     return BackendStatusUpdate(
                         status="LOST", status_message=f"Sandbox failed: {detail}" if detail else "Sandbox not found"
                     )
                 return await self._status(client, workspace, name, live)
-        except OpenSandboxError as exc:
-            return BackendStatusUpdate(status="UNKNOWN", status_message=str(exc), error_details={"error": str(exc)})
+        except SandboxException as exc:
+            message = describe("read sandbox", exc)
+            return BackendStatusUpdate(status="UNKNOWN", status_message=message, error_details={"error": message})
 
     async def _status(
-        self, client: OpenSandboxClient, workspace: str, name: str, sandbox: Sandbox
+        self, client: OpenSandboxClient, workspace: str, name: str, sandbox: SandboxInfo
     ) -> BackendStatusUpdate:
-        state = _state(sandbox)
+        state = sandbox.status.state
         if state in _STARTING_STATES:
             return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox is {state}")
         if state != "Running":
             return BackendStatusUpdate(status="UNKNOWN", status_message=f"Sandbox is {state}")
 
-        metadata: dict[str, str] = sandbox.get("metadata") or {}
+        metadata = sandbox.metadata or {}
         config_name = metadata.get(CONFIG_NAME_LABEL)
         if not config_name:
             return _failed("Sandbox is missing its deployment-config label")
@@ -185,39 +204,38 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
         except NemoEntityNotFoundError:
             return _failed(f"DeploymentConfig '{config_name}' not found in workspace '{workspace}'")
         container = config.containers[0]
-        sandbox_id: str = sandbox["id"]
-        token = self._execd_token(workspace, name)
+        execd = await client.execd(sandbox.id, self._execd_token(workspace, name))
 
         command_id = metadata.get(SERVE_COMMAND_KEY)
         if command_id is None:
-            return await self._launch(client, sandbox_id, token, config)
+            return await self._launch(client, execd, sandbox.id, config)
 
         try:
-            status = await client.command_status(sandbox_id, token, command_id)
-        except OpenSandboxError as exc:
+            status = await execd.commands.get_command_status(command_id)
+        except SandboxApiException as exc:
             if exc.status_code != 404:
                 raise
             return _failed("execd no longer tracks the serve process; deployment is not serving")
-        if not status.get("running"):
-            exit_code = status.get("exit_code")
-            tail = (await client.command_logs(sandbox_id, token, command_id))[-_LOG_TAIL_CHARS:].strip()
-            message = f"Serve process exited with code {exit_code}; deployment is not serving"
+        if not status.running:
+            tail = (await execd.commands.get_background_command_logs(command_id, cursor=0)).content
+            tail = tail[-_LOG_TAIL_CHARS:].strip()
+            message = f"Serve process exited with code {status.exit_code}; deployment is not serving"
             return BackendStatusUpdate(
                 status="FAILED",
                 status_message=f"{message}. Last output: {tail}" if tail else message,
-                exit_code=exit_code if isinstance(exit_code, int) else None,
+                exit_code=status.exit_code,
             )
 
         if metadata.get(SERVE_READY_KEY) != "true":
-            if not await self._ready(client, sandbox_id, container):
+            if not await self._ready(client, sandbox.id, container):
                 return BackendStatusUpdate(status="STARTING", status_message="Serve running; awaiting readiness")
-            await client.patch_metadata(sandbox_id, {SERVE_READY_KEY: "true"})
+            await client.sandboxes.patch_sandbox_metadata(sandbox.id, {SERVE_READY_KEY: "true"})
         return BackendStatusUpdate(
-            status="READY", status_message="Sandbox serving", endpoints=_endpoints(sandbox_id, container)
+            status="READY", status_message="Sandbox serving", endpoints=_endpoints(sandbox.id, container)
         )
 
     async def _launch(
-        self, client: OpenSandboxClient, sandbox_id: str, token: str, config: DeploymentConfig
+        self, client: OpenSandboxClient, execd: Execd, sandbox_id: str, config: DeploymentConfig
     ) -> BackendStatusUpdate:
         """Deliver the config files and start the serve command, recording its id on the sandbox."""
         try:
@@ -230,21 +248,31 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
             return _failed(f"Cannot resolve a value for environment variable(s): {', '.join(unresolved)}")
         envs = {var.name: var.value for var in container.env if var.value is not None}
         try:
-            for item in resolved.config_files:
-                await client.upload_file(
-                    sandbox_id, token, path=item.path, content=item.content.encode(), mode=item.mode
-                )
-            command_id = await client.start_command(sandbox_id, token, [*container.command, *container.args], envs=envs)
-        except OpenSandboxError as exc:
-            if exc.status_code is None or exc.status_code >= 500:
+            await execd.files.write_files(
+                [
+                    # WriteEntry takes the permission bits as their octal digits: 0o644 is 644.
+                    WriteEntry(path=item.path, data=item.content.encode(), mode=int(f"{item.mode:o}"))
+                    for item in resolved.config_files
+                ]
+            )
+            execution = await execd.commands.run(
+                [*container.command, *container.args], opts=RunCommandOpts(background=True, envs=envs)
+            )
+        except SandboxException as exc:
+            message = describe("start serve command", exc)
+            status_code = exc.status_code if isinstance(exc, SandboxApiException) else None
+            if status_code is None or status_code >= 500:
                 # execd may not be listening yet.
-                return BackendStatusUpdate(status="STARTING", status_message=f"Waiting for execd: {exc}")
-            return _failed(str(exc))
+                return BackendStatusUpdate(status="STARTING", status_message=f"Waiting for execd: {message}")
+            return _failed(message)
+        if execution.id is None:
+            reason = execution.error.value if execution.error else "execd returned no command id"
+            return _failed(f"start serve command failed: {reason}")
         try:
-            await client.patch_metadata(sandbox_id, {SERVE_COMMAND_KEY: command_id})
-        except OpenSandboxError:
+            await client.sandboxes.patch_sandbox_metadata(sandbox_id, {SERVE_COMMAND_KEY: execution.id})
+        except SandboxException:
             # The next poll would start a second serve process.
-            await client.interrupt_command(sandbox_id, token, command_id)
+            await execd.commands.interrupt(execution.id)
             raise
         return BackendStatusUpdate(status="STARTING", status_message="Serve command launched")
 
@@ -257,33 +285,30 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
         port = _resolve_port(probe.http_get.port, container)
         if port is None:
             return True
-        try:
-            status = await client.http_get(sandbox_id, port, probe.http_get.path, timeout=probe.timeout_seconds)
-        except OpenSandboxError:
-            return False
-        return 200 <= status < 400
+        status = await client.http_get(sandbox_id, port, probe.http_get.path, timeout=probe.timeout_seconds)
+        return status is not None and 200 <= status < 400
 
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
         try:
             async with self._client() as client:
                 live, dead = await self._sandboxes(client, workspace, name)
                 for sandbox in [*([live] if live else []), *dead]:
-                    if _state(sandbox) != "Stopping":
-                        await client.delete_sandbox(sandbox["id"])
-        except OpenSandboxError as exc:
-            return _failed(str(exc))
+                    if sandbox.status.state != "Stopping":
+                        await client.delete_sandbox(sandbox.id)
+        except SandboxException as exc:
+            return _failed(describe("delete sandbox", exc))
         return BackendStatusUpdate(status="SUCCEEDED", status_message="Sandbox deleted")
 
     async def list_managed_deployment_names(self) -> list[str]:
         try:
             async with self._client() as client:
                 sandboxes = await client.list_sandboxes({MANAGED_BY_KEY: MANAGED_BY_LABEL})
-        except OpenSandboxError:
+        except SandboxException:
             logger.warning("Failed to list managed sandboxes", exc_info=True)
             return []
         names: set[str] = set()
         for sandbox in sandboxes:
-            metadata = sandbox.get("metadata") or {}
+            metadata = sandbox.metadata or {}
             workspace, name = metadata.get(DEPLOYMENT_WORKSPACE_LABEL), metadata.get(DEPLOYMENT_NAME_LABEL)
             if workspace and name:
                 names.add(f"{workspace}/{name}")
@@ -296,13 +321,14 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
                 live, _ = await self._sandboxes(client, workspace, name)
                 if live is None:
                     return LogResult(lines=["Sandbox not found"])
-                command_id = (live.get("metadata") or {}).get(SERVE_COMMAND_KEY)
+                command_id = (live.metadata or {}).get(SERVE_COMMAND_KEY)
                 if command_id is None:
                     return LogResult(lines=["The serve command has not started"])
-                output = await client.command_logs(live["id"], self._execd_token(workspace, name), command_id)
-        except OpenSandboxError as exc:
-            return LogResult(lines=[f"Failed to fetch logs: {exc}"])
-        lines = output.splitlines()
+                execd = await client.execd(live.id, self._execd_token(workspace, name))
+                logs = await execd.commands.get_background_command_logs(command_id, cursor=0)
+        except SandboxException as exc:
+            return LogResult(lines=[f"Failed to fetch logs: {describe('read serve logs', exc)}"])
+        lines = logs.content.splitlines()
         return LogResult(lines=lines[-tail:], truncated=len(lines) > tail)
 
     # -- volumes ---------------------------------------------------------------------------------
@@ -323,8 +349,13 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
         return _volumes_unsupported()
 
 
-def _state(sandbox: Sandbox) -> str:
-    return str((sandbox.get("status") or {}).get("state") or "")
+def _egress_rule(egress: PlatformEgressConfig) -> NetworkRule:
+    """Allow rule for the platform endpoint. Only an IP target can be limited to the port."""
+    try:
+        ip_address(egress.host)
+    except ValueError:
+        return NetworkRule(action="allow", target=egress.host)
+    return NetworkRule(action="allow", target=egress.host, ports=[egress.port])
 
 
 def _failed(message: str) -> BackendStatusUpdate:

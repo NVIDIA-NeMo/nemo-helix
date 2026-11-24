@@ -34,6 +34,8 @@ from nemo_deployments_plugin.entities import (
 )
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
+pytest.importorskip("opensandbox")  # optional extra
+
 WORKSPACE = "default"
 NAME = "calc-dep"
 IDENTITY = {
@@ -248,15 +250,22 @@ async def test_a_paused_sandbox_is_unknown(osb: FakeOpenSandbox, monkeypatch: py
     assert (await _read(_backend(osb, monkeypatch))).status == "UNKNOWN"
 
 
+@pytest.mark.parametrize("status", [500, 504])
 async def test_server_errors_are_unknown_on_read_and_failed_on_create(
-    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
+    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     backend = _backend(osb, monkeypatch)
-    osb.server_status = 500
+    osb.server_status = status
     read = await _read(backend)
-    assert read.status == "UNKNOWN"
-    assert "BROKEN: server is broken" in read.status_message
-    assert (await _create(backend)).status == "FAILED"
+    assert (read.status, read.status_message) == (
+        "UNKNOWN",
+        f"read sandbox failed (HTTP {status}): BROKEN: server is broken",
+    )
+    created = await _create(backend)
+    assert (created.status, created.status_message) == (
+        "FAILED",
+        f"create sandbox failed (HTTP {status}): BROKEN: server is broken",
+    )
 
 
 async def test_create_outlasts_the_request_timeout(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,6 +300,20 @@ async def test_a_launch_that_cannot_be_recorded_is_interrupted(
 
     assert (await _read(backend)).status == "UNKNOWN"
     assert osb.interrupted == list(osb.commands)
+
+
+async def test_a_rejected_endpoint_token_is_looked_up_again(
+    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(osb, monkeypatch)
+    await _create(backend)
+    assert (await _read(backend)).status_message == "Serve command launched"
+
+    osb.secure_token_generation += 1
+    rejected = await _read(backend)
+    assert rejected.status == "UNKNOWN"
+    assert rejected.status_message.startswith("read sandbox failed (HTTP 401)")
+    assert (await _read(backend)).status == "READY"
 
 
 async def test_an_unresolved_secret_fails_the_launch(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -398,6 +421,12 @@ def test_a_missing_api_key_makes_the_backend_unavailable(osb: FakeOpenSandbox, m
         OpenSandboxDeploymentBackend(MagicMock(), {"domain": osb.base, "gateway_address": osb.base})
 
 
+def test_a_missing_sdk_makes_the_backend_unavailable(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backend_module, "_OPENSANDBOX_IMPORT_ERROR", ImportError("No module named 'opensandbox'"))
+    with pytest.raises(MissingBackendDependencyError, match="opensandbox>=1.2.0"):
+        OpenSandboxDeploymentBackend(MagicMock(), {"domain": osb.base, "gateway_address": osb.base})
+
+
 def test_the_backend_is_registered() -> None:
     assert BACKEND_CLASSES["opensandbox"] is OpenSandboxDeploymentBackend
 
@@ -405,6 +434,13 @@ def test_the_backend_is_registered() -> None:
 def test_platform_egress_rules_and_url() -> None:
     by_ip = PlatformEgressConfig(host="10.96.0.12", port=8080)
     by_name = PlatformEgressConfig(host="nhx-api.nemo.svc.cluster.local", port=80, scheme="https")
-    assert by_ip.egress_rule() == {"action": "allow", "target": "10.96.0.12", "ports": [8080]}
-    assert by_name.egress_rule() == {"action": "allow", "target": "nhx-api.nemo.svc.cluster.local"}
+    assert backend_module._egress_rule(by_ip).model_dump() == {
+        "action": "allow",
+        "target": "10.96.0.12",
+        "ports": [8080],
+    }
+    assert backend_module._egress_rule(by_name).model_dump(exclude_none=True) == {
+        "action": "allow",
+        "target": "nhx-api.nemo.svc.cluster.local",
+    }
     assert (by_ip.url(), by_name.url()) == ("http://10.96.0.12:8080", "https://nhx-api.nemo.svc.cluster.local:80")

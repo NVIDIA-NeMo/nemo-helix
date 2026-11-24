@@ -22,6 +22,8 @@ from nemo_deployments_plugin.backends.opensandbox.endpoint import (
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.endpoint_transport import endpoint_transport
 
+pytest.importorskip("opensandbox")  # optional extra
+
 SID = "7920fbcd-4e18-4753-bb15-41957b6f12e0"
 OTHER = "11111111-2222-3333-4444-555555555555"
 ADVERTISED = f"http://{SID}-8000.osb.helix.internal"
