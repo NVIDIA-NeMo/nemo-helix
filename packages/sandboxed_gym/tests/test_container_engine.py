@@ -104,13 +104,18 @@ def test_setup_runs_then_the_host_drops_to_the_container_user(monkeypatch: pytes
         ENGINE_ENV: "rootless-podman",
         "NHX_WORK_PATH": str(host.work),
         "HOME": "/root",
-        "NHX_CONTAINER_STORAGE_SIZE": "40G",
+        "NHX_CONTAINER_STORAGE_SIZE": "42949672960",
+        "NHX_CONTAINER_STORAGE_DISCARD": "1",
         "NHX_BROKER_TOKEN": "broker-secret",
     }
 
     assert host.prepare(environ) is True
     # The root-only setup runs with a fixed PATH and its own settings, nothing else from the host.
-    assert host.setup_env == {"PATH": container_engine._SETUP_PATH, "NHX_CONTAINER_STORAGE_SIZE": "40G"}
+    assert host.setup_env == {
+        "PATH": container_engine._SETUP_PATH,
+        "NHX_CONTAINER_STORAGE_SIZE": "42949672960",
+        "NHX_CONTAINER_STORAGE_DISCARD": "1",
+    }
 
     names = [name for name, _ in host.calls]
     assert names[0] == "run" and host.calls[0][1] == [container_engine.SETUP_SCRIPT]

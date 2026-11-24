@@ -46,6 +46,8 @@ from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
+from sandboxed_gym.host.opensandbox import host_disk_request_gib
+from sandboxed_gym.quantity import quantity_bytes
 from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
 
 #: The host's ``ROUTE_FAILURES_TO_SIDECAR_ENV_KEY``, spelled out rather than imported: the nemo-helix wheel
@@ -215,6 +217,22 @@ class SandboxPlan(BaseModel):
     episode_backend: str
     allow_insecure_memory_backend: bool = False
     approved_images: tuple[str, ...] = ()
+    # Left out of the serialized plan while unset (see `serialized`), so a worker from before they existed
+    # still accepts a plan that does not use them.
+    container_storage_bytes: int | None = Field(default=None, gt=0)
+    container_storage_discard: bool = False
+
+    def serialized(self) -> str:
+        """The plan as JSON for the job step, without the container storage settings when they are unset."""
+        unset = {
+            name
+            for name, value in (
+                ("container_storage_bytes", self.container_storage_bytes),
+                ("container_storage_discard", self.container_storage_discard),
+            )
+            if not value
+        }
+        return self.model_dump_json(exclude=unset)
 
 
 def resolve_sandbox_plan(
@@ -253,6 +271,12 @@ def resolve_sandbox_plan(
             )
         bundle = SandboxAgentBundle.model_validate(host_provider_options["agent_bundle"])
         host_provider_options["agent_bundle"] = bundle.model_dump(mode="json")
+    container_storage_bytes = _container_storage_bytes(config, runtime_image)
+    if config.sandbox_host_provider == "opensandbox":
+        try:
+            host_disk_request_gib(config.sandbox_resources, host_provider_options.get("create") or {})
+        except ValueError as exc:
+            raise SandboxUnavailableError(f"`sandbox_resources`: {exc}") from None
     return SandboxPlan(
         host_provider=config.sandbox_host_provider,
         runtime_image=runtime_image,
@@ -266,7 +290,38 @@ def resolve_sandbox_plan(
         episode_backend=config.sandbox_episode_backend,
         allow_insecure_memory_backend=config.sandbox_allow_insecure_memory_backend,
         approved_images=tuple(config.sandbox_approved_images),
+        container_storage_bytes=container_storage_bytes,
+        container_storage_discard=config.sandbox_container_storage_discard,
     )
+
+
+def _container_storage_bytes(config: EvaluatorConfig, runtime_image: str) -> int | None:
+    """The configured container storage size in bytes, refused where nothing would apply it.
+
+    Only an image with a container engine reads these settings, and only on a Kata sandbox. The default Gym
+    host image has no engine and the local Docker provider can't run one, so a setting there would be silently
+    ignored; refusing at submit names the setting instead.
+    """
+    if config.sandbox_container_storage_size is None and not config.sandbox_container_storage_discard:
+        return None
+    setting = (
+        "sandbox_container_storage_size"
+        if config.sandbox_container_storage_size is not None
+        else "sandbox_container_storage_discard"
+    )
+    if config.sandbox_host_provider == "docker":
+        raise SandboxUnavailableError(
+            f"`{setting}` applies to the Docker-enabled Gym host on OpenSandbox; the local `docker` host "
+            "provider can't run a container engine"
+        )
+    if config.sandbox_runtime_image is None:
+        raise SandboxUnavailableError(
+            f"`{setting}` applies only to a Gym host image with a container engine, but `sandbox_runtime_image` "
+            f"is unset, so jobs use the default {runtime_image!r}; set it to the Docker-enabled image"
+        )
+    if config.sandbox_container_storage_size is None:
+        return None
+    return quantity_bytes(config.sandbox_container_storage_size)
 
 
 def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: EvaluatorConfig) -> None:
@@ -478,6 +533,8 @@ def serve_config(
             "rollout_timeout_s": chunk_deadline_s,
             "host_provider_options": host_provider_options,
             "network_policy": {"egress_allow": _egress_rules(plan)},
+            "container_storage_bytes": plan.container_storage_bytes,
+            "container_storage_discard": plan.container_storage_discard,
         },
         "episode_broker": {
             "job_id": job_id,

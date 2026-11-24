@@ -21,6 +21,14 @@ HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
 STORAGE=$HOME_DIR/.local/share/containers
 STORAGE_IMAGE=/var/lib/nhx-container-storage.img
 LOG=${NHX_CONTAINER_ENGINE_LOG:-/tmp/podman-service.log}
+# Operator settings, from the platform config: the storage file's size in bytes, and "1" to mount it with
+# discard, so space freed inside it goes back to the node instead of staying allocated until the host ends.
+STORAGE_SIZE=${NHX_CONTAINER_STORAGE_SIZE:-30G}
+case ${NHX_CONTAINER_STORAGE_DISCARD:-0} in
+  1) MOUNT_OPTIONS=loop,discard ;;
+  0) MOUNT_OPTIONS=loop ;;
+  *) echo "NHX_CONTAINER_STORAGE_DISCARD must be 0 or 1, not '$NHX_CONTAINER_STORAGE_DISCARD'" >&2; exit 1 ;;
+esac
 
 # pasta attaches its end of the container network through a tap device.
 mkdir -p /dev/net
@@ -33,10 +41,10 @@ for i in 0 1 2 3 4 5 6 7; do [ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i
 mkdir -p "$STORAGE"
 if ! mountpoint -q "$STORAGE"; then
   if [ ! -e "$STORAGE_IMAGE" ]; then
-    truncate -s "${NHX_CONTAINER_STORAGE_SIZE:-30G}" "$STORAGE_IMAGE"
+    truncate -s "$STORAGE_SIZE" "$STORAGE_IMAGE"
     mkfs.ext4 -q -F "$STORAGE_IMAGE"
   fi
-  mount -o loop "$STORAGE_IMAGE" "$STORAGE"
+  mount -o "$MOUNT_OPTIONS" "$STORAGE_IMAGE" "$STORAGE"
 fi
 
 # netavark writes sysctls in the container user's network namespace. The pod's own network sysctls

@@ -1110,3 +1110,85 @@ def test_the_generated_instance_and_config_drive_the_host_composition() -> None:
     }
     selection = config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY]
     assert (selection["agent_instance"], selection["agent_config"]) == ("registered_calc", generated)
+
+
+# --- Container storage operator settings --------------------------------------------------------------------
+
+
+def test_container_storage_settings_reach_the_hosts_setup_environment() -> None:
+    """The setup reads them from the container's environment, as bytes and a "1"."""
+    from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
+
+    plan = capable_plan(sandbox_container_storage_size="100Gi", sandbox_container_storage_discard=True)
+    spec = built_host_spec(plan)
+
+    assert (plan.container_storage_bytes, plan.container_storage_discard) == (100 * 2**30, True)
+    assert spec.bootstrap_env[STORAGE_SIZE_ENV] == str(100 * 2**30)
+    assert spec.bootstrap_env[STORAGE_DISCARD_ENV] == "1"
+
+
+def test_unset_container_storage_settings_leave_the_image_defaults() -> None:
+    from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
+
+    spec = built_host_spec(capable_plan())
+
+    assert STORAGE_SIZE_ENV not in spec.bootstrap_env
+    assert STORAGE_DISCARD_ENV not in spec.bootstrap_env
+
+
+@pytest.mark.parametrize("name", ["NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_STORAGE_DISCARD"])
+@pytest.mark.parametrize("operator_sets_it", [True, False])
+def test_a_job_cannot_name_the_container_storage_settings(name: str, operator_sets_it: bool) -> None:
+    settings = {"sandbox_container_storage_size": "40Gi"} if operator_sets_it else {}
+
+    with pytest.raises(ValueError, match=name):
+        built_host_spec(capable_plan(**settings), target(env_vars={name: "1"}))
+
+
+def test_a_plan_without_container_storage_settings_serializes_as_before() -> None:
+    """A worker from before these settings forbids unknown plan keys, so an unused setting must not appear."""
+    serialized = capable_plan().serialized()
+
+    assert "container_storage" not in serialized
+    assert SandboxPlan.model_validate_json(serialized) == capable_plan()
+
+
+def test_a_plan_with_container_storage_settings_round_trips() -> None:
+    plan = capable_plan(sandbox_container_storage_size="64Gi", sandbox_container_storage_discard=True)
+
+    assert SandboxPlan.model_validate_json(plan.serialized()) == plan
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [{"sandbox_container_storage_size": "40Gi"}, {"sandbox_container_storage_discard": True}],
+)
+def test_container_storage_settings_are_refused_on_the_default_gym_host_image(setting: dict[str, Any]) -> None:
+    """The default image has no container engine, so the setting would silently do nothing."""
+    with pytest.raises(SandboxUnavailableError, match="sandbox_runtime_image"):
+        capable_plan(sandbox_runtime_image=None, **setting)
+
+
+def test_container_storage_settings_are_refused_with_the_local_docker_provider() -> None:
+    with pytest.raises(SandboxUnavailableError, match="local `docker` host provider"):
+        capable_plan(sandbox_host_provider="docker", sandbox_container_storage_size="40Gi")
+
+
+@pytest.mark.parametrize("size", ["30", "512Mi", "40 Gi", "40gb"])
+def test_a_container_storage_size_that_is_not_a_quantity_of_at_least_1gi_is_a_config_error(size: str) -> None:
+    with pytest.raises(ValueError, match="sandbox_container_storage_size|Kubernetes quantity"):
+        EvaluatorConfig(sandbox_container_storage_size=size)
+
+
+def test_a_disk_request_above_the_operators_own_limit_is_refused_at_submit() -> None:
+    with pytest.raises(SandboxUnavailableError, match="ephemeral-storage"):
+        capable_plan(
+            sandbox_resources={"ephemeral-storage": "40Gi"},
+            sandbox_host_provider_options={"create": {"resource": {"ephemeral-storage": "30Gi"}}},
+        )
+
+
+def test_a_disk_request_reaches_the_built_host_spec() -> None:
+    spec = built_host_spec(capable_plan(sandbox_resources={"cpu": "2", "ephemeral-storage": "40Gi"}))
+
+    assert spec.resources == {"cpu": "2", "ephemeral-storage": "40Gi"}

@@ -24,6 +24,10 @@ SETUP_SCRIPT = "/usr/local/libexec/nhx/rootless-podman-up"
 CONTAINER_USER = "docker-user"
 SETUP_TIMEOUT_S = 300.0
 SETUP_LOG = "/tmp/rootless-podman-up.log"
+# Operator settings for the setup, set by the platform from its own config and never from a job's variables:
+# the size of the file container storage lives in, in bytes, and "1" to mount it with discard.
+STORAGE_SIZE_ENV = "NHX_CONTAINER_STORAGE_SIZE"
+STORAGE_DISCARD_ENV = "NHX_CONTAINER_STORAGE_DISCARD"
 
 # prctl(2) options. Dropping from the bounding set needs CAP_SETPCAP, so it happens before the uid change.
 _PR_SET_DUMPABLE = 4
@@ -31,9 +35,9 @@ _PR_CAPBSET_DROP = 24
 _PR_SET_NO_NEW_PRIVS = 38
 _CAP_SYS_ADMIN = 21
 
-# What the root-only setup runs with: a fixed PATH and the image's own settings for it, nothing else.
+# What the root-only setup runs with: a fixed PATH and the image's and operator's settings for it, nothing else.
 _SETUP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-_SETUP_ENV_KEYS = ("NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_ENGINE_LOG")
+_SETUP_ENV_KEYS = (STORAGE_SIZE_ENV, STORAGE_DISCARD_ENV, "NHX_CONTAINER_ENGINE_LOG")
 
 # Kata boots its guest kernel with the agent's systemd target; a runc container sees the node's own
 # command line instead. Runtimes that boot without systemd still pass `agent.*` parameters.

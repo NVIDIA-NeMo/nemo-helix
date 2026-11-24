@@ -38,6 +38,7 @@ from sandboxed_gym.host.models import (
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.run_sync import run_coro_sync
+from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
 from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
@@ -260,6 +261,15 @@ def build_gym_host_spec(
         # leaves it. Assigned after host_env so a job cannot keep uv offline once the operator
         # opened the index.
         bootstrap_extra[UV_OFFLINE_ENV_KEY] = "0"
+    if sandbox.container_storage_bytes is not None:
+        bootstrap_extra[STORAGE_SIZE_ENV] = str(sandbox.container_storage_bytes)
+    if sandbox.container_storage_discard:
+        bootstrap_extra[STORAGE_DISCARD_ENV] = "1"
+    # The setup reads these from the container's environment, which a job's variables never reach. A job
+    # setting them anyway would only be seen by Gym, as values the setup never used.
+    claimed = sorted({STORAGE_SIZE_ENV, STORAGE_DISCARD_ENV} & set(cfg.host_env))
+    if claimed:
+        raise ValueError(f"the job's environment must not set {', '.join(claimed)}; the platform sets them")
     bootstrap_env = build_bootstrap_env(
         cfg.job_id,
         cfg.environment_path or sandbox.env_mount_path,

@@ -216,6 +216,10 @@ class SandboxConfig(BaseModel):
     rollout_retry_backoff_s: float = Field(default=DEFAULT_ROLLOUT_RETRY_BACKOFF_S, ge=0)
     host_provider_options: dict[str, Any] = Field(default_factory=dict)
     entrypoint: list[str] | None = None
+    # Operator settings for a Gym host image with a container engine: the size of its storage file in bytes
+    # (unset keeps the image's default), and whether to mount it with discard.
+    container_storage_bytes: int | None = Field(default=None, gt=0)
+    container_storage_discard: bool = False
 
 
 class NemoGymSandboxedConfig(BaseModel):
