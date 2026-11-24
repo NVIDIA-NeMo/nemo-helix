@@ -186,6 +186,13 @@ Run pre-commit with `uv run pre-commit -a` to target all files in the repository
 
 If you run `pre-commit install` in the repo it will setup git hooks as needed
 
+Lock-consistency hooks run when their inputs change (and during `pre-commit run -a`):
+
+- The Gym host check compares `docker/locks/nhx-gym-host/uv.lock` with the evals plugin's bundled copy. After regenerating the host lock, copy it to `plugins/nemo-evals/src/nemo_evals/gym_registered_agent/nhx-gym-host.uv.lock` and stage both files.
+- The web check validates changed package manifests and the workspace catalog against `web/pnpm-lock.yaml` using `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts`. It does not install `node_modules` or run lifecycle scripts. Activate the repository's Flox environment to make pnpm available. If the lock is stale, run `pnpm install --lockfile-only --ignore-scripts` from `web/` and stage the updated lock.
+
+Both checks fail with repair instructions rather than silently skipping or automatically changing locks. The existing unit tests and CI frozen installs remain as backstops.
+
 ### IDE Setup
 
 #### Cursor Rules
