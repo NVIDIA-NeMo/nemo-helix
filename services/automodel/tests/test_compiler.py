@@ -465,12 +465,20 @@ def test_compile_training_step_rejects_registered_text_moe_without_expert_parall
         (True, SFTTraining(recipe="sft", tokenizer_backend="nemo_wrapped_auto"), "tokenizer_backend"),
         (True, SFTTraining(recipe="sft", mask_generation_prompt=True), "mask_generation_prompt"),
         (False, SFTTraining(recipe="bi_encoder", mask_generation_prompt=True), "mask_generation_prompt"),
+        (False, SFTTraining(recipe="sft", max_pixels=2_621_440), "apply only to vision-language"),
+        (
+            False,
+            SFTTraining(recipe="sft", image_size=ImageSize(longest_edge=2_621_440, shortest_edge=65_536)),
+            "apply only to vision-language",
+        ),
     ],
     ids=[
         "vlm-distillation",
         "vlm-tokenizer-backend",
         "vlm-mask-generation-prompt",
         "bi-encoder-mask-generation-prompt",
+        "text-max-pixels",
+        "text-image-size",
     ],
 )
 def test_compile_training_step_rejects_options_the_recipe_would_ignore(

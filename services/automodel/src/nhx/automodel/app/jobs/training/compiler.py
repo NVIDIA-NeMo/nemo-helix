@@ -309,8 +309,6 @@ def _translate_model_config(
     training = job_spec.training
     recorded = traits or CheckpointTraits()
     image_size = training.image_size
-    if (training.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
-        raise ValueError("max_pixels and image_size apply only to vision-language checkpoints.")
     return ModelConfig(
         path=path,
         name=_extract_model_name(job_spec),
@@ -389,6 +387,8 @@ def _reject_sequence_shorter_than_image(training: AnyTraining, traits: Checkpoin
 
 def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, *, has_vision_tower: bool) -> None:
     """Reject settings the resolved recipe would otherwise ignore."""
+    if not has_vision_tower and (training.max_pixels is not None or training.image_size is not None):
+        raise ValueError("max_pixels and image_size apply only to vision-language checkpoints.")
     if has_vision_tower and training.tokenizer_backend is not None:
         raise ValueError(
             "tokenizer_backend is not supported for vision-language models, which load the checkpoint's processor."

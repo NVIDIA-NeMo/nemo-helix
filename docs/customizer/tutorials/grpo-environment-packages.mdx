@@ -450,7 +450,7 @@ uv run --no-project --with datasets --with pillow \
   --prompt qwen
 ```
 
-Package the server with the conversion environment's Python, not `uv run` against the project environment:
+Package the server with the conversion environment's Python, not `uv run` against the project environment. Set `ARCH` to the architecture of the GRPO training nodes, as in [wheels-v1](#wheels-v1). `--validate-only` does not check wheel tags, so a mismatch fails only when the job installs the wheels.
 
 ```bash
 .venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
@@ -459,11 +459,36 @@ Package the server with the conversion environment's Python, not `uv run` agains
   --nemo-rl-root <nemo-rl-checkout> \
   --config clevr_cogent.yaml \
   --format wheels-v1 \
-  --arch x86_64 \
+  --arch "$ARCH" \
   --out-dir ./clevr-cogent-env
 ```
 
 Add `--config clevr_cogent_tool.yaml` for the tool agent. That agent needs `inline_tool_output_images: true` on the policy model server and `max_rollout_turns` of 2 on the job.
+
+The preparation script always writes `agent_ref.name: clevr_cogent_simple_agent` and no `responses_create_params.tools`. Adding the tool config does not change those rows, so rollouts would use the simple agent and never call `inspect_scene`. For the tool agent, rewrite **both** `training.jsonl` and `validation.jsonl` after preparing them:
+
+```bash
+python - <<'EOF'
+import json
+from pathlib import Path
+
+TOOL = {
+    "type": "function",
+    "name": "inspect_scene",
+    "description": "Return a second view of the scene.",
+    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    "strict": True,
+}
+
+for name in ("training.jsonl", "validation.jsonl"):
+    path = Path("clevr-cogent") / name
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    for row in rows:
+        row["agent_ref"]["name"] = "clevr_cogent_tool_agent"
+        row["responses_create_params"]["tools"] = [TOOL]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+EOF
+```
 
 ```bash
 .venv-conversion/bin/pi-to-gym-conversion --validate-only ./clevr-cogent-env

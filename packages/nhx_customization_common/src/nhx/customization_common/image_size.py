@@ -49,6 +49,9 @@ def check_max_pixels_or_image_size(max_pixels: int | None, image_size_set: bool)
     """``max_pixels`` and ``image_size`` are two ways to set the same ceiling, so only one may be set."""
     if max_pixels is not None and image_size_set:
         raise ValueError("Set max_pixels or image_size, not both.")
+    if max_pixels is not None and max_pixels < 2:
+        # image_size_bounds derives the floor as max_pixels // 2, so 1 would yield 0. Fail before the job exists.
+        raise ValueError("max_pixels must be at least 2.")
 
 
 def check_seq_length_fits_image(

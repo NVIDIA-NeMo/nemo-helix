@@ -310,6 +310,26 @@ nemo customization automodel --job-json ./job.json --workspace default --dry-run
 ```
 
 ```python
+def active_deployments(model_entity: str):
+    """Active deployments of the base model, newest first."""
+    found = []
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
+        ).items()
+        found.extend(d for d in deployments if d.status in ("CREATED", "PENDING", "READY"))
+    return found
+
+
+# An adapter is served from its base model's deployment, which other adapters can share.
+# Record what exists now so step 9 deletes only a deployment this job created.
+preexisting = {d.name for d in active_deployments(model_name)}
+
 customization = Customization.from_client(client)
 job = customization.automodel.jobs.create(spec=spec, workspace="default", name=f"cord-lora-{job_suffix}")
 print(job.job.name)
@@ -318,7 +338,7 @@ print(job.job.name)
 
 ## 7. Send one image
 
-Wait for the job to finish. The deployment is created in the last step, so looking it up earlier fails. Then wait for the deployment, and for the composite adapter route. READY can arrive before that route exists.
+Wait for the job to finish. The deployment is created in the last step, so looking it up earlier fails. The job reuses an active deployment of the base model when one exists, so pick the one that was not there before the job. Then wait for the deployment, and for the composite adapter route. READY can arrive before that route exists.
 
 ```python
 import time
@@ -336,23 +356,12 @@ while True:
 
 assert status.status.lower() == "completed"
 
-def find_deployment(model_entity: str):
-    configs = client.models.list_deployment_configs(
-        workspace="default",
-        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
-    ).items()
-    for config in configs:
-        deployments = client.models.list_deployments(
-            workspace="default",
-            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
-        ).items()
-        for deployment in deployments:
-            if deployment.status in ("CREATED", "PENDING", "READY"):
-                return deployment
-    raise RuntimeError(f"No active deployment serves default/{model_entity}")
-
-
-deployment = find_deployment(model_name)
+current = active_deployments(model_name)
+if not current:
+    raise RuntimeError(f"No active deployment serves default/{model_name}")
+created = [d for d in current if d.name not in preexisting]
+deployment = (created or current)[0]
+owns_deployment = bool(created)
 deployment_name = deployment.name
 if not client.models.wait_for_deployment_status(deployment_name, "READY", workspace="default", timeout=1800):
     raise TimeoutError("Deployment did not become ready")
@@ -445,17 +454,20 @@ print(exact, similarity)
 
 ## 9. Remove the deployment
 
-The scoring jobs use the deployment. Wait for them to finish, then delete the deployment and its config.
+The scoring jobs use the deployment. Wait for them to finish. Then delete the deployment and its config, but only if this job created them. An adapter is served from its base model's deployment, so a deployment that existed before the job can serve other adapters and is kept.
 
 ```python
 exact.wait_until_done()
 similarity.wait_until_done()
 
-config_name = deployment.config
-client.models.delete_deployment(name=deployment.name, workspace="default")
-if config_name:
-    client.models.delete_deployment_config(name=config_name, workspace="default")
-print(f"Deleted deployment {deployment.name}")
+if owns_deployment:
+    config_name = deployment.config
+    client.models.delete_deployment(name=deployment.name, workspace="default")
+    if config_name:
+        client.models.delete_deployment_config(name=config_name, workspace="default")
+    print(f"Deleted deployment {deployment.name}")
+else:
+    print(f"Kept deployment {deployment.name}: it existed before this job and may serve other adapters.")
 
 ```
 
