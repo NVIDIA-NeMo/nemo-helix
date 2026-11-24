@@ -404,7 +404,7 @@ async def test_sends_task_resources_env_and_gpu_types(tmp_path: Path, server: Se
     sent = server.creates[-1]
     assert sent["image"] == "registry.example/hello:1"
     assert sent["resource"] == {"cpu": "2", "memory": "4096Mi", "gpu": "1"}
-    assert sent["extensions"] == {"harbor.gpu_types": "h100"}
+    assert sent["extensions"] == {"harbor.gpu_types": "h100", "opensandbox.extensions.nemo-oom-kill-process": "true"}
     assert sent["env"]["TASK_VAR"] == "x"
     assert sent["timeout"].total_seconds() == 600
 
@@ -1183,3 +1183,17 @@ async def test_a_failed_status_read_records_nothing_and_still_stops(
     assert _terminations(tmp_path) == []
     assert "Could not check whether sandbox" in caplog.text
     assert server.live() == set()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "requested"), [({}, True), ({"runtime": "docker"}, False), ({"oom_kill_process": False}, False)]
+)
+async def test_a_kubernetes_sandbox_asks_that_a_process_out_of_memory_be_killed_on_its_own(
+    tmp_path: Path, server: Server, kwargs: dict[str, Any], requested: bool
+) -> None:
+    """So the agent survives a tool it launched running out of memory, as under Docker, which already behaves so."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, **kwargs)
+
+    await environment._create_sandbox()
+
+    assert ("opensandbox.extensions.nemo-oom-kill-process" in server.creates[-1]["extensions"]) is requested

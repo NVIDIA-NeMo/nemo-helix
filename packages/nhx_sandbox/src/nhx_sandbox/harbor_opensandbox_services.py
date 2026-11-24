@@ -70,12 +70,15 @@ COMPOSE_SECURITY_FEATURE = "compose-security"
 # Moving the egress policy API off 18080 when a compose service needs that port. An older extension leaves the API
 # on 18080, and the service can't start.
 EGRESS_PORT_FEATURE = "egress-port"
+# Asking the NRI memory-qos plugin to kill only the process that ran out of memory.
+OOM_KILL_PROCESS_FEATURE = "oom-kill-process"
 EXTENSION_FEATURES = (
     COMPOSE_SERVICES_FEATURE,
     AGENT_BUNDLE_FEATURE,
     COMPOSE_MAIN_FEATURE,
     COMPOSE_SECURITY_FEATURE,
     EGRESS_PORT_FEATURE,
+    OOM_KILL_PROCESS_FEATURE,
 )
 
 # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
@@ -84,6 +87,10 @@ AGENT_BUNDLE_POD_ANNOTATION = "opensandbox.io/extensions.nemo-agent-bundle"
 # The init container that installs the bundle, and where it puts the agent in ``main``.
 AGENT_BUNDLE_CONTAINER = "agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"
+
+# The OOM kill request's extensions key and pod annotation, copied the same way as the services'. Its value is unused.
+OOM_KILL_PROCESS_EXTENSION_KEY = "opensandbox.extensions.nemo-oom-kill-process"
+OOM_KILL_PROCESS_POD_ANNOTATION = "opensandbox.io/extensions.nemo-oom-kill-process"
 
 # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
 # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.

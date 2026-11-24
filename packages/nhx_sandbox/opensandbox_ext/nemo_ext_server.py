@@ -6,6 +6,8 @@
 A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
 those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
 JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
+One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation that
+has a node running the plugin kill only the process that ran out of memory, not the whole container.
 The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
 ``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
 
@@ -47,7 +49,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from kubernetes import client as k8s
 from kubernetes.stream import stream
-from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
+from nemo_ext_pod import (
+    add_agent_bundle,
+    add_process_oom_kill,
+    add_services,
+    agent_bundle_state,
+    move_egress_api,
+    service_states,
+)
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_CONTAINER,
     AGENT_BUNDLE_EXTENSION_KEY,
@@ -55,6 +64,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     EGRESS_API_PORT_ANNOTATION,
     EXTENSION_FEATURES,
     EXTENSION_KEY,
+    OOM_KILL_PROCESS_POD_ANNOTATION,
     POD_ANNOTATION,
     ComposeServices,
     SandboxAgentBundle,
@@ -138,6 +148,9 @@ class NemoComposeProvider(BatchSandboxProvider):
         template = batchsandbox["spec"]["template"]
         annotations = (template.get("metadata") or {}).get("annotations", {})
         pull_policy = self.image_pull_policy or "IfNotPresent"
+
+        if OOM_KILL_PROCESS_POD_ANNOTATION in annotations:
+            add_process_oom_kill(template.setdefault("metadata", {}))
 
         # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
         # The bundle goes first, so the agent is installed before any service starts.

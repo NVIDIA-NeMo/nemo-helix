@@ -35,6 +35,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_POD_ANNOTATION,
     EGRESS_API_PORT_ANNOTATION,
     EXTENSION_KEY,
+    OOM_KILL_PROCESS_POD_ANNOTATION,
     POD_ANNOTATION,
 )
 from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
@@ -174,6 +175,16 @@ def test_bundle_is_added_to_the_stock_manifest_before_the_services(
     assert bundle["command"] == ["/opt/agent-bundle/copy-agent", "/installed-agent"]
     sandbox_mounts = pod_spec["containers"][0]["volumeMounts"]
     assert {"name": "nemo-installed-agent", "mountPath": "/installed-agent", "readOnly": True} in sandbox_mounts
+
+
+@pytest.mark.parametrize("requested", [True, False])
+def test_an_oom_kill_request_annotates_the_pod_for_the_nri_plugin(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, requested: bool
+) -> None:
+    _create(provider, {OOM_KILL_PROCESS_POD_ANNOTATION: "true"} if requested else None)
+
+    annotations = k8s.created[0]["spec"]["template"]["metadata"].get("annotations") or {}
+    assert ("memory.oom.group.memory-qos.nri.io/sandbox" in annotations) is requested
 
 
 def test_invalid_bundle_is_a_value_error_and_creates_nothing(
@@ -332,7 +343,14 @@ def test_health(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.get("/v1/nemo-ext/health").json() == {
         "status": "ok",
         "extension": "nemo-compose-services",
-        "features": ["compose-services", "agent-bundle", "compose-main", "compose-security", "egress-port"],
+        "features": [
+            "compose-services",
+            "agent-bundle",
+            "compose-main",
+            "compose-security",
+            "egress-port",
+            "oom-kill-process",
+        ],
     }
     monkeypatch.setattr(ext, "_provider", None)
     assert api.get("/v1/nemo-ext/health").status_code == 503

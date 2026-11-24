@@ -20,7 +20,14 @@ from kubernetes.client import (
     V1Pod,
     V1PodStatus,
 )
-from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
+from nemo_ext_pod import (
+    add_agent_bundle,
+    add_process_oom_kill,
+    add_services,
+    agent_bundle_state,
+    move_egress_api,
+    service_states,
+)
 from nhx_sandbox.harbor_opensandbox_services import ComposeServices, SandboxAgentBundle, parse_compose_services
 
 SERVICES = parse_compose_services(
@@ -539,7 +546,25 @@ def test_bundle_name_clash_is_rejected() -> None:
             ("ErrImagePull: denied", False),
         ),
         ((_status("agent-bundle", waiting=V1ContainerStateWaiting(reason="PodInitializing")),), (None, False)),
+        # CRI-O refuses a short image name it can't resolve; it never pulls, so waiting can't help.
+        (
+            (
+                _status(
+                    "agent-bundle", waiting=V1ContainerStateWaiting(reason="ImageInspectError", message="ambiguous")
+                ),
+            ),
+            ("ImageInspectError: ambiguous", False),
+        ),
     ],
 )
 def test_bundle_state(statuses: tuple[V1ContainerStatus, ...], state: tuple[str | None, bool]) -> None:
     assert agent_bundle_state(_pod(*statuses)) == state
+
+
+def test_an_oom_kill_request_annotates_only_the_sandbox_container_for_the_nri_plugin() -> None:
+    """Per container, so the egress sidecar and compose services keep Kubernetes' default."""
+    metadata: dict[str, Any] = {"annotations": {"existing": "kept"}}
+
+    add_process_oom_kill(metadata)
+
+    assert metadata["annotations"] == {"existing": "kept", "memory.oom.group.memory-qos.nri.io/sandbox": "0"}

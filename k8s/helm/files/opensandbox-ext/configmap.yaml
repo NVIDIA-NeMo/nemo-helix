@@ -41,6 +41,8 @@ data:
     A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
     those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
     JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
+    One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation that
+    has a node running the plugin kill only the process that ran out of memory, not the whole container.
     The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
     ``AGENT_BUNDLE_POD_ANNOTATION``), so the spec travels with the manifest:
 
@@ -82,7 +84,14 @@ data:
     from fastapi import APIRouter, HTTPException
     from kubernetes import client as k8s
     from kubernetes.stream import stream
-    from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
+    from nemo_ext_pod import (
+        add_agent_bundle,
+        add_process_oom_kill,
+        add_services,
+        agent_bundle_state,
+        move_egress_api,
+        service_states,
+    )
     from nhx_sandbox.harbor_opensandbox_services import (
         AGENT_BUNDLE_CONTAINER,
         AGENT_BUNDLE_EXTENSION_KEY,
@@ -90,6 +99,7 @@ data:
         EGRESS_API_PORT_ANNOTATION,
         EXTENSION_FEATURES,
         EXTENSION_KEY,
+        OOM_KILL_PROCESS_POD_ANNOTATION,
         POD_ANNOTATION,
         ComposeServices,
         SandboxAgentBundle,
@@ -173,6 +183,9 @@ data:
             template = batchsandbox["spec"]["template"]
             annotations = (template.get("metadata") or {}).get("annotations", {})
             pull_policy = self.image_pull_policy or "IfNotPresent"
+
+            if OOM_KILL_PROCESS_POD_ANNOTATION in annotations:
+                add_process_oom_kill(template.setdefault("metadata", {}))
 
             # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.
             # The bundle goes first, so the agent is installed before any service starts.
@@ -529,6 +542,8 @@ data:
     * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
     * Each container's ``security`` narrows its ``securityContext``, and each ``tmpfs`` becomes a
       memory-backed ``emptyDir`` mounted only in that container.
+    * An OOM kill request annotates the pod so the NRI memory-qos plugin, where a node runs it, kills
+      only the process in ``sandbox`` that ran out of memory.
 
     Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
     """
@@ -563,6 +578,10 @@ data:
     # mounts its own folder at one of them gets its own instead: both are empty writable folders.
     REPLACEABLE_TEMPLATE_MOUNTS = frozenset({"/logs", "/solution"})
 
+    # The NRI memory-qos plugin's annotation for ``sandbox``'s ``memory.oom.group``:
+    # https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html
+    NRI_OOM_GROUP_ANNOTATION = f"memory.oom.group.memory-qos.nri.io/{SANDBOX_CONTAINER}"
+
     # Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
     # service gets ~10 minutes to become ready once it runs, egress 2 minutes.
     STARTUP_PROBE_FAILURES = 600
@@ -576,7 +595,14 @@ data:
     CRASH_RESTARTS = 3
     # Waiting reasons that never clear on their own.
     FATAL_WAITING_REASONS = frozenset(
-        {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "ErrImageNeverPull", "CreateContainerConfigError"}
+        {
+            "ErrImagePull",
+            "ImagePullBackOff",
+            "InvalidImageName",
+            "ErrImageNeverPull",
+            "CreateContainerConfigError",
+            "ImageInspectError",
+        }
     )
 
 
@@ -756,6 +782,17 @@ data:
             "securityContext": {"privileged": False, "capabilities": {"drop": ["NET_ADMIN", "NET_RAW"]}},
         }
         init.append(bundle_container)
+
+
+    def add_process_oom_kill(template_metadata: dict[str, Any]) -> None:
+        """Ask the NRI memory-qos plugin to kill only the process in ``sandbox`` that runs out of memory, as Docker does.
+
+        Kubernetes 1.28 and later set every container's ``memory.oom.group`` to 1, so the kernel kills
+        every process in it. The plugin sets it to 0 for a container whose pod is annotated so, when its
+        config lists ``memory.oom.group`` under ``unifiedannotations``. A node without it ignores the
+        annotation.
+        """
+        template_metadata.setdefault("annotations", {})[NRI_OOM_GROUP_ANNOTATION] = "0"
 
 
     def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
@@ -1017,12 +1054,15 @@ data:
     # Moving the egress policy API off 18080 when a compose service needs that port. An older extension leaves the API
     # on 18080, and the service can't start.
     EGRESS_PORT_FEATURE = "egress-port"
+    # Asking the NRI memory-qos plugin to kill only the process that ran out of memory.
+    OOM_KILL_PROCESS_FEATURE = "oom-kill-process"
     EXTENSION_FEATURES = (
         COMPOSE_SERVICES_FEATURE,
         AGENT_BUNDLE_FEATURE,
         COMPOSE_MAIN_FEATURE,
         COMPOSE_SECURITY_FEATURE,
         EGRESS_PORT_FEATURE,
+        OOM_KILL_PROCESS_FEATURE,
     )
 
     # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
@@ -1031,6 +1071,10 @@ data:
     # The init container that installs the bundle, and where it puts the agent in ``main``.
     AGENT_BUNDLE_CONTAINER = "agent-bundle"
     INSTALLED_AGENT_DIR = "/installed-agent"
+
+    # The OOM kill request's extensions key and pod annotation, copied the same way as the services'. Its value is unused.
+    OOM_KILL_PROCESS_EXTENSION_KEY = "opensandbox.extensions.nemo-oom-kill-process"
+    OOM_KILL_PROCESS_POD_ANNOTATION = "opensandbox.io/extensions.nemo-oom-kill-process"
 
     # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
     # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
