@@ -7,117 +7,84 @@ description: ""
 ---
 <a id="open-telemetry-setup"></a>
 
-Set up OpenTelemetry configurations to gain visibility into the operations and performance of NeMo Helix.
-
 ## Configuration
 
-NeMo Helix uses OpenTelemetry to collect telemetry data from the platform and services. It leverages common OpenTelemetry SDK [configuration options](https://opentelemetry.io/docs/languages/sdk-configuration/) to configure the platform deployment.
+NeMo Helix uses standard [OpenTelemetry SDK settings](https://opentelemetry.io/docs/languages/sdk-configuration/)
+to configure export of traces, metrics, and Python application logs.
 
 ## Helm Configuration
 
-The NeMo Helix Helm Chart `values.yaml` exposes OpenTelemetry SDK options to configure the platform deployment. For example, to enable OpenTelemetry for the platform:
+For Helm deployments, set OpenTelemetry environment variables under `telemetry`
+in your chart values. This example exports traces and metrics over gRPC.
+Replace the example address with the endpoint of your collector.
 
 ```yaml
 telemetry:
- OTEL_TRACES_EXPORTER: "otlp"
- OTEL_METRICS_EXPORTER: "otlp"
- OTEL_EXPORTER_OTLP_ENDPOINT: "opentelemetry-collector.monitoring:4317"
- OTEL_EXPORTER_OTLP_INSECURE: true
+  OTEL_TRACES_EXPORTER: "otlp"
+  OTEL_METRICS_EXPORTER: "otlp"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.example.com:4317"
+  OTEL_EXPORTER_OTLP_INSECURE: true
 ```
 
-For a complete list of the default values, refer to [Helm Configuration](/documentation/kubernetes-deployment/helm/helm-reference).
-
+See the [Helm reference](/documentation/kubernetes-deployment/helm/helm-reference) for chart defaults.
 
 ## Python application logs
 
-Helix keeps console logging active and can also send logs directly to an OTel
-collector using the standard Python OTel logging handler. This applies to API,
-controller, and platform task logging initialization.
+Helix can send Python log records directly to an OpenTelemetry Collector while
+keeping console logging active. The API, controllers, and managed Python tasks
+use the standard OpenTelemetry logging handler.
 
 ```bash
 export OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=true
 export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://opentelemetry-collector:4318
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector.example.com:4318/v1/logs
+export OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf
 ```
 
+Replace the example endpoint with one reachable from the emitting process.
+The collector needs an OTLP receiver for the selected protocol and a logs
+pipeline. For the API and controllers, you can also set these variables under
+`telemetry` in your Helm values. Managed job pods use their own environment.
+
 `OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION` defaults to `true` when unset. Set it to
-`false` to skip installing the OTel logging handler. `OTEL_LOGS_EXPORTER=none`
-(the default) disables direct OTLP log export even when the handler is installed.
-`OTEL_SDK_DISABLED=true` also disables direct export. Console logging continues
-with the configured `LOG_FORMAT`, `LOG_LEVEL`, and sensitive-data filtering.
+`false` to skip installing the OpenTelemetry logging handler.
+`OTEL_LOGS_EXPORTER=none` (the default) disables direct OTLP log export even when
+the handler is installed. `OTEL_SDK_DISABLED=true` also disables direct export.
+Console logging continues with the configured `LOG_FORMAT`, `LOG_LEVEL`, and
+sensitive-data filtering.
 
 Log-specific `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` and
 `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL` override the general endpoint and protocol.
 Supported protocols are `grpc` (the default) and `http/protobuf`. For HTTP, Helix
-appends `/v1/logs` to the general endpoint; a log-specific endpoint is used as-is.
-Standard OTLP exporter environment settings, including headers, timeouts, TLS,
-and insecure transport, continue to apply.
+appends `/v1/logs` to the general endpoint. Include the full logs path when
+setting a log-specific endpoint. Standard OTLP exporter settings for headers,
+timeouts, TLS, and insecure transport also apply.
 
 Direct records retain severity, exception details, available trace/span IDs,
 service/workspace/job context, and extra structured fields. Source-file metadata
-and traceback frame filenames use only the filename, without absolute source paths.
+and traceback frames report filenames only.
 
 Messages marked with `extra={"sensitive": True}` are discarded from both console
 and direct OTLP output. This filter does not automatically redact secrets or
 personal data from unmarked messages, exceptions, or extra fields. Internal
 request logs follow `LOG_INTERNAL_REQUESTS` for both outputs.
 
-If a collector already collects the application's console output, enabling
-direct OTLP export can ingest each message twice. Choose the ingestion path for
-your deployment: keep `OTEL_LOGS_EXPORTER=none` or set
-`OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=false` when relying on console collection,
-or arrange for the collector to exclude those console records when using direct
-export. Disabling Python log auto-instrumentation does not disable console
-collection, job-launcher log paths, or Files log storage/query paths.
-
-
-### Before disabling namespace console collection
-
-Verify the replacement paths before stopping stdout/stderr scraping for a namespace:
-
-1. Inventory the actual namespaces, pods, and containers selected by the scrape
-   configuration. Include API/controller pods, managed task pods, init containers,
-   and sidecars. Managed task pods default to the controller's namespace unless
-   their execution profile selects another namespace.
-2. Enable direct logs for API/controllers through top-level Helm `telemetry`:
-   `OTEL_LOGS_EXPORTER=otlp`, `OTEL_PYTHON_LOG_AUTO_INSTRUMENTATION=true`, and
-   `OTEL_SDK_DISABLED=false`. Verify the effective settings in the deployed pods.
-   Confirm the collector has an OTLP receiver connected to its **logs pipeline**
-   and central logging backend; a working traces pipeline is insufficient.
-3. Verify DNS, network access, endpoint/port, protocol, and authentication/TLS
-   settings from each source. Emit a normal log and an exception from each
-   API/controller process and confirm both reach central logs with the expected
-   service, severity, and exception details. Check trace/span correlation when
-   an active trace is available.
-4. Establish coverage for early startup output, `print`, native libraries,
-   subprocesses, init containers, and sidecars. The Python logging handler does
-   not capture every stdout/stderr write. Retain a collection route for required
-   output that direct OTLP does not cover.
-5. Test representative managed jobs separately. Their launcher-to-Files log path
-   is independent of central console scraping. If jobs also need direct central
-   logs, configure OTLP per step and allow the job pods to reach the collector.
-   Direct export covers Python records that reach the logging handler. Verify
-   the required central and Files log paths before removing their scrape coverage.
-6. During a bounded overlap, compare expected records, existing queries, and
-   alerts. Account for duplicate records and differences in fields/resource
-   metadata; select which route to retain for each source before ending overlap.
-7. Disable scraping only for verified sources, then repeat checks through a pod
-   restart and a job completion/failure. Monitor for missing expected logs and
-   restore scraping if the replacement route is incomplete.
-
+If your collector also ingests console output, the same Python log record can
+arrive twice. For console-only collection, keep `OTEL_LOGS_EXPORTER=none`.
+When using direct export, exclude duplicate console records in your collector.
+Keep a collection path for any required output that goes straight to stdout or
+stderr, such as `print()` output or subprocess logs. Console collection,
+job-launcher logging, and Files log storage and queries operate independently
+of the Python logging handler.
 
 ## GenAI workload telemetry
 
-Console and direct OTLP application logs describe platform activity. AI-operation
-spans, metrics, and events come from workload instrumentation, using the
-[OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)
-for fields such as `gen_ai.operation.name`, `gen_ai.provider.name`, and input/output
-token usage. Enabling application log export does not create that instrumentation.
-See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
-for supported workload telemetry ingestion paths.
+To collect spans, metrics, and events for AI operations, instrument your workload
+using the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai).
+The conventions define attributes such as `gen_ai.operation.name`,
+`gen_ai.provider.name`, and input and output token counts. For supported
+ingestion paths, see [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 
-For new instrumentation, follow upstream's opt-in content-capture guidance:
-model prompts/completions and tool-call arguments/results can contain
-sensitive data and should remain uncaptured unless explicitly enabled. The generic
-application-log filter does not redact content recorded in workload telemetry.
+Make recording prompts, completions, and tool-call inputs and outputs opt-in.
+The Python application log filter applies to log records marked as sensitive.
+Configure content capture separately in your workload instrumentation.
