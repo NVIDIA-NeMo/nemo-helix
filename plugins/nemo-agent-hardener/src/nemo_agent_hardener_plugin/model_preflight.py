@@ -7,20 +7,27 @@ A war-game spins up a Docker sandbox and runs for minutes; a mistyped model name
 ``base_url``/key should fail in seconds, not after the sandbox is up. :func:`probe_models` lists the
 models a credential can reach (``GET {base_url}/models``); :func:`validate_choice` turns that into a
 verdict, and — crucially — hands back the *available* models so the caller can show the user what they
-*can* use instead of what they typed. Providers that don't implement ``/models`` are a soft pass
-(reachable, list unknown) rather than a hard failure.
+*can* use instead of what they typed. Providers that don't implement ``/models`` fall through
+to a one-token ``/chat/completions`` probe, which is also what proves the key can actually generate.
 
 The same helper backs both the interactive Studio "Test connection" and the launch-time preflight.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
 _PROBE_TIMEOUT_S = 10.0
+#: Brief provider hiccups a one-token probe retries so they don't fail a launch or "Test connection".
+_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+_PROBE_ATTEMPTS = 3
+_PROBE_BACKOFF_S = 1.0
+_MAX_RETRY_AFTER_S = 5.0
 #: Hosts where plaintext http:// carries the credential no further than this machine, so sending it
 #: is safe. Anything else over http:// would put the key on the wire in the clear.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -52,14 +59,21 @@ class Validation:
     detail: str = ""
 
 
+def _auth_headers(base_url: str, api_key: str | None) -> tuple[dict[str, str], bool]:
+    """Bearer header for *api_key*, and whether it was withheld.
+
+    A plaintext endpoint would put the key on the wire in the clear, so the header is withheld
+    rather than the probe refused: an endpoint that needs no credential still validates cleanly.
+    """
+    parsed = urlsplit(base_url)
+    withheld = bool(api_key) and parsed.scheme != "https" and parsed.hostname not in _LOOPBACK_HOSTS
+    return ({"Authorization": f"Bearer {api_key}"} if api_key and not withheld else {}), withheld
+
+
 def probe_models(base_url: str, api_key: str | None, *, client: httpx.Client | None = None) -> ProbeResult:
     """List the models reachable at ``{base_url}/models`` with *api_key* (best-effort, never raises)."""
     url = base_url.rstrip("/") + "/models"
-    parsed = urlsplit(base_url)
-    # A plaintext endpoint would put the key on the wire in the clear, so the header is withheld
-    # rather than the probe refused: an endpoint that needs no credential still validates cleanly.
-    withheld_credential = bool(api_key) and parsed.scheme != "https" and parsed.hostname not in _LOOPBACK_HOSTS
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key and not withheld_credential else {}
+    headers, withheld_credential = _auth_headers(base_url, api_key)
     owns = client is None
     client = client or httpx.Client(timeout=_PROBE_TIMEOUT_S)
     try:
@@ -93,14 +107,78 @@ def probe_models(base_url: str, api_key: str | None, *, client: httpx.Client | N
     return ProbeResult(reachable=True, auth_ok=True, available=ids)
 
 
+def _probe_chat(model: str, base_url: str, api_key: str | None, client: httpx.Client | None) -> Validation:
+    """One-token ``POST /chat/completions``: the only check that the key can actually use *model*.
+
+    ``/models`` is often public or key-agnostic, so listing alone can pass a key the endpoint rejects.
+    """
+    headers, withheld = _auth_headers(base_url, api_key)
+    body = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+    owns = client is None
+    client = client or httpx.Client(timeout=_PROBE_TIMEOUT_S)
+    try:
+        resp = _post_retrying_transient(client, base_url.rstrip("/") + "/chat/completions", headers, body)
+    except httpx.HTTPError as exc:
+        return Validation(ok=False, reason="unreachable", detail=str(exc) or exc.__class__.__name__)
+    finally:
+        if owns:
+            client.close()
+    status = resp.status_code
+    if status < 400:
+        return Validation(ok=True)
+    detail = f"HTTP {status}: {_server_message(resp)}".rstrip(": ")
+    if status in (401, 403):
+        suffix = " (credential withheld: endpoint is plaintext http://)" if withheld else ""
+        return Validation(ok=False, reason="auth", detail=detail + suffix)
+    if status == 404:
+        return Validation(ok=False, reason="unknown_model", detail=detail)
+    if status in (400, 422):
+        # The key and model got past auth; only the probe's shape was refused (e.g. a reasoning model
+        # that wants more than one token), which says nothing against the choice.
+        return Validation(ok=True, detail=f"probe request refused, key accepted ({detail})")
+    return Validation(ok=False, reason="provider_error", detail=detail)
+
+
+def _post_retrying_transient(
+    client: httpx.Client, url: str, headers: dict[str, str], body: dict[str, Any]
+) -> httpx.Response:
+    resp = client.post(url, headers=headers, json=body)
+    for attempt in range(1, _PROBE_ATTEMPTS):
+        if resp.status_code not in _TRANSIENT_STATUSES:
+            break
+        time.sleep(_retry_delay(resp, attempt))
+        resp = client.post(url, headers=headers, json=body)
+    return resp
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """The endpoint's ``Retry-After`` seconds (capped), else 1s then 3s."""
+    try:
+        return min(float(resp.headers["retry-after"]), _MAX_RETRY_AFTER_S)
+    except (KeyError, ValueError):
+        return _PROBE_BACKOFF_S * 3.0 ** (attempt - 1)
+
+
+def _server_message(resp: httpx.Response) -> str:
+    """The ``error.message`` of an OpenAI-style error body, else the start of the raw body."""
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    message = error.get("message") if isinstance(error, dict) else error
+    return str(message or resp.text)[:200]
+
+
 def validate_choice(
     model: str | None, base_url: str, api_key: str | None, *, client: httpx.Client | None = None
 ) -> Validation:
     """Validate one model group's (model, base_url, key): reachable, authorized, and the model exists.
 
     A model that isn't in the reachable list fails with ``reason="unknown_model"`` and the available
-    list, so the caller can present real choices. If the endpoint has no ``/models`` we can't verify the
-    name — treat it as a pass (reachability + auth already confirmed).
+    list, so the caller can present real choices. A model that passes the list (or whose endpoint has no
+    ``/models``) must still answer a one-token chat call with the key. With no model to test and no
+    ``/models``, reachability is all that can be confirmed.
     """
     result = probe_models(base_url, api_key, client=client)
     if not result.reachable:
@@ -109,8 +187,12 @@ def validate_choice(
         return Validation(ok=False, reason="auth", detail=result.detail)
     if not result.status_ok:
         return Validation(ok=False, reason="provider_error", detail=result.detail)
-    if not result.list_supported:
-        return Validation(ok=True, detail=result.detail)
-    if model and model not in result.available:
+    if result.list_supported and model and model not in result.available:
         return Validation(ok=False, reason="unknown_model", available=result.available)
-    return Validation(ok=True, available=result.available)
+    detail = "" if result.list_supported else result.detail
+    if model:
+        chat = _probe_chat(model, base_url, api_key, client)
+        if not chat.ok:
+            return Validation(ok=False, reason=chat.reason, available=result.available, detail=chat.detail)
+        detail = chat.detail or detail
+    return Validation(ok=True, available=result.available, detail=detail)

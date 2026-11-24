@@ -131,6 +131,86 @@ def test_validate_known_model_ok() -> None:
     assert v.ok
 
 
+def _split_handler(models: httpx.Response, chat: httpx.Response) -> Any:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return chat if req.method == "POST" else models
+
+    return handler
+
+
+def test_a_key_rejected_by_chat_fails_even_when_models_lists_fine() -> None:
+    handler = _split_handler(httpx.Response(200, json={"data": [{"id": "m"}]}), httpx.Response(401))
+    verdict = validate_choice("m", "https://x/v1", "bad", client=_client(handler))
+    assert not verdict.ok and verdict.reason == "auth"
+
+
+def test_chat_probe_is_one_token_with_the_key() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200, json={"data": [{"id": "m"}]})
+
+    assert validate_choice("m", "https://x/v1", "k", client=_client(handler)).ok
+    post = next(r for r in seen if r.method == "POST")
+    assert post.url.path == "/v1/chat/completions"
+    assert post.headers["authorization"] == "Bearer k"
+    assert b'"max_tokens":1' in post.content.replace(b" ", b"")
+
+
+def test_missing_models_route_defers_to_the_chat_probe() -> None:
+    ok = _split_handler(httpx.Response(404), httpx.Response(200, json={}))
+    assert validate_choice("m", "https://x/v1", "k", client=_client(ok)).ok
+
+    bad = _split_handler(httpx.Response(404), httpx.Response(404))
+    verdict = validate_choice("m", "https://x/v1", "k", client=_client(bad))
+    assert not verdict.ok and verdict.reason == "unknown_model"
+
+    denied = _split_handler(httpx.Response(404), httpx.Response(403))
+    assert validate_choice("m", "https://x/v1", "k", client=_client(denied)).reason == "auth"
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_refused_probe_shape_still_passes_the_key(status: int) -> None:
+    """A reasoning model can refuse max_tokens=1 with a 400; the key and model were still accepted."""
+    chat = httpx.Response(status, json={"error": {"message": "max_tokens too small"}})
+    handler = _split_handler(httpx.Response(200, json={"data": [{"id": "m"}]}), chat)
+    verdict = validate_choice("m", "https://x/v1", "k", client=_client(handler))
+    assert verdict.ok
+    assert "max_tokens too small" in verdict.detail
+
+
+def test_a_transient_chat_error_is_retried_then_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin import model_preflight
+
+    monkeypatch.setattr(model_preflight.time, "sleep", lambda _s: None)
+    posts: list[int] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            return httpx.Response(200, json={"data": [{"id": "m"}]})
+        posts.append(1)
+        return httpx.Response(503) if len(posts) < 3 else httpx.Response(200, json={})
+
+    assert validate_choice("m", "https://x/v1", "k", client=_client(handler)).ok
+    assert len(posts) == 3
+
+
+def test_a_persistent_transient_error_fails_with_the_server_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin import model_preflight
+
+    monkeypatch.setattr(model_preflight.time, "sleep", lambda _s: None)
+    chat = httpx.Response(429, json={"error": {"message": "slow down"}})
+    verdict = validate_choice("m", "https://x/v1", "k", client=_client(_split_handler(httpx.Response(404), chat)))
+    assert verdict.reason == "provider_error" and "slow down" in verdict.detail
+
+
+def test_auth_detail_carries_the_server_message() -> None:
+    chat = httpx.Response(403, json={"error": {"message": "key lacks access to m"}})
+    verdict = validate_choice("m", "https://x/v1", "k", client=_client(_split_handler(httpx.Response(404), chat)))
+    assert verdict.reason == "auth" and "key lacks access to m" in verdict.detail
+
+
 def test_preflight_raises_model_unavailable_with_list(monkeypatch: pytest.MonkeyPatch) -> None:
     # A configured analysis model that the endpoint doesn't serve → classified failure listing real models.
     monkeypatch.setattr(
