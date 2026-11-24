@@ -664,6 +664,9 @@ class TestExecute:
         )
 
         assert compiled.steps[0].executor.profile == expected
+        # The job stores this spec, so it records the profile the run used, not just the type's choice.
+        assert step.job_profile == expected
+        assert compiled.steps[0].config["job_profile"] == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

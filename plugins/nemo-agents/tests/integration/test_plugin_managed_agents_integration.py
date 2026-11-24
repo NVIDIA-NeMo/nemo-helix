@@ -160,6 +160,8 @@ def test_a_run_records_its_prepared_context_and_can_be_listed_by_subject(ctx: Cl
     assert spec["subject"] == "bot"
     assert spec["plugin_managed_agent_type"] == "example.analyst"
     assert spec["input"] == "Analyze the target agent."
+    # The stored spec records the profile the run used.
+    assert spec["job_profile"] == "default"
     runs = AgentsClient.from_client(ctx.client).list_agent_jobs(
         workspace="default",
         collection="execute",

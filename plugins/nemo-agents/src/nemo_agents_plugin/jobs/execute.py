@@ -381,8 +381,9 @@ class ExecuteAgentStepConfig(BaseModel):
     # An opaque string whose meaning the type defines; None when the type gave
     # none, and for agents that are not plugin-managed.
     subject: str | None = None
-    # The jobs execution profile the plugin-managed agent type's ``prepare``
-    # chose, used when the request names none. None for every other agent.
+    # The jobs execution profile the run uses: the request's, else the one a
+    # plugin-managed agent type's ``prepare`` chose, else "default". Holds only
+    # the type's choice until ``compile`` settles it.
     job_profile: str | None = None
     # The plugin-managed agent type that prepared this run, recorded so a job
     # says what it is without looking up an agent that may since have changed.
@@ -585,10 +586,12 @@ class ExecuteAgentJob(NemoJob):
     ) -> HelixJobSpec:
         del workspace, entity_client, job_name, async_sdk, options
         step_config = ExecuteAgentStepConfig.model_validate(spec)
+        # Settled on the spec itself, which is what the job stores, so spec.job_profile
+        # names the profile the run actually used.
+        step_config.job_profile = profile or step_config.job_profile or "default"
 
         executor = CPUExecutionProviderSpec(
-            # The request's profile, then the one a plugin-managed agent type chose.
-            profile=profile or step_config.job_profile or "default",
+            profile=step_config.job_profile,
             provider="cpu",
             container=ContainerSpec(
                 image=cls._execution_image(step_config.request.image),
