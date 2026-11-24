@@ -365,7 +365,12 @@ async def _record_job_on(
                 if current.id == row.id and recorded == (uid, attempt_id):
                     # This submit's own write, made though its answer was lost: no one else holds these IDs.
                     return current
-                if current.id != row.id or recorded != held:
+                if current.id != row.id:
+                    break
+                if current.status != "pending":
+                    # Settled meanwhile, whatever job it came to record: returned as it settled.
+                    return current
+                if recorded != held:
                     break
             if current.status != "pending":
                 # Settled meanwhile, or adopted as it was: no step completes it now.
