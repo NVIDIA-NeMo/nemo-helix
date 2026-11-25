@@ -35,7 +35,7 @@ from nemo_deployments_plugin.backends.labels import (
     deployment_identity_labels,
 )
 from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig, PlatformEgressConfig
-from nemo_deployments_plugin.backends.opensandbox.endpoint import sandbox_endpoint_url
+from nemo_deployments_plugin.backends.opensandbox.endpoint import RESERVED_PORTS, sandbox_endpoint_url
 from nemo_deployments_plugin.backends.workload_identity import (
     workload_identity_activation_error,
     workload_identity_requested,
@@ -71,7 +71,7 @@ SERVE_READY_KEY = "nemo.nvidia.com/serve-ready"
 
 _IDLE_ENTRYPOINT = ["tail", "-f", "/dev/null"]
 _DEAD_STATES = frozenset({"Failed", "Terminated", "Stopping"})
-_STARTING_STATES = frozenset({"Pending", "Resuming"})
+_STARTING_STATES = frozenset({"Pending", "Allocated", "Resuming"})
 _LOG_TAIL_CHARS = 2000
 
 
@@ -217,8 +217,13 @@ class OpenSandboxDeploymentBackend(DeploymentBackend):
                 raise
             return _failed("execd no longer tracks the serve process; deployment is not serving")
         if not status.running:
-            tail = (await execd.commands.get_background_command_logs(command_id, cursor=0)).content
-            tail = tail[-_LOG_TAIL_CHARS:].strip()
+            try:
+                logs = await execd.commands.get_background_command_logs(command_id, cursor=0)
+            except SandboxException:
+                logger.warning("Failed to read the output of an exited serve process", exc_info=True)
+                tail = ""
+            else:
+                tail = logs.content[-_LOG_TAIL_CHARS:].strip()
             message = f"Serve process exited with code {status.exit_code}; deployment is not serving"
             return BackendStatusUpdate(
                 status="FAILED",
@@ -386,6 +391,14 @@ def _unsupported(config: DeploymentConfig, auth_context: AuthContext | None) -> 
         return "Volume mounts are not supported by the opensandbox backend"
     if not container.image:
         return "containers[0].image is required"
+    ports = {port.container_port for port in container.ports}
+    probe = container.readiness_probe
+    probe_port = _resolve_port(probe.http_get.port, container) if probe and probe.http_get else None
+    if probe_port is not None:
+        ports.add(probe_port)
+    reserved = sorted(RESERVED_PORTS & ports)
+    if reserved:
+        return f"Port(s) {', '.join(map(str, reserved))} are reserved by OpenSandbox"
     if not (container.command or container.args):
         return (
             "The opensandbox backend requires containers[0].command (the serve command); "

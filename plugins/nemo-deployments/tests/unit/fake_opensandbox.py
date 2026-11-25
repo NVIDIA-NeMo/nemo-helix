@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A fake OpenSandbox installation: lifecycle server, uri-mode ingress gateway, and execd."""
+"""A fake OpenSandbox installation: lifecycle server, header-mode ingress gateway, and execd."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, parse_qsl, urlsplit
 
 API_KEY = "osb-key"
 SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access"
+INGRESS_HEADER = "OpenSandbox-Ingress-To"
+LEGACY_INGRESS_HEADER = "OPEN-SANDBOX-INGRESS"
 EXECD_TOKEN_HEADER = "X-EXECD-ACCESS-TOKEN"
 
 
@@ -41,11 +43,13 @@ class FakeOpenSandbox:
     commands: dict[str, FakeCommand] = field(default_factory=dict)
     interrupted: list[str] = field(default_factory=list)
     probes: list[str] = field(default_factory=list)
+    gateway_requests: list[tuple[str, str, str]] = field(default_factory=list)
     initial_state: str = "Running"
     create_delay: float = 0.0
     server_status: int | None = None
     patch_status: int | None = None
     execd_status: int | None = None
+    logs_status: int | None = None
     app_status: int = 200
     secure_token_generation: int = 0
 
@@ -110,9 +114,20 @@ class _Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         parts = url.path.strip("/").split("/")
         body = self._body()
+        route = self._gateway_route()
+        if route is not None:
+            return self._gateway(route, parts, parse_qs(url.query), body)
         if parts[0] == "v1":
             return self._server(parts[1:], parse_qs(url.query), body)
-        return self._gateway(parts, parse_qs(url.query), body)
+        return self._send(400, text="missing header 'OpenSandbox-Ingress-To' or 'Host'")
+
+    def _gateway_route(self) -> str | None:
+        """The route label the ingress gateway reads: the routing header, its legacy name, then ``Host``."""
+        label = self.headers.get(INGRESS_HEADER) or self.headers.get(LEGACY_INGRESS_HEADER)
+        if label:
+            return label
+        host = self.headers.get("host", "")
+        return host.split(".")[0] if host.endswith(".osb.helix.internal") else None
 
     do_GET = do_POST = do_PATCH = do_DELETE = _handle
 
@@ -156,18 +171,18 @@ class _Handler(BaseHTTPRequestHandler):
                     sandbox["metadata"][key] = value
             return self._send(200, sandbox)
         if parts[2:3] == ["endpoints"]:
-            return self._send(
-                200, {"endpoint": "unused", "headers": {SECURE_ACCESS_HEADER: state.secure_token(parts[1])}}
-            )
+            headers = {INGRESS_HEADER: f"{parts[1]}-{parts[3]}", SECURE_ACCESS_HEADER: state.secure_token(parts[1])}
+            return self._send(200, {"endpoint": state.base, "headers": headers})
         if len(parts) == 2 and self.command == "DELETE":
             state.deleted.append(parts[1])
             del state.sandboxes[parts[1]]
             return self._send(204)
         return self._send(404, {"code": "NOT_FOUND", "message": "no such route"})
 
-    def _gateway(self, parts: list[str], query: dict[str, list[str]], body: bytes) -> None:
+    def _gateway(self, route: str, rest: list[str], query: dict[str, list[str]], body: bytes) -> None:
         state = self.state
-        sandbox_id, port, rest = parts[0], parts[1], parts[2:]
+        sandbox_id, _, port = route.rpartition("-")
+        state.gateway_requests.append((sandbox_id, port, urlsplit(self.path).path))
         if sandbox_id not in state.sandboxes:
             return self._send(404)
         if self.headers.get(SECURE_ACCESS_HEADER) != state.secure_token(sandbox_id):
@@ -205,6 +220,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"code": "NOT_FOUND", "message": "no such command"})
             return self._send(200, {"id": rest[2], "running": command.running, "exit_code": command.exit_code})
         if rest[:1] == ["command"] and rest[2:] == ["logs"]:
+            if state.logs_status is not None:
+                return self._send(state.logs_status)
             output = state.commands[rest[1]].output
             return self._send(200, text=output, headers={"EXECD-COMMANDS-TAIL-CURSOR": str(len(output))})
         return self._send(404)

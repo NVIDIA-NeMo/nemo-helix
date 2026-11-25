@@ -198,6 +198,25 @@ async def test_deployment_reaches_ready_across_polls(osb: FakeOpenSandbox, monke
     assert len(osb.probes) == 2
 
 
+async def test_execd_and_probe_requests_are_routed_by_header_to_the_deployments_own_sandbox(
+    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = osb.add({**IDENTITY, "nemo.nvidia.com/deployment-name": "another"})
+    probe = Probe(httpGet=HTTPGetAction(path=f"/../../{other}/18080/policy", port=8000))
+    backend = _backend(osb, monkeypatch, _config(container={"readiness_probe": probe}))
+    await _create(backend)
+    (sandbox_id,) = set(osb.sandboxes) - {other}
+
+    await _read(backend)
+    await _read(backend)
+
+    assert {(sandbox, port) for sandbox, port, _ in osb.gateway_requests} == {
+        (sandbox_id, "44772"),
+        (sandbox_id, "8000"),
+    }
+    assert osb.probes == [f"/{other}/18080/policy"]
+
+
 async def test_a_container_without_an_http_probe_is_ready_once_serving(
     osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -224,6 +243,22 @@ async def test_an_exited_serve_process_fails_the_deployment(
     assert len(osb.sandboxes) == 1
 
 
+async def test_an_exited_serve_process_fails_the_deployment_when_its_output_cannot_be_read(
+    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(osb, monkeypatch)
+    await _create(backend)
+    await _read(backend)
+    (command,) = osb.commands.values()
+    command.running, command.exit_code = False, 3
+    osb.logs_status = 500
+
+    update = await _read(backend)
+
+    assert (update.status, update.exit_code) == ("FAILED", 3)
+    assert update.status_message == "Serve process exited with code 3; deployment is not serving"
+
+
 async def test_a_serve_process_execd_no_longer_tracks_fails_the_deployment(
     osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -243,6 +278,15 @@ async def test_a_dead_sandbox_is_lost(osb: FakeOpenSandbox, monkeypatch: pytest.
 async def test_a_missing_sandbox_is_lost(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
     osb.add({**IDENTITY, "nemo.nvidia.com/deployment-name": "another"})
     assert (await _read(_backend(osb, monkeypatch))).status == "LOST"
+
+
+@pytest.mark.parametrize("state", ["Pending", "Allocated", "Resuming"])
+async def test_a_sandbox_that_is_not_running_yet_is_starting(
+    osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    osb.add(IDENTITY, state=state)
+    assert (await _read(_backend(osb, monkeypatch))).status == "STARTING"
+    assert osb.commands == {}
 
 
 async def test_a_paused_sandbox_is_unknown(osb: FakeOpenSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,6 +383,11 @@ async def test_an_unresolved_secret_fails_the_launch(osb: FakeOpenSandbox, monke
         ({"container": {"image": ""}}, "image is required"),
         ({"container": {"command": [], "args": []}}, "serve command"),
         ({"container": {"env": [EnvVar(name="X", valueFrom={"fieldRef": {}})]}}, "valueFrom"),
+        ({"container": {"ports": [ContainerPort(name="http", containerPort=44772)]}}, "Port(s) 44772 are reserved"),
+        (
+            {"container": {"readiness_probe": Probe(httpGet=HTTPGetAction(path="/policy", port=18080))}},
+            "Port(s) 18080 are reserved",
+        ),
         ({"workloadIdentity": WorkloadIdentitySpec(enabled=True)}, "orkload"),
     ],
 )

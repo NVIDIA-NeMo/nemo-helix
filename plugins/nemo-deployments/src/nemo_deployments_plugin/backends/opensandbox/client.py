@@ -4,7 +4,8 @@
 """OpenSandbox SDK services for one executor.
 
 Lifecycle calls go to the OpenSandbox server with the API key. execd calls go through the ingress
-gateway to the execd port of the sandbox, with the sandbox's endpoint headers and execd token.
+gateway to the execd port of the sandbox, with the gateway's routing header, the sandbox's endpoint
+headers and its execd token.
 """
 
 from __future__ import annotations
@@ -18,10 +19,13 @@ from typing import Self
 import httpx
 from nemo_deployments_plugin.backends.opensandbox.config import OpenSandboxExecutorConfig
 from nemo_deployments_plugin.backends.opensandbox.endpoint import (
+    INGRESS_HEADER,
     SandboxEndpointAuth,
     endpoint_headers,
     forget_endpoint_headers,
-    gateway_route,
+    parse_route_label,
+    route_label,
+    sandbox_endpoint_host,
 )
 from opensandbox.adapters.factory import AdapterFactory
 from opensandbox.config import ConnectionConfig
@@ -135,8 +139,12 @@ class OpenSandboxClient:
         """execd services of a sandbox, authorized with its endpoint headers and ``token``."""
         headers = await endpoint_headers((self._server_base, sandbox_id, DEFAULT_EXECD_PORT), self._api_key)
         endpoint = SandboxEndpoint(
-            endpoint=f"{self._gateway_address}/{sandbox_id}/{DEFAULT_EXECD_PORT}",
-            headers={**headers, EXECD_ACCESS_TOKEN_HEADER: token},
+            endpoint=self._gateway_address,
+            headers={
+                **headers,
+                INGRESS_HEADER: route_label(sandbox_id, DEFAULT_EXECD_PORT),
+                EXECD_ACCESS_TOKEN_HEADER: token,
+            },
         )
         return Execd(
             commands=self._factory.create_command_service(endpoint),
@@ -145,15 +153,18 @@ class OpenSandboxClient:
 
     async def http_get(self, sandbox_id: str, port: int, path: str, *, timeout: float) -> int | None:
         """Status code of ``GET path`` on ``port`` of the sandbox, or None when no response arrived."""
-        url = f"{self._gateway_base}/{sandbox_id}/{port}/{path.lstrip('/')}"
         try:
-            response = await self._probe.get(url, timeout=timeout)
-        except httpx.HTTPError:
+            response = await self._probe.get(
+                f"{self._gateway_base}/{path.lstrip('/')}",
+                headers={"Host": sandbox_endpoint_host(sandbox_id, port)},
+                timeout=timeout,
+            )
+        except (httpx.HTTPError, ValueError):
             return None
         return response.status_code
 
     async def _forget_headers_on_401(self, response: httpx.Response) -> None:
-        url = response.request.url
-        route = gateway_route(url.path)
-        if response.status_code == 401 and route is not None and str(url).startswith(f"{self._gateway_base}/"):
+        request = response.request
+        route = parse_route_label(request.headers.get(INGRESS_HEADER, ""))
+        if response.status_code == 401 and route is not None and str(request.url).startswith(f"{self._gateway_base}/"):
             forget_endpoint_headers((self._server_base, *route))

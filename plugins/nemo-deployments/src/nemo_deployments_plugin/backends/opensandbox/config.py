@@ -36,7 +36,7 @@ class OpenSandboxExecutorConfig(BaseModel):
 
     domain: HostPort = Field(description="OpenSandbox server as host[:port], with no scheme.")
     gateway_address: HostPort = Field(
-        description="OpenSandbox ingress gateway as host[:port], with no scheme. Requires uri route mode.",
+        description="OpenSandbox ingress gateway as host[:port], with no scheme. Requires header route mode.",
     )
     protocol: Literal["http", "https"] = Field(
         default="http", description="Scheme for the OpenSandbox server and ingress gateway."
@@ -49,7 +49,7 @@ class OpenSandboxExecutorConfig(BaseModel):
         default=None,
         description=(
             "Platform endpoint sandboxes reach. Sandbox egress is denied except to this endpoint. "
-            "Null denies all egress."
+            "Null denies all egress. The OpenSandbox server enforces this only when its egress mode is dns+nft."
         ),
     )
     default_resources: dict[str, str] = Field(

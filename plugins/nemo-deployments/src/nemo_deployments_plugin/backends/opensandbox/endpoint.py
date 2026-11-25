@@ -4,8 +4,9 @@
 """Endpoint transport for sandbox ports behind the OpenSandbox ingress gateway.
 
 Advertised URL: ``http://<sandbox id>-<port>.osb.helix.internal``.
-Dialed URL: ``<gateway>/<sandbox id>/<port>/<path>`` (``uri`` route mode).
-Request headers: those the OpenSandbox server returns for the port, fetched on first use.
+Dialed URL: the gateway, with the advertised URL's path and the advertised host in ``Host``.
+Request headers: ``OpenSandbox-Ingress-To: <sandbox id>-<port>`` (``header`` route mode) and those the
+OpenSandbox server returns for the port, fetched on first use.
 
 The header lookup needs the ``opensandbox`` extra.
 """
@@ -20,7 +21,7 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 import httpx
 from nemo_deployments_plugin.endpoint_transport import EndpointTransport
@@ -28,11 +29,13 @@ from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 logger = logging.getLogger(__name__)
 
 ENDPOINT_HOST_SUFFIX = "osb.helix.internal"
+INGRESS_HEADER = "OpenSandbox-Ingress-To"
+# Sandbox ports of execd and of the egress sidecar's policy API.
+RESERVED_PORTS = frozenset({44772, 18080})
 
-_SANDBOX_ID = r"[a-z0-9][a-z0-9-]*"
-_PORT = r"[0-9]{1,5}"
-_HOST_LABEL = re.compile(rf"(?P<sandbox>{_SANDBOX_ID})-(?P<port>{_PORT})")
-_GATEWAY_ROUTE = re.compile(rf"/(?P<sandbox>{_SANDBOX_ID})/(?P<port>{_PORT})(?:/|$)")
+# The ingress gateway reads this header when ``OpenSandbox-Ingress-To`` is absent.
+_LEGACY_INGRESS_HEADER = "OPEN-SANDBOX-INGRESS"
+_ROUTE_LABEL = re.compile(r"(?P<sandbox>[a-z0-9][a-z0-9-]*)-(?P<port>[0-9]{1,5})")
 _MAX_HOST_LABEL_LENGTH = 63
 
 _LOOKUP_TIMEOUT_SECONDS = 10.0
@@ -81,25 +84,44 @@ def forget_endpoint_headers(key: EndpointKey) -> None:
         _endpoint_headers.pop(key, None)
 
 
-def gateway_route(path: str) -> tuple[str, int] | None:
-    """Sandbox id and port of a gateway route path, or None when ``path`` is not one."""
-    route = _GATEWAY_ROUTE.match(path)
+def route_label(sandbox_id: str, port: int) -> str:
+    """``<sandbox id>-<port>``: the gateway's name for a sandbox port, and the advertised host's first label."""
+    label = f"{sandbox_id}-{port}"
+    if len(label) > _MAX_HOST_LABEL_LENGTH or _ROUTE_LABEL.fullmatch(label) is None:
+        raise ValueError(f"sandbox id {sandbox_id!r} and port {port!r} don't form a host name")
+    return label
+
+
+def parse_route_label(label: str) -> tuple[str, int] | None:
+    """Sandbox id and port of a route label, or None when ``label`` is not one."""
+    route = _ROUTE_LABEL.fullmatch(label)
     return (route["sandbox"], int(route["port"])) if route else None
+
+
+def sandbox_endpoint_host(sandbox_id: str, port: int) -> str:
+    """Advertised host for ``port`` of sandbox ``sandbox_id``."""
+    return f"{route_label(sandbox_id, port)}.{ENDPOINT_HOST_SUFFIX}"
 
 
 def sandbox_endpoint_url(sandbox_id: str, port: int) -> str:
     """Advertised URL for ``port`` of sandbox ``sandbox_id``."""
-    label = f"{sandbox_id}-{port}"
-    if len(label) > _MAX_HOST_LABEL_LENGTH or _HOST_LABEL.fullmatch(label) is None:
-        raise ValueError(f"sandbox id {sandbox_id!r} and port {port!r} don't form a host name")
-    return f"http://{label}.{ENDPOINT_HOST_SUFFIX}"
+    return f"http://{sandbox_endpoint_host(sandbox_id, port)}"
+
+
+def sandbox_route(host: str) -> tuple[str, int] | None:
+    """Sandbox id and port named by an advertised host, or None when ``host`` is not one."""
+    label, _, suffix = host.partition(".")
+    return parse_route_label(label) if suffix == ENDPOINT_HOST_SUFFIX else None
 
 
 class SandboxEndpointAuth(httpx.Auth):
-    """Sets the OpenSandbox endpoint headers on requests to a gateway sandbox route.
+    """Routes and authorizes requests that carry an advertised sandbox host in ``Host``.
 
-    Raises ``httpx.ConnectError`` without sending when the request targets anything else or the
-    header lookup fails.
+    Sets the gateway's routing header from that host and adds the headers the OpenSandbox server
+    returns for the sandbox port. The request path takes no part in routing.
+
+    Raises ``httpx.ConnectError`` without sending when the request is not for the gateway, its
+    host is not an advertised sandbox host, the port is reserved, or the header lookup fails.
     """
 
     def __init__(self, *, server_base: str, gateway_base: str, api_key_env: str) -> None:
@@ -113,7 +135,8 @@ class SandboxEndpointAuth(httpx.Auth):
 
     async def async_auth_flow(self, request: httpx.Request) -> AsyncGenerator[httpx.Request, httpx.Response]:
         try:
-            key = self._cache_key(request)
+            sandbox_id, port = self._route(request)
+            key = (self._server_base, sandbox_id, port)
             api_key = os.environ.get(self._api_key_env)
             if not api_key:
                 raise RuntimeError(f"{self._api_key_env} is not set")
@@ -124,16 +147,20 @@ class SandboxEndpointAuth(httpx.Auth):
             raise httpx.ConnectError("sandbox endpoint authorization is unavailable", request=request) from exc
         for name, value in headers.items():
             request.headers[name] = value
+        request.headers.pop(_LEGACY_INGRESS_HEADER, None)
+        request.headers[INGRESS_HEADER] = route_label(sandbox_id, port)
         response = yield request
         if response.status_code == 401:
             forget_endpoint_headers(key)
 
-    def _cache_key(self, request: httpx.Request) -> EndpointKey:
+    def _route(self, request: httpx.Request) -> tuple[str, int]:
         url = request.url
-        route = gateway_route(url.path)
+        route = sandbox_route(request.headers.get("host", ""))
         if route is None or (url.scheme, url.host, url.port) != self._gateway_origin:
-            raise ValueError("the request is not for a sandbox route on the OpenSandbox gateway")
-        return self._server_base, *route
+            raise ValueError("the request is not for a sandbox endpoint on the OpenSandbox gateway")
+        if route[1] in RESERVED_PORTS:
+            raise ValueError(f"port {route[1]} is reserved by OpenSandbox")
+        return route
 
 
 @dataclass(frozen=True)
@@ -144,15 +171,10 @@ class OpenSandboxEndpointTransport(EndpointTransport):
     api_key_env: str = "OPEN_SANDBOX_API_KEY"
 
     def target(self, url: str) -> tuple[str, dict[str, str]]:
-        """Map an advertised sandbox URL to its gateway route. Other URLs are returned unchanged."""
-        parsed = urlparse(url)
-        label, _, suffix = (parsed.hostname or "").partition(".")
-        route = _HOST_LABEL.fullmatch(label)
-        if self.connect_base is None or route is None or suffix != ENDPOINT_HOST_SUFFIX:
+        """Dial an advertised sandbox URL at the gateway, keeping its host. Other URLs are returned unchanged."""
+        if self.connect_base is None or sandbox_route(urlparse(url).netloc) is None:
             return url, {}
-        gateway = urlparse(self.connect_base)
-        path = f"/{route['sandbox']}/{route['port']}{parsed.path or '/'}"
-        return urlunparse(parsed._replace(scheme=gateway.scheme, netloc=gateway.netloc, path=path)), {}
+        return super().target(url)
 
     def client_kwargs(self) -> dict[str, Any]:
         return {

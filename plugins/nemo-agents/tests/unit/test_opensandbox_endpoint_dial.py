@@ -35,14 +35,20 @@ SID = "7920fbcd-4e18-4753-bb15-41957b6f12e0"
 OTHER = "11111111-2222-3333-4444-555555555555"
 TOKEN = "per-sandbox-token"
 TOKEN_HEADER = "OpenSandbox-Secure-Access"
+INGRESS_HEADER = "OpenSandbox-Ingress-To"
+LEGACY_INGRESS_HEADER = "OPEN-SANDBOX-INGRESS"
+ROUTE = f"{SID}-8000"
 INVOKE = "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/"
 
 
 class _FakeOpenSandbox:
+    """OpenSandbox server endpoint lookup plus a header-mode gateway with secure access on."""
+
     def __init__(self) -> None:
-        self.lookups = 0
+        self.lookups: list[str] = []
         self.lookups_fail = False
-        self.gateway_requests: list[tuple[str, str, list[str]]] = []
+        # (method, route label the gateway used, path, secure-access tokens)
+        self.gateway_requests: list[tuple[str, str, str, list[str]]] = []
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -57,13 +63,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         body = self.rfile.read(int(self.headers.get("content-length") or 0))
-        if self.path.startswith("/v1/sandboxes/"):
-            self.state.lookups += 1
+        host = self.headers.get("host", "")
+        # The ingress gateway routes on the routing header, then its legacy name, then Host.
+        label = self.headers.get(INGRESS_HEADER) or self.headers.get(LEGACY_INGRESS_HEADER)
+        if not label and host.endswith(".osb.helix.internal"):
+            label = host.split(".")[0]
+        if not label:
+            _, _, _, sandbox_id, _, port = self.path.split("?")[0].split("/")
+            self.state.lookups.append(f"{sandbox_id}-{port}")
             if self.state.lookups_fail:
                 return self._send(503)
-            return self._send(200, json.dumps({"endpoint": "unused", "headers": {TOKEN_HEADER: TOKEN}}).encode())
+            headers = {INGRESS_HEADER: f"{sandbox_id}-{port}", TOKEN_HEADER: TOKEN}
+            return self._send(200, json.dumps({"endpoint": host, "headers": headers}).encode())
         tokens = self.headers.get_all(TOKEN_HEADER) or []
-        self.state.gateway_requests.append((self.command, self.path, tokens))
+        self.state.gateway_requests.append((self.command, label, self.path, tokens))
         if tokens != [TOKEN]:
             return self._send(401)
         if self.path.endswith("/health"):
@@ -102,7 +115,7 @@ def _deployment() -> AgentDeployment:
         agent="calc",
         status="running",
         endpoint="",
-        deployment_mode="k8s",
+        deployment_mode="opensandbox",
         endpoints=[Endpoint(name="http", url=sandbox_endpoint_url(SID, 8000), protocol="http")],
     )
     deployment._id = "deployment-id"
@@ -131,8 +144,8 @@ def test_invoke_reaches_the_agent_with_the_sandbox_token(
 
     assert (first.status_code, first.json()) == (200, {"answer": 42})
     assert second.status_code == 200
-    assert state.gateway_requests == [("POST", f"/{SID}/8000/v1/chat/completions", [TOKEN])] * 2
-    assert state.lookups == 1
+    assert state.gateway_requests == [("POST", ROUTE, "/v1/chat/completions", [TOKEN])] * 2
+    assert state.lookups == [ROUTE]
 
 
 def test_invoke_preserves_sse_response(
@@ -148,19 +161,43 @@ def test_invoke_preserves_sse_response(
 
 
 @pytest.mark.parametrize(
-    "trailing",
-    ["%2e%2e/44772/command", "..%2f44772/command", f"%2e%2e/%2e%2e/{OTHER}/8000/command", "/44772/command"],
+    ("trailing", "forwarded"),
+    [
+        ("%2e%2e/44772/command", "/44772/command"),
+        ("..%2f44772/command", "/44772/command"),
+        (f"%2e%2e/%2e%2e/{OTHER}/8000/command", f"/{OTHER}/8000/command"),
+        ("/44772/command", "/44772/command"),
+        (f"http://{ROUTE}.osb.helix.internal/%2e%2e/%2e%2e/{OTHER}/18080/policy", f"/{OTHER}/18080/policy"),
+        (f"//{ROUTE}.osb.helix.internal/%2e%2e/%2e%2e/{OTHER}/18080/policy", f"/{OTHER}/18080/policy"),
+        (f"http:%2f%2f{ROUTE}.osb.helix.internal%2f..%2f..%2f{SID}%2f44772%2fcommand", f"/{SID}/44772/command"),
+    ],
 )
 def test_a_callers_path_cannot_reach_another_port_or_sandbox(
-    client: TestClient, osb: tuple[_FakeOpenSandbox, OpenSandboxEndpointTransport], trailing: str
+    client: TestClient, osb: tuple[_FakeOpenSandbox, OpenSandboxEndpointTransport], trailing: str, forwarded: str
 ) -> None:
     state, transport = osb
     with patch("nemo_agents_plugin.api.v2.gateway.get_deployment_transport", return_value=transport):
         client.post(INVOKE + trailing, json={"command": "id"})
 
-    (request,) = state.gateway_requests
-    assert request[1].startswith(f"/{SID}/8000/")
-    assert request[1].endswith("/command")
+    assert state.gateway_requests == [("POST", ROUTE, forwarded, [TOKEN])]
+    assert state.lookups == [ROUTE]
+
+
+def test_a_callers_headers_cannot_choose_the_sandbox_or_port(
+    client: TestClient, osb: tuple[_FakeOpenSandbox, OpenSandboxEndpointTransport]
+) -> None:
+    state, transport = osb
+    from_caller = {
+        INGRESS_HEADER: f"{OTHER}-18080",
+        LEGACY_INGRESS_HEADER: f"{OTHER}-18080",
+        "Host": f"{OTHER}-18080.osb.helix.internal",
+    }
+    with patch("nemo_agents_plugin.api.v2.gateway.get_deployment_transport", return_value=transport):
+        response = client.post(INVOKE + "policy", json={}, headers=from_caller)
+
+    assert response.status_code == 200
+    assert state.gateway_requests == [("POST", ROUTE, "/policy", [TOKEN])]
+    assert state.lookups == [ROUTE]
 
 
 def test_a_failed_token_lookup_is_a_502_and_the_agent_is_not_dialed(
@@ -189,7 +226,7 @@ async def test_controller_reads_runtime_health(osb: tuple[_FakeOpenSandbox, Open
 
     assert first is not None and first == second
     assert first[0] == "instance-1"
-    assert state.gateway_requests == [("GET", f"/{SID}/8000/health", [TOKEN])] * 2
+    assert state.gateway_requests == [("GET", ROUTE, "/health", [TOKEN])] * 2
     assert len(controller._runtime_health_clients) == 1
 
 
@@ -202,5 +239,7 @@ async def test_session_cleanup_reaches_the_runtime(osb: tuple[_FakeOpenSandbox, 
     with patch("nemo_agents_plugin.session_lifecycle.get_deployment_transport", return_value=transport):
         await cleanup_fabric_runtime(entities, session)
 
-    assert [(method, tokens) for method, _, tokens in state.gateway_requests] == [("DELETE", [TOKEN])]
-    assert state.gateway_requests[0][1].startswith(f"/{SID}/8000/v1/sessions/")
+    assert [(method, route, tokens) for method, route, _, tokens in state.gateway_requests] == [
+        ("DELETE", ROUTE, [TOKEN])
+    ]
+    assert state.gateway_requests[0][2].startswith("/v1/sessions/")
