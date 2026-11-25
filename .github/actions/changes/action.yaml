@@ -7,6 +7,9 @@ description: >
   Outputs boolean flags that downstream jobs use to decide whether to run.
 
 outputs:
+  release-packages:
+    description: "'true' if the release catalog workflow changed"
+    value: ${{ steps.filter.outputs.release-packages }}
   openapi:
     description: "'true' if any file under openapi/ changed"
     value: ${{ steps.filter.outputs.openapi }}
@@ -112,6 +115,8 @@ runs:
       uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d
       with:
         filters: |
+          release-packages:
+            - '.github/workflows/release.yaml'
           openapi:
             - 'openapi/**'
             - 'plugins/*/openapi/**'
