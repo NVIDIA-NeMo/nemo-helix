@@ -433,6 +433,42 @@ def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
     assert (tmp_path / "timeout-args").read_text() == f"120 {agent} --version\n"
 
 
+def test_an_image_with_a_container_engine_leaves_the_agent_check_to_the_runtime(tmp_path: Path) -> None:
+    """That image starts as root for its setup, so the agent must wait for the runtime's privilege drop."""
+    paths = _fake_host(tmp_path)
+    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\n', encoding="utf-8")
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(f'#!/bin/sh\ntouch "{tmp_path / "agent-ran"}"\n', encoding="utf-8")
+    agent.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+            "NHX_GYM_HOST_CONTAINER_ENGINE": "rootless-podman",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "agent-ran").exists()
+    runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
+    assert runtime_env["NHX_GYM_AGENT_EXECUTABLE"] == str(agent)
+    assert not runtime_env["PATH"].startswith(str(agent.parent))
+
+
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
     """The head must return so the host can start, and Gym must be told to join it.
 
