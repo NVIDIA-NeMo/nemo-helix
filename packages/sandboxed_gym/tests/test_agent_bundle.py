@@ -6,22 +6,23 @@ import pytest
 from sandboxed_gym.runtime.agent_bundle import activate_agent_executable
 
 
-def _runs(returncode: int = 0, calls: list[list[str]] | None = None):
-    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+def _runs(returncode: int = 0, calls: list[tuple[list[str], str]] | None = None):
+    def run(argv: list[str], *, env: dict[str, str], **_: object) -> subprocess.CompletedProcess:
         if calls is not None:
-            calls.append(argv)
+            calls.append((argv, env["PATH"]))
         return subprocess.CompletedProcess(argv, returncode)
 
     return run
 
 
 def test_a_working_agent_goes_first_on_path():
+    """It is checked with its directory already first, so a sibling it runs by name (its own `node`) is found."""
     environ = {"PATH": "/usr/bin:/bin"}
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], str]] = []
 
     activate_agent_executable("/installed-agent/bin/codex", environ, run=_runs(calls=calls))
 
-    assert calls == [["/installed-agent/bin/codex", "--version"]]
+    assert calls == [(["/installed-agent/bin/codex", "--version"], "/installed-agent/bin:/usr/bin:/bin")]
     assert environ["PATH"] == "/installed-agent/bin:/usr/bin:/bin"
 
 

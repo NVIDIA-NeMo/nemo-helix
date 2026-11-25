@@ -1145,6 +1145,12 @@ def test_a_job_cannot_name_the_container_storage_settings(name: str, operator_se
         built_host_spec(capable_plan(**settings), target(env_vars={name: "1"}))
 
 
+def test_a_job_cannot_name_the_agent_bundles_executable() -> None:
+    """The host provider names it; from a job it would choose what the host checks, or skip the check."""
+    with pytest.raises(ValueError, match="NHX_GYM_AGENT_EXECUTABLE"):
+        built_host_spec(capable_plan(), target(env_vars={"NHX_GYM_AGENT_EXECUTABLE": ""}))
+
+
 def test_a_plan_without_container_storage_settings_serializes_as_before() -> None:
     """A worker from before these settings forbids unknown plan keys, so an unused setting must not appear."""
     serialized = capable_plan().serialized()

@@ -37,6 +37,7 @@ from sandboxed_gym.host.models import (
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.run_sync import run_coro_sync
+from sandboxed_gym.runtime.agent_bundle import AGENT_EXECUTABLE_ENV_KEY
 from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
 from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
@@ -266,7 +267,9 @@ def build_gym_host_spec(
         bootstrap_extra[STORAGE_DISCARD_ENV] = "1"
     # The setup reads these from the container's environment, which a job's variables never reach. A job
     # setting them anyway would only be seen by Gym, as values the setup never used.
-    claimed = sorted({STORAGE_SIZE_ENV, STORAGE_DISCARD_ENV} & set(cfg.host_env))
+    # Likewise the agent bundle's executable, which the host provider sets: from the job, it would choose what
+    # the host checks, or skip the check.
+    claimed = sorted({STORAGE_SIZE_ENV, STORAGE_DISCARD_ENV, AGENT_EXECUTABLE_ENV_KEY} & set(cfg.host_env))
     if claimed:
         raise ValueError(f"the job's environment must not set {', '.join(claimed)}; the platform sets them")
     bootstrap_env = build_bootstrap_env(

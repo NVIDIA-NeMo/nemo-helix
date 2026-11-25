@@ -341,6 +341,61 @@ def test_a_program_on_the_jobs_path_cannot_read_the_token_from_the_launchers_ini
     assert b"sandbox-token" not in launcher_environ
 
 
+def test_the_agent_bundle_is_checked_before_the_jobs_variables_arrive(tmp_path: Path) -> None:
+    """This script has no privileged setup, so it checks the agent first, as the launcher that ran it did.
+
+    The agent runs with its own directory first on PATH and none of the job's variables; the job's PATH then
+    replaces PATH, and the runtime never sees the name, so it doesn't check again.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
+    paths = _fake_host(tmp_path)
+    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\n', encoding="utf-8")
+    agent_bin = tmp_path / "installed-agent" / "bin"
+    agent_bin.mkdir(parents=True)
+    agent = agent_bin / "codex"
+    agent.write_text(f'#!/bin/sh\nenv > "{tmp_path / "agent-env"}"\necho codex 1.0\n', encoding="utf-8")
+    agent.chmod(0o755)
+
+    def run(agent_script: str) -> subprocess.CompletedProcess:
+        agent.write_text(agent_script, encoding="utf-8")
+        return subprocess.run(
+            [
+                "/bin/sh",
+                str(gym_host_script_path(git_root=str(paths["root"]))),
+                str(paths["venv"]),
+                str(paths["root"]),
+                str(tmp_path / "gym-src" / "Gym"),
+                str(paths["runtime"]),
+            ],
+            env={
+                **os.environ,
+                "SANDBOXED_GYM_TREE": str(paths["tree"]),
+                "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+                "NHX_GYM_JOB_ENV": encode_job_env({"PATH": "/job/bin:/usr/bin:/bin", "JOB_ONLY": "1"}),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    result = run(f'#!/bin/sh\nenv > "{tmp_path / "agent-env"}"\necho codex 1.0\n')
+
+    assert result.returncode == 0, result.stderr
+    assert "codex 1.0" in result.stderr
+    agent_env = dict(line.split("=", 1) for line in (tmp_path / "agent-env").read_text().splitlines() if "=" in line)
+    runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
+    assert agent_env["PATH"].split(":")[0] == str(agent_bin)
+    assert "JOB_ONLY" not in agent_env
+    assert runtime_env["PATH"] == "/job/bin:/usr/bin:/bin"
+    assert "NHX_GYM_AGENT_EXECUTABLE" not in runtime_env
+
+    (tmp_path / "python-env").unlink()
+    broken = run("#!/bin/sh\nexit 3\n")
+    assert broken.returncode != 0
+    assert not (tmp_path / "python-env").exists()
+
+
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
     """The head must return so the host can start, and Gym must be told to join it.
 

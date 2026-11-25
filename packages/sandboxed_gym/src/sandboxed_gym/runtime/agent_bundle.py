@@ -31,9 +31,14 @@ def activate_agent_executable(
     """
     if not executable:
         return
+    path = environ.get("PATH", "")
+    agent_path = f"{os.path.dirname(executable)}{os.pathsep}{path}" if path else os.path.dirname(executable)
     try:
         result = run(
             [executable, "--version"],
+            # With its directory already first on PATH, as the launcher this replaces ran it: a bundle's CLI can
+            # need a sibling, such as a `#!/usr/bin/env node` script shipped beside its own `node`.
+            env={**environ, "PATH": agent_path},
             stdin=subprocess.DEVNULL,
             # To the host's stderr, as the shell launcher this replaces did.
             stdout=2,
@@ -44,6 +49,4 @@ def activate_agent_executable(
         raise RuntimeError(f"the agent bundle's executable {executable} could not run: {exc}") from exc
     if result.returncode != 0:
         raise RuntimeError(f"the agent bundle's executable {executable} --version exited {result.returncode}")
-    directory = os.path.dirname(executable)
-    path = environ.get("PATH", "")
-    environ["PATH"] = f"{directory}{os.pathsep}{path}" if path else directory
+    environ["PATH"] = agent_path

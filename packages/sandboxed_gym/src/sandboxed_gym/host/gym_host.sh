@@ -17,6 +17,16 @@ if [ -n "${EXECD_ACCESS_TOKEN+set}" ]; then
     exec /usr/bin/env -u EXECD_ACCESS_TOKEN /bin/sh "$0" "$@"
 fi
 
+# The agent bundle's CLI, named by the host provider: its directory goes first on PATH and it is checked
+# here, before the job's variables arrive, as the launcher that ran this script used to. This script has
+# no privileged setup to wait for. Unset, so the runtime doesn't repeat the check with the job's variables.
+if [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
+    PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
+    export PATH
+    "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+fi
+unset NHX_GYM_AGENT_EXECUTABLE
+
 # This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
 # NHX_GYM_JOB_ENV, are unpacked first, as if they had arrived in the environment: before the launcher's
 # own parameters and exports below, which keep their precedence over them, and before Ray starts. Names
