@@ -17,21 +17,34 @@ An attempt's spec holds the tasks in one of two shapes. Jobs stored with their t
 (and ``trials``) in the spec. Jobs stored with their tasks frozen in a file carry :data:`FROZEN_TASKS_KEY`
 instead, naming that file and the digest of its exact bytes; the worker downloads it and checks those bytes
 against the step config's digest before parsing them.
+
+The job route freezes a new job's tasks in a file (:func:`freeze_tasks_in_file`): ``tasks.json`` in a fileset
+of the job's workspace named after the job (:func:`frozen_tasks_fileset_name`). Helix never deletes that
+fileset; deleting it is left to the user.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from functools import partial
 from typing import Final
 
 from filesets import parse_fileset_ref
-from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError, read_verified_bytes_sync
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_evals.taskset_runs.plan_storage import (
+    PlanDigestMismatchError,
+    delete_fileset_ref,
+    read_verified_bytes_sync,
+    store_in_new_fileset,
+)
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client_provider import get_task_nemo_client
-from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import StoredJobSpec
+from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 
 TASKS_FROM_KEY: Final = "tasks_from"
 TASKS_DIGEST_KEY: Final = "tasks_digest"
@@ -42,6 +55,10 @@ _FROZEN_KEYS: Final = ("tasks", "trials")
 FROZEN_TASKS_KEY: Final = "frozen_tasks"
 #: The path of that file inside its fileset.
 FROZEN_TASKS_PATH: Final = "tasks.json"
+#: What names that fileset, before the job's name.
+FROZEN_TASKS_FILESET_PREFIX: Final = "job-tasks-"
+#: The stored-spec key that takes the place of ``tasks`` when they're in a file.
+TASK_COUNT_KEY: Final = "task_count"
 
 #: The service the agent-evaluate task runs as (see :mod:`nemo_evals.tasks.agent_evaluate`).
 TASK_SERVICE_NAME: Final = "evals"
@@ -65,6 +82,67 @@ def frozen_tasks_digest(spec: dict) -> str:
     ``plan_digest`` is that SHA-256.
     """
     return _DIGEST_PREFIX + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest()
+
+
+def frozen_tasks_fileset_name(job_name: str, workspace: str) -> str:
+    """The fileset a job's frozen tasks go to: ``job-tasks-<job name>``.
+
+    A job name too long to fit is normalized, truncated and given a hash suffix keyed on ``workspace/name``,
+    as the job's artifact fileset is (:func:`nemo_helix_plugin.jobs.types.derive_job_fileset_name`).
+    """
+    room = NAME_MAX_LENGTH - len(FROZEN_TASKS_FILESET_PREFIX)
+    if len(job_name) <= room:
+        return f"{FROZEN_TASKS_FILESET_PREFIX}{job_name}"
+    shortened = k8s_safe_name(
+        base_name=job_name,
+        max_length=room,
+        hash_input=workspace_name_identity(workspace, job_name),
+        name_type="label",
+    )
+    return f"{FROZEN_TASKS_FILESET_PREFIX}{shortened}"
+
+
+async def freeze_tasks_in_file(
+    spec: dict, *, workspace: str, job_name: str, async_client: AsyncNemoClient
+) -> StoredJobSpec:
+    """Write ``spec``'s tasks and trials to a file, and return the spec a new job stores in their place.
+
+    The file is :data:`FROZEN_TASKS_PATH` in a new fileset named by :func:`frozen_tasks_fileset_name`, and
+    holds :func:`frozen_tasks_bytes`, the bytes the step config's digest covers. The stored spec is ``spec``
+    without ``tasks`` and ``trials``, with :data:`TASK_COUNT_KEY` and a :data:`FROZEN_TASKS_KEY` pointer in
+    their place. Its ``discard`` deletes the fileset, for when the Jobs service then refuses the job.
+
+    Args:
+        spec: The canonical spec as JSON (``model_dump(mode="json")``), as the step config was compiled from.
+        workspace: The job's workspace, where the fileset goes.
+        job_name: The job's name.
+        async_client: The request-scoped client; the fileset is created as the caller.
+
+    Raises:
+        PlanFilesetExistsError: The fileset already exists, so nothing was written.
+        PlanStoragePermissionDeniedError: Files refused the fileset or the upload.
+        PlanStorageError: Creating the fileset or uploading the file failed.
+    """
+    files_client = AsyncFilesClient.from_client(async_client)
+    stored = await store_in_new_fileset(
+        files_client,
+        workspace=workspace,
+        name=frozen_tasks_fileset_name(job_name, workspace),
+        path=FROZEN_TASKS_PATH,
+        body=frozen_tasks_bytes(spec),
+        description=f"Tasks frozen for agent-evaluate job {workspace}/{job_name}.",
+        what="frozen tasks",
+    )
+    trials = spec.get("trials")
+    pointer: dict = {"plan_ref": stored.ref, "plan_digest": stored.digest}
+    if trials is not None:
+        pointer["trial_count"] = len(trials)
+    compact = {key: value for key, value in spec.items() if key not in _FROZEN_KEYS}
+    compact[TASK_COUNT_KEY] = len(spec["tasks"])
+    compact[FROZEN_TASKS_KEY] = pointer
+    return StoredJobSpec(
+        spec=compact, discard=partial(delete_fileset_ref, files_client, stored.ref, fileset_id=stored.fileset_id)
+    )
 
 
 def step_config_without_tasks(spec: dict) -> dict:
@@ -176,15 +254,19 @@ def _attempt_spec(client: NemoClient, *, workspace: str, job: str, attempt: str)
 
 
 __all__ = [
+    "FROZEN_TASKS_FILESET_PREFIX",
     "FROZEN_TASKS_KEY",
     "FROZEN_TASKS_PATH",
     "TASKS_DIGEST_KEY",
     "TASKS_FROM_ATTEMPT",
     "TASKS_FROM_KEY",
+    "TASK_COUNT_KEY",
     "TASK_SERVICE_NAME",
     "AttemptTasksError",
     "frozen_tasks_bytes",
+    "freeze_tasks_in_file",
     "frozen_tasks_digest",
+    "frozen_tasks_fileset_name",
     "load_attempt_tasks",
     "step_config_without_tasks",
 ]

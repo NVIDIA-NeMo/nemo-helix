@@ -5,6 +5,7 @@
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -16,7 +17,7 @@ from nemo_evals.jobs import agent_compiler
 from nemo_evals.jobs import attempt_tasks as attempt_tasks_module
 from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, FrozenTasks, ResolvedAgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
@@ -25,8 +26,10 @@ from nemo_evals.jobs.attempt_tasks import (
     TASKS_FROM_ATTEMPT,
     TASKS_FROM_KEY,
     AttemptTasksError,
+    freeze_tasks_in_file,
     frozen_tasks_bytes,
     frozen_tasks_digest,
+    frozen_tasks_fileset_name,
     load_attempt_tasks,
     step_config_without_tasks,
 )
@@ -38,7 +41,9 @@ from nemo_evals.jobs.harbor_task_spec import (
     build_task_job_input,
 )
 from nemo_evals.sdk.job_resources import AgentEvaluatorJob
+from nemo_evals.taskset_runs.plan_storage import StoredPlan
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entity_naming import NAME_PATTERN
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobSpec, HelixJobStatus
@@ -478,6 +483,52 @@ def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spe
 def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: ResolvedAgentEvalSpec) -> None:
     spec = harbor_spec.model_dump(mode="json")
     assert "sha256-v1:" + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest() == frozen_tasks_digest(spec)
+
+
+# --- Freezing a new job's tasks in a file ----------------------------------------------------------------
+
+
+def test_a_job_name_that_fits_names_its_tasks_fileset_as_is() -> None:
+    assert frozen_tasks_fileset_name("golden-run", "default") == "job-tasks-golden-run"
+
+
+def test_a_long_job_name_is_shortened_to_a_fileset_name_that_stays_its_own() -> None:
+    longest = "a" * 63
+
+    name = frozen_tasks_fileset_name(longest, "default")
+
+    assert name.startswith("job-tasks-a") and re.fullmatch(NAME_PATTERN, name)
+    assert name == frozen_tasks_fileset_name(longest, "default")
+    assert name != frozen_tasks_fileset_name("a" * 62 + "b", "default")
+
+
+@pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
+async def test_freezing_stores_the_settings_the_count_and_a_pointer_the_step_config_binds(
+    harbor_spec: ResolvedAgentEvalSpec, online: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = harbor_spec.model_dump(mode="json")
+    if not online:
+        spec = {"target": None, "tasks": spec["tasks"], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
+    written: dict[str, Any] = {}
+
+    async def store(files_client: object, **kwargs: Any) -> StoredPlan:
+        del files_client
+        written.update(kwargs)
+        ref = f"{kwargs['workspace']}/{kwargs['name']}#{kwargs['path']}"
+        return StoredPlan(ref=ref, digest=hashlib.sha256(kwargs["body"]).hexdigest(), fileset_id="fileset-1")
+
+    monkeypatch.setattr(attempt_tasks_module, "store_in_new_fileset", store)
+    async with AsyncNemoClient(base_url=BASE, workspace="default") as client:
+        stored = await freeze_tasks_in_file(spec, workspace="default", job_name=JOB, async_client=client)
+
+    assert (written["name"], written["path"]) == (f"job-tasks-{JOB}", FROZEN_TASKS_PATH)
+    assert written["body"] == frozen_tasks_bytes(spec)
+    expected, _ = _frozen(spec, ref=f"default/job-tasks-{JOB}#{FROZEN_TASKS_PATH}")
+    pointer = stored.spec.pop(FROZEN_TASKS_KEY)
+    assert FrozenTasks.model_validate(pointer) == FrozenTasks.model_validate(expected.pop(FROZEN_TASKS_KEY))
+    assert stored.spec == expected
+    assert "sha256-v1:" + pointer["plan_digest"] == frozen_tasks_digest(spec)
+    assert AgentEvalSpec.model_validate({**stored.spec, FROZEN_TASKS_KEY: pointer}).task_count == len(harbor_spec.tasks)
 
 
 # --- Taskset-run task Jobs ---------------------------------------------------------------------------------

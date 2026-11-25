@@ -36,16 +36,28 @@ from nemo_evals.jobs.agent_spec import (
     HarborBuiltinAgentSource,
     HarborRunnerTarget,
 )
+from nemo_evals.jobs.attempt_tasks import FROZEN_TASKS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
+from nemo_evals.taskset_runs.plan_storage import read_verified_bytes_sync
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRewardMetric, discover_harbor_tasks
 from nhx_evals_sdk.execution.metric_execution import run_sync
 
 pytestmark = [pytest.mark.integration]
+
+
+def _frozen_tasks(base_url: str, workspace: str, job_name: str) -> list[dict]:
+    """The tasks job ``job_name`` keeps in its file, checked against its digest as its worker checks them."""
+    pointer = JobsClient(base_url=base_url, workspace=workspace).get_job(name=job_name).data().spec[FROZEN_TASKS_KEY]
+    files_client = FilesClient(base_url=base_url, workspace=workspace)
+    body = read_verified_bytes_sync(files_client, pointer["plan_ref"], expected_digest=pointer["plan_digest"])
+    return json.loads(body)["tasks"]
 
 
 @pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
@@ -89,7 +101,9 @@ def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path,
     )
     assert response.status_code == 201, response.text
     job = response.json()
-    snapshots = job["spec"]["tasks"]
+    # The job keeps its tasks in a file; its reply only counts them.
+    assert job["spec"].get("tasks") is None and job["spec"]["task_count"] == 1
+    snapshots = _frozen_tasks(base_url, "default", job["name"])
     assert len(snapshots) == 1
     assert snapshots[0]["spec"]["provenance"]["entity_name"] == f"default/{name}"
     assert snapshots[0]["spec"]["native_task_id"] == "harbor/hello-world"

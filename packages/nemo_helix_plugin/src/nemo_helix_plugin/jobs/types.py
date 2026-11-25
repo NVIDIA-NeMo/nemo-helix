@@ -17,6 +17,8 @@ The deep spec types live in sibling modules:
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
@@ -92,6 +94,21 @@ def derive_job_fileset_name(job_name: str, workspace: str) -> str:
         name_type="label",
     )
     return f"{JOB_FILESET_NAME_PREFIX}{safe_name_part}"
+
+
+_AUTO_NAME_SOURCE_MAX_LENGTH = 20
+_AUTO_NAME_FALLBACK_PREFIX = "job"
+
+
+def generate_job_name(source: str, short_id: str) -> str:
+    """Return ``{source prefix}-{short_id}``, valid both as a job name and inside ``job-fileset-{name}``.
+
+    The Jobs service names a job submitted without a name this way. A job route that needs the name before
+    the job exists names it the same way.
+    """
+    prefix = re.sub(r"[^a-z0-9@.+_]+", "-", source.lower())
+    prefix = re.sub(r"^[^a-z]+", "", prefix)[:_AUTO_NAME_SOURCE_MAX_LENGTH].rstrip("-")
+    return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
 
 
 # Root folder for job artifacts inside a caller-supplied ``output_location`` fileset, so a
@@ -243,6 +260,20 @@ class JobDryRunCheck(BaseModel):
     name: str = Field(description="What was checked.")
     passed: bool
     message: str = Field(description="What the check found; on failure, what to fix.")
+
+
+@dataclass(frozen=True)
+class StoredJobSpec:
+    """The spec a new job stores in place of its canonical spec (see ``NemoJob.store_spec``).
+
+    Attributes:
+        spec: The JSON spec the job record stores. It must validate against the job's stored spec schema.
+        discard: Undoes what storing the spec wrote outside the record. The job route calls it when the Jobs
+            service refuses the job, since no job then owns those writes.
+    """
+
+    spec: dict[str, Any]
+    discard: Callable[[], Awaitable[None]] | None = None
 
 
 class JobDryRunFailureDetail(BaseModel):

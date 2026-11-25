@@ -565,6 +565,24 @@ class TestAddJobRoutes:
         with pytest.raises(TypeError, match="requires input_spec_schema"):
             add_job_routes(StoredWithoutInputJob)
 
+    def test_a_job_that_stores_its_own_spec_must_refuse_spec_updates(self) -> None:
+        class StoringJob(_WithInputJob):
+            name = "storing"
+
+            @classmethod
+            async def store_spec(cls, spec, *, workspace, job_name, async_sdk):
+                del spec, workspace, job_name, async_sdk
+                return None
+
+        with pytest.raises(TypeError, match="must set allow_spec_update = False"):
+            add_job_routes(StoringJob)
+
+        class RefusingStoringJob(StoringJob):
+            name = "refusing-storing"
+            allow_spec_update = False
+
+        assert isinstance(add_job_routes(RefusingStoringJob), APIRouter)
+
     def test_respects_job_collection_path_override(self) -> None:
         class FlatCollectionJob(_WidgetJob):
             name = "flat"

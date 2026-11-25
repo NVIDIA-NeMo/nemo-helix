@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
+from fastapi import HTTPException, status
 from nemo_agents_plugin.jobs.gateway_proxy import (
     platform_auth_proxy,
     rewrite_fabric_gateway_models,
@@ -64,7 +65,7 @@ from nemo_evals.jobs.agent_spec import (
     registered_agent_files_receipt,
     validate_task_collection,
 )
-from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
+from nemo_evals.jobs.attempt_tasks import freeze_tasks_in_file, frozen_tasks_fileset_name, load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.fileset_tasks import load_task_inputs, publish_snapshot
 from nemo_evals.jobs.gateway_models import (
@@ -121,6 +122,7 @@ from nemo_evals.task_refs import (
     validate_execution_support,
     validate_scoring,
 )
+from nemo_evals.taskset_runs.plan_storage import PlanFilesetExistsError, PlanStoragePermissionDeniedError
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -147,6 +149,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     VolcanoJobExecutionProfile,
 )
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from nemo_helix_plugin.jobs.types import StoredJobSpec
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
@@ -260,6 +263,9 @@ class _AgentEvalJobBase(NemoJob):
     spec_schema: ClassVar[type[BaseModel] | None] = ResolvedAgentEvalSpec
     #: What replies show: the job's settings and task count, with the resolved tasks kept out of the record.
     stored_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
+    #: A job keeps the definition it was accepted with; a changed evaluation is a new job. Its tasks are in a
+    #: file named after it (see :meth:`store_spec`), which a new definition couldn't replace.
+    allow_spec_update: ClassVar[bool] = False
     job_collection_path: ClassVar[str | None] = "/agent-evaluate/jobs"
     adapters: ClassVar[Mapping[str, TaskKindAdapter]] = KIND_ADAPTERS
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
@@ -363,6 +369,45 @@ class _AgentEvalJobBase(NemoJob):
             await _discard_resolved_agent_files(target, async_sdk)
             raise
         return await publish(spec)
+
+    @classmethod
+    async def store_spec(
+        cls,
+        spec: BaseModel,
+        *,
+        workspace: str,
+        job_name: str,
+        async_sdk: AsyncNemoClient,
+    ) -> StoredJobSpec:
+        """Keep the job's resolved tasks and trials in a file, so its record doesn't grow with them.
+
+        The job stores its settings, its task count and a pointer to ``tasks.json`` in the fileset
+        ``job-tasks-<job name>`` (:func:`~nemo_evals.jobs.attempt_tasks.freeze_tasks_in_file`). Helix never deletes
+        that fileset, so a name whose fileset is still there is refused with 409 until the user deletes it.
+        """
+        try:
+            # The same JSON the step config's digest was computed from, so the file's bytes match it.
+            return await freeze_tasks_in_file(
+                spec.model_dump(mode="json"), workspace=workspace, job_name=job_name, async_client=async_sdk
+            )
+        except PlanFilesetExistsError as exc:
+            await _discard_resolved_agent_files(getattr(spec, "target", None), async_sdk)
+            fileset = f"{workspace}/{frozen_tasks_fileset_name(job_name, workspace)}"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Fileset {fileset} already holds the tasks of an agent-evaluate job named {job_name!r}: that "
+                    "job exists, or it was deleted and its tasks were kept. Submit under another name, or delete "
+                    "the fileset if its job is gone."
+                ),
+            ) from exc
+        except PlanStoragePermissionDeniedError as exc:
+            await _discard_resolved_agent_files(getattr(spec, "target", None), async_sdk)
+            raise PermissionError(str(exc)) from exc
+        except Exception:
+            # As in ``compile``: a submission that fails here creates no job to own the agent's files snapshot.
+            await _discard_resolved_agent_files(getattr(spec, "target", None), async_sdk)
+            raise
 
     @classmethod
     async def compile(

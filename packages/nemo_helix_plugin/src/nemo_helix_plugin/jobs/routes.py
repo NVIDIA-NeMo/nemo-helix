@@ -49,11 +49,12 @@ from fastapi.routing import APIRoute
 from nemo_helix_plugin.authz import AuthzScope
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import RequestAuthorizer
-from nemo_helix_plugin.job import job_collection_path_for
+from nemo_helix_plugin.job import NemoJob, job_collection_path_for
 from nemo_helix_plugin.jobs.api_factory import (
     DeferWrite,
     HelixJobResultRoute,
     JobRouteOption,
+    SpecStorer,
     _submit_control_kwargs,
     job_route_factory,
 )
@@ -63,8 +64,6 @@ from nemo_helix_plugin.jobs.spec import HelixJobSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from nemo_helix_plugin.job import NemoJob
 
 
 def add_job_routes(
@@ -135,6 +134,12 @@ def add_job_routes(
         raise TypeError(f"{job_cls.__name__}.stored_spec_schema requires input_spec_schema to be declared.")
     job_output = (job_cls.stored_spec_schema or job_cls.spec_schema) if job_cls.input_spec_schema is not None else None
     input_to_output = _adapt_to_spec(job_cls) if job_cls.input_spec_schema is not None else None
+    store_spec = _adapt_store_spec(job_cls)
+    if store_spec is not None and job_cls.allow_spec_update:
+        raise TypeError(
+            f"{job_cls.__name__} overrides store_spec, so it must set allow_spec_update = False: "
+            "a spec update stores the canonical spec as is."
+        )
 
     router = job_route_factory(
         service_name=resolved_service_name,
@@ -149,6 +154,8 @@ def add_job_routes(
         authz=authz,
         jobs_list_filter=job_cls.jobs_list_filter,
         dry_run_checks=_adapt_dry_run_checks(job_cls),
+        allow_spec_update=job_cls.allow_spec_update,
+        store_spec=store_spec,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 
@@ -328,6 +335,17 @@ def _adapt_compile(
         return result
 
     return compile_adapter
+
+
+def _adapt_store_spec(job_cls: type[NemoJob]) -> SpecStorer | None:
+    """Bridge ``NemoJob.store_spec`` to the factory's ``store_spec``, or ``None`` when the job doesn't override it."""
+    if getattr(job_cls.store_spec, "__func__", None) is getattr(NemoJob.store_spec, "__func__", None):
+        return None
+
+    async def store_spec_adapter(spec: Any, workspace: str, job_name: str, async_client: AsyncNemoClient) -> Any:
+        return await job_cls.store_spec(spec, workspace=workspace, job_name=job_name, async_sdk=async_client)
+
+    return store_spec_adapter
 
 
 def _adapt_dry_run_checks(job_cls: type["NemoJob"]) -> "Callable[..., Any]":

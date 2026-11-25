@@ -5,9 +5,11 @@ import inspect
 import json
 import logging
 import os
+import secrets
 import tarfile
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
@@ -39,7 +41,7 @@ from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.errors import ConflictError, HTTPClientError, NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
@@ -100,11 +102,15 @@ from nemo_helix_plugin.jobs.types import (
     ListAttemptsQueryParams,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
+    StoredJobSpec,
     UpdateHelixJobRequest,
     validate_output_location,
 )
 from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
+)
+from nemo_helix_plugin.jobs.types import (
+    generate_job_name as jobs_service_job_name,
 )
 from nemo_helix_plugin.schema import Page, PaginationData
 from pydantic import (
@@ -617,6 +623,9 @@ JobNameGenerator = Callable[[], str]
 # Signature: (transformed_spec, platform_spec, workspace, async_client, full) -> checks, where
 # ``full`` (``?dry_run_full=true``) asks for every check in full, such as every dataset row, not a sample.
 DryRunChecks = Callable[[Any, HelixJobSpec, str, AsyncNemoClient, bool], Awaitable[list[JobDryRunCheck]]]
+# Given the canonical spec, workspace, job name and client, writes what a new job keeps outside its record and
+# returns the spec it stores instead (``None`` stores the canonical spec). Runs on a create, after compile.
+SpecStorer = Callable[[Any, str, str, AsyncNemoClient], Awaitable[StoredJobSpec | None]]
 
 
 def _unwrap_annotated_schema(obj: object) -> object:
@@ -808,9 +817,17 @@ async def _run_deferred_writes(deferred: list[DeferredWrite], spec: JobSchemaLik
     Raises:
         HTTPException: 403 when a write raises ``PermissionError``, 422 for any other failure.
     """
-    try:
+    with _submission_write_errors(service_name):
         for write in deferred:
             spec = await write(spec)
+    return spec
+
+
+@contextmanager
+def _submission_write_errors(service_name: str) -> Generator[None]:
+    """Map a failed submission write to 403 for ``PermissionError``, and to 422 for any other failure."""
+    try:
+        yield
     except HTTPException:
         raise
     except PermissionError as e:
@@ -820,7 +837,33 @@ async def _run_deferred_writes(deferred: list[DeferredWrite], spec: JobSchemaLik
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Failed to submit {service_name} job: {str(e)}",
         ) from e
-    return spec
+
+
+async def _store_job_spec(
+    store_spec: SpecStorer,
+    spec: JobSchemaLike,
+    workspace: str,
+    job_name: str,
+    async_client: AsyncNemoClient,
+    service_name: str,
+) -> StoredJobSpec | None:
+    """Run the job type's :data:`SpecStorer`, mapping its failures as a deferred write's are.
+
+    Raises:
+        HTTPException: 403 when it raises ``PermissionError``, 422 for any other failure.
+    """
+    with _submission_write_errors(service_name):
+        return await store_spec(spec, workspace, job_name, async_client)
+
+
+async def _discard_stored_spec(stored: StoredJobSpec, *, workspace: str, job_name: str) -> None:
+    """Undo what storing a refused job's spec wrote, logging rather than raising, so the refusal surfaces."""
+    if stored.discard is None:
+        return
+    try:
+        await stored.discard()
+    except Exception:
+        logger.warning("Could not remove what job %s/%s stored outside its record", workspace, job_name, exc_info=True)
 
 
 async def _compile_platform_spec(
@@ -957,6 +1000,9 @@ def job_route_factory(
     job_discriminator: str | None = None,
     legacy_job_filter: FilterOperation | None = None,
     dry_run_checks: DryRunChecks | None = None,
+    *,
+    allow_spec_update: bool = True,
+    store_spec: SpecStorer | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -1005,6 +1051,12 @@ def job_route_factory(
             given the canonical spec and the compiled platform spec, such as reading a few dataset
             rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
             step's execution profile is configured.
+        allow_spec_update: Whether ``PATCH /jobs/{name}`` may replace a job's spec. When ``False``,
+            an update that sets ``spec`` is refused with 422; ``description`` can still change.
+        store_spec: Turns a create's canonical spec into the spec the job stores, writing what the job
+            keeps outside its record. It runs after compile, never on a dry run, and the route names a job
+            submitted without a name first, as the Jobs service would. If the Jobs service then refuses the
+            job, the route undoes those writes. Requires ``allow_spec_update=False``.
 
     Example with separate input/output types:
         ```python
@@ -1366,6 +1418,9 @@ def job_route_factory(
             # A dry run creates no job, so it generates no id: it takes the requested name, or a placeholder.
             dry_run_name = request.name or _DRY_RUN_JOB_NAME
             job_name = dry_run_name if dry_run is not None else _resolve_job_name(request.name, generate_job_name)
+            if job_name is None and store_spec is not None:
+                # What the job stores outside its record may be named after it, so it's named now.
+                job_name = jobs_service_job_name(service_name, secrets.token_hex(4))
             input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
             deferred: list[DeferredWrite] = []
             job_spec = await _transform_input_to_output(
@@ -1431,6 +1486,12 @@ def job_route_factory(
             # JSON-encode on the wire (invalid utf-8 on the pickle marker). ``mode="json"`` runs each
             # nested model's own JSON serializer, so bytes base64-encode and round-trip on read.
             spec_dict = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
+            stored: StoredJobSpec | None = None
+            if store_spec is not None:
+                assert job_name is not None
+                stored = await _store_job_spec(store_spec, job_spec, workspace, job_name, async_client, service_name)
+                if stored is not None:
+                    spec_dict = stored.spec
             # Stamp only after transform/compile; metadata must not enter task configuration.
             spec_dict = _stored_job_spec(spec_dict)
 
@@ -1457,7 +1518,16 @@ def job_route_factory(
                 create_fields["output_location"] = request.output_location
 
             jobs = AsyncJobsClient.from_client(async_client)
-            job_resp = (await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))).data()
+            try:
+                job_resp = (
+                    await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))
+                ).data()
+            except HTTPClientError as exc:
+                # A refused job owns nothing it stored. A 409 may answer a create the client sent again after
+                # its first try made the job, so it keeps them, as does any failure that leaves the job unknown.
+                if stored is not None and job_name is not None and not isinstance(exc, ConflictError):
+                    await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
+                raise
             return from_response(job_resp)
 
         async def list_jobs(
@@ -1574,6 +1644,11 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Update a job for the {service_name} microservice."""
 
+            if not allow_spec_update and "spec" in request.model_fields_set:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="This job's spec can't be replaced; submit a new job instead.",
+                )
             jobs = AsyncJobsClient.from_client(async_client)
             existing_job = await _require_mutation_target_in_collection(
                 name=name,

@@ -472,7 +472,9 @@ nemo evals agent-evaluate --spec-file gym_fileset_eval.json
 
 - `fileset` names one file: `workspace/fileset#path/to/file.jsonl`. A whole FileSet or a glob is
   refused. The FileSet can be backed by external storage such as your own S3 bucket.
-- `snapshot` is optional. Without it, the tasks run inline and nothing is stored but the job.
+- `snapshot` is optional. Without it, the tasks run inline: no task or taskset is stored, only the job
+  and the file of its resolved tasks (see
+  [Where a job keeps its tasks](/documentation/evaluate-models/agent-eval#where-a-job-keeps-its-tasks)).
 
 A file may be at most 64 MiB and 50,000 rows, because conversion runs inside the Evals API while the
 submission waits.

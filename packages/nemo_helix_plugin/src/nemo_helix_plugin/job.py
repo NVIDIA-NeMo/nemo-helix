@@ -75,7 +75,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
-from nemo_helix_plugin.jobs.types import JobDryRunCheck
+from nemo_helix_plugin.jobs.types import JobDryRunCheck, StoredJobSpec
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,10 @@ class NemoJob(_NamedPlugin):
     #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``; a union lets a
     #: job keep rendering the records it stored before its stored shape changed.
     stored_spec_schema: ClassVar[type[BaseModel] | UnionType | None] = None
+    #: Whether ``PATCH`` may replace a job's spec. A job whose stored spec points at inputs frozen
+    #: at submission turns this off, so each job keeps the one definition it was accepted with. A job
+    #: that overrides :meth:`store_spec` must turn it off, since an update stores its spec as is.
+    allow_spec_update: ClassVar[bool] = True
 
     # ------------------------------------------------------------------ #
     # API routes                                                         #
@@ -353,6 +357,36 @@ class NemoJob(_NamedPlugin):
         """
         del spec, platform_spec, workspace, async_sdk, full
         return []
+
+    @classmethod
+    async def store_spec(
+        cls,
+        spec: BaseModel,
+        *,
+        workspace: str,
+        job_name: str,
+        async_sdk: AsyncNemoClient,
+    ) -> StoredJobSpec | None:
+        """The spec a new job stores, when it isn't ``spec`` itself.
+
+        The job route calls this on a create, after :meth:`to_spec` and :meth:`compile`, and never on a dry
+        run. Override it to keep part of a large spec out of the job record, such as in a file the job reads
+        back when it runs. The stored spec must validate against :attr:`stored_spec_schema`, and the job still
+        runs what :meth:`compile` compiled from ``spec``. A job that overrides this must set
+        :attr:`allow_spec_update` to ``False``.
+
+        Args:
+            spec: Canonical :attr:`spec_schema` instance, as :meth:`compile` received it.
+            workspace: Workspace scope.
+            job_name: The new job's name. The route names a job submitted without one before calling this.
+            async_sdk: The request-scoped :class:`AsyncNemoClient`.
+
+        Returns:
+            What to store, and how to undo its writes if the Jobs service then refuses the job. ``None``, the
+            default, stores ``spec`` as is.
+        """
+        del spec, workspace, job_name, async_sdk
+        return None
 
     # ------------------------------------------------------------------ #
     # Progress reporting (virtual; default = log only)                   #

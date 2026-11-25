@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from filesets import parse_fileset_ref
 from nemo_evals.api.fields import MetadataItem, TaskInputs
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
@@ -27,21 +28,21 @@ from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, ResolvedAgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
+    TASKS_DIGEST_KEY,
     TASKS_FROM_KEY,
-    frozen_tasks_bytes,
     load_attempt_tasks,
 )
 from nemo_evals.jobs.fileset_tasks import gym_reward_metric
 from nemo_evals.sdk.job_resources import AgentEvaluatorJob
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.dependencies import get_submission_authorizer
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
-from nemo_helix_plugin.jobs.types import UpdateHelixJobRequest
 from nhx.core.entities.service import EntitiesService
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.service import JobsService
@@ -110,10 +111,25 @@ def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> ResolvedAgentEvalSpec:
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(tasks), "profile": "default"}
     )
     assert response.status_code < 300, response.text
-    job = ctx.test_client.get(f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{response.json()['name']}")
+    return _frozen_spec(ctx, response.json()["name"])
+
+
+def _frozen_spec(ctx: ClientContext, name: str) -> ResolvedAgentEvalSpec:
+    """Job ``name``'s settings as its reply shows them, with the tasks and trials from the file that holds them."""
+    job = ctx.test_client.get(f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{name}")
     shown = job.raise_for_status().json()["spec"]
-    assert "task_count" not in shown  # shown only in place of `tasks`
-    return ResolvedAgentEvalSpec.model_validate(shown)
+    assert shown.pop("tasks", None) is None
+    assert shown.pop("task_count") >= 1
+    return ResolvedAgentEvalSpec.model_validate({**shown, **json.loads(_frozen_file(ctx, name))})
+
+
+def _frozen_file(ctx: ClientContext, name: str) -> bytes:
+    """The bytes of the file job ``name`` keeps its tasks in, checked against the digest its record holds."""
+    pointer = JobsClient.from_client(ctx.client).get_job(name=name, workspace="default").data().spec[FROZEN_TASKS_KEY]
+    workspace, fileset, path = parse_fileset_ref(pointer["plan_ref"], workspace_fallback=None)
+    body = FilesClient.from_client(ctx.client).download_file(workspace=workspace, name=fileset, path=path).read()
+    assert hashlib.sha256(body).hexdigest() == pointer["plan_digest"]
+    return body
 
 
 def _refused(ctx: ClientContext, tasks: dict[str, Any]) -> str:
@@ -211,10 +227,10 @@ def test_the_worker_loads_the_tasks_the_job_froze(ctx: ClientContext, snapshot: 
         json={"spec": _spec(_tasks(snapshot=snapshot)), "profile": "default"},
     )
     assert response.status_code < 300, response.text
-    jobs_route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{response.json()['name']}"
-    frozen = ctx.test_client.get(jobs_route).raise_for_status().json()["spec"]["tasks"]
+    frozen = json.loads(_frozen_file(ctx, response.json()["name"]))["tasks"]
     [attempt] = JobsClient.from_client(ctx.client).list_job_attempts(job=response.json()["name"]).items()
     assert attempt.platform_spec is not None
+    assert FROZEN_TASKS_KEY in attempt.spec and "tasks" not in attempt.spec  # the attempt holds only the pointer
     [config] = [step.config for step in attempt.platform_spec.steps if TASKS_FROM_KEY in step.config]
     job_ctx = MagicMock(spec=JobContext, workspace="default", job_id=attempt.job, attempt_id=attempt.id)
 
@@ -473,62 +489,118 @@ def test_a_fileset_source_needs_a_gym_target() -> None:
         AgentEvalInputSpec.model_validate({"trials": [], "tasks": {"fileset": FILE}})
 
 
-# --- Stored shape and spec updates ---------------------------------------------------------------------
+# --- Stored shape and definition updates ---------------------------------------------------------------
 
 
-def test_a_spec_update_resolves_the_tasks_again_and_replies_with_them(ctx: ClientContext) -> None:
+def test_a_jobs_spec_cannot_be_replaced_but_its_description_can(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"))
     created = ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
         json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
     )
     assert created.status_code < 300, created.text
-    assert len(created.json()["spec"]["tasks"]) == 1
     route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{created.json()['name']}"
 
-    _upload(ctx, _row("q1"), _row("q2"))
-    updated = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
+    refused = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
+    described = ctx.test_client.patch(route, json={"description": "golden run"})
 
-    assert updated.status_code == 200, updated.text
-    assert len(updated.json()["spec"]["tasks"]) == 2
-    assert "task_count" not in updated.json()["spec"]  # shown only in place of `tasks`
+    assert refused.status_code == 422, refused.text
+    assert described.status_code == 200, described.text
+    assert described.json()["description"] == "golden run"
+    assert described.json()["spec"] == created.json()["spec"]
 
 
-def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientContext) -> None:
-    _upload(ctx, _row("q1"), _row("q2"))
-    created = ctx.test_client.post(
+# --- Tasks frozen in a file ----------------------------------------------------------------------------
+
+
+def _create(ctx: ClientContext, **fields: Any) -> Any:
+    return ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
-        json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
-    )
-    assert created.status_code < 300, created.text
-    name = created.json()["name"]
-    jobs = JobsClient.from_client(ctx.client)
-    job = jobs.get_job(name=name, workspace="default").data()
-    stored = dict(job.spec)
-    frozen = frozen_tasks_bytes(stored)
-    compact = {key: value for key, value in stored.items() if key not in ("tasks", "trials")}
-    compact["task_count"] = 2
-    compact[FROZEN_TASKS_KEY] = {
-        "plan_ref": f"default/agent-eval-tasks-0123456789ab#{FROZEN_TASKS_PATH}",
-        "plan_digest": hashlib.sha256(frozen).hexdigest(),
-    }
-    # The writer lands separately; here the record is put in the stored shape directly.
-    jobs.update_job(
-        name=name, workspace="default", body=UpdateHelixJobRequest(spec=compact, platform_spec=job.platform_spec)
+        json={"spec": _spec(_tasks(snapshot=None)), "profile": "default", **fields},
     )
 
+
+def _fileset_exists(ctx: ClientContext, name: str) -> bool:
+    try:
+        FilesClient.from_client(ctx.client).get_fileset(workspace="default", name=name)
+    except NotFoundError:
+        return False
+    return True
+
+
+def test_a_job_keeps_its_tasks_in_a_file_named_after_it(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+
+    created = _create(ctx, name="golden-run")
+
+    assert created.status_code < 300, created.text
+    job = JobsClient.from_client(ctx.client).get_job(name="golden-run", workspace="default").data()
+    pointer = job.spec[FROZEN_TASKS_KEY]
+    assert pointer["plan_ref"] == f"default/job-tasks-golden-run#{FROZEN_TASKS_PATH}"
+    assert "tasks" not in job.spec and "trials" not in job.spec
+    assert job.spec["task_count"] == 2
+    assert len(json.loads(_frozen_file(ctx, "golden-run"))["tasks"]) == 2
+    # The step config's digest covers the file's exact bytes, so the worker can check one against the other.
+    assert job.platform_spec is not None
+    [config] = [step.config for step in job.platform_spec.steps if TASKS_FROM_KEY in step.config]
+    assert config[TASKS_DIGEST_KEY] == f"sha256-v1:{pointer['plan_digest']}"
+
+
+def test_replies_show_the_task_count_in_place_of_the_tasks(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+    created = _create(ctx, name="golden-run")
+    assert created.status_code < 300, created.text
     route = "/apis/evals/v2/workspaces/default/agent-evaluate/jobs"
-    one = ctx.test_client.get(f"{route}/{name}")
+
+    one = ctx.test_client.get(f"{route}/golden-run")
     listed = ctx.test_client.get(route)
-    described = ctx.test_client.patch(f"{route}/{name}", json={"description": "still owned"})
 
     assert one.status_code == 200, one.text
-    assert one.json()["spec"].get("tasks") is None
-    assert one.json()["spec"]["task_count"] == 2
-    assert FROZEN_TASKS_KEY not in one.json()["spec"]  # the service's own pointer never reaches a reply
-    # The SDK parses replies with the same model: the reply, without tasks or pointer, has to parse.
-    assert AgentEvaluatorJob.model_validate(one.json()).spec.task_count == 2
     assert listed.status_code == 200, listed.text
-    assert [job["spec"]["task_count"] for job in listed.json()["data"]] == [2]
-    assert all(FROZEN_TASKS_KEY not in job["spec"] for job in listed.json()["data"])
-    assert described.status_code == 200, described.text
+    for shown in (created.json()["spec"], one.json()["spec"], *(job["spec"] for job in listed.json()["data"])):
+        assert shown.get("tasks") is None
+        assert shown["task_count"] == 2
+        assert FROZEN_TASKS_KEY not in shown  # the service's own pointer never reaches a reply
+    # The SDK parses replies with the same model.
+    assert AgentEvaluatorJob.model_validate(one.json()).spec.task_count == 2
+
+
+def test_an_unnamed_job_is_named_before_its_tasks_are_stored(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"))
+
+    created = _create(ctx)
+
+    assert created.status_code < 300, created.text
+    name = created.json()["name"]
+    # The name the Jobs service would have given it.
+    assert re.fullmatch(r"nemo-evals\.agent-eva-[0-9a-f]{8}", name)
+    assert _fileset_exists(ctx, f"job-tasks-{name}")
+
+
+@pytest.mark.parametrize("taken_by", ["job", "fileset"])
+def test_a_name_whose_tasks_fileset_exists_is_refused(ctx: ClientContext, taken_by: str) -> None:
+    _upload(ctx, _row("q1"))
+    if taken_by == "job":
+        assert _create(ctx, name="golden-run").status_code < 300
+    else:
+        FilesClient.from_client(ctx.client).create_fileset(
+            workspace="default", body=CreateFilesetRequest(name="job-tasks-golden-run")
+        )
+    jobs_before = _jobs(ctx)
+
+    refused = _create(ctx, name="golden-run")
+
+    assert refused.status_code == 409, refused.text
+    assert "Fileset default/job-tasks-golden-run already holds the tasks" in refused.json()["detail"]
+    assert _jobs(ctx) == jobs_before
+    assert _fileset_exists(ctx, "job-tasks-golden-run")  # the refusal leaves it alone
+
+
+def test_a_job_the_jobs_service_refuses_leaves_no_tasks_fileset(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"))
+
+    refused = _create(ctx, name="golden-run", output_location="no-such-fileset")
+
+    assert refused.status_code == 422, refused.text
+    assert not _fileset_exists(ctx, "job-tasks-golden-run")
+    assert _create(ctx, name="golden-run").status_code < 300  # so the name can be used again

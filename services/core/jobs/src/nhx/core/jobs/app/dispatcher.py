@@ -5,7 +5,6 @@ import asyncio
 import copy
 import json
 import logging
-import re
 import weakref
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
@@ -14,7 +13,7 @@ from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermi
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
+from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name, generate_job_name
 from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -133,17 +132,6 @@ class JobEnvironmentValidationError(JobSecretValidationError):
 
 class JobOutputLocationError(ValueError):
     """Exception raised when a job's output_location references a fileset that does not exist."""
-
-
-_AUTO_NAME_SOURCE_MAX_LENGTH = 20
-_AUTO_NAME_FALLBACK_PREFIX = "job"
-
-
-def generate_job_name(source: str, short_id: str) -> str:
-    """Return ``{source prefix}-{short_id}``, valid both as a job name and inside ``job-fileset-{name}``."""
-    prefix = re.sub(r"[^a-z0-9@.+_]+", "-", source.lower())
-    prefix = re.sub(r"^[^a-z]+", "", prefix)[:_AUTO_NAME_SOURCE_MAX_LENGTH].rstrip("-")
-    return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
 
 
 class JobHasNoAttemptError(ValueError):
