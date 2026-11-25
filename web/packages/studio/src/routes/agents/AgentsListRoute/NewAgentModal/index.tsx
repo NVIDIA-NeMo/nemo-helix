@@ -519,7 +519,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   />
                 </UploadTrigger>
               </UploadRoot>
-              <Flex justify="end">
+              <Flex justify={entriesSummary ? 'between' : 'end'} align="center">
+                {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
                 {/* A native picker offers files or directories, never both, so the file pick is its own control. */}
                 <Button
                   kind="tertiary"
@@ -539,7 +540,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   onChange={onFilesPicked}
                 />
               </Flex>
-              {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
