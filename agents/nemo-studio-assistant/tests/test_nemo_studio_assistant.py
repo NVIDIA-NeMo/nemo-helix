@@ -434,7 +434,7 @@ def _ok_helix(method: str, path: str, payload: Any = None, status: int = 200) ->
 def _guardrail_workflow_client(
     check_statuses: list[str], config_name: str = "no-fruit", virtual_model_name: str = "guarded-model"
 ) -> tuple[NemoClient, dict[str, Any]]:
-    state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": []}
+    state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": [], "created": []}
     statuses = iter(check_statuses)
 
     def get_config(request: httpx.Request) -> httpx.Response:
@@ -443,6 +443,7 @@ def _guardrail_workflow_client(
 
     def create_config(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
+        state["created"].append(("config", body["name"]))
         state["configs"][body["name"]] = {**_entity(body["name"]), **body, "data": body.get("data") or {}}
         return httpx.Response(201, json=state["configs"][body["name"]])
 
@@ -454,6 +455,7 @@ def _guardrail_workflow_client(
 
     def create_virtual_model(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
+        state["created"].append(("virtual_model", body["name"]))
         state["virtual_models"][body["name"]] = {**_entity(body["name"]), **body}
         return httpx.Response(201, json=state["virtual_models"][body["name"]])
 
@@ -1583,14 +1585,20 @@ def test_nemo_api_reports_no_activity_for_denied_or_invalid_calls(
 
 
 def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
+    attempts: list[str] = []
+    expected = json.dumps({"status": "ok", "results": [{"path": "guardrails.mdx", "title": "Guardrails"}]})
+
+    def fail(_session: str, tool_name: str, *_args: object, **_kwargs: object) -> dict[str, str]:
+        attempts.append(tool_name)
         raise RuntimeError("Studio is down")
 
+    monkeypatch.setattr(register.docs_search, "search_docs", lambda _query, _limit: expected)
     monkeypatch.setattr(register, "_call_studio_tool", fail)
 
-    response = json.loads(register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a"))
+    result = register.search_docs("guardrail", studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a")
 
-    assert response["status"] in {"ok", "no_results", "unavailable"}
+    assert attempts == ["assistant_activity"]
+    assert result == expected
 
 
 _CREATE_DEMO_WORKSPACE = ("workspaces", "create", '{"name": "demo"}')
@@ -1686,6 +1694,47 @@ def test_terminal_confirmation_expires(monkeypatch: pytest.MonkeyPatch, terminal
 
     assert response["status"] == "confirmation_rejected"
     assert platform.mutations() == []
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"fileset": "a", "name": "b", "remote_path": "x.txt"},
+        {"name": "b", "fileset": "a", "remote_path": "x.txt"},
+    ],
+)
+def test_terminal_write_rejects_conflicting_aliases_before_a_preview(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None, params: dict[str, str]
+) -> None:
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
+
+    response = register.nemo_api("files", "delete", json.dumps(params), workspace="default")
+
+    assert "confirmation_token" not in response
+    assert "conflicting values" in response
+    assert platform.mutations() == []
+
+
+def test_terminal_confirmation_reads_the_clock_while_holding_the_lock(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    lock_held_at_read: list[bool] = []
+
+    class Clock:
+        @staticmethod
+        def monotonic() -> float:
+            lock_held_at_read.append(register._state_lock.locked())
+            return 0.0
+
+    monkeypatch.setattr(register, "time", Clock)
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default")
+
+    assert lock_held_at_read
+    assert all(lock_held_at_read)
 
 
 def test_terminal_reads_run_without_a_preview(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
@@ -1786,6 +1835,8 @@ def test_topic_gate_is_created_once_and_reused(monkeypatch: pytest.MonkeyPatch, 
     second = topic_gate.ensure_topic_gate("default", "default/model-a")
     assert second == first
     assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+    # The second call reuses the gate: one create per resource across both calls.
+    assert state["created"] == [("config", topic_gate.TOPIC_GATE_NAME), ("virtual_model", topic_gate.TOPIC_GATE_NAME)]
 
 
 def test_topic_gate_conflict_error_says_how_to_recover(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
@@ -1812,6 +1863,46 @@ def test_guardrail_check_lockout_expires_after_the_cooldown(monkeypatch: pytest.
     assert register._guardrail_check_locked_out(key) is False
     assert key not in register._guardrail_check_failures
     assert key not in register._guardrail_check_failed_at
+
+
+def test_guardrail_check_lockout_refusal_does_not_renew_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "workspace:default"
+    monkeypatch.setattr(register, "_guardrail_check_failures", {key: register._GUARDRAIL_CHECK_FAILURE_LIMIT})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {key: 100.0})
+    monkeypatch.setattr(register, "time", types.SimpleNamespace(monotonic=lambda: 150.0))
+    monkeypatch.setattr(
+        register, "_get_client", lambda *_args, **_kwargs: pytest.fail("a locked-out check must not run")
+    )
+
+    response = register.nemo_api("guardrail", "check", '{"model": "default/m"}', workspace="default")
+
+    assert "retry limit" in response
+    assert register._guardrail_check_failed_at[key] == 100.0
+
+
+def test_topic_gate_waits_for_the_gateway_to_route_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter([False, False, True])
+    sleeps: list[float] = []
+    monkeypatch.setattr(register, "_get_client", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(register, "_routable_virtual_model", lambda *_args: next(answers))
+    monkeypatch.setattr(topic_gate, "time", types.SimpleNamespace(monotonic=lambda: 0.0, sleep=sleeps.append))
+
+    topic_gate._wait_until_routable("default")
+
+    assert sleeps == [topic_gate.ROUTABLE_POLL_SECONDS] * 2
+
+
+def test_topic_gate_fails_when_the_gate_never_becomes_routable(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(register, "_get_client", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(register, "_routable_virtual_model", lambda *_args: False)
+    fake_time = types.SimpleNamespace(
+        monotonic=lambda: clock["now"], sleep=lambda seconds: clock.update(now=clock["now"] + seconds)
+    )
+    monkeypatch.setattr(topic_gate, "time", fake_time)
+
+    with pytest.raises(RuntimeError, match="not routable"):
+        topic_gate._wait_until_routable("default")
 
 
 def test_topic_gate_refuses_to_run_outside_terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:

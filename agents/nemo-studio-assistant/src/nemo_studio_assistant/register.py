@@ -147,8 +147,9 @@ def _terminal_confirmation(
     live; any token is consumed by the attempt. Returns the approved input (a dict) on success.
     """
     fingerprint = _operation_fingerprint(tool_name, tool_input)
-    now = time.monotonic()
     with _state_lock:
+        # Read the clock after acquiring the lock so expiry is judged at the moment the token is consumed.
+        now = time.monotonic()
         for token in [t for t, pending in _pending_confirmations.items() if pending.expires_at <= now]:
             del _pending_confirmations[token]
         if confirmation_token is not None:
@@ -428,7 +429,15 @@ def _build_call_kwargs(
             parameters=[p for p in inspect.signature(descriptor).parameters.values() if p.name != "self"]
         )
         hints = typing.get_type_hints(descriptor)
-    remaining = {aliases.get(key, key): value for key, value in (params or {}).items() if key != "workspace"}
+    remaining: dict[str, Any] = {}
+    for key, value in (params or {}).items():
+        if key == "workspace":
+            continue
+        canonical_key = aliases.get(key, key)
+        if canonical_key in remaining and remaining[canonical_key] != value:
+            # Without this, the later key would silently win and key order would pick the target.
+            raise ValueError(f"conflicting values for {canonical_key!r}; give it once, as {canonical_key!r}")
+        remaining[canonical_key] = value
     kwargs: dict[str, Any] = {}
     if "workspace" in signature.parameters:
         kwargs["workspace"] = workspace
@@ -536,6 +545,10 @@ def _record_guardrail_check_failure(key: str, message: str) -> str:
         count = _guardrail_check_failures.get(key, 0) + 1
         _guardrail_check_failures[key] = count
         _guardrail_check_failed_at[key] = time.monotonic()
+    return _guardrail_check_failure_message(count, message)
+
+
+def _guardrail_check_failure_message(count: int, message: str) -> str:
     prefix = "Guardrail validation stopped"
     if count >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
         return (
@@ -1261,8 +1274,9 @@ def nemo_api(
         workspace = _normalize_workspace(workspace, parsed_params)
         error_key = _api_error_key(workspace or "", studio_session_id)
         if is_guardrail_check and _guardrail_check_locked_out(error_key):
-            return _record_guardrail_check_failure(
-                error_key,
+            # A refusal is not an executed validation, so it must not restart the cooldown.
+            return _guardrail_check_failure_message(
+                _GUARDRAIL_CHECK_FAILURE_LIMIT,
                 "the validation retry limit was already reached for this request",
             )
         if workspace is None:
@@ -1277,6 +1291,9 @@ def nemo_api(
         if is_guardrail_check:
             _preflight_guardrail_model(client, workspace, parsed_params, error_key)
         if normalized_action not in _READ_ONLY_ACTIONS:
+            # Resolve the effective arguments first: a malformed or alias-conflicting request must fail before a
+            # preview is shown, and the approved fingerprint then covers arguments that resolve one way only.
+            _build_call_kwargs(api_resource.client_cls, method_name, parsed_params, workspace, api_resource.aliases)
             approved_input = _request_mutation_approval(
                 studio_session_id,
                 tool_name="nemo_api",

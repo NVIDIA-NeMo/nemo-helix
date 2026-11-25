@@ -585,7 +585,8 @@ def _match_route(route: str | None) -> _RouteMatch | None:
             continue
         consumed = {key for key, _ in parse_qsl(template_query, keep_blank_values=True)}
         literal_length = len(_PLACEHOLDER_RE.sub("", path_template))
-        score = (len(consumed), literal_length)
+        # Static path specificity first; query keys only break ties between matches for the same path.
+        score = (literal_length, len(consumed))
         if best is None or score > best[0]:
             args = {key: unquote(value) for key, value in path_match.groupdict().items()}
             best = (

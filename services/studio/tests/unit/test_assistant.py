@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -600,6 +600,14 @@ def test_describe_studio_page_matches_the_most_specific_destination(
     page = studio_links.describe_studio_page(route)
 
     assert page == studio_links.StudioPage(destination=destination, label=label, args=args, selections=selections)
+
+
+def test_describe_studio_page_prefers_a_static_path_over_a_query_matching_template():
+    # ``agents/{name}?tab=chat-playground`` also fits this route, but ``agents/evaluations`` is the real page.
+    page = studio_links.describe_studio_page("/workspaces/default/agents/evaluations?tab=chat-playground")
+
+    assert page is not None
+    assert page.destination == "agent_evaluations"
 
 
 @pytest.mark.parametrize("route", [None, "", "/models", "/workspaces/default/not-a-page/deep/path"])
@@ -2718,3 +2726,48 @@ def test_studio_read_only_api_actions_match_the_agent_copy() -> None:
             agent_actions = set(ast.literal_eval(node.value.args[0]))
     assert agent_actions is not None
     assert agent_actions == set(assistant._READ_ONLY_API_ACTIONS)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"tool_name": "nemo_api", "input": {"action": "delete", "resource": "agents"}}, True),
+        ({"tool_name": "mcp__nemo__nemo_api", "input": {"action": "create", "resource": "files"}}, True),
+        ({"tool_name": "deploy_guardrail", "input": {}}, True),
+        ({"tool_name": "nemo_api", "input": {"action": "list", "resource": "agents"}}, False),
+        ({"tool_name": "search_docs", "input": {"query": "x"}}, False),
+    ],
+)
+def test_permission_requests_count_as_possible_platform_changes(payload: dict[str, object], expected: bool):
+    assert assistant._reports_platform_change("permission_request", json.dumps(payload)) is expected
+
+
+@pytest.mark.asyncio
+async def test_stream_assistant_closes_the_child_stream_when_the_client_disconnects(monkeypatch: pytest.MonkeyPatch):
+    closed = asyncio.Event()
+
+    async def child(*_args: object, **_kwargs: object) -> AsyncGenerator[str, None]:
+        try:
+            yield "first"
+            yield "second"
+        finally:
+            closed.set()
+
+    async def on_topic(*_args: object, **_kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(assistant_topic_gate, "is_off_topic", on_topic)
+    monkeypatch.setattr(assistant, "_stream_agent_turn", child)
+    session_id = str(uuid.uuid4())
+    conversation = AssistantConversation(
+        name=f"assistant-{session_id}", workspace="default", session_id=session_id, owner_id="local-user"
+    )
+
+    stream = assistant._stream_assistant(
+        session_id, "hi", "https://agent.test/x", {}, "sys prompt", conversation, FakeEntityStore()
+    )
+    assert await anext(stream) == "first"
+    await stream.aclose()
+
+    assert closed.is_set()
+    assert session_id not in assistant._session_streams

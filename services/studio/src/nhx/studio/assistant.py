@@ -10,7 +10,8 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -1086,7 +1087,7 @@ def _mcp_tool_result_payload(request_id: Any, result: dict[str, Any]) -> dict[st
 async def _stream_mcp_tool_result(
     request_id: Any,
     result: Awaitable[dict[str, Any]],
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Keep a blocking MCP HTTP call alive until Studio receives user input."""
     task = asyncio.ensure_future(result)
     try:
@@ -1380,24 +1381,40 @@ def _assistant_activity_event(args: dict[str, Any]) -> tuple[str, dict[str, str]
     return tool_name, tool_input
 
 
+def _is_platform_write(tool_name: object, tool_input: object) -> bool:
+    """Whether a tool call can change the platform: a guardrail deployment or a mutating API call."""
+    if not isinstance(tool_name, str):
+        return False
+    name = tool_name.rsplit("__", 1)[-1]
+    if name == DEPLOY_GUARDRAIL_TOOL_NAME:
+        return True
+    arguments = tool_input if isinstance(tool_input, dict) else {}
+    return name == NEMO_API_TOOL_NAME and arguments.get("action") not in _READ_ONLY_API_ACTIONS
+
+
 def _reports_platform_change(event_type: str, payload: Any) -> bool:
-    """Whether a queued agent event announces a platform write: a guardrail deployment or a mutating API call."""
-    if event_type != "agent" or not isinstance(payload, str):
+    """Whether a queued event announces a platform write.
+
+    A permission request counts too: the user may approve the write even when its activity event never arrives.
+    """
+    if event_type not in {"agent", "permission_request"} or not isinstance(payload, str):
         return False
     try:
         event = json.loads(payload)
     except ValueError:
         return False
-    content = event.get("message", {}).get("content", []) if isinstance(event, dict) else []
-    for block in content:
-        if not isinstance(block, dict) or block.get("type") != "tool_use":
-            continue
-        tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
-        if block.get("name") == DEPLOY_GUARDRAIL_TOOL_NAME:
-            return True
-        if block.get("name") == NEMO_API_TOOL_NAME and tool_input.get("action") not in _READ_ONLY_API_ACTIONS:
-            return True
-    return False
+    if not isinstance(event, dict):
+        return False
+    if event_type == "permission_request":
+        return _is_platform_write(event.get("tool_name"), event.get("input"))
+    message = event.get("message")
+    content = message.get("content", []) if isinstance(message, dict) else []
+    return any(
+        isinstance(block, dict)
+        and block.get("type") == "tool_use"
+        and _is_platform_write(block.get("name"), block.get("input"))
+        for block in content
+    )
 
 
 def _tool_use_stream_event(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str]:
@@ -1539,7 +1556,7 @@ async def _stream_assistant(
     studio_system_prompt: str,
     conversation: AssistantConversation,
     entity_store: _ConversationStore,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Invoke the deployed NeMo Assistant while preserving Studio's blocking UI event protocol."""
     if session_id in _session_streams:
         yield _sse(
@@ -1564,8 +1581,10 @@ async def _stream_assistant(
             frames = _stream_agent_turn(
                 session_id, queue, message, agent_url, headers, studio_system_prompt, conversation, entity_store
             )
-        async for frame in frames:
-            yield frame
+        # Close the child generator before the claim is released so its invocation and queue reader stop first.
+        async with aclosing(frames) as stream:
+            async for frame in stream:
+                yield frame
     except EntityStoreError:
         logger.exception("Failed to persist NeMo Assistant session %s", session_id)
         yield _sse(
@@ -1581,7 +1600,7 @@ async def _stream_refusal(
     message: str,
     conversation: AssistantConversation,
     entity_store: _ConversationStore,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     model = _studio_assistant_name()
     await _persist_conversation_turn(
         entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model, gate_refusal=True
@@ -1599,7 +1618,7 @@ async def _stream_agent_turn(
     studio_system_prompt: str,
     conversation: AssistantConversation,
     entity_store: _ConversationStore,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     deployment_run_id = str(uuid.uuid4())
     contextual_message = "\n\n".join(
         [
