@@ -9,11 +9,16 @@
 #   deploy-local.sh --terminal  Deploy a terminal assistant for 'nemo agents chat' (writes need a
 #                               confirmation token, and an off-topic gate wraps the model).
 #
-# Re-running replaces the existing registration and deployment, so prompt and
-# skill edits take effect. Requires a running platform, Docker, the repo's
-# pinned uv (run inside `flox activate`), and NEMO_DEFAULT_MODEL set to a
-# model entity id from `nemo models list`. Packaging uses a nemo-helix wheel
-# built from this checkout unless NEMO_AGENTS_WHEEL is already set.
+# Re-running replaces the Studio registration and deployment, so prompt and
+# skill edits take effect. The terminal topic gate is created once per
+# workspace: if its backend model or policy changes, remove the existing
+# gate first (the error message says how). The terminal agent reads its model
+# from NEMO_TERMINAL_MODEL, which this script sets to the gate, so registering
+# agent.terminal.yaml by hand without the gate fails instead of running
+# ungated. Requires a running platform, Docker, the repo's pinned uv (run
+# inside `flox activate`), and NEMO_DEFAULT_MODEL set to a model entity id
+# from `nemo models list`. Packaging uses a nemo-helix wheel built from this
+# checkout unless NEMO_AGENTS_WHEEL is already set.
 set -euo pipefail
 
 terminal=false
@@ -65,8 +70,8 @@ if [[ "${terminal}" == true ]]; then
     python -m nemo_studio_assistant.topic_gate \
     --workspace "${gate_workspace}" --backend-model "${NEMO_DEFAULT_MODEL}")" \
     || fail "the topic gate was not created; see the output above"
-  export NEMO_DEFAULT_MODEL="${gate_model}"
-  echo "Terminal agent model ${NEMO_DEFAULT_MODEL}"
+  export NEMO_TERMINAL_MODEL="${gate_model}"
+  echo "Terminal agent model ${NEMO_TERMINAL_MODEL}"
 fi
 
 step "Snapshotting docs for search_docs"

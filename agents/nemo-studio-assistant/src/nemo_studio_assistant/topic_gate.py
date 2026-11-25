@@ -52,7 +52,13 @@ def ensure_topic_gate(workspace: str, backend_model: str) -> str:
         # The operator ran deploy-local.sh --terminal, which is the confirmation for this one gate.
         first = json.loads(register.deploy_guardrail(**arguments, confirmation_token=first["confirmation_token"]))
     if first["status"] != "success":
-        raise RuntimeError(f"topic gate was not created: {first}")
+        hint = ""
+        if "already exists" in str(first.get("error", "")):
+            hint = (
+                f" A different topic gate already exists as {TOPIC_GATE_NAME}. Remove that guardrail config and "
+                "virtual model (see 'nemo guardrail --help'), then re-run."
+            )
+        raise RuntimeError(f"topic gate was not created: {first}.{hint}")
     return first["chat_model"]
 
 

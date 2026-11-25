@@ -49,6 +49,9 @@ STUDIO_ACTIVITY_TIMEOUT_SECONDS = 5.0
 _READ_ONLY_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
 _API_ERROR_LIMIT = 3
 _GUARDRAIL_CHECK_FAILURE_LIMIT = 3
+# A tripped validation lockout expires this long after its last failure, so a terminal workspace key
+# is not refused until the MCP process restarts.
+_GUARDRAIL_CHECK_COOLDOWN_SECONDS = 300.0
 _REFUSAL_LIKE_PROBE_RE = re.compile(
     r"^\s*(?:(?:i(?:'m| am)|we(?:'re| are))\s+sorry[,;:]?\s*(?:but\s+)?)?"
     r"(?:(?:i|we)\s+(?:can't|cannot|won't|will not|am unable to|are unable to)|"
@@ -66,6 +69,7 @@ CONFIRMATION_TTL_SECONDS = 600.0
 _clients: dict[str, NemoClient] = {}
 _api_error_streaks: dict[str, int] = {}
 _guardrail_check_failures: dict[str, int] = {}
+_guardrail_check_failed_at: dict[str, float] = {}
 _preflighted_guardrail_models: set[tuple[str, str, str]] = set()
 _guardrail_deployment_results: dict[tuple[str, str], str | None] = {}
 _state_lock = threading.Lock()
@@ -512,10 +516,26 @@ def _is_guardrail_check(resource: str, action: str) -> bool:
     return resource.strip() == "guardrail" and action.strip().lower() == "check"
 
 
+def _guardrail_check_locked_out(key: str) -> bool:
+    """Return True while validation is refused for ``key`` after too many failures.
+
+    The lockout ends ``_GUARDRAIL_CHECK_COOLDOWN_SECONDS`` after the last failure, and the count is cleared then.
+    """
+    with _state_lock:
+        if _guardrail_check_failures.get(key, 0) < _GUARDRAIL_CHECK_FAILURE_LIMIT:
+            return False
+        if time.monotonic() - _guardrail_check_failed_at.get(key, 0.0) < _GUARDRAIL_CHECK_COOLDOWN_SECONDS:
+            return True
+        _guardrail_check_failures.pop(key, None)
+        _guardrail_check_failed_at.pop(key, None)
+        return False
+
+
 def _record_guardrail_check_failure(key: str, message: str) -> str:
     with _state_lock:
         count = _guardrail_check_failures.get(key, 0) + 1
         _guardrail_check_failures[key] = count
+        _guardrail_check_failed_at[key] = time.monotonic()
     prefix = "Guardrail validation stopped"
     if count >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
         return (
@@ -1240,7 +1260,7 @@ def nemo_api(
         parsed_params = _parse_nemo_api_params(params)
         workspace = _normalize_workspace(workspace, parsed_params)
         error_key = _api_error_key(workspace or "", studio_session_id)
-        if is_guardrail_check and _guardrail_check_failures.get(error_key, 0) >= _GUARDRAIL_CHECK_FAILURE_LIMIT:
+        if is_guardrail_check and _guardrail_check_locked_out(error_key):
             return _record_guardrail_check_failure(
                 error_key,
                 "the validation retry limit was already reached for this request",
@@ -1300,7 +1320,9 @@ def nemo_api(
             status = serialized_result.get("status") if isinstance(serialized_result, dict) else None
             if status not in {"blocked", "success"}:
                 raise ValueError(f"guardrail check returned unexpected status {status!r}")
-            _guardrail_check_failures.pop(error_key, None)
+            with _state_lock:
+                _guardrail_check_failures.pop(error_key, None)
+                _guardrail_check_failed_at.pop(error_key, None)
         _api_error_streaks.pop(error_key, None)
         return json.dumps(_serialize(result), indent=2, default=str)
     except Exception as exc:

@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,7 @@ def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(register.APPROVAL_MODE_ENV, raising=False)
     monkeypatch.setattr(register, "_api_error_streaks", {})
     monkeypatch.setattr(register, "_guardrail_check_failures", {})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {})
     monkeypatch.setattr(register, "_preflighted_guardrail_models", set())
     monkeypatch.setattr(register, "_guardrail_deployment_results", {})
     monkeypatch.setattr(register, "_pending_confirmations", {})
@@ -314,16 +316,26 @@ def test_terminal_agent_config_differs_from_studio_only_in_approval_mode() -> No
 
     assert len(studio_lines) == len(terminal_lines)
     changed = [(old.strip(), new.strip()) for old, new in zip(studio_lines, terminal_lines) if old != new]
-    assert changed == [
-        (
-            "# studio: writes pause for Studio's approval card. The terminal deployment sets chat.",
-            "# terminal: writes need the confirmation_token from a confirmation_required preview.",
-        ),
-        ("ASSISTANT_APPROVAL_MODE: studio", "ASSISTANT_APPROVAL_MODE: chat"),
-    ]
+    assert sorted(changed) == sorted(
+        [
+            (
+                "# studio: writes pause for Studio's approval card. The terminal deployment sets chat.",
+                "# terminal: writes need the confirmation_token from a confirmation_required preview.",
+            ),
+            ("ASSISTANT_APPROVAL_MODE: studio", "ASSISTANT_APPROVAL_MODE: chat"),
+            ("model: ${NEMO_DEFAULT_MODEL}", "model: ${NEMO_TERMINAL_MODEL}"),
+        ]
+    )
     translated = translate_agent_config(load_agent_config(AGENT_ROOT / "agent.terminal.yaml"))
     assert translated.mcp is not None
     assert translated.mcp.servers["nemo_studio"].env["ASSISTANT_APPROVAL_MODE"] == "chat"
+
+
+def test_terminal_agent_model_is_the_topic_gate_variable_not_the_raw_backend() -> None:
+    # Registering agent.terminal.yaml without deploy-local.sh leaves NEMO_TERMINAL_MODEL unset, so the
+    # agent cannot be invoked ungated. The raw backend is only ever named by NEMO_DEFAULT_MODEL.
+    config = load_agent_config(AGENT_ROOT / "agent.terminal.yaml")
+    assert config.models["default"].model == "${NEMO_TERMINAL_MODEL}"
 
 
 def test_shared_system_prompt_names_no_studio_only_surface() -> None:
@@ -1774,6 +1786,32 @@ def test_topic_gate_is_created_once_and_reused(monkeypatch: pytest.MonkeyPatch, 
     second = topic_gate.ensure_topic_gate("default", "default/model-a")
     assert second == first
     assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+
+
+def test_topic_gate_conflict_error_says_how_to_recover(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    conflict = {
+        "status": "failed",
+        "error": "VirtualModel default/nemo-assistant-topic-gate already exists with different data",
+    }
+    monkeypatch.setattr(register, "deploy_guardrail", lambda **_kwargs: json.dumps(conflict))
+
+    with pytest.raises(RuntimeError, match="(?i)remove that guardrail config and virtual model"):
+        topic_gate.ensure_topic_gate("default", "default/model-b")
+
+
+def test_guardrail_check_lockout_expires_after_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "workspace:default"
+    monkeypatch.setattr(register, "_guardrail_check_failures", {key: register._GUARDRAIL_CHECK_FAILURE_LIMIT})
+    monkeypatch.setattr(register, "_guardrail_check_failed_at", {key: 100.0})
+    clock = {"now": 100.0 + register._GUARDRAIL_CHECK_COOLDOWN_SECONDS - 1}
+    monkeypatch.setattr(register, "time", types.SimpleNamespace(monotonic=lambda: clock["now"]))
+
+    assert register._guardrail_check_locked_out(key) is True
+
+    clock["now"] = 100.0 + register._GUARDRAIL_CHECK_COOLDOWN_SECONDS + 1
+    assert register._guardrail_check_locked_out(key) is False
+    assert key not in register._guardrail_check_failures
+    assert key not in register._guardrail_check_failed_at
 
 
 def test_topic_gate_refuses_to_run_outside_terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:

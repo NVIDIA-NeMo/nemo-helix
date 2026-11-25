@@ -8,6 +8,7 @@ import {
   deleteAssistantSessionHistory,
   getAssistantSessionHistory,
   listAssistantHistorySessions,
+  listAssistantSkills,
   resolveAssistantInput,
   resolveAssistantPermission,
   streamAssistantMessage,
@@ -45,11 +46,9 @@ describe('Assistant API helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await listAssistantHistorySessions();
+    await listAssistantSkills();
 
-    expect(platformMocks.platformFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/history/sessions')
-    );
+    expect(platformMocks.platformFetch).toHaveBeenCalledWith(expect.stringContaining('/skills'));
   });
 
   it('scopes session creation and history requests to the active workspace', async () => {
@@ -489,6 +488,38 @@ describe('Assistant API helpers', () => {
         method: 'POST',
       })
     );
+  });
+
+  it('loads Assistant skill metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            name: 'inference',
+            claude_name: 'nemo-inference',
+            description: 'Use NeMo Helix inference.',
+            source: 'nemo-helix',
+            source_path: 'packages/nemo_helix_ext/src/nemo_helix_ext/skills/inference',
+            install_path: '.claude/skills/nemo-inference/SKILL.md',
+            installed: false,
+          },
+        ]),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(listAssistantSkills()).resolves.toEqual([
+      {
+        name: 'inference',
+        claude_name: 'nemo-inference',
+        description: 'Use NeMo Helix inference.',
+        source: 'nemo-helix',
+        source_path: 'packages/nemo_helix_ext/src/nemo_helix_ext/skills/inference',
+        install_path: '.claude/skills/nemo-inference/SKILL.md',
+        installed: false,
+      },
+    ]);
   });
 
   it('emits structured blocking input requests from SSE events', async () => {

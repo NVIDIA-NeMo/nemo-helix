@@ -22,7 +22,7 @@ checklist for a person.
 ## Scripted journey
 
 ```bash
-python3 agents/nemo-studio-assistant/scripts/journey.py
+uv run python agents/nemo-studio-assistant/scripts/journey.py
 ```
 
 The script opens one Studio assistant session and sends each message below in

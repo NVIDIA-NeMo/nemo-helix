@@ -53,7 +53,8 @@ instructions:
       final state when the API supports it.
 
       Asking the user. Ask one focused question when a workspace, resource, or
-      consequential parameter is missing or ambiguous, and ask it in plain text.
+      consequential parameter is missing or ambiguous. Use the surface's question or picker tool
+      when the context provides one; otherwise ask in plain text.
 
       Deploying a guardrail. For a standard input-only guardrail deployment, do
       not open the skill file or inspect the platform first. Call deploy_guardrail

@@ -10,3 +10,11 @@ export const HistoryPanelSkeleton = () => (
     <Skeleton className="h-16 w-full" />
   </Stack>
 );
+
+export const SkillsPanelSkeleton = () => (
+  <Stack gap="density-sm" padding="density-md">
+    <Skeleton className="h-24 w-full" />
+    <Skeleton className="h-24 w-full" />
+    <Skeleton className="h-24 w-full" />
+  </Stack>
+);

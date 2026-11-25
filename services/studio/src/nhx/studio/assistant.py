@@ -11,6 +11,9 @@ import os
 import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Mapping
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote, urlparse, urlsplit
 
@@ -25,7 +28,16 @@ from nhx.common.service.dependencies import get_entity_client
 from nhx.studio import assistant_topic_gate, studio_links
 from nhx.studio.assistant_artifacts import (
     ChatArtifactsResponse,
+    InputSelectionTool,
+    answer_selection_pairs,
+    record_answer_selections,
     record_assistant_model,
+    record_spec_text_artifacts,
+    record_tool_artifacts,
+    record_tool_name,
+    record_user_tool_result_artifacts,
+    record_workspace_artifact,
+    string_value,
 )
 from nhx.studio.assistant_mcp_tools import (
     APPROVAL_TOOL_NAME,
@@ -39,6 +51,7 @@ from nhx.studio.assistant_mcp_tools import (
     STUDIO_ASSISTANT_CONTEXT,
     STUDIO_LINK_TOOL_NAME,
 )
+from nhx.studio.assistant_skills import ClaudeSkillResponse, DuplicateSkillError, list_claude_skill_responses
 from nhx.studio.authz import scope
 from nhx.studio.dependencies import StudioConfigDep
 from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
@@ -624,6 +637,315 @@ async def list_history_sessions(
     return sessions
 
 
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+
+
+SERVER_CWD = Path(os.getcwd()).resolve()
+
+
+@dataclass
+class HistorySummary:
+    """Aggregated metadata from a Claude session history file."""
+
+    title: str | None = None
+    first_prompt: str | None = None
+    message_count: int = 0
+    token_count: int = 0
+    tool_call_count: int = 0
+    tool_calls: list[str] = dataclass_field(default_factory=list)
+    chat_artifacts: ChatArtifactsResponse = dataclass_field(default_factory=ChatArtifactsResponse)
+
+
+@dataclass(frozen=True)
+class HistoryToolUse:
+    """Tool metadata needed to restore user interactions during history replay."""
+
+    name: str
+    input: dict[str, Any]
+
+
+def _project_history_dir() -> Path:
+    encoded = str(SERVER_CWD).replace("/", "-")
+    return CLAUDE_PROJECTS_DIR / encoded
+
+
+_TOKEN_USAGE_FIELDS = (
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+)
+
+
+def _int_metric(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _append_unique_string(items: list[str], value: str) -> None:
+    if value not in items:
+        items.append(value)
+
+
+def _usage_token_count(usage: Any) -> int:
+    if not isinstance(usage, dict):
+        return 0
+    return sum(_int_metric(usage.get(field)) for field in _TOKEN_USAGE_FIELDS)
+
+
+def _tool_result_token_count(tool_result: Any) -> int:
+    if not isinstance(tool_result, dict):
+        return 0
+    total_tokens = _int_metric(tool_result.get("totalTokens"))
+    if total_tokens:
+        return total_tokens
+    return _usage_token_count(tool_result.get("usage"))
+
+
+def _usage_identity(entry: dict[str, Any], message: dict[str, Any]) -> tuple[str, str] | None:
+    request_id = entry.get("requestId")
+    message_id = message.get("id")
+    if not isinstance(request_id, str) and not isinstance(message_id, str):
+        return None
+    return (request_id if isinstance(request_id, str) else "", message_id if isinstance(message_id, str) else "")
+
+
+def _append_tool_call(summary: HistorySummary, tool_name: str) -> None:
+    summary.tool_call_count += 1
+    _append_unique_string(summary.tool_calls, tool_name)
+    record_tool_name(summary.chat_artifacts, tool_name)
+
+
+def _studio_message_title(text: str) -> str | None:
+    summary_start = text.find(STUDIO_MESSAGE_SUMMARY_START)
+    if summary_start < 0:
+        return None
+
+    summary_end = text.find(STUDIO_MESSAGE_SUMMARY_END, summary_start)
+    block = text[summary_start + len(STUDIO_MESSAGE_SUMMARY_START) : summary_end if summary_end >= 0 else None]
+    match = re.search(
+        r"(?:^|\s)title:\s*(.+?)(?=\s+(?:worked_for|summary|details_label):\s*|$)",
+        block,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+
+    return _trimmed_string(" ".join(match.group(1).split()))
+
+
+def _record_assistant_tool_calls(
+    summary: HistorySummary,
+    message: dict[str, Any],
+    seen_tool_use_ids: set[str],
+    question_labels_by_tool_use_id: dict[str, dict[str, str]],
+    input_selection_tools_by_tool_use_id: dict[str, InputSelectionTool],
+) -> None:
+    for part in message.get("content") or []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            text = string_value(part.get("text"))
+            if text:
+                summary.title = _studio_message_title(text) or summary.title
+                record_spec_text_artifacts(summary.chat_artifacts, text)
+            continue
+        if part.get("type") != "tool_use":
+            continue
+        tool_use_id = part.get("id")
+        if isinstance(tool_use_id, str):
+            if tool_use_id in seen_tool_use_ids:
+                continue
+            seen_tool_use_ids.add(tool_use_id)
+        tool_name = part.get("name")
+        tool_name = tool_name if isinstance(tool_name, str) and tool_name else "tool"
+        _append_tool_call(summary, tool_name)
+        record_tool_artifacts(
+            summary.chat_artifacts,
+            tool_name,
+            part.get("input") or {},
+            tool_use_id if isinstance(tool_use_id, str) else None,
+            question_labels_by_tool_use_id,
+            input_selection_tools_by_tool_use_id,
+        )
+
+
+def _summarize_history_session(path: Path) -> HistorySummary:
+    summary = HistorySummary()
+    seen_usage_events: set[tuple[str, str]] = set()
+    seen_tool_use_ids: set[str] = set()
+    question_labels_by_tool_use_id: dict[str, dict[str, str]] = {}
+    input_selection_tools_by_tool_use_id: dict[str, InputSelectionTool] = {}
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("isSidechain"):
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                message = entry.get("message")
+                if isinstance(message, dict):
+                    record_assistant_model(summary.chat_artifacts, string_value(message.get("model")))
+                    usage_identity = _usage_identity(entry, message)
+                    if usage_identity is None or usage_identity not in seen_usage_events:
+                        summary.token_count += _usage_token_count(message.get("usage"))
+                        if usage_identity is not None:
+                            seen_usage_events.add(usage_identity)
+
+                summary.token_count += _tool_result_token_count(entry.get("toolUseResult"))
+
+                entry_type = entry.get("type")
+                if entry_type == "assistant" and isinstance(message, dict):
+                    _record_assistant_tool_calls(
+                        summary,
+                        message,
+                        seen_tool_use_ids,
+                        question_labels_by_tool_use_id,
+                        input_selection_tools_by_tool_use_id,
+                    )
+                elif entry_type == "user" and isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        record_workspace_artifact(summary.chat_artifacts, content)
+                        record_answer_selections(summary.chat_artifacts, content)
+                        content = _strip_studio_context_from_prompt(content)
+                        summary.message_count += 1
+                        if summary.first_prompt is None:
+                            summary.first_prompt = content
+                    else:
+                        record_user_tool_result_artifacts(
+                            summary.chat_artifacts,
+                            content,
+                            question_labels_by_tool_use_id,
+                            input_selection_tools_by_tool_use_id,
+                        )
+    except OSError:
+        return HistorySummary()
+    return summary
+
+
+def _extract_assistant_parts(content: Any) -> list[dict[str, Any]]:
+    if not isinstance(content, list):
+        return []
+
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                parts.append({"type": "text", "text": text})
+        elif part_type == "thinking":
+            thinking = part.get("thinking")
+            if isinstance(thinking, str) and thinking:
+                parts.append({"type": "thinking", "thinking": thinking})
+        elif part_type == "tool_use":
+            tool_use = {
+                "type": "tool_use",
+                "name": part.get("name") or "tool",
+                "input": part.get("input") or {},
+            }
+            tool_use_id = part.get("id")
+            if isinstance(tool_use_id, str) and tool_use_id:
+                tool_use["id"] = tool_use_id
+            parts.append(tool_use)
+    return parts
+
+
+def _history_tool_result_text(content: Any) -> str | None:
+    if isinstance(content, str):
+        return _trimmed_string(content)
+    if not isinstance(content, list):
+        return None
+    text_parts = [
+        text for part in content if isinstance(part, dict) and (text := _trimmed_string(part.get("text"))) is not None
+    ]
+    return "\n".join(text_parts) or None
+
+
+def _history_interaction_text(tool_use: HistoryToolUse, result_text: str) -> str | None:
+    short_name = tool_use.name.rsplit("__", maxsplit=1)[-1]
+    if tool_use.name == "AskUserQuestion" or short_name == "ask_user_question":
+        try:
+            result_value = json.loads(result_text)
+        except json.JSONDecodeError:
+            result_value = None
+        if isinstance(result_value, dict):
+            result_text = _trimmed_string(result_value.get("response")) or result_text
+        pairs = answer_selection_pairs(result_text)
+        return "\n\n".join(f"{question}\n{answer}" for question, answer in pairs) or None
+
+    try:
+        result = json.loads(result_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(result, dict) or result.get("status") != "submitted":
+        return None
+
+    if short_name == SELECT_AGENT_TOOL_NAME:
+        agent = _trimmed_string(result.get("agent"))
+        return f"Selected agent: {agent}" if agent else None
+    if short_name == SELECT_MODEL_TOOL_NAME:
+        output_key = _trimmed_string(tool_use.input.get("output_key")) or "model"
+        model = _trimmed_string(result.get(output_key))
+        display_label = _trimmed_string(tool_use.input.get("display_label")) or "Selected model"
+        return f"{display_label}: {model}" if model else None
+    if short_name == SELECT_DATASET_FILE_TOOL_NAME:
+        fileset = _trimmed_string(result.get("dataset_fileset"))
+        path = _trimmed_string(result.get("dataset_path"))
+        return f"Selected dataset: {fileset}/{path}" if fileset and path else None
+    if short_name == SELECT_EVAL_CONFIG_TOOL_NAME:
+        if result.get("needs_eval_config") is True:
+            return "I don't have an evaluation config yet"
+        if result.get("use_sample_eval_config") is True:
+            return "Use sample evaluation config"
+        fileset = _trimmed_string(result.get("eval_config_fileset"))
+        path = _trimmed_string(result.get("eval_config"))
+        return f"Selected eval config: {fileset}/{path}" if fileset and path else None
+    return None
+
+
+def _history_user_interaction_texts(
+    content: Any,
+    tool_uses: dict[str, HistoryToolUse],
+) -> list[str]:
+    if not isinstance(content, list):
+        return []
+    texts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict) or part.get("type") != "tool_result":
+            continue
+        tool_use_id = _trimmed_string(part.get("tool_use_id"))
+        tool_use = tool_uses.get(tool_use_id) if tool_use_id else None
+        result_text = _history_tool_result_text(part.get("content"))
+        if tool_use is None or result_text is None:
+            continue
+        display_text = _history_interaction_text(tool_use, result_text)
+        if display_text:
+            texts.append(display_text)
+    return texts
+
+
+@router.get("/skills", response_model=list[ClaudeSkillResponse])
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
+def list_claude_skills() -> list[ClaudeSkillResponse]:
+    """List NeMo skills that the repo's Claude Code installer exposes."""
+    try:
+        return list_claude_skill_responses(SERVER_CWD)
+    except DuplicateSkillError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/history/sessions/{session_id}", response_model=SessionHistoryResponse)
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
@@ -633,31 +955,82 @@ async def get_session_history(
     workspace: str = "default",
     entity_store: EntityClient = Depends(get_entity_client),
 ) -> SessionHistoryResponse:
-    """Load the current user's NeMo Assistant session for replay."""
+    """Load the current user's NeMo Assistant session, or a legacy Claude history, for replay."""
     sid = _validate_session_id(session_id)
     workspace = _validated_workspace_or_default(workspace)
-    conversation = await _get_owned_conversation(
-        entity_store,
-        session_id=sid,
-        workspace=workspace,
-        owner_id=_request_principal_id(request),
-    )
-    items: list[dict[str, Any]] = []
-    for message in conversation.messages:
-        if message.role == "user":
-            items.append({"kind": "user", "text": message.content})
-        elif message.role == "assistant":
-            items.append(
-                {
-                    "kind": "assistant",
-                    "parts": [{"type": "text", "text": message.content}],
-                }
-            )
-    return SessionHistoryResponse(
-        session_id=sid,
-        items=items,
-        chat_artifacts=conversation.chat_artifacts,
-    )
+    try:
+        conversation = await _get_conversation(entity_store, session_id=sid, workspace=workspace)
+    except EntityNotFoundError:
+        conversation = None
+    if conversation is not None:
+        if conversation.owner_id != _request_principal_id(request):
+            raise HTTPException(status_code=404, detail="no such session history")
+        items: list[dict[str, Any]] = []
+        for message in conversation.messages:
+            if message.role == "user":
+                items.append({"kind": "user", "text": message.content})
+            elif message.role == "assistant":
+                items.append(
+                    {
+                        "kind": "assistant",
+                        "parts": [{"type": "text", "text": message.content}],
+                    }
+                )
+        return SessionHistoryResponse(
+            session_id=sid,
+            items=items,
+            chat_artifacts=conversation.chat_artifacts,
+        )
+
+    path = _project_history_dir() / f"{sid}.jsonl"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no such session history")
+
+    items = []
+    summary = _summarize_history_session(path)
+    tool_uses: dict[str, HistoryToolUse] = {}
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("isSidechain"):
+                    continue
+
+                entry_type = entry.get("type")
+                message = entry.get("message")
+                if entry_type == "user" and isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content:
+                        content = _strip_studio_context_from_prompt(content)
+                        items.append({"kind": "user", "text": content})
+                    else:
+                        items.extend(
+                            {"kind": "user", "text": text}
+                            for text in _history_user_interaction_texts(content, tool_uses)
+                        )
+                elif entry_type == "assistant" and isinstance(message, dict):
+                    parts = _extract_assistant_parts(message.get("content"))
+                    if parts:
+                        items.append({"kind": "assistant", "parts": parts})
+                    for part in parts:
+                        tool_use_id = _trimmed_string(part.get("id"))
+                        tool_name = _trimmed_string(part.get("name"))
+                        tool_input = part.get("input")
+                        if tool_use_id and tool_name:
+                            tool_uses[tool_use_id] = HistoryToolUse(
+                                name=tool_name,
+                                input=tool_input if isinstance(tool_input, dict) else {},
+                            )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return SessionHistoryResponse(session_id=sid, items=items, chat_artifacts=summary.chat_artifacts)
 
 
 @router.delete("/history/sessions/{session_id}", status_code=204)

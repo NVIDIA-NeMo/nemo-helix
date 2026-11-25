@@ -3,8 +3,10 @@
 
 """Unit tests for the Studio local assistant bridge."""
 
+import ast
 import asyncio
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -20,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError
 from nhx.common.service.dependencies import get_entity_client
-from nhx.studio import assistant, assistant_topic_gate, studio_links
+from nhx.studio import assistant, assistant_artifacts, assistant_skills, assistant_topic_gate, studio_links
 from nhx.studio.config import StudioConfig
 from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
 from nhx.studio.service import StudioService
@@ -2381,3 +2383,338 @@ def test_assistant_routes_are_available_by_default(service_client: TestClient):
 
     assert response.status_code == 200
     uuid.UUID(response.json()["session_id"])
+
+
+def _inference_source_dir(root: Path) -> Path:
+    source_dir = root / "packages" / "nemo_helix_ext" / "skills" / "inference"
+    source_dir.mkdir(parents=True)
+    return source_dir
+
+
+def _inference_skill(source_dir: Path) -> assistant_skills.Skill:
+    return assistant_skills.Skill(
+        name="inference",
+        description="Use NeMo Helix inference.",
+        version="0.1",
+        content="# Inference",
+        raw="# Inference",
+        source_dir=source_dir,
+        source_plugin="platform",
+        source_dist="nemo-helix-ext",
+    )
+
+
+def _expected_inference_skill_response(*, installed: bool) -> dict[str, Any]:
+    return {
+        "name": "inference",
+        "claude_name": "nemo-inference",
+        "description": "Use NeMo Helix inference.",
+        "source": "nemo-helix",
+        "source_path": "packages/nemo_helix_ext/skills/inference",
+        "install_path": ".claude/skills/nemo-inference/SKILL.md",
+        "installed": installed,
+    }
+
+
+def test_vendored_load_skills_from_root_loads_selected_root_without_registry_private_helper(tmp_path: Path):
+    source_dir = _inference_source_dir(tmp_path)
+    (source_dir / "SKILL.md").write_text(
+        "---\nname: inference\ndescription: Use NeMo Helix inference.\nversion: 2\n---\n# Inference\n",
+        encoding="utf-8",
+    )
+
+    loaded = assistant_skills.load_skills_from_root(
+        tmp_path / "packages" / "nemo_helix_ext" / "skills",
+        source_plugin="platform",
+        source_dist="nemo-helix-ext",
+    )
+
+    assert list(loaded) == ["inference"]
+    assert loaded["inference"].description == "Use NeMo Helix inference."
+    assert loaded["inference"].version == "2"
+    assert loaded["inference"].source_plugin == "platform"
+    assert loaded["inference"].source_dist == "nemo-helix-ext"
+
+
+def test_list_claude_skills_returns_claude_install_metadata(
+    service_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = _inference_source_dir(tmp_path)
+    installed_skill = tmp_path / ".claude" / "skills" / "nemo-inference" / "SKILL.md"
+    installed_skill.parent.mkdir(parents=True)
+    installed_skill.write_text("# Installed")
+    skill = _inference_skill(source_dir)
+
+    monkeypatch.setattr(assistant, "SERVER_CWD", tmp_path)
+    monkeypatch.setattr(assistant_skills, "load_skills", lambda: {"inference": skill})
+
+    response = service_client.get("/v2/assistant/skills")
+
+    assert response.status_code == 200
+    assert response.json() == [_expected_inference_skill_response(installed=True)]
+
+
+def test_load_claude_skills_falls_back_on_duplicate_skill_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    skill = _inference_skill(_inference_source_dir(tmp_path))
+    fallback_called = False
+
+    def fallback() -> dict[str, assistant_skills.Skill]:
+        nonlocal fallback_called
+        fallback_called = True
+        return {"inference": skill}
+
+    monkeypatch.setattr(
+        assistant_skills,
+        "load_skills",
+        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("vendored drift")),
+    )
+    monkeypatch.setattr(assistant_skills, "_load_skills_from_preferred_entry_points", fallback)
+
+    with caplog.at_level(logging.WARNING):
+        loaded = assistant_skills._load_claude_skills()
+
+    assert loaded == {"inference": skill}
+    assert fallback_called
+    assert "vendored drift" in caplog.text
+
+
+def test_list_claude_skills_returns_500_when_fallback_also_fails(
+    service_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        assistant_skills,
+        "load_skills",
+        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("registry drift")),
+    )
+    monkeypatch.setattr(
+        assistant_skills,
+        "_load_skills_from_preferred_entry_points",
+        lambda: (_ for _ in ()).throw(assistant_skills.DuplicateSkillError("fallback drift")),
+    )
+
+    response = service_client.get("/v2/assistant/skills")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "fallback drift"
+
+
+def test_history_preserves_distinct_answers_under_an_agent_header():
+    artifacts = assistant_artifacts.ChatArtifactsResponse()
+    question_labels_by_tool_use_id: dict[str, dict[str, str]] = {}
+    input_selection_tools_by_tool_use_id: dict[str, assistant_artifacts.InputSelectionTool] = {}
+    questions = [
+        {
+            "header": "Agent",
+            "question": "Which framework should the agent use?",
+            "options": [{"label": "LangGraph"}, {"label": "NAT"}],
+        },
+        {
+            "header": "Agent",
+            "question": "How should the agent handle retries?",
+            "options": [{"label": "Retry once"}, {"label": "Fail immediately"}],
+        },
+    ]
+
+    assistant_artifacts.record_tool_artifacts(
+        artifacts,
+        "AskUserQuestion",
+        {"questions": questions},
+        "toolu_questions",
+        question_labels_by_tool_use_id,
+        input_selection_tools_by_tool_use_id,
+    )
+    assistant_artifacts.record_user_tool_result_artifacts(
+        artifacts,
+        [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_questions",
+                "content": (
+                    "Your questions have been answered: "
+                    '"Which framework should the agent use?"="NAT", '
+                    '"How should the agent handle retries?"="Retry once".'
+                ),
+            }
+        ],
+        question_labels_by_tool_use_id,
+        input_selection_tools_by_tool_use_id,
+    )
+
+    assert [selection.model_dump() for selection in artifacts.selections] == [
+        {"label": "Which framework should the agent use", "value": "NAT"},
+        {"label": "How should the agent handle retries", "value": "Retry once"},
+    ]
+    assert artifacts.agent is None
+
+
+def test_history_records_studio_picker_results_as_selections():
+    artifacts = assistant_artifacts.ChatArtifactsResponse()
+    question_labels_by_tool_use_id: dict[str, dict[str, str]] = {}
+    input_selection_tools_by_tool_use_id: dict[str, assistant_artifacts.InputSelectionTool] = {}
+    picker_calls = [
+        ("toolu_agent", "mcp__nemo_studio__select_agent", {}, {"agent": "calculator-agent"}),
+        (
+            "toolu_model",
+            "mcp__nemo_studio__select_model",
+            {"output_key": "selected_model"},
+            {"selected_model": "nvidia/llama-3.3-nemotron-super-49b-v1"},
+        ),
+        (
+            "toolu_dataset",
+            "mcp__nemo_studio__select_dataset_file",
+            {},
+            {"dataset_fileset": "evaluation-data", "dataset_path": "inputs/test.jsonl"},
+        ),
+        (
+            "toolu_eval",
+            "mcp__nemo_studio__select_eval_config",
+            {},
+            {"eval_config_fileset": "agent-evals", "eval_config": "configs/default.yml"},
+        ),
+    ]
+
+    for tool_use_id, tool_name, tool_input, _result in picker_calls:
+        assistant_artifacts.record_tool_artifacts(
+            artifacts,
+            tool_name,
+            tool_input,
+            tool_use_id,
+            question_labels_by_tool_use_id,
+            input_selection_tools_by_tool_use_id,
+        )
+
+    assistant_artifacts.record_user_tool_result_artifacts(
+        artifacts,
+        [
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"status": "submitted", **result}),
+                    }
+                ],
+            }
+            for tool_use_id, _tool_name, _tool_input, result in picker_calls
+        ],
+        question_labels_by_tool_use_id,
+        input_selection_tools_by_tool_use_id,
+    )
+
+    assert [selection.model_dump() for selection in artifacts.selections] == [
+        {"label": "Agent", "value": "calculator-agent"},
+        {"label": "Model", "value": "nvidia/llama-3.3-nemotron-super-49b-v1"},
+        {"label": "Dataset", "value": "evaluation-data/inputs/test.jsonl"},
+        {"label": "Eval config", "value": "agent-evals/configs/default.yml"},
+    ]
+    assert artifacts.agent == "calculator-agent"
+    assert artifacts.model == "nvidia/llama-3.3-nemotron-super-49b-v1"
+    assert artifacts.model_source == "selection"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "result", "expected"),
+    [
+        (
+            "mcp__nemo_studio__select_agent",
+            {},
+            '{"status":"submitted","agent":"beach-finder"}',
+            "Selected agent: beach-finder",
+        ),
+        (
+            "mcp__nemo_studio__select_model",
+            {"display_label": "Fallback model", "output_key": "fallback_model"},
+            '{"status":"submitted","fallback_model":"nemotron"}',
+            "Fallback model: nemotron",
+        ),
+        (
+            "mcp__nemo_studio__select_dataset_file",
+            {},
+            '{"status":"submitted","dataset_fileset":"eval-data","dataset_path":"input.jsonl"}',
+            "Selected dataset: eval-data/input.jsonl",
+        ),
+        (
+            "mcp__nemo_studio__select_eval_config",
+            {},
+            '{"status":"submitted","needs_eval_config":true}',
+            "I don't have an evaluation config yet",
+        ),
+    ],
+)
+def test_history_interaction_text_restores_studio_picker_submissions(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    result: str,
+    expected: str,
+):
+    assert (
+        assistant._history_interaction_text(
+            assistant.HistoryToolUse(name=tool_name, input=tool_input),
+            result,
+        )
+        == expected
+    )
+
+
+def test_history_summary_reads_model_generated_session_title(tmp_path: Path):
+    history = tmp_path / "session.jsonl"
+    history.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "user", "message": {"content": "A long initial request"}}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "\n".join(
+                                        [
+                                            assistant.STUDIO_MESSAGE_SUMMARY_START,
+                                            "title: Create Spam Detector Agent",
+                                            "worked_for: unknown",
+                                            "summary: Created the requested agent.",
+                                            "details_label: worked for unknown",
+                                            assistant.STUDIO_MESSAGE_SUMMARY_END,
+                                        ]
+                                    ),
+                                }
+                            ]
+                        },
+                    }
+                ),
+            ]
+        )
+    )
+
+    summary = assistant._summarize_history_session(history)
+
+    assert summary.title == "Create Spam Detector Agent"
+
+
+def test_studio_read_only_api_actions_match_the_agent_copy() -> None:
+    # The Studio copy decides which nemo_api writes get the approval wording; it must match the agent's set.
+    agent_register = (
+        Path(__file__).resolve().parents[4] / "agents/nemo-studio-assistant/src/nemo_studio_assistant/register.py"
+    )
+    tree = ast.parse(agent_register.read_text())
+    agent_actions: set[str] | None = None
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_READ_ONLY_ACTIONS" for t in node.targets)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.args[0], ast.Set)
+        ):
+            agent_actions = set(ast.literal_eval(node.value.args[0]))
+    assert agent_actions is not None
+    assert agent_actions == set(assistant._READ_ONLY_API_ACTIONS)

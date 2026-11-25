@@ -9,9 +9,11 @@ import userEvent from '@testing-library/user-event';
 const mocks = vi.hoisted(() => ({
   deleteAssistantSessionHistory: vi.fn(),
   listAssistantHistorySessions: vi.fn(),
+  listAssistantSkills: vi.fn(),
 }));
 
 vi.mock('@studio/routes/agents/AssistantChatRoute/api', () => ({
+  ASSISTANT_SKILLS_QUERY_KEY: ['assistant', 'skills'],
   deleteAssistantSessionHistory: mocks.deleteAssistantSessionHistory,
   getAssistantHistorySessionsQueryKey: (workspace: string) => [
     'assistant',
@@ -20,6 +22,7 @@ vi.mock('@studio/routes/agents/AssistantChatRoute/api', () => ({
     workspace,
   ],
   listAssistantHistorySessions: mocks.listAssistantHistorySessions,
+  listAssistantSkills: mocks.listAssistantSkills,
 }));
 
 describe('AssistantHistoryPanel', () => {
@@ -28,9 +31,20 @@ describe('AssistantHistoryPanel', () => {
     vi.clearAllMocks();
     mocks.listAssistantHistorySessions.mockResolvedValue([]);
     mocks.deleteAssistantSessionHistory.mockResolvedValue(undefined);
+    mocks.listAssistantSkills.mockResolvedValue([
+      {
+        name: 'inference',
+        claude_name: 'nemo-inference',
+        description: 'Use NeMo Helix inference.',
+        source: 'nemo-helix',
+        source_path: 'packages/nemo_helix_ext/src/nemo_helix_ext/skills/inference',
+        install_path: '.claude/skills/nemo-inference/SKILL.md',
+        installed: false,
+      },
+    ]);
   });
 
-  it('starts history collapsed and expands it', async () => {
+  it('starts history and skills collapsed and expands them independently', async () => {
     const user = userEvent.setup();
     render(
       <AssistantHistoryPanel
@@ -41,9 +55,10 @@ describe('AssistantHistoryPanel', () => {
     );
 
     const historyButton = screen.getByRole('button', { name: 'Expand All Chats' });
+    const skillsButton = screen.getByRole('button', { name: 'Expand Skills' });
     expect(historyButton).toHaveAttribute('aria-expanded', 'false');
+    expect(skillsButton).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Expand Skills' })).not.toBeInTheDocument();
 
     await user.click(historyButton);
 
@@ -51,8 +66,22 @@ describe('AssistantHistoryPanel', () => {
       'aria-expanded',
       'true'
     );
+    expect(skillsButton).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'All Chats' })).toHaveClass('min-h-0', 'flex-1');
+    expect(screen.getByRole('region', { name: 'Skills' })).toHaveClass('shrink-0');
+
+    await user.click(skillsButton);
+
+    expect(screen.getByRole('button', { name: 'Expand All Chats' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    expect(screen.getByRole('button', { name: 'Collapse Skills' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
   });
 
   it('renders history sessions and keeps selection working', async () => {
@@ -305,5 +334,25 @@ describe('AssistantHistoryPanel', () => {
 
     expect(screen.queryByText('Selections')).not.toBeInTheDocument();
     expect(screen.getByText('No artifacts yet')).toBeInTheDocument();
+  });
+
+  it('lists NeMo Assistant skills in the expanded skills block', async () => {
+    const user = userEvent.setup();
+    render(
+      <AssistantHistoryPanel
+        activeSessionId="session-1"
+        onNewChat={vi.fn()}
+        onSelectSession={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Expand Skills' }));
+
+    expect(await screen.findByText('Inference')).toBeInTheDocument();
+    expect(screen.getByText('Use NeMo Helix inference.')).toBeInTheDocument();
+    expect(screen.getByText('nemo-inference')).toBeInTheDocument();
+    expect(screen.queryByText('Source: nemo-helix')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Skill file:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Claude file:/)).not.toBeInTheDocument();
   });
 });

@@ -11,8 +11,13 @@ def test_studio_assistant_routes_are_ruled_for_authenticated_principals() -> Non
     contribution, problems, _warnings = _derive_service_contribution(StudioService())
 
     assert problems == []
+    skills = contribution.endpoints["/apis/studio/v2/assistant/skills"]["get"]
     history = contribution.endpoints["/apis/studio/v2/assistant/history/sessions"]["get"]
     messages = contribution.endpoints["/apis/studio/v2/assistant/sessions/{session_id}/messages"]["post"]
+    assert skills.callers == ["principal"]
+    assert skills.permissions == []
+    assert skills.scopes == ["studio:read", "platform:read"]
+    assert not skills.deny
     assert history.callers == ["principal"]
     assert history.permissions == []
     assert history.scopes == ["studio:read", "platform:read"]

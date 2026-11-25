@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -9,7 +9,7 @@ assistant deployed, answers pickers with their first option, declines every
 mutation approval, and prints one PASS/FAIL line per step. Exits non-zero when
 any step fails.
 
-    python3 agents/nemo-studio-assistant/scripts/journey.py [--base-url URL] [--workspace NAME]
+    uv run python agents/nemo-studio-assistant/scripts/journey.py [--base-url URL] [--workspace NAME]
 """
 
 import argparse
