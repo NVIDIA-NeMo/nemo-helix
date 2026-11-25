@@ -19,9 +19,10 @@ import { useLocation } from 'react-router';
 
 export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
   const { pathname } = useLocation();
-  // Each header's open/closed choice belongs to the user: persisted per id in localStorage, it
-  // outlives navigation and the browser session, and only a click ever changes it. Headers the
-  // user has never touched fall through to `defaultOpen`, which is open unless an item opts out.
+  // Each item header's and section heading's open/closed choice belongs to the user: persisted in
+  // localStorage (item headers per item id, section headings as `group:<heading>` in the same map),
+  // it outlives navigation and the browser session, and only a click ever changes it. Item headers
+  // never touched fall through to `defaultOpen`; headings never touched are open.
   const [accordionState = {}, setAccordionState] = useLocalStorage<Record<string, boolean>>(
     NAV_ACCORDION_STATE_KEY,
     {}
@@ -76,8 +77,15 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
           return <Fragment key={groupIndex}>{navItems}</Fragment>;
         }
 
+        const groupKey = `group:${group.groupLabel}`;
+        const open = collapsed || (accordionState[groupKey] ?? true);
         return (
-          <VerticalNavGroup key={groupIndex}>
+          <VerticalNavGroup
+            key={groupIndex}
+            collapsible={!collapsed}
+            open={open}
+            onOpenChange={(next) => handleAccordionChange(groupKey, next)}
+          >
             <VerticalNavHeading className="h-8 min-h-8">{group.groupLabel}</VerticalNavHeading>
             <VerticalNavGroupList>{navItems}</VerticalNavGroupList>
           </VerticalNavGroup>
