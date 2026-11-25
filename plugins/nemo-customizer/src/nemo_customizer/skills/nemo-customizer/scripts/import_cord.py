@@ -12,6 +12,9 @@ each with its JSONL and ``images/``.
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
       --output /tmp/cord-v2
 
+Add ``--train-limit 300 --validation-limit 30`` for a small run (the validation
+split has only 100 rows; ``--limit N`` applies N to both splits).
+
 Then upload the directory's contents (a new fileset name, no ``--exist-ok``).
 The trailing slash matters: without it the files land under ``cord-v2/`` in
 the fileset, and the fileset-relative image urls no longer resolve.
@@ -122,12 +125,12 @@ def load_split(split: str, limit: int | None) -> Any:
     return load_dataset(CORD_DATASET, split=spec)
 
 
-def write_filesets(output: Path, limit: int | None = None) -> dict[str, int]:
+def write_filesets(output: Path, train_limit: int | None = None, validation_limit: int | None = None) -> dict[str, int]:
     """Write ``output/train`` and ``output/validation`` for one fileset upload."""
     counts = {
-        "train": write_split(load_split("train", limit), output / "train", "train.jsonl", "train"),
+        "train": write_split(load_split("train", train_limit), output / "train", "train.jsonl", "train"),
         "validation": write_split(
-            load_split("validation", limit), output / "validation", "validation.jsonl", "validation"
+            load_split("validation", validation_limit), output / "validation", "validation.jsonl", "validation"
         ),
     }
     return counts
@@ -137,8 +140,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="Fileset directory: train/ and validation/")
     parser.add_argument("--limit", type=int, default=None, help="First N rows of each split")
+    parser.add_argument("--train-limit", type=int, default=None, help="First N train rows (overrides --limit)")
+    parser.add_argument(
+        "--validation-limit", type=int, default=None, help="First N validation rows (overrides --limit)"
+    )
     args = parser.parse_args()
-    counts = write_filesets(args.output, args.limit)
+    counts = write_filesets(
+        args.output,
+        args.limit if args.train_limit is None else args.train_limit,
+        args.limit if args.validation_limit is None else args.validation_limit,
+    )
     print(f"Wrote {counts['train']} train rows and {counts['validation']} validation rows to {args.output}")
 
 

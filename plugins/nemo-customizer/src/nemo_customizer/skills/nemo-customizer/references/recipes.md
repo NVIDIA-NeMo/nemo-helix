@@ -77,9 +77,14 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 For a vision LoRA job without a cluster, use `Qwen/Qwen3-VL-8B-Instruct` on one 48 GB GPU. Full-weight SFT does not fit that GPU. CORD ran on this checkpoint on the platform. Use the finance and CLEVR settings below for a 1-GPU experiment on this same checkpoint.
 
-- **CORD:** rank 16, alpha 32, `max_seq_length` 4096, `image_size` `{"longest_edge": 2621440, "shortest_edge": 65536}`, `activation_checkpointing` true, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows, deploy `gpu` 1 and `--max-model-len 8192`. `image_size` is the pixel bound and `max_seq_length` is the token cap; together they keep the run inside 48 GB. Do not set `max_pixels` as well.
+- **CORD:** rank 16, alpha 32, `max_seq_length` 8192, `image_size` `{"longest_edge": 2621440, "shortest_edge": 65536}`, `activation_checkpointing` true, global batch 8, micro batch 1, learning rate 1e-5, one epoch, first 300 train and 30 validation rows (`import_cord.py --train-limit 300 --validation-limit 30`), deploy `gpu` 1 and `--max-model-len 8192`. `image_size` is the pixel bound and `max_seq_length` is the token cap; together they keep the run inside 48 GB. Do not set `max_pixels` as well.
+- **Image size rule (any VLM):** an image costs `longest_edge / vision_patch_size²` tokens (patch size from the model spec: 32 for Qwen3-VL, 16 for Bolt). Keep that below half of `max_seq_length`, so the other half holds the prompt and label; compile rejects the job otherwise (422). At 8192, `longest_edge` must be under 4096 × patch² (Qwen3-VL 4,194,304; Bolt 1,048,576).
 - **Finance OCR:** rank 16, alpha 32, global batch 4, about 200 rows, `attn_implementation` `sdpa`.
 - **CLEVR:** LoRA rank 16, colocated vLLM, `vllm_gpu_memory_utilization` 0.4, sequence length 2048, 512 new tokens, 32/16 split, `--prompt qwen`, tool agent `max_rollout_turns` 2 and `inline_tool_output_images` true.
+
+### Nemotron 3.5 Bolt E4B (vision) on one GPU
+
+Bolt is `gemma4_text` (`Gemma4ForConditionalGeneration`, about 3.6B parameters, vision tower, patch size 16). The Super VL vLLM flags and the Nemotron gotchas above do not apply. Use the Qwen3-VL-8B CORD recipe with `image_size` `{"longest_edge": 786432, "shortest_edge": 65536}` (3072 tokens) and deploy `gpu` 1 with `--max-model-len 8192`; 5 steps used about 18 GB. Start any VLM not listed here from the Qwen3-VL-8B recipe, and apply the image size rule.
 
 ## Field mapping — Automodel YAML → `automodel` job JSON
 

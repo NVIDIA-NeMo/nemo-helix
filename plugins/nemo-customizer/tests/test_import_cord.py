@@ -70,3 +70,15 @@ def test_write_split_saves_the_image_beside_the_jsonl(tmp_path: Path) -> None:
     assert image.saved == tmp_path / "images" / "00000.png"
     assert row == cord.cord_row("images/00000.png", "<s_nm>A</s_nm>")
     assert row["messages"][0]["content"][1]["text"] == cord.CORD_PROMPT
+
+
+def test_write_filesets_limits_each_split_separately(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_load_split(split: str, limit: int | None) -> list[dict]:
+        rows = {"train": 5, "validation": 4}[split]
+        return [
+            {"image": _Image(), "ground_truth": json.dumps({"gt_parse": {"nm": str(i)}})}
+            for i in range(rows if limit is None else min(limit, rows))
+        ]
+
+    monkeypatch.setattr(cord, "load_split", fake_load_split)
+    assert cord.write_filesets(tmp_path, 3, 2) == {"train": 3, "validation": 2}

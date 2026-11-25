@@ -45,7 +45,6 @@ while true; do
   echo "$(date +%H:%M:%S) $HEALTH"
   case "$STATUS" in
     completed)
-      printf '%s\n' "$JSON" | python3 -m json.tool
       exit 0
       ;;
     error|cancelled)

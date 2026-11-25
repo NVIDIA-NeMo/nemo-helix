@@ -76,6 +76,8 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
 }
 ```
 
+To serve the output when the job finishes, add `deployment_config`: `"default/<config>"` names an existing deployment config (a LoRA job reuses a LoRA-enabled deployment of the same base and loads the adapter onto it), or an inline object such as `{"gpu": 1, "lora_enabled": true, "disk_size": "50Gi", "additional_args": ["--max-model-len", "8192"]}`. Create the config and deployment as in `post-training-eval.md` § **2**; fields: `docs/customizer/grpo-training.mdx` § **Deploy automatically when the job finishes**.
+
 **4. Submit and poll**
 
 ```bash
