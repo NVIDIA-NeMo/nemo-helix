@@ -973,6 +973,11 @@ authz:
       get: *hf-fileset-read
     /apis/files/v2/hf/api/models/{workspace}/{name}/paths-info/{revision}:
       post: *hf-fileset-read
+    # Reserve the metadata namespace, including unmatched paths and methods.
+    /apis/files/v2/hf/api/models/{path:path}:
+      get:
+        x-not-in-openapi: true
+        deny: true
     /apis/files/v2/workspaces/{workspace}/filesets/{name}:
       delete:
         direct:

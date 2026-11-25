@@ -196,8 +196,22 @@ async def get_paths_info(
     return result
 
 
-# Keep metadata routes above the catch-all: a workspace named "resolve" can
-# otherwise make /api/models/... metadata URLs match the download route.
+# Reserve metadata paths before registering the download catch-all. A missing
+# metadata operation must never be interpreted as a file in the api/models repo.
+@router.api_route("/api/models", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"])
+@router.api_route(
+    "/api/models/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]
+)
+async def reject_reserved_model_path() -> None:
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "The /api/models/ prefix is reserved for Hugging Face metadata. "
+            "Use the regular Files API to access the api/models fileset."
+        ),
+    )
+
+
 @router.head(
     "/{workspace}/{name}/resolve/{revision}/{path:path}",
     summary="Get file metadata (HF compatible)",

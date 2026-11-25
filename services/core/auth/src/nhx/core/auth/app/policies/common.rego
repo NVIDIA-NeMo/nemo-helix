@@ -527,10 +527,7 @@ segment_matches(path_segment, pattern_segment) if {
 # If multiple patterns match, returns the most specific one (fewest placeholders)
 normalize_endpoint(path, method) := pattern if {
 	base_path := split(path, "?")[0]
-	path_patterns := {p |
-		some p in object.keys(data.authz.endpoints)
-		path_matches_pattern(base_path, p)
-	}
+	path_patterns := patterns_for_path(base_path)
 	matching_patterns := patterns_for_method(path_patterns, method)
 
 	# Find the pattern with the fewest placeholders (most specific)
@@ -548,6 +545,30 @@ normalize_endpoint(path, method) := pattern if {
 	# Return a pattern with the minimum score
 	some pattern in matching_patterns
 	pattern_scores[pattern] == min_score
+}
+
+# The HF metadata namespace is reserved before method selection, just as the
+# application registers its rejection route before the download catch-all.
+hf_metadata_prefix := "/apis/files/v2/hf/api/models/"
+
+hf_metadata_fallback := concat("", [hf_metadata_prefix, "{path:path}"])
+
+patterns_for_path(path) := metadata if {
+	startswith(path, hf_metadata_prefix)
+	metadata := {p |
+		some p in object.keys(data.authz.endpoints)
+		startswith(p, hf_metadata_prefix)
+		p != hf_metadata_fallback
+		path_matches_pattern(path, p)
+	}
+	count(metadata) > 0
+} else := {hf_metadata_fallback} if {
+	path == trim_suffix(hf_metadata_prefix, "/")
+} else := {hf_metadata_fallback} if {
+	startswith(path, hf_metadata_prefix)
+} else := {p |
+	some p in object.keys(data.authz.endpoints)
+	path_matches_pattern(path, p)
 }
 
 # FastAPI skips path matches that do not support the request method. If none

@@ -65,17 +65,19 @@ test_hf_read_permission_does_not_cross_workspaces if {
 	not hf_allowed(request, "creator", ["platform:read"])
 }
 
-# GET metadata shadows the catch-all download route. HEAD skips GET-only
-# metadata routes, and longer download paths still address the api workspace.
+# Metadata paths never fall through to downloads, regardless of method.
 hf_overlapping_requests := [
 	{"method": "GET", "suffix": "/api/models/resolve/incident", "workspace": "resolve"},
 	{"method": "GET", "suffix": "/api/models/resolve/incident/revision/main", "workspace": "resolve"},
 	{"method": "GET", "suffix": "/api/models/resolve/incident/tree/main", "workspace": "resolve"},
 	{"method": "POST", "suffix": "/api/models/resolve/incident/paths-info/main", "workspace": "resolve"},
-	{"method": "HEAD", "suffix": "/api/models/resolve/incident/revision/main", "workspace": "api"},
-	{"method": "GET", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": "api"},
-	{"method": "HEAD", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": "api"},
+	{"method": "HEAD", "suffix": "/api/models/resolve/incident/revision/main", "workspace": ""},
+	{"method": "GET", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": ""},
+	{"method": "HEAD", "suffix": "/api/models/resolve/incident/weights/model.bin", "workspace": ""},
 	{"method": "GET", "suffix": "/resolve/model/resolve/main/config.json", "workspace": "resolve"},
+	{"method": "HEAD", "suffix": "/resolve/model/resolve/main/config.json", "workspace": "resolve"},
+	{"method": "GET", "suffix": "/resolve/model/resolve/main/api/models/nested.bin", "workspace": "resolve"},
+	{"method": "HEAD", "suffix": "/resolve/model/resolve/main/api/models/nested.bin", "workspace": "resolve"},
 ]
 
 test_hf_overlapping_routes_authorize_only_the_selected_workspace if {
@@ -94,12 +96,27 @@ test_hf_overlapping_routes_authorize_only_the_selected_workspace if {
 	}
 }
 
-test_hf_head_uses_download_contract_and_workspace if {
+test_hf_head_cannot_fall_through_to_download_contract if {
 	request := {"method": "HEAD", "path": "/apis/files/v2/hf/api/models/resolve/incident/revision/main"}
 	endpoint := common.endpoint_scan with input as request
 	workspace := authz.workspace_scan with input as request
-	endpoint == "/apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}"
-	workspace == "api"
+	endpoint == "/apis/files/v2/hf/api/models/{workspace}/{name}/revision/{revision}"
+	workspace == "resolve"
+}
+
+test_hf_reserved_prefix_denies_unmatched_operations_even_for_admins if {
+	every suffix in ["", "/", "/resolve/incident/weights/model.bin"] {
+		every method in ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"] {
+			request := {
+				"method": method,
+				"path": concat("", ["/apis/files/v2/hf/api/models", suffix]),
+				"principal_id": "service:admin",
+			}
+			result := authz.allow with input as request
+				with data.authz.principals as {"service:admin": {"workspaces": {"system": ["HelixAdmin"]}}}
+			not result.allowed
+		}
+	}
 }
 
 test_hf_unsupported_methods_cannot_use_admin_bypass if {

@@ -15,6 +15,8 @@ from huggingface_hub import HfApi, hf_hub_download, hf_hub_url, snapshot_downloa
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.core.files.testing.utils import create_fileset
 
 
@@ -165,6 +167,45 @@ class TestHuggingFaceClientLibrary:
 
 class TestHfFileDownload:
     """Tests for /v2/hf/{workspace}/{name}/resolve/... endpoints."""
+
+    def test_reserved_repo_remains_available_through_regular_files_api(
+        self, client: NemoClient, test_client: TestClient, hf_auth_headers
+    ):
+        WorkspacesClient.from_client(client).create_workspace(body=CreateWorkspaceRequest(name="api"))
+        files_client = FilesClient.from_client(client)
+        with create_fileset(files_client, name="models", workspace="api"):
+            path = "weights/model.bin"
+            content = b"model weights"
+            files_client.upload_file(workspace="api", name="models", path=path, content=content)
+            url = f"/apis/files/v2/hf/api/models/resolve/main/{path}"
+            for method in ["HEAD", "GET"]:
+                response = test_client.request(method, url, headers=hf_auth_headers)
+                assert response.status_code == 404
+                if method == "GET":
+                    assert "regular Files API" in response.json()["detail"]
+            assert files_client.download_file(workspace="api", name="models", path=path).read() == content
+
+    def test_nested_file_head_and_get_remain_available(
+        self, client: NemoClient, test_client: TestClient, fileset: FilesetOutput, hf_auth_headers
+    ):
+        content = b"nested model weights"
+        path = "api/models/nested.bin"
+        FilesClient.from_client(client).upload_file(
+            workspace=fileset.workspace, name=fileset.name, path=path, content=content
+        )
+        url = f"/apis/files/v2/hf/{fileset.workspace}/{fileset.name}/resolve/main/{path}"
+        for method in ["HEAD", "GET"]:
+            response = test_client.request(method, url, headers=hf_auth_headers)
+            assert response.status_code == 200
+            assert response.headers["Content-Length"] == str(len(content))
+            if method == "GET":
+                assert response.content == content
+
+        metadata = test_client.get(
+            f"/apis/files/v2/hf/api/models/{fileset.workspace}/{fileset.name}/revision/main", headers=hf_auth_headers
+        )
+        assert metadata.status_code == 200
+        assert any(item["rfilename"] == path for item in metadata.json()["siblings"])
 
     def test_head_file_returns_metadata(self, client: NemoClient, test_client: TestClient, hf_auth_headers):
         """Test HEAD request returns correct headers."""
