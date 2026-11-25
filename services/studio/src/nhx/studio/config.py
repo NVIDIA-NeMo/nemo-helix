@@ -4,6 +4,7 @@
 """Studio service configuration."""
 
 import logging
+import os
 from fnmatch import fnmatchcase
 from functools import cached_property
 from pathlib import Path
@@ -75,6 +76,13 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
     telemetry_enabled: bool = Field(
         default=False,
         description="Enable Studio UI browser telemetry export.",
+    )
+    default_model: str = Field(
+        default_factory=lambda: os.environ.get("NEMO_DEFAULT_MODEL", ""),
+        description=(
+            "Model Studio preselects when a registered agent config uses ${NEMO_DEFAULT_MODEL}, "
+            "as a `workspace/name` model reference. Defaults to the NEMO_DEFAULT_MODEL environment variable."
+        ),
     )
     otel: StudioOtelConfig = Field(
         default_factory=StudioOtelConfig,

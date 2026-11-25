@@ -38,7 +38,7 @@ import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromU
 import { type DeployOnCreatePlan, useDeployOnCreate } from '@studio/api/agents/useDeployOnCreate';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { DEFAULT_MODEL, PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
@@ -159,6 +159,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const onTracesTab = tab === 'imported-traces';
   const onCreateTab = onUploadTab || onGitHubTab || onTracesTab;
 
+  const formDefaults = {
+    ...UPLOAD_AGENT_FORM_DEFAULTS,
+    name: initialName ?? '',
+    defaultModel: DEFAULT_MODEL,
+  };
   const {
     control,
     setValue,
@@ -167,7 +172,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
-    defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
+    defaultValues: formDefaults,
     disabled: isPending || deployOnCreate.isDeploying,
     mode: 'onTouched',
   });
@@ -207,8 +212,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   }, [watchedRepoUrl]);
   const repoSource = parsedRepo.source;
   const repoKey = repoSource ? formatGitHubSource(repoSource) : null;
+  // With a platform default to preselect, the picker shows up front: agent.yaml is only read on submit.
   const needsModel = onGitHubTab
-    ? repoKey !== null && modelRequiredForRepo === repoKey
+    ? repoKey !== null && (Boolean(DEFAULT_MODEL) || modelRequiredForRepo === repoKey)
     : uploadNeedsModel;
   // Held back until the field is left, so the message is not a running commentary on typing.
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
@@ -220,7 +226,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     resetMutation();
     resetRepoMutation();
     resetTracedMutation();
-    resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
+    resetForm(formDefaults);
     deployAfterCreate.current = null;
     setEntries([]);
     setSourceLabel('');
@@ -424,7 +430,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       render={({ field }) => (
         <FormField
           slotLabel="Model"
-          slotHelp={`${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, the default model the nemo CLI fills in. Studio has no default of its own, so choose the model this agent will use.`}
+          slotHelp={
+            DEFAULT_MODEL
+              ? `Used wherever ${AGENT_CONFIG_FILENAME} sets a model to ${DEFAULT_MODEL_PLACEHOLDER}. Starts as the platform's default model.`
+              : `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, and the platform has no default model set, so choose the model this agent will use.`
+          }
         >
           <WorkspaceModelSelect
             workspace={workspace}

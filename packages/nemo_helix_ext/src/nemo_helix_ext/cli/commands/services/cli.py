@@ -316,6 +316,15 @@ def _ensure_port_available(host: str, port: int, scope: str, *, base_dir: Path |
 # ---------------------------------------------------------------------------
 
 
+# Studio preselects it for agent configs that use ${NEMO_DEFAULT_MODEL}.
+def _export_default_model() -> None:
+    from nemo_helix_ext.config import get_context
+
+    default_model = get_context().default_model
+    if default_model and not os.environ.get("NEMO_DEFAULT_MODEL"):
+        os.environ["NEMO_DEFAULT_MODEL"] = default_model
+
+
 @services_app.command("run")
 def run_services(
     services: Annotated[
@@ -426,6 +435,8 @@ def run_services(
             os.close(lock_fd)
         except OSError:
             pass
+
+    _export_default_model()
 
     from nhx.platform_runner.run import run_platform
 

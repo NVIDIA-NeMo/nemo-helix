@@ -115,9 +115,12 @@ stores an explicit model:
 
 - **CLI and Python SDK** use the default model chosen in `nemo setup`, or the `NEMO_DEFAULT_MODEL`
   environment variable when it is set. With neither, registration fails and asks you to pick one.
-- **Studio** has no default model of its own, so it asks you to choose a model from the workspace.
-  For a code upload it asks as soon as the folder is selected. For a GitHub import it asks after
-  the first **Register** attempt reads `agent.yaml`.
+- **Studio** shows a **Model** picker, preselected with the platform's default model:
+  `studio.default_model`, which defaults to `NEMO_DEFAULT_MODEL` in the platform's environment.
+  `nemo services run` sets that variable from your `nemo setup` default when it isn't already set.
+  You can choose any other model in the workspace. For a code upload the picker appears once the
+  folder is selected. For a GitHub import it appears with the repository when a default is set;
+  without one, it appears after the first **Register** attempt reads `agent.yaml`.
 
 The API rejects a `nemo-agents-spec-v1` config that still holds the placeholder, because nothing
 fills it in at deploy time.
