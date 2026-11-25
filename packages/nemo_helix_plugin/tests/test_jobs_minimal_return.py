@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -115,14 +116,15 @@ def jobs() -> _JobsClient:
     return _JobsClient()
 
 
-@pytest.fixture
-def client(jobs: _JobsClient) -> Iterator[TestClient]:
+@contextmanager
+def _serve(jobs: _JobsClient, job_discriminator: str | None = None) -> Iterator[TestClient]:
     router = job_route_factory(
         service_name="widgets",
         job_type="Widget",
         job_input=_Spec,
         platform_job_config_compiler=_compiler,
         route_options=[JobRouteOption.CORE, JobRouteOption.DRY_RUN],
+        job_discriminator=job_discriminator,
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
@@ -130,6 +132,12 @@ def client(jobs: _JobsClient) -> Iterator[TestClient]:
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
         yield TestClient(app)
+
+
+@pytest.fixture
+def client(jobs: _JobsClient) -> Iterator[TestClient]:
+    with _serve(jobs) as client:
+        yield client
 
 
 def test_create_returns_the_whole_job_by_default(client: TestClient) -> None:
@@ -142,10 +150,25 @@ def test_create_returns_the_whole_job_by_default(client: TestClient) -> None:
 
 @pytest.mark.parametrize(
     "prefer",
-    ["return=minimal", "RETURN=Minimal", 'return="minimal"', "respond-async, return=minimal", "return=minimal; x=1"],
+    [
+        ["return=minimal"],
+        ["RETURN=minimal"],
+        ['return="minimal"'],
+        ["return = minimal"],
+        ["respond-async, return=minimal"],
+        ["return=minimal; x=1"],
+        ['return=minimal; x="a,b"'],
+        # Only the first ``return`` preference counts (RFC 7240 §2), across header lines too.
+        ["return=minimal, return=representation"],
+        ["respond-async", "return=minimal"],
+    ],
 )
-def test_create_with_return_minimal_replies_without_a_body(client: TestClient, jobs: _JobsClient, prefer: str) -> None:
-    response = client.post(_JOBS, json={"name": "w1", "spec": {"rows": ["a", "b"]}}, headers={"Prefer": prefer})
+def test_create_with_return_minimal_replies_without_a_body(
+    client: TestClient, jobs: _JobsClient, prefer: list[str]
+) -> None:
+    response = client.post(
+        _JOBS, json={"name": "w1", "spec": {"rows": ["a", "b"]}}, headers=[("Prefer", line) for line in prefer]
+    )
 
     assert response.status_code == 201, response.text
     assert response.content == b""
@@ -154,14 +177,39 @@ def test_create_with_return_minimal_replies_without_a_body(client: TestClient, j
     assert jobs.created is not None
 
 
-def test_create_with_another_return_preference_returns_the_whole_job(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    "prefer",
+    [
+        ["return=representation"],
+        ["return=representation, return=minimal"],
+        ["return=representation", "return=minimal"],
+        # A preference's value is case-sensitive (RFC 7240 §2).
+        ["return=Minimal"],
+        # Commas inside a quoted string don't separate preferences.
+        ['foo="x,return=minimal"'],
+        ['foo="x\\",return=minimal"'],
+    ],
+)
+def test_create_not_preferring_return_minimal_returns_the_whole_job(client: TestClient, prefer: list[str]) -> None:
     response = client.post(
-        _JOBS, json={"name": "w1", "spec": {"rows": ["a"]}}, headers={"Prefer": "return=representation"}
+        _JOBS, json={"name": "w1", "spec": {"rows": ["a"]}}, headers=[("Prefer", line) for line in prefer]
     )
 
     assert response.status_code == 201, response.text
     assert response.json()["name"] == "w1"
     assert "Preference-Applied" not in response.headers
+
+
+@pytest.mark.parametrize("prefer", [[], ["return=minimal"]])
+def test_create_fails_closed_on_a_job_outside_the_collection(jobs: _JobsClient, prefer: list[str]) -> None:
+    # The jobs service answers with a job whose spec lacks the collection's marker.
+    with _serve(jobs, job_discriminator="widget") as client:
+        response = client.post(
+            _JOBS, json={"name": "w1", "spec": {"rows": ["a"]}}, headers=[("Prefer", line) for line in prefer]
+        )
+
+    assert response.status_code == 502, response.text
+    assert "outside the Widget collection" in response.json()["detail"]
 
 
 def test_dry_run_ignores_return_minimal(client: TestClient, jobs: _JobsClient) -> None:

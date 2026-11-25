@@ -7,6 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { HelixJobStatus } from './HelixJobStatus.ts';
+import type { HelixJobStatusResponseCustomFields } from './HelixJobStatusResponseCustomFields.ts';
 import type { HelixJobStatusResponseErrorDetails } from './HelixJobStatusResponseErrorDetails.ts';
 import type { HelixJobStatusResponseStatusDetails } from './HelixJobStatusResponseStatusDetails.ts';
 import type { HelixJobStepStatusResponse } from './HelixJobStepStatusResponse.ts';
@@ -20,4 +21,5 @@ export interface HelixJobStatusResponse {
   steps: HelixJobStepStatusResponse[];
   created_at: string;
   updated_at: string;
+  custom_fields?: HelixJobStatusResponseCustomFields;
 }

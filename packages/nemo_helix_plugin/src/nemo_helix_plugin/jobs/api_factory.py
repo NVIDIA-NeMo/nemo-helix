@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Mapping
@@ -1250,7 +1251,7 @@ def job_route_factory(
         get_request_authorizer if job_discriminator is not None else _noop_mutation_authorizer
     )
 
-    def from_response(job_resp: HelixJob) -> TypedJobResponse:
+    def require_collection_record(job_resp: HelixJob) -> None:
         if not _matches_job_collection(job_resp):
             # List/create/mutation responses should already be scoped.  A mismatched
             # record here means the core Jobs service violated the factory contract;
@@ -1259,6 +1260,9 @@ def job_route_factory(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Jobs service returned a record outside the {job_type} collection.",
             )
+
+    def from_response(job_resp: HelixJob) -> TypedJobResponse:
+        require_collection_record(job_resp)
         # Use job_output for deserialization (what's stored and returned)
         return TypedJobResponse(
             id=job_resp.id,
@@ -1321,9 +1325,13 @@ def job_route_factory(
     # Core job routes
     if JobRouteOption.CORE in route_options:
         dry_run_dependency = _dry_run_query if JobRouteOption.DRY_RUN in route_options else _no_dry_run
-        create_responses: dict[int | str, dict[str, Any]] | None = None
+        create_responses: dict[int | str, dict[str, Any]] = {
+            status.HTTP_201_CREATED: {
+                "headers": {"Location": _LOCATION_HEADER, "Preference-Applied": _PREFERENCE_APPLIED_HEADER}
+            },
+        }
         if JobRouteOption.DRY_RUN in route_options:
-            create_responses = {
+            create_responses |= {
                 status.HTTP_200_OK: {
                     "model": TypedJobResponse,
                     "description": "Dry run passed: the job that would be created, unsaved.",
@@ -1338,6 +1346,7 @@ def job_route_factory(
             "/jobs",
             status_code=status.HTTP_201_CREATED,
             response_model=TypedJobResponse,
+            response_description=_MINIMAL_REPLY_DESCRIPTION,
             responses=create_responses,
         )
         async def create_job(
@@ -1449,6 +1458,7 @@ def job_route_factory(
             jobs = AsyncJobsClient.from_client(async_client)
             job_resp = (await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))).data()
             if minimal:
+                require_collection_record(job_resp)
                 location = f"{http_request.url.path.rstrip('/')}/{quote(job_resp.name, safe='')}"
                 return _minimal_reply(status.HTTP_201_CREATED, location)
             return from_response(job_resp)
@@ -1730,6 +1740,8 @@ def job_route_factory(
         @router.post(
             "/jobs/{name}/cancel",
             response_model=TypedJobResponse,
+            response_description=_MINIMAL_REPLY_DESCRIPTION,
+            responses={status.HTTP_200_OK: {"headers": {"Preference-Applied": _PREFERENCE_APPLIED_HEADER}}},
         )
         async def cancel_job(
             workspace: str,
@@ -1754,6 +1766,7 @@ def job_route_factory(
                 )
             ).data()
             if minimal:
+                require_collection_record(job_resp)
                 return _minimal_reply(status.HTTP_200_OK)
             return from_response(job_resp)
 
@@ -2194,20 +2207,58 @@ def _no_dry_run(request: Request) -> None:
 _PREFER_DESCRIPTION = (
     "RFC 7240 preferences. `return=minimal` replies with no body, and `Preference-Applied: return=minimal`, "
     "instead of the whole job, whose spec can be large: read the job's state from its status route. "
-    "A create's dry run ignores it."
+    "Only the first `return` preference counts. A create's dry run ignores it."
 )
+_MINIMAL_REPLY_DESCRIPTION = "The job, or no body when `Prefer: return=minimal` is applied."
+_PREFERENCE_APPLIED_HEADER: dict[str, Any] = {
+    "description": "`return=minimal` when the reply has no body.",
+    "schema": {"type": "string"},
+}
+_LOCATION_HEADER: dict[str, Any] = {
+    "description": "The job's URL, when the reply has no body.",
+    "schema": {"type": "string"},
+}
 
 
 def _prefers_minimal_return(
     prefer: list[str] | None = Header(default=None, description=_PREFER_DESCRIPTION),
 ) -> bool:
-    """Whether the request's ``Prefer`` headers ask for ``return=minimal`` (RFC 7240)."""
+    """Whether the request's ``Prefer`` headers ask for ``return=minimal`` (RFC 7240).
+
+    As RFC 7240 has it, only the first ``return`` preference counts, a preference's name is
+    case-insensitive and its value case-sensitive, and a value may be a quoted string.
+    """
     for header in prefer or ():
-        for preference in header.split(","):
-            token, _, value = preference.split(";", 1)[0].partition("=")
-            if token.strip().lower() == "return" and value.strip().strip('"').lower() == "minimal":
-                return True
+        for preference in _split_unquoted(header, ","):
+            name, _, value = _split_unquoted(preference, ";")[0].partition("=")
+            if name.strip().lower() == "return":
+                return _unquoted(value.strip()) == "minimal"
     return False
+
+
+def _split_unquoted(text: str, separator: str) -> list[str]:
+    """``text`` split at each ``separator`` outside a quoted string."""
+    parts: list[str] = []
+    start, quoted, escaped = 0, False, False
+    for index, char in enumerate(text):
+        if escaped:
+            escaped = False
+        elif quoted and char == "\\":
+            escaped = True
+        elif char == '"':
+            quoted = not quoted
+        elif char == separator and not quoted:
+            parts.append(text[start:index])
+            start = index + 1
+    parts.append(text[start:])
+    return parts
+
+
+def _unquoted(word: str) -> str:
+    """The value of ``word``, a token or a quoted string."""
+    if len(word) >= 2 and word.startswith('"') and word.endswith('"'):
+        return re.sub(r"\\(.)", r"\1", word[1:-1])
+    return word
 
 
 def _minimal_reply(status_code: int, location: str | None = None) -> Response:

@@ -65,16 +65,16 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       requestBody:
         required: true
         content:
@@ -83,11 +83,20 @@ paths:
               $ref: '#/components/schemas/WarGameJobRequest'
       responses:
         '201':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarGameJob'
+          headers:
+            Location:
+              description: The job's URL, when the reply has no body.
+              schema:
+                type: string
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -470,23 +479,28 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       responses:
         '200':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarGameJob'
+          headers:
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -1361,16 +1375,16 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       requestBody:
         required: true
         content:
@@ -1379,11 +1393,20 @@ paths:
               $ref: '#/components/schemas/SynthBenignJobRequest'
       responses:
         '201':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SynthBenignJob'
+          headers:
+            Location:
+              description: The job's URL, when the reply has no body.
+              schema:
+                type: string
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -1766,23 +1789,28 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       responses:
         '200':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SynthBenignJob'
+          headers:
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -1948,16 +1976,16 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       requestBody:
         required: true
         content:
@@ -1966,11 +1994,20 @@ paths:
               $ref: '#/components/schemas/VictimContextJobRequest'
       responses:
         '201':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/VictimContextJob'
+          headers:
+            Location:
+              description: The job's URL, when the reply has no body.
+              schema:
+                type: string
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -2353,23 +2390,28 @@ paths:
         schema:
           description: 'RFC 7240 preferences. `return=minimal` replies with no body,
             and `Preference-Applied: return=minimal`, instead of the whole job, whose
-            spec can be large: read the job''s state from its status route. A create''s
-            dry run ignores it.'
+            spec can be large: read the job''s state from its status route. Only the
+            first `return` preference counts. A create''s dry run ignores it.'
           title: Prefer
           type: array
           items:
             type: string
         description: 'RFC 7240 preferences. `return=minimal` replies with no body,
           and `Preference-Applied: return=minimal`, instead of the whole job, whose
-          spec can be large: read the job''s state from its status route. A create''s
-          dry run ignores it.'
+          spec can be large: read the job''s state from its status route. Only the
+          first `return` preference counts. A create''s dry run ignores it.'
       responses:
         '200':
-          description: Successful Response
+          description: 'The job, or no body when `Prefer: return=minimal` is applied.'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/VictimContextJob'
+          headers:
+            Preference-Applied:
+              description: '`return=minimal` when the reply has no body.'
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:

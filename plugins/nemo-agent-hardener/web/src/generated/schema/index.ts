@@ -56,6 +56,7 @@ export * from './HelixJobLogPage.ts';
 export * from './HelixJobResultResponse.ts';
 export * from './HelixJobStatus.ts';
 export * from './HelixJobStatusResponse.ts';
+export * from './HelixJobStatusResponseCustomFields.ts';
 export * from './HelixJobStatusResponseErrorDetails.ts';
 export * from './HelixJobStatusResponseStatusDetails.ts';
 export * from './HelixJobStepStatusResponse.ts';
