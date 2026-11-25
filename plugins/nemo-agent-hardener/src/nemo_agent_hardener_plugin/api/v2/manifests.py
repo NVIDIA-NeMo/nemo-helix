@@ -56,7 +56,13 @@ from nemo_agent_hardener_plugin.filesets import (
     download_and_extract_project,
     upload_project_dir,
 )
-from nemo_agent_hardener_plugin.jobs._common import resolve_model_key, victim_image_required
+from nemo_agent_hardener_plugin.jobs._common import (
+    missing_secret_refs,
+    missing_secret_refs_message,
+    model_key_refs,
+    resolve_model_key,
+    victim_image_required,
+)
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
@@ -310,6 +316,16 @@ def _secrets_or_422(specs: list[str] | None) -> tuple[list[str] | None, dict[str
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+async def _require_secrets_exist(workspace: str, refs: dict[str, str]) -> None:
+    """422 naming every referenced Secret that does not exist; checks existence only, never reads a value."""
+    if not refs:
+        return
+    async with get_async_nemo_client(as_service="agent-hardener", internal=True, workspace=workspace) as client:
+        missing = await missing_secret_refs(client, refs, workspace)
+    if missing:
+        raise HTTPException(status_code=422, detail=missing_secret_refs_message(missing))
+
+
 def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
     """The non-gateway backends in a saved manifest, which refresh must not drop.
 
@@ -335,6 +351,9 @@ async def create_manifest(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentHardenerManifest:
     """`init`: resolve the named source into a manifest and persist it by ``name``."""
+    # Before resolving: a bad reference should not cost a scaffold upload.
+    _, secret_refs = _secrets_or_422(body.secrets)
+    await _require_secrets_exist(workspace, {**secret_refs, **model_key_refs(body.models)})
     manifest = (
         await _build_project_manifest(workspace, body)
         if body.source_type == "project"
@@ -542,6 +561,7 @@ async def update_manifest(
     `POST /manifests/{name}/refresh` to re-resolve the one it already targets.
     """
     existing = (await _get_manifest_or_404(entity_client, workspace, name)).model_copy(deep=True)
+    await _require_secrets_exist(workspace, model_key_refs(body.models))
     existing = await run_in_threadpool(
         migrate_schema_manifest,
         existing,

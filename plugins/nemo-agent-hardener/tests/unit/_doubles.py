@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext
 
@@ -62,3 +63,31 @@ def make_entity(**data: Any) -> Any:
     events-fileset fallback bug reached production while its test passed.
     """
     return SimpleNamespace(data=dict(data))
+
+
+class SecretsStore:
+    """A real :class:`AsyncNemoClient` whose Secrets service holds *existing* (``workspace/name``) secrets.
+
+    Records every request path, so a test can assert that an existence check never read a value
+    (``.../access``). *status* answers every lookup instead, to model a store that is down.
+    """
+
+    def __init__(self, existing: set[str], *, status: int | None = None) -> None:
+        self.paths: list[str] = []
+        self._existing, self._status = existing, status
+
+    def client(self, **_kwargs: Any) -> AsyncNemoClient:
+        """A fresh client per call, since callers may close it (``async with``); takes a provider's kwargs."""
+        return AsyncNemoClient(
+            base_url="http://platform",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(self._handle), base_url="http://platform"),
+        )
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.paths.append(request.url.path)
+        if self._status is not None:
+            return httpx.Response(self._status, json={"detail": "unavailable"})
+        workspace, name = request.url.path.split("/workspaces/")[1].split("/secrets/")
+        if f"{workspace}/{name}" in self._existing:
+            return httpx.Response(200, json={"name": name, "workspace": workspace})
+        return httpx.Response(404, json={"detail": "not found"})

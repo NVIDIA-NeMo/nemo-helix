@@ -19,6 +19,7 @@ from nemo_agent_hardener_plugin.cli._shared import (
 )
 from nemo_agent_hardener_plugin.config import missing_secrets
 from nemo_agent_hardener_plugin.jobs.defenses import defense_ids, select_defense_ids
+from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
 
 
@@ -123,7 +124,11 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(code=1)
             env_files = [ctx.config.operator_env_file] + ([Path(env_file)] if env_file else [])
-            missing = missing_secrets(Path(config_file), env_files=env_files)
+            try:
+                missing = missing_secrets(Path(config_file), env_files=env_files)
+            except AgentHardenerRunError as exc:
+                typer.secho(f"{exc} {exc.remediation}", fg="red")
+                raise typer.Exit(code=1) from exc
             if missing:
                 typer.secho(
                     f"Missing required secrets: {', '.join(missing)}. Provide them via --env-file "

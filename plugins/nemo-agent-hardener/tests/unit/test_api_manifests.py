@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 import yaml
+from _doubles import SecretsStore
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
@@ -698,7 +699,14 @@ def test_refresh_advances_the_recorded_agent_timestamp(client, mock_entity_clien
     assert resp.json()["agent_updated_at"] == "2026-10-05T10:00:00Z"
 
 
+def _secrets_store(monkeypatch: pytest.MonkeyPatch, existing: set[str]) -> SecretsStore:
+    store = SecretsStore(existing)
+    monkeypatch.setattr(manifests_module, "get_async_nemo_client", store.client)
+    return store
+
+
 def test_create_splits_secret_specs_into_names_and_refs(client, mock_entity_client, monkeypatch) -> None:
+    _secrets_store(monkeypatch, {"default/b-secret"})
     seen: list[list[str] | None] = []
 
     def _resolve(*_a, **kw):
@@ -717,6 +725,45 @@ def test_create_splits_secret_specs_into_names_and_refs(client, mock_entity_clie
     assert seen == [["A", "B"]]
     assert resp.json()["secret_refs"] == {"B": "default/b-secret"}
     assert resp.json()["declared_secrets"] == ["A", "B"]
+
+
+def test_create_rejects_references_to_missing_secrets_before_resolving(client, mock_entity_client, monkeypatch) -> None:
+    store = _secrets_store(monkeypatch, {"default/present"})
+    monkeypatch.setattr(
+        manifests_module, "resolve_agent_to_manifest", lambda *_a, **_k: pytest.fail("must not resolve the agent")
+    )
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={
+            "name": "m1",
+            "source_type": "agent",
+            "agent": "clockbot",
+            "secrets": ["OK=default/present", "GONE=other/gone"],
+            "models": {"attack": {"model": "m", "api_key_secret": "no-such-key"}},
+        },
+    )
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert "other/gone (GONE)" in detail and "default/no-such-key (attack model key)" in detail
+    assert "default/present" not in detail
+    assert not any(path.endswith("/access") for path in store.paths)
+    mock_entity_client.create.assert_not_called()
+
+
+def test_patch_rejects_a_model_key_secret_that_does_not_exist(client, mock_entity_client, monkeypatch) -> None:
+    _secrets_store(monkeypatch, set())
+    mock_entity_client.get = AsyncMock(return_value=AgentHardenerManifest(name="m1", workspace="default"))
+
+    resp = client.patch(
+        "/apis/agent-hardener/v2/workspaces/default/manifests/m1",
+        json={"models": {"analysis": {"api_key_secret": "missing-key"}}},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "default/missing-key (analysis model key)" in resp.json()["detail"]
+    mock_entity_client.update.assert_not_called()
 
 
 def test_create_rejects_a_bad_secret_spec_with_422(client, mock_entity_client) -> None:

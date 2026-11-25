@@ -16,6 +16,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import _common, artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
@@ -23,6 +24,12 @@ from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext
+
+
+@pytest.fixture(autouse=True)
+def _no_provisioned_inference_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The jobs here run against SDK doubles that are not real clients, so no provisioned key is looked up."""
+    monkeypatch.setattr(_common, "resolve_model_key", lambda *_a, **_k: None)
 
 
 def _provisioned_config(tmp_path: Path) -> AgentHardenerConfig:
@@ -440,6 +447,7 @@ async def test_compile_builds_subprocess_step_carrying_the_spec() -> None:
         "defense_policy": None,
         "source_run": None,
         "models": None,
+        "models_preflighted": True,
     }
 
 
@@ -449,7 +457,7 @@ async def test_compile_precreates_run_record_for_service_manifest() -> None:
     class FakeEntityClient:
         async def get(self, _entity_type: Any, *, name: str, workspace: str) -> Any:
             assert name == "m1"
-            return SimpleNamespace(agent="default/clockbot", port=8000)
+            return AgentHardenerManifest(name=name, workspace=workspace, agent="default/clockbot", port=8000)
 
         async def create(self, entity: Any) -> Any:
             created["entity"] = entity
@@ -475,11 +483,15 @@ async def test_compile_skips_precreation_when_generating_suite() -> None:
     job_spec = await run_module.AgentHardenerRunJob.compile(
         workspace="default",
         spec=spec,
-        entity_client=SimpleNamespace(get=_fail, create=_fail),
+        entity_client=SimpleNamespace(get=_saved_manifest, create=_fail),
         job_name="job-1",
         async_sdk=None,
     )
     assert "run_name" not in list(job_spec["steps"])[0]["config"]
+
+
+async def _saved_manifest(_entity_type: Any, *, name: str, workspace: str) -> AgentHardenerManifest:
+    return AgentHardenerManifest(name=name, workspace=workspace)
 
 
 def test_materialize_manifest_writes_yaml_from_agent_ref(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

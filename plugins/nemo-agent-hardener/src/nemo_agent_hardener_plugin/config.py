@@ -21,10 +21,11 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field, field_validator, model_validator
 
@@ -95,6 +96,30 @@ def write_private_file(path: Path, body: str) -> None:
     os.chmod(path, 0o600)  # O_CREAT ignores the mode when the file already exists
 
 
+def read_manifest_agent(manifest_path: Path) -> dict[str, Any]:
+    """The manifest's ``agent`` section (``{}`` when it has none).
+
+    Raises a classified manifest error when the file cannot be read or parsed: callers gate on what it
+    declares, so treating an unreadable manifest as "declares nothing" would let a run through unchecked.
+    """
+    try:
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            f"cannot read manifest {manifest_path}: {exc}",
+            remediation="Check the manifest path and that it is valid YAML, or re-create it with "
+            "`nemo agent-hardener init`.",
+        ) from exc
+    agent = data.get("agent") if isinstance(data, dict) else None
+    return agent if isinstance(agent, dict) else {}
+
+
+def declared_secrets(agent: Mapping[str, Any]) -> list[str]:
+    """The secret names a manifest's ``agent`` section declares, in declaration order."""
+    return [name for name in (agent.get("secrets") or []) if isinstance(name, str)]
+
+
 def missing_secrets(
     manifest_path: Path,
     *,
@@ -105,26 +130,32 @@ def missing_secrets(
 
     Sources: *environ* (defaults to ``os.environ``), the manifest's own ``secrets_file`` (resolved
     next to the manifest), and each dotenv in *env_files* (e.g. the operator env + a ``--env-file``).
-    A name set to an empty value counts as missing — ``KEY=`` in a dotenv or ``export KEY=""`` would
-    otherwise pass this gate and resurface minutes later as a provider auth error.
-    Returns the missing names in declaration order; ``[]`` when none are declared or the manifest
-    can't be read (parsing is not this check's job).
+    Raises (see :func:`read_manifest_agent`) when the manifest can't be read.
     """
-    try:
-        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return []
-    agent = data.get("agent", {}) if isinstance(data, dict) else {}
-    declared = [name for name in (agent.get("secrets") or []) if isinstance(name, str)]
-    if not declared:
-        return []
-
-    available = _non_empty_keys(os.environ if environ is None else environ)
+    agent = read_manifest_agent(manifest_path)
     secrets_file = agent.get("secrets_file")
     if isinstance(secrets_file, str) and secrets_file:
         # `secrets_file` may be relative to the manifest or already absolute (see jobs/manifest.py);
         # `/` handles both.
-        available |= _non_empty_keys(read_env_file(manifest_path.parent / secrets_file))
+        env_files = [manifest_path.parent / secrets_file, *env_files]
+    return unprovided_secrets(declared_secrets(agent), env_files=env_files, environ=environ)
+
+
+def unprovided_secrets(
+    declared: Iterable[str],
+    *,
+    env_files: Iterable[Path] = (),
+    environ: Mapping[str, str] | None = None,
+) -> list[str]:
+    """The *declared* names neither *environ* (default ``os.environ``) nor any dotenv in *env_files* sets.
+
+    A name set to an empty value counts as missing — ``KEY=`` in a dotenv or ``export KEY=""`` would
+    otherwise pass this gate and resurface minutes later as a provider auth error.
+    """
+    declared = list(declared)
+    if not declared:
+        return []
+    available = _non_empty_keys(os.environ if environ is None else environ)
     for path in env_files:
         available |= _non_empty_keys(read_env_file(Path(path)))
     return [name for name in declared if name not in available]
