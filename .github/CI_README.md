@@ -33,8 +33,30 @@ reusable actions, and supporting docs.
 
   This pilot is manually requested and is not part of `ci-status.needs`.
   Do not restore the previous signing-author merge gate: it made skill changes
-  unmergeable when the external pipeline could not sign. First verify a complete
-  run and then agree on a required status check with NVSkills maintainers.
+  unmergeable when the external pipeline could not sign.
+
+  **MR gate policy:** keep the live `NVSkills CI` status and this request workflow
+  out of required branch checks and out of `ci-status.needs`. Required offline
+  Customizer tests already run in the unconditional plugin unit-test matrix:
+  `test_skills.py` checks installed references/frontmatter,
+  `test_skill_job_examples.py` validates documented job JSON against the backend
+  schemas, and `test_skill_eval_dataset.py` checks authored task identity,
+  coverage, routing labels and judge inputs. They need no model calls or GPUs.
+  These checks validate authored artifacts, not an agent's success rate.
+
+  Live evaluations are advisory for MRs and provide evidence for a separate
+  catalog-publication review. A failed or incomplete live run remains failed
+  or incomplete in its report; do not use `continue-on-error`, weaken safety
+  assertions, or rerun until green to manufacture publication evidence.
+  Record all scored attempts and inspect trajectories when judging disagrees.
+  Pin the evaluator, agent runtime, agent model and judge model for comparisons.
+  Three attempts are reliability measurements, not retries that erase earlier
+  failures: SkillEvaluator 1.2.0 fails an agent's quality verdict if any scored
+  with-skill attempt fails a required goal/security check, even when pass@3 is
+  100%. An all-attempts-pass live gate therefore becomes more failure-prone as
+  attempts increase. Promoting live results to an MR gate requires a separately
+  reviewed statistical regression policy and evidence that the pinned runtime
+  is reliable; a single run's PASS/FAIL label is insufficient.
 
   Setup and publication checklist:
   1. Keep this workflow and its helper under the existing `.github/` CODEOWNERS rule.

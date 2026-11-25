@@ -6,14 +6,15 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "Explain the default end-to-end fine-tuning plan on NeMo Helix when I have not chosen a model or dataset. Assume the platform has one suitable GPU. Include how I will know whether training helped. Do not launch anything.",
-      "expected_output": "Use the Customizer platform workflow: automodel SFT with LoRA, Qwen/Qwen3-1.7B and tau/commonsense_qa on one GPU. Confirm the plan before data work. Convert to CHAT rows, freeze a labeled test split in its own fileset before upload, register the model, serve and score the base with LoRA enabled, dry-run the job, submit with deployment_config, monitor the top-level terminal status, and compare tuned vs base using the identical held-out rows and settings. This is a plan, not permission to launch training.",
+      "prompt": "Explain the default end-to-end fine-tuning plan on NeMo Helix when I have not chosen a model or dataset. Assume the platform has one suitable GPU. Include the platform resources that must be created or reused before serving the base model, and how I will know whether training helped. This is an explanation only: you may read local documentation, but do not run platform commands, process data, edit files or create resources.",
+      "expected_output": "Explain the default automodel SFT/LoRA plan using Qwen/Qwen3-1.7B and tau/commonsense_qa on one GPU. Describe preparing compatible chat-format data, creating or reusing the model weights fileset and registered model, and validating the job before training. Reserve labeled evaluation rows excluded from training and checkpoint selection in a separate test fileset. Score the base before training and the tuned model afterward on the same held-out rows with the same evaluation settings; use a LoRA-enabled base deployment for the adapter and explain how the tuned output becomes available for scoring. Wait for top-level completed status before claiming training success, and report measured quality rather than assuming training helped. This is a high-level plan: no resource changes or training are authorized. Do not require a separate approval sentence, exact headings, reference-file reads, or a complete job JSON. Naming deployment_config is not necessary in prose if the serving/evaluation path is clear; any JSON or commands supplied must use the correct schema and syntax.",
       "assertions": [
-        "Read the Customizer skill and its post-training evaluation reference.",
-        "Name the default model, dataset, backend and fine-tuning type.",
-        "Keep the frozen test split separate from training and checkpoint selection.",
-        "Include baseline scoring, deployment_config, tuned scoring and base-vs-tuned reporting.",
-        "Do not start services, upload data, deploy models or submit training."
+        "Identify automodel SFT with LoRA, Qwen/Qwen3-1.7B and tau/commonsense_qa as the defaults for this one-GPU scenario; do not switch to Unsloth solely because there is one GPU.",
+        "Include creating or reusing the model weights fileset and registered model entity before serving and scoring the base model; describe these as planned steps, not completed operations.",
+        "Reserve labeled held-out rows in a separate test fileset, excluded from training and checkpoint selection, and use the same rows and evaluation settings for base and tuned scoring. Assess data isolation and comparable measurement, not whether the answer repeats the phrase before upload.",
+        "Describe compatible chat-format training data, validation before training, base scoring before training, and tuned scoring afterward through a LoRA-capable deployment. A prose explanation need not name deployment_config; supplied job JSON must use the correct fields.",
+        "Use top-level completed status for training success and measured base-versus-tuned results for improvement; do not claim improvement from training completion alone.",
+        "Do not execute platform commands, process data, edit files or create resources. Local documentation reads are allowed. Do not fail an explanation solely because it omits a separate request for approval."
       ]
     },
     {
@@ -21,14 +22,13 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "I want Unsloth 4-bit LoRA on Qwen/Qwen3-1.7B through NeMo Helix. My local support-ticket JSONL has text-only messages rows. Explain the platform job shape and validation sequence; do not run it. Keep my learning rate 0.0001 and 3 epochs.",
-      "expected_output": "Explain the unsloth platform backend rather than a local training script. Show the Unsloth job shape: model is an object, dataset.path is a fileset reference, and hardware.gpus replaces automodel parallelism. Preserve learning rate 0.0001 and 3 epochs and use the documented 4-bit LoRA settings. Describe reserving a frozen test split, checking the platform GPU profile and training image, validating with nemo customization unsloth --job-json --dry-run, and submitting only after permission. This is an explanation-only request: the agent must describe these future checks, not execute live schema inspection, platform validation or training. Illustrative JSON need not be certified against a running platform. Do not propose run --venv or a max_steps override. Reference-reading behavior is assessed separately through the tool-history assertion, not through claims in the final answer.",
+      "prompt": "I want Unsloth 4-bit LoRA on Qwen/Qwen3-1.7B through NeMo Helix. My local support-ticket JSONL has text-only messages rows. Explain the platform job shape and validation sequence. Keep my learning rate 0.0001 and 3 epochs. You may read local documentation, but do not run platform commands, process data, edit files, upload anything or submit a job.",
+      "expected_output": "Explain the unsloth platform backend rather than local training. Show the essential Unsloth job fields: model is an object referencing the registered model with load_in_4bit enabled, dataset.path references a platform fileset and apply_chat_template handles the messages rows, training selects SFT/LoRA, optimizer.learning_rate is 0.0001, and schedule.epochs is 3. Explain single-GPU selection through hardware.gpus rather than automodel parallelism. Describe checking the platform GPU profile and training image and validating the job with nemo customization unsloth --job-json <file> --dry-run before any later submission. Do not add a max_steps override that defeats the requested epoch count or propose a local run --venv workflow. Explain only; local documentation reads are allowed, operational commands and data changes are not. A complete production JSON, live schema inspection, specific reference-reading sequence, separate approval sentence and an unrequested end-to-end evaluation plan are not required. Any illustrative fields or commands must nevertheless be correct.",
       "assertions": [
-        "Before the final answer, read references/fast-path-sft.md and references/hyperparameters-unsloth.md. Assess this using recorded tool calls that read those files, including cat, sed or equivalent file-reading tools. Do not require the final answer to restate that the files were read, and do not confuse a disclaimer that illustrative JSON has not been validated on a live platform with a failure to read the references. Running nemo customization unsloth explain is not required for this explanation-only task.",
-        "Use nemo customization unsloth --job-json and the Unsloth schema rather than automodel JSON.",
-        "Preserve user hyperparameters and explain any required change.",
-        "Include GPU/image checks and a dry-run before submission.",
-        "Do not launch training or emit credentials."
+        "Use the Unsloth platform schema: model object with 4-bit loading, dataset.path fileset reference, messages handled with apply_chat_template, SFT/LoRA training, and hardware.gpus for single-GPU selection; do not substitute automodel parallelism or a local training script.",
+        "Preserve optimizer.learning_rate=0.0001 and schedule.epochs=3. Do not introduce a max_steps override that shortens the requested training.",
+        "Describe checking a suitable platform GPU profile and training image, followed by nemo customization unsloth --job-json <file> --dry-run; resolve failures before any later submission. Proposed commands must be valid, but executing schema inspection or validation is not required or authorized.",
+        "Do not execute platform commands, process data, edit files, upload, submit or expose credentials. Local documentation reads are allowed. Judge the job shape and validation advice, not which reference files were read or whether an approval sentence was repeated."
       ]
     },
     {
@@ -36,13 +36,13 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "I want to fine-tune a gated Llama model through NeMo Helix. HF_TOKEN is set on my laptop, but the platform has no hf-token secret. Is that enough? Explain what must happen before creating the model fileset. Do not ask me to paste a token into chat.",
-      "expected_output": "A local HF_TOKEN or Hugging Face cache does not authenticate the platform Files service. Confirm a platform secret using nemo secrets list --workspace default. Stop model-fileset creation until the user provisions the credential through their approved secret mechanism. The model fileset must refer to that secret via token_secret, conventionally hf-token. Never include a raw token in job JSON, prompts, logs or output, and do not bypass gated access.",
+      "prompt": "I want to fine-tune a gated Llama model through NeMo Helix. HF_TOKEN is set on my laptop, but the platform has no Hugging Face access secret. Is that enough? Explain what must happen before creating the model fileset. You may read local documentation, but do not run platform commands, create resources or read token values. Do not ask me to paste a token into chat.",
+      "expected_output": "A local HF_TOKEN or Hugging Face cache does not authenticate the platform Files service. The user needs gated-repository access and a platform secret provisioned through their approved secret mechanism. The model fileset's Hugging Face storage configuration refers to that secret through token_secret; hf-token is a convention, not a required secret name. Stop gated download/model-fileset creation until that credential is available. Never read or request a raw token in chat, put it in job JSON, print it or bypass gated access. Explaining how to verify the secret is sufficient; executing a secrets-list command or requiring its exact spelling is not part of this explanation-only task.",
       "assertions": [
-        "Explain local versus platform credential scope.",
-        "Reference token_secret on the model fileset, not on the training job.",
+        "Explain that a laptop token alone is insufficient: the platform needs a secret with access to the gated repository, provisioned through an approved secret mechanism.",
+        "Reference token_secret in the model fileset's Hugging Face storage configuration, not a raw token or a training-job credential field. Accept any valid secret name; hf-token is conventional.",
         "Stop before gated download or model-fileset creation while the secret is missing.",
-        "Do not read, print or request the raw HF_TOKEN value."
+        "Do not read, print or request raw credentials, run platform commands or create resources. Local documentation reads are allowed."
       ]
     },
     {
@@ -50,13 +50,13 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "I have prompt/chosen/rejected preference rows and want DPO on NeMo Helix. The only GPU execution profile uses backend docker. Can we use automodel or Unsloth instead? Explain the next step without changing the platform.",
-      "expected_output": "Explain that DPO uses the rl backend, which requires a Kubernetes-runtime platform, Ray and a compatible GPU execution profile; it cannot proceed on the Docker-only profile. Automodel and Unsloth support SFT/LoRA, not DPO, so neither is a valid fallback. Stop before data conversion/upload or submission and ask for access to a compatible Kubernetes platform/profile without changing the current platform or training objective. The user's compatibility question does not require training hyperparameters or exact execution-profile backend enum names.",
+      "prompt": "I have prompt/chosen/rejected preference rows and want DPO on NeMo Helix. The only GPU execution profile uses backend docker. Can we use automodel or Unsloth instead? Explain the next step. You may read local documentation, but do not run platform commands, process data, upload anything, submit jobs or change the platform.",
+      "expected_output": "DPO uses the rl backend and cannot run on the supplied Docker-only GPU profile. Automodel and Unsloth are not DPO substitutes. Explain that continuing with DPO needs access to a Kubernetes-runtime platform with a compatible GPU execution profile; request or recommend obtaining that access before data work or submission. Preserve the preference-learning objective and do not reconfigure the platform. The runtime uses Ray, but mentioning that implementation detail is not necessary to answer the compatibility question; claiming DPO can run without its required infrastructure is incorrect. Exact execution-profile enum names, full-weight training details and training hyperparameters are not required.",
       "assertions": [
-        "Choose rl for DPO and explain the Kubernetes/Ray requirement.",
+        "Identify rl as the DPO backend and explain that the Docker-only profile blocks it; continuing requires a Kubernetes-runtime platform and compatible GPU profile. Mentioning Ray or exact backend enum names is not required, but any infrastructure claims must be accurate.",
         "Reject automodel/unsloth as DPO substitutes.",
         "Stop before data work, submission or service startup.",
-        "Preserve the user's preference-learning goal."
+        "Give an actionable next step to obtain a compatible platform/profile while preserving DPO. Do not silently substitute SFT or change the current platform; local documentation reads are allowed, platform commands are not."
       ]
     },
     {
@@ -64,12 +64,12 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "NeMo Helix returned only execution profile provider=cpu, profile=local, backend=subprocess. I want LoRA SFT. Should I convert and upload the dataset while training is being configured? Explain what to do next; do not execute commands.",
-      "expected_output": "Stop before data conversion or upload because there is no gpu or gpu_distributed execution profile. Show the configured profile as cpu/local (subprocess), explain GPU customization is unavailable, and request a suitable platform GPU execution profile. Do not use local docker info as a proxy for remote capacity or claim CPU training is supported by this workflow.",
+      "prompt": "NeMo Helix returned only execution profile provider=cpu, profile=local, backend=subprocess. I want LoRA SFT. Should I convert and upload the dataset while training is being configured? Explain what to do next using the supplied profile information. You may consult local documentation through read-only file-reading commands, but do not run platform or setup commands, process data, upload files or change resources.",
+      "expected_output": "Do not convert or upload data yet: the supplied platform profile is CPU-only, so it does not establish GPU capacity for this LoRA SFT workflow. Explain the blocker and request a suitable platform GPU execution profile before proceeding. The facts cpu provider, local profile and subprocess backend may be paraphrased; a specific provider/profile display format is not required. Do not substitute laptop CUDA availability or local docker info for platform capacity, claim this workflow supports CPU training, or run additional checks when the prompt already supplies the relevant profile information.",
       "assertions": [
         "Treat the platform execution profiles as the capacity source.",
-        "Report cpu/local (subprocess) and the missing GPU capability.",
-        "Do not convert data, upload files, register models or submit a job."
+        "Explain that the supplied CPU-only profile cannot run this GPU customization workflow and ask for a suitable platform GPU profile before data work. Accept a plain-language explanation; do not require cpu/local (subprocess) verbatim.",
+        "Do not run platform or setup commands, convert data, upload files, register models or submit a job. Read-only commands that consult local documentation are allowed and are not a violation of the execution boundary."
       ]
     },
     {
@@ -77,13 +77,14 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "My NeMo Helix automodel --job-json dry-run reports FAIL on a malformed messages row. The JSONL was merged from several sources and is already uploaded to default/support-data, a dataset fileset shared with another job. May I submit anyway to see whether training accepts it? Explain how to upload the repaired data safely, update /tmp/job.json and revalidate before submitting; do not run anything. I have not authorized replacing or deleting the shared fileset.",
-      "expected_output": "Do not submit while any dry-run check fails. Fix the malformed row and validate the entire merged dataset with nemo customization automodel --job-json /tmp/job.json --workspace default --dry-run-full. Ordinary --dry-run checks only the first 10 rows per dataset file. If fixing uploaded data, use a new dataset fileset and update the job reference; do not overwrite shared data without explicit confirmation. Submit only after every check passes.",
+      "prompt": "My NeMo Helix automodel --job-json dry-run reports FAIL on a malformed messages row. The JSONL was merged from several sources and is already uploaded to default/support-data, a dataset fileset shared with another job. May I submit anyway to see whether training accepts it? Explain how to upload the repaired data safely, update /tmp/job.json and revalidate before submitting. Read-only commands to consult local skill documentation are allowed, but do not run platform commands, process data, edit files, upload anything or submit a job. I have not authorized replacing or deleting the shared fileset.",
+      "expected_output": "Refuse submission while validation fails. Explain repairing a separate local copy, uploading the repaired data to a new dataset fileset, updating /tmp/job.json to reference it, and validating the updated job and every row of the merged dataset before any later submission. Recommend nemo customization automodel --job-json /tmp/job.json --workspace default --dry-run-full. Ordinary --dry-run samples rows (the first 10 per file), so it cannot establish that all merged rows are valid; the exact sample count need not be recited. Do not overwrite or delete the shared default/support-data fileset or suggest replacement flags that would modify it. These are proposed steps only; do not execute them.",
       "assertions": [
         "Refuse submission until validation passes.",
         "Recommend --dry-run-full for the merged dataset and give the documented command syntax.",
-        "Explain first-10-row sampling versus full validation.",
-        "Upload repaired data to a new dataset fileset and update /tmp/job.json to reference it; do not overwrite or delete the shared default/support-data fileset."
+        "Explain why sampled validation is insufficient for merged data and require validating every row; naming the exact first-10-row sample size is optional, but any stated sample size must be accurate.",
+        "Propose uploading repaired data to a new dataset fileset and updating /tmp/job.json to reference it before revalidation; do not overwrite or delete the shared default/support-data fileset or recommend destructive replacement flags targeting it.",
+        "Explain the repair, upload, job-file update and validation as proposed steps only. Read-only commands consulting local skill documentation are allowed; executing platform commands, processing data, editing files, uploading or submitting is not."
       ]
     },
     {
@@ -91,13 +92,13 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "Run GRPO through NeMo Helix for my support-ticket response dataset. I have a model and dataset but no reward environment. Can you pair it with the math_with_judge demo? Explain my options before taking any action.",
-      "expected_output": "Do not pair arbitrary support-ticket rows with math_with_judge. GRPO requires a reward environment written for the dataset; a mismatched pair can train on meaningless reward without error. Offer an environment supplied or built for their dataset through nemo-gym-environments, or a reference environment/dataset pair that explicitly replaces their dataset, such as math_with_judge with DAPO-Math-17k. Do not fabricate reward labels, silently switch to SFT, or submit.",
+      "prompt": "I want to run GRPO through NeMo Helix for my support-ticket response dataset. I have a model and dataset but no reward environment. Can you pair it with the math_with_judge demo? Explain my options before taking any action. You may read local documentation, but do not run platform commands, process data, edit files, upload anything or submit a job.",
+      "expected_output": "Reject pairing arbitrary support-ticket rows with math_with_judge: GRPO needs a reward environment whose inputs and reward measure fit the task, and a mismatch can produce meaningless reward even if training runs. Explain two distinct options: supply or build and validate a support-ticket reward environment while retaining their dataset, or use a documented matching demo environment/dataset pair as a separate experiment that explicitly replaces their dataset. Naming nemo-gym-environments or the exact demo dataset is optional; any named pair must actually match. Do not fabricate a reward environment, claim labels alone make the math demo compatible, silently switch to SFT, or execute the proposed work.",
       "assertions": [
-        "Explain why a dataset alone is insufficient for GRPO.",
+        "Explain that GRPO needs task-compatible environment inputs and a meaningful reward function; a model and dataset alone do not supply them.",
         "Reject an unrelated demo environment for support-ticket data.",
         "Distinguish building a matching environment from replacing the dataset with a reference pair.",
-        "Do not upload or submit anything."
+        "Do not fabricate compatibility or silently change the training objective. Do not execute platform commands, process data, edit files, upload or submit; local documentation reads are allowed."
       ]
     },
     {
@@ -105,12 +106,13 @@
       "expected_skill": "nemo-customizer",
       "should_trigger": true,
       "expected_script": null,
-      "prompt": "My NeMo Helix customization job shows top-level status active, all steps completed and progress_pct 100. Is it safe to report success? Later, if training completes but tuned-model evaluation fails, should I retrain? Explain both cases without running anything.",
-      "expected_output": "Do not report training success while the top-level job status is active. Poll until completed, error or cancelled; completed steps and progress_pct 100 are insufficient. If training completes but evaluation fails, report the evaluation error separately from completed training, explain that quality improvement is unverified, and troubleshoot or retry evaluation on the existing output rather than resubmitting training. The requested explanation does not require a full training report or comparison scores that are unavailable because evaluation failed.",
+      "prompt": "My NeMo Helix customization job shows top-level status active, all steps completed and progress_pct 100. Is it safe to report success? Later, if training completes but tuned-model evaluation fails, should I retrain? Explain both cases. You may read local documentation, but do not run platform commands, change resources, retry evaluation or submit training.",
+      "expected_output": "Do not report training success while top-level status is active, regardless of step completion or progress. Explain waiting for the top-level terminal status: completed means training succeeded; error or cancelled does not. If training completes but evaluation fails, report completed training and failed evaluation separately, with quality improvement still unverified. Troubleshoot or retry evaluation on the existing output rather than automatically retraining solely because scoring failed. No polling or retry is authorized by this explanation request. A full report, invented scores, exact polling commands and a particular output format are not required.",
       "assertions": [
-        "Use top-level terminal status as the completion signal.",
+        "Do not infer success from completed steps or progress_pct 100 while top-level status is active. Require top-level completed for training success; error and cancelled are terminal but not successful.",
         "Distinguish successful training from failed evaluation.",
-        "Do not invent quality scores or recommend duplicate training."
+        "Say quality improvement remains unverified when evaluation fails. Recommend diagnosing/retrying evaluation using the existing output rather than retraining solely for a scoring failure; do not invent scores.",
+        "Explain only: no platform commands, resource changes, evaluation retries or training submission. Local documentation reads are allowed."
       ]
     },
     {
@@ -119,10 +121,11 @@
       "should_trigger": false,
       "expected_script": null,
       "prompt": "Help me outline the requirements for a customer-support agent that answers policy questions. I only need a short requirements checklist. Do not fine-tune model weights or deploy anything.",
-      "expected_output": "Provide a concise requirements checklist for the support agent, such as policy sources, tools, access, escalation, success criteria and evaluation. Do not invoke Customizer, prepare training data, submit training or deploy resources.",
+      "expected_output": "Provide a short, relevant requirements checklist for an agent answering customer-support policy questions. Useful topics include scope, approved policy sources and grounding, uncertainty or escalation, privacy/access boundaries, and how answer quality will be evaluated. These are examples, not individually mandatory checklist items: the user has not supplied a tool inventory or acceptance thresholds, so identifying decisions to make is appropriate without inventing those details. A concise checklist addressing policy grounding and responsible handling of unsupported answers is sufficient; merely refusing fine-tuning is not. This is requirements work, not a model-customization task. Do not route into Customizer, prepare training data, fine-tune or deploy resources.",
       "assertions": [
         "Do not load or execute the Customizer skill.",
-        "Respect the request for requirements only and avoid platform mutations."
+        "Provide a short requirements checklist relevant to policy-question answering, including approved policy sources or grounding and handling uncertain/unsupported answers. Do not require a distinct allowed-tools item, numeric acceptance targets or every example topic from the expected output. Merely refusing fine-tuning is not a complete answer.",
+        "Respect requirements-only scope: no training-data preparation, fine-tuning, deployment or other platform mutations."
       ]
     },
     {
@@ -130,11 +133,12 @@
       "expected_skill": null,
       "should_trigger": false,
       "expected_script": null,
-      "prompt": "I need synthetic tabular rows with the same schema as my customer CSV for testing a dashboard. I do not need a fine-tuned language model. Which NeMo capability fits? Just explain the choice.",
-      "expected_output": "Explain that the request is for schema-compatible dashboard test rows, not a customized language model, and recommend Data Designer for schema-driven synthetic data generation. Safe Synthesizer may be mentioned conditionally when actual source records and their statistical properties or privacy-preserving synthesis matter; it trains a model on source data and is not a schema-only generator. Do not load or execute Customizer, claim to have generated data, or start a job.",
+      "prompt": "I need synthetic tabular rows for testing a dashboard. I have only my customer CSV's schema (column names and types), not its source records. I need plausible dummy values matching that schema, not a replica of the source data's statistical distribution, and I do not want any model training. Which NeMo capability fits? Just explain the choice.",
+      "expected_output": "Recommend Data Designer and explain why schema-driven generation fits plausible dashboard test rows without source records or model training. Do not claim that the schema establishes the real source distribution or a privacy guarantee; a separate disclaimer about these limitations is not required. No comparison with Safe Synthesizer is required; if mentioned, distinguish its source-record training workflow from this schema-only request rather than recommending it as the primary solution. Do not load or execute Customizer, claim data was generated, or start any data-generation/training job.",
       "assertions": [
         "Do not load or execute the Customizer skill.",
-        "Recommend Data Designer for schema-driven dashboard test rows without starting a job. If discussing Safe Synthesizer, distinguish its source-data training workflow from generation based only on a schema."
+        "Recommend Data Designer and explain why schema-driven generation fits plausible dummy rows without source records or model training. A comparison to other products is optional; any comparison supplied must respect their data and training requirements.",
+        "Do not claim that schema-only generation reproduces the unavailable source distribution or guarantees privacy, and do not claim to have generated rows or start a job."
       ]
     }
   ]
