@@ -175,7 +175,7 @@ ARG PACKAGE_FLOORS='{ \
     "sqlparse": "sqlparse>=0.6.0,<0.7", \
     "virtualenv": "virtualenv>=21.14.9", \
     "hydra-core": "hydra-core>=1.3.7,<1.4", \
-    "gitpython": "gitpython>=3.1.62", \
+    "gitpython": "gitpython>=3.2.1", \
     "wandb": "wandb>=0.31.0" \
     }'
 
@@ -197,16 +197,16 @@ ARG NO_INSTALL_PACKAGES='[ \
     ]'
 
 # The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
-# vLLM 0.30.0 retains torch 2.13.0 and requires FlashInfer 0.6.18.post1
+# vLLM 0.32.0 (pulse-20261123) is paired with FlashInfer 0.7.0.post1, as in safe-synthesizer
 # plus CUTLASS DSL 4.7.1; update those coordinated generation pins together.
 # Update the actual vllm extra and lock together before any frozen sync, so
 # prefetched workers and later uv invocations cannot restore the vulnerable pin.
 # Remove this adaptation when the upstream RL source pin carries these versions.
 RUN uv add --optional vllm --no-sync \
-        'vllm==0.30.0' \
-        'flashinfer-python==0.6.18.post1' \
-        'flashinfer-cubin==0.6.18.post1' \
-        'flashinfer-jit-cache==0.6.18.post1' \
+        'vllm==0.32.0' \
+        'flashinfer-python==0.7.0.post1' \
+        'flashinfer-cubin==0.7.0.post1' \
+        'flashinfer-jit-cache==0.7.0.post1' \
         'nvidia-cutlass-dsl[cu13]==4.7.1' && \
     mkdir -p /tmp/nhx-nemo-rl-lock && \
     cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
@@ -323,7 +323,7 @@ EOF
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----
 ARG NEMO_GYM_PREFETCH_CONFIGS=""
 # Gym pins vllm==0.25.1, the CUDA 12 wheel. Override it to the cu130 build.
-# RL's own vllm extra is patched to 0.30.0 above.
+# RL's own vllm extra is patched to 0.32.0 above.
 ARG NEMO_GYM_CUDA=cu130
 ARG NEMO_GYM_VLLM_VERSION=0.25.1
 ARG TARGETARCH

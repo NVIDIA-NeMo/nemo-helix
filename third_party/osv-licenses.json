@@ -698,7 +698,7 @@
         {
           "package": {
             "name": "dnspython",
-            "version": "2.8.0",
+            "version": "2.9.2",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -838,11 +838,11 @@
         {
           "package": {
             "name": "fastembed",
-            "version": "0.8.0",
+            "version": "0.9.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
-            "non-standard"
+            "Apache-2.0"
           ]
         },
         {
@@ -878,7 +878,7 @@
         {
           "package": {
             "name": "filelock",
-            "version": "3.32.2",
+            "version": "4.3.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -948,7 +948,7 @@
         {
           "package": {
             "name": "gitpython",
-            "version": "3.1.62",
+            "version": "3.2.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1288,7 +1288,7 @@
         {
           "package": {
             "name": "joserfc",
-            "version": "1.7.4",
+            "version": "1.8.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2328,7 +2328,7 @@
         {
           "package": {
             "name": "oauthlib",
-            "version": "3.3.1",
+            "version": "4.0.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2698,7 +2698,7 @@
         {
           "package": {
             "name": "pillow",
-            "version": "12.3.0",
+            "version": "13.0.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2978,7 +2978,7 @@
         {
           "package": {
             "name": "pyjwt",
-            "version": "2.13.0",
+            "version": "2.15.1",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -4970,7 +4970,7 @@
     },
     {
       "name": "Apache-2.0",
-      "count": 166
+      "count": 167
     },
     {
       "name": "BSD-3-Clause",
@@ -4978,7 +4978,7 @@
     },
     {
       "name": "non-standard",
-      "count": 46
+      "count": 45
     },
     {
       "name": "UNKNOWN",
