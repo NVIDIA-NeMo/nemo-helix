@@ -5,15 +5,16 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { ChartTree, Trash } from '@nemo/icons/icons';
+import { Trash } from '@nemo/icons/icons';
 import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
 import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EXPERIMENT_DELETE_DESCRIPTION } from '@studio/components/ExperimentDeleteButton';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
@@ -117,29 +118,33 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
         attributes={{
           DataViewRoot: { data: pageRows, totalCount: experiments.length },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                className="py-density-3xl"
-                icon={<ChartTree className="size-16" />}
-                header="No experiments yet"
-                emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="experiments"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
               />
             ),
           },
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteRows}
-        open={deleteRows.length > 0}
-        onDelete={handleDelete}
-        title={(count) => `Delete ${count} experiment${count !== 1 ? 's' : ''}?`}
-        description={EXPERIMENT_DELETE_DESCRIPTION}
-        onClose={() => {
-          setDeleteRows([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteRows.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="experiment"
+          ids={deleteRows.map((row) => row.name ?? 'unnamed')}
+          description={EXPERIMENT_DELETE_DESCRIPTION}
+          onDelete={async () => {
+            await handleDelete(deleteRows);
+            return true;
+          }}
+          onClose={() => {
+            setDeleteRows([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
     </>
   );
 };

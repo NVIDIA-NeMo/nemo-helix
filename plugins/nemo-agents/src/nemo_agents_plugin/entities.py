@@ -16,13 +16,18 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.session_protocol import session_id_to_uuid
+from nemo_helix_plugin.agents.ethos import ETHOS_FILENAME as ETHOS_FILENAME
+from nemo_helix_plugin.agents.ethos import ethos_file_ref as ethos_file_ref
+from nemo_helix_plugin.agents.ethos import ethos_fileset_name as ethos_fileset_name
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
     LABELS_DESCRIPTION,
     NOOP_POST_RUN_ACTION_KIND,
+    PLUGIN_MANAGED_AGENT_DESCRIPTION,
     POST_RUN_ACTIONS_DESCRIPTION,
     Labels,
+    PluginManagedAgentSpec,
     PostRunActionKinds,
     ReferenceConfig,
 )
@@ -146,7 +151,8 @@ def supports_image_entrypoint(mode: str) -> bool:
 # hold both the human-readable Ethos document and the machine-readable agent
 # config. We do **not** store these locations on the agent - they are fully
 # derivable from the agent's workspace and name. Consumers should call the
-# file-ref helpers below rather than reconstructing refs inline.
+# file-ref helpers (re-exported here from ``nemo_helix_plugin``) rather than
+# reconstructing refs inline.
 #
 # Layout:
 #   - Fileset (entity ref):  ``{workspace}/{agent-name}-ethos``
@@ -160,9 +166,6 @@ def supports_image_entrypoint(mode: str) -> bool:
 # relationship is 1:1 and convention-bound; carrying a stored ref would
 # duplicate state with no resilience benefit (rename of either entity
 # orphans both representations equally).
-
-ETHOS_FILENAME = "ETHOS.md"
-"""Canonical filename inside the agent's Ethos fileset."""
 
 AGENT_SPEC_FILENAME = "AGENT-SPEC.md"
 """Prior contract filename. Staging drops it from the runtime tree."""
@@ -187,25 +190,9 @@ MAX_ETHOS_STAGED_FILES = 500
 """Maximum number of files an agent Ethos fileset may contain."""
 
 
-def ethos_fileset_name(agent_name: str) -> str:
-    """Return the conventional fileset name holding an agent's Ethos."""
-    return f"{agent_name}-ethos"
-
-
 def ethos_local_path(agent_name: str, root: str | Path = ETHOS_LOCAL_ROOT) -> Path:
     """Return the local write-through cache path for an agent's Ethos."""
     return Path(root) / ethos_fileset_name(agent_name) / ETHOS_FILENAME
-
-
-def ethos_file_ref(workspace: str, agent_name: str) -> FilesetRef:
-    """Return the canonical file ref ``workspace/<name>-ethos#ETHOS.md``.
-
-    Use this anywhere downstream code needs to point at an agent's Ethos -
-    do not reconstruct the path inline. If the layout ever changes (e.g.
-    moving to a per-agent bundle fileset holding multiple artifacts), this
-    is the only function that needs to update.
-    """
-    return FilesetRef(f"{workspace}/{ethos_fileset_name(agent_name)}#{ETHOS_FILENAME}")
 
 
 def agent_config_file_ref(workspace: str, agent_name: str) -> FilesetRef:
@@ -300,6 +287,9 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
+    plugin_managed_agent: PluginManagedAgentSpec | None = Field(
+        default=None, description=PLUGIN_MANAGED_AGENT_DESCRIPTION
+    )
 
 
 class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
@@ -314,6 +304,13 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
 
     _auth_context: AuthContext | None = PrivateAttr(default=None)
     providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    startup_logs: str = Field(
+        default="",
+        description=(
+            "Best-effort startup failure log snapshot, at most 500 lines and 64 KiB UTF-8. "
+            "Retained with this deployment until it is deleted. May contain sensitive application output."
+        ),
+    )
 
     agent: str = Field(default="", description="Name of the Agent entity this deployment is for.")
     config: dict[str, Any] = Field(

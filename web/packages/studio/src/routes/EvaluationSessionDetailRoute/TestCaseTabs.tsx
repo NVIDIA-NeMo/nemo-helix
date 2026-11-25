@@ -37,18 +37,26 @@ const spanDuration = (span: Span): string | undefined => {
   return formatDurationMs(Date.parse(span.ended_at) - Date.parse(span.started_at));
 };
 
-const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = ({
+const AgentReply: FC<{ workspace: string; replySummary: Span | undefined }> = ({
   workspace,
-  replySpanId,
+  replySummary,
 }) => {
   const {
     data: replySpan,
     isLoading,
     error,
-  } = useGetSpan(workspace, replySpanId ?? '', {
-    query: { enabled: Boolean(replySpanId) },
-  });
-  const outputFormat = useSpanPayloadFormat(replySpan?.output);
+  } = useGetSpan(
+    workspace,
+    replySummary?.span_id ?? '',
+    { session_id: replySummary?.session_id },
+    { query: { enabled: Boolean(replySummary) } }
+  );
+  const replyError = error
+    ? getErrorMessage(error)
+    : replySpan && replySpan.session_id !== replySummary?.session_id
+      ? 'The reply does not belong to this session.'
+      : undefined;
+  const outputFormat = useSpanPayloadFormat(replyError ? undefined : replySpan?.output);
 
   return (
     <Stack gap="density-sm" className="min-w-0">
@@ -56,10 +64,10 @@ const AgentReply: FC<{ workspace: string; replySpanId: string | undefined }> = (
         <SpanPayloadFormatToggle state={outputFormat} payloadLabel="reply" />
       </Flex>
       {isLoading ? <PayloadPending /> : null}
-      {!isLoading && error ? (
-        <ErrorMessage message={`The reply couldn't be loaded: ${getErrorMessage(error)}`} />
+      {!isLoading && replyError ? (
+        <ErrorMessage message={`The reply couldn't be loaded: ${replyError}`} />
       ) : null}
-      {!isLoading && !error ? (
+      {!isLoading && !replyError ? (
         <SpanPayloadView
           value={replySpan?.output}
           format={outputFormat.format}
@@ -126,7 +134,7 @@ export const TestCaseTabs: FC<{
     () => trajectories.flatMap((trajectory) => trajectory.spans),
     [trajectories]
   );
-  const replySpanId = useMemo(() => findReplySpan(spans)?.span_id, [spans]);
+  const replySummary = useMemo(() => findReplySpan(spans), [spans]);
   const toolSpans = useMemo(() => findToolCallSpans(spans), [spans]);
 
   const openSpan = useCallback(
@@ -150,7 +158,7 @@ export const TestCaseTabs: FC<{
         <TabsTrigger value="trace">Trace</TabsTrigger>
       </TabsList>
       <TabsContent value="reply" className="items-stretch p-0 pt-density-lg">
-        <AgentReply workspace={workspace} replySpanId={replySpanId} />
+        <AgentReply workspace={workspace} replySummary={replySummary} />
       </TabsContent>
       <TabsContent value="trace" className="items-stretch p-0 pt-density-lg">
         <Stack gap="density-2xl" className="min-w-0">

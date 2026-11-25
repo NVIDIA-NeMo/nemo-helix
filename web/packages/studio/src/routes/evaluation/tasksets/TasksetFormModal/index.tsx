@@ -3,23 +3,27 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { fetchAllPages } from '@nemo/common/src/api/fetchAllPages';
 import { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
-import { useEvalsListTasks } from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
+import {
+  evalsListTasks,
+  getEvalsListTasksQueryKey,
+} from '@nemo/sdk/generated/evals/evals-plugin-tasks-routes';
 import {
   useEvalsCreateTaskset,
   useEvalsReplaceTaskset,
 } from '@nemo/sdk/generated/evals/evals-plugin-tasksets-routes';
 import type { Taskset, TasksetInput } from '@nemo/sdk/generated/evals/schema';
-import { Stack } from '@nvidia/foundations-react-core';
+import { Button, Stack } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { parseTaskRef } from '@studio/routes/evaluation/taskHelpers';
 import { invalidateTasksets } from '@studio/routes/evaluation/tasksets/helpers';
 import { getTasksetDetailRoute } from '@studio/routes/utils';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { FC } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -56,11 +60,23 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
     tasks: taskset?.tasks ?? [],
   };
 
-  const { data: tasks, isPending: tasksPending } = useEvalsListTasks(
-    workspace,
-    { page_size: 1000, sort: 'name' },
-    { query: { enabled: open } }
-  );
+  // Drained so tasks past the first page stay selectable; keyed under the list key so task
+  // writes invalidate it.
+  const {
+    data: taskNames,
+    isPending: tasksPending,
+    isError: tasksError,
+    refetch: refetchTasks,
+  } = useQuery({
+    queryKey: [...getEvalsListTasksQueryKey(workspace), 'all-names'],
+    queryFn: async () =>
+      (
+        await fetchAllPages((page, page_size) =>
+          evalsListTasks(workspace, { page, page_size, sort: 'name' })
+        )
+      ).map((task) => task.name),
+    enabled: open,
+  });
 
   // Current members keep their stored (digest-pinned) refs so an edit doesn't silently move them
   // to latest; tasks added here go in bare and the server pins them to their latest revision.
@@ -68,7 +84,7 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
   const memberNames = new Set(members.map((ref) => parseTaskRef(ref, workspace).name));
   const items = [
     ...members.map((ref) => ({ value: ref, children: parseTaskRef(ref, workspace).name })),
-    ...(tasks?.data ?? []).filter(({ name }) => !memberNames.has(name)).map(({ name }) => name),
+    ...(taskNames ?? []).filter((name) => !memberNames.has(name)),
   ];
 
   const {
@@ -76,7 +92,7 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
     handleSubmit,
     reset,
     watch,
-    formState: { errors, isDirty },
+    formState: { errors, isDirty, isSubmitting },
   } = useForm<FormInput, unknown, FormOutput>({
     resolver: zodResolver(schema),
     defaultValues,
@@ -86,7 +102,7 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
   const preview = toValidEntityName(watch('name'), '');
   const create = useEvalsCreateTaskset();
   const replace = useEvalsReplaceTaskset();
-  const { isPending, error } = taskset ? replace : create;
+  const { error } = taskset ? replace : create;
 
   const handleClose = () => {
     reset(defaultValues);
@@ -119,8 +135,8 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
       open={open}
       title={taskset ? `Edit Taskset: ${taskset.name}` : 'Create Taskset'}
       submitButtonText={taskset ? 'Save' : 'Create'}
-      disabled={isPending}
-      loading={isPending}
+      disabled={isSubmitting}
+      loading={isSubmitting}
       submitDisabled={!!taskset && !isDirty}
       errorText={error ? getErrorMessage(error) : null}
       onSubmit={handleSubmit(onSubmit)}
@@ -129,7 +145,7 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
       <Stack gap="density-lg">
         <ControlledTextInput
           label="Name"
-          disabled={isPending || !!taskset}
+          disabled={isSubmitting || !!taskset}
           useControllerProps={{ name: 'name', control }}
           formFieldProps={{
             slotHelp:
@@ -145,14 +161,14 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
         />
         <ControlledTextArea
           label="Description (optional)"
-          disabled={isPending}
+          disabled={isSubmitting}
           rows={2}
           useControllerProps={{ name: 'description', control }}
         />
         <ControlledCombobox
           kind="multiple"
           label="Tasks"
-          disabled={isPending}
+          disabled={isSubmitting}
           loading={tasksPending}
           items={items}
           placeholder="Select tasks..."
@@ -162,6 +178,17 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
             slotHelp: taskset
               ? 'Saving publishes a new revision. Current members stay on their pinned revision; added tasks are pinned to their latest.'
               : 'Each member is pinned to its latest revision when the taskset is created.',
+            ...(tasksError && {
+              status: 'error',
+              slotError: (
+                <>
+                  Couldn&apos;t load tasks.{' '}
+                  <Button type="button" kind="tertiary" size="small" onClick={() => refetchTasks()}>
+                    Retry
+                  </Button>
+                </>
+              ),
+            }),
           }}
         />
       </Stack>

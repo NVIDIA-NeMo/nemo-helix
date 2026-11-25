@@ -368,6 +368,33 @@ def test_schedule_uses_allowlisted_host_environment(
     assert metadata.process.wait(timeout=5) == 0
 
 
+@pytest.mark.parametrize("adapter_python", [None, "/operator env/bin/python"])
+@pytest.mark.parametrize("step_override", [False, True])
+def test_schedule_preserves_adapter_python(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, adapter_python, step_override
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    expected = "/job env/bin/python" if step_override else adapter_python
+    check = 'test "$ADAPTER_PYTHON" = "$EXPECTED"' if expected is not None else 'test -z "${ADAPTER_PYTHON+x}"'
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", check + ' && test -z "${SECRET_TOKEN+x}"'])
+    step.step_spec.environment = [HelixJobEnvironmentVariable(name="EXPECTED", value=expected or "")]
+    if step_override:
+        step.step_spec.environment.append(HelixJobEnvironmentVariable(name="ADAPTER_PYTHON", value=expected))
+    host_env = {"PATH": "/bin", "SECRET_TOKEN": "do-not-leak"}
+    if adapter_python is not None:
+        host_env["ADAPTER_PYTHON"] = adapter_python
+
+    with patch.dict(os.environ, host_env, clear=True):
+        update = _schedule_without_otel_export(backend, step)
+
+    assert update.status == HelixJobStatus.PENDING
+    metadata = backend._process_registry.get(
+        SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    )
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 0
+
+
 def test_schedule_passes_the_agent_wheel_through(mock_nemo_client, tmp_path, mock_platform_config, test_step_pending):
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(

@@ -77,7 +77,7 @@ describe('ModelCompareRoute availability', () => {
 
     renderRoute(<ModelCompareRoute />, { history: '/compare' });
 
-    expect(await screen.findByText('No models available')).toBeInTheDocument();
+    expect(await screen.findByText('No Models Available')).toBeInTheDocument();
   });
 
   it('shows an error state instead of the no-models state when the search fails', async () => {
@@ -88,7 +88,7 @@ describe('ModelCompareRoute availability', () => {
     renderRoute(<ModelCompareRoute />, { history: '/compare' });
 
     expect(await screen.findByText('gateway unreachable')).toBeInTheDocument();
-    expect(screen.queryByText('No models available')).not.toBeInTheDocument();
+    expect(screen.queryByText('No Models Available')).not.toBeInTheDocument();
   });
 });
 

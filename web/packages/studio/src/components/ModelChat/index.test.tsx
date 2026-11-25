@@ -4,7 +4,7 @@
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { ModelChat } from '@studio/components/ModelChat';
 import { entityStoreBaseModel1 } from '@studio/mocks/entity-store/models';
-import { render, renderRoute, screen } from '@studio/tests/util/render';
+import { render, renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 
 vi.mock('@nemo/common/src/hooks/useChatCompletion', () => ({
   useChatCompletion: () => ({
@@ -34,6 +34,45 @@ describe('ModelChat', () => {
 
     expect(await screen.findByText('Tell me a story')).toBeInTheDocument();
     expect(await screen.findByText('Once upon a time...')).toBeInTheDocument();
+  });
+
+  it('renders tool calls as collapsed work steps', async () => {
+    render(
+      <ModelChat
+        model={modelName}
+        initialMessages={[
+          { role: 'user', content: 'Weather in Paris?' },
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'call_weather',
+                toolName: 'get_weather',
+                args: { city: 'Paris' },
+              },
+              { type: 'text', text: 'Light rain.' },
+            ],
+            status: { type: 'complete', reason: 'stop' },
+          },
+        ]}
+      />
+    );
+
+    expect(await screen.findByText('Light rain.')).toBeInTheDocument();
+    const group = screen.getByTestId('assistant-work-group');
+    expect(group).not.toHaveAttribute('open');
+    expect(within(group).getByTestId('assistant-work-group-label')).toHaveTextContent(
+      'Ran 1 tool call'
+    );
+    const step = within(group).getByTestId('assistant-work-tool-call');
+    expect(step).toHaveTextContent('Used get_weather');
+    expect(within(step).getByText('Arguments')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(group).getByTestId('nv-code-snippet-code')).not.toHaveClass(
+        'nv-code-snippet-code--loading'
+      )
+    );
   });
 
   it('disables the composer when modelChatStatus is not enabled', async () => {

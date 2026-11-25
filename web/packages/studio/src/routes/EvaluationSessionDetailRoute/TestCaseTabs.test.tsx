@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import type { Span } from '@nemo/sdk/generated/platform/schema';
 import { SpanKind } from '@nemo/sdk/generated/platform/schema/SpanKind';
 import { SpanStatus } from '@nemo/sdk/generated/platform/schema/SpanStatus';
@@ -12,6 +13,7 @@ import { render, screen } from '@studio/tests/util/render';
 import { buildSpanTree, type SessionTrajectory } from '@studio/util/intakeTelemetry';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useState } from 'react';
 
 const span = (overrides: Partial<Span> & Pick<Span, 'span_id' | 'kind'>): Span => ({
   session_id: 'session',
@@ -46,6 +48,61 @@ const mockReply = (output: string | undefined) =>
   );
 
 describe('TestCaseTabs', () => {
+  it('keeps replies with reused span IDs scoped to their session while navigating', async () => {
+    const requests: string[] = [];
+    server.use(
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ request }) => {
+        const sessionId = new URL(request.url).searchParams.get('session_id');
+        requests.push(sessionId ?? 'unscoped');
+        return sessionId
+          ? HttpResponse.json(
+              span({
+                span_id: 'shared-agent-span',
+                kind: SpanKind.AGENT,
+                session_id: sessionId,
+                output: `Reply from ${sessionId}`,
+              })
+            )
+          : new HttpResponse(null, { status: 409 });
+      })
+    );
+    const SessionReplies = () => {
+      const [sessionId, setSessionId] = useState('session-a');
+      return (
+        <>
+          <button
+            onClick={() =>
+              setSessionId((previous) => (previous === 'session-a' ? 'session-b' : 'session-a'))
+            }
+          >
+            Switch session
+          </button>
+          <TestCaseTabs
+            workspace={DEFAULT_WORKSPACE}
+            trajectories={trajectoryOf([
+              span({ span_id: 'shared-agent-span', kind: SpanKind.AGENT, session_id: sessionId }),
+            ])}
+            traceView={null}
+          />
+        </>
+      );
+    };
+    const user = userEvent.setup();
+    render(<SessionReplies />, {
+      queryClientConfig: { defaultOptions: { queries: { retry: false, staleTime: Infinity } } },
+    });
+
+    expect(await screen.findByText('Reply from session-a')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Switch session' }));
+    expect(await screen.findByText('Reply from session-b')).toBeInTheDocument();
+    expect(screen.queryByText('Reply from session-a')).not.toBeInTheDocument();
+    const completedRequests = requests.length;
+    await user.click(screen.getByRole('button', { name: 'Switch session' }));
+    expect(await screen.findByText('Reply from session-a')).toBeInTheDocument();
+    expect(new Set(requests)).toEqual(new Set(['session-a', 'session-b']));
+    expect(requests).toHaveLength(completedRequests);
+  });
+
   it('shows the agent reply and each tool it called', async () => {
     mockReply('The plan is 61% above demand.');
     const spans = [

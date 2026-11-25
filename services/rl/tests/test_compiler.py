@@ -513,6 +513,41 @@ def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None)
     assert sc.model.checkpoint_model_name == "NemotronH_Omni"
 
 
+@pytest.mark.parametrize(
+    ("tool_call_config", "expected"),
+    [
+        ({"tool_call_parser": "hermes"}, "hermes"),
+        ({"tool_call_parser": "my_parser", "tool_call_plugin": "default/my-plugin"}, None),
+        ({"auto_tool_choice": True}, None),
+        (None, None),
+    ],
+    ids=["declared-parser", "plugin-parser", "no-parser", "no-tool-config"],
+)
+@pytest.mark.asyncio
+async def test_grpo_rollouts_use_the_model_tool_parser(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+    sandbox_capable: None,
+    tool_call_config: dict[str, Any] | None,
+    expected: str | None,
+) -> None:
+    """Rollouts use the parser the model declares for serving, except one a plugin registers."""
+    from nemo_helix_plugin.models.types import ModelSpec, ToolCallConfig
+
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(
+        tool_call_config=ToolCallConfig(**tool_call_config) if tool_call_config is not None else None
+    )
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(GRPOTraining(type="grpo"), environment="default/env")
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    training = _steps(spec)[1]
+    assert training["name"] == "grpo-training"
+    assert training["config"]["model"]["tool_call_parser"] == expected
+
+
 def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:
     sc = _build_training_step_config(
         _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),

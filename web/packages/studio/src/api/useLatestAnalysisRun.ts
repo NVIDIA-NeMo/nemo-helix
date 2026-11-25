@@ -1,60 +1,64 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { jsonFilter } from '@nemo/common/src/api/filterOperators';
 import { parseISOWithUTCFallback } from '@nemo/common/src/components/RelativeTime/util';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
+import { useAgentsListExecuteJobs } from '@nemo/sdk/generated/agents/agents';
 import {
-  useCompassGetAnalysisRun,
-  useCompassListAnalysisRuns,
-} from '@nemo/sdk/generated/compass/compass-analysis-runs';
+  type AgentsListExecuteJobsParams,
+  type ExecuteJobsListFilter,
+  type ExecuteJobsPage,
+  ExecuteJobsSortField,
+} from '@nemo/sdk/generated/agents/schema';
 import {
   getCompassListInsightsQueryKey,
   compassListInsights,
 } from '@nemo/sdk/generated/compass/compass-insights';
-import type { AnalysisRunResponse } from '@nemo/sdk/generated/compass/schema';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema/HelixJobStatus';
-import { analysisJobStatus } from '@studio/api/insightsAnalysis';
+import { analysisJobStatus, COMPASS_AGENT_TYPE } from '@studio/api/insightsAnalysis';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
 export interface LatestAnalysisRun {
   name: string;
   requestedAt: string;
-  /** False when the run was recorded but its job never landed. */
-  submitted: boolean;
   status?: HelixJobStatus;
 }
 
 // Picks up runs started outside this page, such as by the scheduler or a trace import.
 export const LIST_POLL_MS = 15_000;
-// The scheduler records a run just before submitting its job.
-const UNSUBMITTED_GRACE_MS = 60_000;
 const NEW_FINDINGS_PAGE_SIZE = 100;
 
 const IN_FLIGHT_STATUSES: HelixJobStatus[] = [
   HelixJobStatus.created,
+  HelixJobStatus.queued,
   HelixJobStatus.pending,
   HelixJobStatus.active,
 ];
 
-const runStatusPollInterval = (data: AnalysisRunResponse): number | false => {
-  if (!data.job) {
-    const age = Date.now() - parseISOWithUTCFallback(data.run.created_at).getTime();
-    return age < UNSUBMITTED_GRACE_MS ? JOB_POLLING_INTERVAL_MS : false;
-  }
-  const status = analysisJobStatus(data.job);
-  return status ? getJobRefetchInterval(status) : false;
-};
+export const latestAnalysisRunParams = (agent: string): AgentsListExecuteJobsParams => ({
+  page_size: 1,
+  sort: ExecuteJobsSortField['-created_at'],
+  filter: jsonFilter<ExecuteJobsListFilter>({
+    'spec.plugin_managed_agent_type': { $eq: COMPASS_AGENT_TYPE },
+    'spec.subject': { $eq: agent },
+  }),
+});
 
+const isInFlight = (status?: HelixJobStatus): boolean =>
+  !!status && IN_FLIGHT_STATUSES.includes(status);
+
+/** Polls fast while the latest run is in flight, and slowly otherwise to notice new runs. */
 export const runPollInterval = (
-  data: AnalysisRunResponse | undefined,
+  page: ExecuteJobsPage | undefined,
   fetchFailureCount: number
-): number | false => {
-  if (!data) return fetchFailureCount > 0 ? LIST_POLL_MS : false;
-  const interval = runStatusPollInterval(data);
-  return interval !== false && fetchFailureCount > 0 ? LIST_POLL_MS : interval;
+): number => {
+  if (fetchFailureCount > 0) {
+    return LIST_POLL_MS;
+  }
+  return isInFlight(analysisJobStatus(page?.data[0])) ? JOB_POLLING_INTERVAL_MS : LIST_POLL_MS;
 };
 
 const countInsightsSince = async (
@@ -90,28 +94,17 @@ export const useLatestAnalysisRun = (
   const toast = useToast();
   const watchedName = useRef<string | null>(null);
 
-  const { data: runs } = useCompassListAnalysisRuns(
-    workspace,
-    { agent, page_size: 1, sort: '-created_at' },
-    { query: { enabled: !!agent, refetchInterval: LIST_POLL_MS } }
-  );
-  const name = runs?.data[0]?.name;
-
-  const { data: detail, isPending: detailPending } = useCompassGetAnalysisRun(
-    workspace,
-    name ?? '',
-    {
-      query: {
-        enabled: !!name,
-        refetchInterval: ({ state }) => runPollInterval(state.data, state.fetchFailureCount),
-      },
-    }
-  );
-
-  const current = detail && detail.run.name === name ? detail : undefined;
-  const status = analysisJobStatus(current?.job);
-  const isActive = !!status && IN_FLIGHT_STATUSES.includes(status);
-  const requestedAt = current?.run.created_at;
+  const { data: page } = useAgentsListExecuteJobs(workspace, latestAnalysisRunParams(agent ?? ''), {
+    query: {
+      enabled: !!agent,
+      refetchInterval: ({ state }) => runPollInterval(state.data, state.fetchFailureCount),
+    },
+  });
+  const job = page?.data[0];
+  const name = job?.name;
+  const status = analysisJobStatus(job);
+  const isActive = isInFlight(status);
+  const requestedAt = job?.created_at;
 
   useEffect(() => {
     if (!agent || !name || !status || !requestedAt) return;
@@ -136,9 +129,7 @@ export const useLatestAnalysisRun = (
   }, [agent, isActive, name, queryClient, requestedAt, status, toast, workspace]);
 
   const latestRun: LatestAnalysisRun | undefined =
-    current && name
-      ? { name, requestedAt: current.run.created_at, submitted: !!current.job, status }
-      : undefined;
+    name && requestedAt ? { name, requestedAt, status } : undefined;
 
-  return { latestRun, isActive, blocksNewRun: isActive || (!!name && detailPending) };
+  return { latestRun, isActive, blocksNewRun: isActive };
 };

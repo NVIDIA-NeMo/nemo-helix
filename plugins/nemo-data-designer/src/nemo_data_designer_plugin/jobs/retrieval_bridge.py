@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults, job_storage_context_from_env
 from nemo_helix_plugin.jobs.constants import (
@@ -26,7 +26,7 @@ from pydantic import BaseModel
 def run_job_module(job_cls: type[Any], spec_cls: type[BaseModel]) -> int:
     with open(os.environ[NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR], encoding="utf-8") as handle:
         spec = spec_cls.model_validate_json(handle.read())
-    client = get_nemo_client(as_service="data-designer")
+    client = get_task_nemo_client("data-designer")
     ctx = _get_ctx(client)
     result = job_cls().run(spec.model_dump(mode="json"), ctx=ctx, sdk=client)
     exit_code = result.get("exit_code") if isinstance(result, dict) else 1

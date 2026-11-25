@@ -2,21 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatSignedDelta } from '@nemo/common/src/components/DeltaText';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
-import { Beaker } from '@nemo/icons/icons';
-import {
-  Anchor,
-  Block,
-  Button,
-  Card,
-  Flex,
-  Stack,
-  StatusMessage,
-  Text,
-} from '@nvidia/foundations-react-core';
+import { Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { MetricTrendPanel } from '@studio/components/charts/MetricTrendPanel';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';
-import { LINK_DOCS_EXPERIMENTS_CLI } from '@studio/constants/links';
 import { ExperimentSummaryCard } from '@studio/routes/agents/AgentDetailRoute/overview/ExperimentSummaryCard';
 import {
   DELTA_COMPARISON_LABEL,
@@ -33,6 +23,8 @@ interface RecentExperimentsPanelProps {
   onOpenExperiment: (experiment: RecentExperiment) => void;
   /** Empty-state action: submit an evaluation for this agent. */
   onRunEvaluation?: () => void;
+  /** Resolves `<workspace>` in the empty state's CLI command and skill prompt. */
+  workspace?: string;
 }
 
 /**
@@ -57,6 +49,7 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
   isPending,
   onOpenExperiment,
   onRunEvaluation,
+  workspace,
 }) => {
   const trendCard = (experiment: RecentExperiment) => (
     <MetricTrendPanel
@@ -98,28 +91,16 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
         <Text kind="title/md">Recent experiments</Text>
         <Card>
           <Flex justify="center" align="center" padding="density-2xl">
-            <StatusMessage
-              size="small"
-              slotHeading="Measure agent performance"
-              slotSubheading={
-                <Block className="max-w-[650px]">
-                  {
-                    'Run evaluations for agents, models, and components with NeMo Helix Evals and compare evaluations in Experiments. '
-                  }
-                  <Anchor href={LINK_DOCS_EXPERIMENTS_CLI} target="_blank">
-                    Learn more
-                  </Anchor>
-                  .
-                </Block>
-              }
-              slotFooter={
-                onRunEvaluation ? (
-                  <Button kind="tertiary" onClick={onRunEvaluation}>
-                    <Beaker size="16" className="text-brand" aria-hidden />
-                    Run Evaluation
-                  </Button>
-                ) : null
-              }
+            {/*
+             * Submitting an evaluation under an experiment name is how an experiment
+             * comes into being, so the registry's create action drives the Run
+             * Evaluation modal rather than a second, parallel affordance.
+             */}
+            <EntityEmptyState
+              entity="experiments"
+              workspace={workspace}
+              variant="first-use"
+              onCreate={onRunEvaluation}
             />
           </Flex>
         </Card>

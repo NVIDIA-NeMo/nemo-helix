@@ -194,6 +194,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
                   entity="agentOptimizations"
                   variant="first-use"
                   workspace={workspace}
+                  params={{ 'agent-name': agentName }}
                   onCreate={onOptimize}
                 />
               ),
@@ -204,9 +205,10 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
       {deleteTarget ? (
         <DeleteConfirmationModal
           open
-          title="Delete Optimization Study"
-          description={`Delete "${deleteTarget.name}" and its trial results? This cannot be undone.`}
-          successText="Optimization study deleted."
+          entity="optimization study"
+          entityPlural="optimization studies"
+          ids={[deleteTarget.name]}
+          description="Its trial results are deleted too, and neither can be restored."
           onDelete={async () => {
             // Bundle first: the study is the only record of its fileset name, so a cleanup that
             // failed after the study was gone would orphan the bundle with nothing to retry from.
@@ -216,7 +218,6 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
             return true;
           }}
           onClose={() => setDeleteTarget(null)}
-          simpleConfirm
         />
       ) : null}
     </>

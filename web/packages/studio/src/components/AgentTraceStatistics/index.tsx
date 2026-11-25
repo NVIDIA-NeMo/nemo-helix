@@ -58,8 +58,8 @@ export interface AgentTraceStatisticsProps {
   onViewTraces?: () => void;
   /** Empty-state action: invoke the agent so it emits its first traces. */
   onRunAgent?: () => void;
-  /** Empty-state action: open the tracing setup docs. */
-  onLearnMore?: () => void;
+  /** Resolves `<workspace>` in the empty state's CLI command and skill prompt. */
+  workspace?: string;
   /** Muted note after the heading, e.g. how the traces are scoped. */
   caption?: string;
   isPending?: boolean;
@@ -75,7 +75,7 @@ export const AgentTraceStatistics: FC<AgentTraceStatisticsProps> = ({
   onRangeChange,
   onViewTraces,
   onRunAgent,
-  onLearnMore,
+  workspace,
   caption,
   isPending,
   chartHeight,
@@ -139,8 +139,8 @@ export const AgentTraceStatistics: FC<AgentTraceStatisticsProps> = ({
         </Card>
       ) : isEmpty ? (
         <TraceStatisticsEmptyState
+          workspace={workspace}
           onRunAgent={onRunAgent}
-          onLearnMore={onLearnMore}
           onExpandRange={range === 'max' ? undefined : () => onRangeChange('max')}
         />
       ) : (

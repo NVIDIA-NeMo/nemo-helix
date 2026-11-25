@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -23,11 +24,26 @@ trust = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trust)
 
 
+def test_wandb_rebuild_toolchain_mounts_match_verifier() -> None:
+    docker = Path(__file__).parents[2]
+    mounts = [
+        (path.relative_to(docker), version)
+        for path in docker.rglob("Dockerfile*")
+        for version in re.findall(r"--mount=from=golang:([^,]+),source=/usr/local/go", path.read_text())
+    ]
+    assert mounts, "No W&B rebuild toolchain mounts found"
+    assert trust.WANDB_GO_VERSION == "1.27.4"
+    assert all(version == trust.WANDB_GO_VERSION for _, version in mounts), mounts
+
+
+@pytest.mark.parametrize("go_version", ["go1.27.4", "go1.27.3"])
 @pytest.mark.parametrize(
     ("value", "enabled"),
     [("1", True), (" TRUE ", True), ("Yes", True), (" oN ", True), (None, False), ("0", False), ("false", False)],
 )
-def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeypatch, value, enabled: bool) -> None:
+def test_source_collection_covers_archive_and_go_sources(
+    tmp_path: Path, monkeypatch, value, enabled: bool, go_version: str
+) -> None:
     if value is None:
         monkeypatch.delenv("NHX_COLLECT_SOURCES", raising=False)
     else:
@@ -55,9 +71,15 @@ def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeyp
     responses = iter([json.dumps(metadata).encode(), data])
     monkeypatch.setattr(trust, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
     monkeypatch.setattr(trust, "machine", lambda: "aarch64")
-    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: f"wandb-core: {go_version}\n")
     collected = []
     monkeypatch.setattr(trust, "run_process", lambda command, **kwargs: collected.append(command))
+
+    if go_version != "go1.27.4":
+        with pytest.raises(ValueError, match="Unexpected wandb-core toolchain"):
+            trust.rebuild_wandb("0.31.0", tmp_path)
+        assert not collected
+        return
 
     binary = trust.rebuild_wandb("0.31.0", tmp_path)
 

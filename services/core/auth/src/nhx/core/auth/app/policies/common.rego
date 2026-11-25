@@ -361,8 +361,29 @@ get_route_principals := get_actor_principals if {
 	count(selected_route_contract.actor_perms) > 0
 } else := get_subject_principals
 
-route_permissions_satisfied(workspace) if {
+# This capability is consumed only by the canonical Secret-value route. Generic
+# permission queries and global caller classification retain their existing rules.
+verified_delegated_secret_request if {
+	object.get(input, "verified_workload_delegation", false) == true
+	extract_on_behalf_of_principal_id != ""
+	not valid_service_principal(extract_principal_id)
+	req_method_lower == "get"
+	endpoint_scan == "/apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access"
+	selected_route_contract.actor_perms == ["secrets.access"]
+	selected_route_contract.subject_perms == ["secrets.read"]
+}
+
+selected_actor_permissions_satisfied(workspace) if {
 	actor_permissions_satisfied(workspace, selected_route_contract.actor_perms)
+} else if {
+	verified_delegated_secret_request
+	every permission in selected_route_contract.actor_perms {
+		permission in get_role_permissions("DelegatedService")
+	}
+}
+
+route_permissions_satisfied(workspace) if {
+	selected_actor_permissions_satisfied(workspace)
 	selected_subject_permissions_satisfied(workspace)
 }
 

@@ -25,17 +25,16 @@ from nemo_compass_plugin.analysis.backend import (
     make_backend,
 )
 from nemo_compass_plugin.analysis.result import CompassResult, InsightUpdate, NewInsight
-from nemo_compass_plugin.analysis_runs import mint_analysis_run_name
 from nemo_compass_plugin.config import (
     CompassConfig,
     CompassSchedulerConfig,
     Frequency,
     Weekday,
 )
-from nemo_compass_plugin.controller import CompassAnalysisController
+from nemo_compass_plugin.controller import CompassAnalysisController, mint_compass_job_name
 from nemo_compass_plugin.entities import (
     AnalysisConfig,
-    AnalysisRun,
+    AnalysisConfigStatus,
     AnalysisRunStatus,
     Insight,
     InsightRating,
@@ -43,7 +42,7 @@ from nemo_compass_plugin.entities import (
 )
 from nemo_compass_plugin.evidence import TraceEvidence
 from nemo_compass_plugin.schedule import is_due, previous_scheduled
-from nemo_compass_plugin.schema import AnalysisRunResponse, CreateAnalysisRunRequest
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
 from nemo_helix_plugin.api.filter import (
     ComparisonOperation,
     FilterOperator,
@@ -51,6 +50,7 @@ from nemo_helix_plugin.api.filter import (
     parse_json_filter,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
@@ -887,7 +887,8 @@ class _RecordingJobs:
         *,
         jobs: list[HelixJobResponse] | None = None,
     ) -> None:
-        self.runs: list[CreateAnalysisRunRequest] = []
+        self.runs: list[CreateExecuteJobRequest] = []
+        self.saved_statuses: list[AnalysisRunStatus] = []
         self.query_params: list[ListJobsQueryParams | None] = []
         self._listed_jobs = list(jobs or [])
 
@@ -926,13 +927,14 @@ async def _controller(
     *,
     jobs: list[HelixJobResponse] | None = None,
     run_status: AnalysisRunStatus | None = None,
+    compass_agent: str | None = "compass-analyst",
+    create_error: Exception | None = None,
 ) -> AsyncGenerator[tuple[CompassAnalysisController, _RecordingJobs], None]:
     controller = CompassAnalysisController()
     controller._config = CompassConfig(
         analysis=CompassSchedulerConfig(
             frequency=Frequency.DAILY,
             run_at_hour=0,
-            job_profile="test-profile",
         )
     )
     async with _async_platform() as client:
@@ -945,25 +947,29 @@ async def _controller(
         controller._jobs = jobs_client
         controller._entities = entities
 
-        async def submit_run(
-            *, workspace: str, request: CreateAnalysisRunRequest, name: str, **kwargs: object
-        ) -> AnalysisRunResponse:
-            recording_jobs.runs.append(request)
-            run = AnalysisRun(name=name, workspace=workspace, agent=request.agent)
-            run._created_at = _STAMP
-            return AnalysisRunResponse(run=run, job={"name": name, "status": "created"})
+        async def compass_agent_name(workspace: str) -> str | None:
+            del workspace
+            return compass_agent
+
+        async def create_execute_job(*, workspace: str, body: CreateExecuteJobRequest) -> None:
+            del workspace
+            recording_jobs.runs.append(body)
+            if create_error is not None:
+                raise create_error
 
         async def save_status(status: AnalysisRunStatus) -> AnalysisRunStatus:
+            recording_jobs.saved_statuses.append(status.model_copy())
             return status
 
         monkeypatch.setattr(entities, "create", save_status)
         monkeypatch.setattr(entities, "update", save_status)
-        monkeypatch.setattr("nemo_compass_plugin.controller.submit_analysis_run", submit_run)
+        monkeypatch.setattr(controller, "_compass_agent_name", compass_agent_name)
+        monkeypatch.setattr(controller, "_create_execute_job", create_execute_job)
         yield controller, recording_jobs
 
 
 def test_generated_job_name_fits_derived_fileset_name_limit() -> None:
-    name = mint_analysis_run_name()
+    name = mint_compass_job_name()
 
     assert len(name) <= 63 - len("job-fileset-")
     assert len(f"job-fileset-{name}") <= 63
@@ -982,12 +988,74 @@ async def test_controller_submits_due_job(monkeypatch: pytest.MonkeyPatch) -> No
     async with _controller(monkeypatch) as (controller, jobs):
         await controller._reconcile_config(config)
 
-    assert len(jobs.runs) == 1
-    created_spec = jobs.runs[0]
-    assert created_spec.agent == "research-agent"
-    assert created_spec.since is None
-    assert created_spec.default_model == "default/gpt-5"
-    assert created_spec.fast_model == "default/gpt-5-mini"
+    [created] = jobs.runs
+    # Compass's prepare() applies analysis.job_profile to every run, so the scheduler names none.
+    assert created.profile is None
+    assert created.spec == {
+        "agent": "compass-analyst",
+        "context": {
+            "agent": "research-agent",
+            "default_model": "default/gpt-5",
+            "fast_model": "default/gpt-5-mini",
+        },
+        "post_run_action": {"kind": "compass.save-insights"},
+    }
+    assert jobs.saved_statuses[-1].last_submitted_job == created.name
+
+
+@pytest.mark.asyncio
+async def test_controller_reports_a_workspace_without_a_compass_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = AnalysisConfig(
+        name="research-agent", workspace="default", agent="research-agent", default_model="default/gpt-5"
+    )
+
+    async with _controller(monkeypatch, compass_agent=None) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    assert jobs.runs == []
+    [status] = jobs.saved_statuses
+    assert status.status == AnalysisConfigStatus.ERROR
+    assert "nemo agents create compass.analyst --workspace default" in status.last_error
+    assert "--name <name>" in status.last_error
+
+
+@pytest.mark.asyncio
+async def test_controller_records_why_a_job_was_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = AnalysisConfig(
+        name="research-agent", workspace="default", agent="research-agent", default_model="default/gpt-5"
+    )
+    rejected = NemoHTTPError(
+        httpx.Response(422, json={"detail": "default_model 'default/gpt-5' is not a known Model Entity."})
+    )
+
+    async with _controller(monkeypatch, create_error=rejected) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    status = jobs.saved_statuses[-1]
+    assert status.status == AnalysisConfigStatus.ERROR
+    assert status.last_error == (
+        "Analysis job was rejected: default_model 'default/gpt-5' is not a known Model Entity."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [500, 503, 409])
+async def test_controller_keeps_an_attempt_pending_when_the_job_may_exist(
+    monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    """A server error can follow the job's creation, so the next pass resolves the attempt by name."""
+    config = AnalysisConfig(
+        name="research-agent", workspace="default", agent="research-agent", default_model="default/gpt-5"
+    )
+    failed = NemoHTTPError(httpx.Response(status_code, json={"detail": "upstream failed"}))
+
+    async with _controller(monkeypatch, create_error=failed) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    status = jobs.saved_statuses[-1]
+    assert status.status == AnalysisConfigStatus.RUNNING
+    assert status.last_submitted_job
+    assert status.last_error == ""
 
 
 @pytest.mark.asyncio
@@ -1007,7 +1075,17 @@ async def test_controller_defers_legacy_config_without_persisted_models(
 
 
 @pytest.mark.asyncio
-async def test_controller_skips_active_job(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("spec", "custom_fields"),
+    [
+        pytest.param(
+            {"plugin_managed_agent_type": "compass.analyst", "subject": "research-agent"}, None, id="by-subject"
+        ),
+    ],
+)
+async def test_controller_skips_active_job(
+    monkeypatch: pytest.MonkeyPatch, spec: dict[str, str], custom_fields: dict[str, str] | None
+) -> None:
     config = AnalysisConfig(
         name="research-agent",
         workspace="default",
@@ -1030,7 +1108,8 @@ async def test_controller_skips_active_job(monkeypatch: pytest.MonkeyPatch) -> N
                 ),
                 fileset="fileset-1",
                 status=HelixJobStatus.ACTIVE,
-                custom_fields={"insights_analysis_agent": "research-agent"},
+                spec=spec,
+                custom_fields=custom_fields,
             )
         ],
     ) as (controller, jobs):
@@ -1060,9 +1139,9 @@ async def test_controller_passes_success_cursor_and_fast_model_fallback(monkeypa
     async with _controller(monkeypatch, run_status=status) as (controller, jobs):
         await controller._reconcile_config(config)
 
-    assert len(jobs.runs) == 1
-    assert jobs.runs[0].since == _STAMP
-    assert jobs.runs[0].fast_model == config.default_model
+    [created] = jobs.runs
+    assert created.spec["context"]["since"] == _STAMP.isoformat()
+    assert created.spec["context"]["fast_model"] == config.default_model
     backend.count_agent_sessions.assert_awaited_once_with(
         agent=config.agent,
         workspace=config.workspace,

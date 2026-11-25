@@ -178,13 +178,19 @@ const findTaskset = (workspace: unknown, name: unknown) =>
 const findTask = (workspace: unknown, name: unknown) =>
   mockTasks.find((t) => t.workspace === workspace && t.name === name);
 
-/** Pins a member ref to its task's latest content hash, as the server does on write;
- *  undefined when the task doesn't exist. */
+/** The revision a tag or content digest points at. */
+const resolveRevision = (task: Task, key: string) =>
+  (task.tags && Object.hasOwn(task.tags, key) ? task.tags[key] : undefined) ??
+  revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision;
+
+/** Pins a member ref to a content hash (latest when unversioned), as the server does on write;
+ *  undefined when the task or the requested revision doesn't exist. */
 const resolveTaskRef = (workspace: string, ref: string): string | undefined => {
   const [path, version] = ref.split('#');
   const [ws, name] = path.includes('/') ? path.split('/') : [workspace, path];
   const task = findTask(ws, name);
-  return task && `${ws}/${name}#${version ?? contentHash(task.revision)}`;
+  const revision = task && (version ? resolveRevision(task, version) : task.revision);
+  return revision ? `${ws}/${name}#${contentHash(revision)}` : undefined;
 };
 
 /** A write's stored content, members pinned; undefined when a member doesn't resolve. */
@@ -236,10 +242,7 @@ export const evaluatorHandlers = [
   // Resolves a tag or a content digest; the content itself is the current task's.
   http.get(`${EVALS_URL}/tasks/:name/revisions/:revision`, ({ params }) => {
     const task = findTask(params.workspace, params.name);
-    const key = String(params.revision);
-    const revision =
-      task?.tags?.[key] ??
-      (task && revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision);
+    const revision = task && resolveRevision(task, String(params.revision));
     return task && revision ? HttpResponse.json({ ...task, revision }) : notFound('Revision');
   }),
 

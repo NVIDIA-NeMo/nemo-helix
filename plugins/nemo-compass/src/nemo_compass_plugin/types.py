@@ -23,13 +23,6 @@ class ListAnalysisConfigsQueryParams(TypedDict, total=False):
     enabled: NotRequired[bool]
 
 
-class ListAnalysisRunsQueryParams(TypedDict, total=False):
-    page: NotRequired[int]
-    page_size: NotRequired[int]
-    sort: NotRequired[str]
-    agent: NotRequired[str]
-
-
 class ListAnalysisRunStatusesQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]

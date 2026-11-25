@@ -12,7 +12,7 @@ from typing import Any
 from nhx.common.api.common import PaginatedResult
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseInsert, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
-from nhx.intake.repository.span import SpanRepository
+from nhx.intake.repository.span import SpanAmbiguousError, SpanRepository
 from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, IntakeResponseMode, IntakeSpan, SpanGroup, SpanListFilter
 from nhx.intake.spans.span_attribute_catalog import where_clause
 from nhx.intake.spans.storage import (
@@ -216,14 +216,19 @@ class ClickHouseSpanRepository(SpanRepository):
             ),
         )
 
-    async def get_span(self, *, workspace: str, span_id: str) -> IntakeSpan | None:
+    async def get_span(self, *, workspace: str, span_id: str, session_id: str | None = None) -> IntakeSpan | None:
         table = self._executor.table(ClickHouseTable.SPANS)
+        parameters = {"workspace": workspace, "span_id": span_id}
+        if session_id is not None:
+            parameters["session_id"] = session_id
         ref_rows = await self._executor.fetch_all(
-            _span_storage_ref_query(table).bind(workspace=workspace, span_id=span_id)
+            _span_storage_ref_query(table, scoped=session_id is not None).bind(**parameters)
         )
         if not ref_rows:
             return None
 
+        if len(ref_rows) > 1:
+            raise SpanAmbiguousError(f"Span {workspace}/{span_id} belongs to multiple sessions")
         ref = _SpanStorageRef.from_row(ref_rows[0])
         rows = await self._executor.fetch_all(
             _span_hydration_query(table).bind(
@@ -238,7 +243,7 @@ class ClickHouseSpanRepository(SpanRepository):
         return _row_to_span(rows[0])
 
 
-def _span_storage_ref_query(table: str) -> ClickHouseQuery:
+def _span_storage_ref_query(table: str, *, scoped: bool = False) -> ClickHouseQuery:
     """Resolve an external span ID to its current sorting key using only narrow columns.
 
     ``external_span_id`` has a bloom index but is not part of the sorting key. Applying
@@ -247,21 +252,25 @@ def _span_storage_ref_query(table: str) -> ClickHouseQuery:
     avoids that expansion; the full row can then be read by its exact sorting key.
     """
 
+    session_filter = "AND session_id = %(session_id)s" if scoped else ""
     return ClickHouseQuery(
         name="spans.get.resolve",
         statement=f"""
         SELECT
             id,
-            argMax(session_id, (event_ts, is_deleted)) AS session_id,
+            session_id,
             toUnixTimestamp64Micro(argMax(start_time, (event_ts, is_deleted))) AS start_time_us,
             argMax(is_deleted, (event_ts, is_deleted)) AS current_is_deleted
         FROM {table}
         PREWHERE
             workspace = %(workspace)s
             AND external_span_id = %(span_id)s
-        GROUP BY workspace, source_format, trace_id, external_span_id, id
+            {session_filter}
+        GROUP BY workspace, session_id, source_format, trace_id, external_span_id, id
         HAVING current_is_deleted = 0
-        LIMIT 1
+        ORDER BY session_id
+        LIMIT 1 BY session_id
+        LIMIT 2
         """,
     )
 

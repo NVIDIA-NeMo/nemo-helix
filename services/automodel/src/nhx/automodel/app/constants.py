@@ -47,7 +47,8 @@ DEFAULT_TRAINING_RESULT_FILE_NAME = "customizer_training_result.json"
 # Global rank 0 writes this into the training workspace once the pause checkpoint is saved,
 # and the runner reads it after torchrun exits. The Jobs service only sees the exit code.
 PAUSE_SENTINEL_FILE_NAME = "PAUSED"
-# Asks Automodel to checkpoint and stop. Not SIGTERM: the runner and torchrun use that for cancel.
+# The signal Automodel's preemption handler (checkpoint and stop) is installed for. A pause sets
+# that handler's flag directly. Not SIGTERM: the runner and torchrun use that for cancel.
 PAUSE_SIGNAL = signal.Signals.SIGUSR1
 
 # Absolute paths (used in HelixJobSpec for cross-step file sharing via PVC)

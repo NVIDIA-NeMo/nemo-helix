@@ -30,6 +30,19 @@ export const TOOL_LABELS: Record<string, string> = {
   Write: 'Write file',
 };
 
+/** Other names that model and MCP tools use for the built-in tools above. */
+export const TOOL_NAME_ALIASES: Record<string, readonly string[]> = {
+  AskUserQuestion: ['AskUser'],
+  Bash: ['ExecuteCommand', 'RunCommand', 'Shell'],
+  Edit: ['EditFile'],
+  Grep: ['SearchText'],
+  LS: ['ListDir', 'ListDirectory', 'ListFiles'],
+  Read: ['ReadFile'],
+  WebFetch: ['FetchUrl'],
+  WebSearch: ['SearchWeb'],
+  Write: ['CreateFile', 'WriteFile'],
+};
+
 export const TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
   Bash: WindowTerminal,
   Edit: Pencil,
@@ -43,10 +56,6 @@ export const TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>
   WebSearch: MagnifyingGlass,
   Write: Pencil,
 };
-
-export const CODE_BLOCK_SURFACE_CLASS = 'bg-gray-050 dark:bg-gray-900';
-export const FILE_CHANGE_ADDITION_CLASS = 'text-feedback-success';
-export const FILE_CHANGE_DELETION_CLASS = 'text-feedback-danger';
 
 export const TOOL_RUNNING_ACTIONS: Record<string, string> = {
   AskUserQuestion: 'Asking',

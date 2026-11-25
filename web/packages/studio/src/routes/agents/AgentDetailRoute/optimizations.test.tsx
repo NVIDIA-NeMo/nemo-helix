@@ -146,8 +146,10 @@ describe('AgentDetailRoute optimizations tab', () => {
 
   const deleteFromRow = async (user: ReturnType<typeof userEvent.setup>, studyName: string) => {
     await user.click(await openRowActions(user, studyName));
-    const dialog = await screen.findByRole('dialog', { name: 'Delete Optimization Study' });
-    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: `Delete optimization study '${studyName}'?`,
+    });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete Optimization Study' }));
   };
 
   const BUNDLE = 'react-agent-optimize-abc123';

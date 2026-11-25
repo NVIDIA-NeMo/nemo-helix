@@ -9,10 +9,12 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TypeVar
 
 import httpx
 import pytest
+from nemo_agents_plugin import plugin_managed_agents
 from nemo_agents_plugin.fabric import adapters
 from nemo_helix_plugin import cli_state as cli_state_module
 from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
@@ -289,3 +291,26 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def interactive_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat stdin as a terminal so confirmation prompts read ``CliRunner`` input."""
     monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)
+
+
+@pytest.fixture
+def install_plugin_managed_agent_types(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Return a function that makes exactly the given types the installed plugin-managed agent types.
+
+    Each type is registered under its ``type_id`` unless passed as a
+    ``(entry_point_name, type)`` pair, which lets a test register a mismatch.
+    """
+
+    def install(*types: Any) -> None:
+        registered: dict[str, list[Any]] = {}
+        for item in types:
+            name, type_cls = item if isinstance(item, tuple) else (item.type_id, item)
+            registered.setdefault(name, []).append(
+                SimpleNamespace(
+                    name=name, value=f"tests:{getattr(type_cls, '__name__', type_cls)}", load=lambda t=type_cls: t
+                )
+            )
+        monkeypatch.setattr(plugin_managed_agents, "_registered_entry_points", lambda: registered)
+
+    install()
+    return install

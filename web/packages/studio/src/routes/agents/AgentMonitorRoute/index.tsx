@@ -159,6 +159,8 @@ export const AgentMonitorRoute: FC = () => {
           runs={filteredRuns}
           isFetching={isFetching}
           error={displayError}
+          workspace={workspace}
+          agentName={agentFilter.length === 1 ? agentFilter[0] : undefined}
           onRetry={() => {
             void filesListQuery.refetch();
             void runsQuery.refetch();

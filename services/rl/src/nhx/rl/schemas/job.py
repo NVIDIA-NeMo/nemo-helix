@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Self, Union
 from nemo_helix_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.schema import (
     LearningRateDefault,
     NamespacedModel,
@@ -324,6 +325,29 @@ GRPO_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
 ]
 
 
+class ImageSize(RlSchema):
+    """Pixel-area bounds for a vision processor.
+
+    Both edges are required. ``longest_edge`` is the maximum pixel count and matches ``max_pixels``.
+    """
+
+    longest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.",
+    )
+    shortest_edge: int | None = Field(
+        default=None,
+        gt=0,
+        description="Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.",
+    )
+
+    @model_validator(mode="after")
+    def _has_both_edges(self) -> Self:
+        check_image_size_edges(self.longest_edge, self.shortest_edge)
+        return self
+
+
 class GRPOTraining(_TrainingBase):
     """Group Relative Policy Optimization with NeMo Gym environments.
 
@@ -333,6 +357,19 @@ class GRPOTraining(_TrainingBase):
     """
 
     model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(GRPO_LEARNING_RATE_DEFAULTS))
+
+    max_pixels: int | None = Field(
+        default=None,
+        gt=0,
+        description="Shorthand for image_size.longest_edge on a vision-language checkpoint. Larger images are "
+        "downscaled before the policy processor and the vLLM rollout engine see them, so training and generation "
+        "use the same resolution. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.",
+    )
+    image_size: ImageSize | None = Field(
+        default=None,
+        description="Pixel-area bounds for a vision-language checkpoint. Both edges are required, and "
+        "shortest_edge must be less than longest_edge. Set this or max_pixels, not both. Rejected for text checkpoints.",
+    )
 
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON (same as DPOTraining.type).
@@ -650,6 +687,11 @@ class GRPOTraining(_TrainingBase):
             return data
 
     @model_validator(mode="after")
+    def _max_pixels_or_image_size(self) -> Self:
+        check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
+        return self
+
+    @model_validator(mode="after")
     def _reject_reserved_vllm_kwargs(self) -> Self:
         """The worker sets these itself, so a copy here is a TypeError at startup."""
         if not self.vllm_kwargs:
@@ -657,6 +699,9 @@ class GRPOTraining(_TrainingBase):
         reserved = sorted(self.vllm_kwargs.keys() & _VLLM_KWARGS_RESERVED)
         if reserved:
             raise ValueError(f"vllm_kwargs must not set {', '.join(reserved)}")
+        mm = self.vllm_kwargs.get("mm_processor_kwargs")
+        if mm is not None and not isinstance(mm, dict):
+            raise ValueError("vllm_kwargs.mm_processor_kwargs must be a dict")
         return self
 
     @model_validator(mode="after")

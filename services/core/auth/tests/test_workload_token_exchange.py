@@ -11,10 +11,10 @@ from urllib.parse import urlencode
 import nhx.common.auth.signing_keys as signing_keys_mod
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
 from nhx.common.auth import Principal
 from nhx.common.auth.signing_keys import RSASigningKeyCache
@@ -160,6 +160,7 @@ def _delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         ),
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -190,6 +191,7 @@ def _deployment_delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         ),
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -232,6 +234,7 @@ def _deployment_reference_delegation_entity(**overrides: Any) -> WorkloadDelegat
         bound_reference_value=pod_uid,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -873,6 +876,7 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
 
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["groups"] == "workspace-editors"
     # The job actor needs its own grant; submitter roles must not leak into act.
@@ -899,8 +903,46 @@ def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_r
 
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {"sub": delegation.name}
+
+
+def test_retry_jwt_references_new_grant_and_old_proof_is_rejected(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+) -> None:
+    name = _docker_delegation_name()
+    old_proof, old_hash = create_opaque_docker_proof_token(name)
+    old = _delegation_entity(opaque_subject_token_hash=old_hash)
+    old._id = "workload-delegation-old"
+    entity_client.entities[name] = old
+    old_response = client.post(
+        "/token", data=_exchange_form(old_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+    )
+    assert old_response.status_code == 200
+    old_jwt = old_response.json()["access_token"]
+
+    new_proof, new_hash = create_opaque_docker_proof_token(name)
+    current = _delegation_entity(opaque_subject_token_hash=new_hash)
+    current._id = "workload-delegation-new"
+    entity_client.entities[name] = current
+    rejected = client.post(
+        "/token", data=_exchange_form(old_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"] == "invalid_request"
+    for _ in range(2):
+        refreshed = client.post(
+            "/token", data=_exchange_form(new_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+        )
+        assert refreshed.status_code == 200
+        claims = _decode_access_token(refreshed.json()["access_token"], exchange_config, exchange_service)
+        assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": current.id}}
+    old_claims = _decode_access_token(old_jwt, exchange_config, exchange_service)
+    assert old_claims["nhx_service_attributes"] == {"auth": {"delegation_id": old.id}}
 
 
 def test_opaque_docker_proof_token_requires_private_subject_token_type(
@@ -1059,6 +1101,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert entity_client.get_calls == [delegation.name]
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {
         "sub": "system:serviceaccount:nemo-runs:job-runner",
@@ -1094,6 +1137,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_ro
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert entity_client.get_calls == [delegation.name]
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {
         "sub": "system:serviceaccount:nemo-deployments:deployment-runner",
@@ -1580,6 +1624,73 @@ def test_jwt_subject_token_decoder_refreshes_cached_jwks_on_unknown_kid(
 
     assert claims["sub"] == "authentik-user"
     assert captured["request_count"] == 2
+
+
+def _mock_subject_jwks(monkeypatch: pytest.MonkeyPatch, jwks: dict[str, Any]) -> None:
+    class FakeAsyncClient:
+        def __init__(self, *, timeout: float) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        async def get(self, url: str) -> _FakeResponse:
+            return _FakeResponse(jwks)
+
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
+
+
+def test_jwt_subject_token_decoder_accepts_es256_subject_token(
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Identity providers that sign with ES256 publish an EC key in their JWKS.
+    ec_key = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(ec_key.public_key()))
+    jwk.update({"kid": "ec-key", "use": "sig", "alg": "ES256"})
+    _mock_subject_jwks(monkeypatch, {"keys": [jwk]})
+    subject_token = exchange.jwt.encode(
+        {
+            "iss": _workload(exchange_config).subject_issuers[0],
+            "sub": "es256-user",
+            "aud": "nemo-helix-workload",
+            "exp": int(exchange.time.time()) + 300,
+        },
+        ec_key,
+        algorithm="ES256",
+        headers={"kid": "ec-key"},
+    )
+
+    claims = asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
+
+    assert claims["sub"] == "es256-user"
+
+
+def test_jwt_subject_token_decoder_rejects_unlisted_algorithm(
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_subject_jwks_client(exchange_config, exchange_service, monkeypatch)
+    signing_key = exchange_service.workload_signing_key(exchange_config)
+    subject_token = exchange.jwt.encode(
+        {
+            "iss": _workload(exchange_config).subject_issuers[0],
+            "sub": "authentik-user",
+            "aud": "nemo-helix-workload",
+            "exp": int(exchange.time.time()) + 300,
+        },
+        signing_key.private_key,
+        algorithm="PS256",
+        headers={"kid": signing_key.kid},
+    )
+
+    with pytest.raises(exchange.jwt.InvalidAlgorithmError):
+        asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
 
 
 def test_jwt_subject_token_decoder_rejects_wrong_audience(

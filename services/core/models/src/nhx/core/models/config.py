@@ -397,6 +397,18 @@ def default_trusted_ngc_models() -> list[str]:
     ]
 
 
+class MetadataControllerConfig(BaseModel):
+    """Configuration for the controller that keeps ``ModelEntity.metadata`` filled in."""
+
+    interval_seconds: float = Field(default=300.0, gt=0, description="Seconds between metadata reconcile cycles.")
+    refresh_interval_seconds: float = Field(
+        default=86400.0,
+        gt=0,
+        description="Seconds before a model's metadata, or a lookup that found nothing, is fetched again.",
+    )
+    request_timeout_seconds: float = Field(default=15.0, gt=0, description="Timeout for each metadata request.")
+
+
 class TrustRemoteCodeConfig(BaseModel):
     hf_allow_list: list[str] = Field(
         default_factory=default_trusted_hf_models,
@@ -437,6 +449,9 @@ class ModelsConfig(create_service_config_class("models")):  # type: ignore
     )
     controller: ControllerConfig = Field(
         default_factory=ControllerConfig, description="Controller service configuration"
+    )
+    metadata: MetadataControllerConfig = Field(
+        default_factory=MetadataControllerConfig, description="Model metadata controller configuration"
     )
     parallelism: ParallelismConfig = Field(
         default_factory=ParallelismConfig,
