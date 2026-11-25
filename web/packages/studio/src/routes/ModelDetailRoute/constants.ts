@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { QUERY_PARAMETERS } from '@studio/routes/constants';
-
-/** Tab ids for the model detail page, used as tab values and as the `?tab=<id>` URL value. */
+/** Tab ids for the model detail page, used as tab values and as the tab's URL path segment. */
 export enum ModelDetailTab {
   Details = 'details',
   Chat = 'chat',
@@ -15,6 +13,3 @@ export enum ModelDetailTab {
 }
 
 export type ModelDetailParent = 'fine-tuning' | 'catalog';
-
-// Relative to the current path, so a tab link works under both the catalog and fine-tuning URLs.
-export const getModelTabLink = (tab: ModelDetailTab) => `?${QUERY_PARAMETERS.tab}=${tab}`;
