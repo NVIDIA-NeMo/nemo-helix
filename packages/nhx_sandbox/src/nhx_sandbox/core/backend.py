@@ -135,8 +135,8 @@ class SandboxSpec:
             fit their naming rules, so two sandboxes never share a name.
         env: Environment for every command in the sandbox. Backends that don't apply the image's own
             ``ENV`` to commands (OpenShell) need the caller to include it here. Don't put secrets
-            here: depending on the backend, env ends up in pod specs, cluster objects or command
-            records that others can read.
+            here. Depending on the backend, env ends up in pod specs, cluster objects or command
+            records that others can read. The interface has no way to pass secrets yet.
         workdir: Default working directory for commands. ``None`` uses the backend's default, which
             isn't always the image's ``WORKDIR``.
         resources: CPU, memory, disk and GPU limits.
@@ -145,8 +145,10 @@ class SandboxSpec:
             it refuses the spec. ``PlatformEgress`` accepts the platform's rules instead, on backends
             that can't set egress per sandbox.
         labels: Labels for finding the sandbox later, such as the job that owns it.
-        ttl_s: How long the sandbox may live. On a backend without ``capabilities.server_ttl``,
-            something outside the backend has to delete the sandbox once this runs out.
+        ttl_s: How long the sandbox may live. ``None`` uses the backend's default lifetime, which
+            can be short on a managed service, so set it whenever a task needs longer. On a backend
+            without ``capabilities.server_ttl``, something outside the backend has to delete the
+            sandbox once this runs out.
         ready_timeout_s: How long ``create`` waits for the sandbox to become ready.
         writable_paths: Paths the workload must be able to write, on backends that restrict the
             filesystem (OpenShell's Landlock policy, or a read-only image filesystem). A backend that
@@ -199,10 +201,13 @@ class ExecRequest:
         env: Extra environment, layered over the spec's ``env``. The same caution about secrets applies.
         timeout_s: Seconds before the command is killed, along with anything it started. Backends
             must kill it rather than just stop waiting, so it can't keep changing the sandbox after
-            the caller moves on. ``None`` runs it until the backend's own ceiling, if it has one. A
-            timeout past that ceiling raises ``UnsupportedOperation`` instead of being cut short,
-            since a command stopped early, such as an agent's whole run, would be graded as if it
-            had finished.
+            the caller moves on. The sandbox stays usable afterwards, so a runner can still collect
+            logs and grade the trial. A backend whose platform deletes a sandbox when a command
+            overruns must enforce this timeout itself, inside the sandbox, before the platform's own
+            limit fires. ``None`` runs the command until the backend's ceiling, minus whatever
+            margin the backend needs to stop it in time. A timeout past that raises
+            ``UnsupportedOperation`` instead of being cut short, since a command stopped early, such
+            as an agent's whole run, would be graded as if it had finished.
         user: The user to run as. ``None`` uses the sandbox's default user. Backends that can't
             switch users raise ``UnsupportedOperation`` for anything else.
         stdin: Bytes for the command's standard input.
@@ -229,7 +234,8 @@ class ExecResult:
             (137 when it was killed with ``SIGKILL``, -1 on some), so check ``timed_out`` instead.
         stdout: Standard output, as much as the backend kept.
         stderr: Standard error, as much as the backend kept.
-        timed_out: ``timeout_s`` ran out and the command was killed.
+        timed_out: ``timeout_s`` ran out and the command was killed. The sandbox is still usable;
+            if it went away, ``exec`` raises ``SandboxLost`` instead.
         stdout_truncated: The backend dropped part of ``stdout``.
         stderr_truncated: The backend dropped part of ``stderr``.
     """
@@ -251,11 +257,14 @@ class WorkloadNeeds:
 
     Attributes:
         longest_command_s: The longest any single command will run, such as an agent's whole budget.
+        lifetime_s: How long the whole trial needs the sandbox, from ``create`` to its last call. A
+            task that only sends short commands can still outlive a backend's maximum lifetime.
         runs_as_root: Some command has to run as uid 0.
         multi_container: The task needs several containers in one sandbox, as Compose services do.
     """
 
     longest_command_s: float | None = None
+    lifetime_s: float | None = None
     runs_as_root: bool = False
     multi_container: bool = False
 
@@ -323,8 +332,11 @@ class SandboxBackend(Protocol):
 
     Every call is safe to make concurrently. Calls on different sandboxes run in parallel. Calls on
     the same sandbox do too when ``capabilities.concurrent_exec`` is set, and otherwise wait their
-    turn. ``delete`` is idempotent. Paths inside a sandbox must be absolute; a relative one raises
-    ``ValueError``.
+    turn. Cancelling a call stops the command it started; see ``exec``. ``delete`` is idempotent.
+    Paths inside a sandbox must be absolute; a relative one raises ``ValueError``.
+
+    A backend that moves files using commands inside the sandbox may need ``sh``, ``tar`` and
+    ``gzip`` in the image, and says so in its own docs. ``check`` doesn't inspect images.
     """
 
     name: str
@@ -336,6 +348,11 @@ class SandboxBackend(Protocol):
         An empty list means it fits. This lets a runner refuse a task at submission and name the
         limit it breaks, instead of failing it at ``create`` or partway through, where the mismatch
         can look like a score of 0. ``create`` refuses anything this reports for ``spec`` alone.
+
+        Beyond what ``Capabilities`` shows, it reports limits only the backend knows: a lifetime
+        (``spec.ttl_s`` or ``needs.lifetime_s``) or a command (``needs.longest_command_s``) longer
+        than it allows, with room to stop the command itself, or an image that hasn't been prepared
+        for it.
         """
         ...
 
@@ -353,7 +370,11 @@ class SandboxBackend(Protocol):
         ...
 
     async def list_sandboxes(self, labels: Mapping[str, str]) -> list[SandboxInfo]:
-        """Return the sandboxes that carry all of ``labels``, including ones another process created."""
+        """Return the sandboxes that carry all of ``labels``, including ones another process created.
+
+        Backends without labels may store them another way, such as in the sandbox's name, so
+        matching can be looser there. ``create`` refuses labels a backend can't store.
+        """
         ...
 
     async def delete(self, ref: SandboxRef) -> None:
@@ -366,6 +387,10 @@ class SandboxBackend(Protocol):
 
     async def exec(self, ref: SandboxRef, request: ExecRequest) -> ExecResult:
         """Run one command and return how it ended.
+
+        If the caller cancels this call, the backend makes sure the command stops. A backend that
+        can't stop it marks the sandbox unusable, and later calls on that sandbox raise
+        ``SandboxLost`` instead of waiting behind the command.
 
         Raises:
             UnsupportedOperation: The request asks for a user or timeout this backend can't give.
@@ -464,12 +489,3 @@ def capability_refusals(capabilities: Capabilities, spec: SandboxSpec, needs: Wo
             "(PlatformEgress) to run here"
         )
     return reasons
-
-
-def merged_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
-    """Merge environment layers; later layers win."""
-    merged: dict[str, str] = {}
-    for layer in layers:
-        if layer:
-            merged.update(layer)
-    return merged
