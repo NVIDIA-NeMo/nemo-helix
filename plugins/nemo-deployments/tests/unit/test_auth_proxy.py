@@ -39,7 +39,10 @@ def test_builds_sidecar_when_requested_and_auth_on() -> None:
         patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
         patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
     ):
-        container = build_auth_proxy_container(_config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"))
+        container = build_auth_proxy_container(
+            _config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"),
+            auth_context=AuthContext(principal_id="user:alice"),
+        )
     assert container is not None
     assert container.name == AUTH_PROXY_CONTAINER_NAME
     assert container.image == "my-registry/nhx-api:local"
@@ -97,16 +100,33 @@ def test_sidecar_delegation_requires_matching_captured_creator(creator_id: str |
         )
 
 
-def test_sidecar_omits_on_behalf_of_when_unset() -> None:
+def test_sidecar_derives_delegation_when_config_omits_it() -> None:
     with (
         patch(f"{_MOD}.platform_auth_enabled", return_value=True),
         patch(f"{_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
         patch(f"{_MOD}._upstream_base_url", return_value="http://nemo-helix-api:8080"),
     ):
-        container = build_auth_proxy_container(_config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"))
+        container = build_auth_proxy_container(
+            _config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"),
+            auth_context=AuthContext(principal_id="user:alice", principal_groups=["research"]),
+        )
     assert container is not None
     env = {e.name: e.value for e in container.env}
-    assert "NHX_AUTH_PROXY_ON_BEHALF_OF" not in env
+    assert env["NHX_AUTH_PROXY_ON_BEHALF_OF"] == "user:alice"
+    raw_context = env["NHX_AUTH_PROXY_AUTH_CONTEXT"]
+    assert raw_context is not None
+    assert AuthContext.model_validate_json(raw_context).principal_groups == ["research"]
+
+
+@pytest.mark.parametrize("creator", [None, AuthContext(principal_id="")])
+def test_sidecar_without_delegation_cannot_bypass_creator_check(creator: AuthContext | None) -> None:
+    with (
+        patch(f"{_MOD}.platform_auth_enabled", return_value=True),
+        pytest.raises(ValueError, match="creator"),
+    ):
+        build_auth_proxy_container(
+            _config(auth_proxy_sidecar=True, auth_proxy_sidecar_identity="agents"), auth_context=creator
+        )
 
 
 def test_sidecar_without_identity_is_rejected() -> None:

@@ -124,17 +124,24 @@ class CreateDeploymentConfigRequest(BaseModel):
         ),
     )
     auth_proxy_sidecar: bool = Field(default=False, alias="authProxySidecar")
-    auth_proxy_sidecar_identity: str | None = Field(default=None, alias="authProxySidecarIdentity")
-    auth_proxy_sidecar_on_behalf_of: str | None = Field(default=None, alias="authProxySidecarOnBehalfOf")
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)
 
-    @model_validator(mode="after")
-    def validate_auth_proxy_identity(self) -> CreateDeploymentConfigRequest:
-        if self.auth_proxy_sidecar and not self.auth_proxy_sidecar_identity:
-            raise ValueError("auth_proxy_sidecar_identity is required when auth_proxy_sidecar is True")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def reject_auth_proxy_identity(cls, data: Any) -> Any:
+        if isinstance(data, dict) and any(
+            key in data
+            for key in (
+                "authProxySidecarIdentity",
+                "auth_proxy_sidecar_identity",
+                "authProxySidecarOnBehalfOf",
+                "auth_proxy_sidecar_on_behalf_of",
+            )
+        ):
+            raise ValueError("auth-proxy identity and delegation are managed by the server")
+        return data
 
     @field_validator("shm_size")
     @classmethod

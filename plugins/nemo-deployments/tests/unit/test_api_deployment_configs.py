@@ -46,19 +46,41 @@ def test_create_deployment_config_201(client: TestClient, mock_entity_client: As
     assert mock_entity_client.create.await_args.args[0].shm_size == "8Gi"
 
 
-@pytest.mark.parametrize("alias", ["authProxySidecar", "auth_proxy_sidecar"])
-@pytest.mark.parametrize("identity", [{}, {"authProxySidecarIdentity": None}, {"authProxySidecarIdentity": ""}])
-def test_create_deployment_config_rejects_auth_proxy_without_identity(
-    client: TestClient, mock_entity_client: AsyncMock, alias: str, identity: dict
+@pytest.mark.parametrize(
+    "field",
+    [
+        "authProxySidecarIdentity",
+        "auth_proxy_sidecar_identity",
+        "authProxySidecarOnBehalfOf",
+        "auth_proxy_sidecar_on_behalf_of",
+    ],
+)
+def test_create_deployment_config_rejects_caller_selected_proxy_identity(
+    client: TestClient, mock_entity_client: AsyncMock, field: str
 ) -> None:
     resp = client.post(
         "/apis/deployments/v2/workspaces/default/deployment-configs",
-        json={"name": "cfg1", alias: True, **identity},
+        json={"name": "cfg1", "authProxySidecar": True, field: "service:privileged"},
     )
 
     assert resp.status_code == 422
-    assert "auth_proxy_sidecar_identity is required" in resp.text
+    assert "identity and delegation are managed by the server" in resp.text
     mock_entity_client.create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("alias", ["authProxySidecar", "auth_proxy_sidecar"])
+def test_create_deployment_config_uses_server_proxy_identity(
+    client: TestClient, mock_entity_client: AsyncMock, alias: str
+) -> None:
+    mock_entity_client.create.side_effect = lambda config: config
+    response = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", alias: True},
+    )
+    assert response.status_code == 201
+    config = mock_entity_client.create.await_args.args[0]
+    assert config.auth_proxy_sidecar_identity == "deployments"
+    assert config.auth_proxy_sidecar_on_behalf_of is None
 
 
 @pytest.mark.parametrize("proxy_config", [{}, {"authProxySidecar": False}, {"auth_proxy_sidecar": False}])
@@ -93,8 +115,6 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
             "backoffLimit": 3,
             "shmSize": "32Gi",
             "authProxySidecar": True,
-            "authProxySidecarIdentity": "models",
-            "authProxySidecarOnBehalfOf": "user:alice",
         },
     )
 
@@ -104,8 +124,8 @@ def test_create_deployment_config_accepts_camel_case_restart_policy(
     assert created_config.backoff_limit == 3
     assert created_config.shm_size == "32Gi"
     assert created_config.auth_proxy_sidecar is True
-    assert created_config.auth_proxy_sidecar_identity == "models"
-    assert created_config.auth_proxy_sidecar_on_behalf_of == "user:alice"
+    assert created_config.auth_proxy_sidecar_identity == "deployments"
+    assert created_config.auth_proxy_sidecar_on_behalf_of is None
 
 
 def test_create_deployment_config_accepts_snake_case_top_level_fields(
@@ -127,8 +147,6 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
             "drift_recovery": {"max_attempts": 2},
             "shm_size": "16Gi",
             "auth_proxy_sidecar": True,
-            "auth_proxy_sidecar_identity": "models",
-            "auth_proxy_sidecar_on_behalf_of": "user:alice",
             "backend_config": {"k8s": {"namespace": "dep-ns", "serviceAccount": "dep-sa"}},
             "workload_identity": {
                 "enabled": True,
@@ -149,8 +167,8 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
     assert created_config.drift_recovery.max_attempts == 2
     assert created_config.shm_size == "16Gi"
     assert created_config.auth_proxy_sidecar is True
-    assert created_config.auth_proxy_sidecar_identity == "models"
-    assert created_config.auth_proxy_sidecar_on_behalf_of == "user:alice"
+    assert created_config.auth_proxy_sidecar_identity == "deployments"
+    assert created_config.auth_proxy_sidecar_on_behalf_of is None
     assert created_config.backend_config.k8s is not None
     assert created_config.backend_config.k8s.namespace == "dep-ns"
     assert created_config.backend_config.k8s.service_account == "dep-sa"

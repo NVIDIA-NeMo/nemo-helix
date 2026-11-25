@@ -36,7 +36,7 @@ def test_auth_proxy_injected_as_docker_sidecar_when_auth_on() -> None:
         patch(f"{_AUTH_PROXY_MOD}.get_qualified_image", return_value="my-registry/nhx-api:local"),
         patch(f"{_AUTH_PROXY_MOD}._upstream_base_url", return_value="http://host.docker.internal:8080"),
     ):
-        plan = build_docker_plan(config)
+        plan = build_docker_plan(config, auth_context=AuthContext(principal_id="user:alice"))
     # Injected as a sidecar (shares primary netns), not the primary.
     assert plan.primary.name == "main"
     proxy = next(c for c in plan.sidecars if c.name == "auth-proxy")

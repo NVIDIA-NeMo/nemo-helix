@@ -57,6 +57,7 @@ async def create_deployment_config(
         workspace=workspace,
         containers=[_container_from_request(item) for item in body.containers],
         initContainers=[_container_from_request(item) for item in body.init_containers],
+        auth_proxy_sidecar_identity="deployments" if body.auth_proxy_sidecar else None,
         **payload,
     )
     try:

@@ -262,6 +262,38 @@ def test_registry_contains_openshell() -> None:
     assert BACKEND_CLASSES["openshell"] is OpenShellDeploymentBackend
 
 
+@pytest.mark.parametrize("creator_id", [None, "user:mallory"])
+async def test_provider_proxy_rejects_delegation_not_matching_creator(
+    openshell_backend, mock_entities, mock_stub, creator_id
+):
+    config = _config()
+    config.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+    }
+    config.auth_proxy_sidecar = True
+    config.auth_proxy_sidecar_on_behalf_of = "user:alice"
+    mock_entities.get.return_value = config
+    mock_stub.GetSandbox.side_effect = _not_found()
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=Path("/run/key"),
+        credential_refresh_verified=True,
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    with patch("nemo_deployments_plugin.backends.openshell.backend.platform_auth_enabled", return_value=True):
+        result = await openshell_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={},
+            backend_config={},
+            auth_context=AuthContext(principal_id=creator_id) if creator_id else None,
+        )
+    assert result.status == "FAILED"
+    assert "captured creator" in result.status_message
+    mock_stub.CreateSandbox.assert_not_called()
+
+
 @pytest.mark.parametrize("auth_enabled", [True, False])
 @pytest.mark.parametrize(
     "upstream,create_fails",

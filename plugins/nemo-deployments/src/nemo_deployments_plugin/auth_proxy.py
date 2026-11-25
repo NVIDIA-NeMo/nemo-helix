@@ -94,7 +94,13 @@ def build_auth_proxy_container(
     deployments_config = get_nemo_config(DeploymentsConfig)
     # Guaranteed present: DeploymentConfig validates identity when the sidecar is enabled.
     identity = config.auth_proxy_sidecar_identity
-    on_behalf_of = config.auth_proxy_sidecar_on_behalf_of
+    if auth_context is None:
+        raise ValueError("auth-proxy delegation requires captured creator auth context")
+    on_behalf_of = auth_context.principal_on_behalf_of or auth_context.principal_id
+    if not on_behalf_of:
+        raise ValueError("auth-proxy delegation requires a captured creator identity")
+    if config.auth_proxy_sidecar_on_behalf_of and config.auth_proxy_sidecar_on_behalf_of != on_behalf_of:
+        raise ValueError("auth-proxy on-behalf-of identity does not match its captured creator")
     port = deployments_config.auth_proxy_port
     image = deployments_config.auth_proxy_image or get_qualified_image(deployments_config.auth_proxy_image_name)
 
@@ -111,15 +117,8 @@ def build_auth_proxy_container(
         # Same reason: keep the default data dir off the image-owned home.
         EnvVar(name=_AUTH_PROXY_DATA_DIR_ENVVAR, value="/tmp/nhx-data"),
     ]
-    if on_behalf_of:
-        # The config can select delegation, but its claims must come from the
-        # authenticated context captured on the Deployment by the API.
-        if auth_context is None:
-            raise ValueError("auth-proxy delegation requires captured creator auth context")
-        if on_behalf_of != (auth_context.principal_on_behalf_of or auth_context.principal_id):
-            raise ValueError("auth-proxy on-behalf-of identity does not match its captured creator")
-        env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))
-        env.append(EnvVar(name=_AUTH_PROXY_AUTH_CONTEXT_ENVVAR, value=auth_context.model_dump_json()))
+    env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))
+    env.append(EnvVar(name=_AUTH_PROXY_AUTH_CONTEXT_ENVVAR, value=auth_context.model_dump_json()))
 
     return Container(
         name=AUTH_PROXY_CONTAINER_NAME,

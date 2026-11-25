@@ -57,11 +57,13 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
 
 @pytest.mark.parametrize("delegated", [False, True])
 @pytest.mark.parametrize("has_group_grant", [False, True])
+@pytest.mark.parametrize("explicit_delegation", [False, True])
 def test_legacy_proxy_preserves_creator_group_authorization(
     static_authz_data: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     delegated: bool,
     has_group_grant: bool,
+    explicit_delegation: bool,
 ) -> None:
     creator = AuthContext(
         principal_id="user:alice",
@@ -103,7 +105,7 @@ def test_legacy_proxy_preserves_creator_group_authorization(
                 workspace="default",
                 auth_proxy_sidecar=True,
                 auth_proxy_sidecar_identity=plan.auth_proxy_identity,
-                auth_proxy_sidecar_on_behalf_of=plan.auth_proxy_on_behalf_of,
+                auth_proxy_sidecar_on_behalf_of=plan.auth_proxy_on_behalf_of if explicit_delegation else None,
             ),
             auth_context=creator,
         )
