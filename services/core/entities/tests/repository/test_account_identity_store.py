@@ -261,6 +261,35 @@ async def test_evicted_identity_is_read_from_the_database_again(session_maker, c
         await _resolve(store)
 
 
+@pytest.mark.asyncio
+async def test_lookup_in_flight_during_an_eviction_does_not_repopulate_the_cache(
+    session_maker, cache_config, monkeypatch
+):
+    """A lookup that read the row before the eviction must not publish it afterwards."""
+    cache_config(account_identity_cache_enabled=True)
+    store = AccountIdentityStore(session_maker)
+    await _resolve(store)
+    evict_account_identity(session_maker, issuer=ISSUER, subject="sub-cache")
+    read_row = store.get_active_identity
+
+    async def read_then_evict(*, issuer: str, subject: str):
+        record = await read_row(issuer=issuer, subject=subject)
+        # Deactivation and its eviction land after the read and before the lookup caches the row.
+        evict_account_identity(session_maker, issuer=issuer, subject=subject)
+        return record
+
+    monkeypatch.setattr(store, "get_active_identity", read_then_evict)
+    assert (await _resolve(store)).account_id.startswith("account-")
+
+    cache = _identity_cache(session_maker)
+    assert cache is not None
+    assert (ISSUER, "sub-cache") not in cache
+
+    monkeypatch.setattr(store, "get_active_identity", read_row)
+    await _resolve(store)
+    assert (ISSUER, "sub-cache") in cache
+
+
 def test_non_positive_cache_ttl_is_rejected():
     with pytest.raises(ValidationError):
         EntitiesConfig(account_identity_cache_ttl_sec=0)
