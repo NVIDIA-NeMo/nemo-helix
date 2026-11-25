@@ -2279,6 +2279,50 @@ def test_the_jobs_variables_apply_only_after_the_privileged_setup(monkeypatch):
     assert runtime.JOB_ENV_ENV_KEY not in os.environ
 
 
+def test_the_agent_bundle_runs_only_after_the_privileged_setup(monkeypatch):
+    """On the Docker-enabled image the setup runs as root with SYS_ADMIN; the agent CLI must not.
+
+    Its directory still reaches Gym first on PATH, and a job's own PATH still overrides it as before.
+    """
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.AGENT_EXECUTABLE_ENV_KEY, "/installed-agent/bin/codex")
+    agent_seen_by_setup: list[str | None] = []
+    checked: list[str | None] = []
+
+    def _setup() -> bool:
+        agent_seen_by_setup.append(os.environ.get(runtime.AGENT_EXECUTABLE_ENV_KEY))
+        assert checked == [], "the agent ran before the privilege drop"
+        return True
+
+    def _check(executable: str | None) -> None:
+        checked.append(executable)
+        os.environ["PATH"] = f"/installed-agent/bin:{os.environ['PATH']}"
+
+    monkeypatch.setattr(runtime, "activate_agent_executable", _check)
+
+    seen = _run_main_recording(monkeypatch, setup=_setup)
+
+    assert agent_seen_by_setup == [None]
+    assert checked == ["/installed-agent/bin/codex"]
+    assert seen[-1] == ("bootstrap", "/installed-agent/bin:/usr/bin:/bin")
+    assert runtime.AGENT_EXECUTABLE_ENV_KEY not in os.environ
+
+
+def test_a_failed_setup_never_runs_the_agent_bundle(monkeypatch):
+    monkeypatch.setenv(runtime.AGENT_EXECUTABLE_ENV_KEY, "/installed-agent/bin/codex")
+    checked: list[str | None] = []
+    monkeypatch.setattr(runtime, "activate_agent_executable", checked.append)
+
+    def _fail() -> bool:
+        raise RuntimeError("needs a Kata sandbox")
+
+    _run_main_recording(monkeypatch, setup=_fail)
+
+    assert checked == []
+    assert runtime._BOOTSTRAP_ERROR is not None
+    assert "needs a Kata sandbox" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
 def test_a_failed_setup_never_applies_the_jobs_variables(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, runtime.encode_job_env({"PATH": "/job/environment/bin"}))

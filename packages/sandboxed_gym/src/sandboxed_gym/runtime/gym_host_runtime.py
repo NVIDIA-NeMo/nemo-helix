@@ -58,6 +58,7 @@ from sandboxed_gym.environment_package import (
     validate_environment_namespaces,
 )
 from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV
+from sandboxed_gym.runtime.agent_bundle import AGENT_EXECUTABLE_ENV_KEY, activate_agent_executable
 from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
@@ -1674,6 +1675,9 @@ def main() -> None:
     os.environ.pop(EXECD_ACCESS_TOKEN_ENV, None)
     # The job's variables, held aside so the privileged setup and the services it starts never see them.
     job_env = os.environ.pop(JOB_ENV_ENV_KEY, None)
+    # The agent bundle's CLI, checked only once privileges are dropped: run before the setup, it would have
+    # root and SYS_ADMIN on the Docker-enabled image. Popped, so the Gym servers don't see the name.
+    agent_executable = os.environ.pop(AGENT_EXECUTABLE_ENV_KEY, None)
 
     # Before any thread starts: dropping the capability bounding set and setting no_new_privs apply to the
     # calling thread only, so a thread started earlier would keep them. A failure is reported below, once the
@@ -1681,6 +1685,7 @@ def main() -> None:
     setup_error: Exception | None = None
     try:
         prepare_container_engine()
+        activate_agent_executable(agent_executable)
         _apply_job_env(job_env)
     except Exception as exc:
         setup_error = exc
