@@ -5,7 +5,6 @@ import { PluginContext } from '@studio/plugins/PluginContext';
 import type { LoadedPlugin, PluginNavGroup } from '@studio/plugins/types';
 import { WorkspaceSideNav } from '@studio/routes/WorkspaceLayout/WorkspaceSideNav';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
-import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 
 vi.hoisted(() => {
@@ -15,12 +14,6 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
   vi.stubEnv('VITE_FF_TASKSETS_ENABLED', 'true');
 });
-
-/** The Models children, in the order a user walks the funnel. Virtual Models trails them. */
-const MODEL_FUNNEL = ['Model Catalog', 'Evaluations', 'Fine-tuning', 'Playground', 'Deployments'];
-
-/** A parent row's label is a link; its chevron is a separate disclosure button. */
-const disclosure = (label: string) => screen.getByRole('button', { name: new RegExp(label, 'i') });
 
 const renderSideNav = (history = '/workspaces/test-workspace/dashboard') =>
   renderRoute(<WorkspaceSideNav />, {
@@ -85,136 +78,78 @@ describe('WorkspaceSideNav', () => {
     expect(screen.queryByRole('link', { name: 'Insights' })).not.toBeInTheDocument();
   });
 
-  it('renders the six RFC sections', () => {
+  it('lays the nav out as flat, task-named sections in order', () => {
     renderSideNav();
 
-    for (const section of ['Observability', 'Components', 'Data', 'Governance', 'System']) {
-      expect(screen.getByText(section)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(expand|collapse) (agents|models)$/i })).toBeNull();
+    for (const old of ['Observability', 'Components', 'Governance', 'System', 'Evaluations']) {
+      expect(screen.queryByText(old)).not.toBeInTheDocument();
     }
-    // Superseded group headings
-    expect(screen.queryByText('Safety')).not.toBeInTheDocument();
-    expect(screen.queryByText('Evaluate')).not.toBeInTheDocument();
+
+    const sections: [string | null, string[]][] = [
+      [null, ['Dashboard', 'Playground']],
+      [
+        'Agent Development',
+        ['Agents', 'Monitor', 'Experiments', 'Tasksets', 'Tasks', 'Traces'],
+      ],
+      [
+        'Models',
+        ['Model Catalog', 'Model Evaluations', 'Fine-tuning', 'Deployments', 'Virtual Models'],
+      ],
+      ['Resources', ['Datasets']],
+      ['Safety', ['Guardrails']],
+      ['Data Preparation', ['Data Designer', 'Safe Synthesizer', 'Anonymizer']],
+      ['Workspace', ['Inference Providers', 'Filesets', 'Jobs', 'Settings']],
+    ];
+    const nodes = sections.flatMap(([heading, rows]) => [
+      ...(heading ? [screen.getByText(heading)] : []),
+      ...rows.map((row) => screen.getByRole('link', { name: row })),
+    ]);
+    nodes.slice(1).forEach((node, i) => {
+      expect(nodes[i].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+    // No row is a disclosure parent any more (section headings are not rows).
+    expect(screen.queryByRole('button', { name: 'Agents' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Datasets' })).toBeNull();
   });
 
-  it('links Agents and Datasets to their entity list pages and exposes Model Catalog under Models', () => {
-    renderSideNav('/workspaces/test-workspace/base-models');
+  it('links the renamed and new rows to their pages', () => {
+    renderSideNav();
 
-    expect(screen.getByRole('link', { name: 'Agents' })).toHaveAttribute(
-      'href',
-      '/workspaces/test-workspace/agents'
-    );
-    expect(screen.getByRole('link', { name: 'Datasets' })).toHaveAttribute(
-      'href',
-      '/workspaces/test-workspace/datasets'
-    );
-    // Models is a pure disclosure, not a link to a page of its own.
-    expect(screen.queryByRole('link', { name: 'Models' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Model Catalog' })).toHaveAttribute(
-      'href',
-      '/workspaces/test-workspace/base-models'
-    );
-  });
-
-  it('expands and collapses a parent from the chevron alone', async () => {
-    const user = userEvent.setup();
-    renderSideNav('/workspaces/test-workspace/agents/monitor');
-
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'Monitor' })).toHaveAttribute(
-      'href',
-      '/workspaces/test-workspace/agents/monitor'
-    );
-
-    await user.click(disclosure('Agents'));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('link', { name: 'Monitor' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Agents' })).toBeInTheDocument();
-  });
-
-  it('renders the customization screen as Fine-tuning under Models', () => {
-    renderSideNav('/workspaces/test-workspace/fine-tune');
-
-    expect(screen.getByRole('link', { name: 'Fine-tuning' })).toHaveAttribute(
-      'href',
-      '/workspaces/test-workspace/fine-tune'
-    );
+    const hrefs: Record<string, string> = {
+      Agents: '/workspaces/test-workspace/agents',
+      Monitor: '/workspaces/test-workspace/agents/monitor',
+      'Model Evaluations': '/workspaces/test-workspace/evaluation/results',
+      Datasets: '/workspaces/test-workspace/datasets',
+      'Inference Providers': '/workspaces/test-workspace/inference-providers',
+      'Model Catalog': '/workspaces/test-workspace/base-models',
+      'Fine-tuning': '/workspaces/test-workspace/fine-tune',
+    };
+    for (const [name, href] of Object.entries(hrefs)) {
+      expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
+    }
+    expect(screen.queryByRole('link', { name: 'Evaluations' })).not.toBeInTheDocument();
     expect(screen.queryByText('Custom Models')).not.toBeInTheDocument();
   });
 
-  it('orders the Models children as the model funnel', () => {
-    renderSideNav();
+  it('exposes the same links on the collapsed rail', () => {
+    renderRoute(<WorkspaceSideNav collapsed />, {
+      history: '/workspaces/test-workspace/dashboard',
+      routes: [
+        { path: '/workspaces/:workspace/*', element: <WorkspaceSideNav collapsed /> },
+      ],
+    });
 
-    const labels = screen
-      .getAllByRole('link')
-      .map((link) => link.textContent?.trim())
-      .filter((label) => MODEL_FUNNEL.includes(label ?? ''));
-
-    expect(labels).toEqual(MODEL_FUNNEL);
-  });
-
-  it('places Tasksets then Tasks in the Evaluations group, not under Models', () => {
-    renderSideNav();
-
-    // "Evaluations" is both a Models child link and the group heading; the heading comes last.
-    const heading = screen.getAllByText('Evaluations').at(-1);
-    const tasksets = screen.getByRole('link', { name: 'Tasksets' });
-    const follows = (a: Node | undefined, b: Node) =>
-      Boolean(a && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const tasks = screen.getByRole('link', { name: 'Tasks' });
-    expect(follows(heading, tasksets)).toBe(true);
-    expect(follows(tasksets, tasks)).toBe(true);
-    expect(follows(tasks, screen.getByText('Data'))).toBe(true);
-  });
-
-  it('starts every parent expanded regardless of the current route', () => {
-    renderSideNav('/workspaces/test-workspace/agents/monitor');
-
-    for (const parent of ['Agents', 'Models']) {
-      expect(disclosure(parent)).toHaveAttribute('aria-expanded', 'true');
+    for (const name of ['Playground', 'Model Evaluations', 'Datasets', 'Inference Providers']) {
+      expect(screen.getByRole('link', { name })).toBeInTheDocument();
     }
-  });
-
-  it('lists the data tools beside Datasets rather than under it', () => {
-    renderSideNav();
-
-    expect(screen.queryByRole('button', { name: /datasets/i })).not.toBeInTheDocument();
-    for (const label of ['Datasets', 'Data Designer', 'Safe Synthesizer']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
-    }
-  });
-
-  it('keeps a manually collapsed Models collapsed after the route moves elsewhere', async () => {
-    const user = userEvent.setup();
-    renderSideNav();
-
-    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
-    await user.click(disclosure('Models'));
-    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
-
-    // The manual collapse is the user's preference now; navigating elsewhere does not undo it.
-    await user.click(screen.getByRole('link', { name: 'Agents' }));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('keeps a chevron-collapsed parent collapsed when the route comes back to it', async () => {
-    const user = userEvent.setup();
-    renderSideNav('/workspaces/test-workspace/agents');
-
-    await user.click(disclosure('Agents'));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
-
-    await user.click(screen.getByRole('link', { name: 'Model Catalog' }));
-    await user.click(screen.getByRole('link', { name: 'Agents' }));
-    // The collapse is a saved preference; returning to the section must not reopen it.
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('folds a plugin group into the core group of the same name', async () => {
     renderWithPlugins([
       makePlugin('red-team', [
         {
-          group: 'Governance',
+          group: 'Safety',
           items: [
             {
               id: 'red-team',
@@ -227,7 +162,7 @@ describe('WorkspaceSideNav', () => {
       ]),
     ]);
 
-    expect(screen.getAllByText('Governance')).toHaveLength(1);
+    expect(screen.getAllByText('Safety')).toHaveLength(1);
     expect(await findPluginLinkWithIcon('Red Team')).toBeInTheDocument();
   });
 
@@ -258,7 +193,7 @@ describe('WorkspaceSideNav', () => {
     renderWithPlugins([
       makePlugin('red-team', [
         {
-          group: 'Governance',
+          group: 'Safety',
           items: [
             {
               id: 'guardrails',
@@ -285,7 +220,7 @@ describe('WorkspaceSideNav', () => {
     renderWithPlugins([
       makePlugin('one', [
         {
-          group: 'Governance',
+          group: 'Safety',
           items: [
             { id: 'one', iconName: 'shield', label: 'One', href: '/workspaces/test-workspace/one' },
           ],
@@ -293,7 +228,7 @@ describe('WorkspaceSideNav', () => {
       ]),
       makePlugin('two', [
         {
-          group: 'Governance',
+          group: 'Safety',
           items: [
             { id: 'two', iconName: 'shield', label: 'Two', href: '/workspaces/test-workspace/two' },
           ],
@@ -301,7 +236,7 @@ describe('WorkspaceSideNav', () => {
       ]),
     ]);
 
-    expect(screen.getAllByText('Governance')).toHaveLength(1);
+    expect(screen.getAllByText('Safety')).toHaveLength(1);
     expect(await findPluginLinkWithIcon('One')).toBeInTheDocument();
     expect(await findPluginLinkWithIcon('Two')).toBeInTheDocument();
   });
