@@ -454,14 +454,19 @@ describe('NavigationDrawer', () => {
     const storedState = () =>
       JSON.parse(window.localStorage.getItem(NAV_ACCORDION_STATE_KEY) ?? '{}');
 
+    // KUI renders a collapsible heading as <summary> inside a native <details>.
+    const summaryOf = (heading: string) => {
+      const summary = screen.getByText(heading).closest('summary');
+      expect(summary, `"${heading}" should be a collapsible <summary>`).not.toBeNull();
+      return summary as HTMLElement;
+    };
+    const sectionOf = (heading: string) => summaryOf(heading).closest('details') as HTMLDetailsElement;
+
     it('starts every headed section open with its rows visible', async () => {
       await renderSections();
 
       for (const heading of ['Agent Development', 'Models']) {
-        expect(screen.getByRole('button', { name: heading })).toHaveAttribute(
-          'aria-expanded',
-          'true'
-        );
+        expect(sectionOf(heading)).toHaveAttribute('open');
       }
       for (const row of ['Agents', 'Monitor', 'Model Catalog']) {
         expect(screen.getByRole('link', { name: row })).toBeVisible();
@@ -472,31 +477,24 @@ describe('NavigationDrawer', () => {
       const user = userEvent.setup();
       await renderSections();
 
-      await user.click(screen.getByRole('button', { name: 'Agent Development' }));
+      await user.click(summaryOf('Agent Development'));
 
-      expect(screen.getByRole('button', { name: 'Agent Development' })).toHaveAttribute(
-        'aria-expanded',
-        'false'
-      );
-      expect(screen.queryByRole('link', { name: 'Agents' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: 'Monitor' })).not.toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Model Catalog' })).toBeVisible();
-      expect(screen.getByRole('link', { name: 'Dashboard' })).toBeVisible();
+      expect(sectionOf('Agent Development')).not.toHaveAttribute('open');
+      expect(sectionOf('Models')).toHaveAttribute('open');
 
-      await user.click(screen.getByRole('button', { name: 'Agent Development' }));
+      await user.click(summaryOf('Agent Development'));
 
-      expect(screen.getByRole('link', { name: 'Agents' })).toBeVisible();
-      expect(screen.getByRole('link', { name: 'Monitor' })).toBeVisible();
+      expect(sectionOf('Agent Development')).toHaveAttribute('open');
     });
 
     it('persists the choice under group:<heading> as a boolean', async () => {
       const user = userEvent.setup();
       await renderSections();
 
-      await user.click(screen.getByRole('button', { name: 'Models' }));
+      await user.click(summaryOf('Models'));
       expect(storedState()).toEqual({ 'group:Models': false });
 
-      await user.click(screen.getByRole('button', { name: 'Models' }));
+      await user.click(summaryOf('Models'));
       expect(storedState()).toEqual({ 'group:Models': true });
     });
 
@@ -507,12 +505,8 @@ describe('NavigationDrawer', () => {
       );
       await renderSections();
 
-      expect(screen.getByRole('button', { name: 'Agent Development' })).toHaveAttribute(
-        'aria-expanded',
-        'false'
-      );
-      expect(screen.queryByRole('link', { name: 'Agents' })).not.toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Model Catalog' })).toBeVisible();
+      expect(sectionOf('Agent Development')).not.toHaveAttribute('open');
+      expect(sectionOf('Models')).toHaveAttribute('open');
     });
 
     it('keeps a collapsed section collapsed after navigating, beside item accordion keys', async () => {
@@ -520,19 +514,18 @@ describe('NavigationDrawer', () => {
       window.localStorage.setItem(NAV_ACCORDION_STATE_KEY, JSON.stringify({ agents: false }));
       await renderSections();
 
-      await user.click(screen.getByRole('button', { name: 'Models' }));
+      await user.click(summaryOf('Models'));
       await user.click(screen.getByRole('link', { name: 'Agents' }));
 
-      expect(screen.queryByRole('link', { name: 'Model Catalog' })).not.toBeInTheDocument();
+      expect(sectionOf('Models')).not.toHaveAttribute('open');
       expect(storedState()).toEqual({ agents: false, 'group:Models': false });
     });
 
     it('gives the unlabeled first group no collapsible heading', async () => {
       await renderSections();
 
-      expect(screen.queryByRole('button', { name: 'Dashboard' })).not.toBeInTheDocument();
-      expect(screen.getAllByTestId(VerticalNavTestIds.VerticalNavHeading)).toHaveLength(2);
-      expect(screen.getAllByRole('button')).toHaveLength(2);
+      expect(screen.getByRole('link', { name: 'Dashboard' }).closest('details')).toBeNull();
+      expect(document.querySelectorAll('summary')).toHaveLength(2);
     });
   });
 });
