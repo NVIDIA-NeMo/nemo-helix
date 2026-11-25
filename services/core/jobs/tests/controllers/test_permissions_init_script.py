@@ -21,10 +21,13 @@ GNU_GONE = f"chmod: cannot access '{JOB_DIR}/workspace/f13': No such file or dir
 DENIED = f"chmod: {JOB_DIR}/workspace/ro: Operation not permitted"
 
 
-def _run(tmp_path: Path, *, chmod_output: str = "", chmod_exit: int = 0, mkdir_exit: int = 0) -> tuple[int, str]:
+def _run(
+    tmp_path: Path, *, chmod_output: str = "", chmod_exit: int = 0, mkdir_exit: int = 0, with_grep: bool = True
+) -> tuple[int, str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "grep").symlink_to(shutil.which("grep") or pytest.fail("grep is needed to run the script"))
+    if with_grep:
+        (bin_dir / "grep").symlink_to(shutil.which("grep") or pytest.fail("grep is needed to run the script"))
     for tool, exit_code, output in (("mkdir", mkdir_exit, ""), ("chmod", chmod_exit, chmod_output)):
         fake = bin_dir / tool
         (tmp_path / f"{tool}.out").write_text(output)
@@ -82,3 +85,10 @@ def test_a_failed_mkdir_fails_before_chmod(tmp_path: Path) -> None:
 
     assert code == 1
     assert not (tmp_path / "chmod.calls").exists()
+
+
+def test_a_grep_that_cannot_run_fails_closed(tmp_path: Path) -> None:
+    """Without grep the ENOENT check can't be made, so even ENOENT-only output fails the container."""
+    code, _ = _run(tmp_path, chmod_output=BUSYBOX_GONE + "\n", chmod_exit=1, with_grep=False)
+
+    assert code == 1
