@@ -14,10 +14,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Applied only when the caller named neither target_modules nor exclude_modules.
-# ``*proj`` is the API backfill for that same unset case, so it is not a caller filter.
-# ``*vision_projector*``, ``*audio*``, and ``*sound*`` match the Nemotron 3.5 Super VL
-# PEFT example. The other vision names cover towers that do not use those module names.
+# Always kept on a vision LoRA job. A caller exclude list is unioned with these
+# patterns; it does not replace them. ``*proj`` is the API backfill for an unset
+# target list, so it is not a caller filter. ``*vision_projector*``, ``*audio*``,
+# and ``*sound*`` match the Nemotron 3.5 Super VL PEFT example. The other vision
+# names cover towers that do not use those module names.
 VLM_LORA_EXCLUDE_MODULES = [
     "*vision_tower*",
     "*vision_model*",
