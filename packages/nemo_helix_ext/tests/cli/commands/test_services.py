@@ -208,6 +208,23 @@ def test_run_keeps_an_explicit_default_model_env(base_dir: Path, monkeypatch: py
     assert os.environ["NEMO_DEFAULT_MODEL"] == "default/explicit-model"
 
 
+def test_run_starts_when_the_client_config_cannot_be_read(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(base_dir / "missing-config.yaml"))
+    mock_module = ModuleType("nhx.platform_runner.run")
+    mock_module.run_platform = MagicMock()
+    with (
+        patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
+        patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
+    ):
+        result = runner.invoke(app, ["services", "run", "--port", "9001", "--instance", "broken-config"])
+
+    assert result.exit_code == 0, result.stderr
+    mock_module.run_platform.assert_called_once()
+    assert not os.environ.get("NEMO_DEFAULT_MODEL")
+
+
 def test_run_leaves_the_default_model_unset_without_one(base_dir: Path):
     _invoke_run_with_setup_default(None)
 

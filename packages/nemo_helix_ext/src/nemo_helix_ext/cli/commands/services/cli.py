@@ -320,7 +320,11 @@ def _ensure_port_available(host: str, port: int, scope: str, *, base_dir: Path |
 def _export_default_model() -> None:
     from nemo_helix_ext.config import get_context
 
-    default_model = get_context().default_model
+    try:
+        default_model = get_context().default_model
+    except (OSError, ValueError) as error:
+        logger.warning("Not passing the nemo setup default model to Studio: %s", error)
+        return
     if default_model and not os.environ.get("NEMO_DEFAULT_MODEL"):
         os.environ["NEMO_DEFAULT_MODEL"] = default_model
 

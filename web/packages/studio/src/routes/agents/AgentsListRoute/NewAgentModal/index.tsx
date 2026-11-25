@@ -433,7 +433,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           slotHelp={
             DEFAULT_MODEL
               ? `Used wherever ${AGENT_CONFIG_FILENAME} sets a model to ${DEFAULT_MODEL_PLACEHOLDER}. Starts as the platform's default model.`
-              : `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, and the platform has no default model set, so choose the model this agent will use.`
+              : 'No default model is selected. Choose the model this agent will use.'
           }
         >
           <WorkspaceModelSelect

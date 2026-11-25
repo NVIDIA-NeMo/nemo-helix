@@ -724,7 +724,7 @@ describe('NewAgentModal GitHub import', () => {
     await submit(dialog, user);
 
     expect(
-      await within(dialog).findByText(/the platform has no default model set\. Choose a model/)
+      await within(dialog).findByText(/No default model is selected\. Choose a model/)
     ).toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
@@ -776,7 +776,7 @@ describe('NewAgentModal GitHub import', () => {
     await submit(dialog, user);
 
     expect(
-      await within(dialog).findByText(/the platform has no default model set\. Choose a model/)
+      await within(dialog).findByText(/No default model is selected\. Choose a model/)
     ).toBeInTheDocument();
     expect(created).toHaveLength(0);
   });

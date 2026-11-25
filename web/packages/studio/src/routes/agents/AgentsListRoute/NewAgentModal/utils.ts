@@ -254,9 +254,7 @@ export const containsDefaultModelPlaceholder = (value: unknown): boolean => {
 
 export class DefaultModelRequiredError extends Error {
   constructor() {
-    super(
-      `${AGENT_CONFIG_FILENAME} uses ${DEFAULT_MODEL_PLACEHOLDER}, and the platform has no default model set. Choose a model, then register again.`
-    );
+    super('No default model is selected. Choose a model, then register again.');
   }
 }
 
