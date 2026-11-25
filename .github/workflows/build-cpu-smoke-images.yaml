@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Build one CPU image family for a commit, using the same tags for CI and E2E.
+# Build CPU smoke images for a commit, using the same tags for CI and E2E.
 
 name: Build CPU smoke images
 
@@ -9,7 +9,7 @@ on:
   workflow_call:
     inputs:
       family:
-        description: Bake image family (api, tasks, build-tools, or gym-host).
+        description: Bake image family (api, tasks, build-tools, gym-host, or cpu for legacy checkouts).
         required: true
         type: string
       write_cache:
@@ -121,7 +121,7 @@ jobs:
           # scheduled caller build without publishing.
           publish_images="${PUBLISH}"
           case "$FAMILY" in
-            api|tasks|build-tools|gym-host) target="docker-$FAMILY" ;;
+            api|tasks|build-tools|gym-host|cpu) target="docker-$FAMILY" ;;
             *) printf 'Unknown Docker image family: %s\n' "$FAMILY" >&2; exit 1 ;;
           esac
           if [[ "$publish_images" == true ]]; then
@@ -134,7 +134,7 @@ jobs:
             printf 'CACHE_REGISTRY=%s\n' "$image_registry"
             printf 'BAKE_TAG=%s\n' "$bake_tag"
             printf 'CI_COMMIT_SHA=%s\n' "$source_sha"
-            if [[ "$FAMILY" == api ]]; then
+            if [[ "$FAMILY" == api || "$FAMILY" == cpu ]]; then
               printf 'FASTEMBED_CACHE_CONTEXT=%s\n' "$fastembed_cache_dir"
               printf 'FASTEMBED_CACHE_DIR=%s\n' "$fastembed_cache_dir"
               printf 'DOCKER_BAKE_ALLOW_FS_READ=%s\n' "$fastembed_cache_dir"
@@ -152,8 +152,16 @@ jobs:
             printf 'publish_images=%s\n' "$publish_images"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Print Docker bake graph
+        shell: bash
+        run: |
+          if ! make docker-print TARGET="${BAKE_TARGET}"; then
+            echo "::error::Cannot resolve Bake group ${BAKE_TARGET} at $(git rev-parse HEAD)"
+            exit 1
+          fi
+
       - name: Prepare fastembed model cache directory
-        if: inputs.family == 'api'
+        if: env.FASTEMBED_CACHE_DIR != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -161,7 +169,7 @@ jobs:
           touch "${FASTEMBED_CACHE_DIR}/.cache-context"
 
       - name: Restore fastembed model cache
-        if: inputs.family == 'api'
+        if: env.FASTEMBED_CACHE_DIR != ''
         id: fastembed-cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -169,14 +177,14 @@ jobs:
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
       - name: Install uv for fastembed model cache
-        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: env.FASTEMBED_CACHE_DIR != '' && steps.fastembed-cache.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           cache-dependency-glob: uv.lock
 
       - name: Populate fastembed model cache
-        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: env.FASTEMBED_CACHE_DIR != '' && steps.fastembed-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -197,10 +205,6 @@ jobs:
           set -euo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Print Docker bake graph
-        shell: bash
-        run: make docker-print TARGET="${BAKE_TARGET}"
-
       - name: Build CPU images
         if: env.PUBLISH_IMAGES != 'true'
         shell: bash
@@ -212,7 +216,7 @@ jobs:
         run: make docker-push TARGET="${BAKE_TARGET}"
 
       - name: Save fastembed model cache
-        if: inputs.family == 'api' && steps.fastembed-cache.outputs.cache-hit != 'true'
+        if: env.FASTEMBED_CACHE_DIR != '' && steps.fastembed-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         continue-on-error: true
         with:
