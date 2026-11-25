@@ -287,7 +287,12 @@ def compile_training_step(
     return HelixJobStep(
         name="training",
         executor=executor,
-        environment=[*base_env, *secret_envs, EnvironmentVariable(name="HF_DATASETS_OFFLINE", value="1")],
+        environment=[
+            *base_env,
+            *secret_envs,
+            EnvironmentVariable(name="HF_DATASETS_OFFLINE", value="1"),
+            *(EnvironmentVariable(name=k, value=v) for k, v in config.training_extra_env.items()),
+        ],
         config=training_config.model_dump(mode="json"),
         lifecycle=StepLifecycle(
             staleness_timeout_seconds=config.training_staleness_timeout_seconds,

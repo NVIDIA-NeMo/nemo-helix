@@ -862,6 +862,8 @@ automodel:
   training_staleness_timeout_seconds: 3600
   # How long a paused training step may take to finish its current step, save a checkpoint, and exit. Past this, the step is stopped and fails. 0 means training cannot be paused. | default: 1800
   training_pause_deadline_seconds: 1800
+  # Extra environment variables for the GPU training step, set by the operator, e.g. {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'}. Applied after the platform's own.
+  training_extra_env: {}
   # Default GPU execution profile when the job spec omits training.execution_profile. | default: 'gpu'
   default_training_execution_profile: gpu
 ```

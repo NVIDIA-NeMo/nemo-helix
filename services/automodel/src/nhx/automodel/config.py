@@ -44,6 +44,14 @@ class AutomodelConfig(create_service_config_class("automodel")):  # type: ignore
         ),
     )
 
+    training_extra_env: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Extra environment variables for the GPU training step, set by the operator, "
+            "e.g. {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'}. Applied after the platform's own."
+        ),
+    )
+
     default_training_execution_profile: str = Field(
         default="gpu",
         description="Default GPU execution profile when the job spec omits training.execution_profile.",
