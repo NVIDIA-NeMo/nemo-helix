@@ -153,8 +153,6 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
 
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     client = get_nemo_client()
-    # Use controller-owned storage so job deletion reclaims default outputs and
-    # caller-supplied output locations retain their per-job artifact namespace.
     fileset_name, artifact_base_path = job_storage_context_from_env()
     results_path = f"{artifact_base_path}/results/{attempt_id}" if artifact_base_path else f"results/{attempt_id}"
     file_manager = FilesetFileManager(
