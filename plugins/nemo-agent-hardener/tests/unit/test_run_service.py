@@ -556,15 +556,21 @@ def _capturing_sdk() -> tuple[NemoClient, list[dict[str, Any]]]:
     return make_sdk(entities), captured
 
 
-def test_run_boundary_records_classified_subprocess_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+# "defenders_failed" is an agent-hardener category Helix has no entry for: it must pass through, not degrade.
+@pytest.mark.parametrize("category", ["sandbox", "defenders_failed"])
+def test_run_boundary_records_classified_subprocess_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, category: str
+) -> None:
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
     monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
 
-    def failing_execute(_cmd, env, _log_path, _ctx, *, artifact_name):  # noqa: ANN001, ANN202 - test stub
-        # agent-hardener writes a structured cause to the error file, then exits non-zero.
+    def failing_execute(
+        _cmd: list[str], env: dict[str, str], _log_path: Path, _ctx: JobContext, *, artifact_name: str
+    ) -> tuple[SimpleNamespace, str, None]:
+        # agent-hardener's run-error.json schema (agent_hardener.errors.write_run_error), then a non-zero exit.
         Path(env["AGENT_HARDENER_ERROR_FILE"]).write_text(
-            json.dumps({"category": "sandbox", "message": "docker down", "remediation": "start docker"}),
+            json.dumps({"category": category, "message": "it broke", "remediation": "do this", "stack": "trace"}),
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=1), "log", None
@@ -572,16 +578,20 @@ def test_run_boundary_records_classified_subprocess_failure(tmp_path: Path, monk
     monkeypatch.setattr(run_module._common, "execute", failing_execute)
     sdk, captured = _capturing_sdk()
     job = run_module.AgentHardenerRunJob()
-    monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
+    progress: list[dict[str, Any]] = []
+    monkeypatch.setattr(job, "report_progress", lambda *_a, **k: progress.append(k))
 
     result = job.run({"config": str(manifest)}, ctx=_ctx(tmp_path), sdk=sdk)
 
     assert result["status"] == "failed"
-    assert result["error"]["category"] == "sandbox"
-    assert "docker down" in result["error"]["message"]
+    assert result["error"]["category"] == category
     assert captured[-1]["status"] == "failed"
-    assert captured[-1]["error_category"] == "sandbox"
-    assert captured[-1]["error_remediation"] == "start docker"
+    assert captured[-1]["error_category"] == category
+    assert captured[-1]["error_remediation"] == "do this"
+    # error_details is what Studio's endedJobFailure renders: the cause and its fix, not a generic failure.
+    assert progress[-1]["status"] == "failed"
+    details = progress[-1]["details"]
+    assert (details["type"], details["message"], details["remediation"]) == (category, "it broke", "do this")
 
 
 def test_failure_preserves_the_precreated_agent_and_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
