@@ -15,6 +15,7 @@ Active v2 workspace endpoints:
 - `GET /apis/intake/v2/workspaces/{workspace}/spans/groups`
 - `GET /apis/intake/v2/workspaces/{workspace}/spans/{span_id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/sessions/{id}`
+- `DELETE /apis/intake/v2/workspaces/{workspace}/sessions/{id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/traces`
 - `GET /apis/intake/v2/workspaces/{workspace}/traces/{id}`
 - `GET /apis/intake/v2/workspaces/{workspace}/annotations`
@@ -263,6 +264,103 @@ make test-service SERVICE=intake
 ## Generated API Artifacts
 
 Run `make refresh-openapi` after Intake route or schema changes.
+
+## Session deletion
+
+`DELETE /apis/intake/v2/workspaces/{workspace}/sessions/{id}` soft-deletes all current
+traces and spans belonging to the session in this workspace. It returns `204` on
+success and `404` for a missing or already-deleted session. Other sessions remain intact.
+
+Deletion requires `intake.sessions.delete`, granted by default to workspace Admin.
+Viewer and Editor cannot delete telemetry. Platform-admin access is preserved.
+Scoped requests require `intake:write` or `platform:write`; insufficient permissions
+or scopes return `403` before deletion runs.
+
+Session deletion follows these checks and writes in order:
+
+1. Find live spans or live trace-index rows for the workspace/session. Return `404`
+   only when neither remains, including after an earlier successful deletion.
+2. Require every associated evaluation to be confirmed soft-deleted. An undeleted
+   or unresolved evaluation returns `409`, including an older renamed evaluation
+   whose association cannot be resolved.
+3. Check the exact root-span trace-index keys against current spans and raw index
+   history, including retained tombstones. Conflicting session/source owners return
+   `409` for the entire request before any write. Repeated versions of the same
+   owner and sessions without roots pass; lookup failures prevent deletion.
+4. Tombstone the spans and explicitly tombstone the session's trace-index rows.
+   The explicit write also covers historical roots that have since become children;
+   cleanup does not rely solely on the root-only materialized view.
+
+| Outcome | Response | Next step |
+| --- | --- | --- |
+| Spans and index cleanup complete | `204` | No retry is needed. |
+| No live spans or index rows remain | `404` | The session is missing or fully removed. |
+| Evaluation protection or conflicting ownership | `409` | Resolve the protection/conflict before retrying. |
+| Storage failure, including an index failure after span tombstones commit | `503` | Retry the same DELETE; it repairs remaining live index rows even if session detail returns `404`. |
+
+Evaluation cleanup also discovers retained span references so these repairs are
+retried. Evaluator results and annotations keep their independent retention policies.
+Deletion is logical; physical disk-space reclamation follows ClickHouse retention.
+
+The collision and evaluation checks precede the insert and are not a transaction with
+concurrent ingestion. New telemetry or a new collision can arrive between those operations.
+Coordinated ingestion or a separately reviewed storage migration is needed to close that
+race. Later ingestion into the same session ID is permitted. No single-trace DELETE
+endpoint or ingestion blocking is included.
+
+## Evaluation deletion
+
+Deleting an evaluation automatically soft-deletes its eligible sessions' current
+spans and traces through the existing session deletion service. Discovery includes
+child spans and historical evaluation attribute names. Sessions shared with another
+live or unresolved evaluation stay protected until every association is confirmed
+deleted. Evaluator results and annotations remain retained.
+
+Deleting an experiment also cleans sessions for evaluations deleted with their last
+experiment membership. These routes additionally require `intake.sessions.delete`,
+so workspace Admin access is required under the default roles.
+
+Evaluation cleanup advances through these states:
+
+1. **Reserve the name:** save the generated destination name on the soft-deleted
+   evaluation, while retaining its original name until cleanup finishes.
+2. **Claim cleanup:** reload by immutable evaluation ID and acquire a persisted
+   `deletion_owner` using an entity-version check. Competing requests return `409`.
+   Stale requests whose cleanup already finished skip relinking, protecting any
+   replacement evaluation that reused the original name.
+3. **Delete eligible sessions:** remove their current spans and traces. Shared
+   sessions remain protected by any other live or unresolved evaluation.
+4. **Relink retained references:** rewrite `nemo.evaluation.name` and historical
+   `nemo.experiment.id` span attributes, plus the index's `evaluation_name`, to the
+   generated deleted name. This includes live rows in shared sessions and retained
+   versions/tombstones. Other evaluations, attributes, workspaces, and deletion flags
+   stay unchanged. There is no separate session entity to update.
+5. **Release the name:** wait for both ClickHouse mutations to finish, then rename
+   the entity and clear the claim. Successful deletion returns `204`; a subsequent
+   DELETE using the old name returns `404` unless a new evaluation has claimed it.
+
+Failure handling depends on the state:
+
+- **Known storage failure (`503`) or ownership collision (`409`):** release the
+  claim but reserve the original name. Retrying DELETE resumes session cleanup and
+  reference updates using the same destination name.
+- **Experiment cleanup fails:** retain its original name until member cleanup
+  succeeds, so its DELETE can also be retried.
+- **Cancellation, worker death, or unexpected failure:** retain the claim. Claims
+  never expire automatically, because a paused worker could otherwise resume after
+  another worker released the original name.
+
+For a retained claim, an operator must complete these recovery steps:
+
+1. Stop the old worker and confirm its outstanding ClickHouse operations have
+   finished or been cancelled. **Do not clear an active worker's claim.**
+2. Fetch the evaluation by immutable ID and clear only `deletion_owner` with a
+   version-checked entity update. Preserve `name`, `is_deleted`, and `deletion_name`.
+3. Retry the original DELETE.
+
+Cleanup and reference updates span separate storage systems and retain the
+concurrent-ingestion limitation above. Large retained telemetry sets can make the
+synchronous reference updates take longer.
 
 ## Trace identity and historical collisions
 

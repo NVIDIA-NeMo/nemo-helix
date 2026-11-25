@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""ClickHouse implementation of Intake session reads."""
+"""ClickHouse implementation of Intake sessions."""
 
 from __future__ import annotations
 
@@ -9,9 +9,11 @@ from datetime import datetime
 from typing import Any
 
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
+from nhx.intake.repository.clickhouse.span import SPAN_INSERT_COLUMNS
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
-from nhx.intake.repository.session import SessionRepository
+from nhx.intake.repository.session import SessionRepository, TraceIndexCollisionError
 from nhx.intake.spans.domain import IntakeSession
+from nhx.intake.spans.span_attribute_catalog import SpanAttributeField, bag_keys, spec_for_field
 from nhx.intake.spans.span_rollups import summed_metric_columns, usage_sql
 from nhx.intake.spans.storage import float_or_none, int_or_none, normalize_span_status
 
@@ -20,6 +22,92 @@ class ClickHouseSessionRepository(SessionRepository):
     def __init__(self, executor: ClickHouseExecutor) -> None:
         self._executor = executor
 
+    async def rename_evaluation_references(self, *, workspace: str, original_name: str, deleted_name: str) -> None:
+        if original_name == deleted_name:
+            return
+        keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
+        key_parameters = {f"evaluation_key_{index}": key for index, key in enumerate(keys)}
+        key_list = ", ".join(f"%({key})s" for key in key_parameters)
+        values = ", ".join(f"attributes_string[%({key})s]" for key in key_parameters)
+        # Mutate every retained version, including tombstones. Inserting live
+        # replacements could revive a deleted span or replace a colliding root.
+        # Mutations do not propagate through the insert-time materialized view,
+        # so update its trace index explicitly and wait for both mutations.
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.rename_evaluation_spans",
+                statement=f"""
+                    ALTER TABLE {self._executor.table(ClickHouseTable.SPANS)}
+                    UPDATE attributes_string = mapApply(
+                        (key, value) -> (key, if(
+                            has([{key_list}], key) AND value = %(original_name)s,
+                            %(deleted_name)s, value
+                        )), attributes_string
+                    )
+                    WHERE workspace = %(workspace)s AND has([{values}], %(original_name)s)
+                    SETTINGS mutations_sync = 2
+                """,
+                parameters={
+                    "workspace": workspace,
+                    "original_name": original_name,
+                    "deleted_name": deleted_name,
+                    **key_parameters,
+                },
+            )
+        )
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.rename_evaluation_traces",
+                statement=f"""
+                    ALTER TABLE {self._executor.table(ClickHouseTable.TRACE_INDEX)}
+                    UPDATE evaluation_name = %(deleted_name)s
+                    WHERE workspace = %(workspace)s AND evaluation_name = %(original_name)s
+                    SETTINGS mutations_sync = 2
+                """,
+                parameters={"workspace": workspace, "original_name": original_name, "deleted_name": deleted_name},
+            )
+        )
+
+    async def list_evaluation_session_ids(
+        self, *, workspace: str, evaluation_name: str, after: str | None, limit: int
+    ) -> list[str]:
+        # Retained source references rediscover sessions after their spans were
+        # tombstoned. Live index references catch unfinished root cleanup. Both
+        # branches are needed to repair partial writes; filtering the source to
+        # live rows would lose that recovery path.
+        keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
+        values = ", ".join(f"attributes_string[%(evaluation_key_{index})s]" for index in range(len(keys)))
+        rows = await self._executor.fetch_all(
+            ClickHouseQuery(
+                name="sessions.for_evaluation",
+                statement=f"""
+                    SELECT DISTINCT session_id FROM (
+                        SELECT session_id
+                        FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE has([{values}], %(evaluation_name)s)
+                        UNION ALL
+                        SELECT session_id
+                        FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE is_deleted = 0 AND evaluation_name = %(evaluation_name)s
+                    )
+                    WHERE (%(first_page)s OR session_id > %(after)s)
+                    ORDER BY session_id
+                    LIMIT %(limit)s
+                """,
+                parameters={
+                    "workspace": workspace,
+                    "evaluation_name": evaluation_name,
+                    "first_page": after is None,
+                    "after": after or "",
+                    "limit": limit,
+                    **{f"evaluation_key_{index}": key for index, key in enumerate(keys)},
+                },
+            )
+        )
+        return [str(row["session_id"]) for row in rows]
+
     async def get_session(self, *, workspace: str, session_id: str) -> IntakeSession | None:
         query = _session_detail_query(self._executor.table(ClickHouseTable.SPANS)).bind(
             workspace=workspace,
@@ -27,6 +115,154 @@ class ClickHouseSessionRepository(SessionRepository):
         )
         rows = await self._executor.fetch_all(query)
         return _row_to_session(rows[0]) if rows else None
+
+    async def has_live_trace_index(self, *, workspace: str, session_id: str) -> bool:
+        return bool(
+            await self._executor.fetch_scalar(
+                ClickHouseQuery(
+                    name="sessions.live_index",
+                    statement=f"""
+                SELECT 1 FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                PREWHERE workspace = %(workspace)s
+                WHERE session_id = %(session_id)s AND is_deleted = 0 LIMIT 1
+            """,
+                    parameters={"workspace": workspace, "session_id": session_id},
+                )
+            )
+        )
+
+    async def get_evaluation_names(
+        self, *, workspace: str, session_id: str, include_deleted: bool = False
+    ) -> list[str]:
+        # Inspect all current spans, including child-only and historical attribute
+        # spellings, so deleting one evaluation never bypasses another association.
+        keys = bag_keys(spec_for_field(SpanAttributeField.EVALUATION_NAME))
+        values = ", ".join(f"attributes_string[%(evaluation_key_{index})s]" for index in range(len(keys)))
+        rows = await self._executor.fetch_all(
+            ClickHouseQuery(
+                name="sessions.evaluation_names",
+                statement=f"""
+                    SELECT DISTINCT evaluation_name FROM (
+                        SELECT arrayJoin([{values}]) AS evaluation_name
+                        FROM {self._executor.table(ClickHouseTable.SPANS)} FINAL
+                        PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
+                        WHERE (%(include_deleted)s OR is_deleted = 0)
+                        UNION ALL
+                        SELECT evaluation_name
+                        FROM {self._executor.table(ClickHouseTable.TRACE_INDEX)} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE session_id = %(session_id)s AND is_deleted = 0
+                    ) WHERE notEmpty(evaluation_name)
+                """,
+                parameters={
+                    "workspace": workspace,
+                    "session_id": session_id,
+                    "include_deleted": include_deleted,
+                    **{f"evaluation_key_{index}": key for index, key in enumerate(keys)},
+                },
+            )
+        )
+        return [str(row["evaluation_name"]) for row in rows]
+
+    async def delete_session(self, *, workspace: str, session_id: str) -> None:
+        collision_query = _session_trace_index_collision_query(
+            self._executor.table(ClickHouseTable.SPANS),
+            self._executor.table(ClickHouseTable.TRACE_INDEX),
+        ).bind(workspace=workspace, session_id=session_id)
+        if await self._executor.fetch_scalar(collision_query):
+            raise TraceIndexCollisionError(workspace, session_id)
+        # Keep the full replacement key and root metadata so the trace-index MV
+        # receives matching tombstones. Copy inside ClickHouse to bound API memory.
+        table = self._executor.table(ClickHouseTable.SPANS)
+        columns = ", ".join(SPAN_INSERT_COLUMNS)
+        selection = ", ".join(
+            "greatest(now64(6), event_ts + INTERVAL 1 MICROSECOND)"
+            if column == "event_ts"
+            else "toUInt8(1)"
+            if column == "is_deleted"
+            else column
+            for column in SPAN_INSERT_COLUMNS
+        )
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.delete",
+                statement=f"""
+                    INSERT INTO {table} ({columns})
+                    SELECT {selection}
+                    FROM {table} FINAL
+                    PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
+                    WHERE is_deleted = 0
+                """,
+                parameters={"workspace": workspace, "session_id": session_id},
+            )
+        )
+        # A previous root may now be a child, or an earlier MV write may have
+        # failed after source tombstones committed. Repair the index separately.
+        index = self._executor.table(ClickHouseTable.TRACE_INDEX)
+        await self._executor.execute(
+            ClickHouseQuery(
+                name="sessions.delete_index",
+                statement=f"""
+                INSERT INTO {index}
+                SELECT * REPLACE (
+                    greatest(now64(6), event_ts + INTERVAL 1 MICROSECOND) AS event_ts,
+                    toUInt8(1) AS is_deleted
+                )
+                    FROM (
+                        SELECT * FROM {index} FINAL
+                        PREWHERE workspace = %(workspace)s
+                        WHERE session_id = %(session_id)s AND is_deleted = 0
+                    )
+            """,
+                parameters={"workspace": workspace, "session_id": session_id},
+            )
+        )
+
+
+def _session_trace_index_collision_query(spans_table: str, trace_index_table: str) -> ClickHouseQuery:
+    """Check owners of the exact index keys that root-span tombstones would replace.
+
+    The index key omits session and source. Current spans retain those identities
+    even after index merges, while raw index history can retain an owner whose
+    root span no longer exists. Keep either kind of evidence and reject ambiguity.
+    """
+    return ClickHouseQuery(
+        name="sessions.trace_index_collision",
+        statement=f"""
+            WITH target_roots AS (
+                SELECT start_time, trace_id, external_span_id
+                FROM {spans_table} FINAL
+                PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s
+                WHERE is_deleted = 0 AND external_parent_span_id = ''
+                UNION DISTINCT
+                SELECT root_started_at, trace_id, root_span_id
+                FROM {trace_index_table}
+                PREWHERE workspace = %(workspace)s
+                WHERE session_id = %(session_id)s
+            ), owners AS (
+                SELECT
+                    start_time AS root_started_at,
+                    trace_id,
+                    external_span_id AS root_span_id,
+                    session_id,
+                    source_format
+                FROM {spans_table} FINAL
+                PREWHERE workspace = %(workspace)s
+                    AND (start_time, trace_id, external_span_id) IN (SELECT * FROM target_roots)
+                UNION ALL
+
+                SELECT root_started_at, trace_id, root_span_id, session_id, source_format
+                FROM {trace_index_table}
+                PREWHERE workspace = %(workspace)s
+                    AND (root_started_at, trace_id, root_span_id) IN (SELECT * FROM target_roots)
+            )
+            SELECT 1
+            FROM owners
+            GROUP BY root_started_at, trace_id, root_span_id
+            HAVING uniqExact(session_id, source_format) > 1
+            LIMIT 1
+        """,
+    )
 
 
 def _session_detail_query(table: str) -> ClickHouseQuery:

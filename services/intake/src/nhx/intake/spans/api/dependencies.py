@@ -8,7 +8,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
-from nhx.common.service.dependencies import get_nemo_client
+from nhx.common.entities.client import EntityClient
+from nhx.common.service.dependencies import get_entity_client, get_nemo_client
 from nhx.intake.dependencies import DenormalizerDep as DenormalizerDep
 from nhx.intake.dependencies import get_clickhouse_client
 from nhx.intake.repository.annotations import AnnotationsRepository
@@ -97,6 +98,7 @@ def get_spans_service(
     session_repository: Annotated[SessionRepository, Depends(get_session_repository)],
     evaluator_results_repository: Annotated[EvaluatorResultsRepository, Depends(get_evaluator_results_repository)],
     annotations_repository: Annotated[AnnotationsRepository, Depends(get_annotations_repository)],
+    entity_client: Annotated[EntityClient, Depends(get_entity_client)],
 ) -> IntakeSpansService:
     return IntakeSpansService(
         span_repository,
@@ -104,6 +106,7 @@ def get_spans_service(
         session_repository,
         evaluator_results_repository,
         annotations_repository,
+        entity_client=entity_client,
     )
 
 

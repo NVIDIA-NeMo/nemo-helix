@@ -7,8 +7,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
-from nhx.intake.repository.clickhouse.session import ClickHouseSessionRepository, _session_detail_query
+from nhx.intake.repository.clickhouse.session import (
+    ClickHouseSessionRepository,
+    _session_detail_query,
+    _session_trace_index_collision_query,
+)
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.session import TraceIndexCollisionError
 
 
 class _Executor(ClickHouseExecutor):
@@ -17,16 +22,59 @@ class _Executor(ClickHouseExecutor):
         self.queries: list[ClickHouseQuery] = []
 
     def table(self, table: ClickHouseTable) -> str:
-        assert table is ClickHouseTable.SPANS
-        return "spans"
+        assert table in (ClickHouseTable.SPANS, ClickHouseTable.TRACE_INDEX)
+        return table.value
 
     async def fetch_all(self, query: ClickHouseQuery) -> list[dict[str, object]]:
         self.queries.append(query)
         return self.rows
 
+    async def execute(self, query: ClickHouseQuery) -> None:
+        self.queries.append(query)
+
 
 def _repository(executor: _Executor) -> ClickHouseSessionRepository:
     return ClickHouseSessionRepository(executor)
+
+
+@pytest.mark.asyncio
+async def test_rename_evaluation_references_updates_both_tables_synchronously_and_binds_names() -> None:
+    executor = _Executor()
+    await _repository(executor).rename_evaluation_references(
+        workspace="team'", original_name="eval'", deleted_name="eval-deleted-target"
+    )
+    spans, traces = executor.queries
+    assert spans.name == "sessions.rename_evaluation_spans"
+    assert "ALTER TABLE spans" in spans.statement
+    assert "mapApply" in spans.statement
+    assert "WHERE workspace = %(workspace)s" in spans.statement
+    assert "nemo.evaluation.name" in spans.parameters.values()
+    assert "nemo.experiment.id" in spans.parameters.values()
+    assert "ALTER TABLE trace_index" in traces.statement
+    assert "UPDATE evaluation_name = %(deleted_name)s" in traces.statement
+    for query in (spans, traces):
+        assert "SETTINGS mutations_sync = 2" in query.statement
+        assert "is_deleted = 0" not in query.statement
+        assert "team'" not in query.statement
+        assert "eval'" not in query.statement
+        assert query.parameters["workspace"] == "team'"
+        assert query.parameters["original_name"] == "eval'"
+        assert query.parameters["deleted_name"] == "eval-deleted-target"
+
+
+@pytest.mark.asyncio
+async def test_rename_evaluation_does_not_release_partial_failure_or_run_second_statement() -> None:
+    class FailingExecutor(_Executor):
+        async def execute(self, query: ClickHouseQuery) -> None:
+            self.queries.append(query)
+            raise RuntimeError("mutation failed")
+
+    executor = FailingExecutor()
+    with pytest.raises(RuntimeError, match="mutation failed"):
+        await _repository(executor).rename_evaluation_references(
+            workspace="team", original_name="evaluation", deleted_name="evaluation-deleted-target"
+        )
+    assert len(executor.queries) == 1
 
 
 def test_session_query_is_primary_key_pruned_and_payload_free() -> None:
@@ -100,3 +148,96 @@ async def test_get_session_returns_none_when_no_current_spans_exist() -> None:
     assert session_id not in executor.queries[0].statement
     assert executor.queries[0].parameters["workspace"] == workspace
     assert executor.queries[0].parameters["session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_delete_session_writes_scoped_tombstones_without_loading_payloads() -> None:
+    executor = _Executor()
+    workspace = "workspace' OR 1 = 1 --"
+    session_id = "session'); DROP TABLE spans; --"
+
+    await _repository(executor).delete_session(workspace=workspace, session_id=session_id)
+
+    collision_query, query, index_query = executor.queries
+    assert collision_query.name == "sessions.trace_index_collision"
+    assert collision_query.parameters == {"workspace": workspace, "session_id": session_id}
+    assert query.name == "sessions.delete"
+    assert "INSERT INTO spans" in query.statement
+    assert "FROM spans FINAL" in query.statement
+    assert "PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s" in query.statement
+    assert "WHERE is_deleted = 0" in query.statement
+    assert "greatest(now64(6), event_ts + INTERVAL 1 MICROSECOND)" in query.statement
+    assert "toUInt8(1)" in query.statement
+    assert workspace not in query.statement
+    assert session_id not in query.statement
+    assert query.parameters == {"workspace": workspace, "session_id": session_id}
+    assert index_query.name == "sessions.delete_index"
+    assert "INSERT INTO trace_index" in index_query.statement
+    assert "FROM trace_index FINAL" in index_query.statement
+    assert index_query.parameters == query.parameters
+
+
+@pytest.mark.asyncio
+async def test_delete_session_rejects_collision_before_any_write() -> None:
+    executor = _Executor([{"1": 1}])
+
+    with pytest.raises(TraceIndexCollisionError, match="conflicting trace-index ownership"):
+        await _repository(executor).delete_session(workspace="workspace-a", session_id="session-a")
+
+    assert [query.name for query in executor.queries] == ["sessions.trace_index_collision"]
+
+
+@pytest.mark.asyncio
+async def test_collision_lookup_failure_prevents_deletion() -> None:
+    class _FailingExecutor(_Executor):
+        async def fetch_all(self, query: ClickHouseQuery) -> list[dict[str, object]]:
+            self.queries.append(query)
+            raise RuntimeError("telemetry store unavailable")
+
+    executor = _FailingExecutor()
+    with pytest.raises(RuntimeError, match="telemetry store unavailable"):
+        await _repository(executor).delete_session(workspace="workspace-a", session_id="session-a")
+
+    assert [query.name for query in executor.queries] == ["sessions.trace_index_collision"]
+
+
+def test_collision_query_checks_exact_keys_in_current_spans_and_raw_index_history() -> None:
+    query = _session_trace_index_collision_query("spans", "trace_index")
+
+    assert "FROM spans FINAL" in query.statement
+    assert "session_id = %(session_id)s" in query.statement
+    assert "external_parent_span_id = ''" in query.statement
+    assert "(start_time, trace_id, external_span_id) IN" in query.statement
+    assert "(root_started_at, trace_id, root_span_id) IN" in query.statement
+    assert "FROM trace_index\n" in query.statement
+    assert "FROM trace_index FINAL" not in query.statement
+    assert "HAVING uniqExact(session_id, source_format) > 1" in query.statement
+    assert query.statement.count("PREWHERE workspace = %(workspace)s") == 4
+    assert "input" not in query.statement
+    assert "output" not in query.statement
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("linked", [True, False])
+async def test_evaluation_names_checks_current_scoped_spans_and_legacy_keys(linked: bool) -> None:
+    executor = _Executor([{"evaluation_name": "evaluation-a"}, {"evaluation_name": "evaluation-b"}] if linked else [])
+    workspace = "workspace' OR 1 = 1 --"
+    session_id = "session'); DROP TABLE spans; --"
+
+    names = await _repository(executor).get_evaluation_names(workspace=workspace, session_id=session_id)
+    assert names == (["evaluation-a", "evaluation-b"] if linked else [])
+
+    (query,) = executor.queries
+    assert query.name == "sessions.evaluation_names"
+    assert "FROM spans FINAL" in query.statement
+    assert "PREWHERE workspace = %(workspace)s AND session_id = %(session_id)s" in query.statement
+    assert "%(include_deleted)s OR is_deleted = 0" in query.statement
+    assert "arrayJoin" in query.statement
+    assert "notEmpty(evaluation_name)" in query.statement
+    assert "external_parent_span_id" not in query.statement
+    assert "nemo.evaluation.name" in query.parameters.values()
+    assert "nemo.experiment.id" in query.parameters.values()
+    assert workspace not in query.statement
+    assert session_id not in query.statement
+    assert query.parameters["workspace"] == workspace
+    assert query.parameters["session_id"] == session_id

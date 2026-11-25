@@ -214,6 +214,11 @@ def get_trace_metrics(
 def get_session(*, workspace: str | None = None, id: str) -> Session: ...
 
 
+@delete(f"{_INTAKE_BASE}/sessions/{{id}}")
+@abstractmethod
+def delete_session(*, workspace: str | None = None, id: str) -> None: ...
+
+
 @post(f"{_INTAKE_BASE}/annotations")
 @abstractmethod
 def create_annotation(*, workspace: str | None = None, body: AnnotationInput) -> Annotation: ...

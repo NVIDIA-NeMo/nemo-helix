@@ -244,6 +244,22 @@ async def test_evaluation_deleted_during_rollup_is_skipped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_evaluation_soft_deleted_during_rollup_is_not_updated() -> None:
+    before = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    before._id = "entity-id"
+    deleted = before.model_copy(update={"is_deleted": True, "deletion_owner": "cleanup-owner"})
+    entity_client = _FakeEntityClient(existing=before, replace_after_first_get=deleted)
+    refresher = _refresher(_FakeRollupRepo(), entity_client)
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+
+    await refresher.flush()
+
+    assert entity_client.updated == []
+    assert deleted.deletion_owner == "cleanup-owner"
+    assert refresher.pending() == set()
+
+
+@pytest.mark.asyncio
 async def test_update_conflict_requeues() -> None:
     entity_client = _FakeEntityClient(update_error=EntityConflictError("version mismatch"))
     refresher = _refresher(_FakeRollupRepo(), entity_client)

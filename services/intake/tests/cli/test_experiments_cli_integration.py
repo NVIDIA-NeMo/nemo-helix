@@ -3,8 +3,8 @@
 
 """Integration tests for ``nemo experiments`` against the in-process Intake service.
 
-Experiments live in the entity store, so the ASGI app runs without ClickHouse;
-the ClickHouse-backed span routes are covered by the wire-level tests instead.
+The ASGI app uses the entity store and a mocked spans service so CLI lifecycle
+tests run without ClickHouse. Telemetry cleanup is covered by storage integration tests.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_rep
 from nhx.intake.cli import ExperimentsCLI
 from nhx.intake.config import ClickHouseConfig, IntakeConfig
 from nhx.intake.service import IntakeService
+from nhx.intake.spans.api.dependencies import get_spans_service
+from nhx.intake.spans.service import IntakeSpansService
 from nhx.testing import TestClientHttpAdapter, create_test_client
 from typer.testing import CliRunner
 
@@ -37,7 +39,10 @@ def asgi_client() -> Iterator[NemoClient]:
         with create_test_client(
             IntakeService,
             client_type=TestClient,
-            dependency_overrides={get_evaluation_rollup_repository: lambda: None},
+            dependency_overrides={
+                get_evaluation_rollup_repository: lambda: None,
+                get_spans_service: lambda: AsyncMock(spec=IntakeSpansService),
+            },
             service_configs={IntakeService: intake_config},
         ) as test_client:
             yield NemoClient(

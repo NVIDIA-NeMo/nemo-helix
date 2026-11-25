@@ -147,6 +147,8 @@ class EvaluationDenormalizer(BackgroundWorker):
             # Recreated mid-rollup: these facets belong to the deleted entity, so refresh again.
             self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
             return
+        if current.is_deleted:
+            return
         if _facets_match(current, rollup):
             return
         current.agent_names = rollup.agent_names
