@@ -34,7 +34,7 @@ function harness({
       },
       context: {
         eventName: "issue_comment",
-        repo: { owner: "NVIDIA-NeMo", repo: "nemo-platform" },
+        repo: { owner: "NVIDIA-NeMo", repo: "nemo-helix" },
         actor,
         runId: 456,
         payload: {
@@ -65,14 +65,12 @@ function harness({
                   head: {
                     sha: "current-head",
                     repo: {
-                      full_name: fork
-                        ? "user/fork"
-                        : "NVIDIA-NeMo/nemo-platform",
+                      full_name: fork ? "user/fork" : "NVIDIA-NeMo/nemo-helix",
                     },
                   },
                   base: {
                     ref: base,
-                    repo: { full_name: "NVIDIA-NeMo/nemo-platform" },
+                    repo: { full_name: "NVIDIA-NeMo/nemo-helix" },
                   },
                 },
               };
@@ -96,7 +94,7 @@ test("dispatch inputs use the current PR head and repository, with no executable
   assert.equal(outputs.should_dispatch, "true");
   assert.deepEqual(JSON.parse(outputs.inputs), {
     source_owner: "NVIDIA-NeMo",
-    source_repo: "nemo-platform",
+    source_repo: "nemo-helix",
     pr_number: "123",
     request_run_id: "456",
     request_head_sha: "current-head",

@@ -22,7 +22,7 @@ reusable actions, and supporting docs.
 ### CI Check Workflows
 
 - `request-nvskills-ci.yml`
-  Restores explicit `/nvskills-ci` requests for PRs changing
+  Provides an explicit `/nvskills-ci` request adapter for PRs changing
   `plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/`.
   A repository maintainer or admin must post the exact command. The workflow
   reads the current open, same-repository PR into `main`, paginates changed files
@@ -31,11 +31,20 @@ reusable actions, and supporting docs.
   opted into local requests yet. The central service independently determines
   which content to evaluate; this request filter does not restrict its scan scope.
 
+  **Central integration is blocked:** the central validator currently watches
+  only `skills/` and `team-skills/`, so it skips plugin-only changes. Its onboarding
+  entry also still uses the old repository name `NVIDIA-NeMo/nemo-platform`.
+  Before this adapter can produce a central evaluation, the service owners must
+  onboard `NVIDIA-NeMo/nemo-helix`, allow its canonical plugin skill path, and
+  verify downstream discovery and signing for that path. The local adapter
+  cannot bypass central onboarding or changed-path validation. Local
+  SkillEvaluator runs remain available independently.
+
   This pilot is manually requested and is not part of `ci-status.needs`.
   Do not restore the previous signing-author merge gate: it made skill changes
   unmergeable when the external pipeline could not sign.
 
-  **MR gate policy:** keep the live `NVSkills CI` status and this request workflow
+  **PR gate policy:** keep the live `NVSkills CI` status and this request workflow
   out of required branch checks and out of `ci-status.needs`. Required offline
   Customizer tests already run in the unconditional plugin unit-test matrix:
   `test_skills.py` checks installed references/frontmatter,
@@ -44,7 +53,7 @@ reusable actions, and supporting docs.
   coverage, routing labels and judge inputs. They need no model calls or GPUs.
   These checks validate authored artifacts, not an agent's success rate.
 
-  Live evaluations are advisory for MRs and provide evidence for a separate
+  Live evaluations are advisory for PRs and provide evidence for a separate
   catalog-publication review. A failed or incomplete live run remains failed
   or incomplete in its report; do not use `continue-on-error`, weaken safety
   assertions, or rerun until green to manufacture publication evidence.
@@ -54,18 +63,18 @@ reusable actions, and supporting docs.
   failures: SkillEvaluator 1.2.0 fails an agent's quality verdict if any scored
   with-skill attempt fails a required goal/security check, even when pass@3 is
   100%. An all-attempts-pass live gate therefore becomes more failure-prone as
-  attempts increase. Promoting live results to an MR gate requires a separately
+  attempts increase. Promoting live results to a PR gate requires a separately
   reviewed statistical regression policy and evidence that the pinned runtime
   is reliable; a single run's PASS/FAIL label is insufficient.
 
   Setup and publication checklist:
   1. Keep this workflow and its helper under the existing `.github/` CODEOWNERS rule.
      Merge the workflow to the default branch before testing comment triggers.
-  2. Configure `NVSKILLS_CI_DISPATCH_TOKEN` with permission to dispatch
+  2. Resolve the central integration prerequisites above, then configure
+     `NVSKILLS_CI_DISPATCH_TOKEN` with permission to dispatch
      `nvskills-ci.yml` in `NVIDIA/nvskills-ci`. Confirm the central service's
-     GitHub App can read and sign this repository. `NVIDIA-NeMo/nemo-platform`
-     is listed in its onboarding configuration; confirm the repository's current
-     canonical name and allowed base refs with the service owners.
+     GitHub App can read and sign `NVIDIA-NeMo/nemo-helix` and that its onboarding
+     configuration permits the `main` base branch and plugin skill path.
   3. Comment `/nvskills-ci` on a same-repository Customizer skill PR into `main`.
      Follow the central run and its returned `NVSkills CI` status. A successful
      dispatch alone is not a successful evaluation. Request another run after
@@ -74,15 +83,15 @@ reusable actions, and supporting docs.
      verification result, or request a follow-up run explicitly if needed.
   4. Verify all three evaluation tiers, with positive baseline uplift for both
      Claude Code and Codex. Keep the generated `BENCHMARK.md`, `skill-card.md`
-     and `skill.oms.sig` beside the canonical plugin `SKILL.md`. The initial
-     benchmark file explicitly records that evaluation is pending.
+     and `skill.oms.sig` beside the canonical plugin `SKILL.md`. The current
+     benchmark records a local Codex Tier 3 pass; central validation and
+     publication remain pending.
   5. After verification and signing, submit this entry as
-     `components.d/nemo-helix.yml` in `NVIDIA/skills`, using the verified source
-     repository name (the local remote currently uses `nemo-platform`):
+     `components.d/nemo-helix.yml` in `NVIDIA/skills`:
 
      ```yaml
      name: NeMo Helix
-     repo: NVIDIA-NeMo/nemo-platform
+     repo: NVIDIA-NeMo/nemo-helix
      description: Fine-tune open models through NeMo Helix with platform jobs, evaluation and deployment.
      skills:
        - path: plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/
@@ -90,9 +99,9 @@ reusable actions, and supporting docs.
      ```
 
      Do not copy the skill into top-level `skills/`; catalog entries can point
-     directly at its canonical plugin directory. The current shared
-     `NVIDIA/skills` team-request workflow only watches `skills/` and
-     `team-skills/`, so this pilot uses a local adapter for the plugin path.
+     directly at its canonical plugin directory. A catalog entry does not change
+     the central validator's watched paths; plugin-path support must be enabled
+     centrally before this request adapter can evaluate the skill.
      After catalog sync, verify installation with
      `npx skills add nvidia/skills --skill nemo-customizer`.
 

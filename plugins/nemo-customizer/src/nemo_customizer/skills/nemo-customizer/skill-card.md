@@ -10,11 +10,6 @@ or NeMo-RL. The skill coordinates platform execution profiles, dataset and model
 registration, job validation and monitoring, output deployment, and base-versus-tuned
 evaluation. It supports SFT, LoRA, DPO and GRPO as permitted by each backend.
 
-Unlike `nemotron-customize`, which composes Nemotron development pipeline steps,
-this skill operates NeMo Helix's jobs, files, models and inference APIs through
-`nemo customization`. It is intended for platform users training open models,
-including Qwen, Llama and Nemotron.
-
 ## Owner and license
 
 NVIDIA NeMo Helix Team (`nemo-helix@nvidia.com`). Apache-2.0.
@@ -26,7 +21,9 @@ model and dataset licenses and applicable organizational requirements.
 - An installed NeMo Helix CLI with the Customizer plugin and selected backend contributor.
 - A reachable platform exposing jobs, files and models APIs, authentication where enabled,
   a suitable GPU execution profile, and the backend's training image on the executor.
-- Kubernetes and Ray for DPO/GRPO; Automodel and Unsloth can also use Docker GPU executors.
+- A Kubernetes-runtime platform with a compatible GPU execution profile for DPO/GRPO.
+  Ray is included in the backend training image; users do not install it separately.
+  Automodel and Unsloth can also use Docker GPU executors.
 - Platform model-serving and Evals capabilities for SFT/LoRA quality comparison.
 - Hugging Face credentials in a platform secret for gated/private models. A provider
   API key may be needed for evaluation. Never put raw credentials in prompts or logs.

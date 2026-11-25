@@ -45,7 +45,7 @@ The generated report is stored locally at
 ## Limitations
 
 - One attempt per case does not establish a stable failure rate or a reliable
-  live MR gate. Earlier runs exposed intermittent task loss; its cause remains
+  live PR gate. Earlier runs exposed intermittent task loss; its cause remains
   unresolved, and this pass does not establish a fix.
 - Only Codex was evaluated. Claude Code, Tiers 1 and 2, and publication/signing
   were not assessed by this run.
