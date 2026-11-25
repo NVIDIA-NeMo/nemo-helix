@@ -24,7 +24,7 @@ from httpx import AsyncClient
 from nemo_helix_plugin.auth.workload_identity import docker_job_workload_group
 from nhx.common.auth.access_keys import public_jwk_from_private_key_pem_async
 from nhx.common.auth.signing_keys import RSASigningKey, RSASigningKeyCache
-from nhx.common.auth.token_claims import groups_from_claim
+from nhx.common.auth.token_claims import groups_from_claim, trusted_email_from_claims
 from nhx.common.auth.workload_delegations import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
     KUBERNETES_POD_UID_REFERENCE_NAME,
@@ -684,7 +684,7 @@ async def _normalize_verified_subject_token(
     return VerifiedSubjectToken(
         subject=subject,
         groups=_subject_groups_from_claims(claims),
-        email=claims.get("email") if isinstance(claims.get("email"), str) else None,
+        email=trusted_email_from_claims(config, claims),
         bound_reference=decoded.bound_reference,
     )
 

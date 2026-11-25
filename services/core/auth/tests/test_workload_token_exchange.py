@@ -733,6 +733,7 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
             {
                 "sub": "workload-subject",
                 "email": "svc@example.com",
+                "email_verified": True,
                 "groups": ["svc-group", "system:serviceaccounts"],
             }
         )
@@ -760,6 +761,38 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
     assert claims["sub"] == "workload-subject"
     assert claims["email"] == "svc@example.com"
     assert claims["groups"] == "svc-group,system:serviceaccounts"
+
+
+def test_token_exchange_omits_unverified_subject_email(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def decode_subject_token(
+        config: AuthConfig, subject_token: str, audience: str
+    ) -> exchange.DecodedSubjectToken:
+        return _decoded_subject_token(
+            {"sub": "workload-subject", "email": "victim@example.com", "groups": ["svc-group"]}
+        )
+
+    monkeypatch.setattr(exchange_service, "decode_subject_token", decode_subject_token)
+
+    response = client.post(
+        "/token",
+        data={
+            "grant_type": exchange.TOKEN_EXCHANGE_GRANT_TYPE,
+            "client_id": "nemo-helix-workload",
+            "subject_token": "subject-token",
+            "subject_token_type": exchange.JWT_TOKEN_TYPE,
+        },
+    )
+
+    assert response.status_code == 200
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["sub"] == "workload-subject"
+    assert "email" not in claims
+    assert claims["groups"] == "svc-group"
 
 
 def test_token_exchange_ignores_non_string_subject_group_values(
