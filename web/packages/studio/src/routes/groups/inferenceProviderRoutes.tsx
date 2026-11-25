@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { NeuralNetwork } from '@nemo/icons/icons';
+import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { getWorkspaceInferenceProvidersRoute } from '@studio/routes/utils';
@@ -23,10 +23,12 @@ export const inferenceProviderRoutes: RouteObject[] = [
   },
 ];
 
+const InferenceProvidersIcon = ENTITY_ICONS.inferenceProviders;
+
 export const getInferenceProviderSideNavItems = (workspace: string) => [
   {
     id: 'inference-providers',
-    slotIcon: <NeuralNetwork className={iconColorClass} />,
+    slotIcon: <InferenceProvidersIcon className={iconColorClass} />,
     slotLabel: 'Inference Providers',
     href: getWorkspaceInferenceProvidersRoute(workspace),
   },
