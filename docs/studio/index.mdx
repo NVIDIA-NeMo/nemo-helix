@@ -37,9 +37,9 @@ The sidebar is a flat list of pages under task-named section headings. Select a 
 | _(no heading)_       | **Dashboard**          | Workspace summary, quickstart shortcuts, and recent jobs. Shown by default; see [Dashboard](#dashboard). |
 | _(no heading)_       | **Playground**         | Opens the model chat playground. Always shown. |
 | **Agent Development** | **Agents**            | Opens the agent list. Select an agent to access the Overview, Deployments, Logs, Chat, Evaluations, Optimizations, Insights, and Details tabs. Optimizations and Insights are enabled by default and can be hidden by their feature flags. |
-| **Agent Development** | **Monitor**           | Review inference runs and token usage across agents. Shown when `VITE_FF_MONITOR_ENABLED` is not disabled. |
+| **Agent Development** | **Monitor**           | Review inference runs and token usage across agents. Disabled by default; shown when `VITE_FF_MONITOR_ENABLED` is enabled. |
 | **Agent Development** | **Experiments**       | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments). |
-| **Agent Development** | **Tasksets**          | Browse the read-only taskset library used by evaluations. Gated by the Tasksets feature flag (`VITE_FF_TASKSETS_ENABLED`) together with evaluations. |
+| **Agent Development** | **Tasksets**          | Browse the read-only taskset library used by evaluations. Disabled by default; shown when `VITE_FF_TASKSETS_ENABLED` is enabled (and evaluations are enabled). |
 | **Agent Development** | **Tasks**             | Browse evaluation tasks and see which tasksets use them. Shown alongside **Tasksets**. |
 | **Agent Development** | **Insights**          | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights). |
 | **Agent Development** | **Traces**            | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces). |
@@ -143,7 +143,7 @@ Keep models and data organized in dedicated workspaces.
 
 ### Datasets
 
-Select **Data > Datasets** to open the Datasets list. It shows only filesets whose purpose is **Dataset**. **System > Filesets** shows every fileset in the workspace, whatever its purpose.
+Select **Resources > Datasets** to open the Datasets list. It shows only filesets whose purpose is **Dataset**. **Workspace > Filesets** shows every fileset in the workspace, whatever its purpose.
 
 - **Create a dataset** — Select **Create Dataset**. The new fileset gets the Dataset purpose.
 - **Open a dataset** — Select a row, or choose **View** from its row actions. The detail page has two tabs: **Dataset Card**, which opens by default, and **Files**. Each tab has its own URL (`/workspaces/<workspace>/datasets/<name>/card` and `.../files`), so you can bookmark or share a tab directly. If you open a non-dataset fileset under a Datasets URL, Studio redirects you to the same page under **Filesets**.
@@ -151,7 +151,7 @@ Select **Data > Datasets** to open the Datasets list. It shows only filesets who
 
 ### Filesets
 
-Select **System > Filesets** to list every fileset in the workspace. Fileset detail pages use the same two tabs as datasets. The **Card** tab is labeled **Dataset Card** or **Model Card** depending on purpose. A dataset opens on its card. Other filesets open on **Card** when the fileset has a root README, and on **Files** otherwise.
+Select **Workspace > Filesets** to list every fileset in the workspace. Fileset detail pages use the same two tabs as datasets. The **Card** tab is labeled **Dataset Card** or **Model Card** depending on purpose. A dataset opens on its card. Other filesets open on **Card** when the fileset has a root README, and on **Files** otherwise.
 
 #### Copy a fileset to a new local fileset
 
@@ -192,13 +192,13 @@ A file you can upload might not be previewable, and a file you can preview might
 
 ### Anonymizer
 
-Use **Data > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
+Use **Data Preparation > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
 
 For the full workflow, see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).
 
 ### Safe Synthesizer
 
-Use **Data > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
+Use **Data Preparation > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
 
 For the full workflow, see [Synthesize Safe Data](/documentation/synthesize-safe-data).
 
@@ -209,14 +209,14 @@ Studio provides separate agent, model, and workspace evaluation views:
 | Location                                   | What it shows                                                                                                                                                                                     |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Agents > select an agent > Evaluations** | In-progress and completed evaluations in one table, and experiments scoped to the selected agent. Start a new run with **Run Evaluation**.                                                        |
-| **Models > Evaluations**                   | The Model Evaluations page: start a model evaluation with **Run Evaluation**, and review job results and per-row scores. See [Studio Model Evaluations](/documentation/studio/model-evaluations). |
-| **Evaluations > Experiments**              | Experiments and their evaluations across the workspace, evaluation drill-down, and side-by-side run comparison. See [Studio Experiments](/documentation/studio/experiments).                      |
+| **Models > Model Evaluations**             | The Model Evaluations page: start a model evaluation with **Run Evaluation**, and review job results and per-row scores. See [Studio Model Evaluations](/documentation/studio/model-evaluations). |
+| **Agent Development > Experiments**        | Experiments and their evaluations across the workspace, evaluation drill-down, and side-by-side run comparison. See [Studio Experiments](/documentation/studio/experiments).                      |
 
 Use the agent's **Evaluations** tab when reviewing how a specific agent performed. Use **Experiments** for the broader workspace history.
 
 ### Experiments
 
-Use **Evaluations > Experiments** to run an evaluation against an agent from the UI — selecting the agent and judge model, uploading a dataset and evaluation config — and to compare results across runs on the experiment leaderboard.
+Use **Agent Development > Experiments** to run an evaluation against an agent from the UI — selecting the agent and judge model, uploading a dataset and evaluation config — and to compare results across runs on the experiment leaderboard.
 
 For the full workflow, see [NeMo Studio Experiments](/documentation/studio/experiments). For concepts, the data model, and the CLI and SDK workflows, see [Experiments](/documentation/evaluate-models/experiments).
 
