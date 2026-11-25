@@ -24,6 +24,7 @@ from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 logger = logging.getLogger(__name__)
 
 _ENV_VAR_PATTERN = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+_DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
 
 # LLM ``_type`` values that resolve through the platform Inference Gateway —
 # i.e. their ``model_name`` should correspond to a VirtualModel registered in
@@ -357,6 +358,18 @@ def inject_default_model(
         return config
     config = expand_env_vars(config, vars_dict={"NEMO_DEFAULT_MODEL": default_model})
     return config
+
+
+def contains_default_model_placeholder(value: Any) -> bool:
+    """Return True if *value* still contains an unresolved ``NEMO_DEFAULT_MODEL`` reference."""
+    if isinstance(value, str):
+        protected = value.replace("$$", "\0DOLLAR\0")
+        return _DEFAULT_MODEL_PLACEHOLDER.search(protected) is not None
+    if isinstance(value, dict):
+        return any(contains_default_model_placeholder(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_default_model_placeholder(item) for item in value)
+    return False
 
 
 def validate_llm_models(

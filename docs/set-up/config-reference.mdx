@@ -987,6 +987,8 @@ studio:
   platform_base_url: ''
   # Enable Studio UI browser telemetry export. | default: False
   telemetry_enabled: false
+  # Model Studio preselects when a registered agent config uses ${NEMO_DEFAULT_MODEL}, as a `workspace/name` model reference. Defaults to the NEMO_DEFAULT_MODEL environment variable.
+  default_model: ''
   # Studio UI OpenTelemetry settings.
   otel:
     # Internal OTLP/HTTP collector base URL used by the Studio telemetry proxy. | default: ''

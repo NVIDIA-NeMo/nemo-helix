@@ -5,8 +5,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
+import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { hasModelProvider } from '@nemo/common/src/utils/models';
 import {
   getAgentsListAgentsQueryKey,
   useAgentsRegisterAgent,
@@ -17,6 +19,7 @@ import {
   Banner,
   Button,
   Flex,
+  FormField,
   Label,
   Select,
   Stack,
@@ -35,7 +38,7 @@ import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromU
 import { type DeployOnCreatePlan, useDeployOnCreate } from '@studio/api/agents/useDeployOnCreate';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { DEFAULT_MODEL, PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
@@ -47,6 +50,7 @@ import {
 import {
   type GitHubAgentSource,
   agentNameFromSource,
+  formatGitHubSource,
   githubTokenSecretDefaults,
   parseGitHubSource,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
@@ -61,6 +65,9 @@ import { useTraceAgentNames } from '@studio/routes/agents/AgentsListRoute/NewAge
 import {
   agentNameFromConfig,
   collectAgentEntries,
+  containsDefaultModelPlaceholder,
+  DEFAULT_MODEL_PLACEHOLDER,
+  DefaultModelRequiredError,
   findNonUtf8Path,
   parseAgentConfig,
   pickedFromDataTransfer,
@@ -83,7 +90,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
+import { Controller, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 
 export const NewAgentModal: FC<NewAgentModalProps> = ({
   open,
@@ -115,6 +122,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
+  const [uploadNeedsModel, setUploadNeedsModel] = useState(false);
+  // GitHub's agent.yaml is only read during registration, so the need surfaces as that attempt's error.
+  const [modelRequiredForRepo, setModelRequiredForRepo] = useState<string | null>(null);
   // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
   const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
   const deployOnCreate = useDeployOnCreate(workspace, { enabled: open });
@@ -149,6 +159,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const onTracesTab = tab === 'imported-traces';
   const onCreateTab = onUploadTab || onGitHubTab || onTracesTab;
 
+  const formDefaults = {
+    ...UPLOAD_AGENT_FORM_DEFAULTS,
+    name: initialName ?? '',
+    defaultModel: DEFAULT_MODEL,
+  };
   const {
     control,
     setValue,
@@ -157,7 +172,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
-    defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
+    defaultValues: formDefaults,
     disabled: isPending || deployOnCreate.isDeploying,
     mode: 'onTouched',
   });
@@ -184,6 +199,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
+  const watchedDefaultModel = useWatch({ control, name: 'defaultModel' });
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
   const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
@@ -195,6 +211,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     }
   }, [watchedRepoUrl]);
   const repoSource = parsedRepo.source;
+  const repoKey = repoSource ? formatGitHubSource(repoSource) : null;
+  // With a platform default to preselect, the picker shows up front: agent.yaml is only read on submit.
+  const needsModel = onGitHubTab
+    ? repoKey !== null && (Boolean(DEFAULT_MODEL) || modelRequiredForRepo === repoKey)
+    : uploadNeedsModel;
   // Held back until the field is left, so the message is not a running commentary on typing.
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
@@ -205,7 +226,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     resetMutation();
     resetRepoMutation();
     resetTracedMutation();
-    resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
+    resetForm(formDefaults);
     deployAfterCreate.current = null;
     setEntries([]);
     setSourceLabel('');
@@ -213,6 +234,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setReplaceArmedFor(null);
     setRepoBlurred(false);
     setTracedAgent('');
+    setUploadNeedsModel(false);
+    setModelRequiredForRepo(null);
     onClose();
   };
 
@@ -226,6 +249,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setEntries([]);
     setSelectionError(undefined);
     setReplaceArmedFor(null);
+    setUploadNeedsModel(false);
     return () => selection !== selectionSeq.current;
   };
 
@@ -261,6 +285,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       setValue('name', initialName ?? agentNameFromConfig(config) ?? '', {
         shouldValidate: true,
       });
+      setUploadNeedsModel(containsDefaultModelPlaceholder(config));
     } catch (error) {
       if (superseded()) return;
       setEntries([]);
@@ -331,6 +356,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
+    // A choice made for another source must never bind silently into this one.
+    const defaultModel = needsModel ? formData.defaultModel || undefined : undefined;
     deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
       if (onGitHubTab) {
@@ -340,14 +367,24 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           name,
           source: repoSource,
           secretName: formData.secretKey?.trim() || undefined,
+          defaultModel,
           replaceOrphanedFileset: replaceOrphan,
         });
         return;
       }
-      await createAgent({ workspace, name, entries, replaceOrphanedFileset: replaceOrphan });
+      await createAgent({
+        workspace,
+        name,
+        entries,
+        defaultModel,
+        replaceOrphanedFileset: replaceOrphan,
+      });
     } catch (error) {
       // An orphaned fileset is recoverable, so the next submit replaces it.
       setReplaceArmedFor(error instanceof AgentSpecFilesetOrphanError ? name : null);
+      if (error instanceof DefaultModelRequiredError && onGitHubTab) {
+        setModelRequiredForRepo(repoKey);
+      }
     }
   };
 
@@ -384,6 +421,36 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   const busy = isPending || isCreatingTraced || deployOnCreate.isDeploying;
   const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
+  const awaitingModel = needsModel && !watchedDefaultModel;
+
+  const defaultModelField = needsModel ? (
+    <Controller
+      control={control}
+      name="defaultModel"
+      render={({ field }) => (
+        <FormField
+          slotLabel="Model"
+          slotHelp={
+            DEFAULT_MODEL
+              ? `Used wherever ${AGENT_CONFIG_FILENAME} sets a model to ${DEFAULT_MODEL_PLACEHOLDER}. Starts as the platform's default model.`
+              : 'No default model is selected. Choose the model this agent will use.'
+          }
+        >
+          <WorkspaceModelSelect
+            workspace={workspace}
+            include={hasModelProvider}
+            value={field.value ? { model: field.value } : null}
+            onValueChange={({ model }) => field.onChange(model)}
+            placeholder="Select a model"
+            disabled={field.disabled}
+            hideAdapters
+            fullWidth
+            aria-label="Model"
+          />
+        </FormField>
+      )}
+    />
+  ) : null;
 
   const deployFields = (
     <DeployOnCreateFields
@@ -415,10 +482,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         loading={busy}
         submitDisabled={
           onGitHubTab
-            ? !repoSource || awaitingDeployModes
+            ? !repoSource || awaitingDeployModes || awaitingModel
             : onTracesTab
               ? !tracedAgent
-              : entries.length === 0 || awaitingDeployModes
+              : entries.length === 0 || awaitingDeployModes || awaitingModel
         }
         slotFooterRight={
           onCreateTab ? undefined : (
@@ -462,7 +529,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   />
                 </UploadTrigger>
               </UploadRoot>
-              <Flex justify="end">
+              <Flex justify={entriesSummary ? 'between' : 'end'} align="center">
+                {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
                 {/* A native picker offers files or directories, never both, so the file pick is its own control. */}
                 <Button
                   kind="tertiary"
@@ -482,7 +550,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   onChange={onFilesPicked}
                 />
               </Flex>
-              {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
@@ -497,6 +564,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   status: agentNameError ? 'error' : undefined,
                 }}
               />
+              {defaultModelField}
               {deployFields}
             </Stack>
           </TabsContent>
@@ -545,6 +613,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   status: agentNameError ? 'error' : undefined,
                 }}
               />
+              {defaultModelField}
               {deployFields}
             </Stack>
           </TabsContent>

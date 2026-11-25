@@ -166,6 +166,71 @@ def test_run_invokes_runner(base_dir: Path):
     assert kwargs["on_shutdown"] is not None
 
 
+@pytest.fixture(autouse=True)
+def _no_default_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NEMO_DEFAULT_MODEL", raising=False)
+
+
+def _invoke_run_with_setup_default(default_model: str | None) -> None:
+    mock_module = ModuleType("nhx.platform_runner.run")
+    mock_module.run_platform = MagicMock()
+    context = MagicMock(default_model=default_model)
+    with (
+        patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
+        patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
+        patch("nemo_helix_ext.config.get_context", return_value=context),
+    ):
+        result = runner.invoke(app, ["services", "run", "--port", "9001", "--instance", "default-model"])
+    assert result.exit_code == 0, result.stderr
+
+
+def test_run_hands_the_setup_default_model_to_the_platform(base_dir: Path):
+    _invoke_run_with_setup_default("default/setup-model")
+
+    assert os.environ["NEMO_DEFAULT_MODEL"] == "default/setup-model"
+
+
+def test_run_fills_an_empty_default_model_env(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NEMO_DEFAULT_MODEL", "")
+
+    _invoke_run_with_setup_default("default/setup-model")
+
+    assert os.environ["NEMO_DEFAULT_MODEL"] == "default/setup-model"
+
+
+def test_run_keeps_an_explicit_default_model_env(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NEMO_DEFAULT_MODEL", "default/explicit-model")
+
+    _invoke_run_with_setup_default("default/setup-model")
+
+    assert os.environ["NEMO_DEFAULT_MODEL"] == "default/explicit-model"
+
+
+def test_run_starts_when_the_client_config_cannot_be_read(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(base_dir / "missing-config.yaml"))
+    mock_module = ModuleType("nhx.platform_runner.run")
+    mock_module.run_platform = MagicMock()
+    with (
+        patch.dict("sys.modules", {"nhx.platform_runner.run": mock_module}),
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.check_port_available_for_start", return_value=None),
+        patch(f"{_PROCESS_MODULE}.get_create_time", return_value=1000.0),
+    ):
+        result = runner.invoke(app, ["services", "run", "--port", "9001", "--instance", "broken-config"])
+
+    assert result.exit_code == 0, result.stderr
+    mock_module.run_platform.assert_called_once()
+    assert not os.environ.get("NEMO_DEFAULT_MODEL")
+
+
+def test_run_leaves_the_default_model_unset_without_one(base_dir: Path):
+    _invoke_run_with_setup_default(None)
+
+    assert not os.environ.get("NEMO_DEFAULT_MODEL")
+
+
 def test_run_refuses_when_already_running(base_dir: Path):
     fd = acquire_lock("already-8080", base_dir=base_dir)
     try:
