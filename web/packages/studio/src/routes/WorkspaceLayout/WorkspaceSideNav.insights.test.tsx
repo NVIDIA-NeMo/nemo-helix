@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WorkspaceSideNav } from '@studio/routes/WorkspaceLayout/WorkspaceSideNav';
 import { getOptimizerRoute } from '@studio/routes/utils';
+import { WorkspaceSideNav } from '@studio/routes/WorkspaceLayout/WorkspaceSideNav';
 import { renderRoute, screen } from '@studio/tests/util/render';
 
 vi.hoisted(() => {
@@ -28,7 +28,9 @@ describe('WorkspaceSideNav with Optimizer enabled', () => {
       screen.getByText('Models'),
     ];
     ordered.slice(1).forEach((node, i) => {
-      expect(ordered[i].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        ordered[i].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
     });
   });
 });

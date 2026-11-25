@@ -54,7 +54,7 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 
 const findPluginLinkWithIcon = async (name: string) => {
   const link = screen.getByRole('link', { name });
-  // eslint-disable-next-line testing-library/no-node-access
+
   await waitFor(() => expect(link.closest('li')?.querySelector('svg')).not.toBeNull());
   return link;
 };
@@ -81,17 +81,16 @@ describe('WorkspaceSideNav', () => {
   it('lays the nav out as flat, task-named sections in order', () => {
     renderSideNav();
 
-    expect(screen.queryByRole('button', { name: /^(expand|collapse) (agents|models)$/i })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /^(expand|collapse) (agents|models)$/i })
+    ).toBeNull();
     for (const old of ['Observability', 'Components', 'Governance', 'System', 'Evaluations']) {
       expect(screen.queryByText(old)).not.toBeInTheDocument();
     }
 
     const sections: [string | null, string[]][] = [
       [null, ['Dashboard', 'Playground']],
-      [
-        'Agent Development',
-        ['Agents', 'Monitor', 'Experiments', 'Tasksets', 'Tasks', 'Traces'],
-      ],
+      ['Agent Development', ['Agents', 'Monitor', 'Experiments', 'Tasksets', 'Tasks', 'Traces']],
       [
         'Models',
         ['Model Catalog', 'Model Evaluations', 'Fine-tuning', 'Deployments', 'Virtual Models'],
@@ -106,7 +105,9 @@ describe('WorkspaceSideNav', () => {
       ...rows.map((row) => screen.getByRole('link', { name: row })),
     ]);
     nodes.slice(1).forEach((node, i) => {
-      expect(nodes[i].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        nodes[i].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
     });
     // No row is a disclosure parent any more (section headings are not rows).
     expect(screen.queryByRole('button', { name: 'Agents' })).toBeNull();
@@ -135,9 +136,7 @@ describe('WorkspaceSideNav', () => {
   it('exposes the same links on the collapsed rail', () => {
     renderRoute(<WorkspaceSideNav collapsed />, {
       history: '/workspaces/test-workspace/dashboard',
-      routes: [
-        { path: '/workspaces/:workspace/*', element: <WorkspaceSideNav collapsed /> },
-      ],
+      routes: [{ path: '/workspaces/:workspace/*', element: <WorkspaceSideNav collapsed /> }],
     });
 
     for (const name of ['Playground', 'Model Evaluations', 'Datasets', 'Inference Providers']) {

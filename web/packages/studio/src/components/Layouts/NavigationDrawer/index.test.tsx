@@ -456,11 +456,16 @@ describe('NavigationDrawer', () => {
 
     // KUI renders a collapsible heading as <summary> inside a native <details>.
     const summaryOf = (heading: string) => {
+      // eslint-disable-next-line testing-library/no-node-access
       const summary = screen.getByText(heading).closest('summary');
       expect(summary, `"${heading}" should be a collapsible <summary>`).not.toBeNull();
       return summary as HTMLElement;
     };
-    const sectionOf = (heading: string) => summaryOf(heading).closest('details') as HTMLDetailsElement;
+    const sectionOf = (heading: string) =>
+      // eslint-disable-next-line testing-library/no-node-access
+      summaryOf(heading).closest('details') as HTMLDetailsElement;
+    // eslint-disable-next-line testing-library/no-node-access
+    const summaryCount = () => document.querySelectorAll('summary').length;
 
     it('starts every headed section open with its rows visible', async () => {
       await renderSections();
@@ -524,8 +529,10 @@ describe('NavigationDrawer', () => {
     it('gives the unlabeled first group no collapsible heading', async () => {
       await renderSections();
 
-      expect(screen.getByRole('link', { name: 'Dashboard' }).closest('details')).toBeNull();
-      expect(document.querySelectorAll('summary')).toHaveLength(2);
+      const dashboard = screen.getByRole('link', { name: 'Dashboard' });
+      // eslint-disable-next-line testing-library/no-node-access
+      expect(dashboard.closest('details')).toBeNull();
+      expect(summaryCount()).toBe(2);
     });
   });
 });
