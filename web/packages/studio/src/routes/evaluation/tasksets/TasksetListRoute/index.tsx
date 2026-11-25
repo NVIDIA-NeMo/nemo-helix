@@ -17,6 +17,8 @@ export const TasksetListRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [actionRequest, setActionRequest] = useState<TasksetActionRequest>();
+  // A request made in another workspace must not apply here (e.g. after browser Back).
+  const request = actionRequest?.taskset.workspace === workspace ? actionRequest : undefined;
   useBreadcrumbs({ items: [{ href: getTasksetsRoute(workspace), slotLabel: 'Tasksets' }] });
 
   return (
@@ -44,7 +46,7 @@ export const TasksetListRoute: FC = () => {
         />
       </Stack>
       <TasksetFormModal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
-      <TasksetActionModals request={actionRequest} onClose={() => setActionRequest(undefined)} />
+      <TasksetActionModals request={request} onClose={() => setActionRequest(undefined)} />
     </AccessibleTitle>
   );
 };
