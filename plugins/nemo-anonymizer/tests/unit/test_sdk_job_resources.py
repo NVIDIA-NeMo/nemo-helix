@@ -147,7 +147,7 @@ async def test_unfinished_job_creates_no_download_directory(tmp_path, monkeypatc
             json={
                 "id": "platform-job-original",
                 "name": "readable-job-name",
-                "status": "active",
+                "status": "created",
             },
         )
 
@@ -157,7 +157,7 @@ async def test_unfinished_job_creates_no_download_directory(tmp_path, monkeypatc
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         ) as client:
             handle = AsyncAnonymizerJobResource(job_id="platform-job-original", workspace="default", platform=client)
-            with pytest.raises(AnonymizerJobError, match="not available"):
+            with pytest.raises(AnonymizerJobError) as exc_info:
                 await handle.download_artifacts()
     else:
         with NemoClient(
@@ -165,6 +165,7 @@ async def test_unfinished_job_creates_no_download_directory(tmp_path, monkeypatc
             http_client=httpx.Client(transport=httpx.MockTransport(handler)),
         ) as client:
             handle = AnonymizerJobResource(job_id="platform-job-original", workspace="default", platform=client)
-            with pytest.raises(AnonymizerJobError, match="not available"):
+            with pytest.raises(AnonymizerJobError) as exc_info:
                 handle.download_artifacts()
+    assert str(exc_info.value) == "Current job status is 'created'; results are not available."
     assert not (tmp_path / "readable-job-name").exists()

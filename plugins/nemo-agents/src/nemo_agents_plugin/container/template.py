@@ -199,16 +199,16 @@ WHEEL_LATEST = "LATEST"
 #: ``WORKDIR`` of every rendered agent image.
 _IMAGE_WORKDIR = "/workspace"
 
-# Fabric 0.6's tested Hermes revision; its isolated adapter requires Relay 0.10.
+# Hermes v0.22.5 requires Relay 0.10 in its isolated environment.
 PINNED_HERMES_COMMIT = "bf0203a794a07aac3ff764972ab9087baa4e4f4e"
 
 # Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
 # npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
 # Pi 1.x requires Node >= 22.19.0.
 PINNED_NODE_MAJOR = "22"
-PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.6.0"
+PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.7.0"
 # The adapter declares the Pi SDK as OPTIONAL peers, so they are installed explicitly.
-# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.6.0 requires
+# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.7.0 requires
 # 1.0.3) so the explicitly-installed SDK matches what the adapter was built against.
 PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@1.0.3 @earendil-works/pi-coding-agent@1.0.3 @earendil-works/pi-mcp@1.0.3 @earendil-works/pi-codemode@1.0.3"
 

@@ -13,6 +13,7 @@ from nhx.common.entities.constants import (
     MAX_LENGTH_255,
     REGEX_WORD_CHARACTER_DOT_DASH,
 )
+from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import (
     AfterValidator,
@@ -161,10 +162,6 @@ class ExportParams(BaseModel):
         default="eager",
         description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg", description="Embedding pooling over hidden states. Ignored for cross_encoder."
-    )
-    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
     dimensions: bool = Field(
         default=False,
         description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
@@ -187,6 +184,23 @@ class RetrievalParams(BaseModel):
             "Score each query against every passage in the global batch instead of only its own "
             "train_n_passages. Widens the negative pool to num_gpus * micro_batch_size * train_n_passages "
             "at the cost of an all-gather per step. Ignored for cross_encoder."
+        ),
+    )
+    pooling: Optional[Literal["avg", "cls", "last"]] = Field(
+        default=None,
+        description=(
+            "How a bi_encoder turns its token vectors into one embedding: 'avg' (mean of all tokens), "
+            "'cls' (first token), or 'last' (last token). Omit to keep the pooling the base checkpoint was "
+            "pretrained with: its Sentence Transformers files, else its config's 'pooling', else 'avg'. "
+            "Ignored for cross_encoder."
+        ),
+    )
+    normalize: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Scale bi_encoder embeddings to unit length, so a dot product equals cosine similarity. Omit to keep "
+            "the base checkpoint's choice: normalize unless its Sentence Transformers files leave out Normalize. "
+            "Ignored for cross_encoder."
         ),
     )
     query_max_length: int = Field(default=512, ge=1)
@@ -315,6 +329,29 @@ class MTPParams(BaseModel):
         ge=0.0,
         description="Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).",
     )
+
+
+class ImageSize(BaseModel):
+    """Pixel-area bounds passed to the vision processor as ``size``.
+
+    Both edges are required. ``longest_edge`` is the maximum pixel count and matches ``max_pixels``.
+    """
+
+    longest_edge: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.",
+    )
+    shortest_edge: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.",
+    )
+
+    @model_validator(mode="after")
+    def _has_both_edges(self) -> Self:
+        check_image_size_edges(self.longest_edge, self.shortest_edge)
+        return self
 
 
 class _TrainingBase(BaseModel):
@@ -477,7 +514,29 @@ class _TrainingBase(BaseModel):
     max_seq_length: int = Field(
         default=2048,
         gt=0,
-        description="Maximum token sequence length for training. Higher = more memory, longer training.",
+        description=(
+            "Maximum token sequence length for training. Higher means more memory and longer training. "
+            "With a pixel ceiling, this must be larger than the tokens one image can use. The model spec's "
+            "vision patch size decides how many pixels that is; a shorter cap is rejected."
+        ),
+    )
+    max_pixels: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not "
+            "pass this name to transformers. Larger images are downscaled before the vision tower. The model "
+            "spec's vision patch size turns that ceiling into a token count, which max_seq_length must exceed. "
+            "Unset keeps the checkpoint ceiling. Rejected for text checkpoints."
+        ),
+    )
+    image_size: Optional[ImageSize] = Field(
+        default=None,
+        description=(
+            "Pixel-area bounds for a vision-language processor, as size.longest_edge and size.shortest_edge. "
+            "Both edges are required, and shortest_edge must be less than longest_edge. Set this or max_pixels, "
+            "not both. Rejected for text checkpoints."
+        ),
     )
     precision: Optional[Precision] = Field(
         default=None,
@@ -544,6 +603,7 @@ class _TrainingBase(BaseModel):
         # against packing=false is silently ignored -- and the run is slower than asked for.
         if self.packed_sequence_size is not None and not self.sequence_packing:
             raise ValueError("packed_sequence_size requires sequence_packing=true.")
+        check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
         return self
 
     @property

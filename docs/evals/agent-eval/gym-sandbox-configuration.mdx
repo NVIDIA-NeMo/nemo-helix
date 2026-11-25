@@ -191,6 +191,32 @@ platformConfig:
         request_timeout_s: 1200
 ```
 
+## Install an agent CLI into the Gym host
+
+Gym's CLI agents, such as Codex, Claude Code, and OpenCode, install their CLI at startup unless it
+is already on `PATH`. To skip that download or pin a version without rebuilding `nhx-gym-host`,
+install the CLI from an agent bundle image:
+
+```yaml
+platformConfig:
+  evals:
+    sandbox_host_provider_options:
+      agent_bundle:
+        image: registry.example.com/agent-bundles/codex:0.142.5
+        installer: /bundle/install
+        entrypoint: bin/codex
+```
+
+The OpenSandbox server's `nemo-agent-bundle` extension runs `installer /installed-agent` from
+`image` in an init container and mounts the result read-only into the host. The host puts the
+directory containing `entrypoint` first on `PATH` and runs `entrypoint --version` before starting.
+If that fails, the host never becomes ready and the job fails at its startup timeout.
+
+The bundle is a deployment setting: every Gym job on the deployment gets the same CLI. It requires
+the OpenSandbox provider with the NeMo extension installed, and a bundle built for the
+`nhx-gym-host` image's architecture and C library. Evaluator rejects `agent_bundle` with the
+`docker` provider.
+
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.
@@ -216,6 +242,22 @@ Before accepting custom environment jobs, verify:
 3. `nhx-tasks` and `nhx-gym-host` can be pulled by pods in the platform namespace.
 4. The Gym host can reach each configured model URL but cannot reach an unlisted destination.
 5. A completed and a failed run both destroy their Gym hosts.
+
+The repository's sandboxed Gym end-to-end tests check part of items 4 and 5 against a running
+deployment. They submit a small custom environment whose verifier probes the network and storage
+from inside the Gym host:
+
+- Item 4, for one model URL: the one the tests call, which is the platform API unless they are given
+  a real model. They also check that the Kubernetes API, a public address, and a public name are
+  unreachable. They do not read `sandbox_policy_base_urls`, so to check another configured model
+  URL, run them again with `NHX_E2E_GYM_POLICY_ROUTE` set to it, `NHX_E2E_GYM_POLICY_MODEL` set to a
+  model it serves, and the endpoint's key as the section linked below describes.
+- Item 5, for a run that completes and a run that fails after its Gym host is ready. They watch the
+  cluster for the host's removal.
+
+They need a source checkout and `kubectl` access to the cluster. See
+[Sandboxed Gym evaluation](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/e2e/README.md#sandboxed-gym-evaluation)
+for the settings and the command.
 
 ## Related
 

@@ -10,6 +10,7 @@ prefix from the RouterSpec).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -23,6 +24,12 @@ from nemo_agents_plugin.context_schema import check_context_schema
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT, Agent, AgentDeployment
 from nemo_agents_plugin.fabric.adapters import CONTEXT_UNAWARE_HINT, context_unaware_harness
 from nemo_agents_plugin.jobs.post_run_actions import validate_post_run_action_kinds
+from nemo_agents_plugin.plugin_managed_agents import (
+    PluginManagedAgentTypeError,
+    derive_agent,
+    derive_agent_of_type,
+    load_plugin_managed_agent_type,
+)
 from nemo_agents_plugin.schema import (
     AgentFilter,
     AgentPage,
@@ -41,7 +48,9 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityValidationError,
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -68,7 +77,10 @@ async def register_agent(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     files_client: AsyncFilesClient = Depends(get_files_client),
 ) -> Agent:
-    """Register an agent."""
+    """Register an agent: from a config, or of a plugin-managed agent type."""
+    if body.plugin_managed_agent is not None:
+        return await _register_plugin_managed_agent(workspace, body, entity_client)
+
     config = _validate_agent_config_for_register(body)
     _validate_run_declarations(body, config)
     reference = await _resolve_agent_reference(body.reference, workspace=workspace, files_client=files_client)
@@ -85,21 +97,83 @@ async def register_agent(
         post_run_actions=body.post_run_actions,
         reference=reference,
     )
+    return await _create_agent(agent, entity_client)
+
+
+async def _register_plugin_managed_agent(
+    workspace: str, body: RegisterAgentRequest, entity_client: NemoEntitiesClient
+) -> Agent:
+    """Store an agent of a plugin-managed type: its name and type, with no config of its own."""
+    assert body.plugin_managed_agent is not None
+    type_id = body.plugin_managed_agent.type
     try:
-        saved = await entity_client.create(agent)
+        # Off the event loop: the type's checks may scan installed adapter manifests.
+        type_cls = await asyncio.to_thread(load_plugin_managed_agent_type, type_id)
+    except PluginManagedAgentTypeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # We currently enforce only one agent per type per workspace.
+    # This can change; if a future plugin-managed type warrants multiple agents in one workspace,
+    # we can make that a ClassVar attribute of the type class and continue enforcing it here only for
+    # one-per-workspace types.
+    existing = await _find_agent_of_type(type_id, workspace=workspace, entity_client=entity_client)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Workspace {workspace!r} already has an agent of type {type_id!r}: {existing.name!r}.",
+        )
+
+    agent = Agent(
+        name=body.name,
+        workspace=workspace,
+        description=body.description,
+        labels=body.labels,
+        config={},
+        config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+        plugin_managed_agent=body.plugin_managed_agent,
+    )
+    saved = await _create_agent(agent, entity_client)
+    return derive_agent_of_type(saved, type_cls)
+
+
+async def _find_agent_of_type(type_id: str, *, workspace: str, entity_client: NemoEntitiesClient) -> Agent | None:
+    try:
+        result = await entity_client.list(
+            Agent,
+            workspace=workspace,
+            page=1,
+            page_size=1,
+            filter_operation=ComparisonOperation(
+                operator=FilterOperator.EQ, field="data.plugin_managed_agent.type", value=type_id
+            ),
+        )
+    except CLIENT_ERRORS:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Failed to look up agents of type %r in workspace '%s'",
+            sanitize_for_log(type_id),
+            sanitize_for_log(workspace),
+        )
+        raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
+    return result.data[0] if result.data else None
+
+
+async def _create_agent(agent: Agent, entity_client: NemoEntitiesClient) -> Agent:
+    try:
+        return await entity_client.create(agent)
     except NemoEntityConflictError as exc:
         raise HTTPException(
             status_code=409,
-            detail=f"Agent '{body.name}' already exists in workspace '{workspace}'.",
+            detail=f"Agent '{agent.name}' already exists in workspace '{agent.workspace}'.",
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CLIENT_ERRORS:
         raise
     except Exception as exc:
-        logger.exception("Failed to register agent '%s'", body.name)
+        logger.exception("Failed to register agent '%s'", agent.name)
         raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
-    return saved
 
 
 @router.get(
@@ -108,7 +182,10 @@ async def register_agent(
     tags=["Agents"],
     openapi_extra=generate_openapi_extra_params(
         filter_schema=AgentFilter,
-        filter_description="Filter agents by config_format and labels, e.g. `filter[labels.<key>]=<value>`.",
+        filter_description=(
+            "Filter agents by config_format, labels and plugin-managed agent type, e.g. "
+            "`filter[labels.<key>]=<value>` or `filter[plugin_managed_agent.type]=<type>`."
+        ),
     ),
 )
 @scope.read
@@ -125,7 +202,8 @@ async def list_agents(
 ) -> AgentPage:
     """List all agents in the workspace with pagination and filter support.
 
-    Filter on a label with ``filter[labels.<key>]=<value>``.
+    Filter on a label with ``filter[labels.<key>]=<value>``, and on a
+    plugin-managed agent type with ``filter[plugin_managed_agent.type]=<type>``.
     """
     try:
         result = await entity_client.list(
@@ -144,7 +222,7 @@ async def list_agents(
 
     pagination = PaginationData.model_validate(result.pagination.model_dump()) if result.pagination else None
     return AgentPage(
-        data=result.data,
+        data=await _derive_agents(result.data),
         pagination=pagination,
         sort=sort,
         filter=parsed_filter.to_response(),
@@ -175,7 +253,15 @@ async def get_agent(
     except Exception as exc:
         logger.exception("Failed to get agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get agent.") from exc
-    return agent
+    return (await _derive_agents([agent]))[0]
+
+
+async def _derive_agents(agents: list[Agent]) -> list[Agent]:
+    """Fill in what each plugin-managed agent's type supplies; other agents pass through."""
+    if not any(agent.plugin_managed_agent is not None for agent in agents):
+        return agents
+    # Off the event loop: loading a type may scan installed adapter manifests.
+    return await asyncio.to_thread(lambda: [derive_agent(agent) for agent in agents])
 
 
 @router.delete("/agents/{name}", status_code=204, tags=["Agents"])

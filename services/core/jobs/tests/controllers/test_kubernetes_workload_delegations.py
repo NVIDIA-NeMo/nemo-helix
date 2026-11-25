@@ -9,6 +9,7 @@ from kubernetes import client
 from nhx.common.auth import AuthContext
 from nhx.common.auth.workload_delegations import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
+    WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationConflictError,
     reference_delegation_name,
 )
@@ -180,7 +181,7 @@ def test_manager_skips_work_when_step_has_no_auth_context(test_step_pending):
 def test_manager_treats_conflict_as_success_and_records_delegation(test_step_pending_with_auth_context):
     core_v1 = MagicMock()
     core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[_pod("pod-uid-123")])
-    register = MagicMock(side_effect=WorkloadDelegationConflictError("already exists"))
+    register = MagicMock(side_effect=WorkloadDelegationAlreadyActiveError("already exists"))
     manager = _manager(core_v1=core_v1, register=register)
     target = _target()
 
@@ -196,10 +197,13 @@ def test_manager_treats_conflict_as_success_and_records_delegation(test_step_pen
     assert manager._delegations_by_target_key == {f"{target.namespace}/{target.name}": {_expected_name()}}
 
 
-def test_manager_retries_failed_registration_on_next_ensure(test_step_pending_with_auth_context):
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("store offline"), WorkloadDelegationConflictError("registration raced")]
+)
+def test_manager_retries_failed_registration_on_next_ensure(test_step_pending_with_auth_context, failure: Exception):
     core_v1 = MagicMock()
     core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[_pod("pod-uid-123")])
-    register = MagicMock(side_effect=[RuntimeError("store offline"), None])
+    register = MagicMock(side_effect=[failure, None])
     manager = _manager(core_v1=core_v1, register=register)
     target = _target()
 

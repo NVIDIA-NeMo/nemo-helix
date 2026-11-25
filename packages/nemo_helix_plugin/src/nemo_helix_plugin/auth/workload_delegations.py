@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,7 +20,9 @@ from nemo_helix_plugin.entities import SyncEntityClient
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_WORKSPACE = "system"
 WORKLOAD_DELEGATION_ENTITY_TYPE = "workload_delegation"
@@ -31,6 +34,7 @@ KUBERNETES_POD_UID_REFERENCE_NAME = "authentication.kubernetes.io/pod-uid"
 _OPAQUE_DOCKER_PROOF_SECRET_BYTES = 32
 _OPAQUE_DOCKER_PROOF_HASH_PREFIX = "v1:sha256:"
 _DELEGATION_HASH_LENGTH = 48
+_REVOCATION_DELETE_ATTEMPTS = 3
 
 
 class WorkloadDelegationError(Exception):
@@ -42,7 +46,11 @@ class WorkloadDelegationValidationError(WorkloadDelegationError):
 
 
 class WorkloadDelegationConflictError(WorkloadDelegationError):
-    """Raised when an active delegation already exists for the same name."""
+    """Raised when registration or mutation conflicts with stored delegation state."""
+
+
+class WorkloadDelegationAlreadyActiveError(WorkloadDelegationConflictError):
+    """Raised only when registration finds an active delegation at its lookup name."""
 
 
 class InvalidWorkloadProofTokenError(WorkloadDelegationError):
@@ -79,7 +87,12 @@ class WorkloadDelegationScope(WorkloadDelegationLookupScope):
 
 
 class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTITY_TYPE):
-    """Auth-owned delegation record used to mint delegated workload tokens."""
+    """Auth-owned delegation record used to mint delegated workload tokens.
+
+    Docker job controllers bind ``docker_container_id`` once before startup.
+    Cleanup verifies that association against Docker's actual container ID;
+    token exchange continues to require the opaque secret proof.
+    """
 
     __entity_type__: ClassVar[str] = WORKLOAD_DELEGATION_ENTITY_TYPE
 
@@ -96,9 +109,16 @@ class WorkloadDelegationEntity(NemoEntity, entity_type=WORKLOAD_DELEGATION_ENTIT
     auth_context: AuthContext
     bound_reference_name: str | None = None
     bound_reference_value: str | None = None
+    docker_container_id: str | None = Field(default=None, min_length=1)
     opaque_subject_token_hash: str | None = None
     expires_at: datetime
+    # Existing stored markers remain authoritative; new revocations delete the record.
     revoked_at: datetime | None = None
+
+    @field_validator("bound_reference_name", "bound_reference_value")
+    @classmethod
+    def normalize_empty_reference(cls, value: str | None) -> str | None:
+        return value or None
 
     def is_expired(self, *, now: datetime | None = None) -> bool:
         """Return whether this delegation is expired at the supplied time."""
@@ -248,171 +268,287 @@ def subject_token_type_for_exchange(subject_token: str) -> str:
 
 
 class WorkloadDelegationStore:
-    """Identity-based store wrapper for plugin-managed workload delegation records."""
+    """Delegation lifecycle over the existing asynchronous entity client."""
 
     def __init__(self, entity_client: NemoEntitiesClient):
         self._entity_client = entity_client
 
     async def register(
-        self,
-        entity: WorkloadDelegationEntity,
-        *,
-        expected_db_version: int | None = None,
-        require_opaque_subject_token_hash: bool = False,
+        self, entity: WorkloadDelegationEntity, *, require_opaque_subject_token_hash: bool = False
     ) -> WorkloadDelegationEntity:
-        """Create a delegation row, or replace an expired/revoked row with the same name."""
+        """Create a fresh grant, deleting an inactive record if its lookup name is occupied."""
         _validate_delegation(entity, require_opaque_subject_token_hash=require_opaque_subject_token_hash)
-
         try:
             return await self._entity_client.add(entity)
         except NemoEntityConflictError as exc:
             existing = await self.get(entity.name)
-            replacement = _replacement_after_register_conflict(
-                entity,
-                existing,
-                expected_db_version=expected_db_version,
-                conflict=exc,
-            )
-            return await self._entity_client.update(replacement)
+            inactive = _inactive_after_register_conflict(entity, existing, conflict=exc)
+            await self._delete(inactive, reason="revoked" if inactive.revoked_at is not None else "expired")
+            try:
+                saved = await self._entity_client.add(entity)
+            except NemoEntityConflictError as conflict:
+                raise WorkloadDelegationConflictError(f"delegation '{entity.name}' registration raced") from conflict
+            _log_replacement_delegation(inactive, saved)
+            return saved
 
     async def get(self, name: str) -> WorkloadDelegationEntity | None:
-        """Fetch one delegation row by its deterministic name."""
+        """Fetch the current delegation at a deterministic lookup name."""
         try:
             return await self._entity_client.get(WorkloadDelegationEntity, name, workspace=SYSTEM_WORKSPACE)
         except NemoEntityNotFoundError:
             return None
 
-    async def update(
-        self,
-        entity: WorkloadDelegationEntity,
-        *,
-        expected_db_version: int | None = None,
-    ) -> WorkloadDelegationEntity:
-        """Update a delegation row using the db_version from the latest fetched row."""
-        _validate_delegation(entity)
-        existing = await self.get(entity.name)
-        if existing is None:
-            raise NemoEntityNotFoundError(f"Entity '{entity.name}' not found in workspace '{SYSTEM_WORKSPACE}'")
-        replacement = _replacement_for_update(entity, existing, expected_db_version=expected_db_version)
-        return await self._entity_client.update(replacement)
-
-    async def revoke(self, name: str, *, now: datetime | None = None) -> WorkloadDelegationEntity | None:
-        """Soft-revoke a delegation row by setting revoked_at."""
-        existing = await self.get(name)
-        if existing is None:
+    async def get_by_id(self, delegation_id: str) -> WorkloadDelegationEntity | None:
+        """Fetch an exact grant without following a reusable lookup name."""
+        try:
+            entity = await self._entity_client.get_by_id(WorkloadDelegationEntity, delegation_id)
+        except NemoEntityNotFoundError:
             return None
-        return await self._entity_client.update(_mark_revoked(existing, now=now))
+        return entity if entity.workspace == SYSTEM_WORKSPACE else None
+
+    async def renew(
+        self,
+        delegation_id: str,
+        *,
+        expected_db_version: int,
+        expires_at: datetime,
+        opaque_subject_token_hash: str | None = None,
+    ) -> WorkloadDelegationEntity:
+        """Renew expiry or rotate an existing Docker proof without changing the grant binding.
+
+        Trusted reconciliation may renew an expired record to recover a live deployment.
+        Deleted records and legacy revoked records cannot be renewed.
+        """
+        existing = await self.get_by_id(delegation_id)
+        if existing is None:
+            raise WorkloadDelegationConflictError("workload delegation no longer exists")
+        renewed = _renewal(
+            existing,
+            expected_db_version=expected_db_version,
+            expires_at=expires_at,
+            opaque_subject_token_hash=opaque_subject_token_hash,
+        )
+        try:
+            return await self._entity_client.update(renewed)
+        except (NemoEntityConflictError, NemoEntityNotFoundError) as exc:
+            raise WorkloadDelegationConflictError("workload delegation changed during renewal") from exc
+
+    async def bind_docker_container(self, delegation_id: str, container_id: str) -> WorkloadDelegationEntity:
+        """Persist a write-once container association before Docker workload startup."""
+        existing = await self.get_by_id(delegation_id)
+        if existing is None:
+            raise NemoEntityNotFoundError("Docker workload delegation not found")
+        bound = _bind_docker_container(existing, container_id)
+        if existing.docker_container_id == container_id:
+            return existing
+        return await self._entity_client.update(bound)
+
+    async def revoke_for_docker_container(self, delegation_id: str, container_id: str) -> None:
+        """Delete a grant only if its stored container association matches Docker's actual ID."""
+        existing = await self.get_by_id(delegation_id)
+        if existing is not None:
+            _check_docker_container(existing, container_id)
+            await self._revoke(existing)
+
+    async def revoke(self, name: str) -> None:
+        """Delete the current grant at this lookup name."""
+        existing = await self.get(name)
+        if existing is not None:
+            await self._revoke(existing)
+
+    async def revoke_by_id(self, delegation_id: str) -> None:
+        """Delete one exact grant without selecting a replacement by name."""
+        existing = await self.get_by_id(delegation_id)
+        if existing is not None:
+            await self._revoke(existing)
 
     async def list_by_workload(
-        self,
-        scope: WorkloadDelegationLookupScope,
-        *,
-        page_size: int = 100,
+        self, scope: WorkloadDelegationLookupScope, *, page_size: int = 100
     ) -> list[WorkloadDelegationEntity]:
-        """List delegation rows associated with one physical workload scope."""
-        return await _list_by_workload_async(
-            self._entity_client,
-            scope=scope,
-            page_size=page_size,
-        )
+        """List delegation records for one physical workload scope."""
+        return await _list_by_workload_async(self._entity_client, scope=scope, page_size=page_size)
 
-    async def revoke_by_workload(
-        self,
-        scope: WorkloadDelegationLookupScope,
-        *,
-        now: datetime | None = None,
-        page_size: int = 100,
-    ) -> list[WorkloadDelegationEntity]:
-        """Soft-revoke every delegation row associated with one physical workload scope."""
-        entities = await self.list_by_workload(
-            scope,
-            page_size=page_size,
-        )
-        return [await self._entity_client.update(_mark_revoked(entity, now=now)) for entity in entities]
+    async def revoke_by_workload(self, scope: WorkloadDelegationLookupScope, *, page_size: int = 100) -> None:
+        """Delete the exact records selected for this workload scope."""
+        failures: list[Exception] = []
+        for entity in await self.list_by_workload(scope, page_size=page_size):
+            try:
+                await self._revoke(entity)
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise WorkloadDelegationError("Some workload delegations could not be revoked") from ExceptionGroup(
+                "Workload delegation revocation failures", failures
+            )
+
+    async def _revoke(self, entity: WorkloadDelegationEntity) -> None:
+        for attempt in range(_REVOCATION_DELETE_ATTEMPTS):
+            try:
+                await self._delete(entity, reason="revoked")
+                return
+            except WorkloadDelegationConflictError:
+                if attempt == _REVOCATION_DELETE_ATTEMPTS - 1:
+                    raise
+                current = await self.get_by_id(entity.id)
+                if current is None:
+                    return
+                if current.docker_container_id != entity.docker_container_id:
+                    raise WorkloadDelegationConflictError("Docker binding changed during revocation") from None
+                entity = current
+
+    async def _delete(self, entity: WorkloadDelegationEntity, *, reason: str) -> None:
+        if not entity.id:
+            raise WorkloadDelegationValidationError("deleting a delegation requires its persisted ID")
+        try:
+            await self._entity_client.delete_by_id(
+                WorkloadDelegationEntity, entity.id, expected_db_version=entity.db_version
+            )
+        except NemoEntityNotFoundError:
+            return
+        except NemoEntityConflictError as exc:
+            raise WorkloadDelegationConflictError("workload delegation changed before deletion") from exc
+        _log_deleted_delegation(entity, reason=reason)
 
 
 class SyncWorkloadDelegationStore:
-    """Synchronous store wrapper for workload delegation records."""
+    """Delegation lifecycle over the existing synchronous entity client."""
 
     def __init__(self, entity_client: SyncEntityClient):
         self._entity_client = entity_client
 
     def register(
-        self,
-        entity: WorkloadDelegationEntity,
-        *,
-        expected_db_version: int | None = None,
-        require_opaque_subject_token_hash: bool = False,
+        self, entity: WorkloadDelegationEntity, *, require_opaque_subject_token_hash: bool = False
     ) -> WorkloadDelegationEntity:
-        """Create a delegation row, or replace an expired/revoked row with the same name."""
+        """Create a fresh grant, deleting an inactive record if its lookup name is occupied."""
         _validate_delegation(entity, require_opaque_subject_token_hash=require_opaque_subject_token_hash)
-
         try:
             return self._entity_client.add(entity)
         except NemoEntityConflictError as exc:
             existing = self.get(entity.name)
-            replacement = _replacement_after_register_conflict(
-                entity,
-                existing,
-                expected_db_version=expected_db_version,
-                conflict=exc,
-            )
-            return self._entity_client.update(replacement)
+            inactive = _inactive_after_register_conflict(entity, existing, conflict=exc)
+            self._delete(inactive, reason="revoked" if inactive.revoked_at is not None else "expired")
+            try:
+                saved = self._entity_client.add(entity)
+            except NemoEntityConflictError as conflict:
+                raise WorkloadDelegationConflictError(f"delegation '{entity.name}' registration raced") from conflict
+            _log_replacement_delegation(inactive, saved)
+            return saved
 
     def get(self, name: str) -> WorkloadDelegationEntity | None:
-        """Fetch one delegation row by its deterministic name."""
+        """Fetch the current delegation at a deterministic lookup name."""
         try:
             return self._entity_client.get(WorkloadDelegationEntity, name, workspace=SYSTEM_WORKSPACE)
         except NemoEntityNotFoundError:
             return None
 
-    def update(
-        self,
-        entity: WorkloadDelegationEntity,
-        *,
-        expected_db_version: int | None = None,
-    ) -> WorkloadDelegationEntity:
-        """Update a delegation row using the db_version from the latest fetched row."""
-        _validate_delegation(entity)
-        existing = self.get(entity.name)
-        if existing is None:
-            raise NemoEntityNotFoundError(f"Entity '{entity.name}' not found in workspace '{SYSTEM_WORKSPACE}'")
-        replacement = _replacement_for_update(entity, existing, expected_db_version=expected_db_version)
-        return self._entity_client.update(replacement)
-
-    def revoke(self, name: str, *, now: datetime | None = None) -> WorkloadDelegationEntity | None:
-        """Soft-revoke a delegation row by setting revoked_at."""
-        existing = self.get(name)
-        if existing is None:
+    def get_by_id(self, delegation_id: str) -> WorkloadDelegationEntity | None:
+        """Fetch an exact grant without following a reusable lookup name."""
+        try:
+            entity = self._entity_client.get_by_id(WorkloadDelegationEntity, delegation_id)
+        except NemoEntityNotFoundError:
             return None
-        return self._entity_client.update(_mark_revoked(existing, now=now))
+        return entity if entity.workspace == SYSTEM_WORKSPACE else None
+
+    def renew(
+        self,
+        delegation_id: str,
+        *,
+        expected_db_version: int,
+        expires_at: datetime,
+        opaque_subject_token_hash: str | None = None,
+    ) -> WorkloadDelegationEntity:
+        """Renew expiry or rotate an existing Docker proof without changing the grant binding.
+
+        Trusted reconciliation may renew an expired record to recover a live deployment.
+        Deleted records and legacy revoked records cannot be renewed.
+        """
+        existing = self.get_by_id(delegation_id)
+        if existing is None:
+            raise WorkloadDelegationConflictError("workload delegation no longer exists")
+        renewed = _renewal(
+            existing,
+            expected_db_version=expected_db_version,
+            expires_at=expires_at,
+            opaque_subject_token_hash=opaque_subject_token_hash,
+        )
+        try:
+            return self._entity_client.update(renewed)
+        except (NemoEntityConflictError, NemoEntityNotFoundError) as exc:
+            raise WorkloadDelegationConflictError("workload delegation changed during renewal") from exc
+
+    def bind_docker_container(self, delegation_id: str, container_id: str) -> WorkloadDelegationEntity:
+        """Persist a write-once container association before Docker workload startup."""
+        existing = self.get_by_id(delegation_id)
+        if existing is None:
+            raise NemoEntityNotFoundError("Docker workload delegation not found")
+        bound = _bind_docker_container(existing, container_id)
+        if existing.docker_container_id == container_id:
+            return existing
+        return self._entity_client.update(bound)
+
+    def revoke_for_docker_container(self, delegation_id: str, container_id: str) -> None:
+        """Delete a grant only if its stored container association matches Docker's actual ID."""
+        existing = self.get_by_id(delegation_id)
+        if existing is not None:
+            _check_docker_container(existing, container_id)
+            self._revoke(existing)
+
+    def revoke(self, name: str) -> None:
+        """Delete the current grant at this lookup name."""
+        existing = self.get(name)
+        if existing is not None:
+            self._revoke(existing)
+
+    def revoke_by_id(self, delegation_id: str) -> None:
+        """Delete one exact grant without selecting a replacement by name."""
+        existing = self.get_by_id(delegation_id)
+        if existing is not None:
+            self._revoke(existing)
 
     def list_by_workload(
-        self,
-        scope: WorkloadDelegationLookupScope,
-        *,
-        page_size: int = 100,
+        self, scope: WorkloadDelegationLookupScope, *, page_size: int = 100
     ) -> list[WorkloadDelegationEntity]:
-        """List delegation rows associated with one physical workload scope."""
-        return _list_by_workload_sync(
-            self._entity_client,
-            scope=scope,
-            page_size=page_size,
-        )
+        """List delegation records for one physical workload scope."""
+        return _list_by_workload_sync(self._entity_client, scope=scope, page_size=page_size)
 
-    def revoke_by_workload(
-        self,
-        scope: WorkloadDelegationLookupScope,
-        *,
-        now: datetime | None = None,
-        page_size: int = 100,
-    ) -> list[WorkloadDelegationEntity]:
-        """Soft-revoke every delegation row associated with one physical workload scope."""
-        entities = self.list_by_workload(
-            scope,
-            page_size=page_size,
-        )
-        return [self._entity_client.update(_mark_revoked(entity, now=now)) for entity in entities]
+    def revoke_by_workload(self, scope: WorkloadDelegationLookupScope, *, page_size: int = 100) -> None:
+        """Delete the exact records selected for this workload scope."""
+        failures: list[Exception] = []
+        for entity in self.list_by_workload(scope, page_size=page_size):
+            try:
+                self._revoke(entity)
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise WorkloadDelegationError("Some workload delegations could not be revoked") from ExceptionGroup(
+                "Workload delegation revocation failures", failures
+            )
+
+    def _revoke(self, entity: WorkloadDelegationEntity) -> None:
+        for attempt in range(_REVOCATION_DELETE_ATTEMPTS):
+            try:
+                self._delete(entity, reason="revoked")
+                return
+            except WorkloadDelegationConflictError:
+                if attempt == _REVOCATION_DELETE_ATTEMPTS - 1:
+                    raise
+                current = self.get_by_id(entity.id)
+                if current is None:
+                    return
+                if current.docker_container_id != entity.docker_container_id:
+                    raise WorkloadDelegationConflictError("Docker binding changed during revocation") from None
+                entity = current
+
+    def _delete(self, entity: WorkloadDelegationEntity, *, reason: str) -> None:
+        if not entity.id:
+            raise WorkloadDelegationValidationError("deleting a delegation requires its persisted ID")
+        try:
+            self._entity_client.delete_by_id(WorkloadDelegationEntity, entity.id, expected_db_version=entity.db_version)
+        except NemoEntityNotFoundError:
+            return
+        except NemoEntityConflictError as exc:
+            raise WorkloadDelegationConflictError("workload delegation changed before deletion") from exc
+        _log_deleted_delegation(entity, reason=reason)
 
 
 async def _list_by_workload_async(
@@ -461,74 +597,87 @@ def _list_by_workload_sync(
         page += 1
 
 
-def _copy_delegation_payload(
-    target: WorkloadDelegationEntity,
-    source: WorkloadDelegationEntity,
-) -> WorkloadDelegationEntity:
-    target.name = source.name
-    target.workspace = SYSTEM_WORKSPACE
-    target.project = source.project
-    target.workload_subject = source.workload_subject
-    target.workload_audience = source.workload_audience
-    target.workload_workspace = source.workload_workspace
-    target.workload_kind = source.workload_kind
-    target.workload_id = source.workload_id
-    target.workload_claim_id = source.workload_claim_id
-    target.workload_generation = source.workload_generation
-    target.job_id = source.job_id
-    target.attempt_id = source.attempt_id
-    target.step_id = source.step_id
-    target.auth_context = source.auth_context
-    target.bound_reference_name = source.bound_reference_name
-    target.bound_reference_value = source.bound_reference_value
-    target.opaque_subject_token_hash = source.opaque_subject_token_hash
-    target.expires_at = source.expires_at
-    target.revoked_at = source.revoked_at
-    return target
-
-
-def _replacement_after_register_conflict(
+def _inactive_after_register_conflict(
     entity: WorkloadDelegationEntity,
     existing: WorkloadDelegationEntity | None,
     *,
-    expected_db_version: int | None,
     conflict: Exception,
 ) -> WorkloadDelegationEntity:
     if existing is None:
         raise WorkloadDelegationConflictError(f"delegation '{entity.name}' already exists") from conflict
     if existing.is_active():
-        raise WorkloadDelegationConflictError(f"active delegation '{entity.name}' already exists") from conflict
-    return _replacement_for_update(
-        entity,
-        existing,
-        expected_db_version=expected_db_version,
-        conflict=conflict,
-        allow_revoked_replacement=True,
+        raise WorkloadDelegationAlreadyActiveError(f"active delegation '{entity.name}' already exists") from conflict
+    if not existing.id:
+        raise WorkloadDelegationValidationError("deleting an inactive delegation requires its persisted ID")
+    return existing
+
+
+def _log_deleted_delegation(entity: WorkloadDelegationEntity, *, reason: str) -> None:
+    logger.info(
+        "Deleted workload delegation",
+        extra={
+            "delegation_id": entity.id,
+            "delegation_name": entity.name,
+            "reason": reason,
+        },
     )
 
 
-def _replacement_for_update(
-    entity: WorkloadDelegationEntity,
+def _log_replacement_delegation(previous: WorkloadDelegationEntity, saved: WorkloadDelegationEntity) -> None:
+    logger.info(
+        "Registered replacement workload delegation",
+        extra={
+            "previous_delegation_id": previous.id,
+            "delegation_id": saved.id,
+            "delegation_name": saved.name,
+            "reason": "revoked" if previous.revoked_at is not None else "expired",
+        },
+    )
+
+
+def _bind_docker_container(entity: WorkloadDelegationEntity, container_id: str) -> WorkloadDelegationEntity:
+    _require_non_empty(container_id, "docker_container_id")
+    if (
+        not entity.is_active()
+        or not entity.opaque_subject_token_hash
+        or entity.bound_reference_name
+        or entity.bound_reference_value
+    ):
+        raise WorkloadDelegationConflictError("container binding requires an active Docker delegation")
+    if entity.docker_container_id is not None and entity.docker_container_id != container_id:
+        raise WorkloadDelegationConflictError("Docker delegation is already bound to a different container")
+    return entity.model_copy(update={"docker_container_id": container_id})
+
+
+def _check_docker_container(entity: WorkloadDelegationEntity, container_id: str) -> None:
+    _require_non_empty(container_id, "docker_container_id")
+    if entity.docker_container_id != container_id:
+        raise WorkloadDelegationConflictError("Docker container does not match the delegation binding")
+
+
+def _renewal(
     existing: WorkloadDelegationEntity,
     *,
-    expected_db_version: int | None,
-    conflict: Exception | None = None,
-    allow_revoked_replacement: bool = False,
+    expected_db_version: int,
+    expires_at: datetime,
+    opaque_subject_token_hash: str | None,
 ) -> WorkloadDelegationEntity:
-    if expected_db_version is not None and existing.db_version != expected_db_version:
-        error = WorkloadDelegationConflictError(
-            f"delegation '{entity.name}' db_version {existing.db_version} does not match "
-            f"expected db_version {expected_db_version}"
-        )
-        if conflict is not None:
-            raise error from conflict
-        raise error
-    if existing.revoked_at is not None and entity.revoked_at is None and not allow_revoked_replacement:
-        error = WorkloadDelegationConflictError(f"revoked delegation '{entity.name}' cannot be reactivated by update")
-        if conflict is not None:
-            raise error from conflict
-        raise error
-    return _copy_delegation_payload(existing, entity)
+    if existing.db_version != expected_db_version or existing.revoked_at is not None:
+        raise WorkloadDelegationConflictError("workload delegation changed or was revoked")
+    if as_aware_utc(expires_at) <= datetime.now(timezone.utc):
+        raise WorkloadDelegationValidationError("renewed expiry must be in the future")
+    if opaque_subject_token_hash is not None:
+        _require_non_empty(opaque_subject_token_hash, "opaque_subject_token_hash")
+        if not existing.opaque_subject_token_hash or existing.bound_reference_name or existing.bound_reference_value:
+            raise WorkloadDelegationValidationError("proof rotation requires an opaque Docker delegation")
+    return existing.model_copy(
+        update={
+            "expires_at": expires_at,
+            "opaque_subject_token_hash": opaque_subject_token_hash
+            if opaque_subject_token_hash is not None
+            else existing.opaque_subject_token_hash,
+        }
+    )
 
 
 def _validate_delegation(
@@ -547,6 +696,11 @@ def _validate_delegation(
 
     if entity.is_expired():
         raise WorkloadDelegationValidationError("workload delegation expires_at must be in the future")
+    if entity.revoked_at is not None:
+        raise WorkloadDelegationValidationError("new delegations cannot carry a legacy revocation marker")
+
+    if entity.docker_container_id is not None and not entity.opaque_subject_token_hash:
+        raise WorkloadDelegationValidationError("Docker container association requires an opaque Docker proof")
 
     has_reference_name = bool(entity.bound_reference_name)
     has_reference_value = bool(entity.bound_reference_value)
@@ -664,11 +818,6 @@ def _workload_filter(scope: WorkloadDelegationLookupScope) -> FilterOperation:
         operator=FilterOperator.AND,
         operations=operations,
     )
-
-
-def _mark_revoked(entity: WorkloadDelegationEntity, *, now: datetime | None) -> WorkloadDelegationEntity:
-    entity.revoked_at = as_aware_utc(now or datetime.now(timezone.utc))
-    return entity
 
 
 def _opaque_docker_proof_token_hash(secret: bytes) -> str:

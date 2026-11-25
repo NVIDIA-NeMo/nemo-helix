@@ -103,7 +103,7 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
-RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
@@ -146,6 +146,18 @@ EXPOSE 8080
 CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime AS smoke-test
+# The prefetch above only warns when it fails, and a sandbox with no index egress cannot build these
+# venvs at run time. Gym skips a component's build when its venv has bin/python and bin/activate.
+# Gym adds a legacy_agent environment server for an agent that declares none, so that venv is
+# needed too.
+RUN for component in responses_api_agents/simple_agent responses_api_models/inference_provider \
+        resources_servers/mcqa environment_servers/legacy_agent; do \
+      venv="/opt/gym_venvs/${component}/.venv"; \
+      if ! test -x "${venv}/bin/python" || ! test -f "${venv}/bin/activate"; then \
+        echo "prefetched Gym venv missing or incomplete: ${venv}" >&2; \
+        exit 1; \
+      fi; \
+    done
 RUN gym --help >/dev/null \
     && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
         -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \

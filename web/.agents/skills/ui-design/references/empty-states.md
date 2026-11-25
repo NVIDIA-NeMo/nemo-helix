@@ -28,6 +28,8 @@ Canonical locations:
 - Component: `packages/common/src/components/EntityEmptyState/index.tsx`
 - Registry: `packages/common/src/components/EntityEmptyState/registry.ts`
   (`ENTITY_EMPTY_STATES: Record<EntityKey, EmptyStateDescriptor>`)
+- Coding-agent / CLI handoff: `packages/common/src/components/EntityAgentBridge/index.tsx`
+- Icons: `packages/common/src/constants/entityIcons.ts` (`ENTITY_ICONS`)
 
 ## The two variants
 
@@ -80,18 +82,28 @@ Field rules:
 - `skillPrompt` — copy-to-clipboard string that triggers the entity's skill.
   **Not wired to Copilot** (deferred by ticket decision 1) — it is stored for a
   future integration and surfaced under the "Ask an agent" snippet toggle today.
-  Omit if no skill exists.
+  Omit if no skill exists. Name a skill that actually ships (see
+  `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and `plugins/*/skills/`);
+  a prompt naming a skill the reader cannot install is worse than none.
+- For a **read-only** entity (traces, spans, test-case results — anything the
+  user inspects rather than creates), `cliCommand` / `skillPrompt` are still
+  required where one exists. The handoff there is "examine/analyze this", not
+  "create one" — that is the whole point of the bridge (ASTD-398). Only omit
+  both when there is genuinely nothing to run, as with `baseModels`.
 
 ### 2. Wire the callsite
 
 **DataView** (`StudioDataView` / any `DataView` table) — route
-`renderEmptyState` through the shared component so the variant is derived:
+`renderEmptyState` through the shared component, and let
+`getDataViewEmptyStateVariant` pick the variant (and wire the clear action)
+rather than repeating the ternary:
 
 ```tsx
-renderEmptyState={({ hasFiltersApplied, hasSearchApplied }) => (
+renderEmptyState={(state) => (
   <EntityEmptyState
     entity="filesets"
-    variant={hasFiltersApplied || hasSearchApplied ? 'no-results' : 'first-use'}
+    workspace={workspace}
+    {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
   />
 )}
 renderErrorState={() => (
@@ -120,6 +132,69 @@ first-use/no-results `if` branching. Route the error branch through `ErrorPanel`
 with `getErrorMessage(error)`. Do not leave the old empty-state path behind as a
 fallback.
 
+## The coding-agent bridge outside an empty state
+
+`EntityAgentBridge` is the "Ask an agent · CLI" snippet on its own, driven by
+the same registry entry. `EntityEmptyState` embeds it; render it directly only
+when the surface genuinely cannot be an `EntityEmptyState`:
+
+```tsx
+<EntityAgentBridge entity="telemetryTraces" workspace={workspace} />
+```
+
+It renders `null` when the entity has neither a `cliCommand` nor a
+`skillPrompt`, so mount it unconditionally rather than re-reading the registry
+at the callsite to decide. Pass `workspace` wherever one is in scope — without
+it the snippet hands the reader a literal `<workspace>` to fix up by hand.
+
+The same goes for any other placeholder the page already knows. Both
+`EntityAgentBridge` and `EntityEmptyState` take `params`, which fill in each
+`<key>` they name. A key that is missing or empty keeps its placeholder, so
+pass a value only when the page is genuinely scoped to one thing:
+
+```tsx
+<EntityEmptyState
+  entity="agentOptimizations"
+  variant="first-use"
+  workspace={workspace}
+  params={{ 'agent-name': agentName }}
+/>
+```
+
+### When a bespoke panel is allowed
+
+Almost never. `AgentTraceStatistics`'s `TraceStatisticsEmptyState` is the
+worked example of a legitimate exception, and it clears a high bar:
+
+- It escalates through **three** exits (run the agent, set up tracing, widen the
+  window), which overruns the two-action footer rule.
+- Its "widen the window" exit is **not** `no-results`: the panel never learns
+  whether traces exist outside the range, only that none landed inside it, so
+  it must keep offering the create-equivalent action on both branches —
+  something `no-results` forbids by design.
+
+A panel that clears that bar still renders `EntityAgentBridge` rather than
+hand-rolling a snippet, so the registry stays the only source of the commands.
+Wanting different heading copy is **not** a reason to go bespoke — fix the
+registry entry instead.
+
+## Not an empty state
+
+Do not route these through `EntityEmptyState`; they are separate idioms and
+forcing them onto the primitive replaces accurate copy with generic copy:
+
+| Situation                                                 | Use                                        |
+| --------------------------------------------------------- | ------------------------------------------ |
+| The request failed                                        | `ErrorPanel` with `getErrorMessage(error)` |
+| The job has not finished yet ("…once the job completes")  | a pending/`Spinner` state                  |
+| Nothing is selected yet ("Awaiting model selection")      | an instructional state                     |
+| A precondition blocks the view ("File too large to edit") | an instructional state                     |
+| A preview of a file's rows, or a chart with no series     | leave local                                |
+
+The tell: an empty state answers _"there are none of these — here is how to get
+one."_ If the honest answer is instead "not yet", "it broke", or "pick something
+first", it is one of the rows above.
+
 ## Copy & CLI accuracy
 
 - Headings are sentence case and name the entity. CTAs are verb + noun
@@ -137,7 +212,9 @@ fallback.
 ## Verify
 
 - `pnpm --filter @nemo/common test` — the `EntityEmptyState` unit tests cover
-  the `first-use` and `no-results` variants and the CLI/prompt copy affordances.
+  the `first-use` and `no-results` variants, and `EntityAgentBridge`'s cover the
+  CLI/prompt toggle, `<workspace>` and `params` resolution, and the render-nothing
+  case.
   Add a case if you introduced a new descriptor shape or affordance, not for a
   plain new entry.
 - `pnpm --filter nemo-studio-ui test` for migrated studio callsites.
@@ -152,5 +229,8 @@ fallback.
   booleans or show a `first-use` state while filters are active.
 - **Do** omit `createAction` / `cliCommand` / `skillPrompt` when the entity has
   none. **Don't** fabricate a CLI command or a create route.
-- **Don't** re-introduce `TableEmptyState` (temporary migration shim, being
-  removed) or raw `StatusMessage` for empty/error states.
+- **Don't** re-introduce `TableEmptyState` or studio's `Empty` (both temporary
+  migration shims, being removed) or raw `StatusMessage` for empty/error states.
+- **Do** give a read-only entity an "examine/analyze this" bridge. **Don't**
+  leave `cliCommand` and `skillPrompt` empty just because the entity has no
+  create flow.

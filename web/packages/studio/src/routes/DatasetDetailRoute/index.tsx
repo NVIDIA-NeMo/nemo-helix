@@ -9,6 +9,7 @@ import type { FC } from 'react';
 
 const DATASETS_PARENT: FilesetDetailParent = {
   label: 'Datasets',
+  entity: 'dataset',
   purpose: FilesetPurpose.dataset,
   getListRoute: getWorkspaceDatasetsRoute,
   getDetailRoute: getDatasetDetailRoute,

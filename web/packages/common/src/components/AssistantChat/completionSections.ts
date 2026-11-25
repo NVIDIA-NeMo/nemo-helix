@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
-import {
-  ASSISTANT_WORK_DETAILS_LABEL,
-  createAssistantCollapsedStudioDetailsPart,
-  createAssistantToolCallPart,
-} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { createAssistantToolCallPart } from '@nemo/common/src/components/AssistantChat/toolParts';
 import type { ChatCompletionChunk } from 'openai/resources/index.mjs';
 
 type ToolCallDelta = ChatCompletionChunk.Choice.Delta.ToolCall;
@@ -94,25 +90,4 @@ export const appendCompletionDeltaParts = (
   if (text) next = appendText(next, text);
   for (const toolCall of toolCalls) next = appendToolCall(next, toolCall);
   return next;
-};
-
-const isReasoningPart = (part: ThreadAssistantMessagePart): boolean => part.type === 'reasoning';
-
-/**
- * Collapses reasoning and tool calls into a single "Work details" group, leaving the text after
- * the last tool call as the visible answer. Replies without tool calls are returned unchanged.
- */
-export const getWorkDetailsMessageParts = (
-  parts: readonly ThreadAssistantMessagePart[]
-): readonly ThreadAssistantMessagePart[] => {
-  const lastToolIndex = parts.findLastIndex(isToolCallPart);
-  if (lastToolIndex < 0) return parts;
-
-  const trailing = parts.slice(lastToolIndex + 1);
-  const details = createAssistantCollapsedStudioDetailsPart({
-    label: ASSISTANT_WORK_DETAILS_LABEL,
-    parts: [...parts.slice(0, lastToolIndex + 1), ...trailing.filter(isReasoningPart)],
-  });
-  const final = trailing.filter((part) => !isReasoningPart(part));
-  return details ? [details, ...final] : final;
 };

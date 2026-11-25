@@ -36,6 +36,7 @@ AVAILABLE_SERVICES: dict[str, str] = {
 AVAILABLE_CONTROLLERS: dict[str, str] = {
     "jobs": "nhx.core.jobs.controllers.main:run",
     "models": "nhx.core.models.controllers.main:run",
+    "model-metadata": "nhx.core.models.controllers.metadata_main:run",
     "entities": "nhx.core.entities.controllers.main:run",
 }
 

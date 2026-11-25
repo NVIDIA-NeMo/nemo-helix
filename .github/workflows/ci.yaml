@@ -54,6 +54,7 @@ jobs:
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
+      automodel: ${{ steps.changes.outputs.automodel }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
       customizer-skill-references: ${{ steps.changes.outputs.customizer-skill-references }}
@@ -64,6 +65,8 @@ jobs:
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      go: ${{ steps.changes.outputs.go }}
+      go-modules: ${{ steps.go-modules.outputs.modules }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       nightly-taskset-runs-report: ${{ steps.changes.outputs.nightly-taskset-runs-report }}
@@ -76,6 +79,11 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/changes
         id: changes
+      - name: Discover Go modules
+        id: go-modules
+        run: |
+          go_modules=$(bash .github/scripts/go-modules.sh)
+          echo "modules=$go_modules" >> "$GITHUB_OUTPUT"
 
   actionlint:
     name: Run actionlint
@@ -154,6 +162,8 @@ jobs:
           enable-cache: false
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Run JUnit no-skips check unit tests
+        run: uv run --no-cache .github/scripts/tests/test_check_junit_no_skips.py
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
@@ -602,17 +612,8 @@ jobs:
           enable-cache: true
           python-version: "3.13"
           cache-dependency-glob: uv.lock
-      - name: Install nodejs
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: |
-          npm i -g corepack@0.31.0
-          corepack enable pnpm
-      - name: Install web dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       # Unit tests skip the vendor bundler; exercise the same production mode
       # as the Studio image so asset/loader failures are caught before merge.
       - name: Build Studio production assets
@@ -807,6 +808,33 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+  # The automodel service loads checkpoint configs with transformers, which only its training image
+  # ships. `python-unit-test` reads them from JSON instead. Load them for real here through the opt-in
+  # `automodel-tests` group, so the regular install does not carry transformers.
+  python-unit-test-automodel:
+    name: Python unit tests (automodel, with transformers)
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      (needs.changes.outputs.deps == 'true' || needs.changes.outputs.automodel == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run automodel tests
+        run: uv run --frozen --group automodel-tests pytest services/automodel/tests -v
 
   # The scaled-evals plugin stays out of `enabled-plugins`, so `python-unit-test` cannot
   # import it and skips its tests. Installing it into that shared run is not an option:
@@ -1342,14 +1370,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test GitHub JavaScript scripts
         run: node --test .github/scripts/tests/*.test.cjs
       - name: Lint GitHub JavaScript scripts
@@ -1375,36 +1397,15 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        id: deps
-        run: pnpm install --frozen-lockfile
-      # Check the committed sources before generation can modify them.
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
+      # Covers @nemo/sdk too. Its generated tree is built fresh, or restored only when
+      # generated/.input-hash matches the current specs and generator.
       - name: Typecheck web packages
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.changes.outputs.openapi }}" != "true" ]; then
-            git fetch origin "${{ github.base_ref }}" --depth=1
-            pnpm --filter="...[origin/${{ github.base_ref }}]" run --parallel --if-present typecheck
-          else
-            pnpm run --recursive --parallel --if-present typecheck
-          fi
-      - name: Generate SDK from OpenAPI specs
-        id: sdk
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk gen:all-force
-      - name: Typecheck SDK generated output
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk typecheck
-      - name: Typecheck web packages against regenerated SDK
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests
+    name: Web tests (${{ matrix.shard }}/4)
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1412,6 +1413,10 @@ jobs:
         needs.changes.outputs.web-studio == 'true'
       )
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: web
@@ -1420,15 +1425,13 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test changed packages
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
+          filters=(--recursive)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.base_ref }}" --depth=1
             filters=(--filter="...[origin/${{ github.base_ref }}]")
@@ -1437,9 +1440,14 @@ jobs:
             if [ "${{ needs.changes.outputs.customizer-skill-references }}" = "true" ]; then
               filters+=(--filter=nemo-studio-ui)
             fi
-            pnpm "${filters[@]}" run --parallel --if-present test:ci
+          fi
+          if [ "${SHARD}" = 1 ]; then
+            pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
+          fi
+          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
           else
-            pnpm run --recursive --parallel --if-present test:ci
+            echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
 
   web-static:
@@ -1459,14 +1467,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
+      - name: Set up web dependencies
         id: deps
-        run: pnpm install --frozen-lockfile
+        uses: ./.github/actions/setup-web
       - name: Check formatting
         run: pnpm format
       - name: Lint
@@ -1632,6 +1635,38 @@ jobs:
         env:
           ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  go-test:
+    name: Go tests (${{ matrix.module }})
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.go == 'true'
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go-modules) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NHX_GO_MODULE: ${{ matrix.module }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
+        with:
+          disable-metrics: "true"
+      - name: Test and vet Go module
+        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
+        with:
+          dir: ./tools/go
+          command: >-
+            bash -euc 'cd "$NHX_GO_MODULE" && go test -race ./... && go vet ./...'
 
   openshell-tests:
     # Share setup between backend suites while retaining each suite's path filter.
@@ -1915,6 +1950,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - python-unit-test-automodel
       - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests
@@ -1930,6 +1966,7 @@ jobs:
       - web-typecheck
       - web-test
       - web-static
+      - go-test
       - openshell-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze

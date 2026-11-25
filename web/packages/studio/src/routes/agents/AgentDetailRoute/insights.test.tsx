@@ -6,16 +6,17 @@ vi.hoisted(() => {
 });
 
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import type { ExecuteJob } from '@nemo/sdk/generated/agents/schema';
 import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
-import type { AnalysisRunResponse, InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { LIST_POLL_MS } from '@studio/api/useLatestAnalysisRun';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
-  analysisRunCreateHandler,
-  analysisRunHandlers,
+  analysisJobCreateHandler,
+  analysisJobHandlers,
   mockAnalysisConfig,
-  mockAnalysisRunWithJob,
+  mockAnalysisJob,
   mockInsights,
 } from '@studio/mocks/handlers/insights';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -55,7 +56,7 @@ describe('AgentDetailRoute insights tab', () => {
 });
 
 describe('AgentDetailRoute insights tab latest analysis run', () => {
-  let latest: AnalysisRunResponse | undefined;
+  let latest: ExecuteJob | undefined;
   let findings: InsightListItem[];
 
   const runButton = () => screen.findByRole('button', { name: 'Run analysis now' });
@@ -67,7 +68,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     latest = undefined;
     findings = mockInsights;
     server.use(
-      ...analysisRunHandlers(() => (latest ? [latest] : [])),
+      ...analysisJobHandlers(() => (latest ? [latest] : [])),
       http.get(mockApiUrl(getCompassListInsightsQueryKey, ':workspace'), () =>
         HttpResponse.json({
           data: findings,
@@ -90,8 +91,8 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   it('shows the queued run and disables Run analysis now once a run is started', async () => {
     const user = userEvent.setup();
     server.use(
-      analysisRunCreateHandler((_body, response) => {
-        latest = response;
+      analysisJobCreateHandler((_body, job) => {
+        latest = job;
       })
     );
     renderDetail('?tab=insights');
@@ -108,13 +109,13 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
 
   it('follows a run from queued to running to completed and reports new findings', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    latest = mockAnalysisRunWithJob('react-agent', 'created');
+    latest = mockAnalysisJob('react-agent', 'created');
     renderDetail('?tab=insights');
 
     expect(await tabPanel().findByText('Queued')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
 
-    latest = mockAnalysisRunWithJob('react-agent', 'active');
+    latest = mockAnalysisJob('react-agent', 'active');
     await nextPoll();
     expect(await tabPanel().findByText('Running')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
@@ -128,7 +129,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
       },
       ...mockInsights,
     ];
-    latest = mockAnalysisRunWithJob('react-agent', 'completed');
+    latest = mockAnalysisJob('react-agent', 'completed');
     await nextPoll();
 
     expect(await screen.findByText('Analysis complete: 1 new finding.')).toBeInTheDocument();
@@ -139,12 +140,12 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
 
   it('reports a failed run and re-enables Run analysis now', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    latest = mockAnalysisRunWithJob('react-agent', 'active');
+    latest = mockAnalysisJob('react-agent', 'active');
     renderDetail('?tab=insights');
 
     expect(await tabPanel().findByText('Running')).toBeInTheDocument();
 
-    latest = mockAnalysisRunWithJob('react-agent', 'error');
+    latest = mockAnalysisJob('react-agent', 'error');
     await nextPoll();
 
     expect(
@@ -163,7 +164,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     expect(await screen.findByText('Enabled')).toBeInTheDocument();
     await waitFor(async () => expect(await runButton()).toBeEnabled());
 
-    latest = mockAnalysisRunWithJob('react-agent', 'active');
+    latest = mockAnalysisJob('react-agent', 'active');
     await nextPoll(LIST_POLL_MS);
 
     expect(await tabPanel().findByText('Running')).toBeInTheDocument();
@@ -171,7 +172,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   });
 
   it('does not block new runs on a paused job', async () => {
-    latest = mockAnalysisRunWithJob('react-agent', 'paused');
+    latest = mockAnalysisJob('react-agent', 'paused');
     renderDetail('?tab=insights');
 
     expect(await screen.findByTestId('latest-analysis-run')).toBeInTheDocument();
@@ -181,7 +182,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
 
   it('does not toast for a run that had already finished when the page opened', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    latest = mockAnalysisRunWithJob('react-agent', 'completed');
+    latest = mockAnalysisJob('react-agent', 'completed');
     renderDetail('?tab=insights');
 
     expect(await tabPanel().findByText('Completed')).toBeInTheDocument();

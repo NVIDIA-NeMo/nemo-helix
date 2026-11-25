@@ -1533,6 +1533,66 @@ class TestGrpoPassthroughKnobs:
         assert generation["vllm_kwargs"] == {"moe_backend": "triton"}
         assert "vllm_kwargs" not in generation["vllm_cfg"]
 
+    def test_image_size_reaches_vllm_and_the_policy_processor(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path, has_vision_tower=True)
+        step.model.max_pixels = 2_621_440
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        bounds = {"max_pixels": 2_621_440, "min_pixels": 65_536}
+        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == bounds
+        assert cfg["policy"]["tokenizer"]["tokenizer_kwargs"] == {
+            "size": {"longest_edge": 2_621_440, "shortest_edge": 65_536}
+        }
+
+    def test_caller_mm_processor_kwargs_keep_the_pixel_bounds(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(
+            tmp_path,
+            has_vision_tower=True,
+            grpo=GRPOConfig(
+                num_generations_per_prompt=4,
+                vllm_kwargs={"mm_processor_kwargs": {"min_pixels": 1, "do_rescale": False}},
+            ),
+        )
+        step.model.max_pixels = 2_621_440
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == {
+            "max_pixels": 2_621_440,
+            "min_pixels": 65_536,
+            "do_rescale": False,
+        }
+
+    @pytest.mark.parametrize("value", ["max_pixels=1", 5, ["min_pixels"]])
+    def test_non_dict_mm_processor_kwargs_is_rejected(
+        self, tmp_path: Path, job_ctx: NHXJobContext, value: object
+    ) -> None:
+        step, _ = _prepared_step(
+            tmp_path,
+            has_vision_tower=True,
+            grpo=GRPOConfig(num_generations_per_prompt=4, vllm_kwargs={"mm_processor_kwargs": value}),
+        )
+        step.model.max_pixels = 2_621_440
+
+        with pytest.raises(ValueError, match="mm_processor_kwargs must be a dict"):
+            compile_grpo_config(step, job_ctx)
+
+    @pytest.mark.parametrize("parser", ["hermes", None], ids=["model-declares-parser", "no-parser"])
+    def test_rollout_chat_server_gets_the_model_tool_parser(
+        self, tmp_path: Path, job_ctx: NHXJobContext, parser: str | None
+    ) -> None:
+        """vLLM rejects auto or named tool_choice when the rollout chat server has no tool parser."""
+        step, _ = _prepared_step(tmp_path, has_vision_tower=True)
+        step.model.tool_call_parser = parser
+
+        vllm_cfg = compile_grpo_config(step, job_ctx)["policy"]["generation"]["vllm_cfg"]
+
+        if parser is None:
+            assert "http_server_serving_chat_kwargs" not in vllm_cfg
+        else:
+            assert vllm_cfg["http_server_serving_chat_kwargs"] == {"tool_parser": parser}
+
     def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path)
 
@@ -1729,6 +1789,36 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
         "*lm_head*",
     ]
     assert "image_url" in (dataset / "training.jsonl").read_text(encoding="utf-8")
+
+
+def test_grpo_vision_unions_a_caller_exclude_with_the_vision_patterns(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        finetuning_type=FinetuningType.LORA,
+        lora=LoRAConfig(exclude_modules=["*.out_proj"]),
+        has_vision_tower=True,
+    )
+
+    exclude = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"]
+
+    assert exclude[0] == "*vision_tower*"
+    assert exclude[-1] == "*.out_proj"
+
+
+def test_grpo_nemotron_h_vision_excludes_mamba_out_proj_when_unset(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path, finetuning_type=FinetuningType.LORA, lora=LoRAConfig(), has_vision_tower=True)
+    step.model.checkpoint_model_name = "NemotronH_Omni_Reasoning_V3"
+
+    exclude = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"]
+
+    assert "*lm_head*" in exclude
+    assert exclude[-1] == "*.out_proj"
 
 
 def test_grpo_input_image_rows_count_as_images(

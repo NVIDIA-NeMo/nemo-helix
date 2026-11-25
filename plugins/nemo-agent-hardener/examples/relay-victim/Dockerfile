@@ -22,7 +22,7 @@ WORKDIR /workspace
 
 # The Fabric entrypoint, its DeepAgents adapter, and the MCP SDK the tool server uses.
 #
-# nemo-relay is pinned to the 0.11 line because the Fabric 0.6 adapters require >=0.11,<0.12. Keep the
+# nemo-relay is pinned to the 0.11 line because the Fabric 0.7 adapters require >=0.11,<0.12. Keep the
 # uploaded plugins.toml on a schema this Relay accepts: a rejected schema fails the whole plugin
 # initialize() — taking the guardrail component in the same file down with it.
 #

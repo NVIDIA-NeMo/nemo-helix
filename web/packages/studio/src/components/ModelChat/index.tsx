@@ -14,7 +14,6 @@ import { DEFAULT_SEED_QUESTIONS } from '@studio/components/chat/defaultSeedQuest
 import { SeedQuestions } from '@studio/components/chat/SeedQuestions';
 import { StatsBadge, type ChatMetrics } from '@studio/components/chat/StatsBadge';
 import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
-import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
 import type { ComposerSeed } from '@studio/routes/ModelCompareRoute/types';
 import { type ReactNode, useEffect, useRef, useState, type FC } from 'react';
 
@@ -215,7 +214,6 @@ export const ModelChat: FC<ModelChatProps> = ({
           promptData={promptData}
           onMessageComplete={handleMessageComplete}
           onEmptyChange={handleEmptyChange}
-          toolCallPartComponent={AssistantToolCallPart}
           {...rest}
           slotComposerStart={chatSeedSlot}
         />

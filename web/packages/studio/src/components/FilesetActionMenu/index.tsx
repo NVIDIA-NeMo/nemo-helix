@@ -16,12 +16,15 @@ export interface FilesetActionMenuProps {
   fileset: FilesetOutput;
   onFilesetUpdated?: (fileset: FilesetOutput) => void;
   onFilesetDeleted?: (fileset: FilesetOutput) => void;
+  /** Lowercase singular noun used in the delete dialog (default: fileset). */
+  entity?: string;
 }
 
 export const FilesetActionMenu: FC<FilesetActionMenuProps> = ({
   fileset,
   onFilesetUpdated,
   onFilesetDeleted,
+  entity = 'fileset',
 }) => {
   const [modalOpen, setModalOpen] = useState<'edit' | 'delete' | undefined>(undefined);
   const { mutateAsync: deleteFileset } = useFilesDeleteFileset({
@@ -78,9 +81,9 @@ export const FilesetActionMenu: FC<FilesetActionMenuProps> = ({
           open={modalOpen === 'delete'}
           onClose={handleModalClose}
           onDelete={handleDeleteFileset}
-          entity="fileset"
+          entity={entity}
           ids={[fileset.name]}
-          description={getDeleteFilesetsDescription('fileset', 1)}
+          description={getDeleteFilesetsDescription(entity, 1)}
         />
       )}
     </>

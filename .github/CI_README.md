@@ -110,6 +110,11 @@ reusable actions, and supporting docs.
   On successful `main` pushes, it also sends a completion event to an external
   CI consumer.
 
+  Go tests discover every checked-in `go.mod` and run each module in a parallel
+  matrix job with the race detector and `go vet`. The matrix runs for Go source,
+  module, test-data, toolchain, or Go CI changes and is included in the final
+  `CI status` gate.
+
   Python integration tests run in two duration-balanced, whole-package groups
   with four xdist workers each. `services` covers services except core secrets;
   `platform` covers secrets, plugins, packages, and root tests. Both retain normal

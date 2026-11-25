@@ -183,7 +183,7 @@ You do not need traces or insights for all optimization strategies, but they can
 [generate Insights](/documentation/agents/traces-and-insights/insights-from-traces) from them:
 
 ```bash
-nemo compass analysis-runs create --agent my-agent --wait
+nemo agents execute --agent compass-analyst --spec '{"context": {"agent": "my-agent"}}'
 ```
 
 Each Insight names a recurring problem and the traces that show it, which points to a strategy: a

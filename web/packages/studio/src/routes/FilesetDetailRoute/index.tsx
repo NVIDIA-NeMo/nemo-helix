@@ -142,6 +142,7 @@ export const FilesetDetailRoute: FC<FilesetDetailRouteProps> = ({ parent = FILES
                   <span>{filesetName}</span>
                   <FilesetActionMenu
                     fileset={fileset}
+                    entity={parent.entity}
                     onFilesetDeleted={() => navigate(parent.getListRoute(workspace))}
                   />
                 </Flex>

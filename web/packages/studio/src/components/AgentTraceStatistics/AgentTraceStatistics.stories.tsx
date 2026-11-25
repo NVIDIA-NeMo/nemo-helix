@@ -155,7 +155,7 @@ export const Empty: Story = {
     summary: null,
     buckets: [],
     onRunAgent: () => {},
-    onLearnMore: () => {},
+    workspace: 'my-workspace',
   },
 };
 

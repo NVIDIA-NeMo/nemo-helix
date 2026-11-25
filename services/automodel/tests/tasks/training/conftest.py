@@ -12,7 +12,10 @@ and keep their references to the stub.
 
 import importlib
 import importlib.util
+import json
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -52,23 +55,48 @@ class LlamaBidirectionalForSequenceClassification:
         return False
 
 
-def _automodel_cross_encoder_class(config: dict[str, Any]) -> type | None:
-    """Automodel v0.7.0's cross-encoder dispatch: ``SUPPORTED_BACKBONES`` plus ``supports_config``."""
-    model_type = str(config.get("model_type", "")).lower()
+def _automodel_cross_encoder_class(config: Any) -> type | None:
+    """Automodel v0.7.0's cross-encoder dispatch: ``SUPPORTED_BACKBONES`` plus ``supports_config``.
+
+    Only the dispatch is stood in for. The config it gets is the one ``transformers`` loaded.
+    """
+    model_type = str(config.model_type).lower()
     if model_type in ("llama", "llama_bidirec"):
         return LlamaBidirectionalForSequenceClassification
     if model_type == "qwen3" and {"Qwen3ForCausalLM", "Qwen3RerankerForCausalReranking"} & set(
-        config.get("architectures") or ()
+        config.architectures or ()
     ):
         return Qwen3RerankerForCausalReranking
     return None
 
 
+def _automodel_bi_encoder_pooling(_model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+    """Automodel's bi-encoder pooling for a base without Sentence Transformers files or a config pooling."""
+    return pooling or "avg", True if normalize is None else normalize
+
+
+def _load_checkpoint_config(model_path: Path, *, trust_remote_code: bool) -> SimpleNamespace:
+    """``config.json`` as attributes, for runs without the opt-in ``automodel-tests`` group.
+
+    Like ``AutoConfig.from_pretrained``, a missing ``config.json`` raises ``OSError`` and bad JSON ``ValueError``.
+    """
+    config = json.loads((model_path / "config.json").read_text(encoding="utf-8"))
+    return SimpleNamespace(model_type=config.get("model_type", ""), architectures=config.get("architectures"))
+
+
 @pytest.fixture(autouse=True)
-def automodel_cross_encoder_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without ``nemo_automodel``, answer the registry's dispatch question the way Automodel would."""
+def automodel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without ``nemo_automodel``, answer the questions Helix asks Automodel the way it would.
+
+    The training-image smoke tests ask the real Automodel (``tests/smoke_gpu``).
+    Without ``transformers``, read the checkpoint config from its JSON as well.
+    """
+    registry = "nhx.automodel.tasks.training.backends.registry"
     if importlib.util.find_spec("nemo_automodel") is None:
+        monkeypatch.setattr(f"{registry}._automodel_cross_encoder_class", _automodel_cross_encoder_class)
         monkeypatch.setattr(
-            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
-            _automodel_cross_encoder_class,
+            "nhx.automodel.tasks.training.backends.checkpoints._automodel_bi_encoder_pooling",
+            _automodel_bi_encoder_pooling,
         )
+    if importlib.util.find_spec("transformers") is None:
+        monkeypatch.setattr(f"{registry}._load_checkpoint_config", _load_checkpoint_config)

@@ -18,9 +18,6 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_studio_assistant import register
 from nemo_studio_assistant.fabric_compat import (
     apply_deepagents_mcp_env_compatibility,
-    apply_deepagents_skill_path_compatibility,
-    apply_platform_skill_translation_compatibility,
-    virtualize_skill_sources,
 )
 from nemo_studio_assistant.mcp_server import create_server
 from nhx.testing import mock_nemo_client
@@ -84,17 +81,12 @@ def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _restore_fabric_compat_patches(monkeypatch: pytest.MonkeyPatch) -> None:
     # The fabric_compat shims patch module globals for the agent's process lifetime. Record the
     # originals so pytest restores them and later tests in the worker see unpatched Fabric code.
-    from nemo_agents_plugin.fabric import translator
     from nemo_fabric_adapters.deepagents import adapter
 
-    monkeypatch.setattr(translator, "_skills_config", translator._skills_config)
-    monkeypatch.setattr(adapter, "resolve_skills", adapter.resolve_skills)
     monkeypatch.setattr(adapter, "_mcp_connection", adapter._mcp_connection)
-    monkeypatch.setattr(adapter.common_utils, "capability_plan", adapter.common_utils.capability_plan)
 
 
 def test_agent_config_translates_to_fabric_deepagents() -> None:
-    apply_platform_skill_translation_compatibility()
     config = load_agent_config(AGENT_ROOT / "agent.yaml")
     translated = translate_agent_config(config)
 
@@ -110,7 +102,7 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
         "NHX_WORKSPACE": "default",
     }
     assert translated.skills is not None
-    assert translated.skills.paths == ["/skills"]
+    assert translated.skills.paths == SKILL_PATHS
 
 
 def test_canonical_registration_config_translates_to_same_runtime() -> None:
@@ -188,7 +180,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
     }
 
 
-def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None:
+def test_fabric_resolves_packaged_skills_outside_private_workspace(tmp_path: Path) -> None:
     from nemo_fabric_adapter_contract.models import (
         AgentConfig,
         AgentSkillConfig,
@@ -200,8 +192,6 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     )
     from nemo_fabric_adapters.deepagents import adapter
 
-    apply_deepagents_skill_path_compatibility()
-
     runtime_context = RuntimeContext(
         runtime_id="test-runtime",
         invocation_id="test-invocation",
@@ -210,18 +200,16 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
             environment_id="test-environment",
             provider="local",
             control_location=ControlLocation.EXTERNAL_CONTROL,
-            workspace=".",
+            workspace=str(tmp_path),
             ownership=EnvironmentOwnership.CALLER_OWNED,
         ),
         artifacts=ArtifactManifest(),
     )
-    config = AgentConfig(skills=AgentSkillConfig(paths=["/skills"]))
+    config = AgentConfig(skills=AgentSkillConfig(paths=[str(AGENT_ROOT / "skills")]))
     backend = adapter.resolve_backend(runtime_context, str(AGENT_ROOT))
-    skill_sources = adapter.resolve_skills(config)
+    skill_sources, backend = adapter.resolve_skills(config, runtime_context, str(AGENT_ROOT), backend)
 
-    assert isinstance(backend, FilesystemBackend)
-    assert skill_sources is not None
-    assert skill_sources == ["/skills"]
+    assert skill_sources
     skills, error = _list_skills_with_errors(backend, skill_sources[0])
     assert error is None
     assert {skill["name"] for skill in skills} == {
@@ -235,13 +223,6 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
         "secrets",
         "workspace",
     }
-
-
-def test_fabric_absolute_skill_source_is_virtualized_under_workspace() -> None:
-    assert virtualize_skill_sources(
-        ["/tmp/nemo/skills", "relative-skills", "/outside/skills"],
-        Path("/tmp/nemo"),
-    ) == ["/skills", "relative-skills", "/outside/skills"]
 
 
 def test_fabric_stdio_mcp_inherits_platform_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,15 +252,6 @@ def test_fabric_image_loads_startup_compatibility_shims() -> None:
 
     assert "ENV PYTHONPATH=/workspace" in dockerfile
     assert (AGENT_ROOT / "sitecustomize.py").is_file()
-
-
-def test_platform_translation_virtualizes_packaged_skill_root() -> None:
-    apply_platform_skill_translation_compatibility()
-
-    translated = translate_agent_config(load_agent_config(AGENT_ROOT / "agent.yaml"))
-
-    assert translated.skills is not None
-    assert translated.skills.paths == ["/skills"]
 
 
 def test_guardrails_skill_is_generic_sdk_workflow_and_copies_match() -> None:

@@ -59,7 +59,8 @@ paths:
       tags:
       - Agents
       summary: Register Agent
-      description: Register an agent.
+      description: 'Register an agent: from a config, or of a plugin-managed agent
+        type.'
       operationId: register_agent_apis_agents_v2_workspaces__workspace__agents_post
       parameters:
       - name: workspace
@@ -94,7 +95,9 @@ paths:
       description: 'List all agents in the workspace with pagination and filter support.
 
 
-        Filter on a label with ``filter[labels.<key>]=<value>``.'
+        Filter on a label with ``filter[labels.<key>]=<value>``, and on a
+
+        plugin-managed agent type with ``filter[plugin_managed_agent.type]=<type>``.'
       operationId: list_agents_apis_agents_v2_workspaces__workspace__agents_get
       parameters:
       - name: workspace
@@ -138,7 +141,8 @@ paths:
         explode: true
         schema:
           $ref: '#/components/schemas/AgentFilter'
-        description: Filter agents by config_format and labels, e.g. `filter[labels.<key>]=<value>`.
+        description: Filter agents by config_format, labels and plugin-managed agent
+          type, e.g. `filter[labels.<key>]=<value>` or `filter[plugin_managed_agent.type]=<type>`.
       responses:
         '200':
           description: Successful Response
@@ -2592,6 +2596,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/plugin-managed-agent-types:
+    get:
+      tags:
+      - Plugin-Managed Agent Types
+      summary: List Plugin Managed Agent Types Route
+      description: 'List installed plugin-managed agent types, with this workspace''s
+        agent of each.
+
+
+        Create an agent of a type with `POST /agents` and `plugin_managed_agent: {type}`,
+
+        or `nemo agents create <type>`.'
+      operationId: list_plugin_managed_agent_types_route_apis_agents_v2_workspaces__workspace__plugin_managed_agent_types_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PluginManagedAgentTypeInfo'
+                title: Response List Plugin Managed Agent Types Route Apis Agents
+                  V2 Workspaces  Workspace  Plugin Managed Agent Types Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/sessions:
     post:
       tags:
@@ -2853,9 +2894,13 @@ components:
           type: object
           title: Labels
           description: Key/value labels for filtering and display, never for authorization.
-            Keys are '<name>' or '<prefix>/<name>' with no dots. Keys NeMo Helix plugins
-            define use the prefix 'helix-<plugin>', e.g. 'helix-agents/managed-by';
-            that prefix is a convention the API does not enforce.
+            Keys are '<name>' or '<prefix>/<name>' with no dots.
+        plugin_managed_agent:
+          allOf:
+          - $ref: '#/components/schemas/PluginManagedAgentSpec'
+          description: Set when the agent is of a plugin-managed agent type. Its attributes
+            are derived from the installed type whenever the agent is read or run,
+            not stored. List installed types with `nemo agents types`.
         id:
           type: string
           title: Id
@@ -3479,8 +3524,14 @@ components:
           title: Config Format
           type: string
         labels:
-          description: Filter on a label, e.g. `filter[labels.helix-agents/managed-by]=compass`.
+          description: Filter on a label, e.g. `filter[labels.team]=support`.
           title: Labels
+          additionalProperties:
+            type: string
+          type: object
+        plugin_managed_agent:
+          description: Filter on the plugin-managed agent type ID, e.g. `filter[plugin_managed_agent.type]=<type>`.
+          title: Plugin Managed Agent
           additionalProperties:
             type: string
           type: object
@@ -4561,6 +4612,19 @@ components:
           title: Input
         agent_ref:
           title: Agent Ref
+          type: string
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+        subject:
+          title: Subject
+          type: string
+        job_profile:
+          title: Job Profile
+          type: string
+        plugin_managed_agent_type:
+          title: Plugin Managed Agent Type
           type: string
         workdir:
           $ref: '#/components/schemas/AgentWorkdir'
@@ -5838,6 +5902,73 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PluginManagedAgentSpec:
+      properties:
+        type:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+$
+          title: Type
+          description: Plugin-managed agent type ID, of the form '<plugin>.<name>'.
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: PluginManagedAgentSpec
+      description: Defines an agent as managed by a plugin.
+    PluginManagedAgentTypeInfo:
+      properties:
+        type:
+          type: string
+          title: Type
+          description: 'Type ID to create an agent with: `nemo agents create <type>`.'
+        title:
+          type: string
+          title: Title
+          description: Human-readable name of the type.
+        description:
+          type: string
+          title: Description
+          description: One-line summary of what agents of this type do.
+        default_name:
+          type: string
+          title: Default Name
+          description: Name an agent of this type gets when created without one.
+        adapter_id:
+          type: string
+          title: Adapter Id
+          description: Fabric adapter that runs agents of this type.
+        context_schema:
+          additionalProperties: true
+          type: object
+          title: Context Schema
+          description: JSON Schema of the per-run context an execute job passes.
+        post_run_actions:
+          items:
+            type: string
+          type: array
+          title: Post Run Actions
+          description: Post-run action kinds an execute job of this type may choose.
+        subject_label:
+          title: Subject Label
+          description: What a run's spec.subject names, e.g. 'Analyzed agent'; null
+            when runs have no subject.
+          type: string
+        agent:
+          title: Agent
+          description: Name of this workspace's agent of the type, or null when it
+            has none.
+          type: string
+      type: object
+      required:
+      - type
+      - title
+      - description
+      - default_name
+      - adapter_id
+      - context_schema
+      - post_run_actions
+      title: PluginManagedAgentTypeInfo
+      description: A plugin-managed agent type installed on the platform.
     PostRunActionConfig:
       properties:
         kind:
@@ -5932,9 +6063,7 @@ components:
           type: object
           title: Labels
           description: Key/value labels for filtering and display, never for authorization.
-            Keys are '<name>' or '<prefix>/<name>' with no dots. Keys NeMo Helix plugins
-            define use the prefix 'helix-<plugin>', e.g. 'helix-agents/managed-by';
-            that prefix is a convention the API does not enforce.
+            Keys are '<name>' or '<prefix>/<name>' with no dots.
         config:
           additionalProperties: true
           type: object
@@ -5968,6 +6097,12 @@ components:
           description: Config format identifier. Uses config.config_format when present;
             otherwise defaults to nemo-agents-spec-v1 for an empty config or nat-workflow-v1
             for a nonempty config. An explicit value must match config.config_format.
+        plugin_managed_agent:
+          allOf:
+          - $ref: '#/components/schemas/PluginManagedAgentSpec'
+          description: Create an agent of this plugin-managed type instead of from
+            a config. The type supplies the config, context_schema, default_input
+            and post_run_actions, so none of them may be set.
       type: object
       required:
       - name
