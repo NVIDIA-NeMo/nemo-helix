@@ -54,7 +54,6 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 
 const findPluginLinkWithIcon = async (name: string) => {
   const link = screen.getByRole('link', { name });
-
   await waitFor(() => expect(link.closest('li')?.querySelector('svg')).not.toBeNull());
   return link;
 };
