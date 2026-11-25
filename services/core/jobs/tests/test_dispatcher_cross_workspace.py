@@ -24,16 +24,16 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
 from nhx.core.jobs.app.dispatcher import JobDispatcher
 from nhx.core.jobs.app.test_helpers import TestConstants
 from nhx.core.jobs.entities import HelixJobTask
-from nhx.testing import create_test_client
+from nhx.testing import ClientContext, create_test_client
 
 
 @pytest.fixture(scope="function")
-def multi_workspace_store():
+def multi_workspace_store(creation_controller):
     """Create an EntityClient for testing with multiple workspaces."""
     # Create store with both default and custom workspaces
     projects = ["default/test-project", "custom-workspace/test-project"]
-    with create_test_client(client_type=EntityClient, projects=projects) as client:
-        yield client
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        yield ctx.entity_client
 
 
 @pytest_asyncio.fixture()

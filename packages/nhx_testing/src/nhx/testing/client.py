@@ -45,6 +45,7 @@ from nhx.platform_runner.loader import order_services_by_dependencies
 from nhx.platform_runner.server import create_app
 from nhx.testing.access_log import AccessLog, AccessLogMiddleware
 from nhx.testing.asyncio_debug import bounded_event_loop_teardown
+from nhx.testing.jobs import job_creation_controller
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -462,7 +463,8 @@ def create_test_client(
 ) -> Generator[ClientT, None, None]:
     """Create a test client for NeMo Helix services with optional dependency overrides.
 
-    Pass one or more service types as positional arguments.
+    Pass one or more service types as positional arguments. Including JobsService
+    starts its creation-publication handoff without scheduling workloads.
 
     Args:
         *service_types: One or more Service classes to test
@@ -836,23 +838,26 @@ def create_test_client(
                     except ConflictError:
                         logger.warning(f"Project '{proj_name}' in workspace '{ws_id}' already exists")
 
-            if selected_client_type is TestClient:
-                yield client  # ty: ignore[invalid-yield]
-            elif selected_client_type is NemoClient:
-                yield sync_client  # ty: ignore[invalid-yield]
-            elif selected_client_type is AsyncNemoClient:
-                yield async_client  # ty: ignore[invalid-yield]
-            elif selected_client_type is EntityClient:
-                yield entity_client  # ty: ignore[invalid-yield]
-            elif selected_client_type is ClientContext:
-                yield ClientContext(
-                    client=sync_client,
-                    async_client=async_client,
-                    entity_client=entity_client,
-                    test_client=client,
-                    access_log=access_log_instance,
-                )
-            else:
-                raise TypeError(f"Unsupported client_type: {selected_client_type!r}")
+            with ExitStack() as controllers:
+                if any(service.name == "jobs" for service in services_to_start):
+                    controllers.enter_context(job_creation_controller(sync_client))
+                if selected_client_type is TestClient:
+                    yield client  # ty: ignore[invalid-yield]
+                elif selected_client_type is NemoClient:
+                    yield sync_client  # ty: ignore[invalid-yield]
+                elif selected_client_type is AsyncNemoClient:
+                    yield async_client  # ty: ignore[invalid-yield]
+                elif selected_client_type is EntityClient:
+                    yield entity_client  # ty: ignore[invalid-yield]
+                elif selected_client_type is ClientContext:
+                    yield ClientContext(
+                        client=sync_client,
+                        async_client=async_client,
+                        entity_client=entity_client,
+                        test_client=client,
+                        access_log=access_log_instance,
+                    )
+                else:
+                    raise TypeError(f"Unsupported client_type: {selected_client_type!r}")
 
         app.dependency_overrides.clear()

@@ -11,7 +11,7 @@ This section describes how to configure jobs in NeMo Helix. The Jobs service is 
 
 ## Creation and deletion lifecycle
 
-A Job is visible as `creation_pending` while its resources are being prepared. It becomes `created` only after setup is durable. Execution and normal lifecycle mutations wait for that publication. A valid `created` Job can have no current Attempt; get, list, and status still return it, while attempt-dependent operations report that no Attempt exists.
+The API prepares a Job as `creation_pending`, hidden from normal Job lookup, listing, execution, and cancellation. Once setup is durable, the Jobs controller publishes the initial Job, Attempt, and Step events and makes the Job `created`. The create request waits up to 30 seconds for that handoff. A controller outage can therefore delay creation or return HTTP 503; that response does not prove the Job will never become available. Unfinished creation remains eligible for automatic cleanup. A valid `created` Job can have no current Attempt; get, list, and status still return it, while attempt-dependent operations report that no Attempt exists.
 
 Deletion first records `deletion_pending` on an eligible Job. HTTP 204 acknowledges that request; the Jobs controller finishes resource cleanup and removes the Job afterward. Poll the existing get operation using the returned Job ID until it returns not found when you need to wait for completion. A service error or timeout does not mean the Job has disappeared. Workspace deletion performs this wait before advancing to Files cleanup.
 
@@ -19,7 +19,7 @@ The controller retries failed cleanup and retains the Job until its known owned 
 
 Deleting a legacy Job without an allocation receipt removes the Job and its child records but retains the unverified Fileset for reconciliation. That Fileset can still block creating another Job with the same name until it is reconciled.
 
-`jobs.storage.creation_timeout_seconds` sets the grace before unfinished creation becomes eligible for automatic cleanup; its default is 900 seconds. Accepted deletion is eligible for cleanup immediately, including for recently created Jobs. An explicit deletion request can also end unfinished creation before this timeout. Run exactly one active Jobs cleanup controller. The supplied Helm deployment uses one replica and a Recreate rollout; custom startup, restart, and failover procedures must stop the old controller before starting its replacement.
+`jobs.storage.creation_timeout_seconds` sets the grace before unfinished creation becomes eligible for automatic cleanup; its default is 900 seconds. Accepted deletion is eligible for cleanup immediately, including for recently created Jobs. Run exactly one active Jobs cleanup controller. The supplied Helm deployment uses one replica and a Recreate rollout; custom startup, restart, and failover procedures must stop the old controller before starting its replacement.
 
 Continuing SDK handles and watches retain the Job ID they received, so ordinary deletion and recreation under the same name does not move them to the replacement. Existing HTTP addressing still tries an ID and then a name. A literal Job name equal to a disappeared ID remains ambiguous at that public boundary.
 
@@ -65,6 +65,71 @@ nemo jobs update <job-name> \
 ```
 
 Definition updates must provide both `spec` and `platform_spec`; the Jobs Factory recompiles plugin job specs before forwarding the paired fields. To clear a job description, use `--input-data '{"description": null}'`.
+
+## Reading lifecycle events
+
+The deployment-wide event stream records Job, Attempt, and Step creation, state changes, and deletion. Task events, progress updates, and notification delivery are outside this API. Access uses the existing `jobs.list` permission in the system workspace and `jobs:read` or `platform:read` scopes. Both users and service principals can read the deployment-wide stream when authorized; the optional workspace filter narrows results.
+
+Use `POST /apis/jobs/v2/jobs/events` to start reading, continue from a returned cursor, replace filters, or poll for new events. When `start` is omitted, forward reads begin at the oldest retained event and backward reads begin at the newest. The operation accepts `limit` (1–1000, default 100) and `wait_seconds` (0–30, default 0) outside the cursor. A request returns immediately when matching events exist. Otherwise, a forward request can wait until a match is detected or the wait expires. Timeout returns an empty page with a continuation cursor.
+
+Use the typed Python Jobs client:
+
+```python
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.events import (
+    JobEventFilters,
+    JobEventPage,
+    JobEventRequest,
+    JobEventType,
+)
+
+
+async def read_attempt_events() -> JobEventPage:
+    async with AsyncNemoClient.from_config() as client:
+        jobs = AsyncJobsClient.from_client(client)
+        response = await jobs.read_job_events(
+            body=JobEventRequest(
+                filters=JobEventFilters(
+                    event_types=[JobEventType.ATTEMPT_STATE_CHANGED]
+                ),
+                start="latest",
+                wait_seconds=30,
+            )
+        )
+        page = response.data()
+        response = await jobs.read_job_events(
+            body=JobEventRequest(cursor=page.next_cursor, wait_seconds=30)
+        )
+        return response.data()
+```
+
+Web clients use the generated TypeScript operation:
+
+```typescript
+import { readJobEvents } from '@nemo/sdk/generated/platform/jobs';
+
+const page = await readJobEvents({
+  filters: { event_types: ['attempt.state_changed'] },
+  start: 'latest',
+  wait_seconds: 30,
+});
+const nextPage = await readJobEvents({
+  cursor: page.next_cursor,
+  limit: 100,
+  wait_seconds: 30,
+});
+```
+
+`next_cursor` reads forward and `prev_cursor`, when present, reads backward. Keep cursor values opaque. To change filters at the same position, POST the cursor and a complete replacement `filters` object; omitted filter members clear those constraints. Use `start: "oldest"` to replay retained history or `start: "latest"` to follow new events. Re-reading a position can return the same events, so checkpoint the cursor after processing and use event IDs to deduplicate side effects.
+
+Event IDs are decimal strings and retain their values in filtered results. Nullable Attempt/Step references identify the affected resource, and `previous_state`/`new_state` describe its transition. The compact `snapshot` preserves descriptive context after deletion; clients should tolerate new optional snapshot fields.
+
+Events expire seven days after recording, even if their Job still exists. Expired events disappear from reads before periodic storage cleanup. A cursor that has lost retained history returns HTTP 410 with `cursor_expired`; the consumer must explicitly choose to replay the retained window or start at the current end. Malformed cursors return HTTP 400 with `invalid_cursor`.
+
+The Jobs controller is the only event writer. It stores ordinary entities through the Entity Store API and reconstructs its view of published states from the retained stream after restart. It compares those observations with current records and retries missing terminal outcomes for completed, error, and cancelled executions. Intermediate states are best effort, and `previous_state` can be null when no previous observation exists. Duplicate notifications are possible; consumers should distinguish the immutable Job, Attempt, and Step identities from the unique ID assigned to each stream message.
+
+Before hard deletion, the controller unconditionally publishes terminal outcomes again. Failed publication keeps the source records for retry. Deletion notifications themselves are best effort. The same controller removes expired event entities in bounded batches. Task events and direct Entity Store mutation hooks are excluded. Recovery across a seven-day history gap requires a future snapshot mechanism and is outside this prototype.
 
 ## Viewing Job Logs
 

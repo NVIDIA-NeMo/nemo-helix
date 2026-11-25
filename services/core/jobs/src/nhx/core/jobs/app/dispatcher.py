@@ -7,18 +7,20 @@ import json
 import logging
 import re
 import weakref
+from asyncio import timeout
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.entities.base import EntityBase
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
 from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.api.filter import ComparisonOperation, FilterOperator
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
 from nhx.common.entities import SYSTEM_WORKSPACE
@@ -107,6 +109,10 @@ class PauseTTLLimitError(Exception):
         self.detail = detail
 
 
+class JobPublicationTimeoutError(Exception):
+    """The controller did not finish publishing a prepared Job before the request deadline."""
+
+
 class JobAlreadyExistsError(ValueError):
     """Exception raised when creating a job whose name is already in use."""
 
@@ -170,7 +176,7 @@ _JOB_RUN_OBSERVED_STATUSES = frozenset(
         HelixJobStatus.PAUSED,
     }
 )
-EntityT = TypeVar("EntityT")
+EntityT = TypeVar("EntityT", bound=EntityBase)
 
 
 def _should_emit_job_run_telemetry(
@@ -445,15 +451,32 @@ class JobDispatcher:
             )
             await self._start_attempt(job, attempt)
             job.current_attempt_id = attempt.id
-        # This is the final setup write. Never refetch a version to resume setup.
-        job.status = HelixJobStatus.CREATED
-        job.with_auth_context(auth_context)
-        job = await self.store.update(job)
+        # The pointer is the final setup write. Only the controller publishes CREATED.
+        if attempt is not None:
+            job.with_auth_context(auth_context)
+            job = await self.store.update(job)
+        job = await self._wait_for_publication(job)
+        attempt = await self._current_attempt_for_job(job)
         result = create_platform_job_response(job, attempt)
         logger.info("Created new job", extra={"job": job.name, "workspace": job.workspace})
 
         operations_counter.add(1, attributes={"operation": "create_job"})
         return result
+
+    async def _wait_for_publication(self, job: HelixJob) -> HelixJob:
+        try:
+            async with timeout(30):
+                while True:
+                    current = await self.store.get_by_id(HelixJob, job.id)
+                    if current.status == HelixJobStatus.DELETION_PENDING:
+                        raise JobPublicationTimeoutError("Job creation was abandoned before publication")
+                    if current.status != HelixJobStatus.CREATION_PENDING:
+                        return current
+                    await asyncio.sleep(0.1)
+        except (TimeoutError, EntityNotFoundError) as exc:
+            raise JobPublicationTimeoutError(
+                f"Job '{job.name}' is awaiting controller publication; creation did not complete within this request"
+            ) from exc
 
     async def get_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
         """Get a platform job by name or ID, with its current attempt.
@@ -465,7 +488,7 @@ class JobDispatcher:
         the requested workspace.
         """
         job_entity = await self._resolve_job(identifier, workspace)
-        if job_entity is None:
+        if job_entity is None or job_entity.status == HelixJobStatus.CREATION_PENDING:
             return None
         attempt = await self._current_attempt_for_job(job_entity)
         return create_platform_job_response(job_entity, attempt)
@@ -497,9 +520,10 @@ class JobDispatcher:
         """Resolve a job by ID, falling back to its name within the workspace."""
         job_entity = await self._get_job_by_id_optional(identifier)
         if job_entity is not None and job_entity.workspace == workspace:
-            return job_entity
+            return None if job_entity.status == HelixJobStatus.CREATION_PENDING else job_entity
         try:
-            return await self.store.get(HelixJob, identifier, workspace=workspace)
+            job_entity = await self.store.get(HelixJob, identifier, workspace=workspace)
+            return None if job_entity.status == HelixJobStatus.CREATION_PENDING else job_entity
         except EntityNotFoundError:
             return None
 
@@ -565,7 +589,15 @@ class JobDispatcher:
 
         response = await self.store.list(
             HelixJob,
-            filter_operation=parsed.operation,
+            filter_operation=LogicalOperation(
+                operator=FilterOperator.AND,
+                operations=[
+                    ComparisonOperation(
+                        field="data.status", operator=FilterOperator.NIN, value=[HelixJobStatus.CREATION_PENDING.value]
+                    ),
+                    *([parsed.operation] if parsed.operation is not None else []),
+                ],
+            ),
             page=page,
             page_size=page_size,
             workspace=workspace,
@@ -719,7 +751,7 @@ class JobDispatcher:
     ) -> tuple[HelixJob, HelixJobAttempt] | None:
         """Resolve an Attempt under an exact Job ID in the requested workspace."""
         job = await self._get_job_by_id_optional(job_id)
-        if job is None or job.workspace != workspace:
+        if job is None or job.workspace != workspace or job.status == HelixJobStatus.CREATION_PENDING:
             return None
         return await self._attempt_for_job(job, attempt_identifier, workspace)
 
@@ -1205,8 +1237,11 @@ class JobDispatcher:
                         update={"status": status, "error_details": error_details or step_to_save.error_details}
                     )
                 )
-                if status != step_to_save.status or step_to_save.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY):
-                    status_details = {**(status_details or {}), JOB_TASK_CLEANUP_PENDING_KEY: True}
+            if status.is_terminal() and (
+                status != step_to_save.status or step_to_save.status_details.get(JOB_TASK_CLEANUP_PENDING_KEY)
+            ):
+                # The existing finalization retry also covers completion propagation to Attempt and Job.
+                status_details = {**(status_details or {}), JOB_TASK_CLEANUP_PENDING_KEY: True}
 
             if self._step_update_would_be_noop(step_to_save, status, status_details, error_details):
                 saved_step = step_to_save
@@ -1475,16 +1510,13 @@ class JobDispatcher:
         raise RuntimeError("_save_attempt_status did not save or skip the attempt")
 
     async def _save_job_status(self, attempt: HelixJobAttempt) -> None:
-        """Copy the attempt's status onto its job so list filters, sorts and paging run in the store."""
-        # A caller-scoped read strips the stored auth context, and an update would write that back.
+        """Mirror the current Attempt status without changing lifecycle-pending Jobs."""
         store = self.store.as_service("jobs", internal=True)
         for try_number in range(2):
             job = await store.get_by_id(HelixJob, attempt.job)
-            if (
-                job.status in HelixJobStatus.lifecycle_pending()
-                or job.current_attempt_id != attempt.id
-                or job.status == attempt.status
-            ):
+            if job.status in HelixJobStatus.lifecycle_pending() or job.current_attempt_id != attempt.id:
+                return
+            if job.status == attempt.status:
                 return
             job.status = attempt.status
             try:
@@ -1493,6 +1525,7 @@ class JobDispatcher:
             except EntityConflictError:
                 if try_number > 0:
                     raise
+        raise RuntimeError("Job status mirror did not complete")
 
     async def update_attempt_status_details(
         self,
@@ -1721,8 +1754,8 @@ class JobDispatcher:
             next_attempt.status = HelixJobStatus.ERROR
             next_attempt.error_details = {"message": "Rerun publication failed before its first Step"}
             try:
-                next_attempt = await self.store.update(next_attempt)
                 await self._save_job_status(next_attempt)
+                next_attempt = await self.store.update(next_attempt)
             except EntityNotFoundError:
                 pass
             except Exception:

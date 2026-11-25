@@ -2173,17 +2173,18 @@ async def test_get_job_status_returns_steps_in_spec_order(
 @pytest.mark.asyncio
 async def test_list_steps_across_multiple_workspaces(
     sample_platform_job_request: CreateHelixJobRequest,
+    creation_controller,
 ):
     """Test list_steps respects workspace filtering."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from nhx.common.entities.client import EntityClient
     from nhx.core.jobs.api.v2.jobs.schemas import HelixJobSortField, HelixJobStepsListFilter
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
-    with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -2295,6 +2296,7 @@ async def test_list_steps_across_multiple_workspaces(
 @pytest.mark.asyncio
 async def test_list_steps_with_status_filter(
     sample_platform_job_request: CreateHelixJobRequest,
+    creation_controller,
 ):
     """list_steps with filter.status set forwards a filter_str to the entity store.
 
@@ -2305,15 +2307,15 @@ async def test_list_steps_with_status_filter(
     """
     from unittest.mock import AsyncMock, MagicMock
 
-    from nhx.common.entities.client import EntityClient
     from nhx.core.jobs.api.v2.jobs.schemas import (
         HelixJobSortField,
         HelixJobStatus,
         HelixJobStepsListFilter,
     )
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
-    with create_test_client(client_type=EntityClient) as mock_store:
+    with create_test_client(client_type=ClientContext) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -2343,7 +2345,9 @@ async def test_list_steps_with_status_filter(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batch_size", [100, 2])
 async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
-    sample_platform_job_request: CreateHelixJobRequest, batch_size: int
+    sample_platform_job_request: CreateHelixJobRequest,
+    batch_size: int,
+    creation_controller,
 ):
     """A page of steps costs a store query per batch of IDs, not a request per step.
 
@@ -2352,12 +2356,12 @@ async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from nhx.common.entities.client import EntityClient
     from nhx.core.jobs.api.v2.jobs.schemas import HelixJobSortField, HelixJobStepsListFilter
     from nhx.core.jobs.entities import HelixJob, HelixJobAttempt
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
-    with create_test_client(client_type=EntityClient) as mock_store:
+    with create_test_client(client_type=ClientContext) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -2397,16 +2401,18 @@ async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
 
 
 @pytest.mark.asyncio
-async def test_list_steps_drops_a_step_whose_job_no_longer_exists(sample_platform_job_request: CreateHelixJobRequest):
+async def test_list_steps_drops_a_step_whose_job_no_longer_exists(
+    sample_platform_job_request: CreateHelixJobRequest, creation_controller
+):
     """A step is listed only with its attempt and job, as when each was fetched by ID."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from nhx.common.entities.client import EntityClient
     from nhx.core.jobs.api.v2.jobs.schemas import HelixJobSortField, HelixJobStepsListFilter
     from nhx.core.jobs.entities import HelixJob
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
-    with create_test_client(client_type=EntityClient) as mock_store:
+    with create_test_client(client_type=ClientContext) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -2599,14 +2605,16 @@ async def test_mutation_methods_unknown_identifier(mock_dispatcher: JobDispatche
 @pytest.mark.asyncio
 async def test_get_job_by_id_does_not_cross_workspaces(
     sample_platform_job_request: CreateHelixJobRequest,
+    creation_controller,
 ):
     """The ID fallback is workspace-agnostic, so a foreign-workspace ID must not resolve."""
     from unittest.mock import MagicMock
 
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
     projects = ["default/test-project", "other-workspace/test-project"]
-    with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -2632,17 +2640,18 @@ async def test_get_job_by_id_does_not_cross_workspaces(
 @pytest.mark.asyncio
 async def test_list_jobs_across_multiple_workspaces(
     sample_platform_job_request: CreateHelixJobRequest,
+    creation_controller,
 ):
     """Test list_jobs respects workspace filtering."""
     from unittest.mock import MagicMock
 
-    from nhx.common.entities.client import EntityClient
     from nhx.core.jobs.api.v2.jobs.schemas import HelixJobListSortField
-    from nhx.testing import create_test_client
+    from nhx.testing import ClientContext, create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
-    with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
+    with create_test_client(client_type=ClientContext, projects=projects) as ctx, creation_controller(ctx):
+        mock_store = ctx.entity_client
         mock_files = AsyncMock()
         mock_files.with_retry = MagicMock(return_value=mock_files)
         mock_fileset_obj = MagicMock()
@@ -4253,7 +4262,7 @@ async def test_update_job_rejects_reserved_step_env_names(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [*HelixJobStatus.lifecycle_pending(), HelixJobStatus.CREATED])
-async def test_jobs_without_attempts_remain_visible(
+async def test_creation_pending_is_hidden_and_other_jobs_without_attempts_remain_visible(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient, status: HelixJobStatus
 ):
     owner = await mock_store.create(
@@ -4268,6 +4277,11 @@ async def test_jobs_without_attempts_remain_visible(
         )
     )
     response = await mock_dispatcher.get_job(owner.id, DEFAULT_WORKSPACE)
+    if status == HelixJobStatus.CREATION_PENDING:
+        assert response is None
+        assert await mock_dispatcher.list_jobs(ParsedFilter(operation=None), DEFAULT_WORKSPACE) == ([], 0)
+        assert await mock_dispatcher.get_job_status(owner.id, DEFAULT_WORKSPACE) is None
+        return
     assert response is not None and response.attempt_id is None and response.status == status
     listed, total = await mock_dispatcher.list_jobs(ParsedFilter(operation=None), DEFAULT_WORKSPACE)
     assert total == 1 and [job.id for job in listed] == [owner.id]
@@ -4316,7 +4330,7 @@ async def test_cleanup_fence_prevents_late_creator_publication(
 
 
 @pytest.mark.asyncio
-async def test_delete_fences_creator_paused_during_fileset_allocation(
+async def test_cleanup_claim_fences_creator_paused_during_fileset_allocation(
     mock_dispatcher, mock_store, mock_files_client, sample_platform_job_request
 ):
     entered = asyncio.Event()
@@ -4333,7 +4347,9 @@ async def test_delete_fences_creator_paused_during_fileset_allocation(
     await entered.wait()
     owner = await mock_store.get(HelixJob, sample_platform_job_request.name, workspace=DEFAULT_WORKSPACE)
     try:
-        assert await mock_dispatcher.delete_job(owner.id, DEFAULT_WORKSPACE)
+        assert not await mock_dispatcher.delete_job(owner.id, DEFAULT_WORKSPACE)
+        owner.status = HelixJobStatus.DELETION_PENDING
+        await mock_store.update(owner)
         fenced = await mock_store.get_by_id(HelixJob, owner.id)
         assert fenced.db_version > owner.db_version
     finally:
@@ -4397,7 +4413,10 @@ async def test_attempt_status_projection_preserves_pending_job(
     current = await mock_store.get_by_id(HelixJob, job_id)
     assert current.status == pending_status and current.db_version == owner.db_version
     response = await mock_dispatcher.get_job(job_id, DEFAULT_WORKSPACE)
-    assert response is not None and response.status == pending_status
+    if pending_status == HelixJobStatus.CREATION_PENDING:
+        assert response is None
+    else:
+        assert response is not None and response.status == pending_status
     steps, _ = await mock_dispatcher.list_steps(
         HelixJobStepsListFilter(), HelixJobSortField.CREATED_AT_ASC, 100, 0, DEFAULT_WORKSPACE
     )

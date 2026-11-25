@@ -7099,6 +7099,43 @@ paths:
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
+  /apis/jobs/v2/jobs/events:
+    post:
+      tags:
+      - Jobs
+      summary: Read Job Events
+      operationId: read_job_events
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobEventRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEventPage'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEventErrorResponse'
+        '410':
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobEventErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -18921,6 +18958,119 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JobEventErrorDetail:
+      properties:
+        code:
+          type: string
+          title: Code
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - code
+      - message
+      title: JobEventErrorDetail
+    JobEventErrorResponse:
+      properties:
+        detail:
+          $ref: '#/components/schemas/JobEventErrorDetail'
+      type: object
+      required:
+      - detail
+      title: JobEventErrorResponse
+    JobEventFilters:
+      properties:
+        workspace_id:
+          title: Workspace Id
+          nullable: true
+          type: string
+          maxLength: 255
+          minLength: 1
+        event_types:
+          title: Event Types
+          nullable: true
+          items:
+            $ref: '#/components/schemas/JobEventType'
+          type: array
+          maxItems: 9
+          minItems: 1
+      additionalProperties: false
+      type: object
+      title: JobEventFilters
+    JobEventPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/JobLifecycleEvent'
+          type: array
+          title: Data
+        next_cursor:
+          type: string
+          title: Next Cursor
+        prev_cursor:
+          title: Prev Cursor
+          nullable: true
+          type: string
+        has_more:
+          type: boolean
+          title: Has More
+      type: object
+      required:
+      - data
+      - next_cursor
+      - prev_cursor
+      - has_more
+      title: JobEventPage
+    JobEventRequest:
+      properties:
+        cursor:
+          title: Cursor
+          type: string
+          maxLength: 8192
+          minLength: 1
+        filters:
+          $ref: '#/components/schemas/JobEventFilters'
+        start:
+          title: Start
+          type: string
+          enum:
+          - oldest
+          - latest
+        direction:
+          title: Direction
+          type: string
+          enum:
+          - forward
+          - backward
+        limit:
+          type: integer
+          maximum: 1000.0
+          minimum: 1.0
+          title: Limit
+          default: 100
+        wait_seconds:
+          type: number
+          maximum: 30.0
+          minimum: 0.0
+          title: Wait Seconds
+          default: 0
+      additionalProperties: false
+      type: object
+      title: JobEventRequest
+    JobEventType:
+      type: string
+      enum:
+      - job.created
+      - job.state_changed
+      - job.deleted
+      - attempt.created
+      - attempt.state_changed
+      - attempt.deleted
+      - step.created
+      - step.state_changed
+      - step.deleted
+      title: JobEventType
     JobExecutionProfileConfig:
       properties:
         ttl_seconds_before_active:
@@ -18961,6 +19111,63 @@ components:
             these variables.
       type: object
       title: JobExecutionProfileConfig
+    JobLifecycleEvent:
+      properties:
+        id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+          title: Id
+        event_type:
+          $ref: '#/components/schemas/JobEventType'
+        workspace_id:
+          type: string
+          title: Workspace Id
+        job_id:
+          type: string
+          title: Job Id
+        attempt_id:
+          title: Attempt Id
+          nullable: true
+          type: string
+        step_id:
+          title: Step Id
+          nullable: true
+          type: string
+        previous_state:
+          title: Previous State
+          nullable: true
+          type: string
+        new_state:
+          title: New State
+          nullable: true
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+        recorded_at:
+          type: string
+          format: date-time
+          title: Recorded At
+        snapshot:
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
+          title: Snapshot
+      type: object
+      required:
+      - id
+      - event_type
+      - workspace_id
+      - job_id
+      - attempt_id
+      - step_id
+      - previous_state
+      - new_state
+      - occurred_at
+      - recorded_at
+      - snapshot
+      title: JobLifecycleEvent
     JsonValue:
       title: JsonValue
     JsonWebKey:
