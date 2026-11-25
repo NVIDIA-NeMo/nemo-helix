@@ -16,13 +16,12 @@ from typing import Any
 
 # Always kept on a vision LoRA job. A caller exclude list is unioned with these
 # patterns; it does not replace them. ``*proj`` is the API backfill for an unset
-# target list, so it is not a caller filter. ``*vision_projector*``, ``*audio*``,
-# and ``*sound*`` match the Nemotron 3.5 Super VL PEFT example. The other vision
-# names cover towers that do not use those module names.
+# target list, so it is not a caller filter. ``*vision*`` covers the tower, projector
+# and embedder names that contain it (``vision_tower``, ``vision_projector``,
+# Gemma's ``embed_vision``); ``*audio*`` and ``*sound*`` match the Nemotron 3.5 Super
+# VL PEFT example. The other names cover towers that do not use those module names.
 VLM_LORA_EXCLUDE_MODULES = [
-    "*vision_tower*",
-    "*vision_model*",
-    "*vision_projector*",
+    "*vision*",
     "*visual*",
     "*image_encoder*",
     "*multi_modal_projector*",

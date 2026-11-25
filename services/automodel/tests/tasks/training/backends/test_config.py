@@ -1401,9 +1401,7 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert compiled["distributed"]["ep_size"] == 1
     assert "num_nextn_predict_layers" not in compiled["model"]
     assert compiled["peft"]["exclude_modules"] == [
-        "*vision_tower*",
-        "*vision_model*",
-        "*vision_projector*",
+        "*vision*",
         "*visual*",
         "*image_encoder*",
         "*multi_modal_projector*",
@@ -1469,9 +1467,7 @@ def test_a_caller_exclude_keeps_the_vision_patterns(tmp_path: Path) -> None:
     compiled = _compile_vision(config, tmp_path)
 
     assert compiled["peft"]["exclude_modules"] == [
-        "*vision_tower*",
-        "*vision_model*",
-        "*vision_projector*",
+        "*vision*",
         "*visual*",
         "*image_encoder*",
         "*multi_modal_projector*",

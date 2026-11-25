@@ -85,6 +85,16 @@ LoRA parameters (`training.lora`):
 | `merge` | Merge the adapter into the base model at the end of training | `false` |
 | `target_modules` | List of module patterns to adapt; `null` applies LoRA to all linear layers | `null` |
 
+### Merge an Existing Adapter
+
+To merge an adapter you already trained, run a merge job. It merges the adapter into the base model on a GPU, uploads the 16-bit result to a new fileset, and registers a Model Entity with `finetuning_type: lora_merged`. The base model and adapter are unchanged.
+
+```bash
+nemo customization automodel merge --model default/my-base --adapter default/my-lora --output.name my-merged
+```
+
+From Python, use `customization.automodel.merge_jobs.create(spec={...}, workspace="default")` with the same `model`, `adapter` and `output` fields. `num_gpus` (default `1`) sets the GPUs for the merge; a model too large for them spills to CPU memory. The adapter must be a LoRA adapter trained on `model`, and `output.name` cannot be the name of either. Embedding and ranking models are not supported.
+
 ### Schedule
 
 | Parameter | Description | Default |

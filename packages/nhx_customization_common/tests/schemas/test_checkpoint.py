@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from fnmatch import fnmatch
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,21 @@ def test_a_caller_exclude_is_unioned_with_the_vision_patterns() -> None:
 
     assert merged[: len(VLM_LORA_EXCLUDE_MODULES)] == list(VLM_LORA_EXCLUDE_MODULES)
     assert merged[-1] == "*.out_proj"
+
+
+@pytest.mark.parametrize(
+    ("module", "excluded"),
+    [
+        ("model.embed_vision.embedding_projection", True),  # Gemma 4 / Bolt: the adapter once targeted this
+        ("model.vision_tower.encoder.layers.0.self_attn.q_proj", True),
+        ("model.audio_tower.layers.0.feed_forward1.ffw_layer_1.linear", True),
+        ("model.language_model.layers.0.self_attn.q_proj", False),
+    ],
+)
+def test_vision_and_audio_modules_are_excluded_from_vlm_lora_but_language_modules_are_not(
+    module: str, excluded: bool
+) -> None:
+    assert any(fnmatch(module, pattern) for pattern in VLM_LORA_EXCLUDE_MODULES) is excluded
 
 
 def test_nemotron_h_adds_mamba_out_proj_when_the_caller_sets_nothing() -> None:

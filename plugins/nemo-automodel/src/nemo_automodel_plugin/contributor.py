@@ -13,14 +13,24 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
+from nemo_helix_plugin.authz import AuthzScope
+from nemo_helix_plugin.commands import _add_submit_command
 from nemo_helix_plugin.customization_contributor import (
     CustomizationCLISummary,
     CustomizationContributorSDKResources,
 )
+from nemo_helix_plugin.jobs.api_factory import JobRouteOption
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.service import RouterSpec
+from nhx.customization_common.cli.renderer import CustomizationSubmitRenderer
 from nhx.customization_common.contributor.base import BaseContributor
+from nhx.customization_common.contributor.config import generate_job_id
+from nhx.customization_common.service.platform_client import CUSTOMIZATION_JOB_SOURCE
 
 from nemo_automodel_plugin.config import AutomodelPluginConfig, generate_automodel_id, get_config
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
+from nemo_automodel_plugin.jobs.merge import AutomodelMergeJob
 
 _CLI_HELP = """Fine-tune a model with Automodel: SFT, LoRA, or knowledge distillation.
 
@@ -43,6 +53,8 @@ The job JSON follows the AutomodelJobInput schema:
 
 Optional blocks: output names the model entity written at the end of the run,
 and integrations enables Weights & Biases reporting.
+
+To merge a trained LoRA adapter into its base model, run 'nemo customization automodel merge'.
 
 For DPO or GRPO, use the rl backend.
 
@@ -72,10 +84,37 @@ class AutomodelContributor(BaseContributor):
     def _get_config(self) -> AutomodelPluginConfig:
         return get_config()
 
+    def get_routers(self) -> list[RouterSpec]:
+        routers = super().get_routers()
+        merge_router = add_job_routes(
+            AutomodelMergeJob,
+            service_name=CUSTOMIZATION_JOB_SOURCE,
+            generate_job_name=lambda: generate_job_id("automodel-merge"),
+            route_options=[JobRouteOption.CORE, JobRouteOption.RERUN, JobRouteOption.DRY_RUN],
+            default_profile=self._get_config().default_training_execution_profile,
+            authz=AuthzScope("customization").child(self.name, "merge-jobs"),
+        )
+        routers.append(
+            RouterSpec(
+                router=merge_router,
+                prefix="/v2/workspaces/{workspace}",
+                tag="Automodel Merge Jobs",
+                description="Automodel LoRA merge jobs.",
+            )
+        )
+        return routers
+
     def apply_cli_overrides(self, app: typer.Typer) -> None:
         from nemo_automodel_plugin.cli.inputs import apply_automodel_job_cli_overrides
 
         apply_automodel_job_cli_overrides(app)
+        _add_submit_command(
+            app,
+            AutomodelMergeJob,
+            NemoJobScheduler(),
+            renderer_cls=CustomizationSubmitRenderer,
+            command_name="merge",
+        )
 
     def get_sdk_resources(self) -> CustomizationContributorSDKResources:
         from nemo_automodel_plugin.sdk.resources import AsyncAutomodelCustomization, AutomodelCustomization
