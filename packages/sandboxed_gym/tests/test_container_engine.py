@@ -219,3 +219,37 @@ def test_an_unknown_engine_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     with pytest.raises(RuntimeError, match="not supported"):
         host.prepare({ENGINE_ENV: "dockerd"})
+
+
+def test_the_workspace_handover_skips_an_entry_removed_during_the_walk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Another writer on the workspace can delete a file between the listing and its chown."""
+    host = _Host(monkeypatch, tmp_path)
+    (host.work / "nested" / "gone").write_text("x")
+    record = host._chown
+
+    def chown(target: int | str, uid: int, gid: int, **kwargs: object) -> None:
+        if target == "gone":
+            raise FileNotFoundError(2, "No such file or directory", target)
+        record(target, uid, gid, **kwargs)
+
+    monkeypatch.setattr(container_engine, "chown", chown)
+
+    assert host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)}) is True
+    assert ("chown", ("entry", "file")) in host.calls
+    assert ("setuid", 1000) in host.calls
+
+
+def test_the_workspace_handover_raises_any_other_chown_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    host = _Host(monkeypatch, tmp_path)
+
+    def chown(target: int | str, uid: int, gid: int, **kwargs: object) -> None:
+        if target == "file":
+            raise PermissionError(1, "Operation not permitted", target)
+
+    monkeypatch.setattr(container_engine, "chown", chown)
+
+    with pytest.raises(PermissionError):
+        host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)})
+    assert not any(name == "setuid" for name, _ in host.calls)

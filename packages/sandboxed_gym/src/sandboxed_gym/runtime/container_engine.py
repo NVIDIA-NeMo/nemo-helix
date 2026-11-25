@@ -69,12 +69,16 @@ def _chown_tree(root: Path, uid: int, gid: int) -> None:
 
     This runs as root over a workspace an earlier attempt of the job may still be writing to. ``os.fwalk``
     holds each directory open and names entries relative to it, so swapping a directory for a link while
-    the walk runs can't redirect a change of ownership outside the tree.
+    the walk runs can't redirect a change of ownership outside the tree. An entry removed between the listing
+    and its ``chown`` has nothing left to hand over, so it is skipped; any other failure still raises.
     """
     for _path, _dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
         chown(dir_fd, uid, gid)
         for name in filenames:
-            chown(name, uid, gid, dir_fd=dir_fd, follow_symlinks=False)
+            try:
+                chown(name, uid, gid, dir_fd=dir_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
 
 
 def prepare_container_engine(
