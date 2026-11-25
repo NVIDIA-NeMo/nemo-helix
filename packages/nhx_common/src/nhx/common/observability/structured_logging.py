@@ -53,9 +53,9 @@ def _source_path_log_processor() -> LogRecordProcessor:
 
     from opentelemetry.sdk._logs import LogRecordProcessor
 
-    # Match traceback frame locations, including chained exceptions. Message
-    # text is deliberately preserved; this is not general content redaction.
-    frame_path = re.compile(r'(?m)^([ \t|+]*File ")(.+)(", line \d+)')
+    # Match complete frame locations and any trailing frame cut off by the SDK's
+    # attribute-length limit. Preserve the rest of the traceback.
+    frame_path = re.compile(r'(?m)^([ \t|+]*File ")(?:(.+)(", line \d+)(?=, in |$)|[^\n]*\Z)')
 
     class SourcePathLogProcessor(LogRecordProcessor):
         def on_emit(self, log_record) -> None:
@@ -71,7 +71,8 @@ def _source_path_log_processor() -> LogRecordProcessor:
             stacktrace = attributes.get("exception.stacktrace")
             if isinstance(stacktrace, str):
                 attributes["exception.stacktrace"] = frame_path.sub(
-                    lambda match: match[1] + ntpath.basename(match[2]) + match[3], stacktrace
+                    lambda match: match[1] + ntpath.basename(match[2]) + match[3] if match[2] is not None else "",
+                    stacktrace,
                 )
 
         def shutdown(self) -> None:

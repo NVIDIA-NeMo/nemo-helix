@@ -491,6 +491,32 @@ def test_exported_exceptions_keep_details_without_source_directories(monkeypatch
     assert __file__ not in stacktrace
 
 
+def test_encoded_otlp_stacktrace_drops_truncated_frame_path(monkeypatch):
+    monkeypatch.setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "64")
+    exporter = InMemoryLogRecordExporter()
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    initialize_logging()
+
+    source_path = "/opt/application/long-internal-build-directory/source/worker.py"
+    try:
+        exec(compile("raise ValueError('failure details')", source_path, "exec"), {})
+    except ValueError as exc:
+        tb = exc.__traceback__
+        assert tb is not None and tb.tb_next is not None
+        # Keep the synthetic frame first so the limit cuts inside its path.
+        logging.getLogger().error("operation failed", exc_info=(type(exc), exc, tb.tb_next))
+    _flush_logs()
+
+    logs = exporter.get_finished_logs()
+    assert len(logs) == 1
+    record = encode_logs(logs).resource_logs[0].scope_logs[0].log_records[0]
+    attributes = {attribute.key: attribute.value.string_value for attribute in record.attributes}
+    assert attributes["exception.stacktrace"].splitlines() == ["Traceback (most recent call last):"]
+    assert attributes["exception.type"] == "ValueError"
+    assert attributes["exception.message"] == "failure details"
+
+
 def test_only_marked_sensitive_records_are_dropped(monkeypatch):
     exporter = InMemoryLogRecordExporter()
     monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: lambda **kwargs: exporter)
