@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""HTTP request logging middleware."""
+"""HTTP request observability middleware."""
 
 from __future__ import annotations
 
@@ -11,8 +11,37 @@ import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .otel import INTERNAL_REQUEST_HEADER, otel_headers_context
+
+
+class OpenTelemetryRouteMiddleware:
+    """Expose the matched FastAPI template when OTel records request duration."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if scope["type"] == "http":
+                # FastAPI keeps the original APIRoute in scope["route"]. Legacy OTel
+                # reads its path_format after the request, so pass it the composed route.
+                route = scope.get("route")
+                fastapi_scope = scope.get("fastapi")
+                effective_route = (
+                    fastapi_scope.get("effective_route_context") if isinstance(fastapi_scope, dict) else None
+                )
+                template = getattr(effective_route, "path_format", None)
+                if (
+                    route is not None
+                    and getattr(effective_route, "original_route", None) is route
+                    and template
+                    and template != getattr(route, "path_format", None)
+                ):
+                    scope["route"] = effective_route
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

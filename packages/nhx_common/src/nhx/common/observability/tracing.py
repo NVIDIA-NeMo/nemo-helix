@@ -116,7 +116,7 @@ def setup_fastapi_instrumentations(app: FastAPI):
     # server startup time, not during module loading.
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-    from .middleware import RequestLoggingMiddleware
+    from .middleware import OpenTelemetryRouteMiddleware, RequestLoggingMiddleware
 
     app.add_middleware(RequestLoggingMiddleware)
 
@@ -130,6 +130,9 @@ def setup_fastapi_instrumentations(app: FastAPI):
         from prometheus_fastapi_instrumentator import Instrumentator as PrometheusInstrumentator
 
         PrometheusInstrumentator().instrument(app).expose(app)
+
+    # Run on unwind after the other user middleware, before OTel records duration.
+    app.add_middleware(OpenTelemetryRouteMiddleware)
 
 
 def setup_global_instrumentations(
