@@ -10,8 +10,11 @@ from collections.abc import Sequence
 from nemo_builder_plugin.backend import Backend
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.execution import ExecutionBackend
+from nemo_builder_plugin.remote import RemoteBackend
 from nemo_helix_plugin.jobs.endpoints import ExecutionProfile
 
 
 def load_backend(config: BuilderConfig, profiles: Sequence[ExecutionProfile]) -> Backend:
+    if config.backend == "remote":
+        return RemoteBackend(config, profiles)
     return ExecutionBackend(config, profiles)
