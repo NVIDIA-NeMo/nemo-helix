@@ -20,11 +20,12 @@ pytest.importorskip("opensandbox_server")
 
 import nemo_ext_server as ext
 import opensandbox_server
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from kubernetes.client import (
     V1ContainerState,
     V1ContainerStateTerminated,
+    V1ContainerStateWaiting,
     V1ContainerStatus,
     V1ObjectMeta,
     V1Pod,
@@ -40,7 +41,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
 )
 from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from opensandbox_server.extensions import apply_extensions_to_annotations
-from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY, SandboxErrorCodes
 from opensandbox_server.services.endpoint_auth import build_egress_auth_headers
 from opensandbox_server.services.k8s import kubernetes_service, provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
@@ -256,8 +257,10 @@ def _pod(*containers: V1ContainerStatus) -> V1Pod:
     )
 
 
-def _container(name: str, terminated: V1ContainerStateTerminated | None) -> V1ContainerStatus:
-    state = V1ContainerState(terminated=terminated)
+def _container(
+    name: str, terminated: V1ContainerStateTerminated | None, waiting: V1ContainerStateWaiting | None = None
+) -> V1ContainerStatus:
+    state = V1ContainerState(terminated=terminated, waiting=waiting)
     return V1ContainerStatus(name=name, state=state, image="i", image_id="i", ready=False, restart_count=0)
 
 
@@ -296,6 +299,70 @@ def test_pending_sandbox_whose_containers_run_keeps_the_stock_status(
     assert provider.get_status(_labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))["state"] == (
         "Allocated"
     )
+
+
+REFUSED_MESSAGE = 'CreateContainer nemo/sbx-1-pod:sandbox: invalid annotation: "memory.oom.group"'
+
+
+@pytest.mark.parametrize(("annotations", "pod_ip"), [({}, None), ({POD_ANNOTATION: SPEC}, "10.0.0.5")])
+def test_pending_sandbox_whose_container_the_runtime_refused_is_failed_with_why(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, annotations: dict[str, str], pod_ip: str | None
+) -> None:
+    """An NRI plugin that doesn't allow an annotation refuses the container for good, so the sandbox never starts."""
+    waiting = V1ContainerStateWaiting(reason="CreateContainerError", message=REFUSED_MESSAGE)
+    k8s.pods = [_pod(_container("sandbox", None, waiting))]
+
+    status = provider.get_status(_labelled_workload(annotations, "Pending", pod_ip))
+
+    assert status["state"] == "Failed"
+    assert status["reason"] == "CONTAINER_REFUSED"
+    assert status["message"] == f"container sandbox: CreateContainerError: {REFUSED_MESSAGE}"
+
+
+@pytest.mark.parametrize(
+    "waiting",
+    [
+        V1ContainerStateWaiting(reason="ContainerCreating"),
+        # Other create errors, such as a name still held by a removed container, clear up on the kubelet's retry.
+        V1ContainerStateWaiting(reason="CreateContainerError", message='the container name "sandbox" is reserved'),
+    ],
+)
+def test_pending_sandbox_whose_container_waits_otherwise_keeps_the_stock_status(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, waiting: V1ContainerStateWaiting
+) -> None:
+    k8s.pods = [_pod(_container("sandbox", None, waiting))]
+
+    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+
+
+async def test_stock_create_wait_ends_with_the_message_of_a_sandbox_that_cannot_start(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create would otherwise wait out the server's create timeout (900 s in our examples) and say only that."""
+    waiting = V1ContainerStateWaiting(reason="CreateContainerError", message=REFUSED_MESSAGE)
+    k8s.pods = [_pod(_container("sandbox", None, waiting))]
+    workload = _labelled_workload({}, "Pending", None)
+    monkeypatch.setattr(provider, "get_workload", lambda **_: workload)
+    monkeypatch.setattr(kubernetes_service, "_is_unschedulable_status", ext.end_create_wait)
+    service = types.SimpleNamespace(workload_provider=provider, namespace="nemo")
+
+    with pytest.raises(HTTPException) as raised:
+        await KubernetesSandboxService._wait_for_sandbox_ready(
+            service,  # ty: ignore[invalid-argument-type]
+            SANDBOX_ID,
+            timeout_seconds=5,
+            poll_interval_seconds=0.01,
+        )
+
+    assert raised.value.detail == {
+        "code": SandboxErrorCodes.K8S_POD_FAILED,
+        "message": f"Sandbox failed to start: container sandbox: CreateContainerError: {REFUSED_MESSAGE}",
+    }
+
+
+@pytest.mark.parametrize(("reason", "unschedulable"), [("POD_PLATFORM_UNSCHEDULABLE", True), ("POD_PENDING", False)])
+def test_create_wait_keeps_the_stock_check_for_a_sandbox_that_has_not_failed(reason: str, unschedulable: bool) -> None:
+    assert ext.end_create_wait({"state": "Pending", "reason": reason, "message": ""}) is unschedulable
 
 
 def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
@@ -580,12 +647,14 @@ def test_install_registers_the_provider_before_the_server_builds_it(monkeypatch:
     monkeypatch.setattr(
         kubernetes_service, "_attach_egress_auth_headers", kubernetes_service._attach_egress_auth_headers
     )
+    monkeypatch.setattr(kubernetes_service, "_is_unschedulable_status", kubernetes_service._is_unschedulable_status)
 
     ext.install(["opensandbox-server", "--config", "/etc/opensandbox/config.toml"])
 
     assert seen == {"provider": ext.NemoComposeProvider, "config": "/etc/opensandbox/config.toml"}
     # The service's own token attachment is replaced, so the token follows a moved egress policy API.
     assert kubernetes_service._attach_egress_auth_headers is ext.attach_egress_auth_headers
+    assert kubernetes_service._is_unschedulable_status is ext.end_create_wait
     app = sys.modules["opensandbox_server.main"].app
     # 503 rather than 404: the route is there, but this test built no provider.
     assert TestClient(app).get("/v1/nemo-ext/health").status_code == 503

@@ -71,7 +71,11 @@ from nhx_sandbox.harbor_opensandbox_services import (
     SandboxAgentBundle,
 )
 from opensandbox_server.config import CONFIG_ENV_VAR
-from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY, SANDBOX_ID_LABEL
+from opensandbox_server.services.constants import (
+    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
+    SANDBOX_ID_LABEL,
+    SandboxErrorCodes,
+)
 from opensandbox_server.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
 from opensandbox_server.services.k8s import kubernetes_service, provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
@@ -91,6 +95,10 @@ except ImportError:  # Servers before multi-tenancy (opensandbox-server 0.2.2) h
 
 # Under the server's logger tree, which is the only one its logging config enables.
 logger = logging.getLogger("opensandbox_server.nemo_ext")
+
+# How the NRI memory-qos plugin refuses a container whose annotation its config doesn't list.
+_REFUSED = "invalid annotation"
+_stock_is_unschedulable_status = kubernetes_service._is_unschedulable_status
 
 # Set to "true" only where every sandbox node's NRI memory-qos plugin allows memory.oom.group: a plugin that doesn't
 # rejects the container.
@@ -179,8 +187,9 @@ class NemoComposeProvider(BatchSandboxProvider):
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
         """The stock status, except where the pod says more than the BatchSandbox does.
 
-        A Pending sandbox whose pod has a stopped container is ``Failed``, with the container's
-        reason (``OOMKilled``, say) as its message, so a client can tell why its sandbox died.
+        A Pending sandbox whose pod has a stopped container, or one the runtime refused to create, is
+        ``Failed``, with the container's reason (``OOMKilled``, say) as its message, so a client can
+        tell why its sandbox died.
 
         A sandbox with services or a bundle is ``Allocated`` once its pod has an IP. Kubernetes starts
         the sandbox container only after every init container and sidecar is up, and the stock create
@@ -193,9 +202,10 @@ class NemoComposeProvider(BatchSandboxProvider):
             return status
 
         # The controller leaves a sandbox whose container stopped in Pending; only the pod says why.
-        stopped = self._stopped_container(workload)
-        if stopped is not None:
-            return {**status, "state": "Failed", "reason": "CONTAINER_TERMINATED", "message": stopped}
+        failed = self._failed_container(workload)
+        if failed is not None:
+            reason, message = failed
+            return {**status, "state": "Failed", "reason": reason, "message": message}
 
         if not self._parse_pod_ip(workload):
             return status
@@ -218,8 +228,8 @@ class NemoComposeProvider(BatchSandboxProvider):
             }
         return status
 
-    def _stopped_container(self, workload: dict[str, Any]) -> str | None:
-        """``"container <name>: <reason> (exit <code>)"`` for the sandbox pod's first stopped container, else None.
+    def _failed_container(self, workload: dict[str, Any]) -> tuple[str, str] | None:
+        """The status reason and message for the sandbox pod's first stopped or refused container, else None.
 
         Never raises: a failed lookup leaves the stock status as it was.
         """
@@ -239,8 +249,16 @@ class NemoComposeProvider(BatchSandboxProvider):
                 terminated = container.state.terminated if container.state is not None else None
                 if terminated is not None:
                     return (
-                        f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})"
+                        "CONTAINER_TERMINATED",
+                        f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})",
                     )
+                waiting = container.state.waiting if container.state is not None else None
+                if (
+                    waiting is not None
+                    and waiting.reason == "CreateContainerError"
+                    and _REFUSED in (waiting.message or "")
+                ):
+                    return "CONTAINER_REFUSED", f"container {container.name}: CreateContainerError: {waiting.message}"
         return None
 
     def _create_workload_from_pool(self, *args: Any, **kwargs: Any) -> Any:
@@ -387,6 +405,19 @@ def _read_output(ws: Any, timeout: float) -> tuple[str, str]:
     return "".join(out), "".join(err)
 
 
+def end_create_wait(status_info: dict[str, Any]) -> bool:
+    """The stock create wait's unschedulable check, which also ends the wait with the message of a Failed sandbox."""
+    if status_info.get("state") == "Failed":
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": SandboxErrorCodes.K8S_POD_FAILED,
+                "message": f"Sandbox failed to start: {status_info.get('message') or 'no message'}",
+            },
+        )
+    return _stock_is_unschedulable_status(status_info)
+
+
 def _error(status: int, code: str, message: str) -> HTTPException:
     """An HTTPException in the server's error shape."""
     return HTTPException(status_code=status, detail={"code": f"NEMO::{code}", "message": message})
@@ -475,6 +506,8 @@ def install(argv: list[str]) -> None:
     ):
         if not callable(getattr(BatchSandboxProvider, name, None)):
             raise RuntimeError(f"BatchSandboxProvider.{name} is missing; this server version is unsupported")
+    if not callable(getattr(kubernetes_service, "_is_unschedulable_status", None)):
+        raise RuntimeError("KubernetesSandboxService's create wait has changed; this server version is unsupported")
     if not callable(getattr(kubernetes_service, "_attach_egress_auth_headers", None)):
         raise RuntimeError(
             "KubernetesSandboxService no longer attaches the egress token; this server version is unsupported"
@@ -489,6 +522,7 @@ def install(argv: list[str]) -> None:
     provider_factory.register_provider(provider_factory.PROVIDER_TYPE_BATCHSANDBOX, NemoComposeProvider)
     # The service looks this up by name in its own module on every endpoint request, so this takes effect there.
     kubernetes_service._attach_egress_auth_headers = attach_egress_auth_headers
+    kubernetes_service._is_unschedulable_status = end_create_wait
     import opensandbox_server.main as server_main
 
     server_main.app.include_router(router)

@@ -207,8 +207,9 @@ nothing.
 
 A node without the plugin ignores the annotation, but a plugin whose list
 leaves it out, such as the chart's default, rejects the container with
-`CreateContainerError`, so no sandbox starts. Set it only when every sandbox
-node's plugin allows it. With the plugin's Helm chart:
+`CreateContainerError`, so no sandbox starts: each create fails with the
+plugin's `invalid annotation: "memory.oom.group"`. Set it only when every
+sandbox node's plugin allows it. With the plugin's Helm chart:
 
 ```yaml
 config:
