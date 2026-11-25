@@ -212,9 +212,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "grpcio>=1.81.1,<2" \
     "mistune>=3.3.3,<4" \
     "notebook>=7.6.3,<8" \
-    "pillow>=12.3.0,<13" \
+    "pillow>=13.0.0,<14" \
     "soupsieve>=2.8.4,<3" \
-    "GitPython>=3.1.60,<4" \
+    "GitPython>=3.2.1,<4" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7"
 
