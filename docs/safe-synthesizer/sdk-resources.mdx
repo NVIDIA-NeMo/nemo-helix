@@ -95,7 +95,7 @@ job = (
 | `fetch_data()` | Downloads the `synthetic-data` result and returns it as a pandas DataFrame. |
 | `fetch_summary()` | Downloads the `summary` result as a `SafeSynthesizerSummary`. |
 | `fetch_report()` | Downloads the `evaluation-report` result as HTML. |
-| `fetch_report_data()` | Downloads the `evaluation-report-data` result as an `EvaluationReportData` with the evaluation's scores, per-metric results and Plotly charts, and column statistics. |
+| `fetch_report_data()` | Downloads the `evaluation-report-data` result as an `EvaluationReportData` with the evaluation's scores, per-metric results, column statistics, and the PII replacement applied. Per-metric results hold the values the report's charts are drawn from. |
 | `save_report(path)` | Saves the HTML evaluation report to a local file. |
 | `display_report_in_notebook(width="100%", height=1000)` | Displays the evaluation report in a notebook. |
 
