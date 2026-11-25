@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { JobFailureNotice } from '@agent-hardener/components/JobFailureNotice';
 import { useRunWarGame } from '@agent-hardener/components/useRunWarGame';
 import {
   getAgentHardenerListManifestsQueryKey,
@@ -113,6 +114,14 @@ export const AgentHardenerManifestsDataView: FC = () => {
 
   return (
     <>
+      {runWarGame.failure ? (
+        <JobFailureNotice
+          title="War-game failed"
+          failure={runWarGame.failure}
+          workspace={workspace}
+          jobName={runWarGame.jobName}
+        />
+      ) : null}
       <StudioDataView<AgentHardenerManifestWithId>
         dataViewState={dataViewState}
         makeColumns={makeColumns}

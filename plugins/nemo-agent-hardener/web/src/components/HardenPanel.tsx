@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import { endedJobFailure } from '@agent-hardener/api/jobFailure';
-import { useHelixSdk } from '@agent-hardener/api/platform';
+import { usePolledJob } from '@agent-hardener/api/platform';
 import { ConfigDiff } from '@agent-hardener/components/ConfigDiff';
 import { JobFailureNotice } from '@agent-hardener/components/JobFailureNotice';
 import { SanityCheckReport } from '@agent-hardener/components/SanityCheckReport';
@@ -22,7 +23,7 @@ import {
 import { useAgentHardenerApplyMitigation, useAgentHardenerGetManifest } from '@agent-hardener/generated/api';
 import { useNotify, useToast } from '@agent-hardener/host';
 import { ACCENT, tint } from '@agent-hardener/theme';
-import { AccordionSection, ConfirmationModal, getJobRefetchInterval } from '@nemo/common';
+import { AccordionSection, ConfirmationModal } from '@nemo/common';
 import {
   AccordionRoot,
   Badge,
@@ -207,13 +208,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
   const effectiveSanityJob = sanityJob ?? persistedJob;
   // The sanity job's status is what tells us a check died without writing a report — without it a
   // failed job leaves this panel spinning forever.
-  const { useJobsGetJob } = useHelixSdk();
-  const { data: sanityJobDetail } = useJobsGetJob(workspace, effectiveSanityJob ?? '', {
-    query: {
-      enabled: Boolean(effectiveSanityJob),
-      refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status),
-    },
-  });
+  const { data: sanityJobDetail } = usePolledJob(workspace, effectiveSanityJob ?? '');
   const sanityStatus = sanityJobDetail?.status;
   const sanityFailure = endedJobFailure(sanityJobDetail);
   const {
@@ -289,8 +284,8 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     if (!mitigations) return null;
     try {
       return await compose.mutateAsync({ mitigations, selectedDefenseIds: selectedIds });
-    } catch {
-      toast.error('Failed to compose the selected defenses.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to compose the selected defenses')(error);
       return null;
     }
   };
@@ -318,23 +313,20 @@ export const HardenPanel: FC<HardenPanelProps> = ({
       });
       onSanityJobChange(job);
       toast.success('Sanity check started — replaying attacks against your selection…');
-    } catch {
-      toast.error('Failed to start the sanity check.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to start the sanity check')(error);
     }
   };
 
+  // Errors propagate so the ConfirmationModal shows the backend's reason.
   const applyGuardrails = async (): Promise<boolean> => {
     if (!effectiveComposedGuardrails) return false;
-    try {
-      await applyMitigation.mutateAsync({
-        workspace,
-        name: runName,
-        data: { guardrails_toml: effectiveComposedGuardrails },
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    await applyMitigation.mutateAsync({
+      workspace,
+      name: runName,
+      data: { guardrails_toml: effectiveComposedGuardrails },
+    });
+    return true;
   };
 
   const busy = compose.isPending || submitting;

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useHelixSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk, usePolledJob } from '@agent-hardener/api/platform';
 import { CancelJobButton } from '@agent-hardener/components/CancelJobButton';
 import { HardenPanel } from '@agent-hardener/components/HardenPanel';
 import {
@@ -22,7 +22,7 @@ import { useAgentHardenerGetRun } from '@agent-hardener/generated/api';
 import { useBreadcrumbs, useWorkspace } from '@agent-hardener/host';
 import { getAgentHardenerRunListRoute } from '@agent-hardener/paths';
 import { ACCENT, tint } from '@agent-hardener/theme';
-import { AccessibleTitle, JOB_POLLING_INTERVAL_MS, getJobRefetchInterval } from '@nemo/common';
+import { AccessibleTitle, JOB_POLLING_INTERVAL_MS } from '@nemo/common';
 import {
   Badge,
   Banner,
@@ -86,13 +86,8 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
 
   // The platform job behind this run drives the interview/review HITL over its status_details.
   const jobName = run?.job_id ?? '';
-  const { useJobsGetJob, useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
-  const { data: job } = useJobsGetJob(workspace, jobName, {
-    query: {
-      enabled: Boolean(jobName),
-      refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status),
-    },
-  });
+  const { useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
+  const { data: job } = usePolledJob(workspace, jobName);
   const patch = useJobsUpdateJobAttemptStatusDetails();
   const details = job?.status_details as Record<string, unknown> | undefined;
   const interview = pendingInterview(details);

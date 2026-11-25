@@ -12,6 +12,7 @@
  * mutations and this component only reports a validated config.
  */
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import { useUploadBenignSuiteFileset, useUploadHitlogFileset } from '@agent-hardener/api/filesets';
 import { ModelGroupFields } from '@agent-hardener/components/ModelGroupFields';
 import {
@@ -161,8 +162,8 @@ export const RunWarGameDialog: FC<RunWarGameDialogProps> = ({
     setHitlogFileset(undefined);
     try {
       setHitlogFileset(await uploadHitlog.mutateAsync({ workspace, manifestName, file }));
-    } catch {
-      toast.error('Failed to upload the hitlog file.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to upload the hitlog file')(error);
     }
   };
 
@@ -174,8 +175,8 @@ export const RunWarGameDialog: FC<RunWarGameDialogProps> = ({
     setBenignFileset(undefined);
     try {
       setBenignFileset(await uploadBenign.mutateAsync({ workspace, manifestName, file }));
-    } catch {
-      toast.error('Failed to upload the benign suite file.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to upload the benign suite file')(error);
     }
   };
 

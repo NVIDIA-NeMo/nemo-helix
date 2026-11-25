@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import { BenignInterviewCard } from '@agent-hardener/components/BenignInterviewCard';
 import { BenignSuiteTable } from '@agent-hardener/components/BenignSuiteTable';
 import type { SuiteRow } from '@agent-hardener/components/hitlTypes';
@@ -95,7 +96,7 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
           queryKey: getAgentHardenerGetManifestQueryKey(workspace, agentHardenerManifestName),
         });
       },
-      onError: () => toast.error('Failed to save the manifest.'),
+      onError: toastApiError(toast, 'Failed to save the manifest'),
     },
   });
   const runWarGame = useRunWarGame(workspace);
@@ -116,21 +117,18 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
   }, [toast, queryClient, workspace, agentHardenerManifestName]);
   const gen = useGenerateBenignSuite(workspace, agentHardenerManifestName, onGenerated);
 
+  // Errors propagate so the ConfirmationModal shows the backend's reason.
   const clearSuite = async (): Promise<boolean> => {
-    try {
-      await clearManifest.mutateAsync({
-        workspace,
-        name: agentHardenerManifestName,
-        data: { benign_suite: [] },
-      });
-      setSuite([]);
-      queryClient.invalidateQueries({
-        queryKey: getAgentHardenerGetManifestQueryKey(workspace, agentHardenerManifestName),
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    await clearManifest.mutateAsync({
+      workspace,
+      name: agentHardenerManifestName,
+      data: { benign_suite: [] },
+    });
+    setSuite([]);
+    queryClient.invalidateQueries({
+      queryKey: getAgentHardenerGetManifestQueryKey(workspace, agentHardenerManifestName),
+    });
+    return true;
   };
 
   // env is stored as a map but edited as `KEY=VALUE, KEY2=VALUE2` — one text field beats a
@@ -157,24 +155,20 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
       });
       toast.success('Environment variables saved.');
       setEnvDialogOpen(false);
-    } catch {
-      toast.error('Failed to save the environment variables.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to save the environment variables')(error);
     }
   };
 
   const refreshManifest = useAgentHardenerRefreshManifest();
   // Manifests are frozen targets, so agent edits only land here deliberately. Confirmed because it
-  // changes what the next run attacks.
+  // changes what the next run attacks. Errors reach the modal, which shows the backend's reason.
   const refreshTarget = async (): Promise<boolean> => {
-    try {
-      await refreshManifest.mutateAsync({ workspace, name: agentHardenerManifestName });
-      queryClient.invalidateQueries({
-        queryKey: getAgentHardenerGetManifestQueryKey(workspace, agentHardenerManifestName),
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    await refreshManifest.mutateAsync({ workspace, name: agentHardenerManifestName });
+    queryClient.invalidateQueries({
+      queryKey: getAgentHardenerGetManifestQueryKey(workspace, agentHardenerManifestName),
+    });
+    return true;
   };
 
   const downloadCsv = () => {
@@ -265,6 +259,15 @@ export const AgentHardenerManifestDetailRoute: FC = () => {
             </Flex>
           }
         />
+
+        {runWarGame.failure ? (
+          <JobFailureNotice
+            title="War-game failed"
+            failure={runWarGame.failure}
+            workspace={workspace}
+            jobName={runWarGame.jobName}
+          />
+        ) : null}
 
         {gen.failure && !gen.active ? (
           <JobFailureNotice
