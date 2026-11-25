@@ -1023,7 +1023,23 @@ def test_selected_defenders_match_agent_hardeners_own_defaults() -> None:
     implementations = {key: entry["implementation"] for key, entry in manifest_mod.DEFENDER_ENTRIES.items()}
 
     assert implementations["openshell"].startswith("agent_hardener.agents.defenders.openshell_defender_v2")
-    assert implementations["guardrails"].startswith("agent_hardener.agents.defenders.guardrails_defender_v2")
+    assert implementations["guardrails"] == "agent_hardener.agents.defenders.guardrails_defender:run"
+
+
+def test_resolve_guardrails_implementation_supports_0_0_18_and_0_0_19(tmp_path: Path) -> None:
+    v18 = tmp_path / "v18" / "lib" / "python3.12" / "site-packages" / "agent_hardener" / "agents" / "defenders"
+    (v18 / "guardrails_defender_v2").mkdir(parents=True)
+    (v18 / "guardrails_defender_v2" / "guardrails_defender_agent.py").write_text("", encoding="utf-8")
+    assert manifest_mod._resolve_guardrails_implementation(tmp_path / "v18") == (
+        "agent_hardener.agents.defenders.guardrails_defender_v2.guardrails_defender_agent:run"
+    )
+
+    v19 = tmp_path / "v19" / "lib" / "python3.12" / "site-packages" / "agent_hardener" / "agents" / "defenders"
+    v19.mkdir(parents=True)
+    (v19 / "guardrails_defender.py").write_text("", encoding="utf-8")
+    assert manifest_mod._resolve_guardrails_implementation(tmp_path / "v19") == (
+        "agent_hardener.agents.defenders.guardrails_defender:run"
+    )
 
 
 def test_apply_manifest_overrides_applies_explicit_port_only() -> None:
