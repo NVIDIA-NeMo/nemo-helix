@@ -64,6 +64,15 @@ STUDIO_CONTEXT_END = "</nemo_studio_context>"
 STUDIO_CONTEXT_USER_REQUEST_PREFIX = "User request:"
 STUDIO_CONTEXT_PROMPT_HEADER = "You are NeMo Assistant, running inside NeMo Studio."
 EMPTY_ANSWER_MESSAGE = "NeMo Assistant finished without an answer. Try asking again."
+# Activity is reported before a write runs, so a change may have happened even without an answer.
+EMPTY_ANSWER_AFTER_CHANGE_MESSAGE = (
+    "NeMo Assistant finished without an answer after it started a change. Check the activity above "
+    "before you resend, because the change may already have been made."
+)
+NEMO_API_TOOL_NAME = "nemo_api"
+DEPLOY_GUARDRAIL_TOOL_NAME = "deploy_guardrail"
+# Mirrors the agent's read-only nemo_api actions; any other action counts as a possible change.
+_READ_ONLY_API_ACTIONS = frozenset({"check", "get", "get_logs", "get_status", "list", "read", "retrieve", "search"})
 STUDIO_MESSAGE_SUMMARY_START = "<<<NEMO_STUDIO_MESSAGE_SUMMARY_V1>>>"
 STUDIO_MESSAGE_SUMMARY_END = "<<<END_NEMO_STUDIO_MESSAGE_SUMMARY_V1>>>"
 WORKSPACE_NAME_RE = re.compile(NAME_PATTERN)
@@ -138,7 +147,7 @@ _AGENT_INPUT_RESPONSE_RESERVED_KEYS = frozenset({"message", "status"})
 def _without_refused_turns(conversation: list[AssistantMessage]) -> list[AssistantMessage]:
     kept: list[AssistantMessage] = []
     for message in conversation:
-        if message.role == "assistant" and message.content == assistant_topic_gate.REFUSAL_TEXT:
+        if message.role == "assistant" and message.gate_refusal:
             if kept and kept[-1].role == "user":
                 kept.pop()
             continue
@@ -169,11 +178,13 @@ def _append_conversation_turn(
     user_message: str,
     assistant_message: str,
     model: str,
+    *,
+    gate_refusal: bool = False,
 ) -> None:
     conversation.messages.extend(
         [
             AssistantMessage(role="user", content=user_message),
-            AssistantMessage(role="assistant", content=assistant_message),
+            AssistantMessage(role="assistant", content=assistant_message, gate_refusal=gate_refusal),
         ]
     )
     record_assistant_model(conversation.chat_artifacts, model)
@@ -282,7 +293,10 @@ def _normalize_studio_base_url(value: str | None) -> str | None:
     if not base_url:
         return None
 
-    parsed = urlparse(base_url)
+    try:
+        parsed = urlparse(base_url)
+    except ValueError:
+        return None
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
 
@@ -294,7 +308,10 @@ def _studio_base_url_from_referer(value: str | None) -> str | None:
     if not referer:
         return None
 
-    parsed = urlparse(referer)
+    try:
+        parsed = urlparse(referer)
+    except ValueError:
+        return None
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
 
@@ -316,7 +333,10 @@ def _studio_pathname_from_referer(value: str | None) -> str | None:
     if not referer:
         return None
 
-    parsed = urlparse(referer)
+    try:
+        parsed = urlparse(referer)
+    except ValueError:
+        return None
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
 
@@ -347,8 +367,8 @@ def _strip_studio_context_from_prompt(content: str) -> str:
     return request.strip() or content
 
 
-def _studio_page_context_lines(studio_pathname: str | None) -> list[str]:
-    page = studio_links.describe_studio_page(studio_pathname)
+def _studio_page_context_lines(studio_pathname: str | None, workspace: str | None) -> list[str]:
+    page = studio_links.describe_studio_page(studio_pathname, workspace)
     if page is None:
         return []
     details = [f"studio_link destination '{page.destination}'"]
@@ -364,12 +384,20 @@ def _studio_page_context_lines(studio_pathname: str | None) -> list[str]:
     return lines
 
 
-_STUDIO_ROUTE_PATH_RE = re.compile(r"/[\w./~%-]{0,199}")
+# Plain path characters only: a percent-encoded segment is free text, not a route.
+_STUDIO_ROUTE_PATH_RE = re.compile(r"/[\w./~-]{0,199}")
 
 
 def _studio_route_for_prompt(studio_pathname: str | None) -> str:
-    path = urlsplit(_trimmed_string(studio_pathname) or "").path
-    return path if _STUDIO_ROUTE_PATH_RE.fullmatch(path) else "unknown"
+    """Return the route line: the plain path when it is safe, else the matched route template."""
+    pathname = _trimmed_string(studio_pathname)
+    try:
+        path = urlsplit(pathname or "").path
+    except ValueError:
+        return "unknown"
+    if _STUDIO_ROUTE_PATH_RE.fullmatch(path):
+        return path
+    return studio_links.studio_route_template(pathname) or "unknown"
 
 
 def _build_studio_system_prompt(
@@ -386,7 +414,7 @@ def _build_studio_system_prompt(
         f"Current Studio workspace: {workspace or 'unknown'}",
         f"Studio UI base URL: {normalized_base_url or 'unknown'}",
         f"Current Studio route path: {current_studio_route}",
-        *_studio_page_context_lines(studio_pathname),
+        *_studio_page_context_lines(studio_pathname, workspace),
         "Enabled Studio link destinations for this Studio instance: "
         f"{studio_links.destination_description(destinations)}.",
         "Only call studio_link with one of the enabled destinations above.",
@@ -507,6 +535,10 @@ def _build_assistant_system_prompt(
                 f"pass studio_session_id='{session_id}'."
             ),
             "Do not reveal the Studio session id to the user.",
+            (
+                "Mutating calls are approved in Studio's own approval prompt. Never omit or invent the Studio "
+                "session id to get around that approval."
+            ),
             ("Read-only nemo_api calls run immediately; mutating calls pause until the user approves them in Studio."),
             (
                 "Do not ask the user to confirm a read-only lookup or a mutating call: just make the call, "
@@ -975,6 +1007,26 @@ def _assistant_activity_event(args: dict[str, Any]) -> tuple[str, dict[str, str]
     return tool_name, tool_input
 
 
+def _reports_platform_change(event_type: str, payload: Any) -> bool:
+    """Whether a queued agent event announces a platform write: a guardrail deployment or a mutating API call."""
+    if event_type != "agent" or not isinstance(payload, str):
+        return False
+    try:
+        event = json.loads(payload)
+    except ValueError:
+        return False
+    content = event.get("message", {}).get("content", []) if isinstance(event, dict) else []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+        if block.get("name") == DEPLOY_GUARDRAIL_TOOL_NAME:
+            return True
+        if block.get("name") == NEMO_API_TOOL_NAME and tool_input.get("action") not in _READ_ONLY_API_ACTIONS:
+            return True
+    return False
+
+
 def _tool_use_stream_event(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str]:
     safe_input = {key: value for key, value in tool_input.items() if key not in _TOOL_INPUT_INTERNAL_KEYS}
     return (
@@ -1074,18 +1126,20 @@ async def _persist_conversation_turn(
     message: str,
     assistant_text: str,
     model: str,
+    *,
+    gate_refusal: bool = False,
 ) -> None:
-    _append_conversation_turn(conversation, message, assistant_text, model)
+    _append_conversation_turn(conversation, message, assistant_text, model, gate_refusal=gate_refusal)
     try:
         await entity_store.update(conversation)
     except EntityConflictError:
         logger.info("Reloading conflicted NeMo Assistant session %s before retrying", conversation.name)
         latest_conversation = await entity_store.get(
-            AssistantConversation,
+            type(conversation),
             conversation.name,
             workspace=conversation.workspace,
         )
-        _append_conversation_turn(latest_conversation, message, assistant_text, model)
+        _append_conversation_turn(latest_conversation, message, assistant_text, model, gate_refusal=gate_refusal)
         await entity_store.update(latest_conversation)
 
 
@@ -1156,7 +1210,9 @@ async def _stream_refusal(
     entity_store: _ConversationStore,
 ) -> AsyncIterator[str]:
     model = _studio_assistant_name()
-    await _persist_conversation_turn(entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model)
+    await _persist_conversation_turn(
+        entity_store, conversation, message, assistant_topic_gate.REFUSAL_TEXT, model, gate_refusal=True
+    )
     yield _assistant_text_event(assistant_topic_gate.REFUSAL_TEXT, model)
     yield _sse("", event="done")
 
@@ -1186,7 +1242,10 @@ async def _stream_agent_turn(
         ]
     )
     request_messages = [
-        *(persisted_message.model_dump() for persisted_message in _recent_conversation_messages(conversation.messages)),
+        *(
+            persisted_message.model_dump(include={"role", "content"})
+            for persisted_message in _recent_conversation_messages(conversation.messages)
+        ),
         {"role": "user", "content": contextual_message},
     ]
     invocation = asyncio.create_task(
@@ -1198,6 +1257,7 @@ async def _stream_agent_turn(
         )
     )
     queued_event = asyncio.create_task(queue.get())
+    change_started = False
 
     try:
         while not invocation.done():
@@ -1210,7 +1270,9 @@ async def _stream_agent_turn(
                 yield ":\n\n"
                 continue
             if queued_event in done:
-                rendered = _render_session_event(*queued_event.result())
+                event_type, payload = queued_event.result()
+                change_started = change_started or _reports_platform_change(event_type, payload)
+                rendered = _render_session_event(event_type, payload)
                 if rendered is not None:
                     yield rendered
                 queued_event = asyncio.create_task(queue.get())
@@ -1229,6 +1291,7 @@ async def _stream_agent_turn(
             except asyncio.QueueEmpty:
                 break
         for event_type, payload in pending:
+            change_started = change_started or _reports_platform_change(event_type, payload)
             rendered = _render_session_event(event_type, payload)
             if rendered is not None:
                 yield rendered
@@ -1236,7 +1299,8 @@ async def _stream_agent_turn(
         assistant_text, model = await invocation
         if not assistant_text.strip():
             logger.warning("NeMo Assistant returned an empty answer for session %s", session_id)
-            yield _sse(json.dumps({"message": EMPTY_ANSWER_MESSAGE}), event="error")
+            empty_message = EMPTY_ANSWER_AFTER_CHANGE_MESSAGE if change_started else EMPTY_ANSWER_MESSAGE
+            yield _sse(json.dumps({"message": empty_message}), event="error")
             return
         await _persist_conversation_turn(entity_store, conversation, message, assistant_text, model)
         yield _assistant_text_event(assistant_text, model)
@@ -1423,8 +1487,9 @@ async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDe
 
         if name == JOB_PROGRESS_TOOL_NAME:
             queue = _session_streams.get(sid)
-            if queue is not None:
-                await queue.put(_tool_use_stream_event(JOB_PROGRESS_TOOL_NAME, args))
+            if queue is None:
+                return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "not_streaming"}))
+            await queue.put(_tool_use_stream_event(JOB_PROGRESS_TOOL_NAME, args))
             return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "rendered"}))
 
         if name == ASSISTANT_ACTIVITY_TOOL_NAME:
@@ -1432,8 +1497,10 @@ async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDe
             if activity is None:
                 return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "ignored"}))
             queue = _session_streams.get(sid)
-            if queue is not None:
-                await queue.put(_tool_use_stream_event(*activity))
+            if queue is None:
+                # Nothing is streaming, so the step was dropped rather than shown.
+                return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "not_streaming"}))
+            await queue.put(_tool_use_stream_event(*activity))
             return JSONResponse(_mcp_tool_result_payload(request_id, {"status": "recorded"}))
 
         if name == APPROVAL_TOOL_NAME:

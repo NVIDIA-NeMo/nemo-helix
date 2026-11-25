@@ -280,10 +280,11 @@ export const getSubtleToolMessage = (
   }
 
   if (toolName === 'deploy_guardrail') {
+    const failed = getStringArg(args, ['status']) === 'failed';
     return formatSubtleToolMessage(
-      getStringArg(args, ['status']) === 'failed' ? 'Guardrail step failed:' : 'Guardrail:',
+      failed ? 'Guardrail step failed:' : 'Guardrail:',
       getToolSummary(toolName, args),
-      'Deployed guardrail'
+      failed ? 'Guardrail step failed' : 'Deployed guardrail'
     );
   }
 

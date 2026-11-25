@@ -84,6 +84,15 @@ describe('Studio Assistant activity messages', () => {
     expect(getSubtleToolMessage(toolName, {})).toBe(expected);
   });
 
+  it('keeps the failure wording when a failed guardrail step has no summary', () => {
+    expect(getSubtleToolMessage('deploy_guardrail', { status: 'failed' })).toBe(
+      'Guardrail step failed'
+    );
+    expect(getSubtleToolMessage('deploy_guardrail', { summary: '  ', status: 'failed' })).toBe(
+      'Guardrail step failed'
+    );
+  });
+
   it('uses the activity summary as the detail', () => {
     const message = getSubtleToolMessage('nemo_api', { summary: 'list workspaces' }) ?? '';
 

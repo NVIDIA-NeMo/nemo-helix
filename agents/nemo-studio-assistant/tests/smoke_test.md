@@ -40,6 +40,31 @@ below, and finishes with a one-line invocation. Run the steps by hand when one
 fails and you need its output. For the end-to-end walk-through, see
 [user_journey.md](user_journey.md).
 
+## Terminal assistant
+
+The same agent runs without Studio. `--terminal` deploys a second agent,
+`nemo-studio-assistant-terminal`, next to the Studio one:
+
+```bash
+flox activate -- agents/nemo-studio-assistant/scripts/deploy-local.sh --terminal
+nemo agents chat --agent-deployment nemo-studio-assistant-terminal-fabric-deployment
+```
+
+The script first creates a topic gate, a guardrailed VirtualModel named
+`nemo-assistant-topic-gate` over `NEMO_DEFAULT_MODEL`, and the terminal agent calls that
+VirtualModel instead of the backend model. Off-topic messages are refused by the gate.
+Writes use a two-step confirmation: the agent shows the exact operation, and it runs only
+when the same call is repeated with the token from that preview. The agent's MCP tools are
+the only write path; it has no shell.
+
+Check these before you trust the terminal build:
+
+- A write that you decline does not change the platform.
+- An off-topic message such as "give me a banana bread recipe" gets the refusal.
+- A platform question still gets an answer through the gate.
+
+Studio and terminal are separate deployments. Re-running one does not change the other.
+
 ## Register, package, and deploy
 
 These commands change platform state and should be run independently so each

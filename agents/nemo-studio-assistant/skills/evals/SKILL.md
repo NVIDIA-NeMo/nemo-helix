@@ -10,8 +10,8 @@ metadata:
 # Evaluation
 
 Evaluation scores model or agent output against a dataset with a metric, for
-example exact string match or an LLM judge. Metrics can run synchronously on a
-few inline rows or as an asynchronous job over a fileset.
+example exact string match or an LLM judge. Metrics run as an asynchronous job
+over a fileset.
 
 ## Explaining
 
@@ -20,7 +20,7 @@ few inline rows or as an asynchronous job over a fileset.
 - Check what already exists with
   `nemo_api(resource="evaluation.metrics", action="list", workspace="<active request workspace>")`.
 - A typical path is: put a dataset in a fileset, choose or create a metric,
-  try it on a few inline rows, then run a job over the full dataset.
+  then run a metric job over the full dataset.
 - When the user needs to pick an evaluation config file, use
   `select_eval_config`.
 

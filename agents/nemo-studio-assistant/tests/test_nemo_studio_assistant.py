@@ -15,7 +15,7 @@ from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_fabric_adapter_contract.models import AgentMcpServerConfig
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_studio_assistant import register
+from nemo_studio_assistant import register, topic_gate
 from nemo_studio_assistant.fabric_compat import (
     apply_deepagents_mcp_env_compatibility,
 )
@@ -70,10 +70,12 @@ EVAL_CASES = _load_eval_cases()
 
 @pytest.fixture(autouse=True)
 def _reset_api_error_streaks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(register.APPROVAL_MODE_ENV, raising=False)
     monkeypatch.setattr(register, "_api_error_streaks", {})
     monkeypatch.setattr(register, "_guardrail_check_failures", {})
     monkeypatch.setattr(register, "_preflighted_guardrail_models", set())
     monkeypatch.setattr(register, "_guardrail_deployment_results", {})
+    monkeypatch.setattr(register, "_pending_confirmations", {})
     monkeypatch.setattr(register, "_preflight_guardrail_model", lambda *_args, **_kwargs: None)
 
 
@@ -100,6 +102,7 @@ def test_agent_config_translates_to_fabric_deepagents() -> None:
     assert translated.mcp.servers["nemo_studio"].env == {
         "NHX_BASE_URL": "http://host.docker.internal:8080",
         "NHX_WORKSPACE": "default",
+        "ASSISTANT_APPROVAL_MODE": "studio",
     }
     assert translated.skills is not None
     assert translated.skills.paths == SKILL_PATHS
@@ -301,6 +304,52 @@ def test_mcp_server_exposes_expected_tools() -> None:
     assert "Never pass predicted refusal text" in blocked_schema["description"]
 
 
+# The terminal clause may say Studio pages do not exist there; Studio-only tool and argument names must not appear.
+SURFACE_SPECIFIC_TERMS = ("studio_session_id", "deployment_run_id", "studio_link", "select_")
+
+
+def test_terminal_agent_config_differs_from_studio_only_in_approval_mode() -> None:
+    studio_lines = (AGENT_ROOT / "agent.yaml").read_text().splitlines()
+    terminal_lines = (AGENT_ROOT / "agent.terminal.yaml").read_text().splitlines()
+
+    assert len(studio_lines) == len(terminal_lines)
+    changed = [(old.strip(), new.strip()) for old, new in zip(studio_lines, terminal_lines) if old != new]
+    assert changed == [
+        (
+            "# studio: writes pause for Studio's approval card. The terminal deployment sets chat.",
+            "# terminal: writes need the confirmation_token from a confirmation_required preview.",
+        ),
+        ("ASSISTANT_APPROVAL_MODE: studio", "ASSISTANT_APPROVAL_MODE: chat"),
+    ]
+    translated = translate_agent_config(load_agent_config(AGENT_ROOT / "agent.terminal.yaml"))
+    assert translated.mcp is not None
+    assert translated.mcp.servers["nemo_studio"].env["ASSISTANT_APPROVAL_MODE"] == "chat"
+
+
+def test_shared_system_prompt_names_no_studio_only_surface() -> None:
+    config = load_agent_config(AGENT_ROOT / "agent.yaml")
+    assert config.instructions is not None
+    assert config.instructions.system is not None
+    prompt = config.instructions.system.content
+
+    assert [term for term in SURFACE_SPECIFIC_TERMS if term in prompt] == []
+
+
+READ_ONLY_BUILTIN_TOOLS = {"ls", "read_file", "glob", "grep"}
+WRITING_OR_SHELL_BUILTIN_TOOLS = {"write_file", "edit_file", "execute", "task", "write_todos", "delete"}
+
+
+def test_tool_allowlist_is_the_mcp_tools_plus_read_only_builtins() -> None:
+    config = load_agent_config(AGENT_ROOT / "agent.yaml")
+    assert config.tools is not None
+    assert config.tools.enabled is not None
+    enabled = set(config.tools.enabled)
+    mcp_tool_names = {tool.name for tool in asyncio.run(create_server().list_tools())}
+
+    assert enabled == mcp_tool_names | READ_ONLY_BUILTIN_TOOLS
+    assert not enabled & WRITING_OR_SHELL_BUILTIN_TOOLS
+
+
 _TIMESTAMP = "2026-01-01T00:00:00Z"
 _WORKSPACES = "/apis/entities/v2/workspaces"
 _MODELS = "/apis/models/v2/workspaces/default"
@@ -370,7 +419,9 @@ def _ok_helix(method: str, path: str, payload: Any = None, status: int = 200) ->
     return _FakeHelix({(method, path): _json_route(payload if payload is not None else {}, status)})
 
 
-def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, dict[str, Any]]:
+def _guardrail_workflow_client(
+    check_statuses: list[str], config_name: str = "no-fruit", virtual_model_name: str = "guarded-model"
+) -> tuple[NemoClient, dict[str, Any]]:
     state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": []}
     statuses = iter(check_statuses)
 
@@ -405,8 +456,8 @@ def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, d
     platform.routes = {
         ("POST", f"{_GUARDRAILS}/checks"): check,
         ("POST", f"{_GUARDRAILS}/configs"): create_config,
-        ("GET", f"{_GUARDRAILS}/configs/no-fruit"): get_config,
-        ("GET", f"{_INFERENCE_GATEWAY}/virtual-models/guarded-model"): get_virtual_model,
+        ("GET", f"{_GUARDRAILS}/configs/{config_name}"): get_config,
+        ("GET", f"{_INFERENCE_GATEWAY}/virtual-models/{virtual_model_name}"): get_virtual_model,
         ("POST", f"{_INFERENCE_GATEWAY}/virtual-models"): create_virtual_model,
         ("GET", f"{_INFERENCE_GATEWAY}/openai/-/v1/models"): list_models,
     }
@@ -1530,10 +1581,218 @@ def test_activity_failure_does_not_change_tool_result(monkeypatch: pytest.Monkey
     assert response["status"] in {"ok", "no_results", "unavailable"}
 
 
-def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+_CREATE_DEMO_WORKSPACE = ("workspaces", "create", '{"name": "demo"}')
+
+
+@pytest.fixture
+def terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, register.APPROVAL_MODE_CHAT)
+
+
+def _preview(response: str) -> dict[str, Any]:
+    payload = json.loads(response)
+    assert payload["status"] == "confirmation_required", payload
+    return payload
+
+
+def test_studio_mode_refuses_confirmation_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
     def fail(*_args: object, **_kwargs: object) -> dict[str, str]:
-        raise AssertionError("no callback expected without a Studio session")
+        raise AssertionError("a token-only call must not reach Studio")
 
     monkeypatch.setattr(register, "_call_studio_tool", fail)
 
+    response = register.nemo_api(
+        *_CREATE_DEMO_WORKSPACE,
+        studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a",
+        workspace="default",
+        confirmation_token="forged",
+    )
+
+    assert "only accepted in terminal mode" in response
+    assert platform.mutations() == []
+
+
+def test_terminal_write_previews_then_runs_once_confirmed(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+
+    preview = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))
+
+    assert "create workspaces in workspace default" in preview["summary"]
+    assert platform.mutations() == []
+
+    response = json.loads(
+        register.nemo_api(
+            *_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=preview["confirmation_token"]
+        )
+    )
+
+    assert response["name"] == "demo"
+    assert json.loads(platform.mutations()[0].content) == {"name": "demo"}
+
+
+def test_terminal_confirmation_token_is_single_use(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+    register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token)
+
+    replay = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert replay["status"] == "confirmation_rejected"
+    assert len(platform.mutations()) == 1
+
+
+def test_terminal_confirmation_rejects_a_changed_operation_and_consumes_the_token(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+
+    changed = json.loads(
+        register.nemo_api("workspaces", "create", '{"name": "other"}', workspace="default", confirmation_token=token)
+    )
+    retry = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert changed["status"] == "confirmation_rejected"
+    assert "different operation" in changed["error"]
+    assert retry["status"] == "confirmation_rejected"
+    assert platform.mutations() == []
+
+
+def test_terminal_confirmation_expires(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "CONFIRMATION_TTL_SECONDS", 0.0)
+    token = _preview(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default"))["confirmation_token"]
+
+    response = json.loads(register.nemo_api(*_CREATE_DEMO_WORKSPACE, workspace="default", confirmation_token=token))
+
+    assert response["status"] == "confirmation_rejected"
+    assert platform.mutations() == []
+
+
+def test_terminal_reads_run_without_a_preview(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    platform = _ok_helix("GET", f"{_WORKSPACES}/default", _workspace("default"))
+    _install_client(monkeypatch, platform.client())
+
+    response = json.loads(register.nemo_api("workspaces", "retrieve", '{"name": "default"}', workspace="default"))
+
+    assert response["name"] == "default"
+
+
+def test_terminal_mode_registers_only_terminal_tools(terminal_mode: None) -> None:
+    tools = asyncio.run(create_server().list_tools())
+
+    assert {tool.name for tool in tools} == {"deploy_guardrail", "nemo_api", "check_status", "search_docs"}
+
+
+def test_unknown_approval_mode_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, "yolo")
+
+    with pytest.raises(RuntimeError, match="ASSISTANT_APPROVAL_MODE"):
+        create_server()
+
+
+@pytest.mark.parametrize("params", ['{"name": "demo"}', '{"name":"demo"}', '  {"name": "demo"}  '])
+def test_operation_fingerprint_ignores_json_spacing(params: str) -> None:
+    base = {"resource": "workspaces", "action": "create", "params": '{"name": "demo"}', "workspace": "default"}
+
+    assert register._operation_fingerprint("nemo_api", {**base, "params": params}) == (
+        register._operation_fingerprint("nemo_api", base)
+    )
+
+
+def test_terminal_deploy_guardrail_requires_an_explicit_backend_model(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    client, state = _guardrail_workflow_client(["blocked", "success"])
+    _install_client(monkeypatch, client)
+
+    response = json.loads(
+        register.deploy_guardrail(
+            policy="Do not discuss fruit.",
+            config_name="no-fruit",
+            virtual_model_name="guarded-model",
+            blocked_message="Tell me about bananas.",
+            allowed_message="Tell me about the moon.",
+            workspace="default",
+        )
+    )
+
+    assert response["status"] == "failed"
+    assert "backend_model is required" in response["error"]
+    assert state["configs"] == {}
+
+
+def test_terminal_deploy_guardrail_writes_only_after_confirmation(
+    monkeypatch: pytest.MonkeyPatch, terminal_mode: None
+) -> None:
+    client, state = _guardrail_workflow_client(["blocked", "success"])
+    _install_client(monkeypatch, client)
+    arguments = {
+        "policy": "Do not discuss fruit.",
+        "config_name": "no-fruit",
+        "backend_model": "default/model-a",
+        "virtual_model_name": "guarded-model",
+        "blocked_message": "Tell me about bananas.",
+        "allowed_message": "Tell me about the moon.",
+        "workspace": "default",
+    }
+
+    preview = _preview(register.deploy_guardrail(**arguments))
+
+    assert "Create guardrail config default/no-fruit" in preview["summary"]
+    assert state["configs"] == {}
+    assert state["virtual_models"] == {}
+    assert state["checks"] == []
+
+    response = json.loads(register.deploy_guardrail(**arguments, confirmation_token=preview["confirmation_token"]))
+
+    assert response["status"] == "success"
+    assert set(state["configs"]) == {"no-fruit"}
+    assert set(state["virtual_models"]) == {"guarded-model"}
+
+
+def test_topic_gate_is_created_once_and_reused(monkeypatch: pytest.MonkeyPatch, terminal_mode: None) -> None:
+    client, state = _guardrail_workflow_client(
+        ["blocked", "success", "blocked", "success"],
+        config_name=topic_gate.TOPIC_GATE_NAME,
+        virtual_model_name=topic_gate.TOPIC_GATE_NAME,
+    )
+    _install_client(monkeypatch, client)
+
+    first = topic_gate.ensure_topic_gate("default", "default/model-a")
+    assert first == f"default/{topic_gate.TOPIC_GATE_NAME}"
+    assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+    assert set(state["virtual_models"]) == {topic_gate.TOPIC_GATE_NAME}
+
+    second = topic_gate.ensure_topic_gate("default", "default/model-a")
+    assert second == first
+    assert set(state["configs"]) == {topic_gate.TOPIC_GATE_NAME}
+
+
+def test_topic_gate_refuses_to_run_outside_terminal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(register.APPROVAL_MODE_ENV, register.APPROVAL_MODE_STUDIO)
+
+    with pytest.raises(RuntimeError, match="requires"):
+        topic_gate.ensure_topic_gate("default", "default/model-a")
+
+
+def test_activity_is_skipped_without_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    # _report_activity swallows exceptions, so record calls instead of raising inside the callback.
+    calls: list[tuple[object, ...]] = []
+
+    def record(*args: object, **_kwargs: object) -> dict[str, str]:
+        calls.append(args)
+        return {}
+
+    monkeypatch.setattr(register, "_call_studio_tool", record)
+
     register.search_docs("guardrail")
+
+    assert calls == []

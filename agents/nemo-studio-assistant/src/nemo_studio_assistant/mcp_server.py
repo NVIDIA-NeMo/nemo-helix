@@ -5,6 +5,8 @@
 
 from fastmcp import FastMCP
 from nemo_studio_assistant.register import (
+    APPROVAL_MODE_CHAT,
+    approval_mode,
     ask_user_question,
     check_status,
     deploy_guardrail,
@@ -18,7 +20,7 @@ from nemo_studio_assistant.register import (
     studio_link,
 )
 
-TOOLS = (
+STUDIO_TOOLS = (
     deploy_guardrail,
     nemo_api,
     check_status,
@@ -29,13 +31,22 @@ TOOLS = (
     job_progress,
     studio_link,
     ask_user_question,
+    search_docs,
+)
+
+# Terminal tools need no Studio session: no pickers, progress cards, or Studio links.
+TERMINAL_TOOLS = (
+    deploy_guardrail,
+    nemo_api,
+    check_status,
     search_docs,
 )
 
 
 def create_server() -> FastMCP:
     server = FastMCP("NeMo Studio Assistant")
-    for tool in TOOLS:
+    tools = TERMINAL_TOOLS if approval_mode() == APPROVAL_MODE_CHAT else STUDIO_TOOLS
+    for tool in tools:
         server.tool(tool)
     return server
 

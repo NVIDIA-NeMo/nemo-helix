@@ -550,24 +550,31 @@ def _match_query(template_query: str, query: Mapping[str, str]) -> dict[str, str
     return captured
 
 
-def describe_studio_page(route: str | None) -> StudioPage | None:
-    """Return the known Studio destination for a route path, if any.
+@dataclass(frozen=True)
+class _RouteMatch:
+    destination: str
+    path_template: str
+    raw_args: dict[str, str]
+    query: dict[str, str]
+    consumed: set[str]
 
-    ``route`` is a path with an optional query string. Anything before
-    ``/workspaces/`` (such as a ``/studio`` base path) is ignored. The most
-    specific matching destination wins; query parameters it does not consume are
-    returned as ``selections``. Values that are not identifier-like are dropped.
-    """
+
+def _match_route(route: str | None) -> _RouteMatch | None:
+    """Match a Studio route to its most specific destination; ``None`` for unknown or malformed routes."""
     if not route:
         return None
-    parsed = urlsplit(route)
+    try:
+        parsed = urlsplit(route)
+    except ValueError:
+        # A malformed optional URL is an unknown page, not a failed prompt.
+        return None
     marker_index = parsed.path.find("/workspaces/")
     if marker_index < 0:
         return None
     path = parsed.path[marker_index:]
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
 
-    best: tuple[tuple[int, int], str, dict[str, str], set[str]] | None = None
+    best: tuple[tuple[int, int], _RouteMatch] | None = None
     for destination, config in STUDIO_LINK_DESTINATIONS.items():
         path_template, _, template_query = config.path_template.partition("?")
         path_match = _path_pattern(path_template).fullmatch(path)
@@ -581,11 +588,40 @@ def describe_studio_page(route: str | None) -> StudioPage | None:
         score = (len(consumed), literal_length)
         if best is None or score > best[0]:
             args = {key: unquote(value) for key, value in path_match.groupdict().items()}
-            best = (score, destination, {**args, **query_args}, consumed)
-    if best is None:
+            best = (
+                score,
+                _RouteMatch(destination, path_template, {**args, **query_args}, query, consumed),
+            )
+    return None if best is None else best[1]
+
+
+def studio_route_template(route: str | None) -> str | None:
+    """Return the matched destination's route template, such as ``/workspaces/{workspace}/agents/{name}``.
+
+    Callers that show a route to the agent use this instead of the raw path, so
+    percent-encoded free text in a URL never reaches the prompt.
+    """
+    match = _match_route(route)
+    return None if match is None else match.path_template
+
+
+def describe_studio_page(route: str | None, workspace: str | None = None) -> StudioPage | None:
+    """Return the known Studio destination for a route path, if any.
+
+    ``route`` is a path with an optional query string. Anything before
+    ``/workspaces/`` (such as a ``/studio`` base path) is ignored. The most
+    specific matching destination wins; query parameters it does not consume are
+    returned as ``selections``. Values that are not identifier-like are dropped.
+    When ``workspace`` is given, a route in a different workspace describes no page,
+    so resource context from another workspace never reaches the prompt.
+    """
+    match = _match_route(route)
+    if match is None:
+        return None
+    if workspace is not None and match.raw_args.get("workspace") != workspace:
         return None
 
-    _, destination, raw_args, consumed = best
+    destination, raw_args, query, consumed = match.destination, match.raw_args, match.query, match.consumed
     args = {
         key: clean_value
         for key, value in raw_args.items()

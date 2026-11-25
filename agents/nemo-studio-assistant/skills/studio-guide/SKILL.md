@@ -43,9 +43,12 @@ then suggest the most useful next step.
 | Intake | Traces and telemetry from agents | `intake` |
 | Settings and members | Workspace settings and access | `settings`, `members` |
 
-Some areas are behind feature flags. If `studio_link` reports that a
-destination is unavailable, say the feature is not enabled in this Studio
-rather than sending the user to a broken page.
+Some areas are behind feature flags. If `studio_link` returns an error that the
+destination is disabled by a feature flag, say the feature is not enabled in
+this Studio rather than sending the user to a broken page. If it returns
+`status: "unavailable"` with a message that the link could not be created, or
+any other error, the link failed. Say that briefly, give the verified result
+without a link, and do not claim the feature is disabled.
 
 ## Common starting paths
 

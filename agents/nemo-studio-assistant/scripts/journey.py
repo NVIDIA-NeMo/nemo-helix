@@ -21,6 +21,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlencode
 
 REFUSAL_PREFIX = "I can only help with NeMo Helix and NeMo Studio"
 DECLINE_REASON = "Declined by the user journey script."
@@ -57,7 +58,8 @@ class Journey:
         self.base_url = base_url.rstrip("/")
         self.workspace = workspace
         self.api = f"{self.base_url}/apis/studio/v2/assistant"
-        self.session_id = self._post(f"{self.api}/sessions", {})["session_id"]
+        query = urlencode({"workspace": workspace})
+        self.session_id = self._post(f"{self.api}/sessions?{query}", {})["session_id"]
 
     def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
@@ -115,8 +117,10 @@ class Journey:
     def send(self, message: str, pathname: str) -> Turn:
         turn = Turn()
         started = time.monotonic()
+        completed = False
         for event, data in self._events(message, pathname):
             if event == "done":
+                completed = True
                 break
             payload: Any = json.loads(data) if data.startswith(("{", "[")) else data
             if event == "error":
@@ -136,6 +140,9 @@ class Journey:
                         summary = (block.get("input") or {}).get("summary")
                         if summary:
                             turn.activity.append(f"{name}: {summary}")
+        if not completed and not turn.errors:
+            # An empty or cut-off stream must not pass as an answer.
+            turn.errors.append("stream ended without a done event")
         turn.seconds = time.monotonic() - started
         return turn
 

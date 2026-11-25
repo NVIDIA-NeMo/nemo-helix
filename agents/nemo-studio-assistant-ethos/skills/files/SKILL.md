@@ -23,7 +23,8 @@ features refer to a file as `<fileset>#<path>`.
 
 ## Acting on request
 
-- Fileset CRUD: `nemo_api(resource="files.filesets", action="create"|"list"|"retrieve"|"delete", params={"name": "..."}, workspace="<active request workspace>")`.
+- Fileset create, retrieve, and delete: `nemo_api(resource="files.filesets", action="create"|"retrieve"|"delete", params={"name": "..."}, workspace="<active request workspace>")`.
+- Fileset list takes no name: `nemo_api(resource="files.filesets", action="list", params={}, workspace="<active request workspace>")`.
 - Small text uploads: `nemo_api(resource="files", action="upload_content", params={"content": "...", "remote_path": "path.txt", "fileset": "..."}, workspace="<active request workspace>")`.
 - Downloads: `nemo_api(resource="files", action="download_content", params={"remote_path": "path.txt", "fileset": "..."}, workspace="<active request workspace>")`.
 - Listing: `nemo_api(resource="files", action="list", params={"fileset": "..."}, workspace="<active request workspace>")`.

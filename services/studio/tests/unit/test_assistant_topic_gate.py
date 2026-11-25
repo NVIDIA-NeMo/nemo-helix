@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -122,6 +124,29 @@ async def test_is_off_topic_fails_open(
 
 
 @pytest.mark.asyncio
+async def test_is_off_topic_fails_open_at_the_wall_clock_deadline(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(assistant_topic_gate.TOPIC_GATE_MODEL_ENV, "default/judge")
+    monkeypatch.setattr(assistant_topic_gate, "TOPIC_GATE_TIMEOUT_SECONDS", 0.05)
+
+    class StalledClient:
+        """A response that keeps the request open past the deadline, as an incomplete stream would."""
+
+        async def __aenter__(self) -> "StalledClient":
+            return self
+
+        async def __aexit__(self, *exc_info: object) -> None:
+            return None
+
+        async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            await asyncio.sleep(3600)
+            raise AssertionError("the deadline should have cancelled the post")
+
+    monkeypatch.setattr(assistant_topic_gate, "AsyncClient", lambda **kwargs: StalledClient())
+
+    assert await _check() is False
+
+
+@pytest.mark.asyncio
 async def test_is_off_topic_skips_check_when_disabled(monkeypatch: pytest.MonkeyPatch, gate_requests):
     monkeypatch.setenv(assistant_topic_gate.TOPIC_GATE_MODEL_ENV, "off")
     requests = gate_requests(httpx.Response(200, json={"status": "blocked"}))
@@ -145,3 +170,11 @@ async def test_is_off_topic_warns_once_per_failure_kind(
     assert "HTTP 401" in record.getMessage()
     assert "not being filtered" in record.getMessage()
     assert record.exc_info is None
+
+
+def test_terminal_topic_gate_policy_matches_studio_policy() -> None:
+    # The terminal assistant's VirtualModel gate (agents/nemo-studio-assistant) must enforce the same policy as Studio.
+    repo_root = Path(__file__).resolve().parents[4]
+    terminal_gate = (repo_root / "agents/nemo-studio-assistant/src/nemo_studio_assistant/topic_gate.py").read_text()
+
+    assert assistant_topic_gate.TOPIC_POLICY in terminal_gate

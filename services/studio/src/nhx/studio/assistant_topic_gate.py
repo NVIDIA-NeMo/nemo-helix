@@ -7,6 +7,7 @@ The gate is a fence, not the security boundary: the agent's allowlisted tools an
 approval on writes are. It fails open so a guardrails outage never blocks the chat.
 """
 
+import asyncio
 import logging
 import os
 from collections.abc import Mapping
@@ -114,11 +115,13 @@ async def is_off_topic(
     check_workspace = model_workspace if separator and model_workspace else workspace
     url = f"{base_url}/apis/guardrails/v2/workspaces/{quote(check_workspace, safe='')}/checks"
     try:
-        async with AsyncClient(timeout=TOPIC_GATE_TIMEOUT_SECONDS) as client:
-            response = await client.post(url, headers=dict(headers), json=topic_check_request(model, message))
-            response.raise_for_status()
-            result = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
+        # The deadline covers the whole exchange; httpx's timeout only bounds each read.
+        async with asyncio.timeout(TOPIC_GATE_TIMEOUT_SECONDS):
+            async with AsyncClient(timeout=TOPIC_GATE_TIMEOUT_SECONDS) as client:
+                response = await client.post(url, headers=dict(headers), json=topic_check_request(model, message))
+                response.raise_for_status()
+                result = response.json()
+    except (httpx.HTTPError, ValueError, TimeoutError) as exc:
         _log_check_failure(exc, model, url)
         return False
     return isinstance(result, dict) and result.get("status") == "blocked"
