@@ -28,6 +28,7 @@ from filesets import FilesetFileSystem, parse_fileset_ref
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job_results import job_storage_context_from_env
 from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
@@ -152,12 +153,13 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
 
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     client = get_nemo_client()
-    fileset_name = f"job-results-{job_id}"
+    fileset_name, artifact_base_path = job_storage_context_from_env()
+    results_path = f"{artifact_base_path}/results/{attempt_id}" if artifact_base_path else f"results/{attempt_id}"
     file_manager = FilesetFileManager(
         workspace=workspace,
         fileset_name=fileset_name,
         filesystem=FilesetFileSystem(client=FilesClient.from_client(client)),
-        ensure_fileset_exists=True,
+        ensure_fileset_exists=False,
     )
     file_manager.validate_storage()
 
@@ -178,25 +180,25 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
             raise ValueError("Safe Synthesizer did not produce synthetic data")
         result_csv_path = temp_path / "result.csv"
         result.synthetic_data.to_csv(result_csv_path, index=False)
-        artifact_url = file_manager.upload(result_csv_path, f"results/{attempt_id}/synthetic-data")
+        artifact_url = file_manager.upload(result_csv_path, f"{results_path}/synthetic-data")
         _create_job_result(client, workspace, job_id, attempt_id, "synthetic-data", artifact_url)
 
         summary_json_path = temp_path / "summary.json"
         with open(summary_json_path, "w", encoding="utf-8") as f:
             json.dump(result.summary.model_dump(), f)
-        artifact_url = file_manager.upload(summary_json_path, f"results/{attempt_id}/summary")
+        artifact_url = file_manager.upload(summary_json_path, f"{results_path}/summary")
         _create_job_result(client, workspace, job_id, attempt_id, "summary", artifact_url)
 
         if result.evaluation_report_html:
             report_html_path = temp_path / "report.html"
             with open(report_html_path, "w", encoding="utf-8") as f:
                 f.write(result.evaluation_report_html)
-            artifact_url = file_manager.upload(report_html_path, f"results/{attempt_id}/evaluation-report")
+            artifact_url = file_manager.upload(report_html_path, f"{results_path}/evaluation-report")
             _create_job_result(client, workspace, job_id, attempt_id, "evaluation-report", artifact_url)
 
     if adapter_path is not None and adapter_path.exists():
         embed_run_config_in_adapter(adapter_path)
-        artifact_url = file_manager.upload(adapter_path, f"results/{attempt_id}/adapter")
+        artifact_url = file_manager.upload(adapter_path, f"{results_path}/adapter")
         _create_job_result(client, workspace, job_id, attempt_id, "adapter", artifact_url)
 
 
