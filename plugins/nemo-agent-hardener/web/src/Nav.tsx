@@ -7,11 +7,12 @@ import type { PluginNavGroup } from '@agent-hardener/types';
 /**
  * Agent Hardener's entry in Studio's side nav. Studio renders these under the
  * named group, so installing the plugin is what puts the item there — Studio
- * carries no agent-hardener-specific nav code.
+ * carries no agent-hardener-specific nav code. The 'Safety' group is a core
+ * section, so the item joins it alongside Guardrails.
  */
 export const navItems = (workspaceId: string): PluginNavGroup[] => [
   {
-    group: 'Governance',
+    group: 'Safety',
     items: [
       {
         id: 'agent-hardener',

@@ -423,4 +423,116 @@ describe('NavigationDrawer', () => {
       expect(screen.queryByText('Entries')).not.toBeInTheDocument();
     });
   });
+
+  describe('Collapsible section headings', () => {
+    const sectionItems = [
+      { id: 'dashboard', slotLabel: 'Dashboard', href: '/dashboard' },
+      {
+        group: 'Agent Development',
+        items: [
+          { id: 'agents', slotLabel: 'Agents', href: '/agents' },
+          { id: 'monitor', slotLabel: 'Monitor', href: '/monitor' },
+        ],
+      },
+      { group: 'Models', items: [{ id: 'catalog', slotLabel: 'Model Catalog', href: '/catalog' }] },
+    ];
+
+    const renderSections = async (initialEntry = '/dashboard') => {
+      const NavigationDrawer = await importNavigationDrawer();
+      const router = createMemoryRouter(
+        [{ path: '*', element: <NavigationDrawer items={sectionItems} /> }],
+        { initialEntries: [initialEntry] }
+      );
+      render(
+        <TestProviders>
+          <RouterProvider router={router} />
+        </TestProviders>
+      );
+      await screen.findByRole('link', { name: 'Dashboard' });
+    };
+
+    const storedState = () =>
+      JSON.parse(window.localStorage.getItem(NAV_ACCORDION_STATE_KEY) ?? '{}');
+
+    // KUI renders a collapsible heading as <summary> inside a native <details>.
+    const summaryOf = (heading: string) => {
+      // eslint-disable-next-line testing-library/no-node-access
+      const summary = screen.getByText(heading).closest('summary');
+      expect(summary, `"${heading}" should be a collapsible <summary>`).not.toBeNull();
+      return summary as HTMLElement;
+    };
+    const sectionOf = (heading: string) =>
+      // eslint-disable-next-line testing-library/no-node-access
+      summaryOf(heading).closest('details') as HTMLDetailsElement;
+    // eslint-disable-next-line testing-library/no-node-access
+    const summaryCount = () => document.querySelectorAll('summary').length;
+
+    it('starts every headed section open with its rows visible', async () => {
+      await renderSections();
+
+      for (const heading of ['Agent Development', 'Models']) {
+        expect(sectionOf(heading)).toHaveAttribute('open');
+      }
+      for (const row of ['Agents', 'Monitor', 'Model Catalog']) {
+        expect(screen.getByRole('link', { name: row })).toBeVisible();
+      }
+    });
+
+    it('collapses a section on heading click, leaves others open, and reopens on a second click', async () => {
+      const user = userEvent.setup();
+      await renderSections();
+
+      await user.click(summaryOf('Agent Development'));
+
+      expect(sectionOf('Agent Development')).not.toHaveAttribute('open');
+      expect(sectionOf('Models')).toHaveAttribute('open');
+
+      await user.click(summaryOf('Agent Development'));
+
+      expect(sectionOf('Agent Development')).toHaveAttribute('open');
+    });
+
+    it('persists the choice under group:<heading> as a boolean', async () => {
+      const user = userEvent.setup();
+      await renderSections();
+
+      await user.click(summaryOf('Models'));
+      expect(storedState()).toEqual({ 'group:Models': false });
+
+      await user.click(summaryOf('Models'));
+      expect(storedState()).toEqual({ 'group:Models': true });
+    });
+
+    it('starts a section collapsed when storage says so', async () => {
+      window.localStorage.setItem(
+        NAV_ACCORDION_STATE_KEY,
+        JSON.stringify({ 'group:Agent Development': false })
+      );
+      await renderSections();
+
+      expect(sectionOf('Agent Development')).not.toHaveAttribute('open');
+      expect(sectionOf('Models')).toHaveAttribute('open');
+    });
+
+    it('keeps a collapsed section collapsed after navigating, beside item accordion keys', async () => {
+      const user = userEvent.setup();
+      window.localStorage.setItem(NAV_ACCORDION_STATE_KEY, JSON.stringify({ agents: false }));
+      await renderSections();
+
+      await user.click(summaryOf('Models'));
+      await user.click(screen.getByRole('link', { name: 'Agents' }));
+
+      expect(sectionOf('Models')).not.toHaveAttribute('open');
+      expect(storedState()).toEqual({ agents: false, 'group:Models': false });
+    });
+
+    it('gives the unlabeled first group no collapsible heading', async () => {
+      await renderSections();
+
+      const dashboard = screen.getByRole('link', { name: 'Dashboard' });
+      // eslint-disable-next-line testing-library/no-node-access
+      expect(dashboard.closest('details')).toBeNull();
+      expect(summaryCount()).toBe(2);
+    });
+  });
 });

@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { Library } from '@nemo/icons/icons';
+import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { MODEL_DETAILS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { gateModelDetailsRoutes, getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
+
+const BaseModelsIcon = ENTITY_ICONS.baseModels;
 
 const WorkspaceBaseModelsRoute = lazy(() =>
   import('@studio/routes/WorkspaceBaseModelsRoute').then((module) => ({
@@ -39,7 +41,7 @@ export const baseModelsRoutes: RouteObject[] = [
 export const getBaseModelsSideNavItems = (workspace: string) => [
   {
     id: 'base-models',
-    slotIcon: <Library className={iconColorClass} />,
+    slotIcon: <BaseModelsIcon className={iconColorClass} />,
     slotLabel: 'Model Catalog',
     href: getWorkspaceBaseModelsRoute(workspace),
   },

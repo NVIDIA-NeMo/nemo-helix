@@ -133,7 +133,7 @@ export const getEvaluationSideNavItems = (workspace: string) =>
         {
           id: 'evaluation-results',
           slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Evaluations',
+          slotLabel: 'Model Evaluations',
           href: getEvaluationResultsRoute(workspace),
         },
       ]
