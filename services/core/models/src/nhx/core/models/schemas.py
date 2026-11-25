@@ -1,20 +1,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import math
 import re
 from abc import ABC
 from datetime import datetime
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 from urllib.parse import urlparse
 
 from nemo_helix_plugin.inference_middleware import BackendFormat
-from nemo_helix_plugin.models.types import ModelMetadata
+from nemo_helix_plugin.models.types import ModelCapability, ModelMetadata, ModelModality
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import AuthContext
 from nhx.common.entities import Filter, constants
 from nhx.common.entities.utils import get_random_id
-from nhx.common.entities.values import DatetimeFilter, StringFilter, map_entity_field
+from nhx.common.entities.values import DatetimeFilter, NumberFilter, StringFilter, map_entity_field
 from nhx.common.inference import InferenceParams
 from nhx.core.models.constants import (
     FILESET_REF_MAX_LEN,
@@ -1394,6 +1396,124 @@ def _adapters_as_exists(operation: FilterOperation) -> FilterOperation:
     return operation
 
 
+_METADATA_LIST_FILTER_FIELDS: dict[str, type[StrEnum]] = {
+    "capabilities": ModelCapability,
+    "input_modalities": ModelModality,
+    "output_modalities": ModelModality,
+}
+_METADATA_NUMBER_FILTER_FIELDS = frozenset({"context_length", "max_output_tokens", "parameter_count"})
+# Metadata numbers are integers, so a fractional bound rounds to the integer bound that selects the same rows.
+_INTEGER_BOUND_ROUNDING = {
+    FilterOperator.GT: ROUND_FLOOR,
+    FilterOperator.GTE: ROUND_CEILING,
+    FilterOperator.LT: ROUND_CEILING,
+    FilterOperator.LTE: ROUND_FLOOR,
+}
+
+
+def _invalid_filter_value(field: str, value: Any) -> ValueError:
+    return ValueError(f"Invalid value {value!r} for filter field '{field}'")
+
+
+def _unsupported_filter_operator(field: str, operator: FilterOperator) -> ValueError:
+    return ValueError(f"{operator.value} is not supported for filter field '{field}'")
+
+
+def _filter_values(field: str, value: Any) -> list[Any]:
+    values = value if isinstance(value, list) else [value]
+    if not values:
+        raise _invalid_filter_value(field, value)
+    return values
+
+
+def _as_enum_value(field: str, enum_type: type[StrEnum], value: Any) -> str:
+    try:
+        return enum_type(value).value
+    except (TypeError, ValueError):
+        raise _invalid_filter_value(field, value) from None
+
+
+def _as_decimal(field: str, value: Any) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise _invalid_filter_value(field, value)
+    try:
+        number = Decimal(value)
+    except ArithmeticError:
+        raise _invalid_filter_value(field, value) from None
+    if not number.is_finite() or not math.isfinite(float(number)):
+        raise _invalid_filter_value(field, value)
+    return number
+
+
+def _as_integer(field: str, value: Any) -> int:
+    number = _as_decimal(field, value)
+    if number != number.to_integral_value():
+        raise _invalid_filter_value(field, value)
+    return int(number)
+
+
+def _contains_each(field: str, enum_type: type[StrEnum], value: Any, combine: FilterOperator) -> FilterOperation:
+    comparisons: list[FilterOperation] = [
+        ComparisonOperation(operator=FilterOperator.CONTAINS, field=field, value=_as_enum_value(field, enum_type, item))
+        for item in _filter_values(field, value)
+    ]
+    if len(comparisons) == 1:
+        return comparisons[0]
+    return LogicalOperation(operator=combine, operations=comparisons)
+
+
+def _negated(operation: FilterOperation) -> LogicalOperation:
+    return LogicalOperation(operator=FilterOperator.NOT, operations=[operation])
+
+
+def _list_field_operation(operation: ComparisonOperation, enum_type: type[StrEnum]) -> FilterOperation:
+    field, operator, value = operation.field, operation.operator, operation.value
+    if operator in (FilterOperator.EQ, FilterOperator.CONTAINS):
+        return _contains_each(field, enum_type, value, FilterOperator.AND)
+    if operator == FilterOperator.IN:
+        return _contains_each(field, enum_type, value, FilterOperator.OR)
+    if operator == FilterOperator.NIN:
+        return LogicalOperation(
+            operator=FilterOperator.AND,
+            operations=[
+                _negated(ComparisonOperation(operator=FilterOperator.EQ, field=field, value=None)),
+                _negated(_contains_each(field, enum_type, value, FilterOperator.OR)),
+            ],
+        )
+    raise _unsupported_filter_operator(field, operator)
+
+
+def _number_field_operation(operation: ComparisonOperation) -> FilterOperation:
+    field, operator, value = operation.field, operation.operator, operation.value
+    if operator in _INTEGER_BOUND_ROUNDING:
+        bound = _as_decimal(field, value).to_integral_value(rounding=_INTEGER_BOUND_ROUNDING[operator])
+        return operation.model_copy(update={"value": int(bound)})
+    if operator == FilterOperator.EQ and isinstance(value, list):
+        operator = FilterOperator.IN
+    # The store compares $eq/$in/$nin as text, so the operand must render exactly as the stored integer.
+    if operator in (FilterOperator.IN, FilterOperator.NIN):
+        numbers = [_as_integer(field, item) for item in _filter_values(field, value)]
+        return operation.model_copy(update={"operator": operator, "value": numbers})
+    if operator == FilterOperator.EQ:
+        return operation.model_copy(update={"value": _as_integer(field, value)})
+    raise _unsupported_filter_operator(field, operator)
+
+
+def _metadata_filter_values(operation: FilterOperation) -> FilterOperation:
+    """Validate metadata filter values, and match list fields by membership."""
+    if isinstance(operation, ComparisonOperation):
+        if operation.field in _METADATA_LIST_FILTER_FIELDS:
+            return _list_field_operation(operation, _METADATA_LIST_FILTER_FIELDS[operation.field])
+        if operation.field in _METADATA_NUMBER_FILTER_FIELDS:
+            return _number_field_operation(operation)
+        return operation
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [_metadata_filter_values(child) for child in operation.operations]}
+        )
+    return operation
+
+
 # Filter classes for Model Entity queries
 class ModelEntityFilter(Filter):
     """Filter for Model Entity queries."""
@@ -1435,12 +1555,45 @@ class ModelEntityFilter(Filter):
         default=None,
         description="Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.",
     )
+    display_name: Annotated[StringFilter | str | None, map_entity_field("data.metadata.display_name")] = Field(
+        default=None, description="Filter by the display name in the model's metadata."
+    )
+    capabilities: Annotated[
+        ModelCapability | list[ModelCapability] | None, map_entity_field("data.metadata.capabilities")
+    ] = Field(
+        default=None,
+        description="Filter models whose metadata lists this capability, e.g. 'tool_calling'. "
+        "A list matches models with all of them; use $in for any and $nin for none.",
+    )
+    input_modalities: Annotated[
+        ModelModality | list[ModelModality] | None, map_entity_field("data.metadata.input_modalities")
+    ] = Field(
+        default=None,
+        description="Filter models whose metadata says they accept this modality, e.g. 'image'. "
+        "A list matches models that accept all of them; use $in for any and $nin for none.",
+    )
+    output_modalities: Annotated[
+        ModelModality | list[ModelModality] | None, map_entity_field("data.metadata.output_modalities")
+    ] = Field(
+        default=None,
+        description="Filter models whose metadata says they produce this modality. "
+        "A list matches models that produce all of them; use $in for any and $nin for none.",
+    )
+    context_length: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.context_length")] = Field(
+        default=None, description="Filter by context window in tokens, e.g. filter[context_length][$gte]=128000."
+    )
+    max_output_tokens: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.max_output_tokens")] = (
+        Field(default=None, description="Filter by maximum output tokens, e.g. filter[max_output_tokens][$gte]=8192.")
+    )
+    parameter_count: Annotated[NumberFilter | int | None, map_entity_field("data.metadata.parameter_count")] = Field(
+        default=None, description="Filter by total parameter count, e.g. filter[parameter_count][$lte]=10000000000."
+    )
     created_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on creation date.")
     updated_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on update date.")
 
     @classmethod
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
-        return super().translate_operation(_adapters_as_exists(operation))
+        return super().translate_operation(_metadata_filter_values(_adapters_as_exists(operation)))
 
 
 class AdapterEntityFilter(Filter):
