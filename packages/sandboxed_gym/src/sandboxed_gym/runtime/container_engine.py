@@ -14,7 +14,7 @@ import ctypes
 import os
 import subprocess
 from collections.abc import Callable, MutableMapping
-from os import chown, geteuid, setgid, setgroups, setuid
+from os import chown, fwalk, geteuid, setgid, setgroups, setuid
 from pathlib import Path
 from pwd import getpwnam
 
@@ -72,7 +72,7 @@ def _chown_tree(root: Path, uid: int, gid: int) -> None:
     the walk runs can't redirect a change of ownership outside the tree. An entry removed between the listing
     and its ``chown`` has nothing left to hand over, so it is skipped; any other failure still raises.
     """
-    for _path, _dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
+    for _path, _dirnames, filenames, dir_fd in fwalk(root, follow_symlinks=False):
         chown(dir_fd, uid, gid)
         for name in filenames:
             try:

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -228,13 +229,20 @@ def test_the_workspace_handover_skips_an_entry_removed_during_the_walk(
     host = _Host(monkeypatch, tmp_path)
     (host.work / "nested" / "gone").write_text("x")
     record = host._chown
+    walk = container_engine.fwalk
 
     def chown(target: int | str, uid: int, gid: int, **kwargs: object) -> None:
         if target == "gone":
             raise FileNotFoundError(2, "No such file or directory", target)
         record(target, uid, gid, **kwargs)
 
+    def fwalk(top: Path, **kwargs: bool) -> Iterator[tuple[str, list[str], list[str], int]]:
+        # Lists the removed entry first, so the handover must carry on to its sibling.
+        for path, dirnames, filenames, dir_fd in walk(top, **kwargs):
+            yield path, dirnames, sorted(filenames, key=lambda name: name != "gone"), dir_fd
+
     monkeypatch.setattr(container_engine, "chown", chown)
+    monkeypatch.setattr(container_engine, "fwalk", fwalk)
 
     assert host.prepare({ENGINE_ENV: "rootless-podman", "NHX_WORK_PATH": str(host.work)}) is True
     assert ("chown", ("entry", "file")) in host.calls
