@@ -46,7 +46,11 @@ export const TasksetListRoute: FC = () => {
         />
       </Stack>
       <TasksetFormModal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
-      <TasksetActionModals request={request} onClose={() => setActionRequest(undefined)} />
+      <TasksetActionModals
+        request={request}
+        // A late close from an older modal (e.g. a delete settling) must not clear a newer request.
+        onClose={() => setActionRequest((current) => (current === request ? undefined : current))}
+      />
     </AccessibleTitle>
   );
 };
