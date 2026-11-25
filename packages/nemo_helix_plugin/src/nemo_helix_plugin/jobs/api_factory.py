@@ -589,7 +589,8 @@ InputToOutputTransformerAsync = Callable[
 ]
 
 # A write a transformer defers until the job is about to be created: after compile succeeds, and never
-# on a dry run. Given the canonical spec, it performs the write and returns the spec to store.
+# on a dry run. Given the canonical spec, it performs the write and returns the spec to store, which the
+# route compiles again.
 type DeferredWrite = Callable[[Any], Awaitable[Any]]
 # Registers a :data:`DeferredWrite`. A transformer that accepts a ``defer`` keyword receives one, and one
 # that accepts ``authorize`` receives the caller's :class:`RequestAuthorizer` (``None`` outside the platform).
@@ -1365,20 +1366,22 @@ def job_route_factory(
                 authorize=authorize,
                 defer=deferred.append,
             )
-            platform_spec = await _compile_platform_spec(
-                platform_job_config_compiler,
-                workspace,
-                input_spec,
-                job_spec,
-                entity_client,
-                job_name,
-                service_name,
-                async_client,
-                submit_controls=_SubmitControls(
-                    profile=request.profile,
-                    options=request.options,
-                ),
-            )
+            submit_controls = _SubmitControls(profile=request.profile, options=request.options)
+
+            async def compile_job(spec: JobSchemaLike) -> HelixJobSpec:
+                return await _compile_platform_spec(
+                    platform_job_config_compiler,
+                    workspace,
+                    input_spec,
+                    spec,
+                    entity_client,
+                    job_name,
+                    service_name,
+                    async_client,
+                    submit_controls=submit_controls,
+                )
+
+            platform_spec = await compile_job(job_spec)
             if dry_run is not None:
                 checks = await _dry_run_checks(
                     platform_spec, job_spec, workspace, async_client, dry_run_checks, full=dry_run.full
@@ -1396,7 +1399,9 @@ def job_route_factory(
                 )
 
             # Writes the transformer deferred run only now: after every check and compile have passed.
-            job_spec = await _run_deferred_writes(deferred, job_spec, service_name)
+            if deferred:
+                job_spec = await _run_deferred_writes(deferred, job_spec, service_name)
+                platform_spec = await compile_job(job_spec)
 
             # Create the job through the typed Jobs client.
             # Build call kwargs, only including optional fields when they have values

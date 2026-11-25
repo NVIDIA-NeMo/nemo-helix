@@ -12,10 +12,10 @@ installed action kind and listing what is installed.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any, ClassVar
 
+from nemo_agents_plugin.entry_points import group_entry_points, load_unique_entry_point
 from nemo_helix_plugin.agents.post_run_actions import (
     POST_RUN_ACTION_ENTRY_POINT_GROUP,
     PostRunAction,
@@ -109,10 +109,7 @@ def validate_post_run_action_config(
 
 
 def _registered_entry_points() -> dict[str, list[EntryPoint]]:
-    registered: dict[str, list[EntryPoint]] = defaultdict(list)
-    for entry_point in entry_points(group=POST_RUN_ACTION_ENTRY_POINT_GROUP):
-        registered[entry_point.name].append(entry_point)
-    return registered
+    return group_entry_points(entry_points(group=POST_RUN_ACTION_ENTRY_POINT_GROUP))
 
 
 def _load_post_run_action(kind: str) -> type[PostRunAction]:
@@ -120,19 +117,4 @@ def _load_post_run_action(kind: str) -> type[PostRunAction]:
 
 
 def _load_registered_post_run_action(kind: str, registered: dict[str, list[EntryPoint]]) -> type[PostRunAction]:
-    matches = registered.get(kind)
-    if not matches:
-        installed = ", ".join(sorted(registered)) or "none"
-        raise ValueError(f"Unknown post-run action {kind!r}. Installed post-run actions: {installed}.")
-
-    # A kind may legitimately be declared by more than one installed
-    # distribution: the aggregate ``nemo-helix`` wheel re-declares every
-    # bundled plugin's entry points, so a standard install sees each of them
-    # twice — once from the plugin, once from the aggregate. What must be
-    # unique is the *implementation*, not the number of declarations, so
-    # collapse identical targets and reject only genuine conflicts.
-    targets = {entry_point.value for entry_point in matches}
-    if len(targets) > 1:
-        conflicting = ", ".join(sorted(targets))
-        raise ValueError(f"Conflicting post-run actions are registered for {kind!r}: {conflicting}.")
-    return matches[0].load()
+    return load_unique_entry_point(kind, registered, label="post-run action", plural="post-run actions")

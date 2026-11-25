@@ -29,6 +29,11 @@ active non-terminal list.
 
 ## Docker executors
 
+Workload identity grants keep the audience assigned when they are created. After
+changing the configured workload audience, recreate Docker deployments that use
+workload identity. Refresh reports an audience mismatch before replacing the
+existing proof; it cannot change a live grant's audience.
+
 Host port allocation for published container ports is configured per named docker
 executor (not on `DeploymentConfig.backend_config.docker`). Set the inclusive
 `port_range_start` / `port_range_end` bounds on the executor `config` block in

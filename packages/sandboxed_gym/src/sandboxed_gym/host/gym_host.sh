@@ -10,6 +10,38 @@
 # Defaults match sandboxed_gym.host.entrypoint.
 set -eu
 
+# Nothing this launcher starts needs execd's token, so it goes before the job's variables can change
+# which programs run here. Unsetting it would leave it in /proc/<pid>/environ for a child to read, so
+# the launcher starts again without it.
+if [ -n "${EXECD_ACCESS_TOKEN+set}" ]; then
+    exec /usr/bin/env -u EXECD_ACCESS_TOKEN /bin/sh "$0" "$@"
+fi
+
+# This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
+# NHX_GYM_JOB_ENV, are unpacked first, as if they had arrived in the environment: before the launcher's
+# own parameters and exports below, which keep their precedence over them, and before Ray starts. Names
+# a shell can't export stay packed for the runtime, and so does anything this can't decode, which the
+# runtime then reports as a bootstrap failure.
+if [ -n "${NHX_GYM_JOB_ENV:-}" ]; then
+    if job_env_exports=$(python3 -c '
+import base64, json, os, re, shlex
+job = json.loads(base64.b64decode(os.environ["NHX_GYM_JOB_ENV"], validate=True))
+rest = {}
+for name, value in job.items():
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        print(f"export {name}={shlex.quote(value)}")
+    else:
+        rest[name] = value
+packed = base64.b64encode(json.dumps(rest, sort_keys=True).encode()).decode() if rest else ""
+print(f"NHX_GYM_JOB_ENV={packed}")
+'); then
+        eval "$job_env_exports"
+    fi
+fi
+if [ -z "${NHX_GYM_JOB_ENV:-}" ]; then
+    unset NHX_GYM_JOB_ENV
+fi
+
 venv=${1:-/opt/ray_venvs/sandboxed_gym.ray.gym_actor.SandboxedGymActor}
 root=${2:-/opt/nemo-rl}
 gym_rw=${3:-/tmp/gym-src/Gym}
@@ -33,6 +65,9 @@ if [ ! -d "$gym_rw/nemo_gym" ]; then
     cp -a "$gym_tree" "$gym_rw.tmp"
     mv "$gym_rw.tmp" "$gym_rw"
 fi
+
+# Again, in case the job's variables named it.
+unset EXECD_ACCESS_TOKEN
 
 # Pin the single-node in-sandbox Ray to loopback; the routable node IP it picks is dropped by the deny-default sandbox egress.
 export RAY_ENABLE_WINDOWS_OR_OSX_CLUSTER=0

@@ -83,6 +83,18 @@ describe('EntityEmptyState', () => {
       ).not.toBeInTheDocument();
     });
 
+    it('offers neither an upload nor a handoff for a job-written output fileset', () => {
+      // A job writes its own output, so the empty state only explains — it must not
+      // borrow `filesetFiles`' "Upload Files" action or `nemo files upload` command.
+      wrap(<EntityEmptyState entity="dataDesignerJobOutput" variant="first-use" />);
+
+      expect(
+        screen.getByText(ENTITY_EMPTY_STATES.dataDesignerJobOutput.subheading)
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('entity-empty-state-help')).not.toBeInTheDocument();
+    });
+
     it('resets the CLI/agent selection when the descriptor changes on rerender', () => {
       const membersDescriptor = ENTITY_EMPTY_STATES.members;
       const { rerender } = wrap(<EntityEmptyState entity="members" variant="first-use" />);

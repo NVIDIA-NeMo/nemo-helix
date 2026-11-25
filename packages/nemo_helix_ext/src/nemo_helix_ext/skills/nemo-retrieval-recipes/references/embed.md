@@ -139,7 +139,8 @@ and mining caches remain under `additional/`.
 Stage 3 reads the frozen `eval_beir` subtree from the same job result.
 Both `target` and `baseline` must already have IGW providers (`deploy.md`) before submit.
 `query_prefix` / `passage_prefix` default to `query: ` / `passage: `, matching Stage 2
-training and Stage 1 mining.
+training and Stage 1 mining. If Stage 2 used other `training.retrieval.query_prefix` /
+`passage_prefix` values, pass those here for the best scores.
 
 ```bash
 nemo evals retrieve-eval --spec '{

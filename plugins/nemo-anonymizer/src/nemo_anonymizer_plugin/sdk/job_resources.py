@@ -177,7 +177,7 @@ class AnonymizerJobResource:
         status = job.status
         if status == "completed":
             return job
-        raise AnonymizerJobError(f"Current job status is {status!r}; results are not available.")
+        raise AnonymizerJobError(f"Current job status is {status.value!r}; results are not available.")
 
     def _poll_safe(self, fn: Callable[[], T], fallback: T) -> T:
         try:
@@ -270,7 +270,7 @@ class AsyncAnonymizerJobResource:
         status = job.status
         if status == "completed":
             return job
-        raise AnonymizerJobError(f"Current job status is {status!r}; results are not available.")
+        raise AnonymizerJobError(f"Current job status is {status.value!r}; results are not available.")
 
     async def _poll_safe(self, fn: Callable[[], Awaitable[T]], fallback: T) -> T:
         try:

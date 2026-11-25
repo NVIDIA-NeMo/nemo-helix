@@ -64,6 +64,11 @@ from nemo_agents_plugin.jobs.post_run_actions import (
     resolve_post_run_action,
     validate_post_run_action_config,
 )
+from nemo_agents_plugin.plugin_managed_agents import (
+    PluginManagedAgentType,
+    derive_agent_of_type,
+    plugin_managed_agent_type_for,
+)
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
@@ -75,9 +80,11 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
     wants_intake_atif_export,
 )
+from nemo_helix_plugin.agents.plugin_managed_agents import NEMO_HELIX_CONTEXT_KEY as NEMO_HELIX_CONTEXT_KEY
+from nemo_helix_plugin.agents.plugin_managed_agents import PluginManagedAgentInputError, PreparedRun
 from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -113,7 +120,7 @@ from nemo_helix_plugin.openshell.authorization import authorize_provider_referen
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +136,9 @@ FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
 FABRIC_ERROR_FILENAME = "fabric_error.json"
 SUCCESSFUL_FABRIC_STATUSES = {"succeeded"}
 DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS = 60 * 60
-# Key in the Fabric request context that holds the platform's own fields. The
-# rest of the context belongs to the caller, so this one name is reserved.
-NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
+# ``NEMO_HELIX_CONTEXT_KEY`` (imported above) is the key in the Fabric request
+# context that holds the platform's own fields. The rest of the context belongs
+# to the caller, so this one name is reserved.
 
 # Name Fabric gives the agent process's captured stderr. It lives under a
 # runtime/invocation directory Fabric names itself, so it is found by search
@@ -365,6 +372,22 @@ class ExecuteAgentStepConfig(BaseModel):
     # listing can filter by agent with ``filter[spec.agent_ref]``. None for an
     # inline agent, which is not an entity and so belongs to no agent's runs.
     agent_ref: str | None = None
+    # The context the agent runs with. For a plugin-managed agent, the type's
+    # prepared context, so the job records both what was asked
+    # (``request.context``) and what ran; otherwise ``request.context`` itself.
+    context: dict[str, Any] = Field(default_factory=dict)
+    # What the run is about, as the plugin-managed agent type's ``prepare``
+    # named it, so a subject's runs can be listed with ``filter[spec.subject]``.
+    # An opaque string whose meaning the type defines; None when the type gave
+    # none, and for agents that are not plugin-managed.
+    subject: str | None = None
+    # The jobs execution profile the run uses: the request's, else the one a
+    # plugin-managed agent type's ``prepare`` chose, else "default". Holds only
+    # the type's choice until ``compile`` settles it.
+    job_profile: str | None = None
+    # The plugin-managed agent type that prepared this run, recorded so a job
+    # says what it is without looking up an agent that may since have changed.
+    plugin_managed_agent_type: str | None = None
     workdir: AgentWorkdir | None = None
     # Immutable snapshot of the resolved AgentEnvironment, mirroring
     # AgentDeployment. ``agent.config`` already holds the merged config;
@@ -395,6 +418,12 @@ class ExecuteAgentStepConfig(BaseModel):
         # request and stored no resolved copy.
         if "input" not in data and isinstance(request, dict) and isinstance(request.get("input"), str):
             data = {**data, "input": request["input"]}
+        # Jobs created before the step recorded its own context ran the request's.
+        # (A step built in code may pass the request as a model rather than a dict.)
+        if "context" not in data:
+            request_context = request.get("context") if isinstance(request, dict) else getattr(request, "context", None)
+            if isinstance(request_context, dict):
+                data = {**data, "context": request_context}
         return data
 
 
@@ -437,10 +466,24 @@ class ExecuteAgentJob(NemoJob):
         request = cast(ExecuteAgentJobConfig, input_spec)
         typed_entity_client = cast(Any, entity_client)
         source = await _resolve_agent_source(request.agent, workspace=workspace, entity_client=typed_entity_client)
-        agent_input = _resolve_input(request.input, source)
         # The caller's context only: the platform's own key is added at run time.
         if source.context_schema is not None:
             validate_context(request.context, source.context_schema)
+        agent_input = _resolve_input(request.input, source)
+        subject: str | None = None
+        job_profile: str | None = None
+        if source.plugin_managed_type is None:
+            run_context = request.context
+        else:
+            prepared = await _prepare_plugin_managed_run(
+                source.plugin_managed_type,
+                request.context,
+                workspace=workspace,
+                client=cast(AsyncNemoClient, async_sdk),
+            )
+            run_context = prepared.context.model_dump(mode="json")
+            subject = prepared.subject
+            job_profile = prepared.job_profile
 
         _validate_agent_config_format(source.config_format)
         resolved_agent_config = resolve_agent_config_for_deployment(
@@ -517,6 +560,10 @@ class ExecuteAgentJob(NemoJob):
             ),
             input=agent_input,
             agent_ref=source.ref,
+            context=run_context,
+            subject=subject,
+            job_profile=job_profile,
+            plugin_managed_agent_type=source.plugin_managed_type.type_id if source.plugin_managed_type else None,
             workdir=workdir,
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
@@ -539,9 +586,12 @@ class ExecuteAgentJob(NemoJob):
     ) -> HelixJobSpec:
         del workspace, entity_client, job_name, async_sdk, options
         step_config = ExecuteAgentStepConfig.model_validate(spec)
+        # Settled on the spec itself, which is what the job stores, so spec.job_profile
+        # names the profile the run actually used.
+        step_config.job_profile = profile or step_config.job_profile or "default"
 
         executor = CPUExecutionProviderSpec(
-            profile=profile or "default",
+            profile=step_config.job_profile,
             provider="cpu",
             container=ContainerSpec(
                 image=cls._execution_image(step_config.request.image),
@@ -703,7 +753,7 @@ class ExecuteAgentJob(NemoJob):
                             input=step_config.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
-                            caller_context=_caller_context(step_config.request.context, ctx=ctx, agent_ref=agent_ref),
+                            caller_context=_caller_context(step_config.context, ctx=ctx, agent_ref=agent_ref),
                             timeout_seconds=step_config.request.timeout_seconds,
                             observe_progress=True,
                         )
@@ -747,6 +797,7 @@ class ExecuteAgentJob(NemoJob):
                             agent_name=step_config.agent.name,
                             agent_config=post_run_agent_config,
                             fabric_result=result,
+                            run_context=copy.deepcopy(step_config.context),
                         )
                     )
                 except Exception:
@@ -928,6 +979,8 @@ def _read_stderr_tail(path: Path) -> _StderrTail:
 class _AgentSource(BaseModel):
     """The agent definition to execute, however the request supplied it."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
     workspace: str
     config: dict[str, Any]
@@ -938,6 +991,8 @@ class _AgentSource(BaseModel):
     default_input: str | None = None
     post_run_actions: set[str] | None = None
     """Kinds the Agent entity allows, or None for an inline agent, which declares none."""
+    plugin_managed_type: PluginManagedAgentType | None = None
+    """The agent's plugin-managed agent type, or None when it is not plugin-managed."""
 
 
 def _resolve_input(requested: str | None, source: _AgentSource) -> str:
@@ -1018,6 +1073,12 @@ async def _resolve_agent_source(
         entity = await entity_client.get(Agent, name=agent_ref.name, workspace=agent_ref.workspace)
     except NemoEntityNotFoundError as exc:
         raise ValueError(f"Agent '{agent}' not found.") from exc
+    # A plugin-managed agent stores no config: run what its installed type
+    # supplies, refusing one whose type is missing or broken. Off the event
+    # loop: loading a type may scan installed adapter manifests.
+    plugin_managed_type = await asyncio.to_thread(plugin_managed_agent_type_for, entity)
+    if plugin_managed_type is not None:
+        entity = derive_agent_of_type(entity, plugin_managed_type)
     return _AgentSource(
         name=entity.name,
         workspace=entity.workspace,
@@ -1027,7 +1088,48 @@ async def _resolve_agent_source(
         context_schema=entity.context_schema,
         default_input=entity.default_input,
         post_run_actions=entity.post_run_actions,
+        plugin_managed_type=plugin_managed_type,
     )
+
+
+async def _prepare_plugin_managed_run(
+    type_cls: PluginManagedAgentType,
+    raw_context: dict[str, Any],
+    *,
+    workspace: str,
+    client: AsyncNemoClient,
+) -> PreparedRun[BaseModel]:
+    """Resolve the caller's context into the run's, with the type's ``prepare``, as the caller.
+
+    *raw_context* has already matched the type's ``context_schema``. Errors the
+    caller can act on become ``ValueError`` (a 422 on the create request), and a
+    resource the caller may not read becomes ``PermissionError`` (a 403).
+    """
+    try:
+        context = type_cls.context_model.model_validate(raw_context)
+    except ValidationError as exc:
+        raise ValueError(f"context does not match the agent's context_schema: {exc}") from exc
+    try:
+        prepared = await type_cls.prepare(context, workspace=workspace, client=client)
+    except PluginManagedAgentInputError as exc:
+        raise ValueError(str(exc)) from exc
+    except PermissionDeniedError as exc:
+        raise PermissionError(str(exc)) from exc
+
+    # A guard against plugin bugs: what reaches the adapter must parse as the
+    # type says it will, and survive the JSON round trip through the job spec.
+    if not isinstance(prepared, PreparedRun) or not isinstance(prepared.context, type_cls.prepared_context_model):
+        raise ValueError(
+            f"Plugin-managed agent type {type_cls.type_id!r} is broken: prepare() must return a PreparedRun whose "
+            f"context is a {type_cls.prepared_context_model.__name__}."
+        )
+    try:
+        type_cls.prepared_context_model.model_validate(prepared.context.model_dump(mode="json"))
+    except ValidationError as exc:
+        raise ValueError(
+            f"Plugin-managed agent type {type_cls.type_id!r} is broken: prepare() returned an invalid context: {exc}"
+        ) from exc
+    return prepared
 
 
 def _has_workdir_inputs(workdir: AgentWorkdir) -> bool:

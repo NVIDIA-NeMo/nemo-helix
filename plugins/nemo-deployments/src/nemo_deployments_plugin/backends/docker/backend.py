@@ -93,6 +93,7 @@ from nemo_helix_plugin.auth.workload_delegations import (
     WorkloadDelegationConflictError,
     WorkloadDelegationEntity,
     WorkloadDelegationStore,
+    WorkloadDelegationValidationError,
     as_aware_utc,
 )
 from nemo_helix_plugin.auth.workload_identity import (
@@ -675,15 +676,15 @@ class DockerDeploymentBackend(DeploymentBackend):
 
         await asyncio.to_thread(_delete)
 
-    async def _try_revoke_workload_delegation(self, delegation_name: str | None, *, reason: str) -> None:
-        if not delegation_name:
+    async def _try_revoke_workload_delegation(self, delegation_id: str | None, *, reason: str) -> None:
+        if not delegation_id:
             return
         try:
-            await self._workload_delegations.revoke(delegation_name)
+            await self._workload_delegations.revoke_by_id(delegation_id)
         except Exception:
             logger.warning(
                 "Failed to revoke Docker workload delegation",
-                extra={"delegation_name": delegation_name, "reason": reason},
+                extra={"delegation_id": delegation_id, "reason": reason},
                 exc_info=True,
             )
 
@@ -754,30 +755,22 @@ class DockerDeploymentBackend(DeploymentBackend):
         delegation: WorkloadDelegationEntity,
         now: datetime,
     ) -> None:
+        """Refresh a grant with its original audience; audience changes require recreation."""
         if config.workload_identity is None or not delegation.workload_generation:
             return
+        audience = get_workload_delegation_audience()
+        if delegation.workload_audience != audience:
+            raise WorkloadDelegationValidationError(
+                "Docker workload audience changed; recreate the deployment before renewing its grant"
+            )
         scope = workload_delegation_scope(workspace=workspace, deployment_name=name, config=config)
         refreshed, proof_token = build_docker_opaque_workload_delegation(
             scope=scope,
-            workload_audience=get_workload_delegation_audience(),
+            workload_audience=audience,
             workload_generation=delegation.workload_generation,
             auth_context=delegation.auth_context,
             ttl_seconds_active=config.workload_identity.token_expiration_seconds,
             now=now,
-        )
-        replacement = delegation.model_copy(
-            update={
-                "workload_subject": refreshed.workload_subject,
-                "workload_audience": refreshed.workload_audience,
-                "workload_workspace": refreshed.workload_workspace,
-                "workload_kind": refreshed.workload_kind,
-                "workload_id": refreshed.workload_id,
-                "workload_claim_id": refreshed.workload_claim_id,
-                "workload_generation": refreshed.workload_generation,
-                "auth_context": refreshed.auth_context,
-                "opaque_subject_token_hash": refreshed.opaque_subject_token_hash,
-                "expires_at": refreshed.expires_at,
-            }
         )
         volume_name = self._workload_identity_volume_name(
             workspace=workspace,
@@ -790,7 +783,12 @@ class DockerDeploymentBackend(DeploymentBackend):
             workspace=workspace,
             deployment_name=name,
         )
-        await self._workload_delegations.update(replacement, expected_db_version=delegation.db_version)
+        await self._workload_delegations.renew(
+            delegation.id,
+            expected_db_version=delegation.db_version,
+            expires_at=refreshed.expires_at,
+            opaque_subject_token_hash=refreshed.opaque_subject_token_hash,
+        )
 
     async def _sync_workload_identity_for_status(
         self,
@@ -855,10 +853,10 @@ class DockerDeploymentBackend(DeploymentBackend):
                 volume_name=volume_name,
             ),
         )
-        registered = False
+        delegation_id = None
         try:
-            await self._workload_delegations.register(delegation, require_opaque_subject_token_hash=True)
-            registered = True
+            saved = await self._workload_delegations.register(delegation, require_opaque_subject_token_hash=True)
+            delegation_id = saved.id
             await self._write_workload_identity_subject_token(
                 volume_name,
                 proof_token,
@@ -866,11 +864,11 @@ class DockerDeploymentBackend(DeploymentBackend):
                 deployment_name=deployment_name,
             )
         except Exception:
-            if registered:
-                await self._try_revoke_workload_delegation(delegation.name, reason="token provisioning failure")
+            if delegation_id:
+                await self._try_revoke_workload_delegation(delegation_id, reason="token provisioning failure")
             await self._remove_workload_identity_volume(volume_name)
             raise
-        return volume_name, delegation.name
+        return volume_name, delegation_id
 
     async def _cleanup_prepared_workload_identity(
         self,
@@ -880,8 +878,8 @@ class DockerDeploymentBackend(DeploymentBackend):
     ) -> None:
         if material is None:
             return
-        volume_name, delegation_name = material
-        await self._try_revoke_workload_delegation(delegation_name, reason=reason)
+        volume_name, delegation_id = material
+        await self._try_revoke_workload_delegation(delegation_id, reason=reason)
         await self._remove_workload_identity_volume(volume_name)
 
     async def _write_workload_identity_subject_token(

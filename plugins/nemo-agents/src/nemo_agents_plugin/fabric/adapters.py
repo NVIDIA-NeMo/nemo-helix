@@ -71,13 +71,32 @@ def installed_adapter_ids(root: Path | None = None) -> frozenset[str]:
     holds ``nooa`` and ``nooa-bench``). An unreadable
     manifest is skipped so one broken plugin can't block every other adapter.
     """
+    return frozenset().union(*(_scan_adapter_manifests(manifest_root) for manifest_root in _manifest_roots(root)))
+
+
+def adapter_accepts_models(adapter_id: str, root: Path | None = None) -> bool:
+    """Return whether an adapter takes the agent config's ``models``.
+
+    True when its installed manifest lists ``models`` in ``config.accepts``,
+    and for an adapter with no manifest here (the stock ones), which all do.
+    An adapter that takes none gets its models some other way (from the run's
+    context, say), so its config need not name one.
+    """
+    for manifest_root in _manifest_roots(root):
+        accepts = _scan_adapter_config_accepts(manifest_root).get(adapter_id)
+        if accepts is not None:
+            return "models" in accepts
+    return True
+
+
+def _manifest_roots(root: Path | None) -> list[Path]:
     if root is not None:
-        return _scan_adapter_manifests(root)
+        return [root]
     roots = [ADAPTER_MANIFEST_ROOT]
     adapter_python_root = _adapter_python_manifest_root(os.environ.get(ADAPTER_PYTHON_ENV, ""))
     if adapter_python_root is not None:
         roots.append(adapter_python_root)
-    return frozenset().union(*(_scan_adapter_manifests(manifest_root) for manifest_root in roots))
+    return roots
 
 
 @functools.cache
@@ -99,20 +118,30 @@ def _adapter_python_manifest_root(python: str) -> Path | None:
     return Path(result.stdout.strip()) / "share" / "nemo-fabric"
 
 
-@functools.cache
 def _scan_adapter_manifests(root: Path) -> frozenset[str]:
-    adapter_ids: set[str] = set()
+    return frozenset(_scan_adapter_config_accepts(root))
+
+
+@functools.cache
+def _scan_adapter_config_accepts(root: Path) -> dict[str, frozenset[str]]:
+    """Map the ``adapter_id`` of each manifest under ``root`` to its ``config.accepts``."""
+    accepts_by_id: dict[str, frozenset[str]] = {}
     for manifest in sorted(root.rglob(ADAPTER_MANIFEST_PATTERN)):
         try:
-            adapter_id = json.loads(manifest.read_text(encoding="utf-8")).get("adapter_id")
+            descriptor = json.loads(manifest.read_text(encoding="utf-8"))
+            adapter_id = descriptor.get("adapter_id")
+            accepts = (descriptor.get("config") or {}).get("accepts") or []
         except (OSError, UnicodeDecodeError, ValueError, AttributeError) as error:
             logger.warning("Skipping unreadable Fabric adapter manifest %s: %s", manifest, error)
             continue
         if not isinstance(adapter_id, str) or not adapter_id:
             logger.warning("Skipping Fabric adapter manifest %s: it declares no adapter_id.", manifest)
             continue
-        adapter_ids.add(adapter_id)
-    return frozenset(adapter_ids)
+        if not isinstance(accepts, list):
+            logger.warning("Skipping Fabric adapter manifest %s: its config.accepts is not a list.", manifest)
+            continue
+        accepts_by_id[adapter_id] = frozenset(item for item in accepts if isinstance(item, str))
+    return accepts_by_id
 
 
 def accepted_adapter_ids(root: Path | None = None) -> frozenset[str]:

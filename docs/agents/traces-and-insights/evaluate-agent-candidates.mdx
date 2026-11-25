@@ -26,7 +26,7 @@ You need:
 - An Experiment to hold the candidates. See the
   [Experiments First Workflow](/documentation/evaluate-models/experiments#first-workflow).
 - One agent name for every candidate. Every trace must carry the same `agent_name`, the one you pass
-  to Compass as `--agent`. See
+  to Compass as the run's `agent`. See
   [Telemetry Requirement](/documentation/agents/traces-and-insights/insights-from-traces#telemetry-requirement).
 
 The examples use the agent `support-agent` and two candidates, `support-agent-baseline` and
@@ -104,17 +104,16 @@ same filter as `filter[evaluation_name]=support-agent-short-prompt`.
 
 ### Analyze One Candidate with Compass
 
-Pass the Evaluation name to `--evaluation-id`:
+Set the run's `evaluation_id` to the Evaluation name:
 
 ```bash
-nemo compass analysis-runs create \
-  --agent support-agent \
-  --evaluation-id support-agent-short-prompt \
-  --wait
+nemo agents execute --agent compass-analyst \
+  --spec '{"context": {"agent": "support-agent", "evaluation_id": "support-agent-short-prompt"}}'
 ```
 
-`--evaluation-id` restricts every trace and span the run reads to that Evaluation. `--agent` is still
-required and must match the traces' `agent_name`. Do not use `--since` to isolate a candidate.
+`evaluation_id` restricts every trace and span the run reads to that Evaluation. `agent` is still
+required and must match the traces' `agent_name`. Do not use `since` to isolate a candidate. See
+[Run an Analysis On Demand](/documentation/agents/traces-and-insights/insights-from-traces#run-an-analysis-on-demand).
 
 Two things stay true when the run reads only one Evaluation:
 
@@ -148,7 +147,7 @@ To rank candidates through the API instead, see
 | ATIF or chat-completions ingest returns `400` with `Evaluation '<name>' must be created before it can be logged.` | The Evaluation does not exist in this workspace, or it was deleted. Create it first, or create a new Evaluation with a new name. |
 | OTLP traces for a candidate are missing | OTLP ingest drops spans whose `nemo.evaluation.name` names an Evaluation that does not exist, and still returns success. The response body's `errors` list carries the same message. Create the Evaluation, then send the traces again. |
 | A candidate's leaderboard row shows zero metrics | Its runs were ingested without `test_case_name`. See [Experiments Troubleshooting](/documentation/evaluate-models/experiments#troubleshooting). |
-| Compass reports `Analyzed 0 traces` | `--agent` does not match the traces' `agent_name`, or `--evaluation-id` is not the Evaluation name used at ingest. |
+| Compass reports `Analyzed 0 traces` | The run's `agent` does not match the traces' `agent_name`, or its `evaluation_id` is not the Evaluation name used at ingest. |
 
 ## Related Topics
 

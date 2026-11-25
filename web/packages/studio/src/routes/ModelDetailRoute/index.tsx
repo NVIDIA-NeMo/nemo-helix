@@ -3,7 +3,6 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
@@ -19,7 +18,6 @@ import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useModelLineage } from '@studio/hooks/useModelLineage';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
 import { ChatTab } from '@studio/routes/ModelDetailRoute/ChatTab';
 import { type ModelDetailParent, ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
@@ -27,6 +25,7 @@ import { DeploymentTab } from '@studio/routes/ModelDetailRoute/DeploymentTab';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import { FilesTab } from '@studio/routes/ModelDetailRoute/FilesTab';
 import { ModelDetailActions } from '@studio/routes/ModelDetailRoute/ModelDetailActions';
+import { useModelTabRoute } from '@studio/routes/ModelDetailRoute/useModelTabRoute';
 import {
   getCustomizationJobListRoute,
   getEvaluationNewRoute,
@@ -44,8 +43,9 @@ export interface ModelDetailRouteProps {
 export const ModelDetailRoute: FC<ModelDetailRouteProps> = ({ parent = 'fine-tuning' }) => {
   const workspace = useWorkspaceFromPath();
   const { modelName } = useRequiredPathParams([ROUTE_PARAMS.modelName]);
-  const { [ROUTE_PARAMS.adapterName]: adapterName } = useParams();
-  const { getQueryParam, setQueryParam } = useQueryParams();
+  const { [ROUTE_PARAMS.adapterName]: adapterName, [ROUTE_PARAMS.modelTab]: tabFromUrl } =
+    useParams();
+  const getTabRoute = useModelTabRoute();
   const navigate = useNavigate();
 
   // The catalog lists the `default` workspace's models too, so a catalog page falls back to it.
@@ -88,7 +88,6 @@ export const ModelDetailRoute: FC<ModelDetailRouteProps> = ({ parent = 'fine-tun
       : []),
   ];
 
-  const tabFromUrl = getQueryParam(QUERY_PARAMETERS.tab);
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   // An adapter is named with the `model::adapter` encoding the wizard's picker
@@ -151,7 +150,7 @@ export const ModelDetailRoute: FC<ModelDetailRouteProps> = ({ parent = 'fine-tun
         slotDescription={(adapter ?? model).description}
         tabs={tabs}
         selectedTab={selectedTab}
-        onTabChange={(tab) => setQueryParam(QUERY_PARAMETERS.tab, tab)}
+        onTabChange={(tab) => navigate(getTabRoute(tab))}
         slotActions={
           <ModelDetailActions
             selectedTab={selectedTab}

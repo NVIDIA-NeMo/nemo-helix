@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from nhx_evals_sdk.agent_eval.runtimes.fabric._common import trace_answer_text
-from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import register_trace_evidence
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import register_trace_evidence
 from nhx_evals_sdk.values.evidence import EvidenceDescriptor
 
 from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import write_answer_trace

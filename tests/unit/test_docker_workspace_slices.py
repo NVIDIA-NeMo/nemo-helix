@@ -60,9 +60,9 @@ CVE_PACKAGE_FLOORS = (
             Path("services/unsloth/pyproject.toml"),
             Path("docker/Dockerfile.nhx-unsloth-training"),
             Path("docker/rl/Dockerfile.nhx-rl-base"),
-            Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
         ),
     ),
+    ("mlflow-skinny", "3.17.2", (Path("docker/locks/nhx-gym-tasks/pyproject.toml"),)),
     # Automodel 0.7.0's `tracking` extra requires mlflow-skinny 3.16.1, above the CVE floor.
     ("mlflow-skinny", "3.16.1", (Path("docker/automodel/Dockerfile.nhx-automodel-base"),)),
     (
@@ -229,10 +229,10 @@ def test_rl_generation_security_upgrade_precedes_prefetch_and_survives_source_co
     for worker in ("VllmGenerationWorker", "VllmAsyncGenerationWorker", "SyncRolloutActor"):
         assert re.search(rf"^sync_venv .*\.{worker} --extra vllm(?: --extra nemo_gym)?$", worker_script, re.MULTILINE)
     for requirement in (
-        "vllm==0.30.0",
-        "flashinfer-python==0.6.18.post1",
-        "flashinfer-cubin==0.6.18.post1",
-        "flashinfer-jit-cache==0.6.18.post1",
+        "vllm==0.32.0",
+        "flashinfer-python==0.7.0.post1",
+        "flashinfer-cubin==0.7.0.post1",
+        "flashinfer-jit-cache==0.7.0.post1",
         "nvidia-cutlass-dsl[cu13]==4.7.1",
     ):
         assert f"'{requirement}'" in text

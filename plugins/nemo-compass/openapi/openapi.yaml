@@ -105,7 +105,15 @@ paths:
       tags:
       - Compass Analysis Configs
       summary: Update Analysis Config
-      description: Partially update periodic analysis state for one agent.
+      description: 'Partially update periodic analysis state for one agent.
+
+
+        Also creates the workspace''s Compass agent (`compass.analyst`) if it has
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: update_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__patch
       parameters:
       - name: workspace
@@ -177,7 +185,15 @@ paths:
       tags:
       - Compass Analysis Configs
       summary: Enable Analysis Config
-      description: Enable periodic insights analysis for one agent.
+      description: 'Enable periodic insights analysis for one agent.
+
+
+        Also creates the workspace''s Compass agent (`compass.analyst`) if it has
+        none.
+
+        That is best effort: if the caller may not create agents, the config is still
+
+        saved, and the scheduler reports the missing agent on the analysis status.'
       operationId: enable_analysis_config_apis_compass_v2_workspaces__workspace__analysis_configs__agent__enable_post
       parameters:
       - name: workspace
@@ -334,139 +350,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisRunStatus'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/compass/v2/workspaces/{workspace}/analysis-runs:
-    post:
-      tags:
-      - Compass Analysis Runs
-      summary: Create Analysis Run
-      description: Create a Compass analysis run backed by the generic ``agents.execute``
-        job.
-      operationId: create_analysis_run_apis_compass_v2_workspaces__workspace__analysis_runs_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAnalysisRunRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalysisRunResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Compass Analysis Runs
-      summary: List Analysis Runs
-      description: "List analysis runs. Job state is not joined here \u2014 read a\
-        \ run to get it."
-      operationId: list_analysis_runs_apis_compass_v2_workspaces__workspace__analysis_runs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: sort
-        in: query
-        required: false
-        schema:
-          type: string
-          description: Sort field.
-          default: -created_at
-          title: Sort
-        description: Sort field.
-      - name: agent
-        in: query
-        required: false
-        schema:
-          description: Filter by the agent that was analyzed.
-          title: Agent
-          type: string
-        description: Filter by the agent that was analyzed.
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 100
-          minimum: 1
-          description: Page size.
-          default: 20
-          title: Page Size
-        description: Page size.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NemoListResponse_AnalysisRun_'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/compass/v2/workspaces/{workspace}/analysis-runs/{name}:
-    get:
-      tags:
-      - Compass Analysis Runs
-      summary: Get Analysis Run
-      description: Get one analysis run, joined with the live state of its backing
-        job.
-      operationId: get_analysis_run_apis_compass_v2_workspaces__workspace__analysis_runs__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnalysisRunResponse'
         '422':
           description: Validation Error
           content:
@@ -790,127 +673,6 @@ components:
       - error
       title: AnalysisConfigStatus
       description: Lifecycle state for periodic insights analysis of one agent.
-    AnalysisRun:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Entity name within the workspace
-          default: ''
-        workspace:
-          type: string
-          pattern: ^[\w\-\+.@:]+$
-          title: Workspace
-          description: Workspace identifier
-        project:
-          title: Project
-          description: The name of the project associated with this entity.
-          type: string
-        agent:
-          type: string
-          title: Agent
-          description: Agent whose telemetry this run analyzed.
-        since:
-          title: Since
-          description: Lower bound the run enforced on trace/span reads.
-          type: string
-          format: date-time
-        evaluation_id:
-          type: string
-          title: Evaluation Id
-          description: Run scope AND-pinned onto every span read, when one was requested.
-          default: ''
-        default_model:
-          type: string
-          title: Default Model
-          description: Workspace-qualified Model Entity the run used for analysis
-            work.
-          default: ''
-        fast_model:
-          type: string
-          title: Fast Model
-          description: Workspace-qualified Model Entity the run used for context summarization.
-          default: ''
-        id:
-          type: string
-          title: Id
-          readOnly: true
-        created_at:
-          title: Created At
-          readOnly: true
-          type: string
-          format: date-time
-        created_by:
-          title: Created By
-          readOnly: true
-          nullable: true
-          type: string
-        updated_at:
-          title: Updated At
-          readOnly: true
-          type: string
-          format: date-time
-        updated_by:
-          title: Updated By
-          readOnly: true
-          nullable: true
-          type: string
-        entity_id:
-          type: string
-          title: Entity Id
-          description: Alias for id for backwards compatibility.
-          readOnly: true
-        parent:
-          title: Parent
-          description: Parent entity ID for nested entities.
-          readOnly: true
-          type: string
-        db_version:
-          type: integer
-          title: Db Version
-          description: Database version of the entity for optimistic locking.
-          readOnly: true
-      type: object
-      required:
-      - workspace
-      - agent
-      - id
-      - created_at
-      - created_by
-      - updated_at
-      - updated_by
-      - entity_id
-      - parent
-      - db_version
-      title: AnalysisRun
-      description: "One Compass analysis run \u2014 what was asked for, not how it\
-        \ went.\n\nThe record's ``name`` is also the name of the backing ``agents.execute``\n\
-        job. Compass mints that name before submitting, so the link between a run\n\
-        and its job is *derivable* rather than written back after the fact. That\n\
-        removes the dual write, and with it the failure mode where a job exists\n\
-        that no run points at: a run whose job name 404s simply never landed. There\n\
-        is no resubmit-under-an-existing-name route yet, so such a run is a read\n\
-        today, not something a caller can drive back to completion.\n\nProgress is\
-        \ deliberately absent. Status, logs, and results belong to the\nJob and are\
-        \ read from it; mirroring them here would go stale immediately.\nCompass owns\
-        \ only what no lower layer knows: that this job was an analysis\nrun, over\
-        \ which agent and scope."
-    AnalysisRunResponse:
-      properties:
-        run:
-          $ref: '#/components/schemas/AnalysisRun'
-        job:
-          title: Job
-          description: "The backing execute-agent job, or null when no job exists\
-            \ under the run's name \u2014 meaning submission never landed and the\
-            \ run can be resubmitted."
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - run
-      title: AnalysisRunResponse
-      description: An analysis run plus the live state of the job backing it.
     AnalysisRunStatus:
       properties:
         name:
@@ -1015,56 +777,6 @@ components:
       - db_version
       title: AnalysisRunStatus
       description: Machine-written run state for periodic analysis of one agent.
-    CreateAnalysisRunRequest:
-      properties:
-        agent:
-          type: string
-          minLength: 1
-          title: Agent
-          description: Agent whose telemetry should be analyzed.
-        default_model:
-          type: string
-          minLength: 1
-          title: Default Model
-          description: 'Model Entity Compass uses for analysis work, as a name or
-            a ''<workspace>/<name>'' ref; a bare name resolves in the run''s workspace
-            and is stored qualified. Required: the model pair is the operator''s choice
-            and is not persisted anywhere the Platform process can read it.'
-        fast_model:
-          type: string
-          minLength: 1
-          title: Fast Model
-          description: Model Entity used for context summarization, in the same form
-            as default_model. Required for the same reason.
-        ethos:
-          title: Ethos
-          description: 'Optional Ethos Markdown for the agent under test. Sent inline
-            rather than as a reference: the execute job''s Fabric adapter has no Files
-            access.'
-          type: string
-          minLength: 1
-        since:
-          title: Since
-          description: Optional lower bound enforced on Compass's trace/span reads.
-          type: string
-          format: date-time
-        evaluation_id:
-          title: Evaluation Id
-          description: Optional run scope AND-pinned onto every span read.
-          type: string
-          minLength: 1
-        timeout_seconds:
-          title: Timeout Seconds
-          description: Optional execute job timeout.
-          type: number
-          exclusiveMinimum: 0.0
-      type: object
-      required:
-      - agent
-      - default_model
-      - fast_model
-      title: CreateAnalysisRunRequest
-      description: Client-facing request to run Compass through ``agents.execute``.
     CreateInsightRequest:
       properties:
         title:
@@ -1482,29 +1194,6 @@ components:
       required:
       - data
       title: NemoListResponse_AnalysisRunStatus_
-    NemoListResponse_AnalysisRun_:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/AnalysisRun'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: "Pagination metadata \u2014 page, page_size, total_results,\
-            \ etc."
-        sort:
-          title: Sort
-          description: Sort field applied to this result set (e.g. '-created_at').
-          type: string
-        filter:
-          title: Filter
-          description: Filter criteria echoed back from the request.
-      type: object
-      required:
-      - data
-      title: NemoListResponse_AnalysisRun_
     NemoListResponse_InsightListItem_:
       properties:
         data:

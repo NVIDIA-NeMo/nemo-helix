@@ -107,6 +107,8 @@ The list shows fine-tuned models created in the current workspace. Select a row 
 
 Above the list, an **In Progress** table shows fine-tuning runs that haven't produced their model yet, with **Name** (the name the output will be registered under), **Base Model**, **Kind**, and **Created** columns. Select a run to open its job detail page. A run registers its output model or LoRA adapter only in its last step, after training and the checkpoint upload, so it stays in this table until then. Once it's registered, the run leaves the table and the model or adapter appears in the list below, without a page reload. The table refreshes automatically and is hidden when no runs are in progress.
 
+Use **Filter** to narrow the list by base model, one or more fine-tuning types, and creation or update date. Selecting **LoRA** also matches base models that have LoRA adapters attached. Selecting a row's type tag filters the list by that type.
+
 A row's actions menu includes **Job details**, which opens the fine-tuning run that produced the model or LoRA adapter. It's omitted for models that weren't created by a fine-tuning run.
 
 ## Customization Job Details

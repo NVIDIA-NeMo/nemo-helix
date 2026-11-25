@@ -19,7 +19,9 @@ from nemo_deployments_plugin.entities import DeploymentConfig, K8sDeploymentConf
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.workload_delegations import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
+    WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationConflictError,
+    WorkloadDelegationError,
     WorkloadDelegationStore,
     as_aware_utc,
 )
@@ -114,16 +116,15 @@ async def reconcile_pod_uid_delegations(
             remaining_seconds = (as_aware_utc(current.expires_at) - now).total_seconds()
             if remaining_seconds > refresh_threshold_seconds:
                 continue
-            refreshed = current.model_copy(
-                update={
-                    "expires_at": workload_delegation_expires_at(
+            try:
+                await store.renew(
+                    current.id,
+                    expected_db_version=current.db_version,
+                    expires_at=workload_delegation_expires_at(
                         ttl_seconds_active=config.workload_identity.token_expiration_seconds,
                         now=now,
-                    )
-                }
-            )
-            try:
-                await store.update(refreshed, expected_db_version=current.db_version)
+                    ),
+                )
             except WorkloadDelegationConflictError:
                 logger.debug(
                     "Skipping stale Pod UID workload delegation refresh",
@@ -142,13 +143,26 @@ async def reconcile_pod_uid_delegations(
         )
         try:
             await store.register(delegation)
-        except WorkloadDelegationConflictError:
+        except WorkloadDelegationAlreadyActiveError:
             logger.debug("Pod UID workload delegation already active", extra={"delegation_name": delegation.name})
+        except WorkloadDelegationConflictError:
+            logger.warning(
+                "Pod UID workload delegation registration conflicted; retrying on next sync",
+                extra={"delegation_name": delegation.name},
+            )
 
     live_set = set(live_pod_uids)
+    failures: list[Exception] = []
     for pod_uid, entity in existing_by_pod_uid.items():
-        if pod_uid not in live_set and entity.is_active():
-            await store.revoke(entity.name)
+        if pod_uid not in live_set:
+            try:
+                await store.revoke_by_id(entity.id)
+            except Exception as exc:
+                failures.append(exc)
+    if failures:
+        raise WorkloadDelegationError("Some stale Pod grants could not be revoked") from ExceptionGroup(
+            "Stale Pod grant revocation failures", failures
+        )
 
 
 def deployment_pod_uid_delegation_pods(

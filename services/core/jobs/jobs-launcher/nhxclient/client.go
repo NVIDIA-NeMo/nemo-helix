@@ -11,9 +11,11 @@ to support the jobs-launcher service.
 */
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -25,11 +27,18 @@ type HelixSecretAccessResponse struct {
 
 // Principal holds the authentication context captured from the job creator.
 // This is propagated to task containers via the NHX_PRINCIPAL environment variable (JSON).
-// The JSON field names match the Principal model (id, email, groups) used by the Python auth layer.
+// JSON fields match the Python Principal model, including an already delegated creator.
 type Principal struct {
-	ID     string   `json:"id"`               // Required - the principal's unique identifier
-	Email  string   `json:"email,omitempty"`  // Optional - the principal's email
-	Groups []string `json:"groups,omitempty"` // Optional - list of groups
+	ID                     string   `json:"id"`
+	Email                  string   `json:"email,omitempty"`
+	Groups                 []string `json:"groups,omitempty"`
+	AccountID              string   `json:"account_id,omitempty"`
+	AuthzAliases           []string `json:"authz_aliases,omitempty"`
+	OnBehalfOf             string   `json:"on_behalf_of,omitempty"`
+	OnBehalfOfEmail        string   `json:"on_behalf_of_email,omitempty"`
+	OnBehalfOfGroups       []string `json:"on_behalf_of_groups,omitempty"`
+	OnBehalfOfAccountID    string   `json:"on_behalf_of_account_id,omitempty"`
+	OnBehalfOfAuthzAliases []string `json:"on_behalf_of_authz_aliases,omitempty"`
 }
 
 // PrincipalFromEnv creates a Principal from the NHX_PRINCIPAL environment variable.
@@ -53,17 +62,18 @@ func PrincipalFromEnv() *Principal {
 }
 
 func getSecretURL(baseURL, workspace, secretName string) string {
-	return fmt.Sprintf("%s/apis/secrets/v2/workspaces/%s/secrets/%s/access", baseURL, workspace, secretName)
+	return fmt.Sprintf("%s/apis/secrets/v2/workspaces/%s/secrets/%s/access", baseURL, url.PathEscape(workspace), url.PathEscape(secretName))
 }
 
 type SecretClient interface {
-	GetSecret(workspaceID, secretName string) (*HelixSecretAccessResponse, error)
+	GetSecret(ctx context.Context, workspaceID, secretName string) (*HelixSecretAccessResponse, error)
 }
 
 type secretClient struct {
 	httpClient *http.Client
 	principal  *Principal
 	apiBaseURL string
+	session    *Session
 }
 
 func NewSecretClient(apiBaseURL string, principal *Principal) SecretClient {
@@ -75,7 +85,8 @@ func NewSecretClientWithHTTPClient(apiBaseURL string, principal *Principal, http
 		httpClient = http.DefaultClient
 	}
 	return &secretClient{
-		httpClient: httpClient,
+		httpClient: safeHTTPClient(httpClient),
+		session:    &Session{},
 		principal:  principal,
 		apiBaseURL: apiBaseURL,
 	}
@@ -85,24 +96,19 @@ func NewSecretClientForEndpoint(endpoint Endpoint, principal *Principal) SecretC
 	return NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, endpoint.HTTPClient())
 }
 
-func (c *secretClient) GetSecret(workspaceID, secretName string) (*HelixSecretAccessResponse, error) {
+func (c *secretClient) GetSecret(ctx context.Context, workspaceID, secretName string) (*HelixSecretAccessResponse, error) {
 	secretURL := getSecretURL(c.apiBaseURL, workspaceID, secretName)
 
-	req, err := http.NewRequest("GET", secretURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", secretURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set auth headers from the job's captured auth context
-	if c.principal != nil {
-		if c.principal.ID != "" {
-			// Fetching the value of the secret requires a service principal, but we want to only access secrets for the principal the job was created by
-			req.Header.Set("X-NHX-Principal-Id", "service:jobs")
-			req.Header.Set("X-NHX-Principal-On-Behalf-Of", c.principal.ID)
-		}
+	if req.URL.User != nil && !c.session.BearerMode() && (c.principal == nil || c.principal.ID == "") {
+		return nil, fmt.Errorf("URL credentials are not supported for anonymous Secret requests")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.session.do(req, c.httpClient, c.principal)
 	if err != nil {
 		return nil, err
 	}
@@ -123,4 +129,10 @@ func (c *secretClient) GetSecret(workspaceID, secretName string) (*HelixSecretAc
 		WorkspaceID: workspaceID,
 		Value:       secretData.Value,
 	}, nil
+}
+
+func (s *Session) SecretClient(endpoint Endpoint, principal *Principal) SecretClient {
+	c := NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, s.clientForEndpoint(endpoint)).(*secretClient)
+	c.session = s
+	return c
 }

@@ -75,6 +75,8 @@ SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
     {
         "PATH",
         "VIRTUAL_ENV",
+        # Preserve the operator's explicit Fabric adapter interpreter for jobs too.
+        "ADAPTER_PYTHON",
         # A path on the build host, so operator-set like the rest of this list.
         "NEMO_AGENTS_WHEEL",
         # The documented platform opt-out. Without it, jobs such as Data Designer fall back to

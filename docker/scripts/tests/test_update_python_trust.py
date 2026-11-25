@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -23,11 +24,26 @@ trust = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trust)
 
 
+def test_wandb_rebuild_toolchain_mounts_match_verifier() -> None:
+    docker = Path(__file__).parents[2]
+    mounts = [
+        (path.relative_to(docker), version)
+        for path in docker.rglob("Dockerfile*")
+        for version in re.findall(r"--mount=from=golang:([^,]+),source=/usr/local/go", path.read_text())
+    ]
+    assert mounts, "No W&B rebuild toolchain mounts found"
+    assert trust.WANDB_GO_VERSION == "1.27.4"
+    assert all(version == trust.WANDB_GO_VERSION for _, version in mounts), mounts
+
+
+@pytest.mark.parametrize("go_version", ["go1.27.4", "go1.27.3"])
 @pytest.mark.parametrize(
     ("value", "enabled"),
     [("1", True), (" TRUE ", True), ("Yes", True), (" oN ", True), (None, False), ("0", False), ("false", False)],
 )
-def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeypatch, value, enabled: bool) -> None:
+def test_source_collection_covers_archive_and_go_sources(
+    tmp_path: Path, monkeypatch, value, enabled: bool, go_version: str
+) -> None:
     if value is None:
         monkeypatch.delenv("NHX_COLLECT_SOURCES", raising=False)
     else:
@@ -55,9 +71,15 @@ def test_source_collection_covers_archive_and_go_sources(tmp_path: Path, monkeyp
     responses = iter([json.dumps(metadata).encode(), data])
     monkeypatch.setattr(trust, "urlopen", lambda *args, **kwargs: io.BytesIO(next(responses)))
     monkeypatch.setattr(trust, "machine", lambda: "aarch64")
-    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: f"wandb-core: {go_version}\n")
     collected = []
     monkeypatch.setattr(trust, "run_process", lambda command, **kwargs: collected.append(command))
+
+    if go_version != "go1.27.4":
+        with pytest.raises(ValueError, match="Unexpected wandb-core toolchain"):
+            trust.rebuild_wandb("0.31.0", tmp_path)
+        assert not collected
+        return
 
     binary = trust.rebuild_wandb("0.31.0", tmp_path)
 
@@ -144,6 +166,7 @@ def test_rebuild_evicts_content_store_without_deleting_other_consumers(
     monkeypatch.setattr(trust, "SOURCE_OUTPUT", tmp_path / "sources")
     monkeypatch.setattr(trust, "python_environments", lambda _: [])
     monkeypatch.setattr(trust, "rebuild_wandb", lambda *args: replacement)
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.2\n")
 
     trust.main()
 
@@ -152,6 +175,65 @@ def test_rebuild_evicts_content_store_without_deleting_other_consumers(
     assert metadata.exists()
     if referenced:
         assert other.read_bytes() == b"old Go executable"
+
+
+@pytest.mark.parametrize(
+    ("version", "accepted"),
+    [
+        ("go1.25.20", False),
+        ("go1.26.9", False),
+        ("go1.26.10", True),
+        ("go1.27.2", False),
+        ("go1.27.3", True),
+        ("go1.28.0", True),
+        ("go1.28rc1", False),
+        ("unrecognized", False),
+    ],
+)
+def test_patched_go_toolchain_floors(monkeypatch, version: str, accepted: bool) -> None:
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: f"wandb-core: {version}\n")
+    assert trust.has_patched_go(Path("wandb-core")) is accepted
+
+
+def test_unreadable_go_metadata_requires_rebuild(monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0])
+
+    monkeypatch.setattr(trust, "check_output", fail)
+    assert not trust.has_patched_go(Path("wandb-core"))
+
+
+@pytest.mark.parametrize("collect_sources", [False, True])
+def test_keep_patched_wandb_in_environment_and_cache(tmp_path: Path, monkeypatch, collect_sources: bool) -> None:
+    environment = tmp_path / "environment"
+    cache = tmp_path / "cache"
+    installed = environment / "site-packages"
+    cached = cache / "archive-v0/wandb"
+    for root in (installed, cached):
+        metadata = root / "wandb-0.31.2.dist-info/METADATA"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text("Name: wandb\nVersion: 0.31.2\n")
+        binary = root / "wandb/bin/wandb-core"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"upstream Go executable")
+    monkeypatch.setattr(sys, "argv", ["update-python-trust.py", "--root", str(environment)])
+    monkeypatch.setattr(trust, "CACHE_ROOTS", (cache,))
+    monkeypatch.setattr(trust, "SOURCE_OUTPUT", tmp_path / "sources")
+    monkeypatch.setattr(trust, "python_environments", lambda _: [])
+    monkeypatch.setattr(trust, "check_output", lambda *args, **kwargs: "wandb-core: go1.27.3\n")
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", str(int(collect_sources)))
+    monkeypatch.setattr(trust, "rebuild_wandb", lambda *args: pytest.fail("Compliant binary was rebuilt"))
+    sdists = []
+    binaries = []
+    monkeypatch.setattr(trust, "download_sdist", lambda version, destination: sdists.append(version))
+    monkeypatch.setattr(trust, "collect_go_sources", lambda binary: binaries.append(binary.read_bytes()))
+
+    trust.main()
+
+    for root in (installed, cached):
+        assert (root / "wandb/bin/wandb-core").read_bytes() == b"upstream Go executable"
+    assert sdists == (["0.31.2"] if collect_sources else [])
+    assert binaries == ([b"upstream Go executable"] if collect_sources else [])
 
 
 def test_content_addressed_cleanup_preserves_symlinks_and_installed_hardlinks(tmp_path: Path) -> None:

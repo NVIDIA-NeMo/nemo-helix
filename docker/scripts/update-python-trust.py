@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Update Python CA bundles and rebuild installed wandb-core with patched Go."""
+"""Update Python CA bundles and verify or rebuild wandb-core with patched Go."""
 
 import argparse
 import base64
@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 from platform import machine
 from shutil import which
-from subprocess import check_output
+from subprocess import DEVNULL, CalledProcessError, check_output
 from subprocess import run as run_process
 from urllib.request import urlopen
 
@@ -43,6 +43,8 @@ ROOTS = (
 SOURCE_OUTPUT = Path("/usr/share/nemo-helix/source-distributions/rebuilt-wandb")
 CACHE_ROOTS = (Path("/opt/uv_cache"), Path("/home/ubuntu/.cache/uv"))
 FIXED_PACKAGES = {"certifi": "2026.10.19", "pip": "26.2.2", "uv": "0.13.4"}
+# W&B 0.31.1 requires Go 1.27.4; keep every Docker rebuild mount aligned.
+WANDB_GO_VERSION = "1.27.4"
 
 
 def source_collection_enabled() -> bool:
@@ -142,7 +144,7 @@ def update_bundles(python: Path) -> None:
         )
 
 
-def download_source(version: str, destination: Path) -> Path:
+def download_sdist(version: str, destination: Path) -> Path:
     with urlopen(f"https://pypi.org/pypi/wandb/{version}/json", timeout=120) as response:
         metadata = json.load(response)
     source = next(file for file in metadata["urls"] if file["packagetype"] == "sdist")
@@ -154,15 +156,42 @@ def download_source(version: str, destination: Path) -> Path:
     archive.write_bytes(data)
     if source_collection_enabled():
         shutil.copy2(archive, SOURCE_OUTPUT / archive.name)
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-        tar.extractall(destination, filter="data")
-    return next(path for path in destination.iterdir() if path.is_dir())
+    return archive
+
+
+def collect_go_sources(binary: Path) -> None:
+    run_process(
+        [
+            sys.executable,
+            "/tmp/collect-go-module-sources.py",
+            "--binary",
+            str(binary),
+            "--output",
+            str(SOURCE_OUTPUT),
+        ],
+        check=True,
+    )
+
+
+def has_patched_go(binary: Path) -> bool:
+    try:
+        info = check_output(["/usr/local/go/bin/go", "version", "-m", str(binary)], text=True, stderr=DEVNULL)
+    except (CalledProcessError, OSError):
+        return False
+    version = re.search(r": go(\d+)\.(\d+)\.(\d+)$", info.partition("\n")[0])
+    if version is None:
+        return False
+    major, minor, patch = map(int, version.groups())
+    return major == 1 and ((minor == 26 and patch >= 10) or (minor == 27 and patch >= 3) or minor > 27)
 
 
 def rebuild_wandb(version: str, work: Path) -> Path:
     directory = work / version
     directory.mkdir()
-    source = download_source(version, directory)
+    archive = download_sdist(version, directory)
+    with tarfile.open(archive, mode="r:gz") as tar:
+        tar.extractall(directory, filter="data")
+    source = next(path for path in directory.iterdir() if path.is_dir())
     output = directory / "wandb-core"
     previous = Path.cwd()
     try:
@@ -181,20 +210,10 @@ def rebuild_wandb(version: str, work: Path) -> Path:
     finally:
         os.chdir(previous)
     version_info = check_output(["/usr/local/go/bin/go", "version", "-m", str(output)], text=True)
-    if version_info.splitlines()[0].split()[-1] != "go1.27.3":
+    if version_info.splitlines()[0].split()[-1] != f"go{WANDB_GO_VERSION}":
         raise ValueError(f"Unexpected wandb-core toolchain: {version_info}")
     if source_collection_enabled():
-        run_process(
-            [
-                sys.executable,
-                "/tmp/collect-go-module-sources.py",
-                "--binary",
-                str(output),
-                "--output",
-                str(SOURCE_OUTPUT),
-            ],
-            check=True,
-        )
+        collect_go_sources(output)
     return output
 
 
@@ -246,6 +265,8 @@ def main() -> None:
     # Include the caches that supply symlinked RL and Gym environments.
     roots.extend(CACHE_ROOTS)
     rebuilt: dict[str, Path] = {}
+    collected_sdists: set[str] = set()
+    collected_binaries: set[bytes] = set()
     with tempfile.TemporaryDirectory(prefix="wandb-security-") as temporary:
         for root in roots:
             if not root.exists():
@@ -256,6 +277,16 @@ def main() -> None:
                 if not binary.is_file():
                     continue
                 version = distribution.version
+                if has_patched_go(binary):
+                    if source_collection_enabled():
+                        if version not in collected_sdists:
+                            download_sdist(version, Path(temporary))
+                            collected_sdists.add(version)
+                        digest = hashlib.sha256(binary.read_bytes()).digest()
+                        if digest not in collected_binaries:
+                            collect_go_sources(binary)
+                            collected_binaries.add(digest)
+                    continue
                 if version not in rebuilt:
                     rebuilt[version] = rebuild_wandb(version, Path(temporary))
                 replace_binary(binary, rebuilt[version], metadata.parent / "RECORD")

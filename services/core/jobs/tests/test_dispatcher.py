@@ -12,7 +12,7 @@ import gc
 import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import Any, TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1014,6 +1014,39 @@ async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_re
         "pod": {"name": "pod-1", "phase": "Running"},
     }
 
+    # The controller re-sends the same pod details every pass. That write is not progress, so it
+    # leaves updated_at alone and a stalled task still reads as stale. It still repairs an attempt
+    # whose earlier propagation failed, and rewrites nothing once the attempt holds the details.
+    attempt = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    attempt.status_details = {}
+    await mock_store.update(attempt)
+    writes: dict[type, int] = {HelixJobTask: 0, HelixJobAttempt: 0}
+    store_update = mock_store.update
+
+    async def recording_update(entity: Any) -> Any:
+        if type(entity) in writes:
+            writes[type(entity)] += 1
+        return await store_update(entity)
+
+    mock_store.update = recording_update  # type: ignore[method-assign]
+    repeat = HelixJobTaskUpdate(
+        status=HelixJobStatus.ACTIVE, status_details={"pod": {"name": "pod-1", "phase": "Running"}}
+    )
+    progress = HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE, status_details={"step": 13})
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, repeat, step)
+    assert writes == {HelixJobTask: 0, HelixJobAttempt: 1}
+    repaired = await mock_store.get_by_id(HelixJobAttempt, step.attempt_id)
+    assert repaired.status_details["pod"] == {"name": "pod-1", "phase": "Running"}
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, repeat, step)
+    assert writes == {HelixJobTask: 0, HelixJobAttempt: 1}
+
+    await mock_dispatcher.create_or_update_task(job_name, task.name, DEFAULT_WORKSPACE, progress, step)
+    assert writes == {HelixJobTask: 1, HelixJobAttempt: 2}
+    stored = await mock_dispatcher.get_task(step.id, task.name, workspace=DEFAULT_WORKSPACE)
+    assert stored is not None and stored.status_details["step"] == 13
+
 
 CLASSIFIED_ERROR = {
     "message": "A GPU ran out of memory.",
@@ -1630,6 +1663,74 @@ async def test_update_job_status_from_step_skips_job_run_telemetry_without_sessi
         await mock_dispatcher.update_job_status_from_step(current_step, HelixJobStatus.COMPLETED)
 
     emit_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [HelixJobStatus.COMPLETED, HelixJobStatus.ERROR, HelixJobStatus.CANCELLED, HelixJobStatus.PAUSED],
+)
+@pytest.mark.parametrize("with_session", [False, True])
+@pytest.mark.parametrize("failure", [None, "metrics", "telemetry"])
+async def test_job_metrics_precede_telemetry_gate_and_do_not_repeat(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    status: HelixJobStatus,
+    with_session: bool,
+    failure: str | None,
+):
+    from nhx.core.jobs.telemetry import build_job_run_telemetry_from_observation
+
+    if not with_session:
+        monkeypatch.setenv("NEMO_TELEMETRY_ENABLED", "false")
+    request = sample_platform_job_request.model_copy(
+        update={
+            "custom_fields": build_job_telemetry_custom_fields("session-123") if with_session else {},
+        }
+    )
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step.status = HelixJobStatus.ACTIVE
+    step = await mock_store.update(step)
+    attempt = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert attempt is not None
+    attempt.status = HelixJobStatus.ACTIVE
+    await mock_store.update(attempt)
+    calls = []
+    expected_calls = ["metrics", "outbound_gate"]
+
+    def record(observation):
+        calls.append("metrics")
+        assert observation.status == status.value
+        if failure == "metrics":
+            raise RuntimeError("metrics sink failed")
+
+    def outbound_gate(observation, custom_fields):
+        calls.append("outbound_gate")
+        if failure == "telemetry":
+            raise RuntimeError("telemetry sink failed")
+        return build_job_run_telemetry_from_observation(observation, custom_fields)
+
+    with (
+        patch("nhx.core.jobs.app.dispatcher.record_job_run_metrics", side_effect=record) as metrics,
+        patch("nhx.core.jobs.app.dispatcher.build_job_run_telemetry_from_observation", side_effect=outbound_gate),
+        patch("nhx.core.jobs.app.dispatcher.emit_job_run_event") as emit,
+    ):
+        await mock_dispatcher.update_job_status_from_step(step, status, status_details={"input_tokens": 3})
+        assert calls == expected_calls
+        assert emit.call_count == int(with_session and failure != "telemetry")
+        metrics.assert_called_once()
+        # Replayed/reconciled updates are not new lifecycle observations.
+        saved_step = await mock_store.get_by_id(HelixJobStep, step.id)
+        await mock_dispatcher.update_job_status_from_step(saved_step, status)
+        metrics.assert_called_once()
+        assert calls == expected_calls
+    saved_attempt = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert saved_attempt is not None
+    assert saved_attempt.status == status
 
 
 @pytest.mark.asyncio

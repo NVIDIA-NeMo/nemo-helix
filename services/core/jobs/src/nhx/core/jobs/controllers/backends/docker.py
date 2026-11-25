@@ -22,6 +22,7 @@ import docker.types
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 from docker.types import LogConfig, Mount
+from kubernetes.utils import parse_quantity
 from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError, probe_docker
 from nemo_helix_plugin.client.errors import NemoClientError
@@ -51,7 +52,6 @@ from nhx.common.auth import (
     WorkloadDelegationError,
     WorkloadDelegationScope,
     build_docker_opaque_workload_delegation,
-    docker_delegation_name,
     get_workload_delegation_audience,
 )
 from nhx.common.config import get_platform_config, nhx_user_data_dir
@@ -172,6 +172,7 @@ DOCKER_STOP_TIMEOUT = int(os.getenv("NEMO_JOBS_DEFAULT_DOCKER_STOP_TIMEOUT", "30
 NHX_JOBS_DOCKER_OWNER_ID_ENVVAR = "NHX_JOBS_DOCKER_OWNER_ID"
 DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL = "nhx.nvidia.com/workload_identity_token_file"
 DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL = "nhx.nvidia.com/workload_identity_volume"
+DOCKER_WORKLOAD_DELEGATION_ID_LABEL = "nhx.nvidia.com/workload_delegation_id"
 
 
 ProviderT = TypeVar("ProviderT", CPUExecutionProvider, GPUExecutionProvider)
@@ -321,7 +322,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             auth_context=auth_context,
             ttl_seconds_active=step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
         )
-        self._workload_delegation_store.register(
+        saved = self._workload_delegation_store.register(
             delegation,
             require_opaque_subject_token_hash=True,
         )
@@ -333,68 +334,51 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
         finally:
             if not token_written:
                 self._try_revoke_workload_delegation(
-                    delegation.name,
+                    saved.id,
                     reason="token provisioning failure",
                     cause=sys.exception(),
                 )
 
-        return delegation.name
+        return saved.id
 
     def _try_revoke_workload_delegation(
         self,
-        delegation_name: str | None,
+        delegation_id: str | None,
         *,
         reason: str,
         cause: BaseException | None = None,
     ) -> Exception | None:
-        if not delegation_name:
+        if not delegation_id:
             return None
 
         try:
-            self._workload_delegation_store.revoke(delegation_name)
+            self._workload_delegation_store.revoke_by_id(delegation_id)
         except _WORKLOAD_DELEGATION_CLEANUP_ERRORS as exc:
             logger.exception(
                 "Failed to revoke Docker workload delegation",
-                extra={"delegation_name": delegation_name, "reason": reason},
+                extra={"delegation_id": delegation_id, "reason": reason},
             )
             if cause is not None:
-                cause.add_note(f"Failed to revoke Docker workload delegation {delegation_name} after {reason}: {exc!r}")
+                cause.add_note(f"Failed to revoke Docker workload delegation {delegation_id} after {reason}: {exc!r}")
             return exc
         return None
 
-    def _workload_delegation_name_for_step(self, step: HelixJobStepWithContext) -> str:
-        return docker_delegation_name(
-            workload_workspace=step.workspace,
-            job_id=step.job,
-            attempt_id=step.attempt_id,
-            step_id=step.id,
-        )
+    def _try_revoke_container_delegation(self, container: Container, *, reason: str) -> None:
+        delegation_id = self._workload_delegation_id_from_container(container)
+        if delegation_id is None:
+            return
+        try:
+            self._workload_delegation_store.revoke_for_docker_container(delegation_id, container.id)
+        except _WORKLOAD_DELEGATION_CLEANUP_ERRORS:
+            logger.exception(
+                "Failed to revoke container workload delegation",
+                extra={"delegation_id": delegation_id, "container_id": container.id, "reason": reason},
+            )
 
     @staticmethod
-    def _workload_delegation_name_from_container(container: Container) -> str | None:
-        labels = container.labels or {}
-        if DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL not in labels:
-            return None
-
-        workload_workspace = labels.get(JOB_WORKSPACE_ID_LABEL)
-        job_id = labels.get(JOB_ID_LABEL)
-        attempt_id = labels.get(JOB_ATTEMPT_ID_LABEL)
-        step_id = labels.get(JOB_STEP_ID_LABEL)
-        if not isinstance(workload_workspace, str) or not workload_workspace:
-            return None
-        if not isinstance(job_id, str) or not job_id:
-            return None
-        if not isinstance(attempt_id, str) or not attempt_id:
-            return None
-        if not isinstance(step_id, str) or not step_id:
-            return None
-
-        return docker_delegation_name(
-            workload_workspace=workload_workspace,
-            job_id=job_id,
-            attempt_id=attempt_id,
-            step_id=step_id,
-        )
+    def _workload_delegation_id_from_container(container: Container) -> str | None:
+        delegation_id = (container.labels or {}).get(DOCKER_WORKLOAD_DELEGATION_ID_LABEL)
+        return delegation_id if isinstance(delegation_id, str) and delegation_id else None
 
     def _write_workload_identity_subject_token(self, volume_name: str, token: str) -> None:
         storage_config = self._execution_profile_config.storage
@@ -982,7 +966,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
             if not submitted:
                 if container_args is not None:
                     self._try_revoke_workload_delegation(
-                        container_args.get("_nhx_workload_delegation_name"),
+                        container_args.get("_nhx_workload_delegation_id"),
                         reason="container scheduling failure",
                         cause=sys.exception(),
                     )
@@ -1039,7 +1023,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
             step_config_json=step_config_json,
             workload_identity_volume_name=workload_identity_volume_name,
         )
-        workload_delegation_name = None
+        workload_delegation_id = None
         logger.debug(
             "Docker job storage ensured",
             extra={
@@ -1101,11 +1085,12 @@ chmod -R 777 {job_vol}/{storage_subpath}
         if workload_identity_volume_name is not None:
             workload_identity_prepared = False
             try:
-                workload_delegation_name = self._prepare_workload_identity_for_step(
+                workload_delegation_id = self._prepare_workload_identity_for_step(
                     step=step,
                     workload_identity_volume_name=workload_identity_volume_name,
                 )
-                container_args["_nhx_workload_delegation_name"] = workload_delegation_name
+                container_args["_nhx_workload_delegation_id"] = workload_delegation_id
+                labels[DOCKER_WORKLOAD_DELEGATION_ID_LABEL] = workload_delegation_id
                 workload_identity_prepared = True
             finally:
                 if not workload_identity_prepared:
@@ -1120,7 +1105,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         finally:
             if not configured:
                 self._try_revoke_workload_delegation(
-                    workload_delegation_name,
+                    workload_delegation_id,
                     reason="container scheduling failure",
                     cause=sys.exception(),
                 )
@@ -1235,13 +1220,13 @@ chmod -R 777 {job_vol}/{storage_subpath}
             if submitted_to_threadpool_at is not None:
                 log_extra["queue_delay_seconds"] = time.monotonic() - submitted_to_threadpool_at
             logger.debug("Docker run_container worker started", extra=log_extra)
-            workload_delegation_name = container_args.get("_nhx_workload_delegation_name")
+            workload_delegation_id = container_args.get("_nhx_workload_delegation_id")
             try:
                 self._run_container_in_thread(step, container_args)
             except FailedToScheduleError as e:
                 logger.exception("Failed to schedule container for job step")
                 self._try_revoke_workload_delegation(
-                    workload_delegation_name,
+                    workload_delegation_id,
                     reason="container scheduling failure",
                     cause=e,
                 )
@@ -1261,7 +1246,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
             except Exception as e:
                 logger.exception("Unexpected error while scheduling container for job step")
                 self._try_revoke_workload_delegation(
-                    workload_delegation_name,
+                    workload_delegation_id,
                     reason="container scheduling failure",
                     cause=e,
                 )
@@ -1317,7 +1302,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         container_args: dict,
         status: HelixJobStatus,
         status_details: dict,
-        workload_delegation_name: str | None,
+        workload_delegation_id: str | None,
     ) -> Container | None:
         image = container_args["image"]
         try:
@@ -1354,7 +1339,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
             logger.debug("Checking for cancellation or pausing before creating container after image pull")
             if self.cancel_scheduling(step):
                 self._try_revoke_workload_delegation(
-                    workload_delegation_name,
+                    workload_delegation_id,
                     reason="container scheduling cancellation",
                 )
                 return None
@@ -1462,7 +1447,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
     def _run_container_in_thread(self, step: HelixJobStepWithContext, container_args: dict):
         status_details = {}
         status = HelixJobStatus.PENDING
-        workload_delegation_name = container_args.pop("_nhx_workload_delegation_name", None)
+        workload_delegation_id = container_args.pop("_nhx_workload_delegation_id", None)
 
         # If a request to pause or cancel came in while we were waiting for scheduling loop,
         # cancel scheduling the container
@@ -1478,7 +1463,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 },
             )
             self._try_revoke_workload_delegation(
-                workload_delegation_name,
+                workload_delegation_id,
                 reason="container scheduling cancellation",
             )
             return
@@ -1511,6 +1496,10 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 raise FailedToScheduleError(f"Could not remove the previous container '{container.name}'")
             container = None
         if container is not None:
+            if workload_delegation_id is not None:
+                raise FailedToScheduleError(
+                    "Refusing to adopt an existing container while workload identity is enabled"
+                )
             logger.info("Container already exists, not creating a new one", extra={"container_name": container.name})
         else:
             # Container not found, create it
@@ -1544,10 +1533,17 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 container_args=container_args,
                 status=status,
                 status_details=status_details,
-                workload_delegation_name=workload_delegation_name,
+                workload_delegation_id=workload_delegation_id,
             )
             if container is None:
                 return
+
+            if workload_delegation_id is not None:
+                try:
+                    self._workload_delegation_store.bind_docker_container(workload_delegation_id, container.id)
+                except Exception as exc:
+                    message = "Failed to persist Docker workload delegation binding"
+                    raise FailedToScheduleError(message, error_details={"message": message}) from exc
 
             # Insert the jobs-launcher into the container if the launcher exists
             if jobs_launcher_stream is not None:
@@ -1587,7 +1583,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 },
             )
             self._try_revoke_workload_delegation(
-                workload_delegation_name,
+                workload_delegation_id,
                 reason="container scheduling cancellation",
             )
             return
@@ -2012,10 +2008,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         """Record the container's status on its task, and revoke its delegation once it is terminal."""
         task_id = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
         if status in HelixJobStatus.terminals() and self._should_enable_workload_identity_for_step(step):
-            self._try_revoke_workload_delegation(
-                self._workload_delegation_name_for_step(step),
-                reason="terminal status",
-            )
+            self._try_revoke_container_delegation(container, reason="terminal status")
 
         logger.debug(
             "Docker container status mapped to platform status",
@@ -2133,16 +2126,42 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     container_args["mem_limit"] = memory_limit
 
             if limits.cpu is not None:
-                cpu_limit = limits.cpu
-                # Convert CPU format - Docker expects float/int
-                if cpu_limit.endswith("m"):
-                    # Convert millicores to cores
-                    cpu_cores = int(float(cpu_limit[:-1]) / 1000)
-                    container_args["cpu_count"] = cpu_cores
-                else:
-                    container_args["cpu_count"] = int(cpu_limit)
+                nano_cpus = self._docker_nano_cpus(limits.cpu)
+                if nano_cpus > 0:
+                    container_args["nano_cpus"] = nano_cpus
 
         return container_args
+
+    def _docker_nano_cpus(self, cpu_limit: str) -> int:
+        """Convert a Kubernetes CPU quantity (``"500m"``, ``"2.5"``, ``"4"``) to Docker ``nano_cpus``.
+
+        Kubernetes enforces a CPU limit as a CFS quota, which is what ``nano_cpus`` (``docker run
+        --cpus``) sets. Docker's ``cpu_count`` is Windows-only and ignored by Linux daemons. Docker
+        rejects a quota above the daemon's CPU count, whereas Kubernetes accepts a limit above node
+        capacity and never reaches it, so the quota is capped at the daemon's CPU count. Docker also
+        rejects any quota when the daemon has no CFS quota support (e.g. rootless without the cpu
+        cgroup controller), so the limit is skipped there, as it was before.
+        """
+        cores = parse_quantity(cpu_limit)
+        if not cores.is_finite() or cores < 0:
+            raise ValueError("Docker CPU limit must be finite and non-negative")
+        # Preserve the existing zero-means-no-limit behavior.
+        if cores == 0:
+            return 0
+        nano_cpus = int(cores * 1_000_000_000)
+        if nano_cpus <= 0:
+            raise ValueError("Docker CPU limit must be at least one nanocore")
+        daemon_info = self._client.info()
+        if daemon_info.get("CpuCfsQuota") is False:
+            logger.warning(
+                "Docker daemon does not support CPU CFS quota; not applying the job step CPU limit",
+                extra={"cpu_limit": cpu_limit},
+            )
+            return 0
+        daemon_cpus = daemon_info.get("NCPU")
+        if isinstance(daemon_cpus, int) and daemon_cpus > 0:
+            nano_cpus = min(nano_cpus, daemon_cpus * 1_000_000_000)
+        return nano_cpus
 
     def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         containers = self._client.containers.list(
@@ -2266,12 +2285,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         job = self.get_label_from_container(container, JOB_ID_LABEL)
         task = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
         attempt_id = (container.labels or {}).get(JOB_ATTEMPT_ID_LABEL)
-        delegation_name = self._workload_delegation_name_from_container(container)
-
-        self._try_revoke_workload_delegation(
-            delegation_name,
-            reason="terminal status",
-        )
+        self._try_revoke_container_delegation(container, reason="terminal status")
         self.cleanup_container(container)
         logger.debug(
             "Cleaned up container",

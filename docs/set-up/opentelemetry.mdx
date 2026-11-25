@@ -13,6 +13,40 @@ Set up OpenTelemetry configurations to gain visibility into the operations and p
 
 NeMo Helix uses OpenTelemetry to collect telemetry data from the platform and services. It leverages common OpenTelemetry SDK [configuration options](https://opentelemetry.io/docs/languages/sdk-configuration/) to configure the platform deployment.
 
+## Internal Job Metrics
+
+The jobs service records operational metrics before checking whether an anonymous
+usage event can be sent. Recording covers jobs with or without a telemetry session
+and remains active when `NEMO_TELEMETRY_ENABLED=false`. These metrics use only the
+platform's existing OpenTelemetry MeterProvider and operator-configured exporters;
+no NVIDIA usage-telemetry destination or additional exporter is configured by this
+instrumentation. `OTEL_METRICS_EXPORTER=none` still disables metric export.
+
+| OTel instrument | Prometheus name | Meaning |
+| --- | --- | --- |
+| `nhx.jobs.run.events.total` | `nhx_jobs_run_events_total` | Accepted attempt transitions into `completed`, `error`, `cancelled`, or `paused`. |
+| `nhx.jobs.run.duration` (seconds) | `nhx_jobs_run_duration_seconds` | Final attempt wall-clock duration, including queue/pause time; histogram, not active compute time. |
+| `nhx.jobs.run.tokens.total` | `nhx_jobs_run_tokens_total` | Known terminal job-summary token counts, split by `direction=input` or `output`. |
+
+Attributes are bounded `job_type`, `tool_category`, and `status`, plus `direction`
+for tokens. There are no session/event/attempt IDs, job/workspace/model names, or
+arbitrary plugin labels. Unrecognized sources use safe category buckets. A pause
+increments the lifecycle counter but does not record a partial duration or token
+summary, avoiding overlap with a later final observation. Missing measurements
+are skipped, not treated as zero; a measured zero remains valid.
+
+The dispatcher records after a successful state change, not during anonymous
+telemetry delivery or its retries. Replayed same-state updates do not increment
+the metrics again. Metric failures do not block job transitions or optional usage
+telemetry, and usage-telemetry failures do not undo internal measurements. These
+are process-local operational metrics, not a durable audit or billing ledger;
+process failures can lose measurements, and counters reset on restart.
+
+To count finished attempts, filter the event counter to `completed`, `error`, and
+`cancelled` (exclude `paused`). Token summaries remain partial job-level reports;
+do not add them to inference-level token counters for the same work. The existing
+anonymous-telemetry opt-in/session requirements and delivery frequency are unchanged.
+
 ## Helm Configuration
 
 The NeMo Helix Helm Chart `values.yaml` exposes OpenTelemetry SDK options to configure the platform deployment. For example, to enable OpenTelemetry for the platform:

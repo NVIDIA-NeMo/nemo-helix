@@ -17,6 +17,7 @@ from typing import Any, Literal, Self
 
 import yaml
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
+from nemo_fabric import SkillConfig as FabricSkillsConfig
 from nemo_helix_plugin.agents.types import (
     CONTEXT_SCHEMA_DESCRIPTION,
     DEFAULT_INPUT_DESCRIPTION,
@@ -137,10 +138,31 @@ class InstructionsConfig(BaseModel):
     system: InstructionConfig | None = None
 
 
-class SkillsConfig(BaseModel):
+class SkillsConfig(FabricSkillsConfig):
     model_config = ConfigDict(extra="forbid")
 
-    paths: list[str] = Field(default_factory=list)
+    def configured_paths(self) -> list[tuple[str, str]]:
+        """Return source fields and paths for packaging and fileset validation."""
+        if self.directories is None:
+            return [("skills.paths", str(path)) for path in self.paths]
+        return [
+            (f"skills.directories[{index}].{kind}", str(path))
+            for index, directory in enumerate(self.directories)
+            for kind, path in (("skill", directory.skill), ("folder", directory.folder))
+            if path is not None
+        ]
+
+
+class McpAuthenticationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["service_account"]
+    client_id: str = Field(min_length=1, pattern=r"\S")
+    client_secret_env: str = Field(min_length=1, pattern=r"\S")
+    token_url: str = Field(min_length=1, pattern=r"\S")
+    scopes: list[str] = Field(default_factory=list)
+    token_endpoint_auth_method: Literal["client_secret_basic", "client_secret_post"] | None = None
+    token_cache_buffer_seconds: int = Field(default=300, ge=0)
 
 
 class McpServerConfig(BaseModel):
@@ -151,6 +173,7 @@ class McpServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     custom_headers: dict[str, str] = Field(default_factory=dict)
+    authentication: McpAuthenticationConfig | None = None
     exposure: Literal["harness_native", "fabric_managed"] = "harness_native"
     allowed_tools: list[str] | None = None
     blocked_tools: list[str] = Field(default_factory=list)
@@ -162,9 +185,18 @@ class McpConfig(BaseModel):
     servers: dict[str, McpServerConfig] = Field(default_factory=dict)
 
 
+class ToolDefinitionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(min_length=1, pattern=r"\S")
+    ref: str = Field(min_length=1, pattern=r"\S")
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
 class ToolsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    definitions: dict[str, ToolDefinitionConfig] = Field(default_factory=dict)
     # None preserves harness defaults; [] disables all tools.
     enabled: list[str] | None = None
     blocked: list[str] = Field(default_factory=list)

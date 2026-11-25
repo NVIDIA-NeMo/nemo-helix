@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FINETUNING_TYPE_FILTER_OPTIONS } from '@studio/components/dataViews/CustomModelsDataView/constants';
+import {
+  FINETUNING_TYPE_FILTER_OPTIONS,
+  toFinetuningTypeFilterState,
+  toSelectedFinetuningTypes,
+} from '@studio/components/dataViews/CustomModelsDataView/constants';
 
 describe('FINETUNING_TYPE_FILTER_OPTIONS', () => {
   it('lists only product-supported finetuning types, deduped, with display labels', () => {
@@ -27,5 +31,18 @@ describe('FINETUNING_TYPE_FILTER_OPTIONS', () => {
     ]) {
       expect(values).not.toContain(unsupported);
     }
+  });
+});
+
+describe('finetuning type filter state', () => {
+  it('reads selected types from filter state or a lone string from older URLs', () => {
+    expect(toSelectedFinetuningTypes({ lora: true, dpo: true })).toEqual(['lora', 'dpo']);
+    expect(toSelectedFinetuningTypes('dpo')).toEqual(['dpo']);
+    expect(toSelectedFinetuningTypes(undefined)).toEqual([]);
+  });
+
+  it('builds filter state and clears it when nothing is selected', () => {
+    expect(toFinetuningTypeFilterState(['lora'])).toEqual({ lora: true });
+    expect(toFinetuningTypeFilterState([])).toBeUndefined();
   });
 });

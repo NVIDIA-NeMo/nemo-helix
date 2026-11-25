@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compass Fabric adapter descriptor and the config built for it.
+"""Compass Fabric adapter descriptor and the config ``compass.analyst`` derives.
 
 These exercise the real Fabric planner rather than a hand-rolled schema copy,
 so an invalid ``config.accepts`` key or an untranslatable harness kind fails
@@ -11,20 +11,13 @@ here instead of inside a running job.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import nemo_fabric as fabric
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.translator import translate_agent_config
-from nemo_compass_plugin import fabric_adapter
-from nemo_compass_plugin.analysis.agent_config import (
-    COMPASS_ADAPTER_ID,
-    build_compass_agent_config,
-    build_compass_run_context,
-)
-from nemo_fabric_adapter_contract import models as contract
+from nemo_agents_plugin.plugin_managed_agents import load_plugin_managed_agent_type
+from nemo_compass_plugin.analyst import COMPASS_ADAPTER_ID, CompassAnalyst
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTOR = _PLUGIN_ROOT / "analyst.fabric-adapter.json"
@@ -56,17 +49,8 @@ def _require_installed_descriptor() -> Path:
     return installed
 
 
-def _built_config(**overrides: Any) -> dict[str, Any]:
-    return build_compass_agent_config(
-        agent="demo-agent",
-        default_model="default/test-default",
-        fast_model="default/test-fast",
-        **overrides,
-    )
-
-
-def _compass_config(**overrides: Any) -> AgentConfig:
-    return AgentConfig.model_validate(_built_config(**overrides))
+def _compass_config() -> AgentConfig:
+    return AgentConfig.model_validate(CompassAnalyst.config(name="compass-analyst"))
 
 
 def test_descriptor_declares_the_expected_adapter_id() -> None:
@@ -88,84 +72,38 @@ def test_installed_descriptor_matches_the_source() -> None:
     )
 
 
-def test_built_config_is_a_valid_agent_config() -> None:
+def test_the_type_passes_the_platforms_load_checks() -> None:
+    """The check the Agents service runs on every load: entry point, context models, config against the adapter."""
+    assert load_plugin_managed_agent_type("compass.analyst") is CompassAnalyst
+
+
+def test_the_derived_config_is_a_valid_agent_config() -> None:
     config = _compass_config()
 
-    assert config.name == "compass"
-    assert config.default_harness == "compass"
+    assert config.name == "compass-analyst"
     assert config.environment.provider == "local"
 
 
-def test_built_config_translates_to_the_compass_adapter() -> None:
+def test_the_derived_config_translates_to_the_compass_adapter_with_no_settings() -> None:
     fabric_config = translate_agent_config(_compass_config())
 
     assert fabric_config.harness is not None
     assert fabric_config.harness.adapter_id == COMPASS_ADAPTER_ID
-    assert fabric_config.harness.settings["agent"] == "demo-agent"
+    assert not fabric_config.harness.settings
+    assert not fabric_config.models
 
 
-def test_built_config_forwards_both_model_refs() -> None:
-    """Compass runs analysis on ``default`` and context summarization on ``fast``."""
-    fabric_config = translate_agent_config(_compass_config())
+def test_descriptor_takes_no_settings_and_no_models() -> None:
+    """Everything a run varies, models included, arrives in its request context.
 
-    assert set(fabric_config.models) == {"default", "fast"}
-    assert fabric_config.models["default"].model == "default/test-default"
-    assert fabric_config.models["fast"].model == "default/test-fast"
+    A stray setting is rejected, not ignored; and because the adapter accepts no
+    ``models``, the derived config may name none.
+    """
+    descriptor = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))
 
-
-def test_compass_adapter_resolves_the_forwarded_pair() -> None:
-    """Guards the silent collapse: a missing ``fast`` falls back to ``default``."""
-    fabric_config = translate_agent_config(_compass_config())
-    models = {
-        key: contract.AgentModelConfig.from_mapping({"provider": "platform", "model": value.model})
-        for key, value in fabric_config.models.items()
-    }
-
-    assert fabric_adapter._default_model_ref({}, models) == "default/test-default"
-    assert fabric_adapter._fast_model_ref({}, models) == "default/test-fast"
-
-
-def test_optional_read_settings_are_omitted_when_unset() -> None:
-    settings = _built_config()["harnesses"]["compass"]["settings"]
-
-    assert set(settings) == {"agent"}
-
-
-def test_optional_read_settings_are_carried_when_set() -> None:
-    settings = _built_config(
-        base_url="http://platform:8080",
-        enable_observability=False,
-    )["harnesses"]["compass"]["settings"]
-
-    assert settings["base_url"] == "http://platform:8080"
-    assert settings["enable_observability"] is False
-
-
-def test_descriptor_leaves_run_scope_and_workspace_to_the_request_context() -> None:
-    """``since``/``evaluation_id`` come from the job's context and the workspace from the job itself."""
-    properties = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))["settings_schema"]["properties"]
-
-    assert not {"since", "evaluation_id", "workspace"} & set(properties)
-
-
-def test_run_context_is_empty_when_unscoped() -> None:
-    assert build_compass_run_context() == {}
-
-
-def test_run_context_carries_the_read_scope() -> None:
-    context = build_compass_run_context(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
-
-    assert context == {"since": "2026-08-01T00:00:00+00:00", "evaluation_id": "eval-123"}
-
-
-def test_descriptor_declares_the_ethos_setting() -> None:
-    """The adapter reads ``ethos``; an undeclared key is rejected by the closed schema."""
-    settings_schema = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))["settings_schema"]
-
-    assert "ethos" in settings_schema["properties"]
-    assert settings_schema["additionalProperties"] is False
-    # The pre-rename name of the same field; nothing reads it any more.
-    assert "agent_spec" not in settings_schema["properties"]
+    assert descriptor["settings_schema"]["properties"] == {}
+    assert descriptor["settings_schema"]["additionalProperties"] is False
+    assert "models" not in descriptor["config"]["accepts"]
 
 
 def test_descriptor_declares_relay_telemetry_support() -> None:
@@ -181,17 +119,7 @@ def test_descriptor_declares_relay_telemetry_support() -> None:
     assert "atif" in telemetry["providers"]["relay"]["outputs"]
 
 
-def test_fabric_plans_a_config_carrying_an_ethos(tmp_path: Path) -> None:
-    """Planning is where a setting the descriptor omits actually blows up."""
-    _require_installed_descriptor()
-
-    config = _compass_config(ethos="# Ethos\n\nBe careful.")
-    assert config.harnesses["compass"].settings["ethos"] == "# Ethos\n\nBe careful."
-
-    assert fabric.Fabric().plan(translate_agent_config(config), base_dir=tmp_path) is not None
-
-
-def test_fabric_plans_the_built_config(tmp_path: Path) -> None:
+def test_fabric_plans_the_derived_config(tmp_path: Path) -> None:
     """Fabric validates the adapter descriptor while planning; this is the real check."""
     _require_installed_descriptor()
 

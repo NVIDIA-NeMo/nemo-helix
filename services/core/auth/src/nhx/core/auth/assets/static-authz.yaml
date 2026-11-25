@@ -423,6 +423,11 @@ authz:
       - secrets.rotate
       - models.trust-remote-code.set
       - models.tool-call-plugin.set
+    DelegatedService:
+      description: "Actor-only capability for authentication-verified delegated Secret access"
+      service_only: true
+      permissions:
+      - secrets.access
     JobRunner:
       description: "Runtime permissions for job workload containers"
       permissions:

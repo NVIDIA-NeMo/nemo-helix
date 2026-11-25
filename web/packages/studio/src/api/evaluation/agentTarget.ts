@@ -9,8 +9,12 @@ const AGENT_ENDPOINT_PATH = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/agents\/([
 
 const agentFromEndpointUrl = (url: unknown): string | null => {
   if (typeof url !== 'string') return null;
-  const match = AGENT_ENDPOINT_PATH.exec(url);
-  return match ? `${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}` : null;
+  try {
+    const match = AGENT_ENDPOINT_PATH.exec(new URL(url).pathname);
+    return match ? `${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}` : null;
+  } catch {
+    return null;
+  }
 };
 
 /** Resolve only targets that identify a registered agent, never a runner's display name.

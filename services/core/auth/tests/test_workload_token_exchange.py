@@ -160,6 +160,7 @@ def _delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         ),
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -190,6 +191,7 @@ def _deployment_delegation_entity(**overrides: Any) -> WorkloadDelegationEntity:
         ),
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -232,6 +234,7 @@ def _deployment_reference_delegation_entity(**overrides: Any) -> WorkloadDelegat
         bound_reference_value=pod_uid,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
+    entity._id = "workload_delegation-test-id"
     return entity.model_copy(update=overrides)
 
 
@@ -873,6 +876,7 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
 
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["groups"] == "workspace-editors"
     # The job actor needs its own grant; submitter roles must not leak into act.
@@ -899,8 +903,46 @@ def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_r
 
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {"sub": delegation.name}
+
+
+def test_retry_jwt_references_new_grant_and_old_proof_is_rejected(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+) -> None:
+    name = _docker_delegation_name()
+    old_proof, old_hash = create_opaque_docker_proof_token(name)
+    old = _delegation_entity(opaque_subject_token_hash=old_hash)
+    old._id = "workload-delegation-old"
+    entity_client.entities[name] = old
+    old_response = client.post(
+        "/token", data=_exchange_form(old_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+    )
+    assert old_response.status_code == 200
+    old_jwt = old_response.json()["access_token"]
+
+    new_proof, new_hash = create_opaque_docker_proof_token(name)
+    current = _delegation_entity(opaque_subject_token_hash=new_hash)
+    current._id = "workload-delegation-new"
+    entity_client.entities[name] = current
+    rejected = client.post(
+        "/token", data=_exchange_form(old_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"] == "invalid_request"
+    for _ in range(2):
+        refreshed = client.post(
+            "/token", data=_exchange_form(new_proof, subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE)
+        )
+        assert refreshed.status_code == 200
+        claims = _decode_access_token(refreshed.json()["access_token"], exchange_config, exchange_service)
+        assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": current.id}}
+    old_claims = _decode_access_token(old_jwt, exchange_config, exchange_service)
+    assert old_claims["nhx_service_attributes"] == {"auth": {"delegation_id": old.id}}
 
 
 def test_opaque_docker_proof_token_requires_private_subject_token_type(
@@ -1059,6 +1101,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert entity_client.get_calls == [delegation.name]
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {
         "sub": "system:serviceaccount:nemo-runs:job-runner",
@@ -1094,6 +1137,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_ro
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert entity_client.get_calls == [delegation.name]
+    assert claims["nhx_service_attributes"] == {"auth": {"delegation_id": delegation.id}}
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {
         "sub": "system:serviceaccount:nemo-deployments:deployment-runner",

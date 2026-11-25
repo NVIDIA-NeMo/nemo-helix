@@ -127,6 +127,8 @@ auth:
     subject_claim: sub
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300
+    # Seconds of clock difference allowed when checking a token's iat, nbf and exp claims. Without it, a token issued a moment ago by an identity provider whose clock is slightly ahead is rejected as not yet valid. Workload tokens and access keys use the same allowance. | default: 30
+    clock_skew_leeway_seconds: 30
   # Shared token signing configuration for NeMo Helix-minted JWTs.
   token_signing:
     # Shared issuer for NeMo Helix-minted JWTs. Defaults to <platform.base_url>/apis/auth.
@@ -618,6 +620,14 @@ models:
     provider_discovery_timeout_seconds: 180
     # Client retry count for provider autodiscovery requests. The controller loop already retries on each cycle; disabling client retries avoids multi-minute retry storms on slow upstreams. | default: 0
     provider_discovery_max_retries: 0
+  # Model metadata controller configuration
+  metadata:
+    # Seconds between metadata reconcile cycles. | default: 300.0
+    interval_seconds: 300.0
+    # Seconds before a model's metadata, or a lookup that found nothing, is fetched again. | default: 86400.0
+    refresh_interval_seconds: 86400.0
+    # Timeout for each metadata request. | default: 15.0
+    request_timeout_seconds: 15.0
   # Parallelism estimation heuristics (model size thresholds, TP/PP/DP/CP/EP costs, balance bonuses)
   parallelism:
     # Standard node configuration (e.g., DGX H100) | default: 8
@@ -916,10 +926,14 @@ safe_synthesizer:
 
 ### `builder`
 
-Configuration for in-cluster container image builds.
+Configuration for container image builds, in this cluster or by a remote build service.
 
 ```yaml wordWrap
 builder:
+  # Where images are built: `in-cluster`, in sandboxes in this cluster; or `remote`, by the build service that `builder.remote` names. | default: 'in-cluster' | values: 'in-cluster' | 'remote'
+  backend: in-cluster
+  # The build service `backend: remote` uses. Unset refuses every remote submit.
+  remote:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
@@ -973,6 +987,8 @@ studio:
   platform_base_url: ''
   # Enable Studio UI browser telemetry export. | default: False
   telemetry_enabled: false
+  # Model Studio preselects when a registered agent config uses ${NEMO_DEFAULT_MODEL}, as a `workspace/name` model reference. Defaults to the NEMO_DEFAULT_MODEL environment variable.
+  default_model: ''
   # Studio UI OpenTelemetry settings.
   otel:
     # Internal OTLP/HTTP collector base URL used by the Studio telemetry proxy. | default: ''

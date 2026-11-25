@@ -35,6 +35,7 @@ from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
@@ -2344,7 +2345,18 @@ def _auto_setup(clients: SetupClients, workspace: str, inference_base_url: str |
                 provider_name = known.name
             else:
                 hostname = urlparse(base_url).hostname or "custom"
-                provider_name = hostname.replace(".", "-")
+                provider_name = re.sub(r"[^a-z0-9@+_]+", "-", hostname).strip("-")
+                if not provider_name or not ("a" <= provider_name[0] <= "z") or len(provider_name) < 2:
+                    provider_name = f"provider-{provider_name}".rstrip("-")
+                # Reject rather than truncate: a collision could overwrite an existing secret.
+                max_provider_length = NAME_MAX_LENGTH - len("-api-key")
+                if len(provider_name) > max_provider_length:
+                    raise typer.BadParameter(
+                        f"The inference URL derives a provider name longer than {max_provider_length} characters "
+                        "(including room for the '-api-key' secret suffix). Use a shorter hostname or "
+                        "configure the provider interactively with 'nemo setup'.",
+                        param_hint="inference base URL",
+                    )
             host_url = base_url
             auth_provider = known or env_provider
             auth_header_format = auth_provider.auth_header_format if auth_provider else None
@@ -2428,6 +2440,7 @@ def _require_supported_python() -> None:
 
 
 @handle_errors
+@emit.track_onboarding
 def setup_command(
     ctx: typer.Context,
     auto: Annotated[
@@ -2640,46 +2653,33 @@ def setup_command(
     skills_from_list = _parse_csv_flag(skills_from)
     clients = SetupClients.from_context(cli_context)
 
-    try:
-        if auto:
-            _run_auto_mode(
-                cli_context,
-                clients,
-                workspace,
-                base_url,
-                install_skills,
-                skills_agents=skills_agents_list,
-                skills_scope=skills_scope,
-                skills_from=skills_from_list,
-                skills_path=skills_path,
-                certificate_authority=certificate_authority,
-                inference_base_url=inference_base_url,
-            )
-        else:
-            _run_interactive_mode(
-                cli_context,
-                clients,
-                workspace,
-                base_url,
-                install_skills,
-                skills_agents=skills_agents_list,
-                skills_scope=skills_scope,
-                skills_from=skills_from_list,
-                skills_path=skills_path,
-                certificate_authority=certificate_authority,
-            )
-    except typer.Exit as exc:
-        # A clean user-cancel raises typer.Exit(0); that is a normal end of the
-        # flow, not a failure, so it must not corrupt the onboarding funnel.
-        # Only a non-zero exit code counts as ERROR. Re-raise unchanged either way.
-        status = TaskStatusEnum.COMPLETED if exc.exit_code == 0 else TaskStatusEnum.ERROR
-        emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=status))
-        raise
-    except Exception:
-        # Any real (non-Exit) failure: setup did not finish cleanly.
-        emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=TaskStatusEnum.ERROR))
-        raise
-    emit.emit_event(OnboardingStepEvent(step="setup_finished", task_status=TaskStatusEnum.COMPLETED))
+    if auto:
+        _run_auto_mode(
+            cli_context,
+            clients,
+            workspace,
+            base_url,
+            install_skills,
+            skills_agents=skills_agents_list,
+            skills_scope=skills_scope,
+            skills_from=skills_from_list,
+            skills_path=skills_path,
+            certificate_authority=certificate_authority,
+            inference_base_url=inference_base_url,
+        )
+    else:
+        _run_interactive_mode(
+            cli_context,
+            clients,
+            workspace,
+            base_url,
+            install_skills,
+            skills_agents=skills_agents_list,
+            skills_scope=skills_scope,
+            skills_from=skills_from_list,
+            skills_path=skills_path,
+            certificate_authority=certificate_authority,
+        )
 
 
 def _run_auto_mode(

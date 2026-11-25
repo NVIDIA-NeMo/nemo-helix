@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { TrialTextModal } from '@studio/components/dataViews/OptimizationJobsDataView/TrialTextModal';
 import { useTrialColumns } from '@studio/components/dataViews/OptimizationJobsDataView/useTrialColumns';
@@ -13,6 +14,7 @@ import {
   PARAM_SORT_PREFIX,
   paramValue,
 } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type {
   StudyResults,
   Trial,
@@ -106,6 +108,7 @@ export interface TrialsDataViewProps {
 }
 
 export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy }) => {
+  const workspace = useWorkspaceFromPath();
   const { trials, metricNames } = results;
   const primaryMetric = metricNames[0];
 
@@ -179,14 +182,11 @@ export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy
             totalCount: processedTrials.length,
           },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                header={debouncedSearchBar.trim() ? 'No matching trials' : 'No trials'}
-                emptyMessage={
-                  debouncedSearchBar.trim()
-                    ? 'No trial matches this search.'
-                    : 'This study did not record any trials.'
-                }
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="optimizationTrials"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
               />
             ),
           },

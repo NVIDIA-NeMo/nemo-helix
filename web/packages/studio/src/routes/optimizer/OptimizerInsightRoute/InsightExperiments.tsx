@@ -91,7 +91,11 @@ export const InsightExperiments: FC<InsightExperimentsProps> = ({ workspace, ins
           className={`min-h-0 flex-1 overflow-auto bg-transparent [&_td]:!bg-transparent [&_thead]:!bg-transparent [&_thead_th]:!bg-transparent ${className}`}
           onClick={onClick}
           renderEmptyState={() => (
-            <EntityEmptyState entity="insightExperiments" variant="first-use" />
+            <EntityEmptyState
+              entity="insightExperiments"
+              variant="first-use"
+              workspace={workspace}
+            />
           )}
           renderErrorState={() => (
             <ErrorMessage

@@ -13,7 +13,10 @@ import {
   AgentConfigParseError,
   agentNameFromConfig,
   agentSpecFilesetName,
+  bindDefaultModel,
   collectAgentEntries,
+  containsDefaultModelPlaceholder,
+  DefaultModelRequiredError,
   findNonUtf8Path,
   isIgnoredPath,
   parseAgentConfig,
@@ -344,5 +347,54 @@ describe('pickedFromDataTransfer', () => {
     const items = [{ kind: 'string', webkitGetAsEntry: () => null } as unknown as DataTransferItem];
 
     await expect(pickedFromDataTransfer(items)).resolves.toEqual([]);
+  });
+});
+
+describe('containsDefaultModelPlaceholder', () => {
+  it.each(['${NEMO_DEFAULT_MODEL}', '$NEMO_DEFAULT_MODEL', 'prefix-${NEMO_DEFAULT_MODEL}'])(
+    'finds %s',
+    (model) => {
+      expect(containsDefaultModelPlaceholder({ models: [{ model }] })).toBe(true);
+    }
+  );
+
+  it.each(['default/my-model', '$${NEMO_DEFAULT_MODEL}', '$NEMO_DEFAULT_MODEL_2'])(
+    'ignores %s',
+    (model) => {
+      expect(containsDefaultModelPlaceholder({ models: [{ model }] })).toBe(false);
+    }
+  );
+});
+
+describe('bindDefaultModel', () => {
+  it('substitutes every reference and unescapes $$ the way the CLI does', () => {
+    const config = {
+      models: { default: { model: '${NEMO_DEFAULT_MODEL}', temperature: 0 } },
+      notes: ['$NEMO_DEFAULT_MODEL costs $$5', '$OTHER'],
+    };
+
+    expect(bindDefaultModel(config, 'ws/model')).toEqual({
+      models: { default: { model: 'ws/model', temperature: 0 } },
+      notes: ['ws/model costs $5', '$OTHER'],
+    });
+  });
+
+  it('inserts the model name literally', () => {
+    expect(bindDefaultModel({ model: '${NEMO_DEFAULT_MODEL}' }, "ws/$&-$'")).toEqual({
+      model: "ws/$&-$'",
+    });
+  });
+
+  it('returns a config that names its model unchanged, with or without a choice', () => {
+    const config = { models: { default: { model: 'ws/explicit' } } };
+
+    expect(bindDefaultModel(config, undefined)).toBe(config);
+    expect(bindDefaultModel(config, 'ws/other')).toBe(config);
+  });
+
+  it('refuses a config that defers to the default model when none was chosen', () => {
+    expect(() => bindDefaultModel({ model: '$NEMO_DEFAULT_MODEL' }, undefined)).toThrow(
+      DefaultModelRequiredError
+    );
   });
 });

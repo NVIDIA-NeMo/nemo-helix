@@ -37,24 +37,38 @@ The current sidebar groups related pages under expandable parents. Selecting a p
 | **Observability** | **Insights**                    | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights).                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **Observability** | **Traces**                      | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | **Components**    | **Agents**                      | Opens the agent list. Select an agent to access the Overview, Deployments, Logs, Chat, Evaluations, Optimizations, Insights, and Details tabs. Optimizations and Insights are enabled by default and can be hidden by their feature flags.                                                                                                                                                                                                                                                                                                                                                                                          |
-| **Components**    | **Models**                      | Expands to **Model Catalog**, **Evaluations**, **Fine-tuning**, **Playground**, **Deployments**, and **Virtual Models**, when those capabilities are enabled. **Model Catalog** opens the base-model list. **Evaluations** opens the Model Evaluations page; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). **Fine-tuning** opens the fine-tuned models list; see [NeMo Studio Fine-tuning](/documentation/studio/customization). **Playground** is disabled by default. **Virtual Models** appears when the Guardrails preview feature or agent optimizations are enabled, and is shown by default. |
+| **Components**    | **Models**                      | Expands to **Model Catalog**, **Evaluations**, **Fine-tuning**, **Playground**, **Deployments**, and **Virtual Models**, when those capabilities are enabled. **Model Catalog** opens the base-model list. **Evaluations** opens the Model Evaluations page; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). **Fine-tuning** opens the fine-tuned models list; see [NeMo Studio Fine-tuning](/documentation/studio/customization). **Playground** opens the model chat playground; it's always shown and needs no feature flag. **Virtual Models** appears when the Guardrails preview feature or agent optimizations are enabled, and is shown by default. |
 | **Evaluations**   | **Experiments**                 | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **Data**          | **Datasets > Anonymizer**       | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **Data**          | **Datasets > Data Designer**    | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **Data**          | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Data**          | **Datasets**                    | Browse and create dataset-purpose filesets; see [Datasets](#datasets).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Data**          | **Anonymizer**                  | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Data**          | **Data Designer**               | Build and monitor synthetic-data jobs; see [Data Designer in NeMo Studio](/documentation/studio/data-designer).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Data**          | **Safe Synthesizer**            | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **Governance**    | **Guardrails**                  | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **Governance**    | **Agent Hardening**             | Plugin-provided agent hardening UI. Appears only when the Agent hardening plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **System**        | **Filesets**                    | Organize and manage files used by agents and jobs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **System**        | **Jobs**                        | Monitor jobs across enabled platform capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **System**        | **Settings**                    | View workspace settings and open **Secrets** and inference provider management. Enabled by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
-**Dashboard** appears above the sidebar groups and is shown by default; see [Dashboard](#dashboard). **Playground** is disabled by default and appears only when an administrator enables its feature flag. **Virtual Models** is shown by default and is hidden only when both the Guardrails and agent optimizations feature flags are disabled. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+**Dashboard** appears above the sidebar groups and is shown by default; see [Dashboard](#dashboard). **Virtual Models** is shown by default and is hidden only when both the Guardrails and agent optimizations feature flags are disabled. **Datasets**, **Anonymizer**, **Data Designer**, and **Safe Synthesizer** are sibling entries in the **Data** group; other installed data plugins can add entries to the same group. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
 
 ### Dashboard
 
-The workspace **Dashboard** includes a **Recent Jobs** list of jobs in progress and jobs that reached a terminal state in the last 48 hours. It is shown when jobs are enabled; an administrator can hide it by setting `studio.feature_flags.jobs_enabled: false` in the platform configuration and restarting Studio.
+The workspace **Dashboard** is the first entry in the sidebar and the page a workspace opens on. It shows workspace summary tiles, a **Quickstart** section, and a **Recent Jobs** list.
 
-The list shows newest jobs first, ten rows per page with pagination, in these columns:
+The Dashboard is shown by default and controlled by `studio.feature_flags.dashboard_sandbox_enabled` (default `true`). When an administrator sets it to `false`, and `studio.feature_flags.assistant_studio_enabled` is also off, Studio hides the Dashboard entry and route, and workspaces open on the **Agents** list instead.
+
+#### Quickstart
+
+**Quickstart** groups shortcuts into panels. A panel or shortcut appears only when its capability is enabled. In the **Connect an Agent** panel:
+
+- **Upload an Agent** opens **Register an agent with NeMo Helix** on the code-upload tab.
+- **Import from GitHub** opens the same dialog on the **Register from GitHub** tab. See [Register an Agent](/documentation/studio/agents#register-an-agent).
+
+You can dismiss the Quickstart section. In a sample sandbox workspace, a sample-workload panel replaces the Quickstart shortcuts.
+
+#### Recent Jobs
+
+**Recent Jobs** lists jobs in progress and jobs that reached a terminal state in the last 48 hours. It appears whenever the Dashboard does and has no separate setting to hide it. The list shows newest jobs first, ten rows per page with pagination, in these columns:
 
 | Column           | Shows                                                                                                                                                                |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,7 +117,7 @@ For the full workflow, see [Studio Virtual Models](/documentation/studio/virtual
 
 Select **Models > Model Catalog** to browse base-model entities available in the current workspace. **Models** is an expandable parent without its own landing page; **Model Catalog** is the base-model list. Base models include models registered in the workspace and default platform models.
 
-The Model Catalog page supports searching by model name, filtering by creation or update date, sorting alphabetically or by creation time, and showing only customizable models. Select a model card to open the model details side panel.
+The Model Catalog page supports searching by model name, sorting alphabetically or by creation time, and showing only customizable models with the **Fine-tunable** checkbox. The **Filter** panel narrows the list by LoRA support (**Has adapters** or **Serving enabled**), model family, model provider, and creation or update date. Model family comes from the checkpoint configuration, so it's only set on models registered with a checkpoint fileset. Select a model card to open the model details side panel.
 
 The model details side panel has **Model Details** and **Chat Playground** tabs. **Model Details** shows model metadata, parameters, and available actions, such as **Customize this Model** when fine-tuning is enabled. **Chat Playground** lets you chat with chat-capable models.
 
@@ -117,9 +131,30 @@ Select **Models > Fine-tuning** to open the fine-tuned models list, start a fine
 
 Keep models and data organized in dedicated workspaces.
 
+### Datasets
+
+Select **Data > Datasets** to open the Datasets list. It shows only filesets whose purpose is **Dataset**. **System > Filesets** shows every fileset in the workspace, whatever its purpose.
+
+- **Create a dataset** — Select **Create Dataset**. The new fileset gets the Dataset purpose.
+- **Open a dataset** — Select a row, or choose **View** from its row actions. The detail page has two tabs: **Dataset Card**, which opens by default, and **Files**. Each tab has its own URL (`/workspaces/<workspace>/datasets/<name>/card` and `.../files`), so you can bookmark or share a tab directly. If you open a non-dataset fileset under a Datasets URL, Studio redirects you to the same page under **Filesets**.
+- **Edit or delete** — Use **Edit** or **Delete** from the row actions.
+
 ### Filesets
 
-Use **Filesets** to organize files by **purpose**, which determines which metadata fields are available. Purpose is chosen at creation time and can't be changed afterward.
+Select **System > Filesets** to list every fileset in the workspace. Fileset detail pages use the same two tabs as datasets. The **Card** tab is labeled **Dataset Card** or **Model Card** depending on purpose. A dataset opens on its card. Other filesets open on **Card** when the fileset has a root README, and on **Files** otherwise.
+
+#### Copy a fileset to a new local fileset
+
+Some filesets are backed by external storage and are read-only, such as one registered from Hugging Face, NGC, or GitHub. To get an editable copy, choose **Copy to New Fileset** from the row actions in the **Datasets** or **Filesets** list:
+
+1. Enter a **Name** for the copy. It defaults to a copy name based on the source, and must be unique in the workspace. Optionally edit the **Description**.
+2. Select **Copy**. Studio creates a local-storage fileset in the same workspace with the source's purpose and metadata, then copies every file into it. The dialog shows progress as **Copied N of M files**.
+
+The source fileset isn't changed. Files pass through your browser, so a large fileset can take a while to copy. Keep the page open until the copy finishes. If a file fails to copy, Studio deletes the partial fileset. If you close or reload the page during the copy, that cleanup doesn't run and a partial fileset can remain; delete it manually.
+
+#### Fileset purposes
+
+Filesets organize files by **purpose**, which determines which metadata fields are available. Purpose is chosen at creation time and can't be changed afterward.
 
 | Purpose     | Use for                                                                                                                                                                                                                |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -128,9 +163,18 @@ Use **Filesets** to organize files by **purpose**, which determines which metada
 | Model       | Model weights and checkpoints. Enables model-specific metadata, including tool-calling and model configuration fields.                                                                                                 |
 | Environment | Executable environment packages consumed by sandboxed workloads.                                                                                                                                                       |
 
-**Supported file formats:** JSON (`.json`), JSONL (`.jsonl`), CSV (`.csv`), and Parquet (`.parquet`). PDF, image, and other binary formats are not currently supported.
+#### File formats
 
-You can upload any file type into a fileset. However, each service supports specific input file types:
+Format support depends on what you're doing with the file:
+
+| Surface                       | What's supported                                                                                                                                                                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upload and storage (Files)    | Any file type. The Files service stores files without checking their format.                                                                                                                                                         |
+| Studio file preview           | JSON and JSONL as formatted code, Markdown as rendered text, CSV as a table, images as images, and other text files as plain text. Binary files other than images, such as Parquet or PDF, have no preview; download them instead. |
+| Studio dataset schemas        | JSON (`.json`), JSONL (`.jsonl`), CSV (`.csv`), and Parquet (`.parquet`) files in a dataset. Other files, such as READMEs, licenses, and images, are skipped.                                                                       |
+| Consuming services            | Each service accepts its own input formats. See the table below and each service's documentation.                                                                                                                                     |
+
+A file you can upload might not be previewable, and a file you can preview might not be accepted by the service you want to use it with. Input formats for services that read filesets:
 
 | Service                                               | Supported File Types                  |
 | ----------------------------------------------------- | ------------------------------------- |
@@ -138,13 +182,13 @@ You can upload any file type into a fileset. However, each service supports spec
 
 ### Anonymizer
 
-Use **Datasets > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
+Use **Data > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
 
 For the full workflow, see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).
 
 ### Safe Synthesizer
 
-Use **Datasets > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
+Use **Data > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
 
 For the full workflow, see [Synthesize Safe Data](/documentation/synthesize-safe-data).
 
