@@ -1136,6 +1136,22 @@ def docker_plan(profile: dict[str, Any] | None = None, **config: Any) -> Sandbox
     return plan
 
 
+def test_a_docker_profile_can_be_the_only_route_to_a_model() -> None:
+    """A deployment that allows egress only in its Docker profile serves `docker: true` jobs, and only those."""
+    config = capable_config(
+        sandbox_policy_base_urls=(),
+        sandbox_egress_allow=(),
+        sandbox_docker_profile=docker_profile(egress_allow=("models.internal:443", "registry-1.docker.io:443")),
+    )
+
+    plan = resolve_sandbox_plan(config, target(docker=True))
+
+    assert plan is not None
+    assert plan.egress_allow == ("models.internal:443", "registry-1.docker.io:443")
+    with pytest.raises(SandboxUnavailableError, match="no route to a model"):
+        resolve_sandbox_plan(config, target())
+
+
 def test_a_docker_job_gets_the_profile_over_the_deployment_defaults() -> None:
     plan = docker_plan(
         {"resources": {"ephemeral-storage": "45Gi"}},

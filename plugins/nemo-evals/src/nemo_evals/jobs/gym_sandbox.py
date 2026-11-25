@@ -148,11 +148,12 @@ def credential_shaped_env_vars(target: GymRunnerTarget) -> list[str]:
     return sorted(name for name in target.env_vars if _CREDENTIAL_PATTERN.search(name))
 
 
-def require_sandbox_available(config: EvaluatorConfig) -> None:
+def require_sandbox_available(config: EvaluatorConfig, target: GymRunnerTarget | None = None) -> None:
     """Raise unless this deployment can actually provision a sandboxed Gym host.
 
     Checked before anything is provisioned, so a misconfigured deployment fails at compile time with
-    a message naming the setting rather than after the cost of a partial run.
+    a message naming the setting rather than after the cost of a partial run. With ``target``, the
+    egress check counts what that job's host gets, including a Docker profile's ``egress_allow``.
     """
     if not config.sandbox_cluster_capable:
         raise SandboxUnavailableError(
@@ -167,7 +168,7 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
         raise SandboxUnavailableError(
             f"sandboxed Gym execution needs {', '.join(missing)} configured; a host cannot be provisioned without them."
         )
-    if not config.sandbox_policy_base_urls and not config.sandbox_egress_allow:
+    if not config.sandbox_policy_base_urls and not _job_egress_allow(config, target):
         # A sandboxed host denies all egress except the broker. With no model endpoint allowed it
         # comes up healthy and fails at the first rollout, far from the setting that caused it --
         # so refuse here, where the message can name it.
@@ -176,6 +177,12 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
             "`sandbox_egress_allow`; a sandboxed host denies all egress except the episode broker, "
             "so an environment would have no route to a model."
         )
+
+
+def _job_egress_allow(config: EvaluatorConfig, target: GymRunnerTarget | None) -> tuple[str, ...]:
+    """The deployment's egress allowances for this job, with the Docker profile's when it sets ``docker: true``."""
+    profile = config.sandbox_docker_profile if target is not None and target.docker else None
+    return tuple(dict.fromkeys((*config.sandbox_egress_allow, *(profile.egress_allow if profile else ()))))
 
 
 def require_no_plaintext_credentials(target: GymRunnerTarget) -> None:
@@ -255,7 +262,7 @@ def resolve_sandbox_plan(
                 "(`sandboxed_gym_default` is off)"
             )
         return None
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
     docker = _docker_profile(config) if target.docker else None
     if docker is None:
@@ -268,7 +275,7 @@ def resolve_sandbox_plan(
         runtime_image = docker.runtime_image
         host_provider_options = _merged(config.sandbox_host_provider_options, docker.host_provider_options)
         resources = {**(config.sandbox_resources or {}), **(docker.resources or {})} or None
-        egress_allow = tuple(dict.fromkeys((*config.sandbox_egress_allow, *docker.egress_allow)))
+        egress_allow = _job_egress_allow(config, target)
         container_storage_bytes = (
             quantity_bytes(docker.container_storage_size) if docker.container_storage_size is not None else None
         )
@@ -349,7 +356,7 @@ def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: Evalu
             f"{what} require sandboxed execution. Enable `sandboxed_gym_default`, or select a Gym agent by "
             "`component` without `target.environment`, so colocated GymAgentTaskRunner cannot ignore the staged package."
         )
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
 
 
