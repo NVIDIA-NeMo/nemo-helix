@@ -22,7 +22,7 @@ import tarfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Literal
 
 from nhx_sandbox.core.backend import (
@@ -39,47 +39,55 @@ from nhx_sandbox.core.backend import (
 )
 from nhx_sandbox.core.errors import RevisionConflict, SandboxLost, SandboxNotFound, UnsupportedOperation
 from nhx_sandbox.egress import EgressPolicy, EgressRule
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["CaseResult", "EgressProbe", "run_suite"]
 
 Outcome = Literal["passed", "failed", "skipped"]
 
 
-@dataclass(frozen=True)
-class EgressProbe:
-    """How to check that a backend enforces egress. Without one, the suite skips those checks.
+class EgressProbe(BaseModel):
+    """How to check that a backend enforces egress. Without one, the suite skips those checks."""
 
-    Attributes:
-        allowed_host: A host the sandbox can reach once it's allowed, such as ``pypi.org``.
-        denied_host: A host the sandbox must not reach while it isn't listed.
-        internal_targets: ``host:port`` addresses no sandbox should reach under a deny policy: the
-            cloud metadata service and the Kubernetes API by default, the usual first stops for
-            code trying to get out of a sandbox.
-        fetch: A shell command that exits 0 only if ``{url}`` answered. It must run on the suite's
-            image; the default uses Python, which the default image has.
-        connect: A shell command that exits 0 only if a TCP connection to ``{target}`` opened. It
-            connects directly, so a backend that silently redirects every connection to a proxy
-            needs its own.
-    """
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    allowed_host: str
-    denied_host: str
-    internal_targets: tuple[str, ...] = ("169.254.169.254:80", "kubernetes.default.svc:443")
-    fetch: str = 'python3 -c "import sys, urllib.request as u; u.urlopen(sys.argv[1], timeout=10)" {url}'
-    connect: str = (
-        "python3 -c \"import socket, sys; host, _, port = sys.argv[1].rpartition(':'); "
-        'socket.create_connection((host, int(port)), timeout=5)" {target}'
+    allowed_host: str = Field(description="A host the sandbox can reach once it's allowed, such as `pypi.org`.")
+    denied_host: str = Field(description="A host the sandbox must not reach while it isn't listed.")
+    internal_targets: tuple[str, ...] = Field(
+        default=("169.254.169.254:80", "kubernetes.default.svc:443"),
+        description=(
+            "`host:port` addresses no sandbox should reach under a deny policy: the cloud metadata service and "
+            "the Kubernetes API by default, the usual first stops for code trying to get out of a sandbox."
+        ),
+    )
+    fetch: str = Field(
+        default='python3 -c "import sys, urllib.request as u; u.urlopen(sys.argv[1], timeout=10)" {url}',
+        description=(
+            "A shell command that exits 0 only if `{url}` answered. It must run on the suite's image; the "
+            "default uses Python, which the default image has."
+        ),
+    )
+    connect: str = Field(
+        default=(
+            "python3 -c \"import socket, sys; host, _, port = sys.argv[1].rpartition(':'); "
+            'socket.create_connection((host, int(port)), timeout=5)" {target}'
+        ),
+        description=(
+            "A shell command that exits 0 only if a TCP connection to `{target}` opened. It connects directly, "
+            "so a backend that silently redirects every connection to a proxy needs its own."
+        ),
     )
 
 
-@dataclass(frozen=True)
-class CaseResult:
+class CaseResult(BaseModel):
     """One case's outcome, and what it saw if it didn't pass."""
 
-    name: str
-    outcome: Outcome
-    detail: str = ""
-    seconds: float = 0.0
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(description="The case's name.")
+    outcome: Outcome = Field(description="Whether the case passed, failed or was skipped.")
+    detail: str = Field(default="", description="What the case saw when it didn't pass, or why it was skipped.")
+    seconds: float = Field(default=0.0, description="How long the case took.")
 
 
 class _Skip(Exception):
@@ -88,6 +96,8 @@ class _Skip(Exception):
 
 @dataclass
 class _Context:
+    """What every case works with: the backend, the suite's shared sandbox, and sandboxes to clean up."""
+
     backend: SandboxBackend
     ref: SandboxRef
     spec: SandboxSpec
@@ -283,7 +293,7 @@ async def _check_and_refusals(ctx: _Context) -> None:
     # Whichever kind of egress the backend can't honour: a per-sandbox backend can't take the platform's
     # rules on trust, and a backend without per-sandbox egress can't apply a policy.
     egress = PlatformEgress(reason="conformance") if caps.egress_per_sandbox else EgressPolicy()
-    mismatched = replace(ctx.spec, name_hint="conf-refuse", egress=egress)
+    mismatched = ctx.spec.model_copy(update={"name_hint": "conf-refuse", "egress": egress})
     _expect(bool(await ctx.backend.check(mismatched)), f"check accepted {type(egress).__name__} egress")
     try:
         ref = await ctx.backend.create(mismatched)
@@ -351,7 +361,9 @@ async def _egress_live_update(ctx: _Context) -> None:
 
 
 async def _delete_is_idempotent(ctx: _Context) -> None:
-    spec = replace(ctx.spec, name_hint="conf-del", labels={**ctx.spec.labels, "nhx-conformance-case": "delete"})
+    spec = ctx.spec.model_copy(
+        update={"name_hint": "conf-del", "labels": {**ctx.spec.labels, "nhx-conformance-case": "delete"}}
+    )
     ref = await ctx.backend.create(spec)
     ctx.extra_refs.append(ref)
     await ctx.backend.delete(ref)
@@ -401,7 +413,7 @@ async def run_suite(
             can be changed and read back.
         only: Run just these cases.
     """
-    spec = replace(spec, env={**spec.env, "CONFORMANCE_SPEC": "spec"})
+    spec = spec.model_copy(update={"env": {**spec.env, "CONFORMANCE_SPEC": "spec"}})
     ref = await backend.create(spec)
     results: list[CaseResult] = []
     ctx: _Context | None = None
@@ -421,7 +433,9 @@ async def run_suite(
                 outcome, detail = "skipped", str(skip)
             except Exception as exc:  # noqa: BLE001 - a failed case is a result, not a crash
                 outcome, detail = "failed", f"{type(exc).__name__}: {exc}"
-            results.append(CaseResult(name, outcome, detail, round(time.monotonic() - started, 1)))
+            results.append(
+                CaseResult(name=name, outcome=outcome, detail=detail, seconds=round(time.monotonic() - started, 1))
+            )
     finally:
         for extra in ctx.extra_refs if ctx else ():
             await backend.delete(extra)
