@@ -195,7 +195,9 @@ translate them at runtime.
 | `workload_audience`, `workload_scope` | `workload.audience`, `workload.scope` |
 | `workload_token_issuer`, `workload_token_ttl_seconds`, `workload_token_key_id`, `workload_token_private_key_file` | The corresponding `workload.token_*` field |
 | `workload_allowed_audiences`, `workload_subject_jwks_uri`, `workload_subject_issuers`, `workload_subject_jwks_cache_ttl_seconds` | The corresponding `workload` subject-validation field |
-| `workload_kubernetes_token_review_enabled` | Remove it; Kubernetes TokenReview is automatic when `workload` is configured |
+
+On Kubernetes, TokenReview is automatic when `auth.oidc.workload` is configured;
+no separate toggle is required.
 
 Auth discovery now exposes interactive clients only through structured
 `oidc.clients` entries. Removed top-level client IDs, endpoints, scopes,
