@@ -22,11 +22,11 @@ import functools
 import math
 import os
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from nemo_evals.config import EvaluatorConfig
+from nemo_evals.config import EvaluatorConfig, SandboxDockerProfile
 from nemo_evals.jobs.agent_spec import GymRunnerTarget, RegisteredAgentSource
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gym_environment_package import (
@@ -148,11 +148,12 @@ def credential_shaped_env_vars(target: GymRunnerTarget) -> list[str]:
     return sorted(name for name in target.env_vars if _CREDENTIAL_PATTERN.search(name))
 
 
-def require_sandbox_available(config: EvaluatorConfig) -> None:
+def require_sandbox_available(config: EvaluatorConfig, target: GymRunnerTarget | None = None) -> None:
     """Raise unless this deployment can actually provision a sandboxed Gym host.
 
     Checked before anything is provisioned, so a misconfigured deployment fails at compile time with
-    a message naming the setting rather than after the cost of a partial run.
+    a message naming the setting rather than after the cost of a partial run. With ``target``, the
+    egress check counts what that job's host gets, including a Docker profile's ``egress_allow``.
     """
     if not config.sandbox_cluster_capable:
         raise SandboxUnavailableError(
@@ -167,7 +168,7 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
         raise SandboxUnavailableError(
             f"sandboxed Gym execution needs {', '.join(missing)} configured; a host cannot be provisioned without them."
         )
-    if not config.sandbox_policy_base_urls and not config.sandbox_egress_allow:
+    if not config.sandbox_policy_base_urls and not _job_egress_allow(config, target):
         # A sandboxed host denies all egress except the broker. With no model endpoint allowed it
         # comes up healthy and fails at the first rollout, far from the setting that caused it --
         # so refuse here, where the message can name it.
@@ -176,6 +177,12 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
             "`sandbox_egress_allow`; a sandboxed host denies all egress except the episode broker, "
             "so an environment would have no route to a model."
         )
+
+
+def _job_egress_allow(config: EvaluatorConfig, target: GymRunnerTarget | None) -> tuple[str, ...]:
+    """The deployment's egress allowances for this job, with the Docker profile's when it sets ``docker: true``."""
+    profile = config.sandbox_docker_profile if target is not None and target.docker else None
+    return tuple(dict.fromkeys((*config.sandbox_egress_allow, *(profile.egress_allow if profile else ()))))
 
 
 def require_no_plaintext_credentials(target: GymRunnerTarget) -> None:
@@ -249,13 +256,31 @@ def resolve_sandbox_plan(
     if has_staged_environment(target):
         require_fileset_environment_sandboxed(target, config)
     if not config.sandboxed_gym_default:
+        if target.docker:
+            raise SandboxUnavailableError(
+                "`docker: true` needs sandboxed Gym execution, but this deployment runs Gym in the job container "
+                "(`sandboxed_gym_default` is off)"
+            )
         return None
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
-    runtime_image = config.sandbox_runtime_image or get_qualified_image(GYM_HOST_IMAGE)
+    docker = _docker_profile(config) if target.docker else None
+    if docker is None:
+        runtime_image = config.sandbox_runtime_image or get_qualified_image(GYM_HOST_IMAGE)
+        host_provider_options = dict(config.sandbox_host_provider_options)
+        resources = config.sandbox_resources
+        egress_allow = tuple(config.sandbox_egress_allow)
+        container_storage_bytes = None
+    else:
+        runtime_image = docker.runtime_image
+        host_provider_options = _merged(config.sandbox_host_provider_options, docker.host_provider_options)
+        resources = {**(config.sandbox_resources or {}), **(docker.resources or {})} or None
+        egress_allow = _job_egress_allow(config, target)
+        container_storage_bytes = (
+            quantity_bytes(docker.container_storage_size) if docker.container_storage_size is not None else None
+        )
     # `require_sandbox_available` has just established that this is not empty.
     assert config.sandbox_job_storage_pvc_claim is not None
-    host_provider_options = dict(config.sandbox_host_provider_options)
     # In-cluster OpenSandbox speaks http. If we leave this unset, the host probes the
     # sandbox over https and the readiness wait times out.
     if config.sandbox_host_provider == "opensandbox" and sandbox_server_protocol:
@@ -270,57 +295,51 @@ def resolve_sandbox_plan(
             )
         bundle = SandboxAgentBundle.model_validate(host_provider_options["agent_bundle"])
         host_provider_options["agent_bundle"] = bundle.model_dump(mode="json")
-    container_storage_bytes = _container_storage_bytes(config, runtime_image)
     if config.sandbox_host_provider == "opensandbox":
         try:
-            host_disk_request_gib(config.sandbox_resources, host_provider_options.get("create") or {})
+            host_disk_request_gib(resources, host_provider_options.get("create") or {})
         except ValueError as exc:
-            raise SandboxUnavailableError(f"`sandbox_resources`: {exc}") from None
+            setting = "`sandbox_docker_profile.resources`" if docker else "`sandbox_resources`"
+            raise SandboxUnavailableError(f"{setting}: {exc}") from None
     return SandboxPlan(
         host_provider=config.sandbox_host_provider,
         runtime_image=runtime_image,
         job_storage_pvc_claim=config.sandbox_job_storage_pvc_claim,
         environment_sub_path=config.sandbox_environment_sub_path,
         workspace_sub_path=config.sandbox_workspace_sub_path,
-        resources=config.sandbox_resources,
+        resources=resources,
         host_provider_options=host_provider_options,
-        egress_allow=tuple(config.sandbox_egress_allow),
+        egress_allow=egress_allow,
         policy_base_urls=tuple(config.sandbox_policy_base_urls),
         episode_backend=config.sandbox_episode_backend,
         allow_insecure_memory_backend=config.sandbox_allow_insecure_memory_backend,
         approved_images=tuple(config.sandbox_approved_images),
         container_storage_bytes=container_storage_bytes,
-        container_storage_discard=config.sandbox_container_storage_discard,
+        container_storage_discard=docker is not None and docker.container_storage_discard,
     )
 
 
-def _container_storage_bytes(config: EvaluatorConfig, runtime_image: str) -> int | None:
-    """The configured container storage size in bytes, refused where nothing would apply it.
+def _docker_profile(config: EvaluatorConfig) -> SandboxDockerProfile:
+    """The deployment's Docker profile for a job that sets ``docker: true``, refused where it can't apply."""
+    if config.sandbox_docker_profile is None:
+        raise SandboxUnavailableError(
+            "`docker: true` needs the deployment's `sandbox_docker_profile`, which this deployment does not set"
+        )
+    if config.sandbox_host_provider != "opensandbox":
+        raise SandboxUnavailableError(
+            f"`docker: true` needs the `opensandbox` host provider with a Kata runtime class; the "
+            f"`{config.sandbox_host_provider}` host provider can't run the Docker-enabled Gym host"
+        )
+    return config.sandbox_docker_profile
 
-    Only an image with a container engine reads these settings, and only on a Kata sandbox. The default Gym
-    host image has no engine and the local Docker provider can't run one, so a setting there would be silently
-    ignored; refusing at submit names the setting instead.
-    """
-    if config.sandbox_container_storage_size is None and not config.sandbox_container_storage_discard:
-        return None
-    setting = (
-        "sandbox_container_storage_size"
-        if config.sandbox_container_storage_size is not None
-        else "sandbox_container_storage_discard"
-    )
-    if config.sandbox_host_provider == "docker":
-        raise SandboxUnavailableError(
-            f"`{setting}` applies to the Docker-enabled Gym host on OpenSandbox; the local `docker` host "
-            "provider can't run a container engine"
-        )
-    if config.sandbox_runtime_image is None:
-        raise SandboxUnavailableError(
-            f"`{setting}` applies only to a Gym host image with a container engine, but `sandbox_runtime_image` "
-            f"is unset, so jobs use the default {runtime_image!r}; set it to the Docker-enabled image"
-        )
-    if config.sandbox_container_storage_size is None:
-        return None
-    return quantity_bytes(config.sandbox_container_storage_size)
+
+def _merged(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    """``override`` over ``base``: nested mappings merge key by key, and any other value replaces."""
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        merged[key] = _merged(current, value) if isinstance(current, Mapping) and isinstance(value, Mapping) else value
+    return merged
 
 
 def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: EvaluatorConfig) -> None:
@@ -337,7 +356,7 @@ def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: Evalu
             f"{what} require sandboxed execution. Enable `sandboxed_gym_default`, or select a Gym agent by "
             "`component` without `target.environment`, so colocated GymAgentTaskRunner cannot ignore the staged package."
         )
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
 
 

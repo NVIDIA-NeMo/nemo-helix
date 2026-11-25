@@ -1118,6 +1118,7 @@ def _greeting_target(
     api_key_secret: str,
     *,
     collection_timeout_s: float | None = None,
+    docker: bool = False,
 ) -> GymRunnerTarget:
     policy_route, policy_model = policy
     # As it starts, the Gym host calls the policy endpoint with this key and refuses to start on a
@@ -1134,6 +1135,7 @@ def _greeting_target(
         concurrency=2,
         startup_timeout_s=GYM_HOST_STARTUP_TIMEOUT_SECONDS,
         collection_timeout_s=collection_timeout_s,
+        docker=docker,
         env_secrets={GYM_POLICY_API_KEY_ENV: SecretRef(root=api_key_secret)},
         hydra_params={
             "policy_base_url": policy_route,
@@ -1411,15 +1413,17 @@ def test_gym_servers_run_docker_compose_in_the_sandbox(
     answer a third container by service name, that container gets an HTTP answer from Docker Hub's
     registry but none from example.com or from 1.1.1.1 by address, and a shell started with an empty
     environment, as an agent's shell tool may start one, brings up a project with both ``docker
-    compose`` and ``docker-compose``. The deployment's egress must allow Docker Hub but not example.com
-    or 1.1.1.1. Not run by CI, which has neither Kata nor that image: e2e/README.md has the settings.
+    compose`` and ``docker-compose``. The job sets ``docker: true``, so the deployment's
+    ``sandbox_docker_profile`` must name the Docker-enabled image and allow Docker Hub but not
+    example.com or 1.1.1.1. Not run by CI, which has neither Kata nor that image: e2e/README.md has
+    the settings.
     """
     greeting = "hello there"
     fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace)
     policy = _greeting_policy(client, evaluator_workspace, greeting)
     rows = [_greeting_row(greeting, "docker_compose"), _greeting_row(greeting, "execd_refuses")]
     payloads, labels = _greeting_task_payloads(rows, tmp_path / "greeting-rows.jsonl")
-    target = _greeting_target(evaluator_workspace, fileset_name, policy, gym_policy_api_key_secret)
+    target = _greeting_target(evaluator_workspace, fileset_name, policy, gym_policy_api_key_secret, docker=True)
     job_name = _submit_agent_eval_job(
         evaluator_client, evaluator_workspace, {"tasks": payloads, "target": target.model_dump(mode="json")}
     )

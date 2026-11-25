@@ -294,6 +294,55 @@ class TasksetRunsConfig(BaseModel):
 MIN_CONTAINER_STORAGE_BYTES = 2**30
 
 
+class SandboxDockerProfile(BaseModel):
+    """What a Gym job that sets ``docker: true`` runs with, on top of the deployment's sandbox settings.
+
+    Only those jobs get the Docker-enabled image, its privileged setup, its container storage and the extra
+    egress. Every other Gym job keeps the deployment's plain Gym host.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_image: str = Field(
+        min_length=1,
+        description="The Docker-enabled Gym host image, such as `nhx-gym-host-podman`, fully qualified.",
+    )
+    host_provider_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Merged over `sandbox_host_provider_options`, nested keys included, for these jobs only. "
+        "The Docker-enabled image needs `create.extensions` to include `bootstrap.execd.isolation: enable`.",
+    )
+    egress_allow: tuple[str, ...] = Field(
+        default=(),
+        description="Added to `sandbox_egress_allow` for these jobs only, as `host:port`: every registry the "
+        "environment's images come from, including its blob storage hosts.",
+    )
+    resources: dict[str, str] | None = Field(
+        default=None,
+        description="Merged over `sandbox_resources` for these jobs only, for example a larger "
+        "`ephemeral-storage` request to hold the container storage.",
+    )
+    container_storage_size: str | None = Field(
+        default=None,
+        description="The most these jobs' containers, images and volumes may store, as a Kubernetes quantity "
+        "such as `100Gi`. The storage is a sparse file, so this is a ceiling, not an allocation. Unset keeps the "
+        "image's default of 30Gi. It does not reserve node disk; set `ephemeral-storage` in `resources` for that.",
+    )
+    container_storage_discard: bool = Field(
+        default=False,
+        description="Mount the container storage file with `discard`, so space freed by deleting images or "
+        "containers goes back to the node during the job instead of when the host ends, at the cost of extra "
+        "I/O on every delete.",
+    )
+
+    @field_validator("container_storage_size")
+    @classmethod
+    def _container_storage_size_is_a_quantity(cls, value: str | None) -> str | None:
+        if value is not None and quantity_bytes(value) < MIN_CONTAINER_STORAGE_BYTES:
+            raise ValueError(f"container_storage_size {value!r} is below the 1Gi minimum")
+        return value
+
+
 class EvaluatorConfig(NemoConfig):
     """Configuration namespace for the evals plugin."""
 
@@ -393,18 +442,11 @@ class EvaluatorConfig(NemoConfig):
         "unbounded and is first to be evicted. No default is guessed: a Gym host's footprint depends on "
         "the environment it runs.",
     )
-    sandbox_container_storage_size: str | None = Field(
+    sandbox_docker_profile: SandboxDockerProfile | None = Field(
         default=None,
-        description="For a Gym host image with a container engine: the most its containers, images and "
-        "volumes may store, as a Kubernetes quantity such as `100Gi`. The storage is a sparse file, so this "
-        "is a ceiling, not an allocation. Unset keeps the image's default of 30Gi. It does not reserve node "
-        "disk; set `ephemeral-storage` in `sandbox_resources` for that.",
-    )
-    sandbox_container_storage_discard: bool = Field(
-        default=False,
-        description="For a Gym host image with a container engine: mount its storage file with `discard`, "
-        "so space freed by deleting images or containers goes back to the node during the job instead of "
-        "when the host ends, at the cost of extra I/O on every delete.",
+        description="Lets Gym jobs that set `docker: true` run `docker` and `docker compose`: their Gym host "
+        "uses this profile's image, settings and extra egress. Unset refuses those jobs. Requires the "
+        "`opensandbox` host provider with a Kata runtime class.",
     )
     sandbox_policy_base_urls: tuple[str, ...] = Field(
         default=(),
@@ -424,13 +466,6 @@ class EvaluatorConfig(NemoConfig):
         "every episode create is refused, matching the broker's own closed default -- a run that needs "
         "episodes must be granted its images explicitly.",
     )
-
-    @field_validator("sandbox_container_storage_size")
-    @classmethod
-    def _container_storage_size_is_a_quantity(cls, value: str | None) -> str | None:
-        if value is not None and quantity_bytes(value) < MIN_CONTAINER_STORAGE_BYTES:
-            raise ValueError(f"sandbox_container_storage_size {value!r} is below the 1Gi minimum")
-        return value
 
     allow_insecure_cloudpickle_metrics: bool = Field(
         default=False,

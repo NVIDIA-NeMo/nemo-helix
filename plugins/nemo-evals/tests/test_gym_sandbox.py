@@ -1112,15 +1112,96 @@ def test_the_generated_instance_and_config_drive_the_host_composition() -> None:
     assert (selection["agent_instance"], selection["agent_config"]) == ("registered_calc", generated)
 
 
-# --- Container storage operator settings --------------------------------------------------------------------
+# --- Docker profile: `docker: true` jobs --------------------------------------------------------------------
+
+PODMAN_IMAGE = "registry.example.com/nhx-gym-host-podman:1.0"
+
+
+def docker_profile(**overrides: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "runtime_image": PODMAN_IMAGE,
+        "host_provider_options": {"create": {"extensions": {"bootstrap.execd.isolation": "enable"}}},
+        "egress_allow": ("registry-1.docker.io:443",),
+    }
+    fields.update(overrides)
+    return fields
+
+
+def docker_plan(profile: dict[str, Any] | None = None, **config: Any) -> SandboxPlan:
+    """The plan a `docker: true` job resolves to on a deployment with a Docker profile."""
+    plan = resolve_sandbox_plan(
+        capable_config(sandbox_docker_profile=docker_profile(**(profile or {})), **config), target(docker=True)
+    )
+    assert plan is not None
+    return plan
+
+
+def test_a_docker_profile_can_be_the_only_route_to_a_model() -> None:
+    """A deployment that allows egress only in its Docker profile serves `docker: true` jobs, and only those."""
+    config = capable_config(
+        sandbox_policy_base_urls=(),
+        sandbox_egress_allow=(),
+        sandbox_docker_profile=docker_profile(egress_allow=("models.internal:443", "registry-1.docker.io:443")),
+    )
+
+    plan = resolve_sandbox_plan(config, target(docker=True))
+
+    assert plan is not None
+    assert plan.egress_allow == ("models.internal:443", "registry-1.docker.io:443")
+    with pytest.raises(SandboxUnavailableError, match="no route to a model"):
+        resolve_sandbox_plan(config, target())
+
+
+def test_a_docker_job_gets_the_profile_over_the_deployment_defaults() -> None:
+    plan = docker_plan(
+        {"resources": {"ephemeral-storage": "45Gi"}},
+        sandbox_host_provider_options={"connection": {"request_timeout_s": 1200}, "create": {"resource": {"cpu": "8"}}},
+        sandbox_egress_allow=("pypi.org:443", "registry-1.docker.io:443"),
+        sandbox_resources={"cpu": "2", "memory": "8Gi"},
+    )
+
+    assert plan.runtime_image == PODMAN_IMAGE
+    # Nested settings merge, so the profile adds the isolation extension without restating the rest.
+    assert plan.host_provider_options == {
+        "connection": {"request_timeout_s": 1200},
+        "create": {"resource": {"cpu": "8"}, "extensions": {"bootstrap.execd.isolation": "enable"}},
+    }
+    assert plan.egress_allow == ("pypi.org:443", "registry-1.docker.io:443")
+    assert plan.resources == {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "45Gi"}
+
+
+def test_a_job_that_does_not_ask_for_docker_keeps_the_plain_gym_host() -> None:
+    """The profile's image, privileged setup, storage and registry egress reach only `docker: true` jobs."""
+    config = capable_config(
+        sandbox_docker_profile=docker_profile(resources={"ephemeral-storage": "45Gi"}, container_storage_size="40Gi")
+    )
+
+    assert resolve_sandbox_plan(config, target()) == resolve_sandbox_plan(capable_config(), target())
+
+
+def test_a_docker_job_is_refused_on_a_deployment_without_a_docker_profile() -> None:
+    with pytest.raises(SandboxUnavailableError, match="sandbox_docker_profile"):
+        resolve_sandbox_plan(capable_config(), target(docker=True))
+
+
+def test_a_docker_job_is_refused_where_gym_runs_in_the_job_container() -> None:
+    config = capable_config(sandboxed_gym_default=False, sandbox_docker_profile=docker_profile())
+
+    with pytest.raises(SandboxUnavailableError, match="sandboxed_gym_default"):
+        resolve_sandbox_plan(config, target(docker=True))
+
+
+def test_a_docker_job_is_refused_with_the_local_docker_provider() -> None:
+    with pytest.raises(SandboxUnavailableError, match="opensandbox"):
+        docker_plan(sandbox_host_provider="docker")
 
 
 def test_container_storage_settings_reach_the_hosts_setup_environment() -> None:
     """The setup reads them from the container's environment, as bytes and a "1"."""
     from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
 
-    plan = capable_plan(sandbox_container_storage_size="100Gi", sandbox_container_storage_discard=True)
-    spec = built_host_spec(plan)
+    plan = docker_plan({"container_storage_size": "100Gi", "container_storage_discard": True})
+    spec = built_host_spec(plan, target(docker=True))
 
     assert (plan.container_storage_bytes, plan.container_storage_discard) == (100 * 2**30, True)
     assert spec.bootstrap_env[STORAGE_SIZE_ENV] == str(100 * 2**30)
@@ -1130,7 +1211,7 @@ def test_container_storage_settings_reach_the_hosts_setup_environment() -> None:
 def test_unset_container_storage_settings_leave_the_image_defaults() -> None:
     from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
 
-    spec = built_host_spec(capable_plan())
+    spec = built_host_spec(docker_plan(), target(docker=True))
 
     assert STORAGE_SIZE_ENV not in spec.bootstrap_env
     assert STORAGE_DISCARD_ENV not in spec.bootstrap_env
@@ -1139,10 +1220,10 @@ def test_unset_container_storage_settings_leave_the_image_defaults() -> None:
 @pytest.mark.parametrize("name", ["NHX_CONTAINER_STORAGE_SIZE", "NHX_CONTAINER_STORAGE_DISCARD"])
 @pytest.mark.parametrize("operator_sets_it", [True, False])
 def test_a_job_cannot_name_the_container_storage_settings(name: str, operator_sets_it: bool) -> None:
-    settings = {"sandbox_container_storage_size": "40Gi"} if operator_sets_it else {}
+    profile = {"container_storage_size": "40Gi"} if operator_sets_it else {}
 
     with pytest.raises(ValueError, match=name):
-        built_host_spec(capable_plan(**settings), target(env_vars={name: "1"}))
+        built_host_spec(docker_plan(profile), target(docker=True, env_vars={name: "1"}))
 
 
 def test_a_plan_without_container_storage_settings_serializes_as_before() -> None:
@@ -1154,30 +1235,23 @@ def test_a_plan_without_container_storage_settings_serializes_as_before() -> Non
 
 
 def test_a_plan_with_container_storage_settings_round_trips() -> None:
-    plan = capable_plan(sandbox_container_storage_size="64Gi", sandbox_container_storage_discard=True)
+    plan = docker_plan({"container_storage_size": "64Gi", "container_storage_discard": True})
 
     assert SandboxPlan.model_validate_json(plan.serialized()) == plan
 
 
-@pytest.mark.parametrize(
-    "setting",
-    [{"sandbox_container_storage_size": "40Gi"}, {"sandbox_container_storage_discard": True}],
-)
-def test_container_storage_settings_are_refused_on_the_default_gym_host_image(setting: dict[str, Any]) -> None:
-    """The default image has no container engine, so the setting would silently do nothing."""
-    with pytest.raises(SandboxUnavailableError, match="sandbox_runtime_image"):
-        capable_plan(sandbox_runtime_image=None, **setting)
-
-
-def test_container_storage_settings_are_refused_with_the_local_docker_provider() -> None:
-    with pytest.raises(SandboxUnavailableError, match="local `docker` host provider"):
-        capable_plan(sandbox_host_provider="docker", sandbox_container_storage_size="40Gi")
-
-
 @pytest.mark.parametrize("size", ["30", "512Mi", "40 Gi", "40gb"])
 def test_a_container_storage_size_that_is_not_a_quantity_of_at_least_1gi_is_a_config_error(size: str) -> None:
-    with pytest.raises(ValueError, match="sandbox_container_storage_size|Kubernetes quantity"):
-        EvaluatorConfig(sandbox_container_storage_size=size)
+    with pytest.raises(ValueError, match="container_storage_size|Kubernetes quantity"):
+        EvaluatorConfig(sandbox_docker_profile=docker_profile(container_storage_size=size))
+
+
+def test_a_docker_profile_disk_request_above_the_operators_own_limit_names_the_profile() -> None:
+    with pytest.raises(SandboxUnavailableError, match="sandbox_docker_profile.resources.*ephemeral-storage"):
+        docker_plan(
+            {"resources": {"ephemeral-storage": "40Gi"}},
+            sandbox_host_provider_options={"create": {"resource": {"ephemeral-storage": "30Gi"}}},
+        )
 
 
 def test_a_disk_request_above_the_operators_own_limit_is_refused_at_submit() -> None:

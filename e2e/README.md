@@ -350,10 +350,10 @@ nothing.
 
 **Docker in the Gym host.** `test_gym_servers_run_docker_compose_in_the_sandbox`, marked
 `gym_docker_e2e`, checks that Gym servers run `docker compose` unprivileged and inside the sandbox's
-egress. It needs a deployment whose Gym host runs the Docker-enabled image (`nhx-gym-host-podman`) on
-Kata OpenSandbox sandboxes, with egress to Docker Hub (`registry-1.docker.io`, `auth.docker.io`,
-`production.cloudflare.docker.com`) and not to `example.com` or `1.1.1.1`; see "Run Docker in Gym
-servers" in the docs page above. It skips unless `NHX_E2E_GYM_DOCKER=1`, and no CI lane runs it: the
+egress. Its job sets `docker: true`, so it needs a deployment on Kata OpenSandbox sandboxes whose
+`sandbox_docker_profile` names the Docker-enabled image (`nhx-gym-host-podman`) and allows Docker Hub
+(`registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`), and whose egress does
+not reach `example.com` or `1.1.1.1`; see "Run Docker in Gym servers" in the docs page above. It skips unless `NHX_E2E_GYM_DOCKER=1`, and no CI lane runs it: the
 kind lane deselects it, having neither Kata nor that image. It does not read the cluster, so the
 `NHX_E2E_KUBE_*` settings are not needed for it alone (`-m gym_docker_e2e`).
 
