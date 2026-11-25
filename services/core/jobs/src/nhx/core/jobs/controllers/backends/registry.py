@@ -3,7 +3,9 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Self, Sequence
+from importlib import import_module
+from inspect import isabstract
+from typing import Self, Sequence, cast
 
 from docker.errors import DockerException
 from nemo_helix_plugin.capabilities import (
@@ -12,6 +14,8 @@ from nemo_helix_plugin.capabilities import (
     reset_capability_cache,
 )
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.jobs.backends import discover_job_backends
+from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.schemas import BackendRef, ProfileRef, ProviderRef
 from nhx.core.jobs.controllers.backends.base import DEFAULT_PROFILE, DEFAULT_PROVIDER, JobBackend
@@ -110,8 +114,8 @@ class BackendRegistry:
     def from_config(
         cls,
         nemo_client: NemoClient,
-        profiles: Sequence[ExecutionProfileT],
-        backends: BackendRegistryT = backend_registry,
+        profiles: Sequence[BaseExecutionProfile],
+        backends: BackendRegistryT | None = None,
     ) -> Self:
         """Create a BackendRegistry from a list of execution profiles.
 
@@ -121,19 +125,42 @@ class BackendRegistry:
 
         Args:
             profiles: List of execution profiles defining backend configurations
-            backends: Registry of available backend classes (defaults to global backend_registry)
+            backends: Explicit backend mapping, bypassing plugin discovery. By default,
+                combine built-ins with implementations selected by configured profiles.
 
         Returns:
             A configured BackendRegistry instance with all backends initialized
 
         Raises:
             KeyError: If a profile references an executor not found in the backends registry
+            ValueError: If a selected plugin implementation cannot load or is not a concrete JobBackend
             ValidationError: If a profile's configuration is invalid for its backend type
         """
         registry: dict[RegistryKey, JobBackend] = {}
         docker_available: bool | None = None
+        # Plugin models are BaseExecutionProfile subclasses outside the static
+        # built-in union. Discovery/admission requires the same backend/config
+        # fields, so use that shared shape inside the registry.
+        configured_profiles = cast(Sequence[ExecutionProfileT], profiles)
+        if backends is None:
+            backends = dict(backend_registry)
+            for backend_name, contribution in discover_job_backends().items():
+                for provider, reference in contribution.implementations.items():
+                    key = BackendKey(provider, backend_name)
+                    if not any(p.provider == provider and p.backend == backend_name for p in configured_profiles):
+                        continue
+                    module, symbol = reference.split(":")
+                    try:
+                        implementation = getattr(import_module(module), symbol)
+                    except (ImportError, AttributeError) as exc:
+                        raise ValueError(f"Cannot load job backend {key} from {reference!r}") from exc
+                    if not isinstance(implementation, type) or not issubclass(implementation, JobBackend):
+                        raise ValueError(f"Job backend implementation must subclass JobBackend: {key} ({reference})")
+                    if isabstract(implementation):
+                        raise ValueError(f"Job backend implementation must be concrete: {key} ({reference})")
+                    backends[key] = implementation
 
-        for executor in profiles:
+        for executor in configured_profiles:
             # Execution profiles are unique with respect to the provider
             # and profile combination
             registry_key = RegistryKey(executor.provider, executor.profile)

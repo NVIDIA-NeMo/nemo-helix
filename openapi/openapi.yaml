@@ -7096,6 +7096,7 @@ paths:
                   - $ref: '#/components/schemas/SubprocessJobExecutionProfile'
                   - $ref: '#/components/schemas/E2EJobExecutionProfile'
                   - $ref: '#/components/schemas/OpenShellJobExecutionProfile'
+                  - $ref: '#/components/schemas/GenericExecutionProfile'
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
@@ -16834,6 +16835,32 @@ components:
       type: object
       title: GenerationStats
       description: General stats about the generation.
+    GenericExecutionProfile:
+      properties:
+        provider:
+          type: string
+          title: Provider
+          description: The compute provider for the executor, e.g., cpu, gpu
+          default: cpu
+        profile:
+          type: string
+          title: Profile
+          description: The profile name for the executor, e.g., high_priority_a100,
+            low_priority, etc.
+          default: default
+        backend:
+          type: string
+          title: Backend
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+      type: object
+      required:
+      - backend
+      title: GenericExecutionProfile
+      description: Readback shape for clients without the backend-specific schema
+        installed.
     GenericSortField:
       type: string
       enum:
