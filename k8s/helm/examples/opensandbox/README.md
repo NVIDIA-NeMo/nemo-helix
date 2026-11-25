@@ -196,7 +196,7 @@ container when one of them runs out of memory, unless the node's kubelet sets
 agent survives a tool it launched running out of memory, and in a sandbox it
 doesn't.
 
-NeMo Evals' Harbor sandboxes and Gym hosts ask for Docker's behaviour with
+NeMo Evals' Harbor sandboxes ask for Docker's behaviour with
 `extensions["opensandbox.extensions.nemo-oom-kill-process"]`. On a server that
 sets `NEMO_EXT_OOM_KILL_PROCESS=true`, the extension turns the request into the
 pod annotation `memory.oom.group.memory-qos.nri.io/sandbox: "0"`, and the
@@ -204,6 +204,10 @@ pod annotation `memory.oom.group.memory-qos.nri.io/sandbox: "0"`, and the
 gives the `sandbox` container `memory.oom.group=0`. Only the process that ran
 out of memory then dies, as under Docker. Without the setting, the request does
 nothing.
+
+Sandboxed Gym hosts don't ask for it. Their processes are servers that every
+rollout goes through, and nothing restarts one that's killed, so a host that
+runs out of memory is better killed whole and reported as out of memory.
 
 A node without the plugin ignores the annotation, but a plugin whose list
 leaves it out, such as the chart's default, rejects the container with

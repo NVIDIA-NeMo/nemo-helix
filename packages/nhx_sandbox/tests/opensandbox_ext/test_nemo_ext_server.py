@@ -373,6 +373,15 @@ def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s
     assert k8s.listed_namespaces == []
 
 
+def test_unscheduled_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    """The create wait reads the status every second, and a sandbox waiting for a node has no containers to report."""
+    workload = _labelled_workload({}, "Pending", None)
+    workload["status"]["allocated"] = 0
+
+    assert provider.get_status(workload)["state"] == "Pending"
+    assert k8s.listed_namespaces == []
+
+
 def test_failed_pod_lookup_keeps_the_stock_status(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

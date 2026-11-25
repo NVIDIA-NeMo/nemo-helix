@@ -202,7 +202,7 @@ class NemoComposeProvider(BatchSandboxProvider):
             return status
 
         # The controller leaves a sandbox whose container stopped in Pending; only the pod says why.
-        failed = self._failed_container(workload)
+        failed = self._failed_container(workload) if (workload.get("status") or {}).get("allocated", 0) > 0 else None
         if failed is not None:
             reason, message = failed
             return {**status, "state": "Failed", "reason": reason, "message": message}
