@@ -21,6 +21,7 @@ from nemo_agent_hardener_plugin.config import (
     write_env_file,
 )
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.secrets.client import SecretsClient
 
 
@@ -35,8 +36,16 @@ def resolve_inference_key(config: AgentHardenerConfig) -> tuple[str | None, str]
         secret = secrets.access_secret(name=config.inference_secret_name, workspace=config.default_workspace).data()
         if secret and secret.value:
             return secret.value, f"secret '{config.inference_secret_name}'"
-    except Exception:  # Secrets store unreachable/absent → fall back to env
+    except NotFoundError:
         pass
+    except NemoClientError as exc:
+        # setup may run before the platform is up, so a store failure falls back to env, but visibly:
+        # a refused or broken lookup would otherwise provision a different key than the store holds.
+        typer.secho(
+            f"  ! could not read secret '{config.inference_secret_name}' ({type(exc).__name__}); "
+            f"falling back to {INFERENCE_API_KEY_ENVVAR}.",
+            fg="yellow",
+        )
 
     env_value = os.environ.get(INFERENCE_API_KEY_ENVVAR)
     if env_value:

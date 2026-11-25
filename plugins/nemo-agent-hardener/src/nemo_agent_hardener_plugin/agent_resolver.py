@@ -31,17 +31,20 @@ import logging
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agent_hardener_plugin.filesets import download_fileset
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, derive_binaries, dockerfile_env
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.agents.types import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +463,23 @@ def build_manifest_dict(
 # --------------------------------------------------------------------------- #
 # Filesystem materialization
 # --------------------------------------------------------------------------- #
+@contextmanager
+def _ethos_fileset(sdk: Any, agent_name: str, workspace: str) -> Generator[Path | None]:
+    """The agent's registered ``{agent}-ethos`` fileset, downloaded to a temporary directory.
+
+    Yields ``None`` only when the agent has none (registered before ethos filesets existed); any other
+    read failure raises.
+    """
+    with tempfile.TemporaryDirectory(prefix="agent-hardener-ethos-") as directory:
+        try:
+            download_fileset(sdk, f"{workspace}/{agent_name}-ethos", Path(directory))
+        except NotFoundError:
+            logger.info("agent %s/%s has no ethos fileset", workspace, agent_name)
+            yield None
+            return
+        yield Path(directory)
+
+
 def download_agent_bundle(sdk: Any, agent_name: str, workspace: str, destination: Path) -> bool:
     """Copy the whole directory the author registered into *destination*.
 
@@ -474,14 +494,8 @@ def download_agent_bundle(sdk: Any, agent_name: str, workspace: str, destination
 
     Returns whether a bundle was found; ``False`` is the ordinary case for a config-only agent.
     """
-    from nemo_agent_hardener_plugin.filesets import download_fileset  # noqa: PLC0415
-
-    with tempfile.TemporaryDirectory(prefix="agent-hardener-ethos-") as directory:
-        source = Path(directory)
-        try:
-            download_fileset(sdk, f"{workspace}/{agent_name}-ethos", source)
-        except Exception:
-            logger.info("agent %s/%s has no readable ethos fileset", workspace, agent_name)
+    with _ethos_fileset(sdk, agent_name, workspace) as source:
+        if source is None:
             return False
         destination.mkdir(parents=True, exist_ok=True)
         copied = False
@@ -510,17 +524,11 @@ def shipped_dockerfile(sdk: Any, agent_name: str, workspace: str) -> str | None:
     serves. The author's own file has neither problem, and it is the image they actually ship.
 
     Returns ``None`` when the agent shipped none, which is the common case; the caller renders then.
-    A failure to *read* an existing fileset is logged as a warning rather than swallowed: silently
-    rendering would quietly ignore the author's file and reintroduce both pins.
+    A failure to *read* an existing fileset raises: silently rendering would quietly ignore the
+    author's file and reintroduce both pins.
     """
-    from nemo_agent_hardener_plugin.filesets import download_fileset  # noqa: PLC0415
-
-    with tempfile.TemporaryDirectory(prefix="agent-hardener-ethos-") as directory:
-        dest = Path(directory)
-        try:
-            download_fileset(sdk, f"{workspace}/{agent_name}-ethos", dest)
-        except Exception:
-            logger.info("agent %s/%s has no readable ethos fileset; rendering a Dockerfile", workspace, agent_name)
+    with _ethos_fileset(sdk, agent_name, workspace) as dest:
+        if dest is None:
             return None
         candidate = dest / DOCKERFILE_FILENAME
         if not candidate.is_file():

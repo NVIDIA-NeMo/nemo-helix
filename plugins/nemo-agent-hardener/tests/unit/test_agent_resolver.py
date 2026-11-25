@@ -28,6 +28,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     derive_egress,
     derive_secret_names,
     detect_custom_components,
+    download_agent_bundle,
     gateway_backend,
     inject_gateway_url,
     inspect_agent,
@@ -42,6 +43,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     shipped_dockerfile,
 )
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError
 
 # `list` is shadowed by the fake's own `list` method inside the class body, so the parameter type
 # is aliased at module level.
@@ -102,6 +104,9 @@ def _client(agent: dict | None, deployments: DeploymentRows | None = None) -> Ne
                 "total_results": len(rows),
             }
             return httpx.Response(200, json={"data": rows, "pagination": pagination})
+        if path.startswith("/apis/files/v2/workspaces/default/filesets/calc-ethos/"):
+            # Registered without an ethos fileset: the resolver renders its own Dockerfile.
+            return httpx.Response(404, json={"detail": "not found"})
         raise AssertionError(f"unexpected platform request: {request.method} {path}")
 
     return NemoClient(
@@ -366,12 +371,12 @@ def _fake_ethos(monkeypatch: pytest.MonkeyPatch, contents: dict[str, str] | None
     def fake_download(_sdk: object, ref: str, dest: Path) -> Path:
         asked.append(ref)
         if contents is None:
-            raise FileNotFoundError(ref)
+            raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://files")))
         for name, text in contents.items():
             (dest / name).write_text(text, encoding="utf-8")
         return dest
 
-    monkeypatch.setattr("nemo_agent_hardener_plugin.filesets.download_fileset", fake_download)
+    monkeypatch.setattr("nemo_agent_hardener_plugin.agent_resolver.download_fileset", fake_download)
     return asked
 
 
@@ -396,10 +401,25 @@ def test_an_agent_without_a_dockerfile_falls_back_to_rendering(monkeypatch: pyte
     assert shipped_dockerfile(SimpleNamespace(), "ledger", "default") is None
 
 
-def test_an_unreadable_ethos_fileset_falls_back_to_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_missing_ethos_fileset_falls_back_to_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
     """An agent registered before ethos filesets existed has none; that is not an error."""
     _fake_ethos(monkeypatch, None)
     assert shipped_dockerfile(SimpleNamespace(), "ledger", "default") is None
+
+
+def test_an_unreadable_ethos_fileset_raises_instead_of_ignoring_the_authors_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rendering over a fileset we could not read would drop the author's Dockerfile and bundle."""
+
+    def failing_download(_sdk: object, _ref: str, _dest: Path) -> Path:
+        raise InternalServerError(httpx.Response(500, request=httpx.Request("GET", "http://files")))
+
+    monkeypatch.setattr("nemo_agent_hardener_plugin.agent_resolver.download_fileset", failing_download)
+    with pytest.raises(InternalServerError):
+        shipped_dockerfile(SimpleNamespace(), "ledger", "default")
+    with pytest.raises(InternalServerError):
+        download_agent_bundle(SimpleNamespace(), "ledger", "default", tmp_path / "bundle")
 
 
 def test_materialize_prefers_the_shipped_dockerfile(tmp_path: Path) -> None:

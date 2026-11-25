@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
@@ -21,8 +22,10 @@ from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import _common, artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs import run as run_module
-from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
+from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MANIFEST, AgentHardenerRunError
+from nemo_agent_hardener_plugin.jobs.records import _manifest_models, _manifest_rounds
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.job_context import JobContext
 
 
@@ -947,13 +950,16 @@ def test_explicit_garak_report_dir_uses_an_invocation_unique_prefix(
     assert uploaded == [own_hitlog]
 
 
-def test_unscoped_capture_fails_closed_and_cleanup_removes_private_manifest(tmp_path: Path) -> None:
+def test_unscopable_capture_fails_the_run_and_cleanup_removes_private_manifest(tmp_path: Path) -> None:
+    """Running unscoped would publish nothing, or another job's outputs, so it fails as a manifest problem."""
     bad_manifest = tmp_path / "bad.yaml"
     bad_manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
     capture = artifacts.ArtifactCapture()
-    assert artifacts._prepare_artifact_capture(capture, str(bad_manifest)) == str(bad_manifest)
+    with pytest.raises(AgentHardenerRunError) as raised:
+        artifacts._prepare_artifact_capture(capture, str(bad_manifest))
+    assert raised.value.category == CATEGORY_MANIFEST
     assert capture.run_dir is None
-    assert artifacts._save_hitlog_fileset(object(), "default", capture) == ""
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["bad.yaml"]
 
     manifest = tmp_path / "agent-hardener.yaml"
     manifest.write_text("agent:\n  name: clockbot\n", encoding="utf-8")
@@ -1763,3 +1769,21 @@ def test_manifest_secrets_land_in_the_victim_dotenv(tmp_path: Path, monkeypatch:
     job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=sdk)
 
     assert f"REMOTE_TOKEN={_SECRET_VALUE}" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("read", [_manifest_rounds, _manifest_models])
+def test_an_unreadable_manifest_fails_the_run_instead_of_using_defaults(
+    tmp_path: Path, read: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused read must not quietly run one round or agent-hardener's default models."""
+    refused = PermissionDeniedError(httpx.Response(403, request=httpx.Request("GET", "http://entities")))
+
+    def get_entity_by_name(**_kwargs: Any) -> Any:
+        raise refused
+
+    monkeypatch.setattr(
+        "nemo_agent_hardener_plugin.jobs.records.client_from_platform",
+        lambda _sdk, _cls: SimpleNamespace(get_entity_by_name=get_entity_by_name),
+    )
+    with pytest.raises(PermissionDeniedError):
+        read(object(), "m", make_job_context(tmp_path))

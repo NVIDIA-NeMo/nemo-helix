@@ -222,6 +222,7 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
     monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(job_mod, "_effective_models", lambda sdk, config, ctx: None)
     monkeypatch.setattr(
         job_mod.AgentHardenerConfig,
         "get",
@@ -715,6 +716,7 @@ def test_synth_benign_writes_the_victim_dotenv_when_env_file_is_given(
     monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c, _e=None: {})
     monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
+    monkeypatch.setattr(job_mod, "_effective_models", lambda sdk, config, ctx: None)
     monkeypatch.setattr(
         job_mod.AgentHardenerConfig,
         "get",

@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from nemo_agent_hardener_plugin._perms import AgentHardenerRunPerms
 from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -25,6 +25,7 @@ from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_RUN_TYPE
 from nemo_agent_hardener_plugin.filesets import download_fileset
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities.client import EntitiesClient
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -150,7 +151,11 @@ async def get_events(workspace: str, name: str, after: int = 0) -> EventsRespons
 
 
 def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> list[tuple[int, dict[str, Any]]]:
-    """Blocking: fetch the run's ``events_fileset`` and re-read history. Must run off the event loop."""
+    """Blocking: fetch the run's ``events_fileset`` and re-read history. Must run off the event loop.
+
+    Empty only when there is nothing to fall back to; a failed lookup or download is a 502, since an
+    empty list would read as a run that emitted no events.
+    """
     try:
         client = _get_client()
         # get_entity_by_name returns a generic Entity; its domain fields live under `.data`
@@ -168,6 +173,11 @@ def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> lis
         if fileset_ref:
             download_fileset(client, fileset_ref, stream._path.parent)
             return stream.history(after_id=after)
-    except Exception:
-        logger.warning("Fileset fallback failed for run %r events; returning empty", name, exc_info=True)
+    except NotFoundError:
+        return []
+    except Exception as exc:
+        logger.warning("Fileset fallback failed for run %r events", name, exc_info=True)
+        raise HTTPException(
+            status_code=502, detail=f"Could not load the persisted events for run {name!r}: {exc}"
+        ) from exc
     return []
