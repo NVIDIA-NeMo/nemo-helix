@@ -25,11 +25,15 @@ from sandboxed_gym.host.models import (
     render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
+from sandboxed_gym.quantity import quantity_bytes, quantity_gib_rounded_up
 
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 2.0
-_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+# Isolated (-I): `-m` would otherwise put the working directory, the job's writable workspace, first on the
+# import path, and PYTHON* variables would apply too. The host starts as root on the Docker-enabled image.
+# Unbuffered (-u), since -I also ignores the image's PYTHONUNBUFFERED.
+_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-I", "-u", "-m", "sandboxed_gym.runtime.gym_host_runtime")
 # Match nhx_sandbox.harbor_opensandbox_services, which this package does not depend on.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"
@@ -58,6 +62,32 @@ def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]
     if memory is not None and str(memory) != "":
         limits["memory"] = str(memory)
     return limits
+
+
+EPHEMERAL_STORAGE = "ephemeral-storage"
+
+
+def host_disk_request_gib(resources: Mapping[str, str] | None, create: Mapping[str, Any]) -> int | None:
+    """The host's ephemeral-storage request in whole GiB, rounded up, or ``None`` when it asks for none.
+
+    The sandbox API takes the request in GiB. It is a request only: the scheduler places the host where that
+    much node disk is free. An operator's own ``ephemeral-storage`` limit in ``create.resource`` must not be
+    below it, or Kubernetes rejects the pod, which surfaces only as a create call that never finishes.
+    """
+    if not resources or resources.get(EPHEMERAL_STORAGE) in (None, ""):
+        return None
+    request = str(resources[EPHEMERAL_STORAGE])
+    try:
+        gib = quantity_gib_rounded_up(request)
+    except ValueError as exc:
+        raise ValueError(f"sandbox resource {EPHEMERAL_STORAGE}: {exc}") from None
+    limit = (create.get("resource") or {}).get(EPHEMERAL_STORAGE)
+    if limit is not None and gib * 2**30 > quantity_bytes(str(limit)):
+        raise ValueError(
+            f"sandbox resource {EPHEMERAL_STORAGE} requests {request} ({gib}Gi, the sandbox API's whole-GiB "
+            f"request) but the create options limit it to {limit}"
+        )
+    return gib
 
 
 def _create_options_for_host(create: Mapping[str, Any], resources: Mapping[str, str] | None) -> dict[str, Any]:
@@ -179,6 +209,9 @@ class OpenSandboxGymHostProvider:
                     resource_kwargs["memory_mib"] = int(float(memory_s[:-2]))
                 else:
                     resource_kwargs["memory_mib"] = int(memory_s)
+            disk_gib = host_disk_request_gib(spec.resources, self._create_options)
+            if disk_gib is not None:
+                resource_kwargs["disk_gib"] = disk_gib
             resources = SandboxResources.from_mapping(resource_kwargs)
 
         # OpenSandbox treats an omitted entrypoint as a request for its persistent-sandbox

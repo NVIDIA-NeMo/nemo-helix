@@ -12,6 +12,7 @@ is injected verbatim into the sandbox image, where ``nemo_rl`` may not be import
 
 import asyncio
 import atexit
+import base64
 import codecs
 import collections
 import collections.abc
@@ -56,8 +57,33 @@ from sandboxed_gym.environment_package import (
     load_environment_package,
     validate_environment_namespaces,
 )
+from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV
+from sandboxed_gym.runtime.container_engine import prepare_container_engine
 
 GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
+#: The job's own variables (``env_vars`` and resolved ``env_secrets``) as one JSON object. They travel
+#: in this one variable rather than as the container's environment because everything that starts as
+#: root in the sandbox, before the host drops to the container user, would otherwise run with them:
+#: a job's ``PATH``, ``LD_PRELOAD`` or ``PYTHONPATH`` would choose what root executes. Base64, so that
+#: Kubernetes, which expands ``$(NAME)`` in container variables, passes it through unchanged.
+JOB_ENV_ENV_KEY = "NHX_GYM_JOB_ENV"
+
+
+def encode_job_env(job_env: collections.abc.Mapping[str, str]) -> str:
+    """The value of ``JOB_ENV_ENV_KEY`` carrying ``job_env``."""
+    return base64.b64encode(json.dumps(dict(job_env), sort_keys=True).encode()).decode("ascii")
+
+
+def decode_job_env(raw: str) -> dict[str, str]:
+    """The job's variables from a ``JOB_ENV_ENV_KEY`` value."""
+    job_env = json.loads(base64.b64decode(raw, validate=True))
+    if not isinstance(job_env, dict) or not all(
+        isinstance(name, str) and isinstance(value, str) for name, value in job_env.items()
+    ):
+        raise ValueError(f"{JOB_ENV_ENV_KEY} must carry a JSON object of strings")
+    return job_env
+
+
 #: Set by the orchestrator when the caller supplied an explicit ``environment_path`` (a FileSet).
 #: ``NHX_ENVIRONMENT_PATH`` is also the host's environment *mount*, so it is ``/job/environment``
 #: for image-bundled Gym too; this flag is how a missing ``nemo-environment.yaml`` becomes a
@@ -1618,9 +1644,48 @@ class _Server(ThreadingHTTPServer):
         )
 
 
+def _apply_job_env(
+    raw: str | None,
+    environ: collections.abc.MutableMapping[str, str] = os.environ,
+    import_path: list[str] = sys.path,
+) -> None:
+    """Merge the job's variables, as carried in ``JOB_ENV_ENV_KEY``, into this process's environment.
+
+    Called after the container-engine setup and privilege drop, so the job's values reach Gym and the
+    servers it starts but nothing that ran before. They override the image's own variables, as they did
+    when they were the container's environment; the orchestrator already left out any name it sets itself.
+    The host starts isolated (``python -I``), so a job's ``PYTHONPATH`` reaches its import path here, where
+    the interpreter would have put it at startup.
+    """
+    if not raw:
+        return
+    job_env = decode_job_env(raw)
+    environ.update(job_env)
+    if job_env.get("PYTHONPATH"):
+        import_path[0:0] = [entry for entry in job_env["PYTHONPATH"].split(os.pathsep) if entry]
+
+
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
+    # execd's token reaches this process as the sandbox's own environment. Drop it before starting anything,
+    # so neither the container engine nor a Gym server inherits it: environment code that held it could run
+    # commands through execd, which keeps root after this process becomes the unprivileged container user.
+    os.environ.pop(EXECD_ACCESS_TOKEN_ENV, None)
+    # The job's variables, held aside so the privileged setup and the services it starts never see them.
+    job_env = os.environ.pop(JOB_ENV_ENV_KEY, None)
+
+    # Before any thread starts: dropping the capability bounding set and setting no_new_privs apply to the
+    # calling thread only, so a thread started earlier would keep them. A failure is reported below, once the
+    # output is captured; the job's variables are applied only when the setup succeeded.
+    setup_error: Exception | None = None
+    try:
+        prepare_container_engine()
+        _apply_job_env(job_env)
+    except Exception as exc:
+        setup_error = exc
+
+    # After the job's variables are applied, so the secrets among them are masked in what is captured.
     # Before bootstrap, so both host output and inherited component fd 1/2 are captured.
     # Do not enable Gym's `nemo_gym_log_dir`: in nemo-gym 0.5.0 it runs each component under
     # `set -o pipefail`, which kills any non-editable install whose requirements.txt has nothing
@@ -1634,6 +1699,8 @@ def main() -> None:
 
     _ensure_event_loop()
     try:
+        if setup_error is not None:
+            raise setup_error
         _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER = bootstrap_gym_host()
     except Exception as exc:
         # Serve anyway. Exiting takes the sandbox down with its logs, and leaves the caller

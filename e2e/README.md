@@ -328,6 +328,7 @@ failure message carries its last state as seen there: pod phase, conditions, and
 | `NHX_E2E_INTERNAL_BASE_URL` | Platform API URL as the Gym host reaches it. Use the name `sandbox_policy_base_urls` allows, which is the Service's full DNS name in the example values | `http://nemo-helix-api:8080` |
 | `NHX_E2E_GYM_POLICY_ROUTE` / `NHX_E2E_GYM_POLICY_MODEL` | A real model's base URL (`http://` or `https://`) and name, used instead of the mock. Set both or neither; one alone fails the tests | unset (mock model) |
 | `NHX_E2E_GYM_POLICY_API_KEY_SECRET` | Platform secret holding the model endpoint's key, as `workspace/secret-name`, readable by the user the tests run as. A bare name fails the tests: they submit from a temporary `e2e-eval-*` workspace of their own, where it would be looked up | unset (the tests create a secret holding the placeholder `not-used`) |
+| `NHX_E2E_GYM_DOCKER` | Set to `1`, with `NHX_E2E_SANDBOXED_GYM`, to run the `gym_docker_e2e` test as well. See below | unset (skipped) |
 
 ```bash
 # Against a deployed cluster. With auth on, the test client needs a principal too: add
@@ -346,6 +347,15 @@ uv run --frozen pytest e2e/test_evaluator_plugin.py \
 On a cluster with no route to the internet the tests fail before they submit anything: the API pod
 cannot reach `1.1.1.1:443` or `example.com:443`, so a sandbox failing to reach them would prove
 nothing.
+
+**Docker in the Gym host.** `test_gym_servers_run_docker_compose_in_the_sandbox`, marked
+`gym_docker_e2e`, checks that Gym servers run `docker compose` unprivileged and inside the sandbox's
+egress. It needs a deployment whose Gym host runs the Docker-enabled image (`nhx-gym-host-podman`) on
+Kata OpenSandbox sandboxes, with egress to Docker Hub (`registry-1.docker.io`, `auth.docker.io`,
+`production.cloudflare.docker.com`) and not to `example.com` or `1.1.1.1`; see "Run Docker in Gym
+servers" in the docs page above. It skips unless `NHX_E2E_GYM_DOCKER=1`, and no CI lane runs it: the
+kind lane deselects it, having neither Kata nor that image. It does not read the cluster, so the
+`NHX_E2E_KUBE_*` settings are not needed for it alone (`-m gym_docker_e2e`).
 
 **On a local kind cluster.** The scripts CI uses also run locally, from the repository root. Every
 step must use one namespace: the cluster setup puts the platform Secrets and the Gateway there,

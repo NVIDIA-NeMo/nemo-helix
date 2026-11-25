@@ -122,7 +122,7 @@ def test_opensandbox_host_provider_supplies_runtime_entrypoint_when_omitted():
     provider = OpenSandboxGymHostProvider(connection={"domain": "x", "api_key": "k"})
     sandbox_spec = provider._to_sandbox_spec(_gym_host_spec())
 
-    assert sandbox_spec.entrypoint == ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
+    assert sandbox_spec.entrypoint == ["python", "-I", "-u", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 
 @requires_opensandbox
@@ -251,6 +251,117 @@ def test_the_staged_path_is_published_for_search_root_discovery(tmp_path: Path) 
 
     assert result.returncode == 0, result.stderr
     assert recorded.read_text(encoding="utf-8") == f"{gym_rw}\n"
+
+
+def test_the_jobs_variables_reach_ray_and_the_runtime_as_before_without_the_execd_token(tmp_path: Path) -> None:
+    """This launcher has no privileged setup, so it unpacks the job's variables before starting anything.
+
+    The script's own parameters and exports still win, a job's PYTHONPATH is still appended after the staged Gym tree, and
+    names a shell can't export stay packed for the runtime. execd's token reaches nothing the launcher runs, a program on the job's PATH included.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import decode_job_env, encode_job_env
+
+    paths = _fake_host(tmp_path)
+    for tool, log in (("ray", "ray-env"), ("python", "python-env")):
+        script = paths["venv"] / "bin" / tool
+        script.write_text(f'#!/bin/sh\nenv > "{tmp_path / log}"\nexit 0\n', encoding="utf-8")
+        script.chmod(0o755)
+    (paths["venv"] / "bin" / "python").write_text(
+        f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\nprintf \'%s\\n\' "$1" > "{tmp_path / "runtime-arg"}"\n',
+        encoding="utf-8",
+    )
+    # A job's PATH can put its own programs in front of the ones the launcher stages the Gym tree with.
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "cp").write_text(f'#!/bin/sh\nenv > "{tmp_path / "cp-env"}"\nexec /bin/cp "$@"\n', encoding="utf-8")
+    (job_bin / "cp").chmod(0o755)
+    job_env = {
+        "PATH": f"{job_bin}:{os.environ['PATH']}",
+        # Same names as the launcher's parameters: the job can't redirect what it starts.
+        "venv": "/job/venv",
+        "root": "/job/root",
+        "gym_rw": "/job/gym",
+        "runtime": "/job/missing.py",
+        "PROMPT": "it's $(not) expanded",
+        "PYTHONPATH": "/job/lib",
+        "SANDBOXED_GYM_SRC_DIR": "/job/elsewhere",
+        "odd.name": "kept packed",
+    }
+    gym_rw = tmp_path / "gym-src" / "Gym"
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(gym_rw),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_JOB_ENV": encode_job_env(job_env),
+            "EXECD_ACCESS_TOKEN": "sandbox-token",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    ray_env = dict(line.split("=", 1) for line in (tmp_path / "ray-env").read_text().splitlines() if "=" in line)
+    runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
+    cp_env = dict(line.split("=", 1) for line in (tmp_path / "cp-env").read_text().splitlines() if "=" in line)
+    for env in (cp_env, ray_env, runtime_env):
+        assert "EXECD_ACCESS_TOKEN" not in env
+        assert env["PROMPT"] == "it's $(not) expanded"
+    assert runtime_env["SANDBOXED_GYM_SRC_DIR"] == str(gym_rw)
+    assert runtime_env["PYTHONPATH"] == f"{gym_rw}:{paths['root']}:/job/lib"
+    assert decode_job_env(runtime_env["NHX_GYM_JOB_ENV"]) == {"odd.name": "kept packed"}
+    assert (tmp_path / "runtime-arg").read_text() == f"{paths['runtime']}\n"
+
+
+@pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="needs procfs")
+def test_a_program_on_the_jobs_path_cannot_read_the_token_from_the_launchers_initial_environment(
+    tmp_path: Path,
+) -> None:
+    """Unsetting a variable leaves it in /proc/<pid>/environ, so the launcher starts again without the token."""
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
+    paths = _fake_host(tmp_path)
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "cp").write_text(
+        f'#!/bin/sh\ncat /proc/$PPID/environ > "{tmp_path / "launcher-environ"}"\nexec /bin/cp "$@"\n',
+        encoding="utf-8",
+    )
+    (job_bin / "cp").chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_JOB_ENV": encode_job_env({"PATH": f"{job_bin}:{os.environ['PATH']}"}),
+            "EXECD_ACCESS_TOKEN": "sandbox-token",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    launcher_environ = (tmp_path / "launcher-environ").read_bytes()
+    assert launcher_environ
+    assert b"sandbox-token" not in launcher_environ
 
 
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
