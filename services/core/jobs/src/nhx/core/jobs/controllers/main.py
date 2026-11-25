@@ -7,11 +7,13 @@ import threading
 import time
 
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
+from nhx.common.entities import SyncEntityClient
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
@@ -80,6 +82,7 @@ def run(parent_stop_signal: threading.Event | None = None):
         },
         max_active_jobs_per_workspace=jobs_config.max_active_jobs_per_workspace,
         max_active_jobs_per_user=jobs_config.max_active_jobs_per_user,
+        system_entities=SyncEntityClient(EntitiesClient.from_client(nemo_client)).as_service("jobs", internal=True),
     )
     job_scheduler = JobScheduler(backend_registry, nemo_client, stop_signal=local_stop_signal, admission=admission)
     job_scheduler_monitored = TrackLastExecutionTime(job_scheduler)

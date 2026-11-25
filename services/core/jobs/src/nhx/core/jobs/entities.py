@@ -11,6 +11,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
+from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
@@ -238,3 +239,20 @@ class HelixJobStorageReclaim(EntityBase):
     def name_for_job(job_id: str) -> str:
         """Return a stable record name for a job. Job IDs have upper case, which entity names do not allow."""
         return f"reclaim-{hashlib.sha256(job_id.encode()).hexdigest()[:40]}"
+
+
+class JobsUserConcurrencyLimit(NemoEntity, entity_type="platform_job_user_concurrency_limit"):
+    """Maps a user to a non-default per-user concurrency limit.
+
+    When present, ``max_concurrent_jobs`` is honored over the ``max_active_jobs_per_user`` config
+    default. It lives in the system workspace because user ids are global, and the jobs controller
+    reads all of them in bulk once per scheduling pass rather than fetching one per job.
+    """
+
+    user_id: str = Field(..., min_length=1, description="Identity of the user this limit applies to")
+    max_concurrent_jobs: int = Field(..., ge=1, description="Maximum active jobs this user may have at once")
+
+    @staticmethod
+    def name_for_user(user_id: str) -> str:
+        """Return a stable record name for a user. User ids may have characters entity names do not allow."""
+        return f"user-limit-{hashlib.sha256(user_id.encode()).hexdigest()[:40]}"

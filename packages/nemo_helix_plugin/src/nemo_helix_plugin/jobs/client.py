@@ -143,6 +143,13 @@ class _JobsMethods:
     update_attempt_step_task = method(endpoints.update_attempt_step_task)
     get_attempt_step_task = method(endpoints.get_attempt_step_task)
 
+    # Per-user concurrency limit overrides
+    create_user_concurrency_limit = method(endpoints.create_user_concurrency_limit)
+    list_user_concurrency_limits = method(endpoints.list_user_concurrency_limits)
+    get_user_concurrency_limit = method(endpoints.get_user_concurrency_limit)
+    update_user_concurrency_limit = method(endpoints.update_user_concurrency_limit)
+    delete_user_concurrency_limit = method(endpoints.delete_user_concurrency_limit)
+
 
 class JobsClient(_JobsMethods, NemoClient):
     """Sync client for the Jobs service API."""

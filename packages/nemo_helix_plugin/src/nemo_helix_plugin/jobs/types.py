@@ -549,3 +549,45 @@ class JobLogsQueryParams(TypedDict, total=False):
     step_id: NotRequired[str]
     task_id: NotRequired[str]
     tail: NotRequired[int]
+
+
+class ListUserConcurrencyLimitsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+
+
+class CreateUserConcurrencyLimitRequest(BaseModel):
+    """Grant a user a non-default concurrency limit."""
+
+    user_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Identity of the user this limit applies to. Must match the submitting user's identity exactly "
+            "(including case). Cannot contain '/' or leading/trailing whitespace."
+        ),
+    )
+    max_concurrent_jobs: int = Field(..., ge=1, description="Maximum active jobs this user may have at once")
+
+    @field_validator("user_id")
+    @classmethod
+    def _user_id_is_path_safe(cls, value: str) -> str:
+        # The id is a single URL path segment on the item routes, and authz matches one segment per placeholder.
+        if "/" in value or value != value.strip():
+            raise ValueError("user_id cannot contain '/' or leading/trailing whitespace")
+        return value
+
+
+class UpdateUserConcurrencyLimitRequest(BaseModel):
+    """Change a user's concurrency limit."""
+
+    max_concurrent_jobs: int = Field(..., ge=1, description="Maximum active jobs this user may have at once")
+
+
+class UserConcurrencyLimitResponse(BaseModel):
+    """A user's concurrency limit override."""
+
+    user_id: str
+    max_concurrent_jobs: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

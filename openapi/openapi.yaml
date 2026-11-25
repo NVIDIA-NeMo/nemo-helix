@@ -7099,6 +7099,200 @@ paths:
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
+  /apis/jobs/v2/user-concurrency-limits:
+    post:
+      tags:
+      - Jobs
+      summary: Create User Concurrency Limit
+      description: Grant a user a non-default concurrency limit.
+      operationId: create_user_concurrency_limit_apis_jobs_v2_user_concurrency_limits_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserConcurrencyLimitRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserConcurrencyLimitResponse'
+        '409':
+          description: An override already exists for this user
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Jobs
+      summary: List User Concurrency Limits
+      description: List all per-user concurrency limit overrides.
+      operationId: list_user_concurrency_limits_apis_jobs_v2_user_concurrency_limits_get
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 100
+          title: Page Size
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserConcurrencyLimitResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/user-concurrency-limits/{user_id}:
+    get:
+      tags:
+      - Jobs
+      summary: Get User Concurrency Limit
+      description: Get a user's concurrency limit override.
+      operationId: get_user_concurrency_limit_apis_jobs_v2_user_concurrency_limits__user_id__get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserConcurrencyLimitResponse'
+        '404':
+          description: No override for this user
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Jobs
+      summary: Update User Concurrency Limit
+      description: Change a user's concurrency limit override.
+      operationId: update_user_concurrency_limit_apis_jobs_v2_user_concurrency_limits__user_id__put
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserConcurrencyLimitRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserConcurrencyLimitResponse'
+        '404':
+          description: No override for this user
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Jobs
+      summary: Delete User Concurrency Limit
+      description: Remove a user's override so they fall back to the default limit.
+      operationId: delete_user_concurrency_limit_apis_jobs_v2_user_concurrency_limits__user_id__delete
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: No override for this user
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/jobs/v2/user-concurrency-limits/my-user-concurrency-limit"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/user-concurrency-limits/my-user-concurrency-limit\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/jobs/v2/user-concurrency-limits/my-user-concurrency-limit\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/jobs/v2/user-concurrency-limits/my-user-concurrency-limit"
+
+
+            response = requests.request("DELETE", url)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/user-concurrency-limits/my-user-concurrency-limit\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -14117,6 +14311,26 @@ components:
       - name
       title: CreatePromptRequest
       description: Request model for creating a Prompt.
+    CreateUserConcurrencyLimitRequest:
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+          title: User Id
+          description: Identity of the user this limit applies to. Must match the
+            submitting user's identity exactly (including case). Cannot contain '/'
+            or leading/trailing whitespace.
+        max_concurrent_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Concurrent Jobs
+          description: Maximum active jobs this user may have at once
+      type: object
+      required:
+      - user_id
+      - max_concurrent_jobs
+      title: CreateUserConcurrencyLimitRequest
+      description: Grant a user a non-default concurrency limit.
     CreateVirtualModelRequest:
       properties:
         default_model_entity:
@@ -24580,6 +24794,18 @@ components:
 
 
         The prompt name and workspace come from the URL path and cannot be changed.'
+    UpdateUserConcurrencyLimitRequest:
+      properties:
+        max_concurrent_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Concurrent Jobs
+          description: Maximum active jobs this user may have at once
+      type: object
+      required:
+      - max_concurrent_jobs
+      title: UpdateUserConcurrencyLimitRequest
+      description: Change a user's concurrency limit.
     UpdateVirtualModelRequest:
       properties:
         default_model_entity:
@@ -24750,6 +24976,52 @@ components:
         reasons.
 
         Use PUT /status endpoint to update status-related fields only.'
+    UserConcurrencyLimitResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        max_concurrent_jobs:
+          type: integer
+          title: Max Concurrent Jobs
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+      type: object
+      required:
+      - user_id
+      - max_concurrent_jobs
+      title: UserConcurrencyLimitResponse
+      description: A user's concurrency limit override.
+    UserConcurrencyLimitResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/UserConcurrencyLimitResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: UserConcurrencyLimitResponsesPage
     UserMessagesConfig:
       properties:
         embeddings_only:
