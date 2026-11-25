@@ -3719,6 +3719,66 @@ class TestValidateApiKeyIntegration:
         mock_register.assert_not_called()
         mock_wait.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "host,expected",
+        [
+            ("127.0.0.1:11434", "provider-127-0-0-1"),
+            ("[::1]:11434", "provider-1"),
+            ("[2001:db8::1]", "provider-2001-db8-1"),
+            ("123.example.com", "provider-123-example-com"),
+            ("inference.example.com", "inference-example-com"),
+            ("a--b.example.com", "a-b-example-com"),
+            ("é.example.com", "example-com"),
+            ("x", "provider-x"),
+            ("é", "provider"),
+            ("", "custom"),
+            ("a" * 55, "a" * 55),
+            ("localhost:11434", "ollama"),
+            ("integrate.api.nvidia.com", "nvidia-build"),
+        ],
+    )
+    def test_auto_url_derives_valid_provider_and_secret_names(self, host, expected):
+        client = _make_mock_client()
+        scheme = "https" if host == "integrate.api.nvidia.com" else "http"
+        base_url = f"{scheme}://{host}" if scheme == "https" else f"{scheme}://{host}/v1"
+        with (
+            patch.dict(
+                "os.environ",
+                {"NEMO_DEFAULT_INFERENCE_KEY": "placeholder", "NEMO_DEFAULT_INFERENCE_BASE_URL": base_url},
+                clear=True,
+            ),
+            patch(
+                f"{self._MOD}._validate_api_key",
+                return_value=KeyValidationResult(status=KeyValidationStatus.VALID, message="OK"),
+            ),
+            patch(f"{self._MOD}.console"),
+        ):
+            assert _auto_setup(client, "default") == expected
+        client.models.create_provider.assert_called_once()
+        client.secrets.create_secret.assert_called_once()
+        assert client.models.create_provider.call_args.kwargs["body"].name == expected
+        assert client.secrets.create_secret.call_args.kwargs["body"].name == f"{expected}-api-key"
+
+    @pytest.mark.parametrize("host", ["a" * 56, "a" * 63 + ".example.com", "1" * 48])
+    def test_auto_overlong_derived_name_fails_before_network_or_mutations(self, host):
+        client = _make_mock_client()
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "NEMO_DEFAULT_INFERENCE_KEY": "placeholder",
+                    "NEMO_DEFAULT_INFERENCE_BASE_URL": f"http://{host}/v1",
+                },
+                clear=True,
+            ),
+            patch(f"{self._MOD}._validate_api_key") as validate_key,
+            pytest.raises(typer.BadParameter, match="longer than 55 characters.*shorter hostname"),
+        ):
+            _auto_setup(client, "default")
+        validate_key.assert_not_called()
+        assert client.models.mock_calls == []
+        assert client.secrets.mock_calls == []
+
     def test_auto_invalid_key_raises_exit(self):
         """When key validation fails in auto mode, _auto_setup should raise typer.Exit(1)."""
         client = _make_mock_client()
