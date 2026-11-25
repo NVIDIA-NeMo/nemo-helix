@@ -495,7 +495,7 @@ leaves the taskset as it was. Submit whenever the file changes:
 Each taskset revision records the file it came from in its metadata (`source_fileset`,
 `source_sha256`) and carries the tag `src-<sha256>`, so `default/golden-suite#src-<sha256>` selects the
 revision built from a given file. Members are pinned to the exact task revisions the submission
-published, and each task in the job spec records the stored revision it was frozen from.
+published, and each of the job's tasks records the stored revision it was frozen from.
 
 To snapshot, the submitter needs to read the source FileSet and to read and write tasks and tasksets
 in the taskset's workspace. It also needs to create FileSets there, because the first task in a workspace

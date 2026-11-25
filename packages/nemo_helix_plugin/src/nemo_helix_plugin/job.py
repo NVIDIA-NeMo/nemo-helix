@@ -382,8 +382,8 @@ class NemoJob(_NamedPlugin):
             async_sdk: The request-scoped :class:`AsyncNemoClient`.
 
         Returns:
-            What to store, and how to undo its writes if the Jobs service then refuses the job. ``None``, the
-            default, stores ``spec`` as is.
+            What to store, and how to undo its writes when no job will own them (see ``StoredJobSpec``).
+            ``None``, the default, stores ``spec`` as is.
         """
         del spec, workspace, job_name, async_sdk
         return None

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from nemo_evals.jobs import agent_compiler
 from nemo_evals.jobs import attempt_tasks as attempt_tasks_module
 from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
@@ -41,8 +42,14 @@ from nemo_evals.jobs.harbor_task_spec import (
     build_task_job_input,
 )
 from nemo_evals.sdk.job_resources import AgentEvaluatorJob
-from nemo_evals.taskset_runs.plan_storage import StoredPlan
+from nemo_evals.taskset_runs.plan_storage import (
+    PlanFilesetExistsError,
+    PlanStorageError,
+    PlanStoragePermissionDeniedError,
+    StoredPlan,
+)
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.entity_naming import NAME_PATTERN
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -529,6 +536,47 @@ async def test_freezing_stores_the_settings_the_count_and_a_pointer_the_step_con
     assert stored.spec == expected
     assert "sha256-v1:" + pointer["plan_digest"] == frozen_tasks_digest(spec)
     assert AgentEvalSpec.model_validate({**stored.spec, FROZEN_TASKS_KEY: pointer}).task_count == len(harbor_spec.tasks)
+
+
+def _denied() -> PlanStoragePermissionDeniedError:
+    response = httpx.Response(403, request=httpx.Request("POST", f"{BASE}/apis/files/v2/workspaces/default/filesets"))
+    return PlanStoragePermissionDeniedError("may not create the fileset", PermissionDeniedError(response))
+
+
+@pytest.mark.parametrize(
+    ("failure", "raised"),
+    [
+        (PlanFilesetExistsError("the fileset exists"), HTTPException),  # the route answers 409
+        (_denied(), PermissionError),  # the route answers 403
+        (PlanStorageError("files are down"), PlanStorageError),  # the route answers 422
+    ],
+    ids=["exists", "denied", "failed"],
+)
+async def test_a_job_whose_tasks_cannot_be_frozen_gives_back_the_agents_files(
+    harbor_spec: ResolvedAgentEvalSpec,
+    failure: Exception,
+    raised: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def refuse(*_: object, **__: object) -> None:
+        raise failure
+
+    discarded: list[object] = []
+
+    async def discard(target: object, async_sdk: object) -> None:
+        del async_sdk
+        discarded.append(target)
+
+    monkeypatch.setattr("nemo_evals.jobs.agent_evaluate.freeze_tasks_in_file", refuse)
+    monkeypatch.setattr("nemo_evals.jobs.agent_evaluate._discard_resolved_agent_files", discard)
+    async with AsyncNemoClient(base_url=BASE, workspace="default") as client:
+        with pytest.raises(raised) as caught:
+            await AgentEvalJob.store_spec(harbor_spec, workspace="default", job_name=JOB, async_sdk=client)
+
+    # No job will own the registered agent's files snapshot that resolution took.
+    assert discarded == [harbor_spec.target]
+    if isinstance(caught.value, HTTPException):
+        assert caught.value.status_code == 409
 
 
 # --- Taskset-run task Jobs ---------------------------------------------------------------------------------

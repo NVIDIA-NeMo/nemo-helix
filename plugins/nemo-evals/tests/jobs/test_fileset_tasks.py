@@ -591,7 +591,7 @@ def test_a_name_whose_tasks_fileset_exists_is_refused(ctx: ClientContext, taken_
     refused = _create(ctx, name="golden-run")
 
     assert refused.status_code == 409, refused.text
-    assert "Fileset default/job-tasks-golden-run already holds the tasks" in refused.json()["detail"]
+    assert refused.json()["detail"].startswith("Fileset default/job-tasks-golden-run already exists")
     assert _jobs(ctx) == jobs_before
     assert _fileset_exists(ctx, "job-tasks-golden-run")  # the refusal leaves it alone
 

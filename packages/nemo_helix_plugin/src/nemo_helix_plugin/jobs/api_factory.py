@@ -41,7 +41,7 @@ from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import ConflictError, HTTPClientError, NemoHTTPError
+from nemo_helix_plugin.client.errors import HTTPClientError, NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
@@ -1055,8 +1055,11 @@ def job_route_factory(
             an update that sets ``spec`` is refused with 422; ``description`` can still change.
         store_spec: Turns a create's canonical spec into the spec the job stores, writing what the job
             keeps outside its record. It runs after compile, never on a dry run, and the route names a job
-            submitted without a name first, as the Jobs service would. If the Jobs service then refuses the
-            job, the route undoes those writes. Requires ``allow_spec_update=False``.
+            submitted without a name first, as the Jobs service would. The route checks the stored spec
+            against ``job_output``, and sends that create once, without retries, so a refusal means no job
+            was made: when the check fails or the Jobs service refuses the job with a 4xx, it undoes those
+            writes. A 5xx or a lost reply leaves the job's existence unknown, so the writes stay. Requires
+            ``allow_spec_update=False``.
 
     Example with separate input/output types:
         ```python
@@ -1099,6 +1102,8 @@ def job_route_factory(
 
     if job_discriminator is not None and (not isinstance(job_discriminator, str) or not job_discriminator.strip()):
         raise ValueError("job_discriminator must be a non-empty string when provided")
+    if store_spec is not None and allow_spec_update:
+        raise TypeError("store_spec requires allow_spec_update=False: a spec update stores the canonical spec as is.")
 
     # Handle job_output defaulting and validation
     job_output, input_to_output = _validate_and_resolve_job_output(job_output, job_input, input_to_output)
@@ -1345,6 +1350,20 @@ def job_route_factory(
 
     job_output_adapter = _spec_adapter(job_output)
 
+    async def _require_renderable_stored_spec(stored: StoredJobSpec, *, workspace: str, job_name: str) -> None:
+        """Refuse a stored spec the job's replies couldn't render, undoing its writes, before any job holds it."""
+        try:
+            job_output_adapter.validate_python(stored.spec)
+        except ValidationError as exc:
+            await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
+            # Locations and messages only: a spec's values may hold credentials.
+            problems = [(error["loc"], error["msg"]) for error in exc.errors(include_url=False, include_input=False)]
+            logger.error("Job %s/%s stored a spec its replies can't render: %s", workspace, job_name, problems)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to submit {service_name} job: its stored spec doesn't match its schema.",
+            ) from exc
+
     def validate_own_job(job: HelixJob, name: str, workspace: str) -> HelixJob:
         """Refuse a job these routes do not serve, before acting on it.
 
@@ -1491,6 +1510,7 @@ def job_route_factory(
                 assert job_name is not None
                 stored = await _store_job_spec(store_spec, job_spec, workspace, job_name, async_client, service_name)
                 if stored is not None:
+                    await _require_renderable_stored_spec(stored, workspace=workspace, job_name=job_name)
                     spec_dict = stored.spec
             # Stamp only after transform/compile; metadata must not enter task configuration.
             spec_dict = _stored_job_spec(spec_dict)
@@ -1518,14 +1538,17 @@ def job_route_factory(
                 create_fields["output_location"] = request.output_location
 
             jobs = AsyncJobsClient.from_client(async_client)
+            if stored is not None:
+                # Sent once: after a resend, a refusal could answer a retry whose earlier try made the job,
+                # and undoing the stored writes would then break that job.
+                jobs = jobs.with_retry(RetryPolicy(max_retries=0))
             try:
                 job_resp = (
                     await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))
                 ).data()
-            except HTTPClientError as exc:
-                # A refused job owns nothing it stored. A 409 may answer a create the client sent again after
-                # its first try made the job, so it keeps them, as does any failure that leaves the job unknown.
-                if stored is not None and job_name is not None and not isinstance(exc, ConflictError):
+            except HTTPClientError:
+                # A refused job owns nothing it stored. A 5xx or a lost reply leaves the job unknown, so those keep it.
+                if stored is not None and job_name is not None:
                     await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
                 raise
             return from_response(job_resp)

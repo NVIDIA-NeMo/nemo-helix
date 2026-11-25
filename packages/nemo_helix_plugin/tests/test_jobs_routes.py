@@ -574,7 +574,7 @@ class TestAddJobRoutes:
                 del spec, workspace, job_name, async_sdk
                 return None
 
-        with pytest.raises(TypeError, match="must set allow_spec_update = False"):
+        with pytest.raises(TypeError, match="requires allow_spec_update=False"):
             add_job_routes(StoringJob)
 
         class RefusingStoringJob(StoringJob):

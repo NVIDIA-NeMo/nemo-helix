@@ -134,12 +134,6 @@ def add_job_routes(
         raise TypeError(f"{job_cls.__name__}.stored_spec_schema requires input_spec_schema to be declared.")
     job_output = (job_cls.stored_spec_schema or job_cls.spec_schema) if job_cls.input_spec_schema is not None else None
     input_to_output = _adapt_to_spec(job_cls) if job_cls.input_spec_schema is not None else None
-    store_spec = _adapt_store_spec(job_cls)
-    if store_spec is not None and job_cls.allow_spec_update:
-        raise TypeError(
-            f"{job_cls.__name__} overrides store_spec, so it must set allow_spec_update = False: "
-            "a spec update stores the canonical spec as is."
-        )
 
     router = job_route_factory(
         service_name=resolved_service_name,
@@ -155,7 +149,7 @@ def add_job_routes(
         jobs_list_filter=job_cls.jobs_list_filter,
         dry_run_checks=_adapt_dry_run_checks(job_cls),
         allow_spec_update=job_cls.allow_spec_update,
-        store_spec=store_spec,
+        store_spec=_adapt_store_spec(job_cls),
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 

@@ -72,6 +72,12 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     captured = []
 
     class Jobs:
+        retry_policies = []
+
+        def with_retry(self, policy):
+            self.retry_policies.append(policy)
+            return self
+
         async def get_execution_profiles(self):
             response = MagicMock()
             response.data.return_value = [SubprocessJobExecutionProfile(provider="subprocess", profile="harbor-test")]
@@ -148,6 +154,8 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
             "metadata": [],
         }
     ]
+    # The create is sent once, so a refusal can safely undo the file.
+    assert [policy.max_retries for policy in jobs.retry_policies] == [0]
     # The job keeps its tasks in a file, and its record and reply only count them.
     [tasks_file] = written
     assert json.loads(tasks_file["body"])["tasks"] == expected

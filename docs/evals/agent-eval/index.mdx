@@ -117,9 +117,12 @@ asyncio.run(main())
 An `agent-evaluate` job resolves its tasks when you submit it, and runs exactly those tasks, even if
 the tasks, tasksets or metrics they came from change later. It keeps them in `tasks.json`, in a FileSet
 of the job's workspace named `job-tasks-<job name>`, so the job record stays small however many tasks
-it has. A long job name is shortened, with a hash added to keep the FileSet name unique.
+it has. A long job name is shortened, with a hash added to keep the FileSet name unique. Submitting a
+job creates that FileSet, so the submitter needs permission to create FileSets in the workspace.
 
-- **Replies show `task_count`, not `tasks`.** To see the tasks a job runs, download its `tasks.json`.
+- **Replies show `task_count` in place of `tasks`.** To see the tasks a job runs, download its
+  `tasks.json`. Jobs submitted to earlier releases keep their tasks in the job record, and their replies
+  still show them.
 - **Helix doesn't delete the FileSet,** when the job finishes or when you delete the job. Delete it
   yourself once you no longer need the job: without it, the job can't run again.
 - **A job name is free again only once its FileSet is gone.** Submitting a job under a name whose

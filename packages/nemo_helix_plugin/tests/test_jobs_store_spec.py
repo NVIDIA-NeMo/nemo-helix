@@ -37,20 +37,31 @@ class _Spec(BaseModel):
 class _Storer:
     """Stores a smaller spec in place of the canonical one, and records what it stored and discarded."""
 
-    def __init__(self, *, refuse: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        refuse: Exception | None = None,
+        spec: dict[str, Any] | None = None,
+        discard_error: Exception | None = None,
+    ) -> None:
         self.calls: list[tuple[dict[str, Any], str, str]] = []
         self.discarded = 0
         self.refuse = refuse
+        self.spec = spec
+        self.discard_error = discard_error
 
     async def __call__(self, spec: _Spec, workspace: str, job_name: str, async_client: object) -> StoredJobSpec:
         del async_client
         self.calls.append((spec.model_dump(mode="json"), workspace, job_name))
         if self.refuse is not None:
             raise self.refuse
-        return StoredJobSpec(spec={"label": spec.label, "stored": True}, discard=self._discard)
+        stored = self.spec if self.spec is not None else {"label": spec.label, "stored": True}
+        return StoredJobSpec(spec=stored, discard=self._discard)
 
     async def _discard(self) -> None:
         self.discarded += 1
+        if self.discard_error is not None:
+            raise self.discard_error
 
 
 def _compile(workspace: str, input_spec: _Spec, spec: _Spec, *args: object) -> HelixJobSpec:
@@ -64,7 +75,12 @@ def _http_error(error: type[Exception], status_code: int) -> Exception:
 
 
 def _post(
-    storer: _Storer, *, name: str | None = "widget-1", dry_run: bool = False, create_error: Exception | None = None
+    storer: _Storer | None,
+    *,
+    name: str | None = "widget-1",
+    dry_run: bool = False,
+    create_error: Exception | None = None,
+    raise_server_exceptions: bool = False,
 ) -> tuple[Any, MagicMock]:
     router = job_route_factory(
         service_name="widgets",
@@ -72,7 +88,7 @@ def _post(
         job_input=_Spec,
         platform_job_config_compiler=_compile,
         route_options=[JobRouteOption.CORE, JobRouteOption.DRY_RUN],
-        allow_spec_update=False,
+        allow_spec_update=storer is None,
         store_spec=storer,
     )
     app = FastAPI()
@@ -80,12 +96,13 @@ def _post(
     app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
     jobs = MagicMock()
+    jobs.with_retry = MagicMock(return_value=jobs)
     # The route's reply needs a whole job record; these tests read what it sent instead.
     jobs.create_job = AsyncMock(side_effect=create_error or RuntimeError("stop after create"))
     jobs.list_execution_profiles = AsyncMock(return_value=[SimpleNamespace(provider="gpu", profile="default")])
     body: dict[str, Any] = {"spec": {"label": "x"}} | ({"name": name} if name is not None else {})
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
-        client = TestClient(app, raise_server_exceptions=False)
+        client = TestClient(app, raise_server_exceptions=raise_server_exceptions)
         response = client.post(_CREATE_URL, params={"dry_run": "true"} if dry_run else None, json=body)
     return response, jobs
 
@@ -109,6 +126,20 @@ def test_an_unnamed_job_is_named_before_its_spec_is_stored() -> None:
     [(_, _, job_name)] = storer.calls
     assert re.fullmatch(r"widgets-[0-9a-f]{8}", job_name)  # as the Jobs service would name it
     assert jobs.create_job.await_args.kwargs["body"].name == job_name
+
+
+def test_a_job_type_that_stores_its_spec_as_is_keeps_the_jobs_services_naming_and_retries() -> None:
+    _, jobs = _post(None, name=None)
+
+    assert jobs.create_job.await_args.kwargs["body"].name is None
+    jobs.with_retry.assert_not_called()
+
+
+def test_the_create_of_a_job_that_stored_its_spec_is_sent_once() -> None:
+    _, jobs = _post(_Storer())
+
+    [(policy,), _] = jobs.with_retry.call_args
+    assert policy.max_retries == 0
 
 
 def test_a_dry_run_stores_nothing() -> None:
@@ -137,12 +168,22 @@ def test_a_spec_that_cannot_be_stored_creates_no_job(refusal: Exception, status:
     jobs.create_job.assert_not_called()
 
 
+def test_a_stored_spec_the_replies_cannot_render_is_undone_and_creates_no_job() -> None:
+    storer = _Storer(spec={"stored": True})  # no `label`, so `_Spec` can't render it
+
+    response, jobs = _post(storer)
+
+    assert response.status_code == 500, response.text
+    assert storer.discarded == 1
+    jobs.create_job.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("create_error", "discarded"),
     [
         (_http_error(UnprocessableEntityError, 422), 1),
-        # A 409 may answer a create the client sent again after its first try made the job.
-        (_http_error(ConflictError, 409), 0),
+        # Sent once, so a 409 refuses this create too, such as for a missing secret or a taken name.
+        (_http_error(ConflictError, 409), 1),
         # Neither of these says whether the job exists.
         (_http_error(InternalServerError, 500), 0),
         (RuntimeError("connection lost"), 0),
@@ -155,3 +196,23 @@ def test_only_a_refused_job_undoes_what_its_spec_stored(create_error: Exception,
     _post(storer, create_error=create_error)
 
     assert storer.discarded == discarded
+
+
+def test_a_failing_undo_leaves_the_refusal_to_surface() -> None:
+    storer = _Storer(discard_error=RuntimeError("files are down"))
+
+    with pytest.raises(UnprocessableEntityError):
+        _post(storer, create_error=_http_error(UnprocessableEntityError, 422), raise_server_exceptions=True)
+
+    assert storer.discarded == 1
+
+
+def test_storing_a_spec_requires_refusing_spec_updates() -> None:
+    with pytest.raises(TypeError, match="requires allow_spec_update=False"):
+        job_route_factory(
+            service_name="widgets",
+            job_type="Widget",
+            job_input=_Spec,
+            platform_job_config_compiler=_compile,
+            store_spec=_Storer(),
+        )

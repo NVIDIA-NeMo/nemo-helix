@@ -396,9 +396,9 @@ class _AgentEvalJobBase(NemoJob):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"Fileset {fileset} already holds the tasks of an agent-evaluate job named {job_name!r}: that "
-                    "job exists, or it was deleted and its tasks were kept. Submit under another name, or delete "
-                    "the fileset if its job is gone."
+                    f"Fileset {fileset} already exists, and an agent-evaluate job named {job_name!r} keeps its "
+                    "tasks there. Helix doesn't delete it, even with its job. Submit under another name, or delete "
+                    "the fileset if no job needs it."
                 ),
             ) from exc
         except PlanStoragePermissionDeniedError as exc:

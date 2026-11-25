@@ -268,8 +268,9 @@ class StoredJobSpec:
 
     Attributes:
         spec: The JSON spec the job record stores. It must validate against the job's stored spec schema.
-        discard: Undoes what storing the spec wrote outside the record. The job route calls it when the Jobs
-            service refuses the job, since no job then owns those writes.
+        discard: Undoes what storing the spec wrote outside the record. The job route calls it when no job will
+            own those writes: the spec doesn't match the stored spec schema, or the Jobs service refuses the job
+            with a 4xx. A 5xx or a lost reply leaves the job's existence unknown, so the route doesn't call it.
     """
 
     spec: dict[str, Any]
