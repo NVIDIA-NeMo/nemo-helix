@@ -20,11 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
 
-# In-process LRU + TTL cache of active identities. Stores are built per request, so the cache cannot live
-# on the store; it is keyed by session maker instead. Each event loop owns one session maker (and one
-# engine), so a cache never outlives or crosses the database connection it was filled from, and tests that
-# build a fresh database per test get a fresh cache. Configure with
-# NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_{ENABLED,TTL_SEC,MAX_SIZE} (see EntitiesConfig).
+# Stores are built per request, so the cache is keyed by session maker. Each event loop owns one session
+# maker and engine, so a cache never serves identities read from a different database.
 _identity_caches: WeakKeyDictionary[async_sessionmaker[AsyncSession], TTLCache] = WeakKeyDictionary()
 _identity_caches_lock = threading.Lock()
 
