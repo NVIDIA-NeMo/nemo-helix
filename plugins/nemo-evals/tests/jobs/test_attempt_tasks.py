@@ -380,9 +380,9 @@ def test_a_reply_without_its_tasks_parses_back(harbor_spec: ResolvedAgentEvalSpe
     reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
 
     # A reply omits the pointer, and an offline job's trials with it; the SDK parses replies with this model.
-    assert AgentEvalSpec.model_validate(reply).task_count == len(spec["tasks"])
+    assert AgentEvalSpec.model_validate(reply).task_count == len(harbor_spec.tasks)
     job = AgentEvaluatorJob.model_validate({"name": JOB, "workspace": "default", "spec": reply})
-    assert job.spec.task_count == len(spec["tasks"])
+    assert job.spec.task_count == len(harbor_spec.tasks)
 
 
 def test_a_stored_spec_with_fields_from_a_later_release_still_renders(harbor_spec: ResolvedAgentEvalSpec) -> None:
