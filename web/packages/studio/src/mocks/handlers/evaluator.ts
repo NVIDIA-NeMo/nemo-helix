@@ -193,12 +193,16 @@ const resolveTaskRef = (workspace: string, ref: string): string | undefined => {
   return revision ? `${ws}/${name}#${contentHash(revision)}` : undefined;
 };
 
-/** A write's stored content, members pinned; undefined when a member doesn't resolve. */
+/** A write's stored content, members pinned; undefined when a member doesn't resolve. Refs the
+ *  taskset already stores are kept as-is, so an edit isn't blocked by a member task since removed. */
 const resolveTasksetInput = (
   workspace: string,
-  { tasks = [], description, files_ref, metadata }: TasksetInput
+  { tasks = [], description, files_ref, metadata }: TasksetInput,
+  stored: string[] = []
 ): Pick<Taskset, 'tasks' | 'description' | 'files_ref' | 'metadata'> | undefined => {
-  const resolved = tasks.map((ref) => resolveTaskRef(workspace, ref));
+  const resolved = tasks.map((ref) =>
+    stored.includes(ref) ? ref : resolveTaskRef(workspace, ref)
+  );
   return resolved.every(Boolean)
     ? { tasks: resolved as string[], description, files_ref, metadata }
     : undefined;
@@ -281,7 +285,11 @@ export const evaluatorHandlers = [
   http.put(TASKSET_URL, async ({ request, params }) => {
     const taskset = findTaskset(params.workspace, params.name);
     if (!taskset) return notFound('Taskset');
-    const content = resolveTasksetInput(taskset.workspace, (await request.json()) as TasksetInput);
+    const content = resolveTasksetInput(
+      taskset.workspace,
+      (await request.json()) as TasksetInput,
+      taskset.tasks
+    );
     if (!content) return unknownTaskRef();
     const revision = taskset.revision + 1;
     Object.assign(taskset, content, {

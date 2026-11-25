@@ -29,19 +29,21 @@ import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
-const schema = z.object({
-  name: z
-    .string()
-    .refine((value) => sanitizeEntityName(value) !== undefined, {
-      message: 'Name must start with a letter and be at least 2 characters.',
-    })
-    .transform((value) => toValidEntityName(value, value)),
-  description: z.string(),
-  tasks: z.array(z.string()).min(1, 'Select at least one task.'),
-});
+// A files-backed taskset may have no members, so only enforce one when there's no `files_ref`.
+const getSchema = (minTasks: number) =>
+  z.object({
+    name: z
+      .string()
+      .refine((value) => sanitizeEntityName(value) !== undefined, {
+        message: 'Name must start with a letter and be at least 2 characters.',
+      })
+      .transform((value) => toValidEntityName(value, value)),
+    description: z.string(),
+    tasks: z.array(z.string()).min(minTasks, 'Select at least one task.'),
+  });
 
-type FormInput = z.input<typeof schema>;
-type FormOutput = z.output<typeof schema>;
+type FormInput = z.input<ReturnType<typeof getSchema>>;
+type FormOutput = z.output<ReturnType<typeof getSchema>>;
 
 interface Props {
   open: boolean;
@@ -81,10 +83,15 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
   // Current members keep their stored (digest-pinned) refs so an edit doesn't silently move them
   // to latest; tasks added here go in bare and the server pins them to their latest revision.
   const members = taskset?.tasks ?? [];
-  const memberNames = new Set(members.map((ref) => parseTaskRef(ref, workspace).name));
+  const memberKeys = new Set(
+    members.map((ref) => {
+      const { workspace: ws, name } = parseTaskRef(ref, workspace);
+      return `${ws}/${name}`;
+    })
+  );
   const items = [
     ...members.map((ref) => ({ value: ref, children: parseTaskRef(ref, workspace).name })),
-    ...(taskNames ?? []).filter((name) => !memberNames.has(name)),
+    ...(taskNames ?? []).filter((name) => !memberKeys.has(`${workspace}/${name}`)),
   ];
 
   const {
@@ -94,7 +101,7 @@ export const TasksetFormModal: FC<Props> = ({ open, onClose, taskset }) => {
     watch,
     formState: { errors, isDirty, isSubmitting },
   } = useForm<FormInput, unknown, FormOutput>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(getSchema(taskset?.files_ref ? 0 : 1)),
     defaultValues,
     mode: 'onTouched',
   });
