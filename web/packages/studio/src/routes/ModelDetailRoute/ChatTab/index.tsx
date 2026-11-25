@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { Flex } from '@nvidia/foundations-react-core';
+import { Stack } from '@nvidia/foundations-react-core';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ChatUnavailable } from '@studio/components/ModelChat/ChatUnavailable';
 import { ComparePlayground } from '@studio/components/ModelCompareChat/ComparePlayground';
@@ -38,14 +38,14 @@ export const ChatTab: FC<ChatTabProps> = ({ model, adapter }) => {
 
   if (isAdapterUnserved || modelChatStatus !== 'enabled') {
     return (
-      <Flex direction="col" justify="center" align="center" className="w-full flex-1">
+      <Stack justify="center" align="center" className="w-full flex-1">
         <ChatUnavailable
           status={modelChatStatus}
           isAdapterUnserved={isAdapterUnserved}
           deployModelRef={`${model.workspace}/${model.name}`}
           deployModelLabel={adapter ? 'Deploy base model' : undefined}
         />
-      </Flex>
+      </Stack>
     );
   }
 
