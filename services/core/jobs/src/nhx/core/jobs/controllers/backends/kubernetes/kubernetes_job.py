@@ -7,7 +7,7 @@ from typing import Generic, Literal, TypeVar
 
 from kubernetes import client
 from kubernetes.client import BatchV1Api, CoreV1Api, NetworkingV1Api
-from kubernetes.client.models import V1Job, V1JobStatus
+from kubernetes.client.models import V1Job, V1JobCondition, V1JobStatus
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
@@ -887,20 +887,47 @@ def _job_namespace(job: V1Job) -> str | None:
     return metadata.namespace
 
 
+def _failed_condition(job_status: V1JobStatus) -> V1JobCondition | None:
+    """The Job's Failed=True condition, which Kubernetes sets once the Job has stopped for good."""
+    for condition in job_status.conditions or []:
+        if condition.type == "Failed" and condition.status == "True":
+            return condition
+    return None
+
+
+def _final_status_from_job_status(job_status: V1JobStatus) -> tuple[HelixJobStatus, KubernetesStatusDetails] | None:
+    """The COMPLETED or ERROR result the Job's own status decides, or None when the pods decide it.
+
+    A Failed=True condition is terminal whatever the failed-pod count, because Kubernetes also sets it for
+    reasons such as DeadlineExceeded. A counted failure without that condition is also ERROR: Helix Jobs
+    run one pod with backoff_limit=0, so the pod has already failed and Kubernetes is only catching up.
+    """
+    if job_status.completion_time is not None:
+        return HelixJobStatus.COMPLETED, {"message": f"Job has completed successfully at {job_status.completion_time}"}
+
+    failed_condition = _failed_condition(job_status)
+    if failed_condition is not None:
+        return HelixJobStatus.ERROR, {"message": f"Job failed: {failed_condition.message}"}
+
+    if job_status.failed and job_status.conditions is not None:
+        cond_summary = [
+            {"type": condition.type, "status": condition.status, "message": condition.message}
+            for condition in job_status.conditions
+        ]
+        return HelixJobStatus.ERROR, {
+            "message": f"Job reports {job_status.failed} failure(s) but no Failed condition is True yet",
+            "kubernetes_conditions": cond_summary,
+        }
+    return None
+
+
 def _kubernetes_job_has_finished(job: V1Job) -> bool:
     """Whether map_kubernetes_job_status_to_step_status reports this Job as COMPLETED or ERROR from its status alone.
 
     A finished Job skips the TTL and staleness timeouts, so this must not be broader than the mapper:
     a Job called finished here that the mapper still sees as running would never be ended.
     """
-    job_status = job.status
-    if job_status is None:
-        return False
-    if job_status.completion_time is not None:
-        return True
-    return bool(job_status.failed) and any(
-        condition.type == "Failed" and condition.status == "True" for condition in job_status.conditions or []
-    )
+    return job.status is not None and _final_status_from_job_status(job.status) is not None
 
 
 def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> bool:
@@ -915,8 +942,7 @@ def _kubernetes_job_workload_is_finished(job: V1Job, status: HelixJobStatus) -> 
         return True
     if status == HelixJobStatus.CANCELLED:
         return True
-    conditions = job_status.conditions if job_status is not None else None
-    return any(condition.type == "Failed" and condition.status == "True" for condition in conditions or [])
+    return job_status is not None and _failed_condition(job_status) is not None
 
 
 def map_kubernetes_job_status_to_step_status(
@@ -929,30 +955,11 @@ def map_kubernetes_job_status_to_step_status(
     if status is None:
         raise ValueError("Kubernetes Job status is None")
 
-    # Completed jobs always have a completion time set
-    if status.completion_time is not None:
-        # Job is completed
-        return HelixJobStatus.COMPLETED, {"message": f"Job has completed successfully at {status.completion_time}"}
-
-    # Failed jobs will have at least one failure recorded.
-    # We want to keep the job active until the job has fully terminated however.
-    if status.failed is not None and status.failed > 0:
-        # Check the conditions for failure condition and job has stopped
-        if status.conditions is not None:
-            for condition in status.conditions:
-                if condition.type == "Failed" and condition.status == "True":
-                    return HelixJobStatus.ERROR, {"message": f"Job failed: {condition.message}"}
-            cond_summary = [
-                {"type": condition.type, "status": condition.status, "message": condition.message}
-                for condition in status.conditions
-            ]
-            return HelixJobStatus.ERROR, {
-                "message": (f"Job reports {status.failed} failure(s) but no Failed condition is True yet"),
-                "kubernetes_conditions": cond_summary,
-            }
-        else:
-            # No conditions available, but job has failed. Something went wrong.
-            raise ValueError("Kubernetes Job has failed but no conditions are available to determine failure reason")
+    final_status = _final_status_from_job_status(status)
+    if final_status is not None:
+        return final_status
+    if status.failed:
+        raise ValueError("Kubernetes Job has failed but no conditions are available to determine failure reason")
 
     pods = list_pod_status(core_v1, job.metadata.namespace, common_labels_for_step(step))
     errored_pods = [pod for pod in pods if pod.errors]

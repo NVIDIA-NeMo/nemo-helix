@@ -1395,7 +1395,13 @@ def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pendin
 )
 @pytest.mark.parametrize("step_name", ["test_step_pending", "test_step_active"])
 def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
-    volcano_job: VolcanoJobBackend, request, step_name, phase, expected_status, expected_message
+    volcano_job: VolcanoJobBackend,
+    kubernetes_client_mock: dict[str, MagicMock],
+    request,
+    step_name,
+    phase,
+    expected_status,
+    expected_message,
 ):
     """The reconciler can reach a step after its TTL even though Volcano finished the Job long ago.
 
@@ -1410,7 +1416,8 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     step.created_at = old_timestamp
     step.updated_at = old_timestamp
-    volcano_job._custom_v1.get_namespaced_custom_object.return_value = _volcano_job_for_step(step, phase=phase)  # ty: ignore[invalid-assignment]
+    custom_v1 = kubernetes_client_mock["custom_v1"]
+    custom_v1.get_namespaced_custom_object.return_value = _volcano_job_for_step(step, phase=phase)
 
     with (
         patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
@@ -1419,8 +1426,9 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
         result = volcano_job.sync(step)
 
     assert result.status == expected_status.value
-    assert result.status_details["message"] == expected_message  # type: ignore[index]
-    volcano_job._custom_v1.delete_namespaced_custom_object.assert_not_called()  # ty: ignore[possibly-unbound-attribute]
+    assert result.status_details is not None
+    assert result.status_details["message"] == expected_message
+    custom_v1.delete_namespaced_custom_object.assert_not_called()
 
 
 def test_cleanup_active_by_ttl(volcano_job: VolcanoJobBackend, test_step_active):

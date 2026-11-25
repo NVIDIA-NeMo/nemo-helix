@@ -2921,6 +2921,7 @@ def test_cleanup_pending_by_ttl(kubernetes_job, test_step_pending):
     mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
     mock_job.status.active = None
     mock_job.status.completion_time = None
+    mock_job.status.failed = None
 
     # Mock get_job_by_name to return our job
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
@@ -2962,6 +2963,7 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
     mock_job.status.active = 1
     mock_job.status.completion_time = None
+    mock_job.status.failed = None
 
     # Mock get_job_by_name to return our job
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
@@ -3011,6 +3013,42 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
             "Job failed: BackoffLimitExceeded",
             id="failed",
         ),
+        pytest.param(
+            client.V1JobStatus(
+                active=None,
+                completion_time=None,
+                failed=None,
+                succeeded=None,
+                conditions=[client.V1JobCondition(type="Failed", status="True", message="DeadlineExceeded")],
+            ),
+            HelixJobStatus.ERROR,
+            "Job failed: DeadlineExceeded",
+            id="failed-condition-without-failed-count",
+        ),
+        pytest.param(
+            client.V1JobStatus(
+                active=None,
+                completion_time=None,
+                failed=0,
+                succeeded=None,
+                conditions=[client.V1JobCondition(type="Failed", status="True", message="DeadlineExceeded")],
+            ),
+            HelixJobStatus.ERROR,
+            "Job failed: DeadlineExceeded",
+            id="failed-condition-with-zero-failed-count",
+        ),
+        pytest.param(
+            client.V1JobStatus(
+                active=None,
+                completion_time=None,
+                failed=1,
+                succeeded=None,
+                conditions=[],
+            ),
+            HelixJobStatus.ERROR,
+            "Job reports 1 failure(s) but no Failed condition is True yet",
+            id="failed-count-before-failed-condition",
+        ),
     ],
 )
 @pytest.mark.parametrize("step_name", ["test_step_pending", "test_step_active"])
@@ -3045,8 +3083,8 @@ def test_sync_past_ttl_keeps_the_outcome_of_a_job_kubernetes_already_finished(
     kubernetes_job._batch_v1.delete_namespaced_job.assert_not_called()
 
 
-def test_sync_past_ttl_times_out_a_job_whose_failure_kubernetes_has_not_counted(kubernetes_job, test_step_pending):
-    """A Failed condition without a counted failure is not finished, because the mapper does not report it as ERROR.
+def test_sync_past_ttl_times_out_a_failed_job_without_conditions(kubernetes_job, test_step_pending):
+    """A counted failure with no conditions is not finished, because the mapper cannot report an outcome for it.
 
     Sparing it would leave the step pending with no TTL to end it.
     """
@@ -3059,9 +3097,9 @@ def test_sync_past_ttl_times_out_a_job_whose_failure_kubernetes_has_not_counted(
         status=client.V1JobStatus(
             active=None,
             completion_time=None,
-            failed=None,
+            failed=1,
             succeeded=None,
-            conditions=[client.V1JobCondition(type="Failed", status="True", message="DeadlineExceeded")],
+            conditions=None,
         ),
     )
 
