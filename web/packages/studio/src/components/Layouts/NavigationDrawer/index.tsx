@@ -78,7 +78,7 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
         }
 
         const groupKey = `group:${group.groupLabel}`;
-        const open = collapsed || (accordionState[groupKey] ?? true);
+        const open = accordionState[groupKey] ?? true;
         return (
           <VerticalNavGroup
             key={groupIndex}

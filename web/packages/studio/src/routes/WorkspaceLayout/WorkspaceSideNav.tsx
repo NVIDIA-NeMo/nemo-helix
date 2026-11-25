@@ -136,12 +136,11 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
       },
     ];
 
-    // Empty sections are omitted; the heading-less first section is a bare list.
-    return sections
-      .filter((s) => s.items.length > 0)
-      .map((s) =>
-        s.group === undefined ? { items: s.items } : { group: s.group, items: s.items }
-      );
+    // Empty sections are kept so plugin groups can merge into them (e.g. Safety);
+    // the drawer drops any group that is still empty. The first section is heading-less.
+    return sections.map((s) =>
+      s.group === undefined ? { items: s.items } : { group: s.group, items: s.items }
+    );
   }, [workspace, showAgents]);
 
   const pluginNavGroups = useMemo(
