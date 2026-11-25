@@ -1385,6 +1385,52 @@ def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pendin
     assert call_args.kwargs["propagation_policy"] == "Foreground"
 
 
+@pytest.mark.parametrize(
+    ("phase", "expected_status", "expected_message"),
+    [
+        ("Completed", HelixJobStatus.COMPLETED, "Job completed successfully"),
+        ("Failed", HelixJobStatus.ERROR, "Job failed"),
+        ("Terminated", HelixJobStatus.ERROR, "Job failed"),
+    ],
+)
+@pytest.mark.parametrize("step_name", ["test_step_pending", "test_step_active"])
+def test_sync_past_ttl_keeps_the_outcome_of_a_job_volcano_already_finished(
+    volcano_job: VolcanoJobBackend,
+    kubernetes_client_mock: dict[str, MagicMock],
+    request,
+    step_name,
+    phase,
+    expected_status,
+    expected_message,
+):
+    """The reconciler can reach a step after its TTL even though Volcano finished the Job long ago.
+
+    Neither the TTL timeout nor the staleness timeout, which sees the tasks' old timestamps, may delete
+    that Job or replace its real outcome.
+    """
+    step = request.getfixturevalue(step_name)
+    config = volcano_job._execution_profile_config
+    ttl_seconds = (
+        config.ttl_seconds_before_active if step.status == HelixJobStatus.PENDING else config.ttl_seconds_active
+    )
+    old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
+    step.created_at = old_timestamp
+    step.updated_at = old_timestamp
+    custom_v1 = kubernetes_client_mock["custom_v1"]
+    custom_v1.get_namespaced_custom_object.return_value = _volcano_job_for_step(step, phase=phase)
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "check_step_is_stale", return_value=True),
+    ):
+        result = volcano_job.sync(step)
+
+    assert result.status == expected_status.value
+    assert result.status_details is not None
+    assert result.status_details["message"] == expected_message
+    custom_v1.delete_namespaced_custom_object.assert_not_called()
+
+
 def test_cleanup_active_by_ttl(volcano_job: VolcanoJobBackend, test_step_active):
     """Test that sync of an ACTIVE step transitions to an ERROR state when step's created_at exceeds TTL."""
     # Get the TTL configuration for active jobs (default is 24 hours)
