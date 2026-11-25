@@ -54,7 +54,7 @@ async def test_capture_is_persisted_before_cleanup_and_specific_failure_wins(bac
     async def deleted(*args: object) -> bool:
         assert isinstance(controller.entities.update, AsyncMock)
         controller.entities.update.assert_awaited_once()
-        assert dep.startup_log_tail.endswith("Unsupported harness kind")
+        assert dep.startup_logs.endswith("Unsupported harness kind")
         return True
 
     backend.delete_deployment.side_effect = deleted
@@ -64,7 +64,7 @@ async def test_capture_is_persisted_before_cleanup_and_specific_failure_wins(bac
     assert dep.error == ("Unsupported harness kind" if backend_failed else "Health check timed out after 0s.")
     # Round-trip the durable entity; no controller or backend state is needed.
     restored = AgentDeployment.model_validate_json(dep.model_dump_json())
-    assert restored.startup_log_tail == "traceback\nUnsupported harness kind"
+    assert restored.startup_logs == "traceback\nUnsupported harness kind"
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_capture_error_does_not_prevent_cleanup() -> None:
     dep = AgentDeployment(name="broken", workspace="default", status="starting", deployment_mode="docker")
     await controller._check_health(dep)
     assert dep.error == "exit 1"
-    assert dep.startup_log_tail == ""
+    assert dep.startup_logs == ""
     backend.delete_deployment.assert_awaited_once()
 
 
@@ -127,7 +127,7 @@ async def test_retained_logs_after_restart(monkeypatch: pytest.MonkeyPatch, tail
             workspace="private",
             status="failed",
             deployment_mode="docker",
-            startup_log_tail="traceback\nfailure",
+            startup_logs="traceback\nfailure",
         ).model_dump_json()
     )
     entities = AsyncMock()
@@ -156,6 +156,6 @@ async def test_existing_stream_getter_switches_to_retained_logs(monkeypatch: pyt
     monkeypatch.setattr(deployment_logs, "get_runner_registry", lambda: registry)
     getter = await deployment_logs._resolve_external_log_getter("private", "broken", entities)
     assert (await getter(workspace="private", name="broken", tail=500)).lines == ["starting"]
-    dep.startup_log_tail = "starting\nfailure"
+    dep.startup_logs = "starting\nfailure"
     assert (await getter(workspace="private", name="broken", tail=500)).lines == ["starting", "failure"]
     assert backend.get_logs.await_count == 1

@@ -618,7 +618,7 @@ class AgentDeploymentController(NemoController):
         try:
             tail = await capture_startup_logs(self._backend_for(dep), dep.workspace, dep.name)
             if tail:
-                dep.startup_log_tail = tail
+                dep.startup_logs = tail
         except Exception:
             logger.exception("Could not capture startup logs for '%s'", dep.name)
         # Persist before deletion, not just at the end of reconciliation. If saving
@@ -639,6 +639,8 @@ class AgentDeploymentController(NemoController):
         elapsed = time.monotonic() - since
         remaining = timeout - elapsed
 
+        # Inspect the runtime before the timeout branch so a specific startup
+        # failure takes precedence over a generic health-check timeout.
         backend = self._backend_for(dep)
         info = await backend.get_deployment_status(dep.workspace, dep.name)
 

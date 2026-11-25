@@ -360,7 +360,7 @@ complete log archive. The host-local CLI log reader does not read this snapshot.
 
 Snapshots have no time-based expiry: deleting the agent deployment deletes its retained diagnostics.
 Application logs may contain sensitive output; avoid printing credentials. Snapshots have the same
-read authorization as the deployment and are also included in its `startup_log_tail` field.
+read authorization as the deployment and are also included in its `startup_logs` field.
 
 ## Update a Deployed Agent
 
