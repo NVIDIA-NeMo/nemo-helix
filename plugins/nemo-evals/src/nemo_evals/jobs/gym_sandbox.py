@@ -36,6 +36,7 @@ from nemo_evals.jobs.gym_environment_package import (
     parse_environment_manifest,
 )
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
+from nemo_evals.sandbox_quantity import host_disk_request_gib, quantity_bytes
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
@@ -46,8 +47,6 @@ from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field
 from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
-from sandboxed_gym.host.opensandbox import host_disk_request_gib
-from sandboxed_gym.quantity import quantity_bytes
 from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
 
 #: The host's ``ROUTE_FAILURES_TO_SIDECAR_ENV_KEY``, spelled out rather than imported: the nemo-helix wheel

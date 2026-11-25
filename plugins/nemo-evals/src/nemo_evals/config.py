@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import Any, ClassVar, Literal, Self
 
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
+from nemo_evals.sandbox_quantity import quantity_bytes
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sandboxed_gym.quantity import quantity_bytes
 
 
 class HarborSandboxProfileConfig(BaseModel):
