@@ -16,12 +16,12 @@ lets a task accept network rules it can't set.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 from nhx_sandbox.core.errors import UnsupportedOperation
 from nhx_sandbox.egress import EgressPolicy
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "AppliedEgress",
@@ -95,235 +95,299 @@ class WorkloadUser(StrEnum):
     """A non-root uid the platform picks for each sandbox, which the caller can't predict (OpenShift)."""
 
 
-@dataclass(frozen=True)
-class PlatformEgress:
-    """Accepts the platform's own network rules in place of an ``EgressPolicy``.
+class PlatformEgress(BaseModel):
+    """A task's acceptance of the platform's own network rules, in place of an ``EgressPolicy``.
 
     Some backends can't set egress per sandbox; the platform applies the same rules to all of them,
     and callers can't read those rules back. Those backends refuse a regular ``EgressPolicy``, and
     backends that do set egress per sandbox refuse this marker. It lives on the task rather than in
     backend config, so a task's unknown network access is visible where the task is defined.
-
-    Attributes:
-        reason: Why the task accepts the platform's rules, for logs and results.
     """
 
-    reason: str
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str = Field(description="Why the task accepts the platform's rules, for logs and results.")
 
 
-@dataclass(frozen=True)
-class Resources:
-    """Limits on what a sandbox may use. ``None`` leaves a value to the backend's default.
+class Resources(BaseModel):
+    """Limits on what one sandbox may use: caps, not reservations.
 
     ``disk_mib`` caps the sandbox's writable storage, so a task that fills its disk fails on its own
     instead of filling the node.
     """
 
-    cpu: float | None = None
-    memory_mib: int | None = None
-    disk_mib: int | None = None
-    gpus: int = 0
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cpu: float | None = Field(default=None, gt=0, description="CPU cores; `None` uses the backend's default.")
+    memory_mib: int | None = Field(default=None, gt=0, description="Memory in MiB; `None` uses the backend's default.")
+    disk_mib: int | None = Field(
+        default=None, gt=0, description="Writable storage in MiB; `None` uses the backend's default."
+    )
+    gpus: int = Field(default=0, ge=0, description="Number of GPUs.")
 
 
-@dataclass(frozen=True)
-class SandboxSpec:
-    """What a caller wants from a new sandbox.
+class SandboxSpec(BaseModel):
+    """What a caller wants from one new sandbox, stated as intent.
 
-    Attributes:
-        image: The container image, ideally pinned by digest.
-        name_hint: A readable prefix for the sandbox's name. Backends shorten it and add a suffix to
-            fit their naming rules, so two sandboxes never share a name.
-        env: Environment for every command in the sandbox. Backends that don't apply the image's own
-            ``ENV`` to commands (OpenShell) need the caller to include it here. Don't put secrets
-            here. Depending on the backend, env ends up in pod specs, cluster objects or command
-            records that others can read. The interface has no way to pass secrets yet.
-        workdir: Default working directory for commands. ``None`` uses the backend's default, which
-            isn't always the image's ``WORKDIR``.
-        resources: CPU, memory, disk and GPU limits.
-        egress: What the sandbox may reach on the network. An ``EgressPolicy`` is always applied, even
-            an empty one, so no sandbox gets open network access by default. A backend that can't apply
-            it refuses the spec. ``PlatformEgress`` accepts the platform's rules instead, on backends
-            that can't set egress per sandbox.
-        labels: Labels for finding the sandbox later, such as the job that owns it.
-        ttl_s: How long the sandbox may live. ``None`` uses the backend's default lifetime, which
-            can be short on a managed service, so set it whenever a task needs longer. On a backend
-            without ``capabilities.server_ttl``, something outside the backend has to delete the
-            sandbox once this runs out.
-        ready_timeout_s: How long ``create`` waits for the sandbox to become ready.
-        writable_paths: Paths the workload must be able to write, on backends that restrict the
-            filesystem (OpenShell's Landlock policy, or a read-only image filesystem). A backend that
-            can't make one writable refuses the spec rather than hand back a sandbox that fails later.
-            Granting a path doesn't change who owns it, so the workload's user still needs
-            permission to write there.
+    It's the only input to ``create`` and the main input to ``check``. It holds no provider details:
+    each backend translates it into its own API, or refuses the parts it can't honour. It's frozen,
+    so a runner can reuse one spec for every trial of a task.
     """
 
-    image: str
-    name_hint: str = "sandbox"
-    env: Mapping[str, str] = field(default_factory=dict)
-    workdir: str | None = None
-    resources: Resources = field(default_factory=Resources)
-    egress: EgressPolicy | PlatformEgress = field(default_factory=EgressPolicy)
-    labels: Mapping[str, str] = field(default_factory=dict)
-    ttl_s: float | None = None
-    ready_timeout_s: float = 600.0
-    writable_paths: tuple[str, ...] = ()
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    image: str = Field(description="The container image, ideally pinned by digest.")
+    name_hint: str = Field(
+        default="sandbox",
+        description=(
+            "A readable prefix for the sandbox's name. Backends shorten it and add a suffix to fit their "
+            "naming rules, so two sandboxes never share a name."
+        ),
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Environment for every command in the sandbox. Backends that don't apply the image's own `ENV` "
+            "to commands (OpenShell) need the caller to include it here. Don't put secrets here: depending "
+            "on the backend, env ends up in pod specs, cluster objects or command records that others can "
+            "read. The interface has no way to pass secrets yet."
+        ),
+    )
+    workdir: str | None = Field(
+        default=None,
+        description=(
+            "Default working directory for commands. `None` uses the backend's default, which isn't always "
+            "the image's `WORKDIR`."
+        ),
+    )
+    resources: Resources = Field(default_factory=Resources, description="CPU, memory, disk and GPU limits.")
+    egress: EgressPolicy | PlatformEgress = Field(
+        default_factory=EgressPolicy,
+        description=(
+            "What the sandbox may reach on the network. An `EgressPolicy` is always applied, even an empty "
+            "one, so no sandbox gets open network access by default; a backend that can't apply it refuses "
+            "the spec. `PlatformEgress` accepts the platform's rules instead, on backends that can't set "
+            "egress per sandbox."
+        ),
+    )
+    labels: dict[str, str] = Field(
+        default_factory=dict, description="Labels for finding the sandbox later, such as the job that owns it."
+    )
+    ttl_s: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "How long the sandbox may live, in seconds. `None` uses the backend's default lifetime, which "
+            "can be short on a managed service, so set it whenever a task needs longer. On a backend "
+            "without `capabilities.server_ttl`, something outside the backend has to delete the sandbox "
+            "once this runs out."
+        ),
+    )
+    ready_timeout_s: float = Field(
+        default=600.0, gt=0, description="How long `create` waits for the sandbox to become ready, in seconds."
+    )
+    writable_paths: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Paths the workload must be able to write, on backends that restrict the filesystem "
+            "(OpenShell's Landlock policy, or a read-only image filesystem). A backend that can't make one "
+            "writable refuses the spec rather than hand back a sandbox that fails later. Granting a path "
+            "doesn't change who owns it, so the workload's user still needs permission to write there."
+        ),
+    )
 
 
-@dataclass(frozen=True)
-class SandboxRef:
-    """An opaque handle to one sandbox.
+class SandboxRef(BaseModel):
+    """An opaque handle to one sandbox, returned by ``create`` and ``list_sandboxes``.
 
-    Only the backend named in ``backend`` can act on it; any other raises ``ValueError``.
+    Callers pass it back and never look inside. Only the backend named in ``backend`` can act on it,
+    since sandbox ids are only unique within one backend; any other raises ``ValueError``.
     """
 
-    backend: str
-    id: str
-    name: str
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    backend: str = Field(description="The name of the backend that made the sandbox.")
+    id: str = Field(description="The backend's own id for the sandbox.")
+    name: str = Field(description="A readable name for logs.")
 
 
-@dataclass(frozen=True)
-class SandboxInfo:
-    """A sandbox's current state, as its backend reports it."""
+class SandboxInfo(BaseModel):
+    """A snapshot of one sandbox's state, as its backend reports it."""
 
-    ref: SandboxRef
-    phase: SandboxPhase
-    labels: Mapping[str, str] = field(default_factory=dict)
-    detail: str | None = None
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    ref: SandboxRef = Field(description="Which sandbox.")
+    phase: SandboxPhase = Field(description="Where it is in its life.")
+    labels: dict[str, str] = Field(default_factory=dict, description="Its labels, as the backend stores them.")
+    detail: str | None = Field(default=None, description="The backend's own message, such as why it failed.")
 
 
-@dataclass(frozen=True)
-class ExecRequest:
-    """One command to run in a sandbox.
+class ExecRequest(BaseModel):
+    """One command to run in a sandbox, and how to run it.
 
-    Attributes:
-        command: A shell command line, run with ``sh -c``.
-        cwd: Working directory. ``None`` uses the spec's ``workdir``, then the backend's default.
-        env: Extra environment, layered over the spec's ``env``. The same caution about secrets applies.
-        timeout_s: Seconds before the command is killed, along with anything it started. Backends
-            must kill it rather than just stop waiting, so it can't keep changing the sandbox after
-            the caller moves on. The sandbox stays usable afterwards, so a runner can still collect
-            logs and grade the trial. A backend whose platform deletes a sandbox when a command
-            overruns must enforce this timeout itself, inside the sandbox, before the platform's own
-            limit fires. ``None`` runs the command until the backend's ceiling, minus whatever
-            margin the backend needs to stop it in time. A timeout past that raises
-            ``UnsupportedOperation`` instead of being cut short, since a command stopped early, such
-            as an agent's whole run, would be graded as if it had finished.
-        user: The user to run as. ``None`` uses the sandbox's default user. Backends that can't
-            switch users raise ``UnsupportedOperation`` for anything else.
-        stdin: Bytes for the command's standard input.
+    Some backends support the working directory, environment, timeout and standard input natively;
+    others apply them in a wrapper around the command. Either way the result has to be the same.
     """
 
-    command: str
-    cwd: str | None = None
-    env: Mapping[str, str] = field(default_factory=dict)
-    timeout_s: float | None = None
-    user: str | int | None = None
-    stdin: bytes | None = None
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command: str = Field(description="A shell command line, run with `sh -c`.")
+    cwd: str | None = Field(
+        default=None,
+        description="Working directory. `None` uses the spec's `workdir`, then the backend's default.",
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra environment, layered over the spec's `env`. The same caution about secrets applies.",
+    )
+    timeout_s: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Seconds before the command is killed, along with anything it started. Backends must kill it "
+            "rather than just stop waiting, so it can't keep changing the sandbox after the caller moves on. "
+            "The sandbox stays usable afterwards, so a runner can still collect logs and grade the trial. A "
+            "backend whose platform deletes a sandbox when a command overruns must enforce this timeout "
+            "itself, inside the sandbox, before the platform's own limit fires. `None` runs the command "
+            "until the backend's ceiling, minus whatever margin the backend needs to stop it in time. A "
+            "timeout past that raises `UnsupportedOperation` instead of being cut short, since a command "
+            "stopped early, such as an agent's whole run, would be graded as if it had finished."
+        ),
+    )
+    user: str | int | None = Field(
+        default=None,
+        description=(
+            "The user to run as. `None` uses the sandbox's default user. Backends that can't switch users "
+            "raise `UnsupportedOperation` for anything else."
+        ),
+    )
+    stdin: bytes | None = Field(default=None, description="Bytes for the command's standard input.")
 
 
-@dataclass(frozen=True)
-class ExecResult:
+class ExecResult(BaseModel):
     """How a command ended.
 
     A backend that keeps only part of a command's output returns what it kept and flags it, rather
     than failing the command. The exit code is still accurate, and a caller that needs all of the
     output, such as a grader parsing a test log, can tell what's missing and read a file instead.
-
-    Attributes:
-        exit_code: The command's exit code. For a timed-out command it depends on the backend
-            (137 when it was killed with ``SIGKILL``, -1 on some), so check ``timed_out`` instead.
-        stdout: Standard output, as much as the backend kept.
-        stderr: Standard error, as much as the backend kept.
-        timed_out: ``timeout_s`` ran out and the command was killed. The sandbox is still usable;
-            if it went away, ``exec`` raises ``SandboxLost`` instead.
-        stdout_truncated: The backend dropped part of ``stdout``.
-        stderr_truncated: The backend dropped part of ``stderr``.
     """
 
-    exit_code: int
-    stdout: str
-    stderr: str
-    timed_out: bool = False
-    stdout_truncated: bool = False
-    stderr_truncated: bool = False
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    exit_code: int = Field(
+        description=(
+            "The command's exit code. For a timed-out command it depends on the backend (137 when it was "
+            "killed with `SIGKILL`, -1 on some), so check `timed_out` instead."
+        )
+    )
+    stdout: str = Field(description="Standard output, as much as the backend kept.")
+    stderr: str = Field(description="Standard error, as much as the backend kept.")
+    timed_out: bool = Field(
+        default=False,
+        description=(
+            "`timeout_s` ran out and the command was killed. The sandbox is still usable; if it went away, "
+            "`exec` raises `SandboxLost` instead."
+        ),
+    )
+    stdout_truncated: bool = Field(default=False, description="The backend dropped part of `stdout`.")
+    stderr_truncated: bool = Field(default=False, description="The backend dropped part of `stderr`.")
 
 
-@dataclass(frozen=True)
-class WorkloadNeeds:
+class WorkloadNeeds(BaseModel):
     """What a task will do in its sandbox that its ``SandboxSpec`` doesn't say, for ``check`` to weigh.
 
     These aren't settings a sandbox is created with, so they stay out of the spec. Keeping them in
     one type means a new need is a new field here, not a signature change in every backend.
-
-    Attributes:
-        longest_command_s: The longest any single command will run, such as an agent's whole budget.
-        lifetime_s: How long the whole trial needs the sandbox, from ``create`` to its last call. A
-            task that only sends short commands can still outlive a backend's maximum lifetime.
-        runs_as_root: Some command has to run as uid 0.
-        multi_container: The task needs several containers in one sandbox, as Compose services do.
     """
 
-    longest_command_s: float | None = None
-    lifetime_s: float | None = None
-    runs_as_root: bool = False
-    multi_container: bool = False
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    longest_command_s: float | None = Field(
+        default=None,
+        gt=0,
+        description="The longest any single command will run, in seconds, such as an agent's whole budget.",
+    )
+    lifetime_s: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "How long the whole trial needs the sandbox, in seconds, from `create` to its last call. A task "
+            "that only sends short commands can still outlive a backend's maximum lifetime."
+        ),
+    )
+    runs_as_root: bool = Field(default=False, description="Some command has to run as uid 0.")
+    multi_container: bool = Field(
+        default=False, description="The task needs several containers in one sandbox, as Compose services do."
+    )
 
 
-@dataclass(frozen=True)
-class Capabilities:
+class Capabilities(BaseModel):
     """What a backend supports, so a runner can refuse a task up front instead of failing it halfway.
 
-    Attributes:
-        isolation: How strongly the workload is separated from the machine it runs on.
-        exec_as_root: Commands can run as uid 0.
-        exec_as_other_users: Commands can run as a user other than the sandbox's default.
-        workload_user: Who workloads run as: the image's ``USER``, one fixed uid, or a uid the
-            platform assigns.
-        fixed_uid: The uid every workload runs as when ``workload_user`` is ``FIXED``, else ``None``.
-        server_ttl: The backend deletes a sandbox itself once its ``ttl_s`` runs out. Without this, a
-            sandbox whose caller crashed stays until something else cleans it up.
-        egress_live_update: Egress can change while the sandbox runs (``EgressControl``).
-        egress_readback: The applied egress can be read back and confirmed.
-        egress_tld_wildcards: A wildcard on a whole top-level domain, such as ``*.com``, can be allowed.
-        gpus: Sandboxes can have GPUs.
-        multi_container: Several containers can share one sandbox, as Compose services do.
-        egress_per_sandbox: Each sandbox gets the ``EgressPolicy`` its spec asks for. Without this, the
-            platform's rules apply to every sandbox and only ``PlatformEgress`` specs run.
-        concurrent_exec: Several calls can run in one sandbox at once. Without this, calls on the same
-            sandbox run one at a time, so a call can wait behind a long command.
+    It describes the backend as configured, not any one sandbox. Runners read it to refuse tasks,
+    the conformance suite reads it to skip cases that don't apply, and ``capability_refusals`` turns it
+    into reasons for ``check``.
     """
 
-    isolation: Isolation
-    exec_as_root: bool
-    exec_as_other_users: bool
-    workload_user: WorkloadUser
-    fixed_uid: int | None
-    server_ttl: bool
-    egress_live_update: bool
-    egress_readback: bool
-    egress_tld_wildcards: bool
-    gpus: bool
-    multi_container: bool
-    egress_per_sandbox: bool
-    concurrent_exec: bool
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    def __post_init__(self) -> None:
+    isolation: Isolation = Field(description="How strongly the workload is separated from the machine it runs on.")
+    exec_as_root: bool = Field(description="Commands can run as uid 0.")
+    exec_as_other_users: bool = Field(description="Commands can run as a user other than the sandbox's default.")
+    workload_user: WorkloadUser = Field(
+        description="Who workloads run as: the image's `USER`, one fixed uid, or a uid the platform assigns."
+    )
+    fixed_uid: int | None = Field(
+        default=None, description="The uid every workload runs as when `workload_user` is `FIXED`, else `None`."
+    )
+    server_ttl: bool = Field(
+        description=(
+            "The backend deletes a sandbox itself once its `ttl_s` runs out. Without this, a sandbox whose "
+            "caller crashed stays until something else cleans it up."
+        )
+    )
+    egress_live_update: bool = Field(description="Egress can change while the sandbox runs (`EgressControl`).")
+    egress_readback: bool = Field(description="The applied egress can be read back and confirmed.")
+    egress_tld_wildcards: bool = Field(
+        description="A wildcard on a whole top-level domain, such as `*.com`, can be allowed."
+    )
+    gpus: bool = Field(description="Sandboxes can have GPUs.")
+    multi_container: bool = Field(description="Several containers can share one sandbox, as Compose services do.")
+    egress_per_sandbox: bool = Field(
+        description=(
+            "Each sandbox gets the `EgressPolicy` its spec asks for. Without this, the platform's rules apply "
+            "to every sandbox and only `PlatformEgress` specs run."
+        )
+    )
+    concurrent_exec: bool = Field(
+        description=(
+            "Several calls can run in one sandbox at once. Without this, calls on the same sandbox run one at "
+            "a time, so a call can wait behind a long command."
+        )
+    )
+
+    @model_validator(mode="after")
+    def _fixed_uid_matches_workload_user(self) -> Capabilities:
         if (self.workload_user is WorkloadUser.FIXED) != (self.fixed_uid is not None):
             raise ValueError("fixed_uid must be set when workload_user is FIXED, and only then")
+        return self
 
 
-@dataclass(frozen=True)
-class AppliedEgress:
-    """The egress a sandbox has right now, as its backend reports it.
+class AppliedEgress(BaseModel):
+    """The egress a sandbox has right now, read back from its backend.
 
-    Attributes:
-        revision: The backend's version of the policy. Pass it to ``set_egress`` to change the policy
-            only if nothing else has changed it since.
-        policy: The policy in the backend's own format, as read back from it.
+    ``EgressControl`` uses it to confirm a change, and to change egress only if nothing else has since.
     """
 
-    revision: str
-    policy: Mapping[str, Any]
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(
+        description=(
+            "The backend's version of the policy. Pass it to `set_egress` as `expected_revision` to change "
+            "the policy only if nothing else has changed it since."
+        )
+    )
+    policy: dict[str, Any] = Field(description="The policy in the backend's own format, as read back from it.")
 
 
 @runtime_checkable

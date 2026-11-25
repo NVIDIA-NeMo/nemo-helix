@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 from nhx_sandbox.core.backend import (
     Capabilities,
@@ -24,6 +22,7 @@ from nhx_sandbox.core.backend import (
 )
 from nhx_sandbox.core.errors import SandboxLost, SandboxNotFound, UnsupportedOperation
 from nhx_sandbox.egress import EgressPolicy
+from pydantic import ValidationError
 
 # A backend shaped like a managed service: no root, an assigned uid, the platform's egress, one command at a time.
 MANAGED = Capabilities(
@@ -41,15 +40,22 @@ MANAGED = Capabilities(
     egress_per_sandbox=False,
     concurrent_exec=False,
 )
-PER_SANDBOX = replace(MANAGED, egress_per_sandbox=True)
+
+
+def _caps(**changes: object) -> Capabilities:
+    """``MANAGED`` with ``changes``, validated again (``model_copy`` would skip validation)."""
+    return Capabilities.model_validate({**MANAGED.model_dump(), **changes})
+
+
+PER_SANDBOX = _caps(egress_per_sandbox=True)
 
 
 def test_fixed_uid_is_set_exactly_when_the_uid_is_fixed() -> None:
-    replace(MANAGED, workload_user=WorkloadUser.FIXED, fixed_uid=10001)
+    _caps(workload_user=WorkloadUser.FIXED, fixed_uid=10001)
     with pytest.raises(ValueError, match="fixed_uid"):
-        replace(MANAGED, workload_user=WorkloadUser.FIXED, fixed_uid=None)
+        _caps(workload_user=WorkloadUser.FIXED, fixed_uid=None)
     with pytest.raises(ValueError, match="fixed_uid"):
-        replace(MANAGED, workload_user=WorkloadUser.ASSIGNED, fixed_uid=1000)
+        _caps(workload_user=WorkloadUser.ASSIGNED, fixed_uid=1000)
 
 
 def test_a_backend_without_per_sandbox_egress_runs_only_tasks_that_accept_the_platforms_rules() -> None:
@@ -104,3 +110,13 @@ def test_sandbox_paths_must_be_absolute() -> None:
     require_absolute_path("/workspace/out.txt")
     with pytest.raises(ValueError, match="absolute"):
         require_absolute_path("out.txt")
+
+
+def test_specs_are_checked_where_they_are_built() -> None:
+    """Specs come from task configs too, so a typo or an impossible value fails at construction, not in a backend."""
+    with pytest.raises(ValidationError):
+        SandboxSpec.model_validate({"image": "i", "ttl": 60})
+    with pytest.raises(ValidationError):
+        SandboxSpec(image="i", ttl_s=-1)
+    spec = SandboxSpec.model_validate({"image": "i", "egress": {"reason": "agent egress is the namespace's"}})
+    assert isinstance(spec.egress, PlatformEgress)
