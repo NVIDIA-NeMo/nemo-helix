@@ -280,6 +280,10 @@ networkPolicies:
     modelPullers:
       # -- Enable ingress from Models-controller weight-puller pods.
       enabled: true
+    # -- Allow Models-controller serving pods with LoRA sidecars in the same namespace to reach the Models and Files APIs.
+    modelAdapters:
+      # -- Enable ingress from Models-controller serving pods with LoRA sidecars.
+      enabled: true
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 

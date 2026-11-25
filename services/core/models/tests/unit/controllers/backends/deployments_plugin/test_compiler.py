@@ -64,6 +64,7 @@ def test_vllm_weighted_chain_has_on_failure_puller_and_always_server() -> None:
     assert compiled.server_config.restart_policy == "Always"
     assert compiled.puller_prerequisite is True
     assert compiled.server_config.containers[0].volume_mounts[0].read_only is True
+    assert "nhx.nvidia.com/lora-adapters" not in compiled.server_config.labels
 
 
 def test_docker_weights_volume_requests_init_chmod() -> None:
@@ -770,6 +771,7 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
         docker = compile_model_deployment(_resolved("vllm", lora=True, runtime=Runtime.DOCKER), config)
 
     assert k8s.scratch_volume is not None
+    assert k8s.server_config.labels["nhx.nvidia.com/lora-adapters"] == "true"
     # The server accepts adapters up to the configured rank, not vLLM's default of 16.
     server_args = k8s.server_config.containers[0].args
     assert server_args[server_args.index("--max-lora-rank") + 1] == str(config.default_vllm_max_lora_rank) == "32"

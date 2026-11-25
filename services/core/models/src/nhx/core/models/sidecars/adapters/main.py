@@ -15,7 +15,9 @@ from asyncio import new_event_loop
 
 from filesets import transfer
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import NHX_BASE_URL_ENV_VAR
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import Adapter, ModelEntity
@@ -103,8 +105,10 @@ class AdaptersController(HeartbeatMixin, Controller):
         self.platform_config = get_platform_config()
 
         self._client: NemoClient = get_nemo_client(
-            as_service="models",
+            as_service=None if is_workload_identity_token_file_set() else "models",
             internal=True,
+            # Pin the deployment's connection URL for both Models and Files requests.
+            base_url=os.getenv(NHX_BASE_URL_ENV_VAR) or None,
         )
         self._models = ModelsClient.from_client(self._client)
         self._files = FilesClient.from_client(self._client)

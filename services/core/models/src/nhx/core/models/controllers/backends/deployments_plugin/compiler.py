@@ -535,12 +535,15 @@ def compile_model_deployment(
             apply_k8s_nim_operator_container_overrides(server, readiness_probe, resolved.view)
         server_config_containers = [server]
 
+    server_labels = _labels(resolved, engine, "server")
+    if lora_enabled:
+        server_labels["nhx.nvidia.com/lora-adapters"] = "true"
     server_config = DeploymentConfig(
         name=names.server,
         workspace=resolved.deployment.workspace,
         containers=server_config_containers,
         initContainers=init_containers,
-        labels=_labels(resolved, engine, "server"),
+        labels=server_labels,
         restartPolicy="Always",
         backendConfig=backend_config or DeploymentBackendConfig(),
         workloadIdentity=workload_identity,

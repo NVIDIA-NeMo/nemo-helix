@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 {{- if and .Values.api.enabled .Values.networkPolicies.enabled .Values.networkPolicies.api.enabled }}
 {{- $api := .Values.networkPolicies.api -}}
 {{- $modelPullers := $api.modelPullers | default (dict "enabled" true) -}}
+{{- $modelAdapters := $api.modelAdapters | default (dict "enabled" true) -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,7 +21,7 @@ spec:
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
-  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $modelPullers.enabled $api.extraIngress .Values.builder.enabled }}
+  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $modelPullers.enabled $modelAdapters.enabled $api.extraIngress .Values.builder.enabled }}
   ingress:
     {{- if $api.sameReleasePods.enabled }}
     - from:
@@ -47,6 +48,18 @@ spec:
             matchLabels:
               nhx.nvidia.com/managed-by: models-controller
               nhx.nvidia.com/models-role: puller
+      ports:
+        - protocol: TCP
+          port: {{ default .Values.api.service.port $api.port }}
+    {{- end }}
+    {{- if $modelAdapters.enabled }}
+    # LoRA sidecars use the Models and Files APIs from the serving pod.
+    - from:
+        - podSelector:
+            matchLabels:
+              nhx.nvidia.com/managed-by: models-controller
+              nhx.nvidia.com/models-role: server
+              nhx.nvidia.com/lora-adapters: "true"
       ports:
         - protocol: TCP
           port: {{ default .Values.api.service.port $api.port }}
