@@ -20,10 +20,15 @@ fi
 # The agent bundle's CLI, named by the host provider: its directory goes first on PATH and it is checked
 # here, before the job's variables arrive, as the launcher that ran this script used to. This script has
 # no privileged setup to wait for. Unset, so the runtime doesn't repeat the check with the job's variables.
+# A failing or hanging agent (the runtime's 120 s limit, where coreutils `timeout` exists) stops the script.
 if [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
     PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
     export PATH
-    "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    else
+        "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    fi
 fi
 unset NHX_GYM_AGENT_EXECUTABLE
 

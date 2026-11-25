@@ -396,6 +396,43 @@ def test_the_agent_bundle_is_checked_before_the_jobs_variables_arrive(tmp_path: 
     assert not (tmp_path / "python-env").exists()
 
 
+def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
+    """A hanging agent stops the script instead of holding it until the caller's readiness timeout."""
+    paths = _fake_host(tmp_path)
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text("#!/bin/sh\necho codex 1.0\n", encoding="utf-8")
+    agent.chmod(0o755)
+    # Stands in for coreutils `timeout`, so the test doesn't wait out the real deadline.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "timeout").write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$*" > "{tmp_path / "timeout-args"}"\nexit 124\n')
+    (tools / "timeout").chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(tmp_path / "gym-src" / "Gym"),
+            str(paths["runtime"]),
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "SANDBOXED_GYM_TREE": str(paths["tree"]),
+            "NHX_GYM_AGENT_EXECUTABLE": str(agent),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 124
+    assert (tmp_path / "timeout-args").read_text() == f"120 {agent} --version\n"
+
+
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
     """The head must return so the host can start, and Gym must be told to join it.
 
