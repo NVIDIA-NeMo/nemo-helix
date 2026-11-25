@@ -29,17 +29,17 @@ fi
 # The agent bundle's CLI, named by the host provider: its directory goes first on PATH and it is checked
 # here, before the job's variables arrive, as the launcher that ran this script used to. This script has
 # no privileged setup to wait for. Unset, so the runtime doesn't repeat the check with the job's variables.
-# A failing or hanging agent (the runtime's 120 s limit, where coreutils `timeout` exists) stops the script.
+# A failing or hanging agent stops the script: the runtime's 120 s limit, then a kill for an agent that
+# ignores SIGTERM. Without coreutils `timeout` there is no limit, so the script refuses to run the check.
 if [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
     # Found before the bundle's directory goes on PATH, so a `timeout` the bundle ships can't stand in for it.
-    timeout_command=$(command -v timeout 2>/dev/null || true)
+    if ! timeout_command=$(command -v timeout 2>/dev/null); then
+        echo "gym-host: checking the agent bundle needs coreutils timeout, which this image lacks" >&2
+        exit 1
+    fi
     PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
     export PATH
-    if [ -n "$timeout_command" ]; then
-        "$timeout_command" 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
-    else
-        "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
-    fi
+    "$timeout_command" -k 10 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
     unset NHX_GYM_AGENT_EXECUTABLE
 fi
 

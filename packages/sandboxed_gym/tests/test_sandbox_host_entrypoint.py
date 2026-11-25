@@ -356,6 +356,11 @@ def test_the_agent_bundle_is_checked_before_the_jobs_variables_arrive(tmp_path: 
     agent = agent_bin / "codex"
     agent.write_text(f'#!/bin/sh\nenv > "{tmp_path / "agent-env"}"\necho codex 1.0\n', encoding="utf-8")
     agent.chmod(0o755)
+    # Passes straight through, so the test doesn't depend on the host having coreutils `timeout`.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "timeout").write_text('#!/bin/sh\nshift 3\nexec "$@"\n', encoding="utf-8")
+    (tools / "timeout").chmod(0o755)
 
     def run(agent_script: str) -> subprocess.CompletedProcess:
         agent.write_text(agent_script, encoding="utf-8")
@@ -370,6 +375,7 @@ def test_the_agent_bundle_is_checked_before_the_jobs_variables_arrive(tmp_path: 
             ],
             env={
                 **os.environ,
+                "PATH": f"{tools}:{os.environ['PATH']}",
                 "SANDBOXED_GYM_TREE": str(paths["tree"]),
                 "NHX_GYM_AGENT_EXECUTABLE": str(agent),
                 "NHX_GYM_JOB_ENV": encode_job_env({"PATH": "/job/bin:/usr/bin:/bin", "JOB_ONLY": "1"}),
@@ -433,7 +439,30 @@ def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 124
-    assert (tmp_path / "timeout-args").read_text() == f"120 {agent} --version\n"
+    assert (tmp_path / "timeout-args").read_text() == f"-k 10 120 {agent} --version\n"
+
+
+def test_the_agent_bundle_check_needs_a_deadline_it_can_enforce(tmp_path: Path) -> None:
+    """Without coreutils `timeout` the check could hang the host, so the script refuses to run it."""
+    paths = _fake_host(tmp_path)
+    agent = tmp_path / "installed-agent" / "bin" / "codex"
+    agent.parent.mkdir(parents=True)
+    agent.write_text(f'#!/bin/sh\ntouch "{tmp_path / "agent-ran"}"\n', encoding="utf-8")
+    agent.chmod(0o755)
+    no_tools = tmp_path / "no-tools"
+    no_tools.mkdir()
+
+    result = subprocess.run(
+        ["/bin/sh", str(gym_host_script_path(git_root=str(paths["root"]))), str(paths["venv"]), str(paths["root"])],
+        env={"PATH": str(no_tools), "NHX_GYM_AGENT_EXECUTABLE": str(agent)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 1
+    assert "needs coreutils timeout" in result.stderr
+    assert not (tmp_path / "agent-ran").exists()
 
 
 def test_an_image_with_a_container_engine_is_refused(tmp_path: Path) -> None:

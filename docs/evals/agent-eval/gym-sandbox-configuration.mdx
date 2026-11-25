@@ -231,11 +231,11 @@ The OpenSandbox server's `nemo-agent-bundle` extension runs `installer /installe
 directory containing `entrypoint` first on `PATH` and runs `entrypoint --version` before starting
 Gym. On the `nhx-gym-host-podman` image, it does both only after dropping root and every capability.
 If the check fails or takes over two minutes, the host reports a bootstrap failure and the job
-fails. `gym_host.sh` runs the check itself before the host's server starts, so when its check fails,
-the host exits and the job fails at its startup timeout. `gym_host.sh` refuses the
-`nhx-gym-host-podman` image, which must start with its default command. The Gym host has to start
-with its image's default command or with `gym_host.sh`, which do this; a host image that starts its
-own server instead gets neither the check nor the `PATH` change.
+fails. `gym_host.sh` runs the check itself before the host's server starts, and needs coreutils
+`timeout` to bound it; when its check fails, the host exits and the job fails at its startup
+timeout. `gym_host.sh` refuses the `nhx-gym-host-podman` image, which must start with its default
+command. The Gym host has to start with its image's default command or with `gym_host.sh`, which do
+this; a host image that starts its own server instead gets neither the check nor the `PATH` change.
 
 The bundle is a deployment setting: every Gym job on the deployment gets the same CLI. It requires
 the OpenSandbox provider with the NeMo extension installed, and a bundle built for the
