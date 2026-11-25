@@ -304,6 +304,12 @@ nemo workspaces list
 
 ## Upgrade the chart
 
+Remove `platformConfig.auth.oidc.workload.kubernetes_token_review_enabled` from
+retained values, or `auth.oidc.workload.kubernetes_token_review_enabled` from
+standalone platform YAML. Both boolean values are temporarily accepted as
+deprecated input and ignored. TokenReview and its Helm RBAC follow the workload
+profile automatically; `false` no longer disables TokenReview.
+
 Remove `platformConfig.models.huggingface_model_puller` from existing values
 before upgrading. The `models.huggingface_model_puller` configuration key was
 removed, and retaining it causes configuration loading to fail. Model weight

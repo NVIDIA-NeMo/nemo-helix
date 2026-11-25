@@ -3,6 +3,7 @@
 
 """Tests for the WASM policy engine."""
 
+import json
 from pathlib import Path
 from queue import Queue
 from threading import Thread
@@ -19,7 +20,10 @@ from nemo_deployments_plugin.auth_proxy import build_auth_proxy_container
 from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import DeploymentConfig
 from nemo_helix_plugin.auth import AuthContext
+from nhx.common.auth.middleware import AuthorizationMiddleware
 from nhx.common.auth.workload_proxy import main as workload_proxy
+from nhx.common.config import AuthConfig
+from nhx.common.service.dependencies import get_entity_client
 from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
@@ -30,6 +34,7 @@ from nhx.core.auth.app.embedded_pdp import (
     set_policy_data,
     validate_entrypoint,
 )
+from nhx.core.files.api.v2.hf.endpoints import router as hf_router
 
 
 @pytest.fixture
@@ -237,6 +242,48 @@ def test_hf_overlapping_routes_use_the_application_workspace(
     result = evaluate("allow", request)
 
     assert result["allowed"] is (workspace == granted_workspace)
+
+
+@pytest.mark.asyncio
+async def test_encoded_hf_metadata_prefix_cannot_read_another_workspace(
+    static_authz_data: dict[str, Any],
+) -> None:
+    static_authz_data["authz"]["principals"] = {"reader": {"workspaces": {"resolve": ["Viewer"]}}}
+    set_policy_data(static_authz_data)
+    decisions: list[bool] = []
+    inputs: list[dict[str, Any]] = []
+
+    def authorize(request: httpx.Request) -> httpx.Response:
+        policy_input = json.loads(request.content)["input"]
+        inputs.append(policy_input)
+        result = evaluate("allow", policy_input)
+        decisions.append(result["allowed"])
+        return httpx.Response(200, json={"result": result})
+
+    # Reaching a metadata/download handler would attempt this dependency. The
+    # reserved-prefix handler must reject the full decoded path before any read.
+    entity_lookup = MagicMock(side_effect=AssertionError("Encoded HF path reached a fileset read"))
+    app = FastAPI()
+    app.include_router(hf_router, prefix="/apis/files")
+    app.dependency_overrides[get_entity_client] = entity_lookup
+    config = AuthConfig(enabled=True, policy_decision_point_base_url="http://policy.test")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(authorize)) as pdp_client:
+        app.add_middleware(AuthorizationMiddleware, service_name="files", http_client=pdp_client)
+        with patch("nhx.common.auth.middleware.get_auth_config", return_value=config):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://files.test") as client:
+                response = await client.get(
+                    "/apis/files/v2/hf/api/models/resolve/incident/revision/main%3F/weights.bin",
+                    headers={"X-NHX-Principal-Id": "reader", "X-NHX-Scopes": "platform:read"},
+                )
+
+    assert len(inputs) == 1
+    assert inputs[0]["principal_id"] == "reader"
+    # If path normalization is corrected later, authorization may deny first.
+    # Today it can authorize truncated metadata, but routing must still reject.
+    assert response.status_code == (404 if decisions[0] else 403)
+    if response.status_code == 404:
+        assert "regular Files API" in response.json()["detail"]
+    entity_lookup.assert_not_called()
 
 
 @pytest.fixture(autouse=True)

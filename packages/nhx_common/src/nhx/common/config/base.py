@@ -10,6 +10,7 @@ dependencies (sqlalchemy, etc.) or internal platform logic.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, Self
 
@@ -36,7 +37,7 @@ from nemo_helix_plugin.config import get_service_config_prefix as get_service_co
 from nemo_helix_plugin.config import internal_field as internal_field
 from nemo_helix_plugin.config import register_platform_config_class as register_platform_config_class
 from nhx.common.config.paths import nhx_user_data_dir
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -128,6 +129,22 @@ class OIDCWorkloadConfig(BaseSettings):
     subject_jwks_uri: str | None = None
     subject_issuers: list[str] = Field(default_factory=list)
     subject_jwks_cache_ttl_seconds: int = Field(default=3600, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_deprecated_token_review_toggle(cls, values: object) -> object:
+        if not isinstance(values, dict) or "kubernetes_token_review_enabled" not in values:
+            return values
+        values = dict(values)
+        TypeAdapter(bool).validate_python(values.pop("kubernetes_token_review_enabled"))
+        warnings.warn(
+            "auth.oidc.workload.kubernetes_token_review_enabled is deprecated and ignored. "
+            "Delete this key. Kubernetes TokenReview and its Helm RBAC are automatic when workload auth "
+            "is configured; false no longer disables TokenReview.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return values
 
 
 class OIDCConfig(BaseSettings):

@@ -282,14 +282,20 @@ grep -Fq "opensandbox.composeServices.enabled needs sandboxClusterCapable" <<<"$
 
 # A workload client alone requires TokenReview, including for an existing account.
 for workload_values in 35-workload-token-review.yaml 36-workload-token-review-existing-account.yaml; do
-  workload_rbac=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
-    -f "${HELM_FOLDER}/ci/${workload_values}" \
-    --show-only templates/api/token-reviewer-rbac.yaml)
-  grep -Fxq 'kind: ClusterRole' <<<"${workload_rbac}"
-  grep -Fxq 'kind: ClusterRoleBinding' <<<"${workload_rbac}"
-  if [ "${workload_values}" = 36-workload-token-review-existing-account.yaml ]; then
-    grep -Fq 'name: existing-helix-api' <<<"${workload_rbac}"
-  fi
+  for token_review_compat in omitted true false; do
+    legacy_settings=()
+    if [ "${token_review_compat}" != omitted ]; then
+      legacy_settings=(--set "platformConfig.auth.oidc.workload.kubernetes_token_review_enabled=${token_review_compat}")
+    fi
+    workload_rbac=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
+      -f "${HELM_FOLDER}/ci/${workload_values}" "${legacy_settings[@]}" \
+      --show-only templates/api/token-reviewer-rbac.yaml)
+    grep -Fxq 'kind: ClusterRole' <<<"${workload_rbac}"
+    grep -Fxq 'kind: ClusterRoleBinding' <<<"${workload_rbac}"
+    if [ "${workload_values}" = 36-workload-token-review-existing-account.yaml ]; then
+      grep -Fq 'name: existing-helix-api' <<<"${workload_rbac}"
+    fi
+  done
 done
 
 for disabled_setting in platformConfig.auth.enabled=false api.enabled=false platformConfig.auth.oidc.workload=null; do
