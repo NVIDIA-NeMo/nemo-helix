@@ -661,9 +661,11 @@ class DatabaseConfig(EnvironmentFirstSettings):
         "With it off, the first query on a connection the server closed fails once and the pool replaces it.",
     )
     pool_recycle_seconds: int = Field(
-        default=1800,
-        description="Close and replace pooled PostgreSQL connections older than this many seconds, so a "
-        "connection that sat idle past a proxy or server timeout is not reused. 0 disables recycling.",
+        default=300,
+        ge=0,
+        description="Close and replace pooled PostgreSQL connections this many seconds after they were opened. "
+        "Keep it below the idle timeout of any proxy or load balancer in front of the database, so a connection "
+        "the proxy has dropped is never reused. 0 disables recycling.",
     )
     echo: bool = Field(default=False, description="Enable SQLAlchemy echo for the database connection")
 

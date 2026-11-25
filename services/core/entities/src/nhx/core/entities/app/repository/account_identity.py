@@ -27,7 +27,10 @@ _identity_caches_lock = threading.Lock()
 
 
 def _identity_cache(session_maker: async_sessionmaker[AsyncSession]) -> TTLCache | None:
-    """Return the cache for ``session_maker``, or ``None`` if caching is disabled."""
+    """Return the cache for ``session_maker``, or ``None`` if caching is disabled.
+
+    TTL and size are fixed when a session maker's cache is created; only the enabled flag is re-read per call.
+    """
     config = EntitiesConfig.get()
     if not config.account_identity_cache_enabled:
         return None
@@ -40,6 +43,26 @@ def _identity_cache(session_maker: async_sessionmaker[AsyncSession]) -> TTLCache
             )
             _identity_caches[session_maker] = cache
         return cache
+
+
+def _remember(
+    cache: TTLCache | None, issuer: str, subject: str, record: AccountIdentityRecord
+) -> AccountIdentityRecord:
+    if cache is not None:
+        cache[(issuer, subject)] = record
+    return record
+
+
+def evict_account_identity(session_maker: async_sessionmaker[AsyncSession], *, issuer: str, subject: str) -> None:
+    """Drop one cached identity so its next resolution reads the database.
+
+    Call after deactivating or relinking the identity. This only clears the cache behind ``session_maker``;
+    other event loops and replicas keep serving the old record until it expires.
+    """
+    with _identity_caches_lock:
+        cache = _identity_caches.get(session_maker)
+    if cache is not None:
+        cache.pop((issuer, subject), None)
 
 
 class AccountIdentityUnavailableError(RuntimeError):
@@ -96,9 +119,7 @@ class AccountIdentityStore:
 
         existing = await self.get_active_identity(issuer=issuer, subject=subject)
         if existing is not None:
-            if cache is not None:
-                cache[(issuer, subject)] = existing
-            return existing
+            return _remember(cache, issuer, subject, existing)
 
         account_id = generate_entity_id("account")
         identity_id = generate_entity_id("account_identity")
@@ -134,7 +155,7 @@ class AccountIdentityStore:
         except IntegrityError as exc:
             existing_after_conflict = await self.get_active_identity(issuer=issuer, subject=subject)
             if existing_after_conflict is not None:
-                return existing_after_conflict
+                return _remember(cache, issuer, subject, existing_after_conflict)
             if link_key is not None:
                 linked_after_conflict = await self._link_identity_to_active_account_by_link_key(
                     issuer=issuer,
@@ -147,7 +168,7 @@ class AccountIdentityStore:
                     linked_by=linked_by,
                 )
                 if linked_after_conflict is not None:
-                    return linked_after_conflict
+                    return _remember(cache, issuer, subject, linked_after_conflict)
             raise AccountIdentityConflictError(
                 f"Account identity conflict for issuer={issuer!r}, subject={subject!r}"
             ) from exc
@@ -157,9 +178,7 @@ class AccountIdentityStore:
             raise AccountIdentityConflictError(
                 f"Account identity was not readable after materialization for issuer={issuer!r}, subject={subject!r}"
             )
-        if cache is not None:
-            cache[(issuer, subject)] = created
-        return created
+        return _remember(cache, issuer, subject, created)
 
     async def _link_identity_to_active_account_by_link_key(
         self,

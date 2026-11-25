@@ -26,8 +26,8 @@ def create_async_engine_for_entities(
     - timeout from database_config.connect_timeout_seconds: Connection timeout (default 30s).
     - pool_size from database_config.connections_limit: connections kept open and reused. SQLAlchemy's
       default of 5 forces a burst of concurrent requests to open (and then close) overflow connections.
-    - pool_recycle from database_config.pool_recycle_seconds: replace connections older than this, so one
-      that idled past a proxy or server timeout is not reused.
+    - pool_recycle from database_config.pool_recycle_seconds: replace connections this long after they were
+      opened. Below a proxy's idle timeout, no connection can sit idle long enough for the proxy to drop it.
 
     Args:
         config: Entities service configuration

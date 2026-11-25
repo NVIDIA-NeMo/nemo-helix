@@ -205,8 +205,8 @@ entities:
     connect_timeout_seconds: 30
     # Test each pooled connection with a round trip before handing it out. Costs about three database round trips per checkout; leave off unless connections are dropped without the pool noticing. With it off, the first query on a connection the server closed fails once and the pool replaces it. | default: False
     pool_pre_ping: false
-    # Close and replace pooled PostgreSQL connections older than this many seconds, so a connection that sat idle past a proxy or server timeout is not reused. 0 disables recycling. | default: 1800
-    pool_recycle_seconds: 1800
+    # Close and replace pooled PostgreSQL connections this many seconds after they were opened. Keep it below the idle timeout of any proxy or load balancer in front of the database, so a connection the proxy has dropped is never reused. 0 disables recycling. | default: 300
+    pool_recycle_seconds: 300
     # Enable SQLAlchemy echo for the database connection | default: False
     echo: false
   # Interval in seconds to run the workspace cleanup routine. | default: 10

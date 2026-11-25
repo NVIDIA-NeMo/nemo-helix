@@ -24,6 +24,7 @@ from nhx.core.entities.app.repository.account_identity import (
     AccountIdentityRecord,
     AccountIdentityStore,
     AccountIdentityUnavailableError,
+    evict_account_identity,
 )
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
 from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
@@ -155,6 +156,7 @@ __all__ = [
     "AccountIdentityRecord",
     "AccountIdentityStore",
     "AccountIdentityUnavailableError",
+    "evict_account_identity",
     "AccountCredentialConflictError",
     "AccountCredentialRecord",
     "AccountCredentialStatus",

@@ -10,6 +10,7 @@ import pytest
 from nhx.common.config.base import DatabaseConfig
 from nhx.core.entities.app.database import create_async_engine_for_entities
 from nhx.core.entities.config import EntitiesConfig
+from pydantic import ValidationError
 
 
 @pytest.mark.asyncio
@@ -71,9 +72,18 @@ def test_pre_ping_follows_config_unless_overridden(
     assert engine.sync_engine.pool._pre_ping is expected
 
 
-@pytest.mark.parametrize(("recycle_seconds", "expected"), [(1800, 1800), (600, 600), (0, -1)])
-def test_postgres_pool_recycle_follows_config(recycle_seconds: int, expected: int) -> None:
-    """0 disables recycling, which SQLAlchemy records as -1."""
-    config = EntitiesConfig(database_config=DatabaseConfig(url=POSTGRES_URL, pool_recycle_seconds=recycle_seconds))
-    engine = create_async_engine_for_entities(config)
+@pytest.mark.parametrize(("recycle_seconds", "expected"), [(None, 300), (600, 600), (0, -1)])
+def test_postgres_pool_recycle_follows_config(recycle_seconds: int | None, expected: int) -> None:
+    """Defaults below common proxy idle timeouts; 0 disables recycling, which SQLAlchemy records as -1."""
+    database_config = (
+        DatabaseConfig(url=POSTGRES_URL)
+        if recycle_seconds is None
+        else DatabaseConfig(url=POSTGRES_URL, pool_recycle_seconds=recycle_seconds)
+    )
+    engine = create_async_engine_for_entities(EntitiesConfig(database_config=database_config))
     assert engine.sync_engine.pool._recycle == expected
+
+
+def test_negative_pool_recycle_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DatabaseConfig(url=POSTGRES_URL, pool_recycle_seconds=-1)

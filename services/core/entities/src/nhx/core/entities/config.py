@@ -63,6 +63,7 @@ class EntitiesConfig(create_service_config_class("entities")):
     )
     account_identity_cache_ttl_sec: float = Field(
         default=30.0,
+        gt=0,
         description=("TTL in seconds for cached account identities (NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_TTL_SEC)."),
     )
     account_identity_cache_max_size: int = Field(

@@ -10,9 +10,11 @@ from nhx.core.entities.app.repository.account_identity import (
     AccountIdentityStore,
     AccountIdentityUnavailableError,
     _identity_cache,
+    evict_account_identity,
 )
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
 from nhx.core.entities.config import EntitiesConfig
+from pydantic import ValidationError
 from sqlalchemy import event, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -243,3 +245,22 @@ async def test_inactive_identity_is_never_cached(session_maker, cache_config):
     async with session_maker() as session, session.begin():
         await session.execute(update(DBAccountIdentity).values(status="active"))
     assert (await _resolve(AccountIdentityStore(other))).account_id.startswith("account-")
+
+
+@pytest.mark.asyncio
+async def test_evicted_identity_is_read_from_the_database_again(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=True)
+    store = AccountIdentityStore(session_maker)
+    await _resolve(store)
+    async with session_maker() as session, session.begin():
+        await session.execute(update(DBAccountIdentity).values(status="disabled"))
+
+    evict_account_identity(session_maker, issuer=ISSUER, subject="sub-cache")
+
+    with pytest.raises(AccountIdentityUnavailableError):
+        await _resolve(store)
+
+
+def test_non_positive_cache_ttl_is_rejected():
+    with pytest.raises(ValidationError):
+        EntitiesConfig(account_identity_cache_ttl_sec=0)
