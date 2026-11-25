@@ -54,6 +54,10 @@ they pick. Do not dump every path at them.
 
 ## 1. Pre-flight
 
+Requires the NeMo Agent Hardener plugin, Docker, an OpenShell gateway, and an inference
+credential. Give the Docker VM at least 8 GB of memory. This workflow is not sandbox-safe:
+it builds images, starts containers, and makes network calls.
+
 ```bash
 # `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
 # or an explicit NHX_BASE_URL. Do NOT export a localhost fallback here — it would
