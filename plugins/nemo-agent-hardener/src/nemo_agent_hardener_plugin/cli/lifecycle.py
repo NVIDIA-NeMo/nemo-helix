@@ -18,6 +18,7 @@ import typer
 import yaml
 from nemo_agent_hardener_plugin.cli import checks, credentials, provisioning
 from nemo_agent_hardener_plugin.cli._shared import (
+    api_errors,
     command_context,
     json_mapping,
     json_string_list,
@@ -187,6 +188,7 @@ def register(app: typer.Typer) -> None:
         typer.secho("\nSetup complete. Next: nemo agent-hardener init --agent <name>", fg="green")
 
     @app.command()
+    @api_errors
     def init(
         agent: str | None = typer.Option(
             None, "--agent", help="Registered NeMo Helix agent to war-game (name or workspace/name)."
@@ -338,11 +340,7 @@ def register(app: typer.Typer) -> None:
         if models:
             preflight_models(ctx, models)
             body["models"] = models
-        try:
-            manifest = ctx.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
-        except Exception as exc:
-            typer.secho(f"Error: could not create manifest — {exc}", fg="red")
-            raise typer.Exit(code=1) from exc
+        manifest = ctx.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
 
         # A project manifest already printed these while deriving; repeating them here reads as two
         # separate problems rather than one.
@@ -411,6 +409,7 @@ def register(app: typer.Typer) -> None:
         )
 
     @app.command()
+    @api_errors
     def refresh(
         manifest_id: str = typer.Option(..., "--manifest-id", help="Saved manifest to re-resolve."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
@@ -422,11 +421,7 @@ def register(app: typer.Typer) -> None:
         secrets, models, defenders and cached benign suite are kept.
         """
         ctx = command_context(workspace, preflight=False)
-        try:
-            manifest = ctx.agent_hardener.manifests.refresh(manifest_id, workspace=ctx.workspace)
-        except Exception as exc:
-            typer.secho(f"Error: could not refresh manifest '{manifest_id}' — {exc}", fg="red")
-            raise typer.Exit(code=1) from exc
+        manifest = ctx.agent_hardener.manifests.refresh(manifest_id, workspace=ctx.workspace)
 
         for warning in json_string_list(manifest.get("warnings")):
             typer.secho(f"  ! {warning}", fg="yellow")

@@ -9,14 +9,18 @@ are each one decision rather than one per command module.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import get_args
+from typing import ParamSpec, TypeVar, get_args
 
+import httpx
 import typer
 from nemo_agent_hardener_plugin.cli import checks
 from nemo_agent_hardener_plugin.cli.client import base_url, make_sdk
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
+from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
 from nemo_agent_hardener_plugin.model_config import (
     ANALYSIS_DEFAULT_BASE_URL,
@@ -28,6 +32,8 @@ from nemo_agent_hardener_plugin.model_config import (
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
 from nemo_helix_ext.cli.core.waiters import wait_for_platform_job
 from nemo_helix_plugin.agent_hardener.types import JsonMap, JsonValue
+from nemo_helix_plugin.cli_error_handling import REMOTE_ERROR_EXIT_CODE, handle_errors
+from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.client.adapter import SyncHelixClient
 from nemo_helix_plugin.jobs.client import JobsClient
 
@@ -35,6 +41,9 @@ from nemo_helix_plugin.jobs.client import JobsClient
 ATTACK_INTENSITIES: tuple[str, ...] = get_args(AgentHardenerManifest.model_fields["attack_intensity"].annotation)
 # A war-game job can run as long as its garak scan, which is capped at 2h.
 JOB_WAIT_TIMEOUT_S = 7200
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 @dataclass(frozen=True)
@@ -76,12 +85,43 @@ def wait_for_job(base_url: str, workspace: str, job_name: str) -> bool:
     jobs = JobsClient(base_url=base_url)
     if wait_for_platform_job(jobs, job_name, workspace=workspace, timeout=JOB_WAIT_TIMEOUT_S):
         return True
+    # The waiter already said how it ended (timeout / terminal status); this adds the job's own cause.
     error = jobs.get_job(name=job_name, workspace=workspace).data().error_details or {}
     if error.get("message"):
-        typer.secho(f"Job failed: {error['message']}", fg="red")
-    if error.get("remediation"):
-        typer.echo(f"Fix: {error['remediation']}")
+        _print_failure(f"Job failed: {error['message']}", error.get("remediation"))
     return False
+
+
+def api_errors(command: Callable[P, R]) -> Callable[P, R]:
+    """Turn a command's API or classified run failure into its message and a non-zero exit, no traceback.
+
+    Built on the CLI-wide ``handle_errors``, which covers the typed-client errors (exit 3). Two failures it
+    does not know are mapped here: job submission posts with raw httpx (``NemoJobScheduler.submit_remote``),
+    and local pre-checks raise :class:`AgentHardenerRunError`, whose remediation is worth showing.
+    """
+    action = getattr(command, "__name__", "command").replace("_", "-")
+
+    @functools.wraps(command)
+    def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return command(*args, **kwargs)
+        except AgentHardenerRunError as exc:
+            _print_failure(f"Error: {exc}", exc.remediation)
+            raise typer.Exit(code=1) from exc
+        except httpx.HTTPStatusError as exc:
+            print_http_status_error(exc, action=action)
+            raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE) from exc
+        except httpx.RequestError as exc:
+            print_http_request_error(exc, action=action)
+            raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE) from exc
+
+    return handle_errors(guarded)
+
+
+def _print_failure(message: str, remediation: object = None) -> None:
+    typer.secho(message, fg="red")
+    if remediation:
+        typer.echo(f"Fix: {remediation}")
 
 
 def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
