@@ -952,10 +952,11 @@ def test_authenticated_weight_puller_uses_creator_scoped_proxy(
     assert (server_request.workload_identity is not None) is exchange
 
 
-def test_weight_puller_refuses_missing_creator_in_exchange_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("exchange", [False, True])
+def test_weight_puller_refuses_missing_creator(monkeypatch: pytest.MonkeyPatch, exchange: bool) -> None:
     monkeypatch.setattr("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", lambda: True)
     monkeypatch.setattr(
-        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: True
+        "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled", lambda: exchange
     )
     with pytest.raises(ValueError, match="requires creator auth context"):
         compile_model_deployment(_resolved("vllm"), DeploymentsPluginConfig())

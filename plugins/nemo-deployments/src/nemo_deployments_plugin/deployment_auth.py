@@ -45,32 +45,22 @@ def plan_deployment_auth(
     if not platform_auth_enabled():
         return DeploymentAuthPlan(workload_identity_enabled=workload_identity_enabled)
 
-    if token_exchange_enabled and auth_context is None:
+    creator_id = (auth_context.principal_on_behalf_of or auth_context.principal_id) if auth_context else None
+    if not creator_id:
         return DeploymentAuthPlan(
             error=(
-                f"{workload_label} requires creator auth context when workload token exchange is enabled; "
-                "refusing to deploy without creator workload identity context."
+                f"{workload_label} {workload_name!r} requires creator auth context when platform auth is enabled. "
+                "Recreate the deployment under the intended creator so Helix can capture that identity."
             )
         )
 
-    auth_proxy_on_behalf_of = None if token_exchange_enabled else on_behalf_of
-    if auth_proxy_on_behalf_of is not None:
-        if auth_context is None:
-            return DeploymentAuthPlan(error=f"{workload_label} requires creator auth context for legacy delegation.")
-        creator_id = auth_context.principal_on_behalf_of or auth_context.principal_id
-        if auth_proxy_on_behalf_of != creator_id:
-            return DeploymentAuthPlan(error=f"{workload_label} on-behalf-of identity does not match its creator.")
-    warning = None
-    if not token_exchange_enabled and auth_proxy_on_behalf_of is None:
-        warning = (
-            f"{workload_label} {workload_name!r} has no creator principal; the workload will run as the "
-            f"unscoped {service_identity} service principal without on-behalf-of delegation."
-        )
+    auth_proxy_on_behalf_of = None if token_exchange_enabled else creator_id
+    if not token_exchange_enabled and on_behalf_of and on_behalf_of != creator_id:
+        return DeploymentAuthPlan(error=f"{workload_label} on-behalf-of identity does not match its creator.")
 
     return DeploymentAuthPlan(
         auth_proxy_base_url=f"http://127.0.0.1:{auth_proxy_port()}",
         auth_proxy_identity=service_identity,
         auth_proxy_on_behalf_of=auth_proxy_on_behalf_of,
         workload_identity_enabled=workload_identity_enabled,
-        warning=warning,
     )

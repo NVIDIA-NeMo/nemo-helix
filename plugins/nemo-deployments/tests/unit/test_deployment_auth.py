@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_helix_plugin.auth import AuthContext
 
@@ -35,7 +36,8 @@ def test_auth_off_omits_auth_proxy_but_preserves_workload_identity_request() -> 
     assert plan.error is None
 
 
-def test_trusted_header_auth_uses_creator_on_behalf_of() -> None:
+@pytest.mark.parametrize("on_behalf_of", [None, "user:alice"])
+def test_trusted_header_auth_uses_creator_on_behalf_of(on_behalf_of: str | None) -> None:
     with (
         patch(f"{_MOD}.platform_auth_enabled", return_value=True),
         patch(f"{_MOD}.is_workload_identity_token_exchange_enabled", return_value=False),
@@ -43,7 +45,7 @@ def test_trusted_header_auth_uses_creator_on_behalf_of() -> None:
     ):
         plan = plan_deployment_auth(
             service_identity="agents",
-            on_behalf_of="user:alice",
+            on_behalf_of=on_behalf_of,
             auth_context=_auth_context(),
             workload_name="hello-dep",
             workload_label="Agent deployment",
@@ -54,6 +56,67 @@ def test_trusted_header_auth_uses_creator_on_behalf_of() -> None:
     assert plan.auth_proxy_on_behalf_of == "user:alice"
     assert plan.workload_identity_enabled is False
     assert plan.error is None
+
+
+@pytest.mark.parametrize("exchange", [False, True])
+def test_auth_off_needs_no_creator_or_proxy(exchange: bool) -> None:
+    with (
+        patch(f"{_MOD}.platform_auth_enabled", return_value=False),
+        patch(f"{_MOD}.is_workload_identity_token_exchange_enabled", return_value=exchange),
+    ):
+        plan = plan_deployment_auth(
+            service_identity="agents",
+            on_behalf_of=None,
+            auth_context=None,
+            workload_name="hello-dep",
+            workload_label="Agent deployment",
+        )
+    assert plan.error is None
+    assert plan.auth_proxy_base_url is None
+    assert plan.auth_proxy_identity is None
+    assert plan.auth_proxy_on_behalf_of is None
+    assert plan.workload_identity_enabled is False
+
+
+@pytest.mark.parametrize("exchange", [False, True])
+@pytest.mark.parametrize("auth_context", [None, AuthContext(principal_id="")])
+def test_authenticated_planning_rejects_missing_creator_without_delegation(
+    exchange: bool, auth_context: AuthContext | None
+) -> None:
+    with (
+        patch(f"{_MOD}.platform_auth_enabled", return_value=True),
+        patch(f"{_MOD}.is_workload_identity_token_exchange_enabled", return_value=exchange),
+    ):
+        plan = plan_deployment_auth(
+            service_identity="agents",
+            on_behalf_of=None,
+            auth_context=auth_context,
+            workload_name="hello-dep",
+            workload_label="Agent deployment",
+        )
+    assert plan.error is not None
+    assert "creator auth context" in plan.error
+    assert "Recreate the deployment under the intended creator" in plan.error
+    assert plan.auth_proxy_base_url is None
+    assert plan.auth_proxy_identity is None
+    assert plan.workload_identity_enabled is False
+
+
+def test_trusted_header_auth_rejects_mismatched_creator() -> None:
+    with (
+        patch(f"{_MOD}.platform_auth_enabled", return_value=True),
+        patch(f"{_MOD}.is_workload_identity_token_exchange_enabled", return_value=False),
+    ):
+        plan = plan_deployment_auth(
+            service_identity="agents",
+            on_behalf_of="user:mallory",
+            auth_context=_auth_context(),
+            workload_name="hello-dep",
+            workload_label="Agent deployment",
+        )
+    assert plan.error is not None
+    assert "does not match its creator" in plan.error
+    assert plan.auth_proxy_base_url is None
 
 
 def test_trusted_header_auth_rejects_delegation_without_captured_creator() -> None:
