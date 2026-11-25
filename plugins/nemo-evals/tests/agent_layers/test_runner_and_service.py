@@ -30,7 +30,7 @@ from nemo_evals.entities import TaskEntity
 from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.planning import ImagePlanError
 from nemo_evals.image_builds.service import BuildJob
-from nemo_evals.jobs.agent_layer_build import INSTALLER_ARCHIVE, agent_layer_build_job_request, is_job_for
+from nemo_evals.jobs.agent_layer_build import INSTALLERS_DIR, agent_layer_build_job_request, is_job_for
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
@@ -94,12 +94,17 @@ def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
 
 
 class _Builder:
-    """Builder whose builds are ready once submitted; records each submit's source, Dockerfile and mounts."""
+    """Builder whose builds are ready once submitted; records each submit's source, Dockerfile, mounts and platform.
 
-    def __init__(self) -> None:
+    Every published image is for ``published`` platforms.
+    """
+
+    def __init__(self, published: tuple[str, ...] = ()) -> None:
         self.rows: dict[str, ContainerImage] = {}
         self.submits: list[tuple[str, FileSetSource | ImageSource, str | None]] = []
         self.mounts: list[list[BuildMount]] = []
+        self.platforms: list[str | None] = []
+        self.published = published
 
     async def get_image(self, name: str) -> ContainerImage | None:
         return self.rows.get(name)
@@ -109,6 +114,7 @@ class _Builder:
     ):
         self.submits.append((name, source, dockerfile))
         self.mounts.append(list(mounts))
+        self.platforms.append(platform)
         self.rows[f"{name}-{revision}"] = _ready(f"{name}-{revision}")
         return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[self.rows[f"{name}-{revision}"]])
 
@@ -116,7 +122,7 @@ class _Builder:
         return "completed"
 
     async def image_platforms(self, image: str) -> list[str]:
-        return []
+        return list(self.published)
 
 
 def _serve_archive(monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes]) -> None:
@@ -136,23 +142,36 @@ def _serve_archive(monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes]) -> 
     monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", download)
 
 
-def _installer(tmp_path: Path) -> Path:
-    """An installer archive shaped like the image's: ``nhx-agent-installer/venv/bin/python``."""
-    path = tmp_path / INSTALLER_ARCHIVE
-    with tarfile.open(path, "w:gz") as archive:
-        content = b"#!/bin/sh\n"
-        info = tarfile.TarInfo("nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3")
-        info.size, info.mode = len(content), 0o755
-        archive.addfile(info, io.BytesIO(content))
-        # The real installer's links, absolute under the mount: uv's minor-version alias and the venv's interpreter.
-        for name, target in [
-            ("nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu", "python/cpython-3.12.15-linux-x86_64-gnu"),
-            ("nhx-agent-installer/venv/bin/python", "python/cpython-3.12.15-linux-x86_64-gnu/bin/python3"),
-        ]:
-            link = tarfile.TarInfo(name)
-            link.type, link.linkname = tarfile.SYMTYPE, f"/opt/nhx-agent-installer/{target}"
-            archive.addfile(link)
-    return path
+_MACHINES = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
+
+
+def _installers(tmp_path: Path, platforms: tuple[str, ...] = ("linux/amd64", "linux/arm64")) -> Path:
+    """The installers directory as the image holds it: per platform, ``nhx-agent-installer/venv/bin/python`` linked to
+    that platform's CPython."""
+    directory = tmp_path / INSTALLERS_DIR
+    directory.mkdir(exist_ok=True)
+    for platform in platforms:
+        cpython = f"cpython-3.12.15-linux-{_MACHINES[platform]}-gnu"
+        with tarfile.open(directory / f"{platform.replace('/', '-')}.tar.gz", "w:gz") as archive:
+            content = b"#!/bin/sh\n"
+            info = tarfile.TarInfo(f"nhx-agent-installer/python/{cpython}/bin/python3")
+            info.size, info.mode = len(content), 0o755
+            archive.addfile(info, io.BytesIO(content))
+            # The real installer's links, absolute under the mount: uv's minor-version alias and the venv's interpreter.
+            for name, target in [
+                (f"nhx-agent-installer/python/cpython-3.12-linux-{_MACHINES[platform]}-gnu", f"python/{cpython}"),
+                ("nhx-agent-installer/venv/bin/python", f"python/{cpython}/bin/python3"),
+            ]:
+                link = tarfile.TarInfo(name)
+                link.type, link.linkname = tarfile.SYMTYPE, f"/opt/nhx-agent-installer/{target}"
+                archive.addfile(link)
+    return directory
+
+
+@pytest.fixture(autouse=True)
+def _amd64_node(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Job's build step runs on an amd64 node, whatever machine runs the tests."""
+    monkeypatch.setattr("nemo_evals.agent_layers.runner.machine", lambda: "x86_64")
 
 
 class _Files:
@@ -205,13 +224,20 @@ async def _requested(entity_store, store_task, name: str = "sort-task") -> tuple
     return spec, jobs
 
 
-async def _run(entity_store, spec: AgentLayerBuildSpec, builder: _Builder, files: _Files, tmp_path: Path):
+async def _run(
+    entity_store,
+    spec: AgentLayerBuildSpec,
+    builder: _Builder,
+    files: _Files,
+    tmp_path: Path,
+    installers: tuple[str, ...] = ("linux/amd64", "linux/arm64"),
+):
     return await run_agent_layer_build(
         spec,
         entities=entity_store,
         files=cast(AsyncFilesClient, files),
         builder=builder,
-        installer=_installer(tmp_path),
+        installers=_installers(tmp_path, installers),
         sleep=AsyncMock(),
     )
 
@@ -273,6 +299,81 @@ async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
     mounted = _context(files.uploads[(name, "mounts.tar.gz")])
     dockerfile = mounted["mounts/nhx-agent-layer/Dockerfile.nhx-agent-layer"].decode()
     assert dockerfile.splitlines()[0] == f"FROM docker.io/library/python@{_ENVIRONMENT_DIGEST}"
+
+
+async def _prebuilt(entity_store, store_task, monkeypatch) -> AgentLayerBuildSpec:
+    """A requested layer of a task whose environment is the prebuilt image ``python:3.12``."""
+    config = {"agent": {"user": "agent"}, "environment": {"docker_image": "python:3.12"}}
+    _serve_archive(monkeypatch, {"task.toml": b'[agent]\nuser = "agent"\n'})
+    digest = await store_task("sort-task", config=config)
+    layer = await _request(AgentLayerService(entity_store, _Jobs(), _allow), "sort-task", digest)
+    assert layer is not None
+    return AgentLayerBuildSpec(
+        workspace="default", task="sort-task", revision_digest=digest, agent_key=layer.agent_key, attempt=1
+    )
+
+
+def _mounted_python(builder: _Builder, files: _Files) -> str:
+    """Where the mounted installer's venv interpreter links, which names the installer's platform."""
+    ((name, _, _),) = builder.submits
+    return _links(files.uploads[(name, "mounts.tar.gz")])["mounts/nhx-agent-installer/venv/bin/python"]
+
+
+async def test_an_amd64_only_images_layer_is_built_for_amd64_on_an_arm64_node(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """The run's images copied the image for its only platform: the layer, and the installer run in it, match it."""
+    monkeypatch.setattr("nemo_evals.agent_layers.runner.machine", lambda: "aarch64")
+    spec = await _prebuilt(entity_store, store_task, monkeypatch)
+    builder, files = _Builder(published=("linux/amd64",)), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path)
+
+    assert layer.status == "ready" and layer.image is not None and layer.image.platform == "linux/amd64"
+    assert builder.platforms == ["linux/amd64"]
+    assert "linux-x86_64-gnu" in _mounted_python(builder, files)
+
+
+async def test_a_multi_platform_images_layer_is_built_for_the_default_with_the_nodes_installer(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr("nemo_evals.agent_layers.runner.machine", lambda: "aarch64")
+    spec = await _prebuilt(entity_store, store_task, monkeypatch)
+    builder, files = _Builder(published=("linux/amd64", "linux/arm64")), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path)
+
+    assert layer.status == "ready" and layer.image is not None and layer.image.platform is None
+    assert builder.platforms == [None]
+    assert "linux-aarch64-gnu" in _mounted_python(builder, files)
+
+
+async def test_a_layer_of_a_task_pinned_to_a_platform_installs_with_that_platforms_installer(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    _serve_archive(monkeypatch, {**_ENV, "environment/Dockerfile": b"FROM --platform=linux/arm64 ubuntu:24.04\n"})
+    spec, _ = await _requested(entity_store, store_task)
+    builder, files = _Builder(), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path)
+
+    assert layer.status == "ready" and builder.platforms == ["linux/arm64"]
+    assert "linux-aarch64-gnu" in _mounted_python(builder, files)
+
+
+async def test_a_layer_for_a_platform_without_an_installer_fails_before_it_builds(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    spec = await _prebuilt(entity_store, store_task, monkeypatch)
+    builder, files = _Builder(published=("linux/arm64",)), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path, installers=("linux/amd64",))
+
+    assert layer.status == "failed"
+    assert layer.error == (
+        "installer_unavailable: the agent installer isn't built for linux/arm64, the environment image's platform"
+    )
+    assert builder.submits == [] and files.upload_calls == 0
 
 
 async def test_a_task_without_an_agent_user_installs_as_its_images_user(
@@ -493,6 +594,7 @@ def test_the_job_fetches_the_installer_onto_storage_its_build_step_reads() -> No
     assert isinstance(fetch.executor, CPUExecutionProvider) and fetch.executor.container is not None
     assert (fetch.executor.container.image or "").rpartition("/")[2].startswith("nhx-agent-installer")
     assert fetch.executor.container.entrypoint == ["/bin/cp"]
+    assert fetch.executor.container.command == ["-r", f"/{INSTALLERS_DIR}", "/var/run/scratch/job/"]
     for step in (fetch, build):
         assert [variable.name for variable in step.environment or []] == [PERSISTENT_JOB_STORAGE_PATH_ENVVAR]
     assert build.config == spec.model_dump(mode="json")

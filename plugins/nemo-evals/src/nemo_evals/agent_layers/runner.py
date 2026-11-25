@@ -4,9 +4,10 @@
 """The agent-layer Job's work: make the layer's build context, have Builder build it, and record the result.
 
 The context is the task's environment context, or nothing for a prebuilt image. The generated Dockerfile, the agent
-to install, and the agent installer the Job's first step put on job storage are the build's mounts, apart from the
-context. Each goes up as a tar archive in a fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
-the agent install, the installer and the platform), so tasks with the same environment share one build.
+to install, and the agent installer for the layer's platform, from those the Job's first step put on job storage, are
+the build's mounts, apart from the context. Each goes up as a tar archive in a fileset of its own. Builder's name for
+the build is keyed by what the layer holds (the environment's files or image, the agent install, the installer and the
+platform), so tasks with the same environment share one build.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from platform import machine
 
 from nemo_builder_plugin.identity import normalize_reference
 from nemo_builder_plugin.schema import BuildMount, FileSetSource
@@ -37,7 +39,7 @@ from nemo_evals.agent_layers.dockerfile import (
 from nemo_evals.agent_layers.models import AgentLayerEntity, layer_entity_name
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build, usable_build
+from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build, published_platform, usable_build
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, TERMINAL_IMAGE_STATUSES, BuildImage
 from nemo_evals.image_builds.planning import MAIN_SERVICE, ImagePlanError, TaskArchive, parse_task_config, plan_images
 from nemo_evals.image_builds.runner import apply_builder_image, downloaded_archive, refresh_images
@@ -59,6 +61,7 @@ MOUNTS_ROOT = "mounts"
 #: The generated Dockerfile, where the build reads it: in the agent's mount.
 MOUNTED_DOCKERFILE = f"{AGENT_MOUNT}/{LAYER_DOCKERFILE}"
 _BUILDER_NAME_PREFIX = "harbor-agent-"
+_ARCHITECTURES = {"x86_64": "amd64", "aarch64": "arm64"}
 
 
 class AgentLayerBuildSpec(BaseModel):
@@ -79,13 +82,14 @@ async def run_agent_layer_build(
     entities: EntityClient,
     files: AsyncFilesClient,
     builder: ImageBuilder,
-    installer: Path,
+    installers: Path,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> AgentLayerEntity:
-    """Build one attempt's layer, recording progress on its record; ``installer`` is the installer's tar archive."""
+    """Build one attempt's layer, recording progress on its record; ``installers`` holds an installer archive per
+    platform, ``<os>-<arch>.tar.gz``."""
     head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
     layer = await entities.get(
         AgentLayerEntity,
@@ -99,7 +103,7 @@ async def run_agent_layer_build(
         revision = await get_revision(entities, TaskRevisionEntity, head, spec.revision_digest)
         if not isinstance(revision.spec, HarborTaskDefinition):
             return await _fail(entities, layer, f"task {layer.task} is not a Harbor task")
-        image = await _submit(spec, layer, revision.spec, files=files, builder=builder, installer=installer)
+        image = await _submit(spec, layer, revision.spec, files=files, builder=builder, installers=installers)
     except ImagePlanError as exc:
         return await _fail(entities, layer, str(exc))
     except Exception as exc:
@@ -131,7 +135,7 @@ async def _submit(
     *,
     files: AsyncFilesClient,
     builder: ImageBuilder,
-    installer: Path,
+    installers: Path,
 ) -> BuildImage:
     """Use the build of the same layer another task made, or make the layer's context and have Builder build it.
 
@@ -147,13 +151,17 @@ async def _submit(
             main = await asyncio.to_thread(_plan_main, definition, archive)
             base_image = _base_image(main.image, layer.environment_digest) if main.image is not None else None
             environment = main.context_digest if base_image is None else base_image
+            platform = main.platform
+            if platform is None and base_image is not None:
+                platform = await published_platform(builder, base_image)
             name = layer_builder_name(
-                environment=environment or "", agent_key=spec.agent_key, user=user, platform=main.platform
+                environment=environment or "", agent_key=spec.agent_key, user=user, platform=platform
             )
             built = await usable_build(builder, name, built_after=layer.built_after)
             if built is None:
                 environment_dockerfile = await asyncio.to_thread(_stage_environment, main, archive, context)
         if built is None:
+            installer = installer_archive(installers, platform)
             mounted = Path(scratch) / MOUNTS_ROOT
             (mounted / AGENT_DIR).mkdir(parents=True)
             # In the agent's mount, not the context: a task's `COPY . .` would copy it into the image.
@@ -173,7 +181,7 @@ async def _submit(
                 source=source,
                 dockerfile=MOUNTED_DOCKERFILE,
                 mounts=mounts,
-                platform=main.platform,
+                platform=platform,
                 built_after=layer.built_after,
             )
     image = BuildImage(
@@ -182,7 +190,7 @@ async def _submit(
         context_path=CONTEXT_ROOT,
         dockerfile=MOUNTED_DOCKERFILE,
         context_digest=main.context_digest,
-        platform=main.platform,
+        platform=platform,
         builder_image=built.name,
         build_job=built.provenance.job.rpartition("/")[2],
     )
@@ -197,6 +205,24 @@ def _base_image(image: str, digest: str | None) -> str:
     """
     reference = normalize_reference(image)
     return str(replace(reference, tag=None, digest=digest) if digest is not None else reference)
+
+
+def installer_archive(installers: Path, platform: str | None) -> Path:
+    """The installer in ``installers`` for a layer built for ``platform``, or for None, the deployment's default, which
+    is the nodes' own platform.
+
+    Raises:
+        ImagePlanError: There is no installer for that platform.
+    """
+    if platform is None:
+        architecture = machine().lower()
+        platform = f"linux/{_ARCHITECTURES.get(architecture, architecture)}"
+    path = installers / f"{platform.replace('/', '-')}.tar.gz"
+    if not path.is_file():
+        raise ImagePlanError(
+            "installer_unavailable", f"the agent installer isn't built for {platform}, the environment image's platform"
+        )
+    return path
 
 
 def install_user(agent_user: str | int | None, image_user: str | None) -> str | int | None:
