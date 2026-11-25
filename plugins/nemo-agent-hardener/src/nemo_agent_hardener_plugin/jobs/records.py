@@ -89,24 +89,23 @@ def _create_run(sdk: Any, *, workspace: str, data: dict[str, Any]) -> str | None
 
 
 async def _precreate_run(
-    entity_client: NemoEntitiesClient, *, workspace: str, manifest_id: str, job_id: str, source_run: str = ""
+    entity_client: NemoEntitiesClient, *, manifest: AgentHardenerManifest, job_id: str, source_run: str = ""
 ) -> str | None:
     """Create the run record at submit time so Studio can open its live view immediately.
 
-    Reads the agent/port straight off the manifest entity (no sandbox/materialization) and records a
+    Reads the agent/port straight off the already-loaded manifest (no sandbox/materialization) and records a
     ``running`` row linked to the job. The worker reuses this record instead of creating its own. Best-effort:
     on any failure we return ``None`` and the worker falls back to creating the record when it starts.
     """
     try:
-        manifest = await entity_client.get(AgentHardenerManifest, name=manifest_id, workspace=workspace)
         # Project-source manifests have no agent ref; label the run by the manifest name instead.
         label = manifest.agent or manifest.name
         run = AgentHardenerRun(
-            workspace=workspace,
+            workspace=manifest.workspace,
             agent=manifest.agent,
             port=manifest.port,
             job_id=job_id,
-            manifest_id=manifest_id,
+            manifest_id=manifest.name,
             status="running",
             returncode=-1,
             summary=f"running against {label}",

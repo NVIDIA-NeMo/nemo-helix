@@ -86,13 +86,10 @@ class AgentHardenerSynthBenignJob(NemoJob):
         executor, environment = await _common.task_step_executor(
             "nemo_agent_hardener_plugin.tasks.synth_benign", step="synth", profile=profile, async_sdk=async_sdk
         )
-        await _common.require_victim_image(
-            executor,
-            step="synth",
-            workspace=workspace,
-            manifest_id=synth.manifest_id,
-            entity_client=cast(NemoEntitiesClient, entity_client),
+        manifest = await _common.load_manifest(
+            cast(NemoEntitiesClient, entity_client), workspace=workspace, manifest_id=synth.manifest_id
         )
+        _common.require_victim_image(executor, step="synth", manifest=manifest)
         return HelixJobSpec(
             steps=[
                 HelixJobStep(

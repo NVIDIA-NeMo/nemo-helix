@@ -9,12 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from _doubles import make_entity, make_job_context, make_sdk
 from nemo_agent_hardener_plugin.agent_resolver import inject_gateway_url
 from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
+from nemo_helix_plugin.client.errors import NotFoundError
 
 
 class _FakeSecrets:
@@ -184,7 +186,7 @@ class _Secrets:
         if not self._reachable:
             raise RuntimeError("secrets store unreachable")
         if name not in self._values:
-            raise KeyError(name)
+            raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://secrets")))
         return SimpleNamespace(data=lambda: SimpleNamespace(value=self._values[name]))
 
 
@@ -226,8 +228,8 @@ def test_resolve_model_key_falls_back_to_the_provisioned_secret(monkeypatch: Any
     assert common.resolve_model_key(sdk, None, workspace="default") == "provisioned"
 
 
-def test_resolve_model_key_falls_back_to_the_dotenv(monkeypatch: Any) -> None:
-    """The offline path: no such secret (or no store) still resolves the key `setup` wrote."""
+def test_resolve_model_key_falls_back_to_the_dotenv_only_when_the_secret_is_absent(monkeypatch: Any) -> None:
+    """No such secret resolves the key `setup` wrote; an unreachable store is surfaced, not papered over."""
     from nemo_agent_hardener_plugin.jobs import _common as common
 
     _config_double(monkeypatch, "from-dotenv")
@@ -236,7 +238,8 @@ def test_resolve_model_key_falls_back_to_the_dotenv(monkeypatch: Any) -> None:
     assert common.resolve_model_key(absent, None, workspace="default") == "from-dotenv"
 
     unreachable = _sdk_with(_Secrets({}, reachable=False), monkeypatch)
-    assert common.resolve_model_key(unreachable, None, workspace="default") == "from-dotenv"
+    with pytest.raises(RuntimeError, match="unreachable"):
+        common.resolve_model_key(unreachable, None, workspace="default")
 
 
 def test_resolve_model_key_none_when_nothing_resolves(monkeypatch: Any) -> None:

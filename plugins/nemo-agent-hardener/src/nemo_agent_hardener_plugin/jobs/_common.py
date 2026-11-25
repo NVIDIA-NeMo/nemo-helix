@@ -18,13 +18,15 @@ from pathlib import Path
 from subprocess import run
 from typing import Any, cast
 
-import yaml
 from nemo_agent_hardener_plugin.config import (
     GARAK_PYTHON_ENVVAR,
     INFERENCE_API_KEY_ENVVAR,
     AgentHardenerConfig,
+    declared_secrets,
     missing_secrets,
     read_env_file,
+    read_manifest_agent,
+    unprovided_secrets,
     write_env_file,
 )
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
@@ -37,14 +39,15 @@ from nemo_agent_hardener_plugin.jobs.openshell_gateway import register_openshell
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities.base import parse_qualified_name
-from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, ExecutorSpec, SubprocessExecutionProviderSpec
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.executor import resolve_task_executor
-from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
 
 logger = logging.getLogger(__name__)
 
@@ -111,20 +114,30 @@ async def victim_image_required(*, async_sdk: object, profile: str | None = None
     return not isinstance(executor, SubprocessExecutionProviderSpec)
 
 
-async def require_victim_image(
-    executor: ExecutorSpec, *, step: str, workspace: str, manifest_id: str | None, entity_client: NemoEntitiesClient
-) -> None:
+async def load_manifest(
+    entity_client: NemoEntitiesClient, *, workspace: str, manifest_id: str
+) -> AgentHardenerManifest:
+    """The saved manifest a job targets; a missing one is rejected at submit rather than when the job runs."""
+    try:
+        return await entity_client.get(AgentHardenerManifest, name=manifest_id, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HelixJobCompilationError(
+            f"Manifest {manifest_id!r} not found in workspace {workspace!r}. List the saved manifests with "
+            "`nemo agent-hardener manifest list`, or create one with `nemo agent-hardener init`."
+        ) from exc
+
+
+def require_victim_image(executor: ExecutorSpec, *, step: str, manifest: AgentHardenerManifest | None) -> None:
     """Fail at submit, not at sandbox creation, when a container job's manifest has no pre-built victim image.
 
     A container job has no Docker to build the victim, and OpenShell only creates a sandbox from an image the
     cluster can pull. A host (subprocess) job still builds it locally.
     """
-    if isinstance(executor, SubprocessExecutionProviderSpec) or not manifest_id:
+    if isinstance(executor, SubprocessExecutionProviderSpec) or manifest is None:
         return
-    manifest = await entity_client.get(AgentHardenerManifest, name=manifest_id, workspace=workspace)
     if not manifest.victim_image:
         raise HelixJobCompilationError(
-            f"The agent-hardener {step} step runs in a container here, so manifest {manifest_id!r} needs a victim "
+            f"The agent-hardener {step} step runs in a container here, so manifest {manifest.name!r} needs a victim "
             "image: run `agent-hardener stage` on it, build and push the printed context to a registry the "
             "OpenShell gateway can pull from, then set the image on the manifest."
         )
@@ -226,9 +239,10 @@ def resolve_model_key(sdk: Any, api_key_secret: str | None, *, workspace: str) -
 
 
 def _optional_secret(sdk: Any, name: str, workspace: str) -> str | None:
+    """A Secret's value, or ``None`` only when it does not exist; an unreachable or refusing store raises."""
     try:
         return _resolve_secret(sdk, name, workspace)
-    except Exception:  # absent secret / unreachable store — callers fall back or report it themselves
+    except NotFoundError:
         return None
 
 
@@ -265,23 +279,40 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
     so a custom provider's credential reaches garak (NIM_API_KEY) / the llm factory (INFERENCE_API_KEY) /
     the guardrail judge (AGENT_HARDENER_SAFETY_API_KEY).
     """
+    env: dict[str, str] = {}
+    for choice, model_envvars, base_url_envvars, key_envvar in _model_groups(models):
+        _apply_group(env, choice, model_envvars, base_url_envvars, key_envvar, sdk, workspace)
+    return env
+
+
+def model_key_secrets(models: WarGameModels | None) -> dict[str, str]:
+    """The ``key env var -> Secret name`` bindings :func:`build_model_env` makes for *models*."""
+    return {
+        key_envvar: choice.api_key_secret
+        for choice, _, _, key_envvar in _model_groups(models)
+        if choice and choice.api_key_secret
+    }
+
+
+def model_key_refs(models: WarGameModels | None) -> dict[str, str]:
+    """Each group's chosen key Secret, labelled for messages (``"attack model key" -> secret``)."""
     if models is None:
         return {}
-    env: dict[str, str] = {}
-    _apply_group(
-        env, models.attack, _ATTACK_MODEL_ENVVARS, _ATTACK_BASE_URL_ENVVARS, _ATTACK_KEY_ENVVAR, sdk, workspace
+    groups = (("attack", models.attack), ("analysis", models.analysis), ("safety", models.safety))
+    return {f"{label} model key": choice.api_key_secret for label, choice in groups if choice and choice.api_key_secret}
+
+
+def _model_groups(
+    models: WarGameModels | None,
+) -> tuple[tuple[ModelChoice | None, tuple[str, ...], tuple[str, ...], str], ...]:
+    """Each model group with its ``(model, base_url, key)`` env vars; empty when nothing is selected."""
+    if models is None:
+        return ()
+    return (
+        (models.attack, _ATTACK_MODEL_ENVVARS, _ATTACK_BASE_URL_ENVVARS, _ATTACK_KEY_ENVVAR),
+        (models.analysis, (_ANALYSIS_MODEL_ENVVAR,), (_ANALYSIS_BASE_URL_ENVVAR,), _ANALYSIS_KEY_ENVVAR),
+        (models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR),
     )
-    _apply_group(
-        env,
-        models.analysis,
-        (_ANALYSIS_MODEL_ENVVAR,),
-        (_ANALYSIS_BASE_URL_ENVVAR,),
-        _ANALYSIS_KEY_ENVVAR,
-        sdk,
-        workspace,
-    )
-    _apply_group(env, models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR, sdk, workspace)
-    return env
 
 
 def _apply_group(
@@ -319,13 +350,7 @@ def materialize_victim_env_file(manifest: str, env: dict[str, str], dest_dir: Pa
     agent-hardener's operator key, see :func:`build_subprocess_env`) and write them so the war-game has creds.
     Returns ``None`` when the manifest declares no secrets or none are present in *env*.
     """
-    try:
-        data = yaml.safe_load(Path(manifest).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    agent = data.get("agent", {}) if isinstance(data, dict) else {}
-    declared = [name for name in (agent.get("secrets") or []) if isinstance(name, str)]
-    present = {name: env[name] for name in declared if name in env}
+    present = {name: env[name] for name in declared_secrets(read_manifest_agent(Path(manifest))) if name in env}
     if not present:
         return None
     dest = dest_dir / ".env"
@@ -353,6 +378,31 @@ def resolve_secret_refs(sdk: Any, refs: dict[str, str], workspace: str) -> dict[
     return values
 
 
+async def missing_secret_refs(async_client: AsyncNemoClient, refs: dict[str, str], workspace: str) -> list[str]:
+    """The ``purpose -> [workspace/]secret`` refs whose Secret does not exist, as ``"workspace/name (purpose)"``.
+
+    Checks existence only (metadata, never the value). Errors other than not-found raise, so an unreachable
+    store is not mistaken for a missing secret.
+    """
+    secrets_client = AsyncSecretsClient.from_client(async_client)
+    missing: list[str] = []
+    for purpose, ref in refs.items():
+        secret_workspace, secret_name = parse_qualified_name(ref, default_workspace=workspace)
+        try:
+            await secrets_client.get_secret(name=secret_name, workspace=secret_workspace)
+        except NotFoundError:
+            missing.append(f"{secret_workspace}/{secret_name} ({purpose})")
+    return missing
+
+
+def missing_secret_refs_message(missing: list[str]) -> str:
+    """Operator-facing message for :func:`missing_secret_refs` results, naming each ref and the fix."""
+    return (
+        f"Secrets not found in the Secrets store: {', '.join(missing)}. Create each with `nemo secrets create`, "
+        "or point the reference at an existing secret."
+    )
+
+
 def prepare_victim_env(
     manifest: str, env: dict[str, str], user_env_file: str | None, secret_values: dict[str, str] | None = None
 ) -> tuple[dict[str, str], str | None]:
@@ -374,14 +424,47 @@ def check_victim_secrets(manifest: str, env: dict[str, str], env_file: str | Non
     extra_env_files = [Path(env_file)] if env_file else []
     missing = missing_secrets(Path(manifest), env_files=extra_env_files, environ=env)
     if missing:
-        # Secrets-store names are lowercase kebab-case, so the store entry cannot share the env var's name.
-        refs = " ".join(f"--secrets {name}=<workspace>/{name.lower().replace('_', '-')}" for name in missing)
-        raise AgentHardenerRunError(
-            CATEGORY_MISSING_CREDENTIAL,
-            f"missing required secrets for the victim agent: {', '.join(missing)}.",
-            remediation=f"Store each value in the Secrets store and map it on the manifest ({refs}), "
-            "or supply it with --env-file or the platform environment.",
-        )
+        raise missing_victim_secrets_error(missing)
+
+
+def missing_victim_secrets_error(missing: list[str]) -> AgentHardenerRunError:
+    """The classified error for victim secrets no source provides, with the exact flags that fix it."""
+    # Secrets-store names are lowercase kebab-case, so the store entry cannot share the env var's name.
+    refs = " ".join(f"--secrets {name}=<workspace>/{name.lower().replace('_', '-')}" for name in missing)
+    return AgentHardenerRunError(
+        CATEGORY_MISSING_CREDENTIAL,
+        f"missing required secrets for the victim agent: {', '.join(missing)}.",
+        remediation=f"Store each value in the Secrets store and map it on the manifest ({refs}), "
+        "or supply it with --env-file or the platform environment.",
+    )
+
+
+def unprovided_host_secrets(
+    manifest: AgentHardenerManifest,
+    plugin_config: AgentHardenerConfig,
+    *,
+    env_file: str | None,
+    models: WarGameModels | None,
+) -> list[str]:
+    """The manifest's declared victim secrets a host (subprocess) job on this machine would not find.
+
+    Mirrors the sources the job assembles (see :func:`prepare_victim_env`): Secrets-store refs (checked for
+    existence separately), the keys the job derives from the provisioned inference secret and the model
+    choice, this host's environment and operator dotenv, and the run's ``--env-file``. The job's own
+    environment is a subset of this process's, so this never rejects what the job would accept.
+    """
+    provided = {
+        *manifest.deployed_secret_refs,
+        *manifest.secret_refs,
+        *model_key_secrets(models),
+        # Set by job_runtime_env from the provisioned inference secret, when one exists.
+        INFERENCE_API_KEY_ENVVAR,
+    }
+    return unprovided_secrets(
+        [name for name in manifest.secrets if name not in provided],
+        env_files=[Path(env_file)] if env_file else [],
+        environ=build_subprocess_env(plugin_config),
+    )
 
 
 def execute(

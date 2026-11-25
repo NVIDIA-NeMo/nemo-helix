@@ -20,6 +20,7 @@ from nemo_agent_hardener_plugin.config import (
     read_env_file,
 )
 from nemo_agent_hardener_plugin.jobs import _common
+from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 
 
@@ -257,8 +258,16 @@ def test_missing_secrets_resolved_from_environ_env_file_and_secrets_file(tmp_pat
     assert missing == []
 
 
-def test_missing_secrets_returns_empty_on_unreadable_manifest(tmp_path: Path) -> None:
-    assert missing_secrets(tmp_path / "nope.yaml", environ={}) == []
+@pytest.mark.parametrize("body", [None, "agent: [unclosed\n"])
+def test_missing_secrets_rejects_an_unreadable_manifest(tmp_path: Path, body: str | None) -> None:
+    """An unreadable manifest must not read as "declares no secrets" and wave the run through."""
+    path = tmp_path / "agent-hardener.yaml"
+    if body is not None:
+        path.write_text(body, encoding="utf-8")
+    with pytest.raises(AgentHardenerRunError) as exc:
+        missing_secrets(path, environ={})
+    assert exc.value.category == CATEGORY_MANIFEST
+    assert str(path) in str(exc.value)
 
 
 def test_missing_secrets_treats_a_blank_value_as_missing(tmp_path: Path) -> None:

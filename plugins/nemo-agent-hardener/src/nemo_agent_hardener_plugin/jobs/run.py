@@ -15,12 +15,14 @@ and ``run`` sequences the phases. The mechanics live in sibling modules:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
 from nemo_agent_hardener_plugin.jobs.artifacts import (
     ArtifactCapture,
@@ -73,18 +75,25 @@ from nemo_agent_hardener_plugin.model_config import (
     effective_safety,
 )
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
+    ExecutorSpec,
     HelixJobSpec,
     HelixJobStep,
+    SubprocessExecutionProviderSpec,
 )
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
+# Step-config marker: compile already probed the run's models, so the job need not probe them again.
+_MODELS_PREFLIGHTED = "models_preflighted"
 
 
 def _merge_choice(default: ModelChoice | None, override: ModelChoice | None) -> ModelChoice | None:
@@ -118,8 +127,13 @@ def _effective_models(sdk: Any, config: dict, ctx: JobContext) -> WarGameModels 
                 "war-game. Ignoring it; use the 'safety' group for the guardrail model."
             )
             break
-    stored = WarGameModels.model_validate(stored_raw)
-    override = WarGameModels.model_validate(config.get("models") or {})
+    return _merge_models(
+        WarGameModels.model_validate(stored_raw), WarGameModels.model_validate(config.get("models") or {})
+    )
+
+
+def _merge_models(stored: WarGameModels, override: WarGameModels) -> WarGameModels | None:
+    """Merge the per-run override over the stored default per group; ``None`` when neither selects anything."""
     merged = WarGameModels(
         attack=_merge_choice(stored.attack, override.attack),
         analysis=_merge_choice(stored.analysis, override.analysis),
@@ -140,21 +154,79 @@ def _preflight_models(models: WarGameModels | None, *, sdk: Any, workspace: str,
     unset, as agent-hardener's judge does. Worth probing precisely because its failure is silent: an
     unreachable judge does not error, the guardrail fails open, which reads as "ran, proposed no change".
     """
-    if models is None:
-        return
-    groups = (
-        ("attack", models.attack, ATTACK_DEFAULT_BASE_URL),
-        ("analysis", models.analysis, ANALYSIS_DEFAULT_BASE_URL),
-        ("safety", effective_safety(models.safety, models.analysis), SAFETY_DEFAULT_BASE_URL),
-    )
-    for label, choice, default_base_url in groups:
-        if choice is None or not (choice.model or choice.base_url):
-            continue
+    for label, choice, default_base_url in _probed_groups(models):
         key = _common._resolve_secret(sdk, choice.api_key_secret, workspace) if choice.api_key_secret else default_key
         verdict = validate_choice(choice.model, choice.base_url or default_base_url, key)
         if verdict.ok:
             continue
         raise AgentHardenerRunError(CATEGORY_MODEL_UNAVAILABLE, _preflight_message(label, choice, verdict))
+
+
+def _probed_groups(models: WarGameModels | None) -> list[tuple[str, ModelChoice, str]]:
+    """The groups the user explicitly configured (a model and/or endpoint), with their default endpoint."""
+    if models is None:
+        return []
+    groups = (
+        ("attack", models.attack, ATTACK_DEFAULT_BASE_URL),
+        ("analysis", models.analysis, ANALYSIS_DEFAULT_BASE_URL),
+        ("safety", effective_safety(models.safety, models.analysis), SAFETY_DEFAULT_BASE_URL),
+    )
+    return [
+        (label, choice, default_base_url)
+        for label, choice, default_base_url in groups
+        if choice is not None and (choice.model or choice.base_url)
+    ]
+
+
+def _preflight_models_at_submit(models: WarGameModels | None, workspace: str) -> None:
+    """Probe the run's models from the API server, with the key the job resolves the same way."""
+    if not _probed_groups(models):
+        return
+    client = get_nemo_client(as_service="agent-hardener", internal=True)
+    _preflight_models(
+        models,
+        sdk=client,
+        workspace=workspace,
+        default_key=_common.resolve_model_key(client, None, workspace=workspace),
+    )
+
+
+async def _reject_bad_inputs(
+    war_game: WarGameSpec,
+    manifest: AgentHardenerManifest | None,
+    *,
+    executor: ExecutorSpec,
+    workspace: str,
+    async_sdk: object,
+) -> None:
+    """Reject at submit what the job would otherwise fail on after queuing: missing secrets, unusable models.
+
+    Checks, cheapest first: every Secrets-store ref the run reads exists; on a host job, every victim secret
+    the manifest declares has a source; and every user-chosen model answers with its key.
+    """
+    models = _merge_models(manifest.models if manifest else WarGameModels(), war_game.models or WarGameModels())
+    refs = {**manifest.deployed_secret_refs, **manifest.secret_refs} if manifest else {}
+    refs |= _common.model_key_refs(models)
+    if refs and (missing := await _common.missing_secret_refs(cast(AsyncNemoClient, async_sdk), refs, workspace)):
+        raise HelixJobCompilationError(_common.missing_secret_refs_message(missing))
+
+    # A container job's environment is the task pod's, which this server cannot see; the job checks it there.
+    if manifest is not None and isinstance(executor, SubprocessExecutionProviderSpec):
+        unprovided = _common.unprovided_host_secrets(
+            manifest, AgentHardenerConfig.get(), env_file=war_game.env_file, models=models
+        )
+        if unprovided:
+            raise _compilation_error(_common.missing_victim_secrets_error(unprovided))
+
+    try:
+        await asyncio.to_thread(_preflight_models_at_submit, models, workspace)
+    except AgentHardenerRunError as exc:
+        raise _compilation_error(exc) from exc
+
+
+def _compilation_error(exc: AgentHardenerRunError) -> HelixJobCompilationError:
+    """Carry a classified error's message and its fix into the submit response."""
+    return HelixJobCompilationError(f"{exc} {exc.remediation}".strip())
 
 
 def _preflight_message(label: str, choice: ModelChoice, verdict: Any) -> str:
@@ -217,22 +289,23 @@ class AgentHardenerRunJob(NemoJob):
         executor, environment = await _common.task_step_executor(
             _common.WAR_GAME_TASK, step="war-game", profile=profile, async_sdk=async_sdk
         )
-        await _common.require_victim_image(
-            executor,
-            step="war-game",
-            workspace=workspace,
-            manifest_id=war_game.manifest_id,
-            entity_client=cast(NemoEntitiesClient, entity_client),
+        manifest = (
+            await _common.load_manifest(
+                cast(NemoEntitiesClient, entity_client), workspace=workspace, manifest_id=war_game.manifest_id
+            )
+            if war_game.manifest_id
+            else None
         )
+        _common.require_victim_image(executor, step="war-game", manifest=manifest)
+        await _reject_bad_inputs(war_game, manifest, executor=executor, workspace=workspace, async_sdk=async_sdk)
 
         # Pre-create the run record now (a Studio war-game submits a manifest_id + service driver) so the UI
         # can open its live view immediately; the worker reuses this record via `run_name` in the step config.
         run_name: str | None = None
-        if war_game.driver == "service" and war_game.manifest_id and job_name and not war_game.stop_after_synth:
+        if war_game.driver == "service" and manifest is not None and job_name and not war_game.stop_after_synth:
             run_name = await _precreate_run(
                 cast(NemoEntitiesClient, entity_client),
-                workspace=workspace,
-                manifest_id=war_game.manifest_id,
+                manifest=manifest,
                 job_id=job_name,
                 source_run=war_game.source_run or "",
             )
@@ -242,7 +315,11 @@ class AgentHardenerRunJob(NemoJob):
                 HelixJobStep(
                     name="war-game",
                     executor=executor,
-                    config={**war_game.model_dump(mode="json"), **({"run_name": run_name} if run_name else {})},
+                    config={
+                        **war_game.model_dump(mode="json"),
+                        _MODELS_PREFLIGHTED: True,
+                        **({"run_name": run_name} if run_name else {}),
+                    },
                     environment=environment,
                 ),
             ],
@@ -347,14 +424,16 @@ class AgentHardenerRunJob(NemoJob):
         model_env = {**runtime_env, **_common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)}
         # Preflight user-chosen models against their endpoint before the (minutes-long) sandbox spin-up, so
         # a wrong model name / key fails in seconds with the list of models the credentials can actually reach.
-        _preflight_models(
-            models,
-            sdk=sdk,
-            workspace=ctx.workspace,
-            # Same resolver the validate endpoint uses, so a run is never preflighted against a
-            # different credential than it runs with.
-            default_key=_common.resolve_model_key(sdk, None, workspace=ctx.workspace),
-        )
+        # A submitted job was already probed at compile; only a local, uncompiled run is probed here.
+        if not config.get(_MODELS_PREFLIGHTED):
+            _preflight_models(
+                models,
+                sdk=sdk,
+                workspace=ctx.workspace,
+                # Same resolver the validate endpoint uses, so a run is never preflighted against a
+                # different credential than it runs with.
+                default_key=_common.resolve_model_key(sdk, None, workspace=ctx.workspace),
+            )
         validate_only = bool(config.get("validate_only"))
         stale_warning: str | None = None
         secret_values: dict[str, str] = {}

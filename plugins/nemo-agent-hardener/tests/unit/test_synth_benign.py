@@ -13,10 +13,17 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.cli import _shared, war_game
+from nemo_agent_hardener_plugin.jobs import _common
 from nemo_helix_plugin.job_context import JobContext
 from typer.testing import CliRunner
 
 _HEADER = "tool,payload,label,rationale,persona\n"
+
+
+@pytest.fixture(autouse=True)
+def _no_provisioned_inference_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The jobs here run against SDK doubles that are not real clients, so no provisioned key is looked up."""
+    monkeypatch.setattr(_common, "resolve_model_key", lambda *_a, **_k: None)
 
 
 def _ctx(tmp_path: Path, workspace: str = "ws1") -> JobContext:
@@ -414,10 +421,17 @@ def test_synth_benign_job_compile_builds_synth_task_step(monkeypatch: pytest.Mon
 
     from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
 
+    async def _saved_manifest(entity_type: Any, *, name: str, workspace: str) -> Any:
+        return entity_type(name=name, workspace=workspace)
+
     spec = job_mod.SynthBenignSpec(manifest_id="m1", driver="service")
     platform_spec = asyncio.run(
         job_mod.AgentHardenerSynthBenignJob.compile(
-            workspace="ws1", spec=spec, entity_client=object(), job_name="job-1", async_sdk=object()
+            workspace="ws1",
+            spec=spec,
+            entity_client=SimpleNamespace(get=_saved_manifest),
+            job_name="job-1",
+            async_sdk=object(),
         )
     )
 
