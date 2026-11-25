@@ -151,6 +151,28 @@ Use `--fast` for the fast model, or `--model <model-name>` for any other model f
 
 ### Sample workspace
 
+The sample uses the platform's default deployment mode. For **subprocess deployments**,
+install its optional DeepAgents harness in the **platform/service Python environment**,
+not just your CLI environment, before choosing the sample workspace. For container deployments,
+the harness must instead be available in the agent's container image.
+`nemo-helix[all]` includes the adapter but not the third-party harness. For a published
+tool install, include the harness extra while retaining the platform dependencies:
+
+```bash
+uv tool install "nemo-helix[all,nemo-agents-plugin-deepagents]"
+```
+
+For a source checkout, run this from the repo root:
+
+```bash
+uv sync --frozen --all-packages --extra deepagents
+```
+
+These commands also add the extra to an existing install. Restart running platform services
+after changing their environment. For a remote platform,
+ask its operator to install the harness there. This prerequisite avoids the missing-harness
+invocation failure; a deployment reporting `running` does not verify harness startup.
+
 If you chose **Create a sample workspace and demo agent**, setup creates the
 `sample` workspace and deploys the Fabric email security agent. Use the Studio
 link printed at the end of setup to explore its dataset and evaluation config.
