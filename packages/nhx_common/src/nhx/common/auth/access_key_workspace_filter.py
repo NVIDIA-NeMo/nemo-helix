@@ -4,8 +4,8 @@
 """Stop a workspace-limited Scoped Access Key from widening a list call with ``filter[workspace]``.
 
 The PDP authorizes the workspace in the path, but several list endpoints let ``filter[workspace]``
-replace it. For a limited key every workspace the filter names must equal the path workspace, and no
-workspace comparison may sit under ``$not``.
+replace it. For a limited key every workspace the filter names must equal the path workspace, no workspace
+comparison may sit under ``$not``, and every ``$or`` branch must be scoped to the path workspace.
 """
 
 from __future__ import annotations
@@ -62,6 +62,34 @@ def _workspace_comparisons(
             yield from _workspace_comparisons(child, negated=child_negated)
 
 
+def _constrains_workspace(operation: FilterOperation, path_workspace: str) -> bool:
+    """Whether every record the filter matches is in the path workspace."""
+    if isinstance(operation, ComparisonOperation):
+        return (
+            operation.field == WORKSPACE_FIELD
+            and operation.operator == FilterOperator.EQ
+            and operation.value == path_workspace
+        )
+    if operation.operator == FilterOperator.AND:
+        return any(_constrains_workspace(child, path_workspace) for child in operation.operations)
+    if operation.operator == FilterOperator.OR:
+        return all(_constrains_workspace(child, path_workspace) for child in operation.operations)
+    return False
+
+
+def _has_unscoped_or(operation: FilterOperation, path_workspace: str, *, scoped: bool = False) -> bool:
+    """Whether an $or has a branch outside the path workspace that no enclosing $and scopes back in."""
+    if not isinstance(operation, LogicalOperation):
+        return False
+    if operation.operator == FilterOperator.AND:
+        scoped = scoped or _constrains_workspace(operation, path_workspace)
+    elif (
+        operation.operator == FilterOperator.OR and not scoped and not _constrains_workspace(operation, path_workspace)
+    ):
+        return True
+    return any(_has_unscoped_or(child, path_workspace, scoped=scoped) for child in operation.operations)
+
+
 def _is_bracket_filter_key(key: str) -> bool:
     # Same reading as parse_deep_object, which also accepts malformed keys such as "filter][workspace]".
     return "[" in key and key.replace("]", "").split("[")[0] == FILTER_PARAM
@@ -96,4 +124,6 @@ def workspace_filter_error(path: str, query_params: QueryParams) -> str | None:
             or comparison.value != path_workspace
         ):
             return WORKSPACE_FILTER_MISMATCH_DETAIL
+    if path_workspace is not None and _has_unscoped_or(operation, path_workspace):
+        return WORKSPACE_FILTER_MISMATCH_DETAIL
     return None

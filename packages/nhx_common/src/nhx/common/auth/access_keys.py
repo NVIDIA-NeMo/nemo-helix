@@ -115,7 +115,7 @@ def _groups_claim_for_gateway_header(groups: list[str]) -> str | None:
     return groups_claim or None
 
 
-def access_key_workspace_ids(metadata: dict[str, Any]) -> list[str] | None:
+def validate_access_key_workspace_ids(metadata: dict[str, Any]) -> list[str] | None:
     """Return the key's workspace limit, or None when it has none.
 
     Raises AccessKeyValidationError when the field is present on a key that isn't a service account's, or isn't a
@@ -583,7 +583,7 @@ async def validate_access_key_token(
         if entity_type not in {"USER", "SERVICE_ACCOUNT"}:
             return None
         # A malformed limit rejects the token rather than being ignored, which would make the key unlimited.
-        access_key_workspace_ids(metadata)
+        validate_access_key_workspace_ids(metadata)
 
         groups = groups_from_claim(claims.get("groups", []))
         scope_claim = claims.get("scope") or claims.get("scp")

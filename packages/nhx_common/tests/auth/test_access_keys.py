@@ -956,7 +956,7 @@ async def test_validate_access_key_token_accepts_workspace_ids(tmp_path):
     assert claims is not None
     metadata = claims.raw_claims["nhx_access_key"]
     assert isinstance(metadata, dict)
-    assert access_keys_mod.access_key_workspace_ids(metadata) == workspace_ids
+    assert access_keys_mod.validate_access_key_workspace_ids(metadata) == workspace_ids
 
 
 @pytest.mark.parametrize(
@@ -994,4 +994,4 @@ async def test_validate_access_key_token_rejects_workspace_ids_on_a_user_key(tmp
 
 
 def test_access_key_workspace_ids_is_none_without_the_field():
-    assert access_keys_mod.access_key_workspace_ids({"version": 2}) is None
+    assert access_keys_mod.validate_access_key_workspace_ids({"version": 2}) is None

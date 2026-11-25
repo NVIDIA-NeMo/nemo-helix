@@ -31,8 +31,7 @@ deny_request if {
 	not access_key_workspace_allowed(workspace_scan)
 }
 
-# A limited key with scopes gets strict scope checks. Scope families no route declares are not ignored
-# (as they are for other tokens), and a route with no scopes is not open to it.
+# A limited key with scopes gets strict scope checks. Scope families without a declared route are not ignored
 deny_request if {
 	access_key_limited
 	some scope in extract_scopes

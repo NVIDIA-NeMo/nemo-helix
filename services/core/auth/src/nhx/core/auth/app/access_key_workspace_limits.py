@@ -126,7 +126,7 @@ async def _identity_limit(
         # No key ID (only service accounts get here, see _identities) or an unlimited one: neither lifts a limited
         # service account's denial, whoever owns that key.
         return await _limited_account_limit(principal_id, workspace_store) if is_service_account else None
-    # Only service-account keys can be limited (see access_key_workspace_ids); anything else is a mismatch.
+    # Only service-account keys can be limited (see validate_access_key_workspace_ids); anything else is a mismatch.
     if not is_service_account:
         return set()
     credential = await credential_store.get_active(ACCESS_KEY_CREDENTIAL_TYPE, jti)

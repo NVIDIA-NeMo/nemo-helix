@@ -36,9 +36,18 @@ def _cleanup_config_overrides():
         "filter[workspace]=team-a",
         "filter[name]=llama",
         "filter=" + json.dumps({"workspace": "team-a", "name": "llama"}),
-        "filter=" + json.dumps({"$or": [{"$not": {"name": "x"}}, {"workspace": "team-a"}]}),
+        "filter=" + json.dumps({"$or": [{"workspace": "team-a", "name": "x"}, {"workspace": "team-a", "name": "y"}]}),
+        "filter=" + json.dumps({"$and": [{"workspace": "team-a"}, {"$or": [{"name": "x"}, {"name": "y"}]}]}),
     ],
-    ids=["none", "unrelated", "same-workspace", "other-field", "json-same-workspace", "negation-stays-in-its-branch"],
+    ids=[
+        "none",
+        "unrelated",
+        "same-workspace",
+        "other-field",
+        "json-same-workspace",
+        "or-scoped-per-branch",
+        "or-under-scoped-and",
+    ],
 )
 def test_filter_within_path_workspace_is_allowed(query):
     assert workspace_filter_error(MODELS_PATH, QueryParams(query)) is None
@@ -54,8 +63,20 @@ def test_filter_within_path_workspace_is_allowed(query):
         "filter=" + json.dumps({"$not": {"workspace": "team-a"}}),
         "filter=" + json.dumps({"$not": {"$or": [{"workspace": "team-a"}]}}),
         "filter=" + json.dumps({"$not": {"$not": {"workspace": "team-a"}}}),
+        "filter=" + json.dumps({"$or": [{"workspace": "team-a"}, {"name": "llama"}]}),
+        "filter=" + json.dumps({"$or": [{"$not": {"name": "x"}}, {"workspace": "team-a"}]}),
     ],
-    ids=["bracket", "json", "nested-or", "non-eq-operator", "negated-path-workspace", "not-or", "not-not"],
+    ids=[
+        "bracket",
+        "json",
+        "nested-or",
+        "non-eq-operator",
+        "negated-path-workspace",
+        "not-or",
+        "not-not",
+        "or-with-unscoped-branch",
+        "or-with-negated-branch",
+    ],
 )
 def test_filter_naming_another_workspace_is_a_mismatch(query):
     assert workspace_filter_error(MODELS_PATH, QueryParams(query)) == WORKSPACE_FILTER_MISMATCH_DETAIL
