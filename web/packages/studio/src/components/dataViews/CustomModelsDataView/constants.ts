@@ -34,3 +34,13 @@ export const HAS_ADAPTERS = { adapters: { $exists: true } };
  * Default filter: show only "custom" models (has base_model, finetuning_type, or adapters).
  */
 export const DEFAULT_CUSTOM_MODELS_FILTER = { $or: [HAS_BASE_MODEL, HAS_ADAPTERS] };
+
+/** Selected types from the `{ type: true }` filter state (or a lone string, e.g. from an older URL). */
+export const toSelectedFinetuningTypes = (value: unknown): string[] => {
+  if (typeof value === 'string') return value ? [value] : [];
+  return value && typeof value === 'object' ? Object.keys(value) : [];
+};
+
+/** Filter state for the selected types; `undefined` clears the filter. */
+export const toFinetuningTypeFilterState = (values: string[]) =>
+  values.length > 0 ? Object.fromEntries(values.map((v) => [v, true as const])) : undefined;
