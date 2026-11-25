@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
-      group: nvskills-ci-request-${{ github.repository }}-${{ github.event.issue.number }}
+      group: nvskills-ci-request-${{ github.repository }}-${{ github.event.issue.number }}-${{ github.triggering_actor }}
       cancel-in-progress: true
     steps:
       # issue_comment runs from the default branch; never execute the PR's code
@@ -32,10 +32,12 @@ jobs:
       - name: Validate request
         id: request
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUEST_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         with:
           script: |
             const { resolveNvskillsRequest } = require('./.github/scripts/request-nvskills-ci.cjs');
-            await resolveNvskillsRequest({ core, github, context });
+            await resolveNvskillsRequest({ core, github, context, triggeringActor: process.env.REQUEST_TRIGGERING_ACTOR });
 
       - name: Dispatch NVSkills CI
         if: steps.request.outputs.should_dispatch == 'true'

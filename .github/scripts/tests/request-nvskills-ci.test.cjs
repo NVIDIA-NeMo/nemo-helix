@@ -10,6 +10,8 @@ const SKILL =
 
 function harness({
   role = "maintain",
+  actor = "maintainer",
+  triggeringActor = actor,
   body = "/nvskills-ci",
   state = "open",
   base = "main",
@@ -18,11 +20,14 @@ function harness({
 } = {}) {
   const outputs = {};
   const calls = [];
+  const permissionUsers = [];
   const listFiles = () => assert.fail("Use pagination for changed files.");
   return {
     outputs,
     calls,
+    permissionUsers,
     args: {
+      triggeringActor,
       core: {
         info() {},
         setOutput: (key, value) => (outputs[key] = value),
@@ -30,7 +35,7 @@ function harness({
       context: {
         eventName: "issue_comment",
         repo: { owner: "NVIDIA-NeMo", repo: "nemo-platform" },
-        actor: "maintainer",
+        actor,
         runId: 456,
         payload: {
           issue: { number: 123, pull_request: {} },
@@ -40,8 +45,9 @@ function harness({
       github: {
         rest: {
           repos: {
-            async getCollaboratorPermissionLevel() {
+            async getCollaboratorPermissionLevel({ username }) {
               calls.push("permission");
+              permissionUsers.push(username);
               return { data: { role_name: role } };
             },
             async getCommit({ ref }) {
@@ -110,10 +116,53 @@ for (const role of ["write", "read", "triage", "custom-maintainer"]) {
   });
 }
 
+test("a write user cannot rerun a maintainer request against the current PR head", async () => {
+  const { args, outputs, calls, permissionUsers } = harness({
+    actor: "maintainer",
+    triggeringActor: "developer",
+    role: "write",
+  });
+  await assert.rejects(resolveNvskillsRequest(args), /maintain or admin/);
+  assert.deepEqual(permissionUsers, ["developer"]);
+  assert.deepEqual(calls, ["permission"]);
+  assert.equal(outputs.should_dispatch, "false");
+  assert.equal(outputs.inputs, undefined);
+});
+
+for (const role of ["maintain", "admin"]) {
+  test(`an authorized ${role} rerun checks and records its initiator`, async () => {
+    const { args, outputs, permissionUsers } = harness({
+      actor: "original-maintainer",
+      triggeringActor: "rerun-maintainer",
+      role,
+    });
+    await resolveNvskillsRequest(args);
+    assert.deepEqual(permissionUsers, ["rerun-maintainer"]);
+    assert.equal(outputs.should_dispatch, "true");
+    const inputs = JSON.parse(outputs.inputs);
+    assert.equal(inputs.requested_by, "rerun-maintainer");
+    assert.equal(inputs.request_head_sha, "current-head");
+  });
+}
+
+for (const identity of [undefined, null, "", " "]) {
+  test(`fails closed without a triggering identity: ${JSON.stringify(identity)}`, async () => {
+    const { args, outputs, calls } = harness();
+    args.triggeringActor = identity;
+    await assert.rejects(
+      resolveNvskillsRequest(args),
+      /triggering actor identity/,
+    );
+    assert.deepEqual(calls, []);
+    assert.equal(outputs.should_dispatch, "false");
+    assert.equal(outputs.inputs, undefined);
+  });
+}
+
 for (const options of [
   { fork: true },
   { state: "closed" },
-  { base: "release/0.6" },
+  { base: "release/example" },
 ]) {
   test(`rejects unsupported PR: ${JSON.stringify(options)}`, async () => {
     const { args, outputs } = harness(options);

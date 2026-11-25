@@ -4,7 +4,12 @@
 const CUSTOMIZER_SKILL =
   "plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/";
 
-async function resolveNvskillsRequest({ core, github, context }) {
+async function resolveNvskillsRequest({
+  core,
+  github,
+  context,
+  triggeringActor,
+}) {
   core.setOutput("should_dispatch", "false");
   const { issue, comment } = context.payload;
   if (
@@ -16,12 +21,18 @@ async function resolveNvskillsRequest({ core, github, context }) {
     return;
   }
 
+  // Reruns retain context.actor from the original event. Authorize the person
+  // starting this attempt instead, with no fallback to the original actor.
+  if (typeof triggeringActor !== "string" || !triggeringActor.trim()) {
+    throw new Error("NVSkills CI requires the triggering actor identity.");
+  }
+
   const { owner, repo } = context.repo;
   const { data: permission } =
     await github.rest.repos.getCollaboratorPermissionLevel({
       owner,
       repo,
-      username: context.actor,
+      username: triggeringActor,
     });
   if (!["admin", "maintain"].includes(permission.role_name)) {
     throw new Error(
@@ -77,7 +88,7 @@ async function resolveNvskillsRequest({ core, github, context }) {
       request_base_ref: pr.base.ref,
       request_commit_title: commit.commit.message.split("\n")[0],
       request_comment_id: String(comment.id),
-      requested_by: context.actor,
+      requested_by: triggeringActor,
     }),
   );
   core.setOutput("should_dispatch", "true");
