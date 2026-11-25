@@ -196,24 +196,38 @@ container when one of them runs out of memory, unless the node's kubelet sets
 agent survives a tool it launched running out of memory, and in a sandbox it
 doesn't.
 
-A create request that carries
-`extensions["opensandbox.extensions.nemo-oom-kill-process"]` gets the pod
-annotation `memory.oom.group.memory-qos.nri.io/sandbox: "0"`. On a node running
-the [NRI memory-qos plugin](https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html),
-configured to allow it, the `sandbox` container then gets `memory.oom.group=0`,
-and only the process that ran out of memory dies, as under Docker:
+NeMo Evals' Harbor sandboxes and Gym hosts ask for Docker's behaviour with
+`extensions["opensandbox.extensions.nemo-oom-kill-process"]`. On a server that
+sets `NEMO_EXT_OOM_KILL_PROCESS=true`, the extension turns the request into the
+pod annotation `memory.oom.group.memory-qos.nri.io/sandbox: "0"`, and the
+[NRI memory-qos plugin](https://containers.github.io/nri-plugins/stable/docs/memory/memory-qos.html)
+gives the `sandbox` container `memory.oom.group=0`. Only the process that ran
+out of memory then dies, as under Docker. Without the setting, the request does
+nothing.
+
+A node without the plugin ignores the annotation, but a plugin whose list
+leaves it out, such as the chart's default, rejects the container with
+`CreateContainerError`, so no sandbox starts. Set it only when every sandbox
+node's plugin allows it. With the plugin's Helm chart:
 
 ```yaml
-# The plugin's config
-unifiedannotations:
-- memory.oom.group
+config:
+  unifiedAnnotations:
+    - memory.swap.max
+    - memory.high
+    - memory.oom.group
+```
+
+Then add the setting to the server's environment, next to `PYTHONPATH`:
+
+```yaml
+- name: NEMO_EXT_OOM_KILL_PROCESS
+  value: "true"
 ```
 
 The plugin needs NRI on in the node's container runtime: on by default in
-containerd 2.x; for CRI-O, check `enable_nri` in its config. On a node without it the annotation does
-nothing, and the whole container dies as before. NeMo Evals' Harbor sandboxes
-and Gym hosts send the request. Kata sandboxes don't need it: their guest kernel
-kills only the process.
+containerd 2.x; for CRI-O, check `enable_nri` in its config. Kata sandboxes
+don't need any of this: their guest kernel kills only the process.
 
 ### Enable it with the chart
 

@@ -514,7 +514,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[AGENT_BUNDLE_EXTENSION_KEY] = self._agent_bundle.to_json()
         if self._services is not None:
             extensions[EXTENSION_KEY] = self._services.to_json()
-        # Kill only the process that runs out of memory, as Docker does, where the node runs the NRI memory-qos plugin.
+        # Kill only the process that runs out of memory, as Docker does, where the OpenSandbox server enables it.
         if self._runtime == "kubernetes":
             extensions[OOM_KILL_PROCESS_EXTENSION_KEY] = "true"
         return extensions

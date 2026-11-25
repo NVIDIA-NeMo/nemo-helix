@@ -6,8 +6,8 @@
 A create request whose ``extensions`` carry ``EXTENSION_KEY`` (a JSON ``ComposeServices``) gets
 those services as extra containers in its pod. One that carries ``AGENT_BUNDLE_EXTENSION_KEY`` (a
 JSON ``SandboxAgentBundle``) gets an init container that installs the agent into ``/installed-agent``.
-One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation, so
-that on a node running the plugin an out-of-memory kill takes only the process, not the container.
+One that carries ``OOM_KILL_PROCESS_EXTENSION_KEY`` gets the NRI memory-qos plugin's annotation, when the
+server sets ``OOM_KILL_PROCESS_ENV_VAR``, so that an out-of-memory kill takes only the process, not the container.
 The stock server copies each extension onto the pod as an annotation (``POD_ANNOTATION``,
 ``AGENT_BUNDLE_POD_ANNOTATION``, ``OOM_KILL_PROCESS_POD_ANNOTATION``), so the spec travels with the
 manifest:
@@ -92,6 +92,10 @@ except ImportError:  # Servers before multi-tenancy (opensandbox-server 0.2.2) h
 # Under the server's logger tree, which is the only one its logging config enables.
 logger = logging.getLogger("opensandbox_server.nemo_ext")
 
+# Set to "true" only where every sandbox node's NRI memory-qos plugin allows memory.oom.group: a plugin that doesn't
+# rejects the container.
+OOM_KILL_PROCESS_ENV_VAR = "NEMO_EXT_OOM_KILL_PROCESS"
+
 # The label a server with tenants puts on a tenant's sandboxes and their pods. Spelled out here because
 # ``SANDBOX_TENANT_LABEL`` doesn't exist in servers without tenants, and importing it would stop them.
 TENANT_LABEL = "opensandbox.io/tenant"
@@ -150,7 +154,7 @@ class NemoComposeProvider(BatchSandboxProvider):
         annotations = (template.get("metadata") or {}).get("annotations", {})
         pull_policy = self.image_pull_policy or "IfNotPresent"
 
-        if OOM_KILL_PROCESS_POD_ANNOTATION in annotations:
+        if OOM_KILL_PROCESS_POD_ANNOTATION in annotations and os.environ.get(OOM_KILL_PROCESS_ENV_VAR) == "true":
             add_process_oom_kill(template.setdefault("metadata", {}))
 
         # pydantic's ValidationError is a ValueError, so the client gets a 400 with every problem listed.

@@ -178,13 +178,24 @@ def test_bundle_is_added_to_the_stock_manifest_before_the_services(
 
 
 @pytest.mark.parametrize("requested", [True, False])
-def test_an_oom_kill_request_annotates_the_pod_for_the_nri_plugin(
-    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, requested: bool
+@pytest.mark.parametrize("server_setting", ["true", None])
+def test_an_oom_kill_request_annotates_the_pod_only_on_a_server_that_enables_it(
+    provider: ext.NemoComposeProvider,
+    k8s: FakeK8sClient,
+    monkeypatch: pytest.MonkeyPatch,
+    requested: bool,
+    server_setting: str | None,
 ) -> None:
+    """A node plugin that doesn't allow memory.oom.group rejects the container, so only the operator can turn it on."""
+    if server_setting is None:
+        monkeypatch.delenv(ext.OOM_KILL_PROCESS_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(ext.OOM_KILL_PROCESS_ENV_VAR, server_setting)
+
     _create(provider, {OOM_KILL_PROCESS_POD_ANNOTATION: "true"} if requested else None)
 
     annotations = k8s.created[0]["spec"]["template"]["metadata"].get("annotations") or {}
-    assert ("memory.oom.group.memory-qos.nri.io/sandbox" in annotations) is requested
+    assert ("memory.oom.group.memory-qos.nri.io/sandbox" in annotations) is (requested and server_setting == "true")
 
 
 def test_invalid_bundle_is_a_value_error_and_creates_nothing(
