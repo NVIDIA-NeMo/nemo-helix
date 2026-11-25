@@ -6,10 +6,10 @@
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
     from sandboxed_gym.backends._opensandbox_driver import OpenSandboxDriver
@@ -22,6 +22,7 @@ from sandboxed_gym.host.models import (
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    open_host,
     render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
@@ -39,6 +40,10 @@ AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
 INSTALLED_AGENT_DIR = "/installed-agent"
 # Prepends the agent's directory to the image's PATH, then fails the host at once if the agent can't run.
 _BUNDLE_LAUNCHER = 'export PATH="${0%/*}:$PATH" && "$0" --version >&2 && exec "$@"'
+#: The OpenSandbox server's auth header, and the variable the SDK reads its key from when the
+#: connection names none. Spelled out so the provider still imports without the SDK.
+OPEN_SANDBOX_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
+_OPEN_SANDBOX_API_KEY_ENV = "OPEN_SANDBOX_API_KEY"
 
 
 def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]:
@@ -246,6 +251,21 @@ class OpenSandboxGymHostProvider:
             headers={str(k): str(v) for k, v in (endpoint.headers or {}).items()},
         )
 
+    def _proxy_credential_headers(self) -> dict[str, str]:
+        """The API key for requests that reach the host through the OpenSandbox server's proxy.
+
+        A server with tenants checks the key on proxied requests as well as on its own API, and answers
+        401 without it, so the host never reports ready. A single-tenant server doesn't check, and
+        ignores the header. The server drops it before forwarding, so the host never sees it.
+
+        Same rule as the SDK's own requests to a sandbox: only through the proxy. Direct to the pod,
+        the key would reach the sandbox, which runs untrusted environment code.
+        """
+        if not self._connection.get("use_server_proxy"):
+            return {}
+        api_key = self._connection.get("api_key") or os.environ.get(_OPEN_SANDBOX_API_KEY_ENV, "")
+        return {OPEN_SANDBOX_API_KEY_HEADER: str(api_key)} if api_key else {}
+
     def _absolute_url(self, endpoint: str) -> str:
         """Add http or https to a bare host:port returned by the SDK.
 
@@ -282,6 +302,7 @@ class OpenSandboxGymHostProvider:
             rollout_url=routes.rollout_url,
             headers=routes.headers,
             provider=provider,
+            _credentials=self._proxy_credential_headers(),
         )
 
     async def wait_ready(self, handle: "GymHostHandle[OpenSandboxDriver]", timeout_s: float) -> None:
@@ -290,7 +311,7 @@ class OpenSandboxGymHostProvider:
         last_error: Exception | None = None
         while asyncio.get_running_loop().time() < deadline:
             try:
-                body = await asyncio.to_thread(self._get_json, handle.health_url, handle.headers)
+                body = await asyncio.to_thread(self._get_json, handle)
                 if body.get("status") == "ready":
                     return
                 if body.get("status") == "failed":
@@ -310,10 +331,9 @@ class OpenSandboxGymHostProvider:
             + (f": {last_error}" if last_error is not None else "")
         )
 
-    def _get_json(self, url: str, headers: Mapping[str, str]) -> dict[str, Any]:
-        request = Request(url, method="GET", headers=dict(headers))
+    def _get_json(self, handle: "GymHostHandle[OpenSandboxDriver]") -> dict[str, Any]:
         try:
-            with urlopen(request, timeout=10) as response:
+            with open_host(handle, handle.health_url, timeout=10) as response:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:
