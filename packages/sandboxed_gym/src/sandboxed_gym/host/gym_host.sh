@@ -26,10 +26,12 @@ fi
 if [ -n "${NHX_GYM_HOST_CONTAINER_ENGINE:-}" ]; then
     :
 elif [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
+    # Found before the bundle's directory goes on PATH, so a `timeout` the bundle ships can't stand in for it.
+    timeout_command=$(command -v timeout 2>/dev/null || true)
     PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
     export PATH
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    if [ -n "$timeout_command" ]; then
+        "$timeout_command" 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
     else
         "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
     fi

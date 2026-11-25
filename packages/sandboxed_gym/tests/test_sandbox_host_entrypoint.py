@@ -408,6 +408,9 @@ def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
     tools.mkdir()
     (tools / "timeout").write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$*" > "{tmp_path / "timeout-args"}"\nexit 124\n')
     (tools / "timeout").chmod(0o755)
+    # A `timeout` in the bundle's own directory must not replace the system one.
+    (agent.parent / "timeout").write_text("#!/bin/sh\nexit 0\n")
+    (agent.parent / "timeout").chmod(0o755)
 
     result = subprocess.run(
         [
