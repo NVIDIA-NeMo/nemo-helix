@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -19,6 +20,7 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import execution
 from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_helix_plugin.client.auth import StaticToken
+from nemo_helix_plugin.client.errors import NotFoundError
 from pytest_httpserver import HTTPServer
 from starlette.testclient import TestClient
 
@@ -209,3 +211,33 @@ def test_get_events_returns_empty_when_no_local_and_no_fileset(tmp_path: Path) -
 
     assert resp.status_code == 200
     assert resp.json() == {"events": []}
+
+
+def _get_events_with_fallback(tmp_path: Path, failure: Exception) -> Any:
+    mock_platform = MagicMock()
+    mock_platform.entities.get_entity_by_name.return_value = SimpleNamespace(
+        name="my-run", data={"events_fileset": "default/my-events-fs"}
+    )
+    with (
+        patch.object(events, "hub", events.EventHub()),
+        patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=tmp_path / "missing.jsonl"),
+        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
+        patch("nemo_agent_hardener_plugin.api.v2.events.download_fileset", side_effect=failure),
+    ):
+        app = FastAPI()
+        app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
+        return TestClient(app).get("/v2/workspaces/default/runs/my-run/events?after=0")
+
+
+def test_get_events_is_empty_when_the_events_fileset_is_gone(tmp_path: Path) -> None:
+    gone = NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://files")))
+    resp = _get_events_with_fallback(tmp_path, gone)
+    assert resp.status_code == 200
+    assert resp.json() == {"events": []}
+
+
+def test_get_events_reports_a_failed_fallback_instead_of_an_empty_run(tmp_path: Path) -> None:
+    """An empty list would read as a run that emitted nothing; the caller needs to know the load failed."""
+    resp = _get_events_with_fallback(tmp_path, RuntimeError("files service down"))
+    assert resp.status_code == 502
+    assert "files service down" in resp.json()["detail"]

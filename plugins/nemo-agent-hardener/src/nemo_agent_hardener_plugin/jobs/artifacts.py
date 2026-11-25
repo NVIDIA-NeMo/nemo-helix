@@ -5,7 +5,7 @@
 
 Saves the run's Studio-facing results (mitigations, validation scorecard, composed workflow) and moves
 suites/hitlogs through platform filesets (download an uploaded replay hitlog or benign suite; persist the
-run's produced hitlog for later replay). All best-effort — capturing an artifact never fails the run.
+run's produced hitlog for later replay). Publishing is best-effort; scoping the run's outputs is not.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any
 import yaml
 from nemo_agent_hardener_plugin.api.v2.events import _events_path
 from nemo_agent_hardener_plugin.filesets import download_fileset, upload_file_to_fileset
-from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, AgentHardenerRunError
+from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,8 @@ def _prepare_artifact_capture(capture: ArtifactCapture, manifest: str) -> str:
     """Create a run-scoped manifest and arm exact artifact capture.
 
     The copy stays beside the source manifest so every relative project path
-    keeps its native meaning. Capture is best effort: if the copy cannot be
-    prepared, the original manifest still runs and publication fails closed.
+    keeps its native meaning. A copy that cannot be prepared fails the run:
+    running unscoped would publish nothing, or another job's outputs.
     """
     _cleanup_artifact_capture(capture)
     manifest_path = Path(manifest)
@@ -114,11 +114,14 @@ def _prepare_artifact_capture(capture: ArtifactCapture, manifest: str) -> str:
         descriptor = os.open(scoped_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             yaml.safe_dump(data, stream, sort_keys=False)
-    except Exception:
+    except Exception as exc:
         if scoped_path is not None:
             scoped_path.unlink(missing_ok=True)
-        logger.warning("failed to scope Agent Hardener artifacts to this invocation", exc_info=True)
-        return manifest
+        if isinstance(exc, (yaml.YAMLError, ValueError)):
+            raise AgentHardenerRunError(
+                CATEGORY_MANIFEST, f"could not scope this run's artifacts to its manifest: {exc}"
+            ) from exc
+        raise
     capture.run_dir = run_dir
     capture.hitlog_dir = hitlog_dir
     capture.hitlog_prefix = hitlog_prefix

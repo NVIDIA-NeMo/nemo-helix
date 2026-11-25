@@ -9,6 +9,7 @@ import os
 import types
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 from _doubles import make_job_context
@@ -22,6 +23,12 @@ from nemo_agent_hardener_plugin.config import (
 from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
+from nemo_helix_plugin.client.errors import (
+    AuthenticationError,
+    NemoHTTPError,
+    NemoTransportError,
+    NotFoundError,
+)
 
 
 def _config(tmp_path: Path) -> AgentHardenerConfig:
@@ -79,31 +86,68 @@ def test_resolve_inference_key_prefers_secrets_over_env(tmp_path: Path, monkeypa
     assert "agent-hardener-inference-key" in source
 
 
-def test_resolve_inference_key_falls_back_to_env_when_store_unavailable(
+def _store_raising(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+    def access_secret(**_kwargs: object) -> None:
+        raise exc
+
+    monkeypatch.setattr(credentials, "make_sdk", lambda base: types.SimpleNamespace())
+    monkeypatch.setattr(
+        credentials, "client_from_platform", lambda sdk, cls: types.SimpleNamespace(access_secret=access_secret)
+    )
+    monkeypatch.setattr(credentials.sys.stdin, "isatty", lambda: False)
+
+
+def _http_error(cls: type[NemoHTTPError], status: int) -> NemoHTTPError:
+    return cls(httpx.Response(status, request=httpx.Request("GET", "http://secrets")))
+
+
+def test_resolve_inference_key_falls_back_to_env_silently_when_secret_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv(INFERENCE_API_KEY_ENVVAR, "env-value")
+    _store_raising(monkeypatch, _http_error(NotFoundError, 404))
+
+    assert credentials.resolve_inference_key(_config(tmp_path)) == ("env-value", "environment")
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _http_error(AuthenticationError, 401),
+        NemoTransportError(httpx.ConnectError("refused", request=httpx.Request("GET", "http://secrets"))),
+    ],
+)
+def test_resolve_inference_key_warns_when_store_refuses_or_is_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: Exception
+) -> None:
+    """setup can run before the platform is up, but a store failure must not look like a missing secret."""
+    monkeypatch.setenv(INFERENCE_API_KEY_ENVVAR, "env-value")
+    _store_raising(monkeypatch, exc)
+
+    assert credentials.resolve_inference_key(_config(tmp_path)) == ("env-value", "environment")
+    out = capsys.readouterr().out
+    assert type(exc).__name__ in out
+    assert "env-value" not in out
+
+
+def test_resolve_inference_key_does_not_hide_a_non_client_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(INFERENCE_API_KEY_ENVVAR, "env-value")
+    _store_raising(monkeypatch, KeyError("bug"))
 
-    def _raise(base: str) -> None:
-        raise RuntimeError("platform unreachable")
-
-    monkeypatch.setattr(credentials, "make_sdk", _raise)
-    monkeypatch.setattr(credentials.sys.stdin, "isatty", lambda: False)
-
-    value, source = credentials.resolve_inference_key(_config(tmp_path))
-    assert (value, source) == ("env-value", "environment")
+    with pytest.raises(KeyError):
+        credentials.resolve_inference_key(_config(tmp_path))
 
 
 def test_resolve_inference_key_returns_none_when_platform_down_and_non_interactive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(INFERENCE_API_KEY_ENVVAR, raising=False)
-
-    def _raise(base: str) -> None:
-        raise RuntimeError("platform unreachable")
-
-    monkeypatch.setattr(credentials, "make_sdk", _raise)
-    monkeypatch.setattr(credentials.sys.stdin, "isatty", lambda: False)
+    _store_raising(
+        monkeypatch, NemoTransportError(httpx.ConnectError("refused", request=httpx.Request("GET", "http://secrets")))
+    )
 
     value, source = credentials.resolve_inference_key(_config(tmp_path))
     assert (value, source) == (None, "unresolved")

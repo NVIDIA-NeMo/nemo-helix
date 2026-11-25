@@ -4,8 +4,8 @@
 """Read/write the war-game's entity-store records.
 
 AgentHardenerRun rows (create/pre-create/update + the data payload) and the manifest-entity reads the
-run depends on (configured rounds, cached benign suite, persisting a reviewed suite). All best-effort:
-recording never fails the war-game itself.
+run depends on (configured rounds and models, cached benign suite, persisting a reviewed suite). Recording
+and the suite cache are best-effort; the rounds and models a run uses are not.
 """
 
 from __future__ import annotations
@@ -151,38 +151,35 @@ def _update_run(sdk: Any, *, workspace: str, name: str, data: dict[str, Any]) ->
         logger.warning("failed to update AgentHardenerRun record", exc_info=True)
 
 
+def _manifest_data(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, Any]:
+    record = (
+        client_from_platform(sdk, EntitiesClient)
+        .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
+        .data()
+    )
+    return getattr(record, "data", {}) or {}
+
+
 def _manifest_rounds(sdk: Any, manifest_id: str, ctx: JobContext) -> int:
-    """The manifest's configured number of hardening rounds (>=1); 1 if unset/unavailable (best-effort)."""
+    """The manifest's configured number of hardening rounds (>=1); 1 when unset.
+
+    A failed read propagates to the run boundary rather than silently running a single round.
+    """
     if sdk is None:
         return 1
-    try:
-        record = (
-            client_from_platform(sdk, EntitiesClient)
-            .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
-            .data()
-        )
-        rounds = (getattr(record, "data", {}) or {}).get("rounds")
-        return rounds if isinstance(rounds, int) and rounds >= 1 else 1
-    except Exception:  # reading config is best-effort; default to a single round
-        logger.warning("failed to read rounds for manifest %s", manifest_id, exc_info=True)
-        return 1
+    rounds = _manifest_data(sdk, manifest_id, ctx).get("rounds")
+    return rounds if isinstance(rounds, int) and rounds >= 1 else 1
 
 
 def _manifest_models(sdk: Any, manifest_id: str, ctx: JobContext) -> dict[str, Any]:
-    """The manifest's stored default model selection (attack/analysis/agent), or ``{}`` (best-effort)."""
+    """The manifest's stored default model selection, or ``{}`` when unset.
+
+    A failed read propagates to the run boundary rather than silently using agent-hardener's defaults.
+    """
     if sdk is None:
         return {}
-    try:
-        record = (
-            client_from_platform(sdk, EntitiesClient)
-            .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
-            .data()
-        )
-        models = (getattr(record, "data", {}) or {}).get("models")
-        return models if isinstance(models, dict) else {}
-    except Exception:  # reading config is best-effort; fall back to agent-hardener's built-in model defaults
-        logger.warning("failed to read models for manifest %s", manifest_id, exc_info=True)
-        return {}
+    models = _manifest_data(sdk, manifest_id, ctx).get("models")
+    return models if isinstance(models, dict) else {}
 
 
 def _cached_benign_suite(sdk: Any, manifest_id: str, ctx: JobContext) -> list[dict[str, str]]:
@@ -190,12 +187,7 @@ def _cached_benign_suite(sdk: Any, manifest_id: str, ctx: JobContext) -> list[di
     if sdk is None:
         return []
     try:
-        record = (
-            client_from_platform(sdk, EntitiesClient)
-            .get_entity_by_name(name=manifest_id, entity_type=AGENT_HARDENER_MANIFEST_TYPE, workspace=ctx.workspace)
-            .data()
-        )
-        suite = (getattr(record, "data", {}) or {}).get("benign_suite") or []
+        suite = _manifest_data(sdk, manifest_id, ctx).get("benign_suite") or []
         return [row for row in suite if isinstance(row, dict)]
     except Exception:  # reading the cache is best-effort; a miss just re-generates
         logger.warning("failed to read cached benign suite for manifest %s", manifest_id, exc_info=True)
