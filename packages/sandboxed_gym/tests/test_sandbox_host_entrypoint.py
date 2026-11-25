@@ -436,14 +436,20 @@ def test_the_agent_bundle_check_has_a_deadline(tmp_path: Path) -> None:
     assert (tmp_path / "timeout-args").read_text() == f"120 {agent} --version\n"
 
 
-def test_an_image_with_a_container_engine_leaves_the_agent_check_to_the_runtime(tmp_path: Path) -> None:
-    """That image starts as root for its setup, so the agent must wait for the runtime's privilege drop."""
+def test_an_image_with_a_container_engine_is_refused(tmp_path: Path) -> None:
+    """That image starts as root for its setup; this script would run the agent and unpack the job's PATH first."""
+    from sandboxed_gym.runtime.gym_host_runtime import encode_job_env
+
     paths = _fake_host(tmp_path)
-    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\nenv > "{tmp_path / "python-env"}"\n', encoding="utf-8")
+    (paths["venv"] / "bin" / "python").write_text(f'#!/bin/sh\ntouch "{tmp_path / "runtime-ran"}"\n', encoding="utf-8")
     agent = tmp_path / "installed-agent" / "bin" / "codex"
     agent.parent.mkdir(parents=True)
     agent.write_text(f'#!/bin/sh\ntouch "{tmp_path / "agent-ran"}"\n', encoding="utf-8")
     agent.chmod(0o755)
+    job_bin = tmp_path / "job-bin"
+    job_bin.mkdir()
+    (job_bin / "python3").write_text(f'#!/bin/sh\ntouch "{tmp_path / "job-python-ran"}"\n', encoding="utf-8")
+    (job_bin / "python3").chmod(0o755)
 
     result = subprocess.run(
         [
@@ -459,17 +465,17 @@ def test_an_image_with_a_container_engine_leaves_the_agent_check_to_the_runtime(
             "SANDBOXED_GYM_TREE": str(paths["tree"]),
             "NHX_GYM_AGENT_EXECUTABLE": str(agent),
             "NHX_GYM_HOST_CONTAINER_ENGINE": "rootless-podman",
+            "NHX_GYM_JOB_ENV": encode_job_env({"PATH": f"{job_bin}:{os.environ['PATH']}"}),
         },
         capture_output=True,
         text=True,
         timeout=60,
     )
 
-    assert result.returncode == 0, result.stderr
-    assert not (tmp_path / "agent-ran").exists()
-    runtime_env = dict(line.split("=", 1) for line in (tmp_path / "python-env").read_text().splitlines() if "=" in line)
-    assert runtime_env["NHX_GYM_AGENT_EXECUTABLE"] == str(agent)
-    assert not runtime_env["PATH"].startswith(str(agent.parent))
+    assert result.returncode == 1
+    assert "does not support an image with a container engine" in result.stderr
+    for marker in ("agent-ran", "job-python-ran", "runtime-ran"):
+        assert not (tmp_path / marker).exists(), marker
 
 
 def test_ray_head_starts_in_the_background_and_is_published(tmp_path: Path) -> None:
