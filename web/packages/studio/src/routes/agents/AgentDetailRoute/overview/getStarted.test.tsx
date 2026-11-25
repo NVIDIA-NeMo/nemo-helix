@@ -14,7 +14,7 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -60,7 +60,10 @@ describe('Agent overview before the agent reports anything', () => {
     await user.click(
       await screen.findByRole('button', { name: 'Get coding agent prompt for importing traces' })
     );
-    await user.click(await screen.findByRole('button', { name: 'Copy code' }));
+    // Scoped to the modal: the empty Recent experiments panel behind it carries its own
+    // CLI / coding-agent snippet with an identical copy button.
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Copy code' }));
 
     const prompt = await navigator.clipboard.readText();
     expect(prompt).toContain('nemo-intake');

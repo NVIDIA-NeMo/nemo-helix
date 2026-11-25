@@ -96,14 +96,14 @@ def test_declarations_survive_the_entity_store(ctx: ClientContext) -> None:
         "analyst",
         context_schema=_CONTEXT_SCHEMA,
         default_input="Analyze recent runs.",
-        post_run_actions={"insights.analysis", "agents.noop"},
+        post_run_actions={"compass.save-insights", "agents.noop"},
     )
     stored = AgentsResource(ctx.client).get("analyst")
 
     for agent in (created, stored):
         assert agent["context_schema"] == _CONTEXT_SCHEMA
         assert agent["default_input"] == "Analyze recent runs."
-        assert agent["post_run_actions"] == ["agents.noop", "insights.analysis"]
+        assert agent["post_run_actions"] == ["agents.noop", "compass.save-insights"]
 
 
 def test_an_agent_without_declarations_allows_only_noop(ctx: ClientContext) -> None:
@@ -111,10 +111,10 @@ def test_an_agent_without_declarations_allows_only_noop(ctx: ClientContext) -> N
 
     assert AgentsResource(ctx.client).get("calc")["post_run_actions"] == ["agents.noop"]
     error = _execute_error(
-        ctx, "run-calc", {"agent": "calc", "input": "hello", "post_run_action": {"kind": "insights.analysis"}}
+        ctx, "run-calc", {"agent": "calc", "input": "hello", "post_run_action": {"kind": "compass.save-insights"}}
     )
     assert 400 <= error.status_code < 500
-    assert "'insights.analysis' is not one this agent declares" in str(error)
+    assert "'compass.save-insights' is not one this agent declares" in str(error)
 
 
 def test_register_rejects_a_context_schema_with_a_reference(ctx: ClientContext) -> None:

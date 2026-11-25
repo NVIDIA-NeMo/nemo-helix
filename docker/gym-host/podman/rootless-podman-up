@@ -1,0 +1,82 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Root-only setup for rootless Podman in the sandboxed Gym host, run once by the host runtime before it
+# drops to the container user. Requires a Kata sandbox created with OpenSandbox's
+# `bootstrap.execd.isolation` extension: SYS_ADMIN for the mounts below, and NET_ADMIN still dropped,
+# so nothing here or later can change the pod's network or its egress rules.
+#
+# Containers live in the container user's own user and network namespaces. Podman builds bridge
+# networks and DNS there; pasta carries their traffic out as ordinary sockets in the pod's network
+# namespace, where the egress policy applies.
+set -eu
+
+# Fixed: the Gym host drops to this user, and the image's DOCKER_HOST and storage.conf name its uid.
+USER_NAME=docker-user
+USER_ID=$(id -u "$USER_NAME")
+RUN_DIR=/run/user/$USER_ID
+SOCKET=$RUN_DIR/podman/podman.sock
+HOME_DIR=$(getent passwd "$USER_NAME" | cut -d: -f6)
+STORAGE=$HOME_DIR/.local/share/containers
+STORAGE_IMAGE=/var/lib/nhx-container-storage.img
+LOG=${NHX_CONTAINER_ENGINE_LOG:-/tmp/podman-service.log}
+# Operator settings, from the platform config: the storage file's size in bytes, and "1" to mount it with
+# discard, so space freed inside it goes back to the node instead of staying allocated until the host ends.
+STORAGE_SIZE=${NHX_CONTAINER_STORAGE_SIZE:-30G}
+case ${NHX_CONTAINER_STORAGE_DISCARD:-0} in
+  1) MOUNT_OPTIONS=loop,discard ;;
+  0) MOUNT_OPTIONS=loop ;;
+  *) echo "NHX_CONTAINER_STORAGE_DISCARD must be 0 or 1, not '$NHX_CONTAINER_STORAGE_DISCARD'" >&2; exit 1 ;;
+esac
+
+# pasta attaches its end of the container network through a tap device.
+mkdir -p /dev/net
+[ -e /dev/net/tun ] || mknod -m 666 /dev/net/tun c 10 200
+
+# Kata's root filesystem is virtio-fs, where overlay can't unpack layers under remapped uids. Images
+# live on an ext4 file mounted through a loop device instead.
+[ -e /dev/loop-control ] || mknod /dev/loop-control c 10 237
+for i in 0 1 2 3 4 5 6 7; do [ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i"; done
+mkdir -p "$STORAGE"
+if ! mountpoint -q "$STORAGE"; then
+  if [ ! -e "$STORAGE_IMAGE" ]; then
+    truncate -s "$STORAGE_SIZE" "$STORAGE_IMAGE"
+    mkfs.ext4 -q -F "$STORAGE_IMAGE"
+  fi
+  mount -o "$MOUNT_OPTIONS" "$STORAGE_IMAGE" "$STORAGE"
+fi
+
+# netavark writes sysctls in the container user's network namespace. The pod's own network sysctls
+# still need NET_ADMIN, which this sandbox doesn't have.
+mount -o remount,rw /proc/sys
+# Kubernetes masks parts of /proc with overmounts. Inside a user namespace the kernel refuses a fresh
+# /proc mount while those exist, so containers couldn't get their own. On Kata they hide only the
+# guest VM's details. Deepest first, so a parent is never unmounted under a child.
+grep ' /proc/' /proc/self/mountinfo | awk '{print $5}' | sort -r | while read -r mount_point; do
+  umount "$mount_point" 2>/dev/null || umount -l "$mount_point"
+done
+
+mkdir -p "$RUN_DIR/podman"
+chown -R "$USER_NAME:$USER_NAME" "$RUN_DIR" "$STORAGE"
+chmod 700 "$RUN_DIR"
+
+# Detached, with no inherited output: a caller waiting on this script's output must not be held
+# open by the long-lived service.
+setsid -f runuser -u "$USER_NAME" -- env HOME="$HOME_DIR" XDG_RUNTIME_DIR="$RUN_DIR" \
+  podman system service --time=0 "unix://$SOCKET" </dev/null >"$LOG" 2>&1
+
+attempt=0
+until DOCKER_HOST="unix://$SOCKET" docker version >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -gt 60 ]; then
+    echo "podman's Docker API did not start; service log:" >&2
+    tail -n 20 "$LOG" >&2
+    exit 1
+  fi
+  sleep 0.5
+done
+
+# The Docker CLI's default socket, for anything that runs without the image's DOCKER_HOST: an agent's shell
+# tool may start commands with only the agent's own variables.
+ln -sfn "$SOCKET" /var/run/docker.sock

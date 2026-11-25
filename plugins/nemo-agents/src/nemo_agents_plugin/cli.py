@@ -24,6 +24,8 @@ group by ``nemo-agent-optimization-plugin``, which dispatches
 **Agent Resources commands (require a running cluster):**
 
 - ``register``     — register an agent config on the platform
+- ``types``        — list installed plugin-managed agent types
+- ``create``       — create this workspace's agent of a plugin-managed agent type
 - ``list``         — list agents
 - ``get``          — get an agent by name
 - ``delete``       — delete an agent
@@ -41,7 +43,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -61,6 +62,7 @@ import httpx
 import typer
 import yaml
 from nemo_agents_plugin.agent_config import AgentRegistration
+from nemo_agents_plugin.cli_context_defaults import fill_context_defaults_on_submit
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
     AGENT_SPEC_FILENAME,
@@ -97,6 +99,8 @@ from nemo_helix_plugin.agents.types import (
     Labels,
     ListAgentsQueryParams,
     ListSessionsQueryParams,
+    PluginManagedAgentSpec,
+    PluginManagedAgentTypeInfo,
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.cli import NemoCLI
@@ -154,6 +158,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from typer.main import get_command as _typer_get_command
@@ -170,7 +175,14 @@ _AGENT_LIST_COLUMNS = [
     Column("workspace"),
     Column("description"),
     Column("config_format"),
+    Column("plugin_managed_agent.type", header="type"),
     Column("created_at"),
+]
+_PLUGIN_MANAGED_AGENT_TYPE_COLUMNS = [
+    Column("type"),
+    Column("title"),
+    Column("run_arguments", header="run arguments"),
+    Column("agent", header="agent here"),
 ]
 _DEPLOYMENT_LIST_COLUMNS = [
     Column("name"),
@@ -328,8 +340,15 @@ class AgentsCLI(NemoCLI):
         _register_platform_commands(app)
         _register_environment_commands(app)
         _register_post_run_action_commands(app)
+        _register_plugin_managed_agent_commands(app)
         _register_job_commands(app)
         return app
+
+    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
+        # ``nemo agents execute`` fills a plugin-managed agent's hinted context
+        # defaults (e.g. models) from the CLI's configuration.
+        if job_cls.__module__ == "nemo_agents_plugin.jobs.execute" and job_cls.name == _EXECUTE_JOB_TYPE:
+            fill_context_defaults_on_submit(group)
 
 
 # ---------------------------------------------------------------------------
@@ -1942,6 +1961,118 @@ def _register_post_run_action_commands(app: typer.Typer) -> None:
 _EXECUTE_JOB_TYPE = "execute"
 
 
+def _register_plugin_managed_agent_commands(app: typer.Typer) -> None:
+    """Register ``types`` and ``create``, for agents of plugin-managed agent types."""
+
+    @app.command(name="types", rich_help_panel="Agent Resources")
+    @collect_warnings
+    def list_types(
+        ctx: typer.Context,
+        workspace: WorkspaceOption = None,
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+    ) -> None:
+        """List the plugin-managed agent types installed on the platform.
+
+        Each row shows the context a run takes (optional keys in brackets) and
+        this workspace's agent of the type, if it has one. Create one with
+        `nemo agents create <type>`, then run it with `nemo agents execute --agent <name>`.
+        """
+        workspace = resolve_cli_workspace(ctx, workspace)
+        resolved_output_format = resolve_output_format(ctx, output_format)
+        check_output_columns_with_format(columns, resolved_output_format)
+        if resolved_output_format == "code":
+            handle_code_generation(
+                AgentsClient,
+                "list_plugin_managed_agent_types",
+                {"workspace": workspace},
+                resolved_output_format,
+                cli_state(ctx),
+            )
+            return
+        client = _agents_client(_resolve_base_url(), workspace)
+        types = _run_sdk("GET agent API", lambda: client.list_plugin_managed_agent_types(workspace=workspace).data())
+        rows = [type_info.model_dump(mode="json") for type_info in types]
+        if resolved_output_format in ("table", "markdown", "csv"):
+            # A readable summary of each type's context, for the formats that show columns.
+            rows = [{**row, "run_arguments": _run_arguments(type_info)} for row, type_info in zip(rows, types)]
+        format_output(
+            rows,
+            is_list=True,
+            output_format=resolved_output_format,
+            output_columns=columns
+            if columns is not None and columns.strip() != "default"
+            else _PLUGIN_MANAGED_AGENT_TYPE_COLUMNS,
+            no_truncate=_resolve_no_truncate(ctx, no_truncate),
+            timestamp_format=_resolve_timestamp_format(ctx),
+        )
+
+    @app.command(name="create", rich_help_panel="Agent Resources")
+    def create(
+        typer_ctx: typer.Context,
+        agent_type: str = typer.Argument(
+            ...,
+            metavar="TYPE",
+            help="Plugin-managed agent type ID. List the installed types with `nemo agents types`.",
+        ),
+        name: str | None = typer.Option(None, "--name", "-n", help="Agent name. Defaults to the type's default name."),
+        description: str = typer.Option("", "--description"),
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Agent label as KEY=VALUE, e.g. team=search. Repeatable.",
+        ),
+        workspace: WorkspaceOption = None,
+    ) -> None:
+        """Create this workspace's agent of a plugin-managed agent type.
+
+        The type supplies the agent's config, so there is nothing to write: a
+        workspace holds at most one agent of each type, and it stays current as
+        the plugin is upgraded.
+        """
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        client = _agents_client(_resolve_base_url(), workspace)
+        if name is None:
+            types = _run_sdk(
+                "GET agent API", lambda: client.list_plugin_managed_agent_types(workspace=workspace).data()
+            )
+            type_info = next((info for info in types if info.type == agent_type), None)
+            if type_info is None:
+                installed = ", ".join(info.type for info in types) or "none"
+                typer.echo(
+                    f"Error: unknown plugin-managed agent type {agent_type!r}. Installed types: {installed}.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            name = type_info.default_name
+        try:
+            fields: dict[str, Any] = {"name": name}
+            if description:
+                fields["description"] = description
+            if labels := _parse_labels(label):
+                fields["labels"] = labels
+            body = RegisterAgentRequest(**fields, plugin_managed_agent=PluginManagedAgentSpec(type=agent_type))
+        except ValidationError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        resp = _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(client.register_agent(workspace=workspace, body=body)),
+        )
+        typer.echo(json.dumps(resp, indent=2))
+
+
+def _run_arguments(type_info: PluginManagedAgentTypeInfo) -> str:
+    """Summarize a type's context: its keys, with optional ones in brackets."""
+    properties = type_info.context_schema.get("properties")
+    if not isinstance(properties, dict):
+        return ""
+    required = set(type_info.context_schema.get("required") or [])
+    return ", ".join(key if key in required else f"[{key}]" for key in properties)
+
+
 def _register_job_commands(app: typer.Typer) -> None:
     """Register ``list-jobs``, replacing the generated one to add ``--agent``."""
 
@@ -3266,7 +3397,7 @@ def _validate_agent_config_for_register(
     command runs before it touches the API; ``redeploy`` reuses it as a
     fail-fast gate so a bad config aborts before any destructive teardown.
     """
-    from nemo_agents_plugin.utils import inject_default_model
+    from nemo_agents_plugin.utils import contains_default_model_placeholder, inject_default_model
 
     if agent_config is None:
         return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, AgentRegistration()
@@ -3300,7 +3431,7 @@ def _validate_agent_config_for_register(
     # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
     # no user context at deploy time.
     config_dict = inject_default_model(config_dict)
-    if _contains_default_model_placeholder(config_dict):
+    if contains_default_model_placeholder(config_dict):
         typer.echo(
             "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
             "default model is selected. Run `nemo setup` to pick one, or "
@@ -3527,25 +3658,6 @@ def _load_yaml(path: Path) -> Any:
             location = f" at line {mark.line + 1}, column {mark.column + 1}"
         typer.echo(f"Error: invalid YAML in agent config {path}{location}: {problem}", err=True)
         raise typer.Exit(code=1) from error
-
-
-# Mirrors ``nemo_agents_plugin.utils._ENV_VAR_PATTERN`` semantics: matches
-# ``${NEMO_DEFAULT_MODEL}`` and bare ``$NEMO_DEFAULT_MODEL`` (with an
-# identifier-boundary lookahead so ``$NEMO_DEFAULT_MODELX`` is not matched).
-_DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
-
-
-def _contains_default_model_placeholder(value: Any) -> bool:
-    """Return True if *value* still contains an unresolved ``NEMO_DEFAULT_MODEL`` reference."""
-    if isinstance(value, str):
-        # Honor ``$$`` escape the same way ``expand_env_vars`` does.
-        protected = value.replace("$$", "\0DOLLAR\0")
-        return _DEFAULT_MODEL_PLACEHOLDER.search(protected) is not None
-    if isinstance(value, dict):
-        return any(_contains_default_model_placeholder(v) for v in value.values())
-    if isinstance(value, list):
-        return any(_contains_default_model_placeholder(v) for v in value)
-    return False
 
 
 def _validate_platform_agent_config_for_cli(config: dict[str, Any], *, base_dir: Path) -> dict[str, Any]:

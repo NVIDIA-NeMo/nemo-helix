@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { TasksetFormModal } from '@studio/routes/evaluation/tasksets/TasksetFormModal';
 import { TasksetsDataView } from '@studio/routes/evaluation/tasksets/TasksetListRoute/TasksetsDataView';
 import { getTasksetsRoute } from '@studio/routes/utils';
-import type { FC } from 'react';
+import { type FC, useState } from 'react';
 
 export const TasksetListRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   useBreadcrumbs({ items: [{ href: getTasksetsRoute(workspace), slotLabel: 'Tasksets' }] });
 
   return (
@@ -25,10 +27,16 @@ export const TasksetListRoute: FC = () => {
               <FeatureFlagBadge flag="tasksetsEnabled" />
             </Flex>
           }
-          slotDescription="A taskset is a versioned group of stored tasks that an agent evaluation runs against. Tasksets are created with the CLI or SDK; each change publishes a new revision, and tags such as latest point at one."
+          slotActions={
+            <Button color="brand" onClick={() => setIsCreateOpen(true)}>
+              Create Taskset
+            </Button>
+          }
+          slotDescription="A taskset is a versioned group of stored tasks that an agent evaluation runs against. Each change publishes a new revision, and tags such as latest point at one."
         />
-        <TasksetsDataView workspace={workspace} />
+        <TasksetsDataView workspace={workspace} onCreate={() => setIsCreateOpen(true)} />
       </Stack>
+      <TasksetFormModal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
     </AccessibleTitle>
   );
 };

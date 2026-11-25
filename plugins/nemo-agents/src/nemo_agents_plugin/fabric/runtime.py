@@ -111,9 +111,7 @@ class FabricRuntimeStream:
                 _timeout_error_message(self._timeout_seconds),
             ) from error
         except FabricError as error:
-            raise FabricRuntimeExecutionError(
-                f"Fabric runtime streaming failed: {error}",
-            ) from error
+            raise _invocation_error(error, streaming=True) from error
 
     async def result(self) -> FabricRuntimeResult:
         """Return the authoritative terminal Fabric result for this stream."""
@@ -129,9 +127,7 @@ class FabricRuntimeStream:
                 _timeout_error_message(self._timeout_seconds),
             ) from error
         except FabricError as error:
-            raise FabricRuntimeExecutionError(
-                f"Fabric runtime streaming failed: {error}",
-            ) from error
+            raise _invocation_error(error, streaming=True) from error
         return _normalize_fabric_run_result(result)
 
     async def aclose(self) -> None:
@@ -198,6 +194,13 @@ def _timeout_error_message(timeout_seconds: float | None) -> str:
     return f"Fabric runtime invocation timed out after {timeout_seconds:g}s."
 
 
+def _invocation_error(error: FabricError, *, streaming: bool = False) -> FabricRuntimeExecutionError:
+    if error.code == "timeout" and error.stage == "invoke":
+        return FabricRuntimeTimeoutError(f"Fabric runtime invocation timed out: {error}")
+    operation = "streaming" if streaming else "invocation"
+    return FabricRuntimeExecutionError(f"Fabric runtime {operation} failed: {error}")
+
+
 async def invoke_fabric_runtime(
     runtime: Runtime,
     request: FabricInvocationRequest,
@@ -213,9 +216,7 @@ async def invoke_fabric_runtime(
             _timeout_error_message(request.timeout_seconds),
         ) from error
     except FabricError as error:
-        raise FabricRuntimeExecutionError(
-            f"Fabric runtime invocation failed: {error}",
-        ) from error
+        raise _invocation_error(error) from error
 
     return _normalize_fabric_run_result(result)
 
@@ -236,9 +237,7 @@ def stream_fabric_runtime(
             # Start once and keep the turn alive if the SSE consumer disconnects.
             stream = asyncio.create_task(invoke_fabric_runtime(runtime, request))
     except FabricError as error:
-        raise FabricRuntimeExecutionError(
-            f"Fabric runtime streaming failed: {error}",
-        ) from error
+        raise _invocation_error(error, streaming=True) from error
     return FabricRuntimeStream(stream, request.timeout_seconds, streaming_method=streaming_method)
 
 
@@ -260,9 +259,7 @@ async def run_fabric_agent_once(
                 _timeout_error_message(request.timeout_seconds),
             ) from error
         except FabricError as error:
-            raise FabricRuntimeExecutionError(
-                f"Fabric runtime invocation failed: {error}",
-            ) from error
+            raise _invocation_error(error) from error
 
     return _normalize_fabric_run_result(result)
 

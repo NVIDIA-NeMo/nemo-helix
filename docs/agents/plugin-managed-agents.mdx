@@ -1,0 +1,206 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Plugin-Managed Agents"
+description: "Create agents that a plugin defines, and write a plugin-managed agent type."
+---
+<a id="plugin-managed-agents"></a>
+
+Some agents are written by a NeMo Helix plugin rather than by you. A
+**plugin-managed agent type** packages one: the plugin supplies the agent's
+config, the per-run context it accepts, and the post-run actions its jobs may
+choose. You create the agent by type, with no config to write, and run it as an
+[execute-agent job](/documentation/agents/execute-agents-as-jobs).
+
+| | Registered agent | Plugin-managed agent |
+| --- | --- | --- |
+| Created with | `nemo agents register` and an `agent.yaml` | `nemo agents create <type>` |
+| Config | Stored on the agent | Supplied by the installed type whenever the agent is read or run |
+| Upgrades | Re-register to change it | Follow the installed plugin automatically |
+
+<Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+---
+
+<Note>
+The examples on this page use an example `my-plugin.reviewer` type,
+described in greater detail in [Write a Plugin-Managed Agent Type](#write-a-plugin-managed-agent-type) below.
+The example code is illustrative: helpers it calls, such as `resolve_model`, are left for your plugin to supply.
+</Note>
+
+## Create a Plugin-Managed Agent
+
+List the types installed on the platform. Each row shows the context keys a run
+takes (optional ones in brackets) and the active workspace's agent of the type, if it
+has one:
+
+```bash
+nemo agents types
+```
+
+Plugin-managed agents are created by type. The types define a default name, but it can be overridden by passing `--name`.
+
+```bash
+nemo agents create my-plugin.reviewer
+```
+
+Notice you do not set `config`, `config_format`, `context_schema`, `default_input`,
+`post_run_actions` or `reference`; the type supplies all these.
+
+At this time, plugin-managed agent types are one per workspace; a second agent of
+the same type in one workspace is rejected with `409 Conflict`.
+
+The agent is stored as its name and type. When you read it with
+`nemo agents get`, list it, run it or deploy it, the platform fills in the
+config, `context_schema`, `default_input` and `post_run_actions` from the
+installed type, so the agent always matches the installed plugin.
+
+Find the agents of a type with
+`GET /agents?filter[plugin_managed_agent.type]=my-plugin.reviewer`.
+
+## Run a Plugin-Managed Agent
+
+Run a plugin-managed agent as a normal execute job, passing the run's parameters as `context`. The agent's
+`context_schema` (shown by `nemo agents get` and `nemo agents types`) says what
+the context must contain; a context that does not match fails the create
+request.
+
+```bash
+nemo agents execute --agent reviewer \
+  --spec '{"context": {"target": "support-bot"}}'
+```
+
+As with any agent, a job that omits `input` uses the agent's `default_input`.
+What the agent does with the prompt is up to its type: types may build their
+prompt from the context and ignore `input`.
+
+The job records several details:
+
+| Job field | Holds |
+| --- | --- |
+| `spec.request.context` | The context you sent. |
+| `spec.plugin_managed_agent_type` | The type that prepared the run. |
+| `spec.context` | The context the agent ran with, as prepared internally by the type. |
+| `spec.subject` | What the run is about, if the type names something. |
+
+You can list one subject's runs of a type by filtering execute jobs on both fields:
+
+```bash
+curl -G "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/execute" \
+  --data-urlencode 'filter={"spec.plugin_managed_agent_type": "my-plugin.reviewer", "spec.subject": "support-bot"}'
+```
+
+`spec.subject` is a value the type defines; it does not necessarily refer to a NeMo Helix entity.
+Each type's `subject_label`, in `nemo agents types --output-format json`, describes what the subject means for that type.
+
+## Write a Plugin-Managed Agent Type
+
+A plugin contributes a type by subclassing `PluginManagedAgent` from
+`nemo_helix_plugin.agents.plugin_managed_agents`, and registering the class in the
+`nemo.agents.plugin-managed-agent-types` entry-point group. The entry point's
+name is the type ID:
+
+```toml
+[project.entry-points."nemo.agents.plugin-managed-agent-types"]
+"my-plugin.reviewer" = "my_plugin.reviewer:Reviewer"
+```
+
+A type has two context models:
+
+- **The context model** is what callers pass as the job's `context`. Its JSON
+  Schema becomes the agent's `context_schema`.
+- **The prepared context model** is what the type's Fabric adapter receives,
+  and what post-run actions get as `run_context`. It defaults to the context
+  model.
+
+Pass a second model only when the two differ in shape. For example, a run might
+take the name of a file that `prepare` reads, while the adapter, which cannot
+reach Files, receives the file's text. As a best practice, we recommend naming
+them `<Type>Context` and `<Type>PreparedContext`, and forbidding unknown keys.
+
+```python
+from typing import ClassVar
+
+from nemo_helix_plugin.agents.plugin_managed_agents import (
+    CONFIGURED_DEFAULT_MODEL,
+    PluginManagedAgent,
+    PluginManagedAgentInputError,
+    PreparedRun,
+    helix_default,
+)
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ReviewerContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    model: str = Field(json_schema_extra=helix_default(CONFIGURED_DEFAULT_MODEL))
+
+
+class ReviewerPreparedContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    model: str
+    guidelines: str | None
+
+
+class Reviewer(PluginManagedAgent[ReviewerContext, ReviewerPreparedContext]):
+    type_id: ClassVar[str] = "my-plugin.reviewer"
+    title: ClassVar[str] = "Reviewer"
+    description: ClassVar[str] = "Reviews an agent's recent runs."
+    adapter_id: ClassVar[str] = "acme.my-plugin.reviewer"
+    post_run_actions: ClassVar[frozenset[str]] = frozenset({"my-plugin.publish"})
+    default_name: ClassVar[str] = "reviewer"
+    subject_label: ClassVar[str | None] = "Reviewed agent"
+    default_input: ClassVar[str | None] = "Review the target agent's recent runs."
+
+    @classmethod
+    async def prepare(
+        cls, context: ReviewerContext, *, workspace: str, client: AsyncNemoClient
+    ) -> PreparedRun[ReviewerPreparedContext]:
+        model = await resolve_model(context.model, workspace=workspace, client=client)
+        if model is None:
+            raise PluginManagedAgentInputError(f"Model {context.model!r} not found.")
+        return PreparedRun(
+            context=ReviewerPreparedContext(
+                target=context.target,
+                model=model,
+                guidelines=await read_guidelines(context.target, workspace=workspace, client=client),
+            ),
+            subject=context.target,
+        )
+
+async def read_guidelines(target: str, workspace: str, client: AsyncNemoClient) -> str | None:
+    # Do something with the AsyncNemoClient while you have one; the Fabric adapter will not.
+    ...
+```
+
+| Member | Purpose |
+| --- | --- |
+| `type_id` | `<plugin>.<name>`; must match the entry-point name. |
+| `title`, `description` | Shown by `nemo agents types`. |
+| `adapter_id` | The Fabric adapter that runs the agent. It must be installed on the platform. |
+| `post_run_actions` | The action kinds a job may choose. Each must be installed. |
+| `default_name` | The agent name `nemo agents create` uses by default (override by creating with `--name`). |
+| `subject_label` | Describes `spec.subject`; omit it when runs have no subject. |
+| `default_input` | The agent's `default_input`: the prompt a job that omits `input` passes to the adapter. If the adapter builds its prompt from the context, set a placeholder. Omit it to force users to pass `input` on every run. |
+| `prepare()` | Turns the caller's context into the prepared context. Raise `PluginManagedAgentInputError` for a context the caller can fix; it becomes a `422` naming your message. A type with one context model can omit `prepare()`. |
+| `config()` | The agent's `nemo-agents-spec-v1` config. The default runs one local harness of kind `adapter_id` with no settings and no models, which suits an adapter that reads everything from the context, models included, and leaves `models` out of its Fabric manifest's `config.accepts`. Override it to add what the adapter needs, such as a model, starting from `super().config(name=name)`. |
+
+In the Fabric adapter, parse the request context with
+`Reviewer.parse_context(request.context)`. It drops the platform's
+`nemo_helix` key and returns a `ReviewerPreparedContext`. The adapter owns the
+prompt: it receives the job's `input` (or `default_input`) and may use it,
+or ignore it and build the prompt from the prepared context.
+
+The platform checks a type whenever it loads it, and rejects a type whose
+`type_id` does not match its entry point, whose context model uses `$ref`
+(for example, a nested model) or allows unknown keys, whose `config()` does not
+run `adapter_id` or cannot run on Fabric (it names no model for an adapter that
+takes one), whose context declares fields its adapter would never read, or
+that declares an action that is not installed. A broken
+type is left out of `nemo agents types`; creating or running an agent of it
+fails with the reason.

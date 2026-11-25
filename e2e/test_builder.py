@@ -42,6 +42,8 @@ from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing import as_user, grant_workspace_role
 from pydantic import SecretStr
 
+from e2e.utils import kube_target_from_env
+
 pytestmark = [
     pytest.mark.builder_e2e,
     pytest.mark.feature("builder"),
@@ -169,10 +171,8 @@ def auth_on(request: pytest.FixtureRequest, client: NemoClient) -> bool:
 
 @pytest.fixture(scope="module")
 def kube() -> Kube:
-    return Kube(
-        context=_required_env("NHX_E2E_KUBE_CONTEXT"),
-        namespace=os.environ.get("NHX_E2E_KUBE_NAMESPACE") or "nemo-helix",
-    )
+    context, namespace = kube_target_from_env()
+    return Kube(context=context, namespace=namespace)
 
 
 @pytest.fixture(scope="module")

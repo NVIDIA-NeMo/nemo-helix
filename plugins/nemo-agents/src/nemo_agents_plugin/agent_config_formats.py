@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_agents_plugin.utils import (
+    contains_default_model_placeholder,
     inject_default_model,
     inject_fabric_gateway_url,
     inject_fabric_trace_agent_name,
@@ -64,6 +65,12 @@ class _NatWorkflowConfigHandler:
 
 class _NemoAgentsSpecConfigHandler:
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
+        # Nothing on the platform resolves it later: this format's deployments run the stored config as-is.
+        if contains_default_model_placeholder(config):
+            raise InvalidAgentConfigError(
+                "Invalid agent config: it references ${NEMO_DEFAULT_MODEL}, which the platform cannot resolve. "
+                "Set an explicit model name in the agent config, such as 'default/my-model'."
+            )
         return self._normalize(config)
 
     def resolve_for_deployment(

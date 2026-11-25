@@ -402,6 +402,61 @@ class TestJWTValidator:
 
         assert result is None
 
+    @staticmethod
+    def _unsigned_token_issued_in(seconds: int) -> str:
+        now = int(time.time())
+        return jwt.encode(
+            {"sub": "user123", "iat": now + seconds, "nbf": now, "exp": now + 3600},
+            key="",
+            algorithm="none",
+        )
+
+    @pytest.mark.asyncio
+    async def test_validate_token_issued_seconds_ahead_is_accepted(self):
+        """A small clock difference with the identity provider doesn't reject a fresh token."""
+        config = AuthConfig(
+            enabled=True,
+            allow_unsigned_jwt=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=OIDCConfig(enabled=False),
+        )
+        validator = JWTValidator(config)
+
+        result = await validator.validate_token(self._unsigned_token_issued_in(5))
+
+        assert result is not None
+        assert result.subject == "user123"
+
+    @pytest.mark.asyncio
+    async def test_validate_token_issued_seconds_ahead_is_rejected_without_leeway(self):
+        """Setting the leeway to 0 restores strict validation."""
+        config = AuthConfig(
+            enabled=True,
+            allow_unsigned_jwt=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=OIDCConfig(enabled=False, clock_skew_leeway_seconds=0),
+        )
+        validator = JWTValidator(config)
+
+        result = await validator.validate_token(self._unsigned_token_issued_in(5))
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_validate_token_passes_clock_skew_leeway_to_decode(self, jwt_validator):
+        """Signed OIDC tokens are checked with the configured leeway."""
+        with patch.object(jwt_validator, "_get_jwks_client") as mock_get_jwks:
+            mock_jwks = MagicMock()
+            mock_signing_key = MagicMock()
+            mock_signing_key.key = "test-key"
+            mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
+            mock_get_jwks.return_value = mock_jwks
+
+            with patch("nhx.common.auth.jwt.decode", side_effect=jwt.ImmatureSignatureError("not yet")) as decode:
+                await jwt_validator.validate_token("signed.token.here")
+
+        assert decode.call_args.kwargs["leeway"] == jwt_validator.config.oidc.clock_skew_leeway_seconds == 30
+
     @pytest.mark.asyncio
     async def test_validate_unsigned_token_future_nbf_when_allowed(self):
         """Unsigned JWTs with future nbf claims return None."""

@@ -71,7 +71,12 @@ const makeColumns: ComponentProps<typeof StudioDataView<Taskset>>['makeColumns']
   }),
 ];
 
-export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
+interface Props {
+  workspace: string;
+  onCreate: () => void;
+}
+
+export const TasksetsDataView: FC<Props> = ({ workspace, onCreate }) => {
   const navigate = useNavigate();
   const dataViewState = useStudioDataViewState<TasksetFilter>({
     defaultSort: [{ id: 'updated_at', desc: true }],
@@ -117,7 +122,7 @@ export const TasksetsDataView: FC<{ workspace: string }> = ({ workspace }) => {
                 onClearFilters={dataViewState.resetFilters}
               />
             ) : (
-              <EntityEmptyState entity="tasksets" variant="first-use" />
+              <EntityEmptyState entity="tasksets" variant="first-use" onCreate={onCreate} />
             ),
           renderErrorState: () => (
             <ErrorPanel

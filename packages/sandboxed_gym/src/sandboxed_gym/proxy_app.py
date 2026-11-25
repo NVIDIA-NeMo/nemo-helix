@@ -9,14 +9,13 @@ import asyncio
 import json
 import logging
 import urllib.error
-import urllib.request
 from collections.abc import AsyncGenerator
 from typing import Any
-from urllib.request import urlopen
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from sandboxed_gym.host.models import open_host
 from sandboxed_gym.orchestrator import SandboxedGymSession
 from sandboxed_gym.wire import PROXY_AUTH_HEADER
 
@@ -94,13 +93,8 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
         if authorization and authorization.lower().startswith("bearer "):
             bearer = authorization[7:].strip()
         _check_auth(x_sandboxed_gym_token or bearer)
-        request = urllib.request.Request(
-            session.host.health_url,
-            method="GET",
-            headers=dict(session.host.headers),
-        )
         try:
-            with urlopen(request, timeout=30) as response:
+            with open_host(session.host, session.host.health_url, timeout=30) as response:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             raise HTTPException(status_code=exc.code, detail=exc.read().decode()) from exc
@@ -130,19 +124,18 @@ def build_proxy_app(session: SandboxedGymSession) -> FastAPI:
         if len(payload) > max_req:
             raise HTTPException(status_code=413, detail="request too large")
 
-        upstream = urllib.request.Request(
-            session.host.rollout_url,
-            data=payload,
-            method="POST",
-            headers={
-                "Content-Type": request.headers.get("content-type", "application/json"),
-                **session.host.headers,
-            },
-        )
         # Opened off the event loop, and awaited before streaming so the upstream status and
         # headers still decide this response's own -- once bytes start flowing neither can change.
         try:
-            response = await asyncio.to_thread(urlopen, upstream, timeout=session.cfg.sandbox.rollout_timeout_s)
+            response = await asyncio.to_thread(
+                open_host,
+                session.host,
+                session.host.rollout_url,
+                method="POST",
+                data=payload,
+                headers={"Content-Type": request.headers.get("content-type", "application/json")},
+                timeout=session.cfg.sandbox.rollout_timeout_s,
+            )
         except urllib.error.HTTPError as exc:
             return Response(
                 content=exc.read(),

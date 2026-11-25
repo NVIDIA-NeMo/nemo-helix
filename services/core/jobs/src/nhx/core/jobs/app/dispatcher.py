@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -72,7 +73,12 @@ from nhx.core.jobs.entities import (
     HelixJobTask,
     get_step_spec_name,
 )
-from nhx.core.jobs.telemetry import build_job_run_telemetry, emit_job_run_event
+from nhx.core.jobs.metrics import record_job_run_metrics
+from nhx.core.jobs.telemetry import (
+    build_job_run_observation,
+    build_job_run_telemetry_from_observation,
+    emit_job_run_event,
+)
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
 
@@ -156,7 +162,7 @@ _DELETE_PAGE_SIZE = 1000
 # query string of a GET, so the batch stays small enough for proxies and ingress URL limits.
 _ENRICHMENT_BATCH_SIZE = 100
 _JOB_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
-_JOB_RUN_TELEMETRY_TERMINAL_STATUSES = frozenset(
+_JOB_RUN_OBSERVED_STATUSES = frozenset(
     {
         HelixJobStatus.COMPLETED,
         HelixJobStatus.ERROR,
@@ -171,10 +177,7 @@ def _should_emit_job_run_telemetry(
     previous_status: HelixJobStatus,
     new_status: HelixJobStatus,
 ) -> bool:
-    return (
-        previous_status not in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
-        and new_status in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
-    )
+    return previous_status not in _JOB_RUN_OBSERVED_STATUSES and new_status in _JOB_RUN_OBSERVED_STATUSES
 
 
 def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
@@ -200,6 +203,11 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
     maximum = jobs_config.storage.maximum_pause_ttl_seconds
     if pause_ttl_seconds > maximum:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
+
+
+def _task_state(task: HelixJobTask) -> tuple[Any, ...]:
+    """The fields a task update can change, copied so later in-place merges do not alter them."""
+    return (task.status, copy.deepcopy(task.status_details), copy.deepcopy(task.error_details), task.error_stack)
 
 
 def _keep_reported_cause(reported: dict[str, Any] | None, update: dict[str, Any]) -> dict[str, Any]:
@@ -1354,12 +1362,12 @@ class JobDispatcher:
         if new_attempt_status != attempt.status:
             attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step, step_spec_name)
             if changed:
-                if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
+                if attempt.status in _JOB_RUN_OBSERVED_STATUSES:
                     try:
                         job = await self.store.get_by_id(HelixJob, attempt.job)
                         status_details = dict(attempt.status_details or {})
                         status_details.update(saved_step.status_details or {})
-                        telemetry_event = build_job_run_telemetry(
+                        observation = build_job_run_observation(
                             source=job.source,
                             status=attempt.status.value,
                             status_details=status_details,
@@ -1367,10 +1375,20 @@ class JobDispatcher:
                             created_at=attempt.created_at,
                             updated_at=attempt.updated_at,
                         )
-                        if telemetry_event is not None:
-                            emit_job_run_event(telemetry_event)
+                        # Internal operational metrics cover all jobs, before the
+                        # anonymous telemetry/session gate and never on delivery retries.
+                        # Keep the sinks independent: metric failures cannot block
+                        # the lifecycle transition or optional outbound telemetry.
+                        try:
+                            record_job_run_metrics(observation)
+                        except Exception:
+                            logger.debug("Failed to record job-run metrics", exc_info=True)
+                        if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
+                            telemetry_event = build_job_run_telemetry_from_observation(observation, job.custom_fields)
+                            if telemetry_event is not None:
+                                emit_job_run_event(telemetry_event)
                     except Exception:
-                        logger.debug("Failed to queue job_run telemetry", exc_info=True)
+                        logger.debug("Failed to observe job run or queue telemetry", exc_info=True)
                 logger.info(
                     "Updated job attempt status",
                     extra={
@@ -1545,7 +1563,11 @@ class JobDispatcher:
         attempt = await self.store.get_by_id(HelixJobAttempt, attempt.id)
         if attempt.job != job.id or attempt.workspace != workspace:
             return None
-        attempt.status_details = self._update_status_details_object(dict(attempt.status_details), status_details)
+        merged = self._update_status_details_object(dict(attempt.status_details), status_details)
+        if merged == attempt.status_details:
+            # Already reflected, so a repeated report does not rewrite the attempt.
+            return attempt
+        attempt.status_details = merged
         return await self.store.update(attempt)
 
     @staticmethod
@@ -1940,6 +1962,7 @@ class JobDispatcher:
                 extra={"task": task.id, "job": job_name, "step": step.name, "workspace": step.workspace},
             )
         else:
+            before = _task_state(task)
             current_status = HelixJobStatus(task.status)
             new_status = HelixJobStatus(task_update.status)
             if not current_status.can_transition_to(new_status):
@@ -1977,17 +2000,21 @@ class JobDispatcher:
             if task_update.error_stack:
                 task.error_stack = task_update.error_stack
 
-            task = await self.store.update(task)
-            logger.info(
-                "Updating job task",
-                extra={
-                    "task": task.id,
-                    "job": job_name,
-                    "step": step.name,
-                    "workspace": step.workspace,
-                    "status": task.status,
-                },
-            )
+            # A write that changes nothing is not progress, so it leaves updated_at alone. The
+            # Kubernetes controller re-sends each pod's details on every pass, and counting those
+            # writes would keep a stalled task, such as a hung upload, from ever looking stale.
+            if _task_state(task) != before:
+                task = await self.store.update(task)
+                logger.info(
+                    "Updating job task",
+                    extra={
+                        "task": task.id,
+                        "job": job_name,
+                        "step": step.name,
+                        "workspace": step.workspace,
+                        "status": task.status,
+                    },
+                )
 
         current_step = await self.store.get_by_id(HelixJobStep, step.id)
         if current_step.status in (HelixJobStatus.CANCELLED, HelixJobStatus.ERROR):
@@ -1999,6 +2026,9 @@ class JobDispatcher:
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,
         # but users query job status via the jobs API. Without this propagation,
         # job.status_details would be empty and users couldn't see training progress.
+        # Propagated even when the task did not change: a report that repeats the task's details
+        # still repairs an attempt whose earlier propagation failed. The attempt skips the write when
+        # it already holds them.
         if task_update.status_details:
             try:
                 attempt = await self.get_attempt(step.attempt_id)

@@ -144,6 +144,8 @@ def _compare(field_value: Any, op: FilterOperator, value: Any) -> bool:
         return field_value in value
     if op == FilterOperator.NIN:
         return field_value not in value
+    if isinstance(field_value, bool) and _is_number(value):
+        return False
     if isinstance(field_value, datetime) and isinstance(value, str):
         value = datetime.fromisoformat(value).replace(tzinfo=None)
     try:

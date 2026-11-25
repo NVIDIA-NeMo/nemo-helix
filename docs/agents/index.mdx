@@ -46,8 +46,8 @@ flowchart LR
 
 ## Upgrade and adapter setup
 
-For NeMo Helix 0.10, start with
-[Fabric 0.6 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade): it
+Start with
+[Fabric 0.7 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade): it
 covers the registration-command rename, host/task package compatibility,
 persisted Relay observability, gateway telemetry routing, and the difference
 between a shipped descriptor and an installed harness. Pi is an opt-in packaged
@@ -66,7 +66,7 @@ install → register → deploy → invoke → session → cleanup journey.
 | Invoke | `nemo agents invoke --agent <name> --input "..."` |
 | Chat | `nemo agents chat --agent-deployment <deployment>` |
 | Run once as a job | `nemo agents execute --agent <name> --input "..."` |
-| Analyze traces | `nemo compass analysis-runs create --agent <name>` |
+| Analyze traces | `nemo agents execute --agent compass-analyst --spec '{"context": {"agent": "<name>"}}'` |
 | Optimize | `nemo agents optimize run-strategy --strategy <strategy> --agent <name>` |
 | Update in place | `nemo agents redeploy --agent <name> --agent-config <path>` |
 | Tear down | `nemo agents undeploy --agent <name>`, then `nemo agents delete <name>` |

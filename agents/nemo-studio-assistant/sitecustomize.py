@@ -5,10 +5,6 @@
 
 from nemo_studio_assistant.fabric_compat import (
     apply_deepagents_mcp_env_compatibility,
-    apply_deepagents_skill_path_compatibility,
-    apply_platform_skill_translation_compatibility,
 )
 
-apply_deepagents_skill_path_compatibility()
 apply_deepagents_mcp_env_compatibility()
-apply_platform_skill_translation_compatibility()

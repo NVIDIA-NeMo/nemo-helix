@@ -134,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "f34b91df909e4d9f8fa2faec66ce95fb746a07fa" # soluwalana/RL nhx/rl-20261110
+  default = "6014fd297b25165b71bb37a34247a19f0dc091d3" # soluwalana/RL nhx/rl-20261110
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -373,39 +373,69 @@ group "docker" {
 # =============================================================================
 # Consolidated container images for Python services and task runners.
 
-# Build groups for consolidated containers
 group "docker-cpu" {
+  targets = ["docker-api", "docker-tasks", "docker-build-tools"]
+}
+
+group "docker-cpu-ci" {
+  targets = ["docker-api-ci", "docker-tasks-ci", "docker-build-tools-ci", "docker-gym-host-ci"]
+}
+
+group "docker-api" {
+  targets = ["nhx-api-docker"]
+}
+
+group "docker-api-ci" {
+  targets = ["docker-api", "nhx-agents-deepagents-e2e-docker"]
+}
+
+group "docker-tasks" {
   targets = [
-    "nhx-api-docker",
     "nhx-tasks-docker",
     "nhx-tasks-openshell-docker",
     "nhx-gym-tasks-docker",
     "nhx-agent-hardener-tasks-docker",
+  ]
+}
+
+group "docker-build-tools" {
+  targets = [
     "nhx-builder-tasks-docker",
     "nhx-kaniko-docker",
     "nhx-agent-installer-docker",
   ]
 }
 
-# CI extension that adds the colocated Gym task smoke-test stage to docker-cpu.
-# The sandboxed Gym host is published here, not in docker-cpu, so local and
-# unpublished PR builds do not load it.
-group "docker-cpu-ci" {
+group "docker-tasks-ci" {
   targets = [
-    "docker-cpu",
-    "nhx-agents-deepagents-e2e-docker",
+    "docker-tasks",
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
-    "nhx-gym-host-docker",
-    "nhx-gym-host-smoke-test",
     "nhx-agent-hardener-tasks-smoke-test",
-    "nhx-builder-tasks-docker",
+  ]
+}
+
+group "docker-build-tools-ci" {
+  targets = [
+    "docker-build-tools",
     "nhx-builder-tasks-smoke-test",
-    "nhx-kaniko-docker",
     "nhx-kaniko-smoke-test",
-    "nhx-agent-installer-docker",
     "nhx-agent-installer-smoke-test",
+  ]
+}
+
+# The Gym host is published separately from the general CPU runtimes.
+group "docker-gym-host" {
+  targets = ["nhx-gym-host-docker"]
+}
+
+group "docker-gym-host-ci" {
+  targets = [
+    "docker-gym-host",
+    "nhx-gym-host-smoke-test",
+    "nhx-gym-host-podman-docker",
+    "nhx-gym-host-podman-smoke-test",
   ]
 }
 
@@ -835,7 +865,8 @@ target "nhx-tasks-openshell-docker" {
     NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
     NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
   }
-  cache-from = maybe_registry_cache_from("nhx-tasks")
+  cache-from = concat(maybe_registry_cache_from("nhx-tasks-openshell"), maybe_registry_cache_from("nhx-tasks"))
+  cache-to   = maybe_registry_cache_to("nhx-tasks-openshell")
   tags       = sha_and_maybe_latest_tags("nhx-tasks-openshell")
   output     = image_output()
   platforms  = get_platforms()
@@ -845,6 +876,7 @@ target "nhx-tasks-openshell-docker" {
 target "nhx-tasks-openshell-smoke-test" {
   inherits = ["nhx-tasks-openshell-docker"]
   target   = "openshell-smoke-test"
+  cache-to = []
   tags     = []
   output   = ["type=cacheonly"]
 }
@@ -947,6 +979,42 @@ target "nhx-gym-host-smoke-test" {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-from = maybe_registry_cache_from("nhx-gym-host")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+# Sandboxed Gym host with rootless Podman behind the Docker CLI, for environments whose resource
+# servers run `docker compose`. Opt-in through `sandbox_runtime_image`; Kata sandboxes only.
+target "nhx-gym-host-podman-docker" {
+  target     = "podman"
+  context    = "."
+  dockerfile = "docker/gym-host/Dockerfile"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nhx-gym-host-podman")
+  cache-from = concat(maybe_registry_cache_from("nhx-gym-host"), maybe_registry_cache_from("nhx-gym-host-podman"))
+  tags       = sha_and_maybe_latest_tags("nhx-gym-host-podman")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-gym-host-podman-smoke-test" {
+  target     = "podman-smoke-test"
+  context    = "."
+  dockerfile = "docker/gym-host/Dockerfile"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-from = concat(maybe_registry_cache_from("nhx-gym-host"), maybe_registry_cache_from("nhx-gym-host-podman"))
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }
@@ -1309,7 +1377,6 @@ target "nhx-automodel-base-builder" {
   target          = "nhx-automodel-base"
   context         = "."
   dockerfile      = "docker/automodel/Dockerfile.nhx-automodel-base"
-  no-cache-filter = ["automodel-clone"]
   cache-to        = maybe_registry_cache_to("nhx-automodel-base")
   cache-from      = maybe_registry_cache_from("nhx-automodel-base")
   tags            = base_tags("nhx-automodel-base")

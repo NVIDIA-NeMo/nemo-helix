@@ -64,6 +64,8 @@ class PostRunActionContext:
     # address, and is the action's own copy.
     agent_config: dict[str, Any]
     fabric_result: FabricRuntimeResult
+    # The context the agent ran with, without the platform's reserved ``nemo_helix`` key
+    run_context: dict[str, Any] = field(default_factory=dict)
 
 
 class PostRunAction(Protocol):

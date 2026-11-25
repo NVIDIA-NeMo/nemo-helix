@@ -143,21 +143,17 @@ Ray-bundled JAXB runtime dependencies
 wandb-core MPL-2.0 Go dependencies
   Scope: Unmodified Go module dependencies linked into the wandb-core
   executable distributed with the wandb Python package in container images.
-  wandb package version: 0.31.0
+  wandb package version: 0.31.2
   wandb source distribution:
-    https://files.pythonhosted.org/packages/07/a5/8fc1c319f2db9be5a707c25a76ecba1b2b9450a44a05b295ff5aa379bbfa/wandb-0.31.0.tar.gz
+    https://files.pythonhosted.org/packages/14/07/20b18fd0d9045373b9c4302cab690508b59345940f0ac58e045d858a253c/wandb-0.31.2.tar.gz
   wandb upstream source:
     https://github.com/wandb/wandb
   wandb-core source at reported build commit:
-    https://github.com/wandb/wandb/tree/v0.31.0
+    https://github.com/wandb/wandb/tree/v0.31.2
   License: MPL-2.0
   License text: LICENSES/MPL-2.0.txt
 
   Components:
-    github.com/NimbleMarkets/pixterm v0.0.0-20261012191851-56231aed368c
-      Source: https://github.com/NimbleMarkets/pixterm/tree/56231aed368c
-      Module source archive:
-        https://proxy.golang.org/github.com/!nimble!markets/pixterm/@v/v0.0.0-20261012191851-56231aed368c.zip
     github.com/hashicorp/go-cleanhttp v0.5.2
       Source: https://github.com/hashicorp/go-cleanhttp/tree/v0.5.2
       Module source archive:

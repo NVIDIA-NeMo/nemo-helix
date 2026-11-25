@@ -42,6 +42,7 @@ from nemo_helix_plugin.agents.types import (
     ListEnvironmentResourcesQueryParams,
     ListSessionsQueryParams,
     LogLine,
+    PluginManagedAgentTypeInfo,
     PostRunActionInfo,
     RegisterAgentRequest,
     SampleAgentStreamEvent,
@@ -60,6 +61,7 @@ _EXECUTE_JOBS = f"{_PREFIX}/jobs/execute"
 _JOBS = f"{_PREFIX}/jobs/{{collection}}"
 _SAMPLE_AGENT = "/apis/agents/v2/sample-agent"
 _POST_RUN_ACTIONS = "/apis/agents/v2/post-run-actions"
+_PLUGIN_MANAGED_AGENT_TYPES = f"{_PREFIX}/plugin-managed-agent-types"
 
 
 @post(_SAMPLE_AGENT)
@@ -70,6 +72,11 @@ def create_sample_agent(*, body: CreateSampleAgentRequest) -> Stream[SampleAgent
 @get(_POST_RUN_ACTIONS)
 @abstractmethod
 def list_post_run_actions() -> list[PostRunActionInfo]: ...
+
+
+@get(_PLUGIN_MANAGED_AGENT_TYPES)
+@abstractmethod
+def list_plugin_managed_agent_types(*, workspace: str | None = None) -> list[PluginManagedAgentTypeInfo]: ...
 
 
 # ---------------------------------------------------------------------------

@@ -85,8 +85,13 @@ describe('AgentDetailRoute', () => {
     expect(screen.getByRole('button', { name: 'Agent config' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Configuration' })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Run Evaluation' })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: 'Run Evaluation' })).toHaveLength(1);
     });
+    // The overview's experiments panel now offers the registry's create action, which
+    // opens the same Run Evaluation modal — submitting an evaluation is how an
+    // experiment comes into being.
+    // The panel shows a skeleton until the evaluations query settles, so wait for it.
+    expect(await screen.findByRole('button', { name: 'Create Experiment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

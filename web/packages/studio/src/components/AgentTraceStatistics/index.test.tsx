@@ -70,13 +70,16 @@ describe('AgentTraceStatistics', () => {
         onRangeChange={noop}
         onViewTraces={noop}
         onRunAgent={noop}
-        onLearnMore={noop}
+        workspace="my-workspace"
       />
     );
 
     expect(screen.getByText('No traces')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run the agent/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /set up tracing/i })).toBeInTheDocument();
+    // The bridge replaces the old "Set up tracing" docs link: the CLI command and
+    // skill prompt are resolved against the real workspace, not left as placeholders.
+    expect(screen.getByTestId('entity-empty-state-help')).toBeInTheDocument();
+    expect(screen.queryByText(/<workspace>/)).not.toBeInTheDocument();
     expect(screen.queryByText('Total traces')).not.toBeInTheDocument();
     // Nothing to navigate to when the range is empty.
     expect(screen.queryByRole('button', { name: /view traces/i })).not.toBeInTheDocument();
@@ -111,11 +114,14 @@ describe('AgentTraceStatistics', () => {
     expect(onRangeChange).toHaveBeenCalledWith('max');
   });
 
-  it('does not offer to widen when already on the longest range', () => {
+  it('does not offer to widen when already on the longest range', async () => {
     renderRoute(
       <AgentTraceStatistics summary={null} buckets={[]} range="max" onRangeChange={noop} />
     );
 
+    // The empty state's handoff snippet highlights asynchronously; await it so the
+    // state update lands inside the test rather than after it.
+    await screen.findByTestId('entity-empty-state-help');
     expect(screen.queryByRole('button', { name: /look back further/i })).not.toBeInTheDocument();
   });
 

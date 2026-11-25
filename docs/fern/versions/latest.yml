@@ -60,6 +60,9 @@ navigation:
               - page: Execute as Jobs
                 slug: execute-agents-as-jobs
                 path: ../../agents/execute-agent-jobs.mdx
+              - page: Plugin-Managed Agents
+                slug: plugin-managed-agents
+                path: ../../agents/plugin-managed-agents.mdx
           - section: Insights
             skip-slug: true
             contents:
@@ -111,7 +114,7 @@ navigation:
           - section: Migration & Compatibility
             skip-slug: true
             contents:
-              - page: Fabric 0.6 Upgrade and Adapter Support
+              - page: Fabric 0.7 Upgrade and Adapter Support
                 slug: fabric-upgrade
                 path: ../../agents/fabric-upgrade.mdx
       - section: Evaluate Agents & Models
@@ -262,6 +265,9 @@ navigation:
               - page: Nemotron
                 path: ../../customizer/models/llama-nemotron.mdx
                 slug: llama-nemotron
+              - page: Nemotron Vision-Language
+                path: ../../customizer/models/nemotron-vl.mdx
+                slug: nemotron-vl
               - page: Embedding
                 path: ../../customizer/models/embedding.mdx
                 slug: embedding
@@ -305,6 +311,9 @@ navigation:
               - page: LoRA Customization Job
                 path: ../../customizer/tutorials/lora-customization-job.mdx
                 slug: lora-customization-job
+              - page: Vision LoRA on CORD-v2
+                path: ../../customizer/tutorials/cord-v2-vision-lora.mdx
+                slug: cord-v2-vision-lora
               - page: Distillation Customization Job
                 path: ../../customizer/tutorials/distillation-customization-job.mdx
                 slug: distillation-customization-job

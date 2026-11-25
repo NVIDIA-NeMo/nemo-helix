@@ -64,12 +64,14 @@ from pydantic import Field
 
 
 _LABELS_FIELD = "labels"
-_LABELS_PREFIX = f"{_LABELS_FIELD}."
+_PLUGIN_MANAGED_AGENT_FIELD = "plugin_managed_agent"
+# Fields filtered by sub-path (``labels.<key>``, ``plugin_managed_agent.type``).
+_NAMESPACE_FIELDS = (_LABELS_FIELD, _PLUGIN_MANAGED_AGENT_FIELD)
 
 
 # Implements the hooks ``make_filter_dep`` looks for, so declared fields are
-# rewritten to their ``data.*`` entity-store paths and ``labels.<key>`` is
-# accepted as a namespace sub-path.
+# rewritten to their ``data.*`` entity-store paths and ``labels.<key>`` and
+# ``plugin_managed_agent.type`` are accepted as namespace sub-paths.
 class AgentFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/agents``."""
 
@@ -79,7 +81,11 @@ class AgentFilter(NemoFilter):
     )
     labels: dict[str, str] | None = Field(
         default=None,
-        description="Filter on a label, e.g. `filter[labels.helix-agents/managed-by]=compass`.",
+        description="Filter on a label, e.g. `filter[labels.team]=support`.",
+    )
+    plugin_managed_agent: dict[str, str] | None = Field(
+        default=None,
+        description="Filter on the plugin-managed agent type ID, e.g. `filter[plugin_managed_agent.type]=<type>`.",
     )
 
     @classmethod
@@ -88,7 +94,7 @@ class AgentFilter(NemoFilter):
 
     @classmethod
     def _get_entity_namespace_map(cls) -> dict[str, str]:
-        return {_LABELS_FIELD: f"data.{_LABELS_FIELD}"}
+        return {field: f"data.{field}" for field in _NAMESPACE_FIELDS}
 
     @classmethod
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
@@ -96,7 +102,7 @@ class AgentFilter(NemoFilter):
 
         def _walk(op: FilterOperation) -> FilterOperation:
             if isinstance(op, ComparisonOperation):
-                if op.field.startswith(_LABELS_PREFIX):
+                if op.field.split(".", 1)[0] in _NAMESPACE_FIELDS and "." in op.field:
                     return op.model_copy(update={"field": f"data.{op.field}"})
                 mapped = field_map.get(op.field)
                 return op if mapped is None else op.model_copy(update={"field": mapped})

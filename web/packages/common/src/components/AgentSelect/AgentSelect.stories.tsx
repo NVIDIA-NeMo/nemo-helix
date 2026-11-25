@@ -27,7 +27,7 @@ const mockAgents: Agent[] = [
     config_format: FABRIC_CONFIG_FORMAT,
     description: 'Answers support tickets using the product knowledge base.',
     project: 'support',
-    labels: { 'helix-agents/managed-by': 'studio', team: 'cx' },
+    labels: { 'acme/owner': 'studio', team: 'cx' },
     config: {
       models: { default: { provider: 'nvidia', model: 'nvidia-nemotron-3-nano-30b-a3b' } },
     },

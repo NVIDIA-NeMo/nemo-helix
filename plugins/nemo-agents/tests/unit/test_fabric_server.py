@@ -331,129 +331,116 @@ def test_startup_leaves_other_backends_without_a_workspace_baseline(
         assert not (tmp_path / "workspace").exists()
 
 
-@pytest.mark.parametrize(
-    ("kind", "skill_path", "expected_names"),
-    [
-        ("deepagents", "skills/review", ["review"]),
-        ("nvidia.fabric.langchain.deepagents", "skills", ["audit", "review"]),
-    ],
-)
-def test_startup_stages_skills_and_maps_runtime_paths(
+@pytest.mark.parametrize("policy", [None, "first_wins", "last_wins", "reject"])
+@pytest.mark.parametrize("overlapping", [False, True])
+def test_startup_copies_skill_sources_into_private_workspaces(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
-    kind: str,
-    skill_path: str,
-    expected_names: list[str],
+    policy: str | None,
+    overlapping: bool,
 ) -> None:
-    linked_asset = tmp_path / "linked-asset.txt"
-    linked_asset.write_text("skill input")
-    for name in ("review", "audit"):
-        bundle = tmp_path / "skills" / name
-        (bundle / "references").mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: Review inputs\n---\nRead references/input.txt.\n"
-        )
-        (bundle / "references/input.txt").symlink_to(linked_asset)
-    config = _example_config()
-    config["harnesses"]["hermes"]["kind"] = kind
-    config["skills"] = {"paths": [skill_path]}
-    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
-    fabric = Fabric()
-    monkeypatch.setattr(fabric, "start_runtime", start_runtime)
+    from nemo_fabric_adapter_contract.models import AgentSkillConfig
+    from nemo_fabric_adapters.common.lifecycle import LifecycleError
+    from nemo_fabric_adapters.deepagents.skills import plan_skills
 
-    app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
-    with TestClient(app) as client:
-        app.state.session_manager._fabric = fabric
-        assert client.portal is not None
-        session = client.portal.call(app.state.session_manager.open_session)
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert sorted(path.name for path in skills.iterdir()) == expected_names
-        for name in expected_names:
-            assert (skills / name / "SKILL.md").read_text() == (tmp_path / "skills" / name / "SKILL.md").read_text()
-            assert (skills / name / "references/input.txt").read_text() == "skill input"
-            assert not (skills / name / "references/input.txt").is_symlink()
-        runtime_config = start_runtime.call_args.args[0]
-        assert tmp_path / runtime_config.environment.workspace == session.workspace_dir
-        assert runtime_config.skills.paths == [f"/{environment.DEEPAGENTS_SKILLS_DIR}"]
-        assert app.state.agent_config.skills.paths == [skill_path]
-
-
-@pytest.mark.parametrize("configured_workspace", ["workspace", ".", ""])
-def test_startup_refreshes_skills_without_recapturing_workspace(
-    tmp_path: Path,
-    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
-    monkeypatch: pytest.MonkeyPatch,
-    configured_workspace: str,
-) -> None:
-    workspace = tmp_path / configured_workspace
-    workspace.mkdir(exist_ok=True)
-    (workspace / "input.txt").write_text("original input")
-    for name in ("review", "retired"):
-        bundle = tmp_path / ".agents/skills" / name
-        bundle.mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(name)
+    asset = tmp_path / "asset.txt"
+    asset.write_text("original asset")
+    for name in ("skills", "other"):
+        bundle = tmp_path / name / "review"
+        bundle.parent.mkdir(parents=True)
+        if overlapping and name == "other":
+            bundle.symlink_to(tmp_path / "skills/review")
+            continue
+        bundle.mkdir()
+        (bundle / "SKILL.md").write_text(f"---\nname: review\ndescription: Review inputs\n---\n{name}\n")
+        (bundle / "asset.txt").symlink_to(asset)
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["environment"] = {"workspace": configured_workspace}
-    config["skills"] = {"paths": [".agents/skills/review", ".agents/skills/retired"]}
-    config_path = _write_agent_config(tmp_path, config)
-    start_runtime = AsyncMock(return_value=SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED))
+    sources = ["skills/review", "other"]
+    directories = [{"skill": "skills/review"}, {"folder": "other"}]
+    if overlapping:
+        sources.append("skills/review")
+        directories.append({"skill": "skills/review"})
+    config["skills"] = {"paths": sources} if policy is None else {"directories": directories, "duplicates": policy}
+    start_runtime = AsyncMock(
+        side_effect=lambda *args, **kwargs: SimpleNamespace(stop=AsyncMock(), status=RuntimeStatus.STOPPED)
+    )
     fabric = Fabric()
     monkeypatch.setattr(fabric, "start_runtime", start_runtime)
+    config_path = _write_agent_config(tmp_path, config)
 
     app = create_fabric_serving_app(config_path)
     with TestClient(app) as client:
         app.state.session_manager._fabric = fabric
-        baseline = app.state.workspace_baseline
-        (tmp_path / ".agents/skills/review/SKILL.md").write_text("updated review")
-        new_bundle = tmp_path / ".agents/skills/new"
-        new_bundle.mkdir()
-        (new_bundle / "SKILL.md").write_text("new")
-        config["skills"]["paths"] = [".agents/skills/review", ".agents/skills/new"]
-        _write_agent_config(tmp_path, config)
-        (workspace / "input.txt").write_text("later conversation output")
         assert client.portal is not None
-        session = client.portal.call(app.state.session_manager.open_session)
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
-            "review": "review",
-            "retired": "retired",
-        }
+        first = client.portal.call(app.state.session_manager.open_session)
+        runtime_config = start_runtime.call_args.args[0]
+        assert tmp_path / runtime_config.environment.workspace == first.workspace_dir
+        skills = runtime_config.skills
+        paths = skills.paths if policy is None else [skills.directories[0].skill, skills.directories[1].folder]
+        copied = [Path(paths[0]), Path(paths[1]) / "review"]
+        assert all(path.resolve().is_relative_to(first.workspace_dir) for path in copied)
+        assert all((path / "asset.txt").read_text() == "original asset" for path in copied)
+        assert all(not (path / "asset.txt").is_symlink() for path in copied)
+        assert app.state.agent_config.skills.model_dump(exclude_unset=True) == config["skills"]
+        contract_skills = AgentSkillConfig.from_mapping(skills.model_dump(exclude_none=True))
+        if policy == "reject" and not overlapping:
+            with pytest.raises(LifecycleError):
+                plan_skills(contract_skills, first.workspace_dir)
+        else:
+            mounts = plan_skills(contract_skills, first.workspace_dir)
+            assert mounts.load is not None
+            selected = copied[0 if policy == "first_wins" else 1]
+            assert [skill.path for skill in mounts.load.selected] == [selected.resolve()]
+
+        original_manifest = (tmp_path / "skills/review/SKILL.md").read_text()
+        (copied[0] / "SKILL.md").write_text("conversation edit")
+        (copied[0] / "asset.txt").write_text("conversation edit")
+        if overlapping:
+            assert (copied[1] / "SKILL.md").read_text() == "conversation edit"
+        asset.write_text("source changed after startup")
+        second = client.portal.call(app.state.session_manager.open_session)
+        second_config = start_runtime.call_args.args[0]
+        second_source = Path(
+            second_config.skills.paths[0] if policy is None else second_config.skills.directories[0].skill
+        )
+        assert second_source.is_relative_to(second.workspace_dir)
+        assert (second_source / "SKILL.md").read_text() == original_manifest
+        assert (tmp_path / "skills/review/SKILL.md").read_text() == original_manifest
+        assert (second_source / "asset.txt").read_text() == "original asset"
+        assert asset.read_text() == "source changed after startup"
+        baseline = app.state.workspace_baseline
+    assert not first.workspace_dir.exists()
+    assert not second.workspace_dir.exists()
+    assert not list(baseline.parent.glob("skills-*"))
 
     restarted = create_fabric_serving_app(config_path)
     with TestClient(restarted) as client:
         restarted.state.session_manager._fabric = fabric
-        assert restarted.state.workspace_baseline == baseline
         assert client.portal is not None
-        session = client.portal.call(restarted.state.session_manager.open_session)
-        assert (session.workspace_dir / "input.txt").read_text() == "original input"
-        skills = session.workspace_dir / environment.DEEPAGENTS_SKILLS_DIR
-        assert {path.parent.name: path.read_text() for path in skills.glob("*/SKILL.md")} == {
-            "review": "updated review",
-            "new": "new",
-        }
-    assert not list(baseline.parent.glob("skills-*"))
+        client.portal.call(restarted.state.session_manager.open_session)
+        refreshed = start_runtime.call_args.args[0].skills
+        source = Path(refreshed.paths[0] if policy is None else refreshed.directories[0].skill)
+        assert (source / "asset.txt").read_text() == "source changed after startup"
+        assert restarted.state.workspace_baseline == baseline
 
 
-def test_skill_collision_cleans_up_partial_snapshot(
+def test_failed_skill_snapshot_cleans_up_partial_copy(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
 ) -> None:
-    paths = ["skills/review", "other/review"]
-    for skill_path in paths:
-        bundle = tmp_path / skill_path
-        bundle.mkdir(parents=True)
-        (bundle / "SKILL.md").write_text(skill_path)
+    (tmp_path / "SKILL.md").write_text("---\nname: root\ndescription: Root skill\n---\n")
     config = _example_config()
     config["harnesses"]["hermes"]["kind"] = "deepagents"
-    config["skills"] = {"paths": paths}
+    config["environment"] = {"workspace": "."}
+    config["skills"] = {"paths": [".", "missing"]}
     app = create_fabric_serving_app(_write_agent_config(tmp_path, config))
 
-    with pytest.raises(ValueError, match="both stage as"), TestClient(app):
+    with pytest.raises(FileNotFoundError), TestClient(app):
         pass
 
-    assert not list((tmp_path / "workspace" / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
+    assert not list((tmp_path / environment.DEEPAGENTS_WORKSPACE_DIR).glob("skills-*"))
 
 
 @pytest.mark.parametrize("socket_fd", [None, 123])
@@ -792,6 +779,7 @@ def test_chat_completion_maps_session_resolution_errors(
     [
         (FabricRuntimeStartError("startup failed"), 503),
         (FabricRuntimeExecutionError("stream failed"), 502),
+        (FabricRuntimeTimeoutError("timed out"), 504),
     ],
 )
 def test_streaming_chat_completion_without_session_maps_stream_start_errors(
@@ -1225,17 +1213,24 @@ async def test_streaming_response_logs_cleanup_failure_after_timeout(
     await iterator.aclose()
 
 
+@pytest.mark.parametrize(
+    ("stage", "code", "status_code"),
+    [("invoke", None, 502), ("invoke", "timeout", 504), ("start", "timeout", 502), ("stop", "timeout", 502)],
+)
 def test_chat_completion_maps_failed_run_result(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    code: str | None,
+    status_code: int,
 ) -> None:
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
 
     async def invoke_once(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(
             status="failed",
-            error={"stage": "invoke", "message": "adapter failed"},
+            error={"stage": stage, "code": code, "message": "adapter failed"},
         )
 
     with TestClient(app) as client:
@@ -1245,7 +1240,7 @@ def test_chat_completion_maps_failed_run_result(
             json={"messages": [{"role": "user", "content": "hello"}]},
         )
 
-    assert response.status_code == 502
+    assert response.status_code == status_code
     assert SESSION_ID_HEADER not in response.headers
     assert response.json() == {"detail": "adapter failed"}
 

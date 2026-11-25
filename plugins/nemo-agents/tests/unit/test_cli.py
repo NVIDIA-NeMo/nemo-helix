@@ -9,12 +9,13 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from unittest.mock import patch
 
 import click
 import httpx
 import pytest
+import typer
 from nemo_agents_plugin.cli import (
     MAX_ETHOS_STAGED_BYTES,
     MAX_ETHOS_STAGED_FILES,
@@ -298,25 +299,27 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
             assert f"No such command '{legacy_verb}'" in legacy_result.output
 
 
-def test_agents_cli_has_no_create_command() -> None:
-    result = CliRunner().invoke(AgentsCLI().get_cli(), ["create"])
+def test_create_rejects_the_pre_register_config_form() -> None:
+    # `create` registered an agent from a config until it was renamed `register`; it now creates
+    # an agent of a plugin-managed type, so the old form must fail rather than do something else.
+    result = CliRunner().invoke(AgentsCLI().get_cli(), ["create", "--name", "calc", "--agent-config", "agent.yaml"])
 
     assert result.exit_code == 2
-    assert "No such command 'create'" in result.output
+    assert "No such option" in result.output
 
 
 def test_register_sends_labels() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         assert json.loads(req.content) == {
             "name": "calc",
-            "labels": {"helix-agents/managed-by": "insights", "team": "search"},
+            "labels": {"acme/owner": "insights", "team": "search"},
         }
         return httpx.Response(201, json={"name": "calc"})
 
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             AgentsCLI().get_cli(),
-            ["register", "--name", "calc", "--label", "helix-agents/managed-by=insights", "-l", "team=search"],
+            ["register", "--name", "calc", "--label", "acme/owner=insights", "-l", "team=search"],
         )
 
     assert result.exit_code == 0, result.output
@@ -339,7 +342,7 @@ def test_register_rejects_bad_label_before_post(label: str, error: str) -> None:
 
 def test_list_filters_by_label() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
-        assert json.loads(req.url.params["filter"]) == {"labels.helix-compass/target-agent": "default/bot"}
+        assert json.loads(req.url.params["filter"]) == {"labels.acme/target": "default/bot"}
         return httpx.Response(
             200,
             json={
@@ -355,9 +358,7 @@ def test_list_filters_by_label() -> None:
         )
 
     with _install_mock_transport(handler):
-        result = CliRunner().invoke(
-            AgentsCLI().get_cli(), ["list", "--label", "helix-compass/target-agent=default/bot", "-f", "json"]
-        )
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["list", "--label", "acme/target=default/bot", "-f", "json"])
 
     assert result.exit_code == 0, result.output
 
@@ -538,7 +539,7 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
                     "    type: object",
                     "    additionalProperties: false",
                     "  default_input: Analyze recent runs.",
-                    "  post_run_actions: [insights.analysis, agents.noop]",
+                    "  post_run_actions: [compass.save-insights, agents.noop]",
                     "",
                 ]
             )
@@ -579,7 +580,7 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
             "reference": {"fileset": "default/agent-source"},
             "context_schema": {"type": "object", "additionalProperties": False},
             "default_input": "Analyze recent runs.",
-            "post_run_actions": ["agents.noop", "insights.analysis"],
+            "post_run_actions": ["agents.noop", "compass.save-insights"],
         }
     else:
         assert not set(registration_fields) & sent.keys()
@@ -1653,3 +1654,167 @@ def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
 
     assert result.exit_code == 0, result.stderr
     assert captured["auth"] == "Bearer tok-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Plugin-managed agent types: `types`, `create`, and `execute` context defaults
+# ---------------------------------------------------------------------------
+
+_ANALYST_TYPE = {
+    "type": "example.analyst",
+    "title": "Example analyst",
+    "description": "Analyzes an agent.",
+    "default_name": "example-analyst",
+    "adapter_id": "nvidia.fabric.claude",
+    "context_schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string"},
+            "model": {"type": "string", "x-helix-default": "configured_default_model"},
+            "fast_model": {"type": "string", "x-helix-default": "configured_fast_model"},
+            "since": {"type": "string"},
+        },
+        "required": ["target", "model", "fast_model"],
+        "additionalProperties": False,
+    },
+    "post_run_actions": ["agents.noop"],
+    "subject_label": "Analyzed agent",
+    "agent": None,
+}
+_TYPES_PATH = "/apis/agents/v2/workspaces/default/plugin-managed-agent-types"
+_AGENTS_PATH = "/apis/agents/v2/workspaces/default/agents"
+
+
+def test_types_lists_installed_types() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.path == _TYPES_PATH
+        return httpx.Response(200, json=[_ANALYST_TYPE])
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["types"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == [_ANALYST_TYPE]
+
+
+def test_run_arguments_brackets_optional_context_keys() -> None:
+    from nemo_agents_plugin.cli import _run_arguments
+    from nemo_helix_plugin.agents.types import PluginManagedAgentTypeInfo
+
+    summary = _run_arguments(PluginManagedAgentTypeInfo.model_validate(_ANALYST_TYPE))
+
+    assert summary == "target, model, fast_model, [since]"
+
+
+def test_create_uses_the_types_default_name() -> None:
+    posted: list[dict[str, Any]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET":
+            assert req.url.path == _TYPES_PATH
+            return httpx.Response(200, json=[_ANALYST_TYPE])
+        assert req.url.path == _AGENTS_PATH
+        posted.append(json.loads(req.content))
+        return httpx.Response(
+            201, json={"name": "example-analyst", "plugin_managed_agent": {"type": "example.analyst"}}
+        )
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["create", "example.analyst", "-l", "team=search"])
+
+    assert result.exit_code == 0, result.output
+    assert posted == [
+        {"name": "example-analyst", "labels": {"team": "search"}, "plugin_managed_agent": {"type": "example.analyst"}}
+    ]
+
+
+def test_create_with_a_name_skips_the_type_lookup() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.method == "POST", "should not look up the type's default name"
+        assert json.loads(req.content) == {"name": "my-analyst", "plugin_managed_agent": {"type": "example.analyst"}}
+        return httpx.Response(201, json={"name": "my-analyst"})
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["create", "example.analyst", "--name", "my-analyst"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_create_of_an_unknown_type_lists_the_installed_ones() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.method == "GET", "should not POST an unknown type"
+        return httpx.Response(200, json=[_ANALYST_TYPE])
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["create", "example.nothing"])
+
+    assert result.exit_code == 1
+    assert "unknown plugin-managed agent type 'example.nothing'. Installed types: example.analyst." in result.stderr
+
+
+class TestExecuteContextDefaults:
+    @staticmethod
+    def _fill(kwargs: dict[str, Any], *, schema: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[Any]]:
+        from nemo_agents_plugin import cli_context_defaults
+
+        looked_up: list[Any] = []
+
+        def get_agent(workspace: str, name: str) -> dict[str, Any] | None:
+            looked_up.append((workspace, name))
+            return schema if schema is not None else cast(dict[str, Any], _ANALYST_TYPE["context_schema"])
+
+        typer_ctx = typer.Context(click.Command("execute"), obj=_CLIState())
+        configured = SimpleNamespace(default_model="default/big", fast_model="default/small")
+        with patch.object(cli_context_defaults, "get_context", lambda: configured):
+            spec = cli_context_defaults.spec_with_context_defaults(
+                typer_ctx,
+                {"spec": "{}", "spec_file": None, "workspace": None, **kwargs},
+                get_agent=get_agent,
+            )
+        return json.loads(spec), looked_up
+
+    def test_fills_hinted_keys_the_caller_left_out(self) -> None:
+        spec, looked_up = self._fill(
+            {"agent": "example-analyst", "spec": json.dumps({"context": {"target": "bot", "model": "default/mine"}})}
+        )
+
+        assert looked_up == [("default", "example-analyst")]
+        assert spec == {"context": {"target": "bot", "model": "default/mine", "fast_model": "default/small"}}
+
+    def test_reads_the_agent_from_the_spec_when_no_flag_names_it(self) -> None:
+        spec, looked_up = self._fill({"agent": None, "spec": json.dumps({"agent": "research/example-analyst"})})
+
+        assert looked_up == [("research", "example-analyst")]
+        assert spec["context"] == {"model": "default/big", "fast_model": "default/small"}
+
+    def test_a_key_set_in_the_spec_file_is_not_overridden(self, tmp_path: Path) -> None:
+        spec_file = tmp_path / "spec.json"
+        spec_file.write_text(json.dumps({"context": {"fast_model": "default/from-file"}}))
+
+        spec, _ = self._fill({"agent": "example-analyst", "spec_file": spec_file})
+
+        assert spec == {"context": {"model": "default/big"}}
+
+    def test_leaves_an_agent_without_hints_alone(self) -> None:
+        spec, _ = self._fill({"agent": "calc"}, schema={"type": "object", "properties": {"since": {"type": "string"}}})
+
+        assert spec == {}
+
+    def test_leaves_an_inline_agent_alone(self) -> None:
+        spec, looked_up = self._fill({"agent": None, "spec": json.dumps({"agent": {"config": {}}})})
+
+        assert looked_up == []
+        assert spec == {"agent": {"config": {}}}
+
+    def test_execute_keeps_its_generated_flags(self) -> None:
+        from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
+        from nemo_helix_plugin.commands import add_job_commands
+
+        app = typer.Typer()
+        add_job_commands(app, {"execute": ExecuteAgentJob}, cli=AgentsCLI())
+
+        result = CliRunner().invoke(app, ["execute", "--help"])
+
+        assert result.exit_code == 0, result.output
+        assert "--agent" in result.output
+        assert "--spec" in result.output

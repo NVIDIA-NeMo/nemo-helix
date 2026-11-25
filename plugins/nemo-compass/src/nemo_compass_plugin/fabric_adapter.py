@@ -10,28 +10,27 @@ import logging
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from nemo_compass_plugin.analysis.agent_config import EVALUATION_ID_CONTEXT_KEY, SINCE_CONTEXT_KEY
 from nemo_compass_plugin.analysis.run import run_compass_change_set
+from nemo_compass_plugin.analyst import CompassAnalyst
 from nemo_fabric_adapter_contract import models as contract
 from nemo_fabric_adapters.common import lifecycle
 from nemo_fabric_adapters.common.utils import (
     reject_ambient_relay_plugin_config,
     reject_inherited_relay_plugin_config,
 )
+from nemo_helix_plugin.agents.plugin_managed_agents import NEMO_HELIX_CONTEXT_KEY
 from nemo_helix_plugin.client_provider import get_async_task_nemo_client
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 from nemo_relay.plugin import activate as activate_relay_plugin
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 COMPASS_RELAY_SCOPE = "compass"
-# Key under which an execute job puts its own fields in the request context.
-NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
 
 
 class CompassAdapterConfigError(ValueError):
@@ -39,20 +38,14 @@ class CompassAdapterConfigError(ValueError):
 
 
 class CompassRequestContextError(ValueError):
-    """The request context does not carry a valid Compass run scope."""
+    """The request context is not a valid Compass run context."""
 
 
 class CompassRuntime:
     """Adapter-owned runtime for one Fabric-managed Compass process."""
 
-    def __init__(self) -> None:
-        self._settings: dict[str, Any] = {}
-        self._models: dict[str, contract.AgentModelConfig] = {}
-
     async def start(self, payload: dict[str, Any]) -> None:
-        config: contract.AgentConfig = payload["config"]
-        self._settings = dict(config.harness.settings if config.harness else {})
-        self._models = dict(config.models)
+        del payload
 
     async def invoke(
         self,
@@ -111,48 +104,45 @@ class CompassRuntime:
                 return await self._run_analysis(request, relay_scope_name=COMPASS_RELAY_SCOPE)
 
     async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
-        target_agent = _string_setting(self._settings, "agent") or _string_setting(self._settings, "target_agent")
-        if target_agent is None:
-            raise CompassAdapterConfigError("harness.settings.agent is required for Compass adapter")
-
         # The workspace is the job's own: Compass analyzes the workspace it runs in.
         workspace = _nemo_helix_context(request.context, "job_workspace")
         if workspace is None:
             raise CompassRequestContextError(
                 f"context.{NEMO_HELIX_CONTEXT_KEY}.job_workspace is required; run Compass as an execute job"
             )
-        base_url = (
-            _string_setting(self._settings, "base_url")
-            or os.environ.get("NHX_BASE_URL")
-            or os.environ.get("NEMO_BASE_URL")
-        )
-        # Every settings and context read can raise, so resolve them before
-        # opening the client: nothing is worth a live SDK handle that no one closes.
-        ethos = _string_setting(self._settings, "ethos")
-        since = _datetime_context(request.context, SINCE_CONTEXT_KEY)
-        evaluation_id = _string_context(request.context, EVALUATION_ID_CONTEXT_KEY)
-        enable_observability = bool(self._settings.get("enable_observability", True))
-        model_refs = ConfiguredModelRefs(
-            default=_default_model_ref(self._settings, self._models),
-            fast=_fast_model_ref(self._settings, self._models),
-        )
+        # Parse before opening the client: nothing is worth a live SDK handle that no one closes.
+        try:
+            run = CompassAnalyst.parse_context(request.context)
+        except ValidationError as error:
+            raise CompassRequestContextError(f"the request context is not a Compass run context: {error}") from error
+
+        # Compass's self-observability builds its own OTLP exporter from
+        # the operator's local CLI config, which does not exist in a task
+        # pod, so on a cluster it exports unauthenticated at best. Telemetry
+        # for these runs belongs in the agent config's relay endpoints,
+        # where the agents layer already carries auth; until that is wired,
+        # a run must not depend on it.
+        enable_observability = False
+
+        base_url = os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL")
+
         async with get_async_task_nemo_client("compass") as client:
             result, _backend = await run_compass_change_set(
-                agent=target_agent,
-                ethos=ethos,
+                agent=run.agent,
+                ethos=run.ethos,
                 workspace=workspace,
                 base_url=base_url,
                 client=client,
-                since=since,
-                evaluation_id=evaluation_id,
+                since=run.since,
+                evaluation_id=run.evaluation_id,
                 enable_observability=enable_observability,
                 relay_scope_name=relay_scope_name,
-                model_refs=model_refs,
+                model_refs=ConfiguredModelRefs(default=run.default_model, fast=run.fast_model),
             )
         return result
 
     async def stop(self) -> None:
-        self.__init__()
+        return None
 
 
 @contextmanager
@@ -189,66 +179,10 @@ def _relay_plugin_config(telemetry: contract.RuntimeTelemetryContext) -> dict[st
     return config
 
 
-def _string_setting(settings: dict[str, Any], key: str) -> str | None:
-    value = settings.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise CompassAdapterConfigError(f"harness.settings.{key} must be a non-empty string")
-    return value
-
-
 def _nemo_helix_context(context: dict[str, Any], key: str) -> str | None:
     platform = context.get(NEMO_HELIX_CONTEXT_KEY)
     value = platform.get(key) if isinstance(platform, dict) else None
     return value if isinstance(value, str) and value.strip() else None
-
-
-def _string_context(context: dict[str, Any], key: str) -> str | None:
-    value = context.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise CompassRequestContextError(f"context.{key} must be a non-empty string")
-    return value
-
-
-def _datetime_context(context: dict[str, Any], key: str) -> datetime | None:
-    value = context.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise CompassRequestContextError(f"context.{key} must be an ISO-8601 datetime string")
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError as error:
-        raise CompassRequestContextError(f"context.{key} must be an ISO-8601 datetime string") from error
-
-
-def _default_model_ref(
-    settings: dict[str, Any],
-    models: dict[str, contract.AgentModelConfig],
-) -> str:
-    configured = _string_setting(settings, "default_model")
-    if configured is not None:
-        return configured
-    model = models.get("default")
-    if model is None:
-        raise CompassAdapterConfigError("models.default or harness.settings.default_model is required")
-    return model.model
-
-
-def _fast_model_ref(
-    settings: dict[str, Any],
-    models: dict[str, contract.AgentModelConfig],
-) -> str:
-    configured = _string_setting(settings, "fast_model")
-    if configured is not None:
-        return configured
-    model = models.get("fast")
-    if model is not None:
-        return model.model
-    return _default_model_ref(settings, models)
 
 
 def main() -> None:

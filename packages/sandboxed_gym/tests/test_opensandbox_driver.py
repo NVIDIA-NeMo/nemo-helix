@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import cast
 
 import pytest
@@ -23,11 +24,13 @@ from sandboxed_gym.backends._opensandbox_driver import (
     CREATE_REQUEST_HEADROOM_S,
     OpenSandboxDriver,
     _exec_identity,
+    _extensions,
     _joined_output,
     _resource_limits,
     _resource_requests,
 )
 from sandboxed_gym.backends.base import EpisodeBackendError, UnsupportedEpisodeOperationError
+from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV, EXECD_ACCESS_TOKEN_HEADER
 from sandboxed_gym.sandbox_types import SandboxHandle, SandboxResources, SandboxSpec, SandboxStatus
 
 requires_opensandbox = pytest.mark.skipif(
@@ -358,6 +361,54 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
     assert handle.sandbox_id == "sandbox-1"
     assert captured["resource"] == {"cpu": "4", "memory": "12Gi"}
     assert captured["resource_requests"] == {"cpu": "500m"}
+    assert captured["extensions"] is None
+
+
+@requires_opensandbox
+async def test_create_forwards_the_configured_server_extensions(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    driver = OpenSandboxDriver(create={"extensions": {"bootstrap.execd.isolation": "enable"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    await driver.create(spec_with())
+
+    assert captured["extensions"] == {"bootstrap.execd.isolation": "enable"}
+
+
+@requires_opensandbox
+async def test_create_sends_the_operators_and_the_hosts_extensions_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The Docker-enabled host's isolation comes from the operator; an agent bundle comes from the host provider.
+    # A deployment can use both, and the SDK takes a single extensions argument.
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    driver = OpenSandboxDriver(create={"extensions": {"bootstrap.execd.isolation": "enable"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    await driver.create(SandboxSpec(image="img:1", provider_options={"extensions": {"agent-bundle": "{}"}}))
+
+    assert captured["extensions"] == {"bootstrap.execd.isolation": "enable", "agent-bundle": "{}"}
+
+
+def test_an_extension_both_the_operator_and_the_host_set_is_refused() -> None:
+    spec = SandboxSpec(image="img:1", provider_options={"extensions": {"agent-bundle": "{}"}})
+
+    with pytest.raises(ValueError, match="agent-bundle"):
+        _extensions({"extensions": {"agent-bundle": "{}"}}, spec)
 
 
 class _FakeSandbox:
@@ -504,3 +555,98 @@ async def test_a_create_cut_off_by_the_sdk_request_timeout_names_the_timeout_and
         await driver.create(SandboxSpec(image="img:1", ready_timeout_s=900))
 
     assert isinstance(info.value.__cause__, SandboxTimeoutException)
+
+
+# --------------------------------------------------------------------------------------------
+# execd access token. These take a fake SDK through the driver's `sdk` argument, so they run
+# without the OpenSandbox SDK installed.
+# --------------------------------------------------------------------------------------------
+
+
+class _RecordingSdk:
+    """Stands in for the SDK classes the driver creates and connects sandboxes with."""
+
+    def __init__(self) -> None:
+        self.creates: list[dict[str, object]] = []
+        self.connects: list[dict[str, object]] = []
+        recorder = self
+
+        class ConnectionConfig:
+            def __init__(self, **kwargs: object) -> None:
+                self.headers = dict(cast(Mapping[str, str], kwargs.get("headers", {})))
+                self.request_timeout = kwargs.get("request_timeout", timedelta(seconds=30))
+
+        class Sandbox:
+            @staticmethod
+            async def create(image: str, **kwargs: object) -> object:
+                recorder.creates.append(kwargs)
+                return _FakeSandbox(f"sb-{len(recorder.creates)}", kwargs["connection_config"])
+
+            @staticmethod
+            async def connect(sandbox_id: str, **kwargs: object) -> object:
+                recorder.connects.append(kwargs)
+                return _FakeSandbox(sandbox_id, kwargs["connection_config"])
+
+        class SandboxTimeoutException(Exception):
+            pass
+
+        self.classes = {
+            "Sandbox": Sandbox,
+            "ConnectionConfig": ConnectionConfig,
+            "SandboxTimeoutException": SandboxTimeoutException,
+        }
+
+    def driver(self, **options: Mapping[str, object]) -> OpenSandboxDriver:
+        return OpenSandboxDriver(sdk=self.classes, **options)
+
+
+async def test_execd_gets_a_token_that_only_the_sandboxs_own_connection_sends() -> None:
+    sdk = _RecordingSdk()
+    driver = sdk.driver()
+
+    await driver.create(SandboxSpec(image="img:1", env={"A": "1"}))
+
+    sent = sdk.creates[0]
+    env = cast(Mapping[str, str], sent["env"])
+    token = env[EXECD_ACCESS_TOKEN_ENV]
+    assert len(token) >= 32
+    assert env == {"A": "1", EXECD_ACCESS_TOKEN_ENV: token}
+    assert getattr(sent["connection_config"], "headers") == {EXECD_ACCESS_TOKEN_HEADER: token}
+    # Listing and orphan cleanup use the driver's own connection, which carries no sandbox's token.
+    assert getattr(driver._connection_config, "headers") == {}
+    assert token not in str(sent["metadata"])
+
+
+async def test_every_sandbox_gets_its_own_execd_token() -> None:
+    sdk = _RecordingSdk()
+    driver = sdk.driver()
+
+    await driver.create(SandboxSpec(image="img:1"))
+    await driver.create(SandboxSpec(image="img:1"))
+
+    tokens = [cast(Mapping[str, str], create["env"])[EXECD_ACCESS_TOKEN_ENV] for create in sdk.creates]
+    assert tokens[0] != tokens[1]
+
+
+async def test_a_spec_cannot_choose_its_sandboxs_execd_token() -> None:
+    sdk = _RecordingSdk()
+
+    await sdk.driver().create(SandboxSpec(image="img:1", env={EXECD_ACCESS_TOKEN_ENV: "chosen"}))
+
+    sent = sdk.creates[0]
+    token = cast(Mapping[str, str], sent["env"])[EXECD_ACCESS_TOKEN_ENV]
+    assert token != "chosen"
+    assert getattr(sent["connection_config"], "headers") == {EXECD_ACCESS_TOKEN_HEADER: token}
+
+
+async def test_the_reattached_connection_keeps_the_sandboxs_execd_token() -> None:
+    """A long ready wait reattaches under the configured timeout; losing the token there would break every exec."""
+    sdk = _RecordingSdk()
+
+    handle = await sdk.driver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    token = cast(Mapping[str, str], sdk.creates[0]["env"])[EXECD_ACCESS_TOKEN_ENV]
+    reattached = sdk.connects[0]["connection_config"]
+    assert getattr(reattached, "headers") == {EXECD_ACCESS_TOKEN_HEADER: token}
+    assert getattr(reattached, "request_timeout").total_seconds() == 30
+    assert getattr(handle.raw, "connection_config") is reattached

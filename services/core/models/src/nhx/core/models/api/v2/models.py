@@ -183,7 +183,8 @@ async def create_model(
         filter_description=(
             "Filter models by name, project, workspace, base_model, adapters, "
             "finetuning_type, prompt, lora_enabled, family, model_providers, description, "
-            "created_at, and updated_at."
+            "metadata fields (display_name, capabilities, input_modalities, output_modalities, "
+            "context_length, max_output_tokens, parameter_count), created_at, and updated_at."
         ),
     ),
 )

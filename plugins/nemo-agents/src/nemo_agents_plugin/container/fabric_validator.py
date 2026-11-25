@@ -107,32 +107,34 @@ def validate_fabric_package_artifacts(
     if not resolved_config.is_relative_to(resolved_context):
         errors.append(f"agent config {agent_config_path} is outside Docker build context {resolved_context}")
 
-    for configured_path in config.skills.paths if config.skills is not None else ():
+    for field, configured_path in config.skills.configured_paths() if config.skills is not None else ():
         skill_path = Path(configured_path)
         if skill_path.is_absolute():
             errors.append(
-                f"skills.paths entry {configured_path!r} must be relative to agent.yaml "
-                "so it remains valid under /workspace"
+                f"{field} entry {configured_path!r} must be relative to agent.yaml so it remains valid under /workspace"
             )
             continue
 
         resolved_skill = (resolved_config.parent / skill_path).resolve()
         if not resolved_skill.is_relative_to(resolved_context):
-            errors.append(
-                f"skills.paths entry {configured_path!r} resolves outside Docker build context {resolved_context}"
-            )
+            errors.append(f"{field} entry {configured_path!r} resolves outside Docker build context {resolved_context}")
             continue
         if not resolved_skill.exists():
-            errors.append(f"skills.paths entry {configured_path!r} does not exist at {resolved_skill}")
+            errors.append(f"{field} entry {configured_path!r} does not exist at {resolved_skill}")
             continue
         if not resolved_skill.is_dir():
-            errors.append(f"skills.paths entry {configured_path!r} must reference a directory: {resolved_skill}")
+            errors.append(f"{field} entry {configured_path!r} must reference a directory: {resolved_skill}")
             continue
 
         try:
-            bundles = discover_skill_directories(resolved_skill) if allow_collections else [resolved_skill]
+            collection = field.endswith(".folder") or (field == "skills.paths" and allow_collections)
+            bundles = (
+                discover_skill_directories(resolved_skill, collection=field.endswith(".folder"))
+                if collection
+                else [resolved_skill]
+            )
         except ValueError as error:
-            errors.append(f"skills.paths entry {configured_path!r}: {error}")
+            errors.append(f"{field} entry {configured_path!r}: {error}")
             continue
         for bundle in bundles:
             if not bundle.is_relative_to(resolved_context):
@@ -145,13 +147,13 @@ def validate_fabric_package_artifacts(
                 continue
             skill_manifest = bundle / "SKILL.md"
             if not skill_manifest.is_file():
-                errors.append(f"skills.paths entry {configured_path!r} does not contain SKILL.md: {bundle}")
+                errors.append(f"{field} entry {configured_path!r} does not contain SKILL.md: {bundle}")
                 continue
             try:
                 with skill_manifest.open("rb") as manifest:
                     manifest.read(1)
             except OSError as error:
-                errors.append(f"skills.paths entry {configured_path!r} contains an unreadable SKILL.md: {error}")
+                errors.append(f"{field} entry {configured_path!r} contains an unreadable SKILL.md: {error}")
 
     if errors:
         details = "\n".join(f"  - {error}" for error in errors)

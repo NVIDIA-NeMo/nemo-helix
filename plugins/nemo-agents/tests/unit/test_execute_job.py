@@ -809,9 +809,9 @@ async def test_to_spec_resolves_the_post_run_action_against_the_declaration(
 @pytest.mark.asyncio
 async def test_to_spec_defaults_to_an_installed_single_action() -> None:
     """Unpatched: the defaulted kind is resolved and its empty config validated for real."""
-    step_config = await _step_config_for(_agent(post_run_actions={"insights.analysis"}), input="hello")
+    step_config = await _step_config_for(_agent(post_run_actions={"compass.save-insights"}), input="hello")
 
-    assert step_config.post_run_action == PostRunActionConfig(kind="insights.analysis")
+    assert step_config.post_run_action == PostRunActionConfig(kind="compass.save-insights")
 
 
 @pytest.mark.asyncio

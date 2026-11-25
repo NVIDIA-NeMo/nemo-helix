@@ -9980,7 +9980,8 @@ paths:
           $ref: '#/components/schemas/ModelEntityFilter'
         description: Filter models by name, project, workspace, base_model, adapters,
           finetuning_type, prompt, lora_enabled, family, model_providers, description,
-          created_at, and updated_at.
+          metadata fields (display_name, capabilities, input_modalities, output_modalities,
+          context_length, max_output_tokens, parameter_count), created_at, and updated_at.
       responses:
         '200':
           description: Return a list of models
@@ -13876,6 +13877,11 @@ components:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model - Automatically generated
             by the platform at creation when fileset provided.
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20081,6 +20087,16 @@ components:
       type: object
       title: ModelCacheConfig
       description: Configuration for model caching.
+    ModelCapability:
+      type: string
+      enum:
+      - tool_calling
+      - reasoning
+      - structured_output
+      - embedding
+      - reranking
+      title: ModelCapability
+      description: A capability a model advertises beyond plain text generation.
     ModelDeployment:
       properties:
         id:
@@ -20535,6 +20551,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20681,6 +20702,59 @@ components:
           description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
           title: Model Providers
           type: string
+        display_name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the display name in the model's metadata.
+          title: Display Name
+        capabilities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelCapability'
+          - items:
+              $ref: '#/components/schemas/ModelCapability'
+            type: array
+          description: Filter models whose metadata lists this capability, e.g. 'tool_calling'.
+            A list matches models with all of them; use $in for any and $nin for none.
+          title: Capabilities
+        input_modalities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
+          description: Filter models whose metadata says they accept this modality,
+            e.g. 'image'. A list matches models that accept all of them; use $in for
+            any and $nin for none.
+          title: Input Modalities
+        output_modalities:
+          anyOf:
+          - $ref: '#/components/schemas/ModelModality'
+          - items:
+              $ref: '#/components/schemas/ModelModality'
+            type: array
+          description: Filter models whose metadata says they produce this modality.
+            A list matches models that produce all of them; use $in for any and $nin
+            for none.
+          title: Output Modalities
+        context_length:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by context window in tokens, e.g. filter[context_length][$gte]=128000.
+          title: Context Length
+        max_output_tokens:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by maximum output tokens, e.g. filter[max_output_tokens][$gte]=8192.
+          title: Max Output Tokens
+        parameter_count:
+          anyOf:
+          - $ref: '#/components/schemas/NumberFilter'
+          - type: integer
+          description: Filter by total parameter count, e.g. filter[parameter_count][$lte]=10000000000.
+          title: Parameter Count
         created_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -20726,6 +20800,67 @@ components:
       required:
       - data
       title: ModelEntitysPage
+    ModelMetadata:
+      properties:
+        display_name:
+          title: Display Name
+          description: Human-readable model name.
+          type: string
+          maxLength: 255
+        description:
+          title: Description
+          description: Summary of what the model is for.
+          type: string
+          maxLength: 4000
+        capabilities:
+          items:
+            $ref: '#/components/schemas/ModelCapability'
+          type: array
+          title: Capabilities
+          description: Capabilities the model supports, such as tool calling or reasoning.
+        input_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Input Modalities
+          description: Content types the model accepts.
+        output_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Output Modalities
+          description: Content types the model produces.
+        parameter_count:
+          title: Parameter Count
+          description: Total number of model parameters.
+          type: integer
+          minimum: 0.0
+        context_length:
+          title: Context Length
+          description: Maximum context window, in tokens.
+          type: integer
+          minimum: 0.0
+        max_output_tokens:
+          title: Max Output Tokens
+          description: Maximum tokens in a single response.
+          type: integer
+          minimum: 0.0
+        sources:
+          items:
+            type: string
+          type: array
+          title: Sources
+          description: Metadata sources that contributed these values. Empty means
+            the metadata was set by hand, and automatic enrichment leaves it unchanged.
+        refreshed_at:
+          title: Refreshed At
+          description: When the metadata was last fetched.
+          type: string
+          format: date-time
+      type: object
+      title: ModelMetadata
+      description: Descriptive details about a model, gathered from the services that
+        serve it.
     ModelMetadataContent:
       properties:
         tool_calling:
@@ -20738,6 +20873,16 @@ components:
         Contains tool calling configuration that is merged into the ModelSpec
 
         during checkpoint analysis.'
+    ModelModality:
+      type: string
+      enum:
+      - text
+      - image
+      - audio
+      - video
+      - pdf
+      title: ModelModality
+      description: A kind of content a model accepts or produces.
     ModelParameters:
       properties:
         base_url:
@@ -21120,6 +21265,12 @@ components:
           title: Has Vision Tower
           description: True when the checkpoint config contains a vision tower.
           default: false
+        vision_patch_size:
+          title: Vision Patch Size
+          description: Side length, in pixels, of one image token. Read from the checkpoint
+            vision config as patch_size times the spatial merge. None when the checkpoint
+            does not declare a patch size.
+          type: integer
         has_audio_tower:
           type: boolean
           title: Has Audio Tower
@@ -24330,6 +24481,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length. Send null to clear it.
+          nullable: true
         fileset:
           title: Fileset
           description: 'A set of checkpoint files, configs, and other auxiliary info

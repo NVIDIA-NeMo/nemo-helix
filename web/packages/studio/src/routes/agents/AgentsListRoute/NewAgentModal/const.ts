@@ -68,6 +68,7 @@ export const uploadAgentFormSchema = z
     name: agentNameSchema,
     repoUrl: z.string().trim().default(''),
     secretKey: z.string().default(''),
+    defaultModel: z.string().default(''),
   })
   .merge(deployOnCreateFormSchema);
 

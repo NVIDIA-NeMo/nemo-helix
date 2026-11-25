@@ -15,6 +15,10 @@ interface Props {
   isFetching?: boolean;
   error?: unknown;
   onRetry?: () => void;
+  /** Resolves `<workspace>` in the empty state's CLI command and skill prompt. */
+  workspace?: string;
+  /** The one agent the page is narrowed to, if any, for the empty state's `<agent-name>`. */
+  agentName?: string;
 }
 
 type RunRow = RunSummary & { id: string };
@@ -49,7 +53,14 @@ const compareRunsBy = (a: RunRow, b: RunRow, columnId: string): number => {
   }
 };
 
-export const InferenceLogsTable: FC<Props> = ({ runs, isFetching, error, onRetry }) => {
+export const InferenceLogsTable: FC<Props> = ({
+  runs,
+  isFetching,
+  error,
+  onRetry,
+  workspace,
+  agentName,
+}) => {
   // Keep the page short enough to fit alongside the cards + chart so the data
   // view's internal overflow scroll doesn't capture the page's wheel events.
   const dataViewState = useStudioDataViewState({
@@ -184,7 +195,12 @@ export const InferenceLogsTable: FC<Props> = ({ runs, isFetching, error, onRetry
               />
             ),
             renderEmptyState: () => (
-              <EntityEmptyState entity="agentMonitorRuns" variant="first-use" />
+              <EntityEmptyState
+                entity="agentMonitorRuns"
+                variant="first-use"
+                workspace={workspace}
+                params={{ 'agent-name': agentName }}
+              />
             ),
           },
         }}

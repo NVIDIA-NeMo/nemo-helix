@@ -90,11 +90,17 @@ class RetrievalInputSpec(BaseModel):
     )
     query_prefix: str = Field(
         default="query: ",
-        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+        description=(
+            "Literal prefix prepended to each query. Empty string disables prefixing. "
+            "An embedder scores best with the query prefix it was trained with."
+        ),
     )
     passage_prefix: str = Field(
         default="passage: ",
-        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+        description=(
+            "Literal prefix prepended to each passage. Empty string disables prefixing. "
+            "An embedder scores best with the passage prefix it was trained with."
+        ),
     )
 
 

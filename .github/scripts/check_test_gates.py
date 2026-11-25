@@ -42,7 +42,9 @@ ALLOWED_UNSET = {
     "NHX_INSIGHTS_E2E": "needs a live Insights deployment",
     "TRACE_FIXTURE_LIVE_CODEX": "regenerates fixtures against a live Codex CLI",
     "SCALED_EVALS_TEST_DATABASE_URL": "needs a live Postgres for the scaled-evals migration tests",
-    "NHX_E2E_SANDBOXED_GYM": "needs a sandbox-capable deployment with OpenSandbox; the Gym e2e Kind cluster has none",
+    "NHX_E2E_GYM_DOCKER": (
+        "needs the Docker-enabled Gym host image on Kata OpenSandbox sandboxes; the sandboxed Gym kind lane has neither"
+    ),
 }
 
 #: Directory names that are not this repository's source: installed packages and build caches. Their

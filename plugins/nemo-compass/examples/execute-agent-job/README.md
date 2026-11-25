@@ -3,8 +3,9 @@
 
 # Run Compass on sample traces
 
-This directory demonstrates running Compass through AnalysisRuns
-backed by the generic `agents.execute` job.
+This directory demonstrates running Compass over sample telemetry. Compass is
+the workspace's `compass.analyst` agent, and each analysis is an
+`agents.execute` job of it.
 
 ## Pieces
 
@@ -44,8 +45,8 @@ backed by the generic `agents.execute` job.
   ```
 
   A live model replies. A stale one prints `API error: (424) Failed
-  Dependency`; pick another model and pass it to the run with
-  `--default-model` or `--fast-model`.
+  Dependency`; pick another model and set it as the run's `default_model` or
+  `fast_model`.
 
 The target agent (`demo-agent` below) does not need to exist as an Agent
 entity — Compass only matches it against each span's normalized
@@ -108,23 +109,31 @@ script deletes, through the Intake API, every annotation on a session that has
 demo spans. That includes any annotation someone else added to those sessions.
 Pass `--dry-run` to see the counts first.
 
-### 2. Submit an analysis run
+### 2. Run Compass
 
-Submit an analysis run and wait for it to finish:
+Create the workspace's Compass agent, unless it already has one:
 
 ```bash
-nemo compass analysis-runs create --agent demo-agent --wait
+nemo agents create compass.analyst
 ```
 
-`--wait` reports each status change on stderr and prints the final run as
-JSON on stdout; the run's name is at `run.name`. The command exits non-zero
-if the backing job does not complete.
+Submit an analysis of `demo-agent` and watch it finish:
 
-The model pair is **required** on the request. It lives only in the
+```bash
+nemo agents execute --agent compass-analyst \
+  --spec '{"context": {"agent": "demo-agent"}}'
+nemo jobs watch <job-name>
+```
+
+`execute` prints the created job; its `name` is the `<job-name>` used below.
+`nemo jobs watch` streams the job's logs and exits non-zero if the job does
+not complete.
+
+The model pair is **required** in the context. It lives only in the
 operator's local CLI config (`~/.config/nhx/config.yaml`), which the
 Platform process cannot read, so the request has to carry it. The CLI fills
-it in from that config. Pass `--default-model` and `--fast-model` to override
-either one.
+in `default_model` and `fast_model` from that config when the context leaves
+them out. Set either one in the context to override it.
 
 The same run through the typed Python client. Unlike the CLI, the client does
 not read your CLI config for model defaults, so both models are passed
@@ -132,18 +141,22 @@ explicitly:
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_compass_plugin.sdk import CompassPluginResource
+from nemo_agents_plugin.sdk import AgentsResource
 
 client = NemoClient.from_config()
-compass = CompassPluginResource(client)
-response = compass.analysis_runs.create(
+agents = AgentsResource(client)
+job = agents.jobs.execute.create(
+    spec={
+        "agent": "compass-analyst",
+        "context": {
+            "agent": "demo-agent",
+            "default_model": "default/<default-model>",
+            "fast_model": "default/<fast-model>",
+        },
+    },
     workspace="default",
-    agent="demo-agent",
-    default_model="default/<default-model>",
-    fast_model="default/<fast-model>",
 )
-final = compass.analysis_runs.wait(workspace="default", name=response.run.name)
-print(final.job_status)
+print(job["name"])
 ```
 
 `NemoClient.from_config()` connects to your active CLI context's base URL with
@@ -151,17 +164,12 @@ its credentials. Pass `context=` to use another CLI context.
 
 ### 3. Inspect the run
 
-If you did not use `--wait`, check on the run:
+List the analyses of `demo-agent`, newest first:
 
 ```bash
-nemo compass analysis-runs list --agent demo-agent
-nemo compass analysis-runs get <run-name>          # joined with its job
-nemo compass analysis-runs get <run-name> --wait   # poll to a terminal state
+nemo agents list-jobs --agent compass-analyst --filter '{"spec.subject": "demo-agent"}'
+nemo jobs get-status <job-name>
 ```
-
-A run and its backing job share one name, and `get` returns them together.
-A `job` of `null` means submission never landed and the run can be
-resubmitted.
 
 ### 4. Download the report
 
@@ -169,8 +177,8 @@ The `analysis-report` result, saved by the Compass post-run action, is the
 durable record of what the run did:
 
 ```bash
-nemo jobs results list <run-name>
-nemo jobs results download analysis-report --job <run-name> -o analysis-report.txt
+nemo jobs results list <job-name>
+nemo jobs results download analysis-report --job <job-name> -o analysis-report.txt
 cat analysis-report.txt
 ```
 

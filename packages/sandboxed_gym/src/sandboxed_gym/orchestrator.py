@@ -14,7 +14,6 @@ import signal
 import threading
 import time
 import urllib.error
-import urllib.request
 from atexit import register as register_atexit
 from collections.abc import Callable, Coroutine, Mapping
 from os import kill
@@ -22,7 +21,6 @@ from signal import signal as set_signal_handler
 from types import FrameType
 from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse, urlunsplit
-from urllib.request import urlopen
 
 import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
@@ -34,16 +32,20 @@ from sandboxed_gym.host.models import (
     GymHostSpec,
     GymHostVolumeMount,
     build_bootstrap_env,
+    open_host,
     render_host_error,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.run_sync import run_coro_sync
+from sandboxed_gym.runtime.container_engine import STORAGE_DISCARD_ENV, STORAGE_SIZE_ENV
 from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
     GYM_GLOBAL_CONFIG_ENV_KEY,
+    JOB_ENV_ENV_KEY,
     REUSE_IMAGE_GYM_INSTALL_ENV_KEY,
     UV_OFFLINE_ENV_KEY,
+    encode_job_env,
 )
 from sandboxed_gym.serve_config import (
     SandboxedGymServeConfig,
@@ -216,6 +218,10 @@ def collect_gym_host_egress_allows(
     return tuple(deduped.values())
 
 
+#: Room left under Linux's 128 KiB limit on one environment string for the job's packed variables.
+_JOB_ENV_MAX_BYTES = 120 * 1024
+
+
 def build_gym_host_spec(
     cfg: SandboxedGymServeConfig,
     broker: BrokerEndpoint,
@@ -238,12 +244,8 @@ def build_gym_host_spec(
         )
 
     gym_global = apply_sandbox_runtime_defaults(cfg.gym_global_config)
-    # Caller's variables first so they cannot displace the gym config, package-required flag,
-    # broker endpoint, or mount paths. `build_bootstrap_env` also refuses reserved-key collisions.
-    bootstrap_extra = {
-        **cfg.host_env,
-        GYM_GLOBAL_CONFIG_ENV_KEY: json.dumps(gym_global, sort_keys=True),
-    }
+    # What the platform sets for the host. The job's own variables are kept apart: see below.
+    bootstrap_extra = {GYM_GLOBAL_CONFIG_ENV_KEY: json.dumps(gym_global, sort_keys=True)}
     if cfg.environment_path is not None:
         # The mount path is ``/job/environment`` with or without a FileSet. This flag is how the
         # host distinguishes a required package from an image-bundled tree at the same path.
@@ -258,6 +260,15 @@ def build_gym_host_spec(
         # leaves it. Assigned after host_env so a job cannot keep uv offline once the operator
         # opened the index.
         bootstrap_extra[UV_OFFLINE_ENV_KEY] = "0"
+    if sandbox.container_storage_bytes is not None:
+        bootstrap_extra[STORAGE_SIZE_ENV] = str(sandbox.container_storage_bytes)
+    if sandbox.container_storage_discard:
+        bootstrap_extra[STORAGE_DISCARD_ENV] = "1"
+    # The setup reads these from the container's environment, which a job's variables never reach. A job
+    # setting them anyway would only be seen by Gym, as values the setup never used.
+    claimed = sorted({STORAGE_SIZE_ENV, STORAGE_DISCARD_ENV} & set(cfg.host_env))
+    if claimed:
+        raise ValueError(f"the job's environment must not set {', '.join(claimed)}; the platform sets them")
     bootstrap_env = build_bootstrap_env(
         cfg.job_id,
         cfg.environment_path or sandbox.env_mount_path,
@@ -268,8 +279,25 @@ def build_gym_host_spec(
         sandbox.max_response_bytes,
         dataset_path=dataset_path,
         rollout_deadline_s=sandbox.rollout_timeout_s,
-        extra=bootstrap_extra,
+        # The job's variables first, so they cannot displace anything the platform sets; this also puts
+        # them through the same checks (reserved names, OpenSandbox credentials).
+        extra={**cfg.host_env, **bootstrap_extra},
     )
+    # The job's variables then leave the container's environment for one encoded variable, which the host
+    # applies only after its privileged setup. As the container's environment they would reach every
+    # process that starts as root first: a job's PATH or LD_PRELOAD would choose what root runs.
+    if JOB_ENV_ENV_KEY in cfg.host_env:
+        raise ValueError(f"the job's environment must not set {JOB_ENV_ENV_KEY}; the platform uses it")
+    job_env = {name: bootstrap_env.pop(name) for name in cfg.host_env if name not in bootstrap_extra}
+    if job_env:
+        encoded = encode_job_env(job_env)
+        # Linux caps one environment string at 128 KiB (MAX_ARG_STRLEN); past it the container can't start at all.
+        if len(JOB_ENV_ENV_KEY) + 1 + len(encoded) > _JOB_ENV_MAX_BYTES:
+            raise ValueError(
+                f"the job's environment variables take {len(encoded)} bytes encoded; "
+                f"the Gym host accepts at most {_JOB_ENV_MAX_BYTES - len(JOB_ENV_ENV_KEY) - 1}"
+            )
+        bootstrap_env[JOB_ENV_ENV_KEY] = encoded
 
     egress_allow = collect_gym_host_egress_allows(
         configured=sandbox.network_policy.egress_allow,
@@ -371,9 +399,8 @@ class SandboxedGymSession:
         else:
             path = "/entries"
         url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
-        request = urllib.request.Request(url, method="GET", headers=dict(self.host.headers))
         try:
-            with urlopen(request, timeout=30) as response:
+            with open_host(self.host, url, timeout=30) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -485,15 +512,16 @@ class SandboxedGymSession:
                 retryable=False,
                 origin="client",
             )
-        request = urllib.request.Request(
-            self.host.rollout_url,
-            data=body,
-            method="POST",
-            headers={"Content-Type": "application/json", **self.host.headers},
-        )
         started = time.monotonic()
         try:
-            with urlopen(request, timeout=self._rollout_timeout_s) as response:
+            with open_host(
+                self.host,
+                self.host.rollout_url,
+                method="POST",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                timeout=self._rollout_timeout_s,
+            ) as response:
                 payload = response.read()
         except urllib.error.HTTPError as exc:
             raise self._transport_error(exc.read().decode("utf-8", errors="replace"), exc.code, chunk, started) from exc

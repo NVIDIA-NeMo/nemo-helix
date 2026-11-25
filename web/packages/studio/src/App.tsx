@@ -38,6 +38,7 @@ import { RouterProvider } from 'react-router/dom';
 const expandScopes = (scopes: string, scopePrefix?: string): string => {
   if (!scopePrefix) return scopes;
   const prefix = scopePrefix.endsWith('/') ? scopePrefix : `${scopePrefix}/`;
+
   return scopes
     .split(/\s+/)
     .filter(Boolean)
