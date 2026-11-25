@@ -942,12 +942,14 @@ def test_authenticated_weight_puller_uses_creator_scoped_proxy(
     assert (puller.workload_identity is not None) is exchange
     request = deployment_config_create_request(puller)
     assert request.auth_proxy_sidecar is True
-    assert request.auth_proxy_sidecar_identity == "models"
-    assert request.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
-    server_request = CreateDeploymentConfigRequest.model_validate(request.model_dump(by_alias=True, exclude_none=True))
+    payload = request.model_dump(by_alias=True, exclude_none=True)
+    # The public API chooses the service identity. Delegation comes from the
+    # creator context captured when the controller creates the Deployment.
+    assert "authProxySidecarIdentity" not in payload
+    assert "authProxySidecarOnBehalfOf" not in payload
+    server_request = CreateDeploymentConfigRequest.model_validate(payload)
     assert server_request.auth_proxy_sidecar is True
-    assert server_request.auth_proxy_sidecar_identity == "models"
-    assert server_request.auth_proxy_sidecar_on_behalf_of == (None if exchange else "user:alice")
+    assert (server_request.workload_identity is not None) is exchange
 
 
 def test_weight_puller_refuses_missing_creator_in_exchange_mode(monkeypatch: pytest.MonkeyPatch) -> None:
