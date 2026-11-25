@@ -5,6 +5,7 @@ import logging
 import signal
 import threading
 
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
@@ -62,7 +63,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     backend_registry = BackendRegistry.from_config(
         client=client,
         backend_configs=backends,
-        huggingface_model_puller=models_config.huggingface_model_puller,
+        huggingface_model_puller=get_qualified_image("nhx-api"),
     )
     logger.info(f"Backend registry initialized with: {', '.join(backend_registry.list_backends())}")
 

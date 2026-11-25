@@ -304,6 +304,12 @@ nemo workspaces list
 
 ## Upgrade the chart
 
+Remove `platformConfig.models.huggingface_model_puller` from existing values
+before upgrading. The `models.huggingface_model_puller` configuration key was
+removed, and retaining it causes configuration loading to fail. Model weight
+pullers now use the platform's `nhx-api` image, qualified with
+`platformConfig.platform.image_registry` and `platformConfig.platform.image_tag`.
+
 Update `NHX_HELM_CHART_VERSION`, review the release notes for required values changes, and run:
 
 ```sh

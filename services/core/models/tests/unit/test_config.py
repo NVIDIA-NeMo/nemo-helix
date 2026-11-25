@@ -6,7 +6,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nhx.common.config import Runtime
+from nhx.common.config import Configuration, Runtime
 from nhx.core.models.config import (
     ControllerConfig,
     ModelsConfig,
@@ -19,12 +19,18 @@ from nhx.core.models.controllers.backends.deployments_plugin.config import Deplo
 from pydantic import ValidationError
 
 
-def test_weight_puller_defaults_to_helix_image_and_accepts_override() -> None:
-    with patch("nhx.core.models.config.get_qualified_image", return_value="registry/nhx-api:release"):
-        assert ModelsConfig().huggingface_model_puller == "registry/nhx-api:release"
-    assert ModelsConfig(huggingface_model_puller="registry/custom-puller:release").huggingface_model_puller == (
-        "registry/custom-puller:release"
-    )
+@pytest.mark.parametrize("image", ["registry/custom-puller:release", "", None])
+def test_models_config_rejects_removed_puller_override(image: str | None) -> None:
+    with pytest.raises(
+        ValidationError,
+        match=r"models\.huggingface_model_puller was removed\. Delete it to use the platform's nhx-api image\.",
+    ):
+        Configuration.global_settings_to_service_config({"models": {"huggingface_model_puller": image}}, ModelsConfig)
+
+
+def test_models_config_accepts_omitted_puller_override() -> None:
+    loaded = Configuration.global_settings_to_service_config({"models": {}}, ModelsConfig)
+    assert "huggingface_model_puller" not in loaded.model_dump()
 
 
 def test_models_controller_config_defaults():

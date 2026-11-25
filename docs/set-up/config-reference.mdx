@@ -539,8 +539,6 @@ Consolidated configuration for the Models service.
 
 ```yaml wordWrap
 models:
-  # Image used to pull model weights. Defaults to the platform's nhx-api image (registry/tag from platform config). Overrides must package the Python module nhx.core.models.tasks.weight_puller and its dependencies; CLI-only images are not supported.
-  huggingface_model_puller: my-registry/nhx-api:local
   # Controller service configuration
   controller:
     # Interval in seconds for the Models Controller to run its control loop | default: 5

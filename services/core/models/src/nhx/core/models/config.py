@@ -4,11 +4,10 @@
 import logging
 from typing import Any, Literal
 
-from nemo_helix_plugin.jobs.image import get_qualified_image
 from nhx.common.config import Runtime, create_service_config_class, get_platform_config, get_service_config
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 from nhx.core.models.controllers.backends.registry import BackendConfig
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -428,12 +427,6 @@ class ModelsConfig(create_service_config_class("models")):  # type: ignore
     Contains both API and Controller configurations.
     """
 
-    huggingface_model_puller: str = Field(
-        default_factory=lambda: get_qualified_image("nhx-api"),
-        description="Image used to pull model weights. Defaults to the platform's nhx-api image "
-        "(registry/tag from platform config). Overrides must package the Python module "
-        "nhx.core.models.tasks.weight_puller and its dependencies; CLI-only images are not supported.",
-    )
     controller: ControllerConfig = Field(
         default_factory=ControllerConfig, description="Controller service configuration"
     )
@@ -449,6 +442,15 @@ class ModelsConfig(create_service_config_class("models")):  # type: ignore
         default_factory=ToolCallPluginConfig,
         description="Configuration for tool_call_plugin in the models service",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_puller_image(cls, values: Any) -> Any:
+        if isinstance(values, dict) and "huggingface_model_puller" in values:
+            raise ValueError(
+                "models.huggingface_model_puller was removed. Delete it to use the platform's nhx-api image."
+            )
+        return values
 
 
 # Module-level singleton instances
