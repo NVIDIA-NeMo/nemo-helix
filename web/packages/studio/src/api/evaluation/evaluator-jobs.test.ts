@@ -44,6 +44,10 @@ it('scopes every job page to both evaluator sources and the local agent by publi
               'spec.target.kind': { $in: ['fabric', 'harbor', 'gym'] },
               'spec.target.source.agent': { $in: ['my-agent', `${DEFAULT_WORKSPACE}/my-agent`] },
             },
+            {
+              'spec.target.format': { $eq: 'generic' },
+              'spec.target.name': { $in: ['my-agent', `${DEFAULT_WORKSPACE}/my-agent`] },
+            },
           ],
         },
       ],
