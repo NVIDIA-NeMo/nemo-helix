@@ -49,7 +49,7 @@ export const evalConfigName = (job: AgentEvaluateJob): string | null => {
   return typeof name === 'string' && name.length > 0 ? name : null;
 };
 
-/** How many tasks a job runs. Jobs keep their tasks out of the reply, so count from `task_count`. */
+/** How many tasks a job runs. A job that keeps its tasks in a file shows only `task_count`; others show `tasks`. */
 export const taskCountForJob = (job: AgentEvaluateJob): number | null =>
   job.spec?.task_count ?? job.spec?.tasks?.length ?? null;
 

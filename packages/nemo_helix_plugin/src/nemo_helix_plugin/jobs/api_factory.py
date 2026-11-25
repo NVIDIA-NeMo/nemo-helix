@@ -325,11 +325,12 @@ def _validate_jobs_filter_values(operation: FilterOperation) -> None:
 
 
 def _spec_adapter(schema: object) -> TypeAdapter[Any]:
-    """A validator for a job spec schema whose errors never echo the rejected input.
+    """A validator for a job spec schema; a union of models gets ``hide_input_in_errors``.
 
-    A model sets ``hide_input_in_errors`` on itself, but a union of models is validated by the union's
-    own adapter, which would put a rejected credential back into the error text. Spec errors reach
-    HTTP responses, so a union gets that setting here.
+    A model keeps a rejected input out of its errors only if it sets ``hide_input_in_errors`` on itself.
+    A union of such models is validated by the union's own adapter, which would still put a rejected
+    credential back into the error text. Spec errors reach HTTP responses, so a union gets that setting
+    here; a single model's own config decides.
     """
     if _is_union_type(_unwrap_annotated_schema(schema)):
         return TypeAdapter(schema, config=ConfigDict(hide_input_in_errors=True))

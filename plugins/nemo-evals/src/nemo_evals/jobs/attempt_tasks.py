@@ -120,7 +120,8 @@ def load_attempt_tasks(config: dict, *, ctx: JobContext, client: NemoClient | No
 def _frozen_tasks(client: NemoClient, *, workspace: str, job: str, attempt: str, expected: str) -> dict:
     """The attempt's ``tasks`` and ``trials``, from its spec or from the file its spec names, checked against ``expected``."""
     spec = _attempt_spec(client, workspace=workspace, job=job, attempt=attempt)
-    if FROZEN_TASKS_KEY in spec:
+    # A null pointer is no pointer, as the reply model reads it: the tasks are inline.
+    if spec.get(FROZEN_TASKS_KEY) is not None:
         return _read_frozen_tasks_file(client, spec[FROZEN_TASKS_KEY], workspace=workspace, expected=expected)
     if not isinstance(spec.get("tasks"), list):
         raise AttemptTasksError(f"attempt {attempt!r} of job {job!r} has no task list in its spec")

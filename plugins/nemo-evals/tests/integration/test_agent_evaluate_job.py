@@ -375,7 +375,7 @@ def test_mixed_job_types_list_endpoints_do_not_cross_render(subprocess_platform:
 
     Both job types are owned by the evals plugin. Before the fix they shared one ``source`` tag,
     so ``GET .../agent-evaluate/jobs`` returned every evaluator job and then rendered each against
-    ``ResolvedAgentEvalSpec`` — a row spec failed validation and the list 500'd (and vice versa). The fix
+    ``AgentEvalSpec`` — a row spec failed validation and the list 500'd (and vice versa). The fix
     gives agent-evaluate jobs a distinct ``source`` (``service.AGENT_EVAL_JOB_SOURCE``), so each list
     is scoped to its own collection. The list bug fires on *persisted* records, so this only creates
     one job of each type (no run/wait) and asserts the list endpoints; JSON-native specs keep create

@@ -37,6 +37,7 @@ from nemo_evals.jobs.harbor_task_spec import (
     PreparedImage,
     build_task_job_input,
 )
+from nemo_evals.sdk.job_resources import AgentEvaluatorJob
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -358,13 +359,52 @@ def test_a_job_stored_with_its_tasks_in_a_file_replies_without_them(harbor_spec:
     assert FROZEN_TASKS_KEY not in reply  # the service's own pointer never reaches a reply
 
 
-def test_a_job_stored_with_its_tasks_inline_replies_with_them_and_their_count(
-    harbor_spec: ResolvedAgentEvalSpec,
-) -> None:
-    reply = AgentEvalSpec.model_validate(harbor_spec.model_dump(mode="json")).model_dump(mode="json")
+def test_a_job_stored_with_its_tasks_inline_replies_with_them_alone(harbor_spec: ResolvedAgentEvalSpec) -> None:
+    stored = harbor_spec.model_dump(mode="json")
+    stored["task_count"] = 99  # a count beside the list could only disagree with it
+
+    reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
 
     assert reply["tasks"] == harbor_spec.model_dump(mode="json")["tasks"]
+    # Clients from before `task_count` existed refuse unknown fields, so a reply with tasks doesn't carry it.
+    assert "task_count" not in reply
+
+
+@pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
+def test_a_reply_without_its_tasks_parses_back(harbor_spec: ResolvedAgentEvalSpec, online: bool) -> None:
+    spec = harbor_spec.model_dump(mode="json")
+    if not online:
+        spec = {"target": None, "tasks": spec["tasks"], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
+    stored, _ = _frozen(spec)
+
+    reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
+
+    # A reply omits the pointer, and an offline job's trials with it; the SDK parses replies with this model.
+    assert AgentEvalSpec.model_validate(reply).task_count == len(spec["tasks"])
+    job = AgentEvaluatorJob.model_validate({"name": JOB, "workspace": "default", "spec": reply})
+    assert job.spec.task_count == len(spec["tasks"])
+
+
+def test_a_stored_spec_with_fields_from_a_later_release_still_renders(harbor_spec: ResolvedAgentEvalSpec) -> None:
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    stored[FROZEN_TASKS_KEY]["fileset_id"] = "fileset-1"
+    stored["added_later"] = True
+
+    reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
+
     assert reply["task_count"] == len(harbor_spec.tasks)
+    assert "added_later" not in reply
+
+
+def test_a_null_pointer_leaves_the_tasks_inline(harbor_spec: ResolvedAgentEvalSpec) -> None:
+    stored, compiled, config = _stored_and_compiled(harbor_spec)
+    stored[FROZEN_TASKS_KEY] = None
+    platform = _Platform(_attempt_body(stored, compiled))
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert platform.paths == [f"/apis/jobs/v2/workspaces/default/jobs/{JOB}/attempts/{ATTEMPT}"]
+    assert ResolvedAgentEvalSpec.model_validate(restored) == harbor_spec
 
 
 def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: ResolvedAgentEvalSpec) -> None:

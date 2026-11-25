@@ -32,6 +32,7 @@ from nemo_evals.jobs.attempt_tasks import (
     load_attempt_tasks,
 )
 from nemo_evals.jobs.fileset_tasks import gym_reward_metric
+from nemo_evals.sdk.job_resources import AgentEvaluatorJob
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
 from nemo_helix_plugin.dependencies import get_submission_authorizer
@@ -111,7 +112,7 @@ def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> ResolvedAgentEvalSpec:
     assert response.status_code < 300, response.text
     job = ctx.test_client.get(f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{response.json()['name']}")
     shown = job.raise_for_status().json()["spec"]
-    assert shown.pop("task_count") == len(shown["tasks"])
+    assert "task_count" not in shown  # shown only in place of `tasks`
     return ResolvedAgentEvalSpec.model_validate(shown)
 
 
@@ -475,22 +476,22 @@ def test_a_fileset_source_needs_a_gym_target() -> None:
 # --- Stored shape and spec updates ---------------------------------------------------------------------
 
 
-def test_a_spec_update_resolves_the_tasks_again_and_replies_with_their_count(ctx: ClientContext) -> None:
+def test_a_spec_update_resolves_the_tasks_again_and_replies_with_them(ctx: ClientContext) -> None:
     _upload(ctx, _row("q1"))
     created = ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
         json={"spec": _spec(_tasks(snapshot=None)), "profile": "default"},
     )
     assert created.status_code < 300, created.text
-    assert created.json()["spec"]["task_count"] == 1
+    assert len(created.json()["spec"]["tasks"]) == 1
     route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{created.json()['name']}"
 
     _upload(ctx, _row("q1"), _row("q2"))
     updated = ctx.test_client.patch(route, json={"spec": _spec(_tasks(snapshot=None))})
 
     assert updated.status_code == 200, updated.text
-    assert updated.json()["spec"]["task_count"] == 2
     assert len(updated.json()["spec"]["tasks"]) == 2
+    assert "task_count" not in updated.json()["spec"]  # shown only in place of `tasks`
 
 
 def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientContext) -> None:
@@ -525,6 +526,8 @@ def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientC
     assert one.json()["spec"].get("tasks") is None
     assert one.json()["spec"]["task_count"] == 2
     assert FROZEN_TASKS_KEY not in one.json()["spec"]  # the service's own pointer never reaches a reply
+    # The SDK parses replies with the same model: the reply, without tasks or pointer, has to parse.
+    assert AgentEvaluatorJob.model_validate(one.json()).spec.task_count == 2
     assert listed.status_code == 200, listed.text
     assert [job["spec"]["task_count"] for job in listed.json()["data"]] == [2]
     assert all(FROZEN_TASKS_KEY not in job["spec"] for job in listed.json()["data"])

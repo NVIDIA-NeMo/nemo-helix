@@ -3991,14 +3991,17 @@ components:
           minItems: 1
         task_count:
           title: Task Count
-          description: Number of tasks the job runs. Set even when `tasks` is omitted
-            because the job keeps its tasks outside its record.
+          description: Number of tasks the job runs, set when `tasks` is omitted because
+            the job keeps its tasks outside its record.
           type: integer
           minimum: 1.0
-      additionalProperties: false
       type: object
       title: AgentEvalSpec
-      description: Canonical evaluation containing self-contained, resolved task snapshots.
+      description: 'An agent evaluation as its job stores and returns it.
+
+
+        It holds the resolved tasks, or, for a job that keeps them in a file, only
+        their count.'
     AgentEvalTaskInput:
       properties:
         id:

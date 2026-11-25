@@ -1160,9 +1160,12 @@ class FrozenTasks(BaseModel):
     of its exact bytes. It holds ``{"tasks": [...], "trials": [...] | null}`` as canonical JSON, the bytes the
     step config's ``tasks_digest`` covers, so the worker refuses a file that changed after submission. The
     service sets it; it never appears in a request or a reply.
+
+    Unknown fields are ignored, so a later release can add to the pointer without this one failing to render
+    the jobs it stores.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     plan_ref: str = Field(min_length=1)
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -1170,13 +1173,20 @@ class FrozenTasks(BaseModel):
 
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical evaluation containing self-contained, resolved task snapshots."""
+    """An agent evaluation as its job stores and returns it.
 
-    # Job replies render this model. A job that keeps its tasks in a file shows `task_count` and no `tasks`.
+    It holds the resolved tasks, or, for a job that keeps them in a file, only their count.
+    """
 
+    # Three shapes validate:
+    # - the stored spec of a job that keeps its tasks inline: `tasks`, and `target` or `trials`;
+    # - the stored spec of a job that keeps them in a file: `task_count` and the `frozen_tasks` pointer;
+    # - the reply for such a job, which omits the pointer: `task_count` alone.
     # Replies describe a stored job, not a request: an offline job whose trials are frozen in a file shows
-    # neither `target` nor `trials`, so the request-side ``oneOf`` doesn't apply.
-    model_config = ConfigDict(json_schema_extra=None)
+    # neither `target` nor `trials`, so the request-side ``oneOf`` doesn't apply. Unknown fields are ignored,
+    # so a stored spec from a later release still renders, and a client parsing replies keeps working when
+    # a field is added.
+    model_config = ConfigDict(json_schema_extra=None, extra="ignore")
 
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] | None = Field(
         default=None,
@@ -1185,25 +1195,34 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     task_count: int | None = Field(
         default=None,
         ge=1,
-        description="Number of tasks the job runs. Set even when `tasks` is omitted because the job keeps its "
-        "tasks outside its record.",
+        # Shown only in place of `tasks`, so replies for jobs that keep their tasks inline are unchanged for
+        # clients that don't know the field.
+        exclude_if=lambda value: value is None,
+        description="Number of tasks the job runs, set when `tasks` is omitted because the job keeps its tasks "
+        "outside its record.",
     )
     frozen_tasks: SkipJsonSchema[FrozenTasks | None] = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _require_exactly_one_trial_source(self) -> Self:
-        # Overrides the request-side check: an offline job's frozen trials are counted in ``frozen_tasks``.
+        # Overrides the request-side check. A stored spec counts an offline job's frozen trials in
+        # ``frozen_tasks``; a reply omits that pointer, so it can only refuse both trial sources at once.
+        if self.tasks is None and self.frozen_tasks is None:
+            if self.target is not None and self.trials is not None:
+                raise ValueError("an agent-eval job spec needs exactly one of `target` or trials")
+            return self
         frozen_trials = self.frozen_tasks is not None and self.frozen_tasks.trial_count is not None
         if (self.target is None) == (self.trials is None and not frozen_trials):
             raise ValueError("an agent-eval job spec needs exactly one of `target` or trials")
         return self
 
     @model_validator(mode="after")
-    def _require_tasks_or_frozen_tasks(self) -> Self:
-        if (self.tasks is None) == (self.frozen_tasks is None):
+    def _require_tasks_or_their_count(self) -> Self:
+        if self.tasks is not None and self.frozen_tasks is not None:
             raise ValueError("an agent-eval job spec carries either its `tasks` or the file that holds them")
-        if self.tasks is not None and self.task_count is None:
-            self.task_count = len(self.tasks)
-        if self.task_count is None:
-            raise ValueError("a job spec that keeps its tasks in a file needs `task_count`")
+        if self.tasks is not None:
+            # The list is shown; a count beside it could only disagree with it.
+            self.task_count = None
+        elif self.task_count is None:
+            raise ValueError("an agent-eval job spec that keeps its tasks in a file needs `task_count`")
         return self
