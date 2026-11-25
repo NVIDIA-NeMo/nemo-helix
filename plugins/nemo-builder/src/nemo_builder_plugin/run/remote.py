@@ -104,7 +104,11 @@ class RemoteBuildService(Protocol):
         ...
 
     def start(self, build: RemoteBuild, context: str) -> str:
-        """Start the build and return its ID. Repeating it with one key never starts a second build."""
+        """Start the build and return its ID.
+
+        If a build with this key is still running or has succeeded, return that build's ID rather than start a
+        second one. If it failed or was cancelled, start a new one, so a rerun of the job builds again.
+        """
         ...
 
     def status(self, build_id: str) -> Status:
