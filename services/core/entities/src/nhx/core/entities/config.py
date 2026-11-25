@@ -53,6 +53,27 @@ class EntitiesConfig(create_service_config_class("entities")):
         ),
     )
 
+    account_identity_cache_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable in-process caching of resolved (issuer, subject) account identities, so each authorization "
+            "does not query the database. Only active identities are cached. A deactivated account stays "
+            "authorized on a given replica for up to the TTL. Set via NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_ENABLED."
+        ),
+    )
+    account_identity_cache_ttl_sec: float = Field(
+        default=30.0,
+        description=("TTL in seconds for cached account identities (NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_TTL_SEC)."),
+    )
+    account_identity_cache_max_size: int = Field(
+        default=4096,
+        ge=1,
+        description=(
+            "Max distinct (issuer, subject) pairs in the account identity cache before LRU eviction "
+            "(NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_MAX_SIZE)."
+        ),
+    )
+
     startup_retry_timeout_seconds: int = internal_field(
         default=120,
         description="Maximum seconds to retry database init at startup (e.g. Postgres still booting).",

@@ -46,3 +46,44 @@ def test_postgres_pool_size_follows_connections_limit() -> None:
     )
     engine = create_async_engine_for_entities(config)
     assert engine.sync_engine.pool.size() == 12
+
+
+def test_pre_ping_is_off_by_default() -> None:
+    """A ping costs about three round trips per checkout, so it is opt-in."""
+    config = EntitiesConfig(database_config=DatabaseConfig(url="postgresql+asyncpg://user:pw@localhost:5432/entities"))
+    engine = create_async_engine_for_entities(config)
+    assert engine.sync_engine.pool._pre_ping is False
+
+
+def test_pre_ping_follows_database_config() -> None:
+    config = EntitiesConfig(
+        database_config=DatabaseConfig(url="postgresql+asyncpg://user:pw@localhost:5432/entities", pool_pre_ping=True)
+    )
+    engine = create_async_engine_for_entities(config)
+    assert engine.sync_engine.pool._pre_ping is True
+
+
+def test_pre_ping_argument_overrides_database_config() -> None:
+    config = EntitiesConfig(database_config=DatabaseConfig(url="postgresql+asyncpg://user:pw@localhost:5432/entities"))
+    engine = create_async_engine_for_entities(config, pool_pre_ping=True)
+    assert engine.sync_engine.pool._pre_ping is True
+
+
+def test_postgres_pool_recycles_connections_after_the_configured_age() -> None:
+    config = EntitiesConfig(
+        database_config=DatabaseConfig(
+            url="postgresql+asyncpg://user:pw@localhost:5432/entities", pool_recycle_seconds=600
+        )
+    )
+    engine = create_async_engine_for_entities(config)
+    assert engine.sync_engine.pool._recycle == 600
+
+
+def test_postgres_pool_recycle_can_be_disabled() -> None:
+    config = EntitiesConfig(
+        database_config=DatabaseConfig(
+            url="postgresql+asyncpg://user:pw@localhost:5432/entities", pool_recycle_seconds=0
+        )
+    )
+    engine = create_async_engine_for_entities(config)
+    assert engine.sync_engine.pool._recycle == -1

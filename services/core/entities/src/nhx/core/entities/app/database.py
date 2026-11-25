@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 def create_async_engine_for_entities(
     config: EntitiesConfig,
-    pool_pre_ping: bool = True,
+    pool_pre_ping: bool | None = None,
     **kwargs,
 ) -> AsyncEngine:
     """Create an async SQLAlchemy engine for the entities database.
@@ -26,11 +26,13 @@ def create_async_engine_for_entities(
     - timeout from database_config.connect_timeout_seconds: Connection timeout (default 30s).
     - pool_size from database_config.connections_limit: connections kept open and reused. SQLAlchemy's
       default of 5 forces a burst of concurrent requests to open (and then close) overflow connections.
+    - pool_recycle from database_config.pool_recycle_seconds: replace connections older than this, so one
+      that idled past a proxy or server timeout is not reused.
 
     Args:
         config: Entities service configuration
-        database_url: Database URL. If None, uses get_async_database_url(config)
-        pool_pre_ping: Enable connection health checks (default True)
+        pool_pre_ping: Health-check each pooled connection on checkout. If None, uses
+            database_config.pool_pre_ping (default off: a ping costs about three database round trips)
         **kwargs: Additional arguments passed to create_async_engine
 
     Returns:
@@ -39,6 +41,9 @@ def create_async_engine_for_entities(
     database_url = config.get_async_sqlalchemy_url()
     echo = config.database_config.echo
     connect_timeout = config.database_config.connect_timeout_seconds
+
+    if pool_pre_ping is None:
+        pool_pre_ping = config.database_config.pool_pre_ping
 
     engine_kwargs = {"pool_pre_ping": pool_pre_ping, "echo": echo, **kwargs}
 
@@ -49,6 +54,8 @@ def create_async_engine_for_entities(
         # PostgreSQL (asyncpg): connection timeout in seconds
         engine_kwargs["connect_args"] = {"timeout": connect_timeout}
         engine_kwargs.setdefault("pool_size", config.database_config.connections_limit)
+        if config.database_config.pool_recycle_seconds > 0:
+            engine_kwargs.setdefault("pool_recycle", config.database_config.pool_recycle_seconds)
 
     engine = create_async_engine(database_url, **engine_kwargs)
 

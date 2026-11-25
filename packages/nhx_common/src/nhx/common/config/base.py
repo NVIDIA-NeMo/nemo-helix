@@ -654,6 +654,17 @@ class DatabaseConfig(EnvironmentFirstSettings):
         default=30,
         description="Connection timeout in seconds. For PostgreSQL (asyncpg) and SQLite, how long to wait when connecting or acquiring a lock.",
     )
+    pool_pre_ping: bool = Field(
+        default=False,
+        description="Test each pooled connection with a round trip before handing it out. Costs about three "
+        "database round trips per checkout; leave off unless connections are dropped without the pool noticing. "
+        "With it off, the first query on a connection the server closed fails once and the pool replaces it.",
+    )
+    pool_recycle_seconds: int = Field(
+        default=1800,
+        description="Close and replace pooled PostgreSQL connections older than this many seconds, so a "
+        "connection that sat idle past a proxy or server timeout is not reused. 0 disables recycling.",
+    )
     echo: bool = Field(default=False, description="Enable SQLAlchemy echo for the database connection")
 
     def sqlalchemy_database_url(self) -> str:

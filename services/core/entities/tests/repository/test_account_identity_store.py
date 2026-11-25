@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+from collections.abc import Callable, Iterator
 
 import pytest
-from nhx.core.entities.app.repository.account_identity import AccountIdentityStore
+from nhx.common.config import Configuration
+from nhx.core.entities.app.repository.account_identity import AccountIdentityStore, AccountIdentityUnavailableError
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
-from sqlalchemy import func, select
+from nhx.core.entities.config import EntitiesConfig
+from sqlalchemy import event, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @pytest.mark.asyncio
@@ -133,3 +137,118 @@ async def test_resolve_or_materialize_reuses_account_with_same_link_key(session_
         identity_count = await session.scalar(select(func.count()).select_from(DBAccountIdentity))
     assert account_count == 1
     assert identity_count == 2
+
+
+ISSUER = "https://idp.example.com"
+
+
+def _count_statements(session_maker: async_sessionmaker[AsyncSession]) -> list[str]:
+    """Record every SQL statement the session maker's engine runs from now on."""
+    statements: list[str] = []
+    engine = session_maker.kw["bind"]
+    event.listen(engine.sync_engine, "before_cursor_execute", lambda *args: statements.append(args[2]))
+    return statements
+
+
+async def _resolve(store: AccountIdentityStore, subject: str = "sub-cache"):
+    return await store.resolve_or_materialize(issuer=ISSUER, subject=subject, subject_claim="sub", account_type="user")
+
+
+@pytest.fixture
+def cache_config() -> Iterator[Callable[..., None]]:
+    """Override the entities config for one test; the autouse conftest fixture restores it afterwards."""
+
+    def configure(**fields: object) -> None:
+        Configuration.set_override(EntitiesConfig(**fields))
+
+    yield configure
+    Configuration.clear_override(EntitiesConfig)
+
+
+@pytest.mark.asyncio
+async def test_cached_identity_resolves_without_a_database_query(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=True)
+    store = AccountIdentityStore(session_maker)
+    first = await _resolve(store)
+    statements = _count_statements(session_maker)
+
+    second = await _resolve(AccountIdentityStore(session_maker))
+
+    assert second == first
+    assert statements == []
+
+
+@pytest.mark.asyncio
+async def test_identity_is_cached_after_the_first_read_of_an_existing_row(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=True)
+    created = await _resolve(AccountIdentityStore(session_maker))
+    # A different session maker over the same database has no cache of its own: it reads once, then hits.
+    other = async_sessionmaker(bind=session_maker.kw["bind"], class_=AsyncSession, expire_on_commit=False)
+    store = AccountIdentityStore(other)
+    statements = _count_statements(other)
+
+    assert await _resolve(store) == created
+    reads = len(statements)
+    assert reads > 0
+    assert await _resolve(store) == created
+    assert len(statements) == reads
+
+
+@pytest.mark.asyncio
+async def test_disabled_cache_queries_every_time(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=False)
+    store = AccountIdentityStore(session_maker)
+    await _resolve(store)
+    statements = _count_statements(session_maker)
+
+    await _resolve(store)
+
+    assert statements != []
+
+
+@pytest.mark.asyncio
+async def test_cached_identity_survives_deactivation_only_until_the_ttl(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=True, account_identity_cache_ttl_sec=0.2)
+    store = AccountIdentityStore(session_maker)
+    await _resolve(store)
+    async with session_maker() as session, session.begin():
+        await session.execute(update(DBAccountIdentity).values(status="disabled"))
+
+    await _resolve(store)  # still served from the cache, by design
+
+    await asyncio.sleep(0.3)
+    with pytest.raises(AccountIdentityUnavailableError):
+        await _resolve(store)
+
+
+@pytest.mark.asyncio
+async def test_inactive_identity_is_never_cached(session_maker, cache_config):
+    cache_config(account_identity_cache_enabled=True)
+    store = AccountIdentityStore(session_maker)
+    await _resolve(store)
+    async with session_maker() as session, session.begin():
+        await session.execute(update(DBAccountIdentity).values(status="disabled"))
+    other = async_sessionmaker(bind=session_maker.kw["bind"], class_=AsyncSession, expire_on_commit=False)
+
+    for _ in range(2):
+        with pytest.raises(AccountIdentityUnavailableError):
+            await _resolve(AccountIdentityStore(other))
+
+    async with session_maker() as session, session.begin():
+        await session.execute(update(DBAccountIdentity).values(status="active"))
+    assert (await _resolve(AccountIdentityStore(other))).account_id.startswith("account-")
+
+
+@pytest.mark.asyncio
+async def test_caches_do_not_cross_session_makers(session_maker, cache_config):
+    """Two databases that reuse an issuer and subject must not share resolved account ids."""
+    cache_config(account_identity_cache_enabled=True)
+    first = await _resolve(AccountIdentityStore(session_maker), "sub-shared")
+    other = async_sessionmaker(bind=session_maker.kw["bind"], class_=AsyncSession, expire_on_commit=False)
+    async with other() as session, session.begin():
+        await session.execute(update(DBAccountIdentity).values(subject="sub-renamed"))
+
+    # Same subject on a maker that never saw it cached: it reads the database rather than reusing ``first``.
+    renamed = await _resolve(AccountIdentityStore(other), "sub-shared")
+
+    assert renamed.account_id != first.account_id

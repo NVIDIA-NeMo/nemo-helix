@@ -5,16 +5,44 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Literal
+from weakref import WeakKeyDictionary
 
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
+from nhx.core.entities.cache import TTLCache
+from nhx.core.entities.config import EntitiesConfig
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
+
+# In-process LRU + TTL cache of active identities. Stores are built per request, so the cache cannot live
+# on the store; it is keyed by session maker instead. Each event loop owns one session maker (and one
+# engine), so a cache never outlives or crosses the database connection it was filled from, and tests that
+# build a fresh database per test get a fresh cache. Configure with
+# NHX_ENTITIES_ACCOUNT_IDENTITY_CACHE_{ENABLED,TTL_SEC,MAX_SIZE} (see EntitiesConfig).
+_identity_caches: WeakKeyDictionary[async_sessionmaker[AsyncSession], TTLCache] = WeakKeyDictionary()
+_identity_caches_lock = threading.Lock()
+
+
+def _identity_cache(session_maker: async_sessionmaker[AsyncSession]) -> TTLCache | None:
+    """Return the cache for ``session_maker``, or ``None`` if caching is disabled."""
+    config = EntitiesConfig.get()
+    if not config.account_identity_cache_enabled:
+        return None
+    with _identity_caches_lock:
+        cache = _identity_caches.get(session_maker)
+        if cache is None:
+            cache = TTLCache(
+                maxsize=config.account_identity_cache_max_size,
+                ttl=config.account_identity_cache_ttl_sec,
+            )
+            _identity_caches[session_maker] = cache
+        return cache
 
 
 class AccountIdentityUnavailableError(RuntimeError):
@@ -63,8 +91,16 @@ class AccountIdentityStore:
         linked_by: str | None = None,
     ) -> AccountIdentityRecord:
         """Resolve an identity, materializing account and identity rows on miss."""
+        cache = _identity_cache(self.session_maker)
+        if cache is not None:
+            cached = cache.get((issuer, subject))
+            if cached is not None:
+                return cached
+
         existing = await self.get_active_identity(issuer=issuer, subject=subject)
         if existing is not None:
+            if cache is not None:
+                cache[(issuer, subject)] = existing
             return existing
 
         account_id = generate_entity_id("account")
@@ -124,6 +160,8 @@ class AccountIdentityStore:
             raise AccountIdentityConflictError(
                 f"Account identity was not readable after materialization for issuer={issuer!r}, subject={subject!r}"
             )
+        if cache is not None:
+            cache[(issuer, subject)] = created
         return created
 
     async def _link_identity_to_active_account_by_link_key(
