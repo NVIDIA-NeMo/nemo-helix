@@ -42,6 +42,7 @@ __all__ = [
     "WorkloadNeeds",
     "WorkloadUser",
     "capability_refusals",
+    "merged_env",
     "require_absolute_path",
     "require_egress_policy",
     "require_own_ref",
@@ -555,3 +556,12 @@ def capability_refusals(capabilities: Capabilities, spec: SandboxSpec, needs: Wo
             "(PlatformEgress) to run here"
         )
     return reasons
+
+
+def merged_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
+    """Merge environment layers, such as the spec's env and a request's; later layers win."""
+    merged: dict[str, str] = {}
+    for layer in layers:
+        if layer:
+            merged.update(layer)
+    return merged

@@ -15,6 +15,7 @@ directory, which every backend must make writable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import io
 import tarfile
@@ -36,7 +37,7 @@ from nhx_sandbox.core.backend import (
     WorkloadNeeds,
     WorkloadUser,
 )
-from nhx_sandbox.core.errors import RevisionConflict, SandboxNotFound, UnsupportedOperation
+from nhx_sandbox.core.errors import RevisionConflict, SandboxLost, SandboxNotFound, UnsupportedOperation
 from nhx_sandbox.egress import EgressPolicy, EgressRule
 
 __all__ = ["CaseResult", "EgressProbe", "run_suite"]
@@ -154,6 +155,28 @@ async def _exec_timeout_kills(ctx: _Context) -> None:
     _expect(
         not survivors.stdout.strip(), f"processes kept running after the timeout and wrote {survivors.stdout.split()}"
     )
+    after = await ctx.sh("echo ok")
+    _expect(after.stdout.strip() == "ok", "the sandbox wasn't usable after a command timed out")
+
+
+async def _exec_cancel_stops_command(ctx: _Context) -> None:
+    """Cancelling ``exec`` stops the command, so it can't change the sandbox after the caller gave up on it.
+
+    A backend that can't stop it may instead mark the sandbox unusable, so this case runs after every
+    other case that uses the suite's sandbox.
+    """
+    marker = ctx.path("cancelled")
+    call = asyncio.create_task(ctx.sh(f"sleep 4; touch {marker}"))
+    await asyncio.sleep(1)
+    call.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await call
+    await asyncio.sleep(6)
+    try:
+        check = await ctx.sh(f"test -e {marker}")
+    except SandboxLost:
+        return
+    _expect(check.exit_code != 0, "the command kept running after its call was cancelled")
 
 
 async def _file_round_trip(ctx: _Context) -> None:
@@ -356,6 +379,7 @@ CASES: tuple[tuple[str, Case], ...] = (
     ("get_and_list", _get_and_list),
     ("egress_denied_by_default", _egress_denied_by_default),
     ("egress_live_update", _egress_live_update),
+    ("exec_cancel_stops_command", _exec_cancel_stops_command),
     ("delete_is_idempotent", _delete_is_idempotent),
 )
 

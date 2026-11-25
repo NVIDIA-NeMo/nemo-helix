@@ -160,6 +160,10 @@ class LocalProcessBackend:
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(request.stdin), timeout=request.timeout_s)
+        except asyncio.CancelledError:
+            # The caller gave up on the command, so it must not keep running and change the sandbox.
+            _kill_group(process.pid)
+            raise
         except TimeoutError:
             _kill_group(process.pid)
             stdout, stderr = await process.communicate()
