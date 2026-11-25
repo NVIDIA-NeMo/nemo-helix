@@ -1,16 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""E2E tests for Insights analysis runs backed by ``agents.execute`` jobs.
+"""E2E test for a Compass analysis: an ``agents.execute`` job on the workspace's Compass agent.
 
-This is the platform-side replacement for running the Compass from an
-operator's shell: everything here goes through the ``analysis-runs`` API, so
-passing it means the path works on a remotely-deployed platform, where nobody
-needs to execute analysis in an operator's shell.
+Everything here goes through the platform API, so passing it means analysis
+works on a remotely-deployed platform, where nobody runs Compass from an
+operator's shell.
 
 The Compass's model is mocked, deliberately. What is under test is the wiring —
-run recorded, job submitted under the run's name, Fabric runs the inline
-Compass, the ``insights.analysis`` post-run action persists the change-set and saves
+the ``compass.analyst`` agent created by type, its run prepared (models
+qualified, the Ethos read from Files), Fabric running the Compass adapter, the
+``compass.save-insights`` post-run action persisting the change-set and saving
 the report — not whether a real model reaches a good conclusion. Two seeded
 Intake traces pass through Compass's evidence streams and compilation,
 with deterministic Nooa model responses.
@@ -25,9 +25,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from nemo_compass_plugin.analyst import CompassAnalyst
 from nemo_compass_plugin.sdk import CompassPluginResource
 from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.ethos import ETHOS_FILENAME, ethos_fileset_name
+from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, PluginManagedAgentSpec, RegisterAgentRequest
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.intake.types import DirectSpanInput, DirectSpansIngestRequest
@@ -54,6 +59,7 @@ REPORT_RESULT_NAME = "analysis-report"
 FABRIC_RUN_RESULT_NAME = "fabric_run_result"
 FABRIC_ERROR_RESULT_NAME = "fabric_error"
 JOB_TIMEOUT_SECONDS = 600.0
+TERMINAL_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
 
 COMPASS_SUMMARY = "Analyzed 2 traces: 1 new insights, 0 existing insights with new evidence."
 INSIGHT_TITLE = "Knowledge search returns no documents and the agent answers anyway"
@@ -63,7 +69,7 @@ INSIGHT_DESCRIPTION = (
 )
 TRACE_REF = "trace-compass-analysis-run-e2e"
 TRACE_REFS = [f"{TRACE_REF}-1", f"{TRACE_REF}-2"]
-# Sent inline on the run so the whole ethos chain — request, harness settings,
+# Sent inline on the run so the whole ethos chain — request, run context,
 # adapter, prompt — is exercised by a real job. We can't assert this makes it
 # in to the model prompt here, but we at least ensure it isn't rejected anywhere
 # along the way.
@@ -251,6 +257,16 @@ def _wait_for_spans(intake: IntakeClient, *, workspace: str, agent_name: str, ti
         time.sleep(2.0)
 
 
+def _wait_for_job(agents_client: AgentsClient, workspace: str, job_name: str) -> str:
+    """Poll the execute job until it ends, returning its final status."""
+    deadline = time.monotonic() + JOB_TIMEOUT_SECONDS
+    while True:
+        status = str(agents_client.get_execute_job(name=job_name, workspace=workspace).data().get("status"))
+        if status in TERMINAL_JOB_STATUSES or time.monotonic() >= deadline:
+            return status
+        time.sleep(2.0)
+
+
 def _created_insight_id(report: str) -> str:
     """Pull the stored insight id out of the report's change log.
 
@@ -264,14 +280,14 @@ def _created_insight_id(report: str) -> str:
     return match.group("insight_id")
 
 
-def test_analysis_run_persists_insights_and_saves_its_report(
+def test_compass_run_persists_insights_and_saves_its_report(
     client: NemoClient,
     workspace: str,
     compass: CompassPluginResource,
     intake: IntakeClient,
     agents_client: AgentsClient,
 ) -> None:
-    """One analysis run, end to end, through the supported API surface."""
+    """One Compass run, end to end, through the supported API surface."""
     target_agent = unique_name("analyzed-agent")
     now = datetime.now(timezone.utc) - timedelta(seconds=5)
     intake.create_spans(
@@ -308,54 +324,63 @@ def test_analysis_run_persists_insights_and_saves_its_report(
         pytest.fail("Seeded traces did not become queryable")
     default_model, fast_model = _mock_compass_models(client, workspace)
 
-    created = compass.analysis_runs.create(
+    # The analyzed agent's Ethos lives where Compass reads it when it prepares the run.
+    files_client = FilesClient.from_client(client)
+    files_client.create_fileset(
+        workspace=workspace, body=CreateFilesetRequest(name=ethos_fileset_name(target_agent)), exist_ok=True
+    )
+    files_client.upload_file(
+        workspace=workspace, name=ethos_fileset_name(target_agent), path=ETHOS_FILENAME, content=ETHOS.encode()
+    )
+
+    compass_agent = agents_client.register_agent(
         workspace=workspace,
-        agent=target_agent,
-        default_model=default_model,
-        fast_model=fast_model,
-        ethos=ETHOS,
-        timeout_seconds=JOB_TIMEOUT_SECONDS,
-    )
-    run_name = created.run.name
-
-    # The run is recorded before the job is submitted, and the job takes the
-    # run's name — that shared name is the only link between them.
-    assert created.run.agent == target_agent
-    assert created.job is not None
-    assert created.job["name"] == run_name
-
-    final = compass.analysis_runs.wait(
+        body=RegisterAgentRequest(
+            name=CompassAnalyst.default_name,
+            plugin_managed_agent=PluginManagedAgentSpec(type=CompassAnalyst.type_id),
+        ),
+        exist_ok=True,
+    ).data()
+    job = agents_client.create_execute_job(
         workspace=workspace,
-        name=run_name,
-        timeout=JOB_TIMEOUT_SECONDS,
-        poll_interval=2.0,
-    )
-    assert final.job_status == "completed", _job_diagnostics(
-        client, workspace, run_name, f"Analysis run {run_name} finished with job status {final.job_status!r}"
-    )
+        body=CreateExecuteJobRequest(
+            spec={
+                "agent": compass_agent.name,
+                "context": {"agent": target_agent, "default_model": default_model, "fast_model": fast_model},
+                "timeout_seconds": JOB_TIMEOUT_SECONDS,
+            }
+        ),
+    ).data()
+    job_name = str(job["name"])
 
-    # The run survives as a queryable record, not just as a job.
-    listed = compass.analysis_runs.list_runs(workspace=workspace, agent=target_agent)
-    assert run_name in {run.name for run in listed.data}
-    assert final.run.default_model == default_model
-    assert final.run.fast_model == fast_model
+    # The job is about the analyzed agent, so its runs can be listed by it.
+    spec = job["spec"]
+    assert spec["subject"] == target_agent
+    assert spec["plugin_managed_agent_type"] == CompassAnalyst.type_id
+    assert spec["context"]["ethos"] == ETHOS
+
+    status = _wait_for_job(agents_client, workspace, job_name)
+    assert status == "completed", _job_diagnostics(
+        client, workspace, job_name, f"Compass job {job_name} finished with status {status!r}"
+    )
 
     # The post-run action saves a durable report of what the run did.
-    result_names = {str(result["name"]) for result in _list_job_results(agents_client, workspace, run_name)["data"]}
+    result_names = {str(result["name"]) for result in _list_job_results(agents_client, workspace, job_name)["data"]}
     assert REPORT_RESULT_NAME in result_names, f"Saved results: {sorted(result_names)}"
-    report = _download_job_result(client, workspace, run_name, REPORT_RESULT_NAME)
+    report = _download_job_result(client, workspace, job_name, REPORT_RESULT_NAME)
     assert COMPASS_SUMMARY in report
     assert INSIGHT_TITLE in report
+
+    # Relay carries the Compass's own trajectory to Intake. Nothing in this
+    # test configures telemetry: the agents plugin wires the export, Fabric
+    # resolves it, and the adapter activates it. The spans are named after the
+    # agent that ran: the Compass agent.
+    spans = _wait_for_spans(intake, workspace=workspace, agent_name=compass_agent.name)
+    assert spans, "the Compass ran but its trajectory never reached Intake"
 
     # The post-run action persisted the change-set as a real Insight. The report's
     # change log is what says which one: it is written from what the Insights
     # API returned, so its id only exists if the write landed.
-    # Relay carries the Compass's own trajectory to Intake. Nothing in this
-    # test configures telemetry: the agents plugin wires the export, Fabric
-    # resolves it, and the adapter activates it.
-    spans = _wait_for_spans(intake, workspace=workspace, agent_name="compass")
-    assert spans, "the Compass ran but its trajectory never reached Intake"
-
     insight_id = _created_insight_id(report)
     filed = compass.insights.get(workspace=workspace, insight_id=insight_id)
     assert filed.title == INSIGHT_TITLE

@@ -27,10 +27,6 @@ class _CompassMethods:
     get_analysis_run_status = method(endpoints.get_analysis_run_status)
     update_analysis_run_status = method(endpoints.update_analysis_run_status)
 
-    create_analysis_run = method(endpoints.create_analysis_run)
-    list_analysis_runs = method(endpoints.list_analysis_runs)
-    get_analysis_run = method(endpoints.get_analysis_run)
-
 
 class CompassClient(_CompassMethods, NemoClient):
     """Sync client for Compass plugin API."""

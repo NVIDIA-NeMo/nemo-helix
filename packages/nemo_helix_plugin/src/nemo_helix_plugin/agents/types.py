@@ -104,9 +104,15 @@ def _default_post_run_actions() -> set[str]:
 
 LABELS_DESCRIPTION = (
     "Key/value labels for filtering and display, never for authorization. Keys are '<name>' or "
-    "'<prefix>/<name>' with no dots. Keys NeMo Helix plugins define use the prefix 'helix-<plugin>', "
-    "e.g. 'helix-agents/managed-by'; that prefix is a convention the API does not enforce."
+    "'<prefix>/<name>' with no dots."
 )
+PLUGIN_MANAGED_AGENT_DESCRIPTION = (
+    "Set when the agent is of a plugin-managed agent type. Its attributes "
+    "are derived from the installed type whenever the agent is read or run, "
+    "not stored. List installed types with `nemo agents types`."
+)
+# ``<plugin>.<name>``: lowercase segments of letters, digits, '-' and '_'.
+PLUGIN_MANAGED_AGENT_TYPE_PATTERN = r"^[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+$"
 
 
 class EntityMetadata(BaseModel):
@@ -331,6 +337,17 @@ class ReferenceConfig(BaseModel):
         return value
 
 
+class PluginManagedAgentSpec(BaseModel):
+    """Defines an agent as managed by a plugin."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(
+        pattern=PLUGIN_MANAGED_AGENT_TYPE_PATTERN,
+        description="Plugin-managed agent type ID, of the form '<plugin>.<name>'.",
+    )
+
+
 class Agent(EntityMetadata, AgentInline):
     """An agent definition stored in the Agents service."""
 
@@ -340,6 +357,9 @@ class Agent(EntityMetadata, AgentInline):
     )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
+    plugin_managed_agent: PluginManagedAgentSpec | None = Field(
+        default=None, description=PLUGIN_MANAGED_AGENT_DESCRIPTION
+    )
 
 
 class AgentComputeSpec(EntityMetadata, ComputeSpecInline):
@@ -445,11 +465,37 @@ class RegisterAgentRequest(BaseModel):
         ),
     )
 
+    plugin_managed_agent: PluginManagedAgentSpec | None = Field(
+        default=None,
+        description=(
+            "Create an agent of this plugin-managed type instead of from a config. The type supplies the "
+            "config, context_schema, default_input and post_run_actions, so none of them may be set."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_config_format(self) -> Self:
         if self.config.get("config_format", self.config_format) != self.config_format:
             raise ValueError("config_format must match config.config_format")
         return self
+
+    @model_validator(mode="after")
+    def _validate_plugin_managed_agent(self) -> Self:
+        if self.plugin_managed_agent is None:
+            return self
+        derived = sorted(self.model_fields_set & _DERIVED_FROM_TYPE_FIELDS)
+        if derived:
+            raise ValueError(
+                f"{', '.join(derived)} cannot be set with plugin_managed_agent: the agent's type supplies "
+                f"{'it' if len(derived) == 1 else 'them'}."
+            )
+        return self
+
+
+# What a plugin-managed agent type supplies, so a request may not set it too.
+_DERIVED_FROM_TYPE_FIELDS = frozenset(
+    {"config", "config_format", "context_schema", "default_input", "post_run_actions", "reference"}
+)
 
 
 class CreateSampleAgentRequest(BaseModel):
@@ -644,6 +690,25 @@ class CreateExecuteJobRequest(AgentJobRequest):
     """Compatibility request body for the agents.execute job collection."""
 
     spec: JsonObject = Field(description="ExecuteAgentJobConfig payload owned by the Agents plugin.")
+
+
+class PluginManagedAgentTypeInfo(BaseModel):
+    """A plugin-managed agent type installed on the platform."""
+
+    type: str = Field(description="Type ID to create an agent with: `nemo agents create <type>`.")
+    title: str = Field(description="Human-readable name of the type.")
+    description: str = Field(description="One-line summary of what agents of this type do.")
+    default_name: str = Field(description="Name an agent of this type gets when created without one.")
+    adapter_id: str = Field(description="Fabric adapter that runs agents of this type.")
+    context_schema: JsonMap = Field(description="JSON Schema of the per-run context an execute job passes.")
+    post_run_actions: list[str] = Field(description="Post-run action kinds an execute job of this type may choose.")
+    subject_label: str | None = Field(
+        default=None,
+        description="What a run's spec.subject names, e.g. 'Analyzed agent'; null when runs have no subject.",
+    )
+    agent: str | None = Field(
+        default=None, description="Name of this workspace's agent of the type, or null when it has none."
+    )
 
 
 class PostRunActionInfo(BaseModel):

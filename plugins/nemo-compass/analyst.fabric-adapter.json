@@ -26,19 +26,7 @@
   "settings_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
-    "properties": {
-      "agent": {"type": "string", "minLength": 1},
-      "target_agent": {"type": "string", "minLength": 1},
-      "ethos": {"type": "string", "minLength": 1},
-      "base_url": {"type": "string", "minLength": 1},
-      "enable_observability": {"type": "boolean", "default": true},
-      "default_model": {"type": "string", "minLength": 1},
-      "fast_model": {"type": "string", "minLength": 1}
-    },
-    "oneOf": [
-      {"required": ["agent"]},
-      {"required": ["target_agent"]}
-    ],
+    "properties": {},
     "additionalProperties": false
   },
   "telemetry": {
@@ -48,9 +36,7 @@
   },
   "requirements": {},
   "config": {
-    "accepts": [
-      "models"
-    ]
+    "accepts": []
   },
   "capabilities": {
     "service": false,

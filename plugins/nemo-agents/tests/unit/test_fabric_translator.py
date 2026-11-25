@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.agent_config_formats import validate_agent_config
+from nemo_agents_plugin.fabric import translator
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import (
     FabricTranslationError,
@@ -362,9 +363,17 @@ class TestTranslateAgentConfig:
         with pytest.raises(FabricTranslationError, match="extensions"):
             translate_agent_config(config)
 
-    def test_translates_shared_capability_sections(self) -> None:
+    @pytest.mark.parametrize(
+        "skill_settings",
+        [
+            {"paths": ["skills/review"]},
+            {"directories": [{"skill": "skills/review"}], "duplicates": "reject"},
+            {"directories": [], "bundled": {"include": []}},
+        ],
+    )
+    def test_translates_shared_capability_sections(self, skill_settings: dict[str, Any]) -> None:
         payload = copy.deepcopy(_example_yaml_config())
-        payload["skills"] = {"paths": ["skills/review"]}
+        payload["skills"] = skill_settings
         payload["mcp"] = {
             "servers": {
                 "repo": {
@@ -380,9 +389,27 @@ class TestTranslateAgentConfig:
                     "allowed_tools": [],
                     "custom_headers": {"Authorization": "Bearer ${MCP_ACCESS_TOKEN}"},
                 },
+                "authenticated": {
+                    "transport": "streamable-http",
+                    "url": "https://mcp.example.com",
+                    "authentication": {
+                        "type": "service_account",
+                        "client_id": "example-client",
+                        "client_secret_env": "MCP_CLIENT_SECRET",
+                        "token_url": "https://idp.example.com/token",
+                        "scopes": ["tools.read"],
+                    },
+                },
             }
         }
-        payload["tools"] = {"blocked": ["shell", "browser"]}
+        payload["tools"] = {
+            "definitions": {"convert": {"kind": "python", "ref": "example.tools:convert", "settings": {"unit": "m"}}},
+            "blocked": ["shell", "browser"],
+        }
+        payload["harnesses"][payload["default_harness"]]["settings"] = {
+            "deepagents": {"middleware": [{"ref": "example.middleware:Counter"}]}
+        }
+        payload = validate_agent_config(payload["config_format"], payload)
         config = AgentConfig.model_validate(payload)
 
         fabric_config = translate_agent_config(config)
@@ -391,9 +418,11 @@ class TestTranslateAgentConfig:
         mcp = fabric_config.mcp
         tools = fabric_config.tools
         assert skills is not None
+        assert config.skills is not None
+        assert fabric_config.harness is not None
         assert mcp is not None
         assert tools is not None
-        assert skills.paths == ["skills/review"]
+        assert skills.model_dump(exclude_none=True) == config.skills.model_dump(exclude_none=True)
         assert mcp.servers["repo"].transport == "stdio"
         assert mcp.servers["repo"].url == "repo-mcp --root ."
         assert mcp.servers["repo"].exposure == "fabric_managed"
@@ -402,6 +431,15 @@ class TestTranslateAgentConfig:
         assert mcp.servers["disabled"].allowed_tools == []
         assert mcp.servers["disabled"].custom_headers == {"Authorization": "Bearer ${MCP_ACCESS_TOKEN}"}
         assert tools.blocked == ["shell", "browser"]
+
+        authentication = mcp.servers["authenticated"].authentication
+        assert authentication is not None
+        assert authentication.client_secret_env == "MCP_CLIENT_SECRET"
+        assert authentication.token_url == "https://idp.example.com/token"
+        assert authentication.scopes == ["tools.read"]
+        assert tools.definitions["convert"].ref == "example.tools:convert"
+        assert tools.definitions["convert"].settings == {"unit": "m"}
+        assert fabric_config.harness.settings == payload["harnesses"][payload["default_harness"]]["settings"]
 
     @pytest.mark.parametrize("tools", [{}, {"enabled": None}, {"enabled": []}, {"enabled": ["execute"]}])
     def test_tools_allowlist_survives_normalization_and_translation(self, tools: dict[str, Any]) -> None:
@@ -642,6 +680,33 @@ class TestTranslateAgentConfig:
 
         with pytest.raises(FabricTranslationError, match="no models.default is configured"):
             translate_agent_config(config)
+
+    def test_an_adapter_that_takes_no_models_needs_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An adapter that reads its models from the run's context takes none, so its config names none."""
+        monkeypatch.setattr(translator, "adapter_accepts_models", lambda adapter_id: False)
+        payload = _example_yaml_config()
+        payload["models"] = {}
+        payload["default_harness"] = "codex"
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        assert fabric_config.models == {}
+
+    def test_an_adapter_that_takes_no_models_records_no_atif_model_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(translator, "adapter_accepts_models", lambda adapter_id: False)
+        payload = _example_yaml_config()
+        payload["models"] = {}
+        payload["default_harness"] = "codex"
+        payload["telemetry"]["enabled"] = True
+        config = AgentConfig.model_validate(payload)
+
+        fabric_config = translate_agent_config(config)
+
+        assert fabric_config.relay is not None
+        assert fabric_config.relay.observability is not None
+        atif = fabric_config.relay.observability.model_dump(exclude_none=True)["atif"]
+        assert "model_name" not in atif
 
     def test_relay_defaults_pi_runtime_artifacts_when_unset(self) -> None:
         payload = copy.deepcopy(_example_yaml_config())

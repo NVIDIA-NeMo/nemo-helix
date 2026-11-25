@@ -12,7 +12,7 @@ from typing import ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisConfigPerms, AnalysisRunStatusPerms, InsightPerms
-from nemo_compass_plugin.analysis_runs import router as analysis_runs_router
+from nemo_compass_plugin.analyst import CompassAnalyst
 from nemo_compass_plugin.authz import scope
 from nemo_compass_plugin.entities import (
     AnalysisConfig,
@@ -31,8 +31,13 @@ from nemo_compass_plugin.schema import (
     UpdateAnalysisRunStatusRequest,
     UpdateInsightRequest,
 )
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.agents.types import PluginManagedAgentSpec, RegisterAgentRequest
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import (
     EntityValidationError as NemoEntityValidationError,
 )
@@ -42,6 +47,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import PaginationData
 from nemo_helix_plugin.service import NemoService, RouterSpec
 from nhx.intake.entities.experiments import ExperimentGroup
@@ -87,12 +93,6 @@ class CompassService(NemoService):
                 _build_analysis_run_statuses_router(),
                 tag="Compass Analysis Run Statuses",
                 description="Machine-written state for periodic insights analysis.",
-                prefix="/v2/workspaces/{workspace}",
-            ),
-            RouterSpec(
-                analysis_runs_router,
-                tag="Compass Analysis Runs",
-                description="Submit Compass analysis runs backed by generic execute-agent jobs.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]
@@ -398,6 +398,37 @@ async def _get_or_create_analysis_run_status(
         return await entity_client.get(AnalysisRunStatus, name=agent, workspace=workspace)
 
 
+async def _ensure_compass_agent(client: AsyncNemoClient, *, workspace: str) -> None:
+    """Create the workspace's Compass agent, as the caller, unless it has one.
+
+    Saving an analysis config is how a workspace starts using Compass, so the
+    CLI and Studio share this one path to the agent its runs need. Best effort:
+    a caller who may configure analysis but not create agents still gets the
+    config saved, and the scheduler reports the missing agent on the config's
+    run status.
+    """
+    try:
+        if await CompassAnalyst.find_agent(workspace=workspace, client=client) is not None:
+            return
+        await AsyncAgentsClient.from_client(client).register_agent(
+            workspace=workspace,
+            body=RegisterAgentRequest(
+                name=CompassAnalyst.default_name,
+                plugin_managed_agent=PluginManagedAgentSpec(type=CompassAnalyst.type_id),
+            ),
+        )
+    except ConflictError:
+        # Created concurrently, or the name is taken by another agent; in the
+        # latter case the scheduler reports the missing Compass agent.
+        logger.info("Compass agent not created in workspace '%s': conflict", sanitize_for_log(workspace))
+    except (NemoHTTPError, NemoTransportError) as exc:
+        logger.warning(
+            "Could not create the Compass agent in workspace '%s': %s",
+            sanitize_for_log(workspace),
+            sanitize_for_log(exc),
+        )
+
+
 def _build_analysis_configs_router() -> APIRouter:
     router = APIRouter()
 
@@ -413,8 +444,15 @@ def _build_analysis_configs_router() -> APIRouter:
         agent: str,
         body: EnableAnalysisConfigRequest,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
+        client: AsyncNemoClient = Depends(get_nemo_client),
     ) -> AnalysisConfig:
-        """Enable periodic insights analysis for one agent."""
+        """Enable periodic insights analysis for one agent.
+
+        Also creates the workspace's Compass agent (`compass.analyst`) if it has none.
+        That is best effort: if the caller may not create agents, the config is still
+        saved, and the scheduler reports the missing agent on the analysis status.
+        """
+        await _ensure_compass_agent(client, workspace=workspace)
         config, created = await _get_or_create_analysis_config(
             entity_client,
             workspace=workspace,
@@ -534,8 +572,14 @@ def _build_analysis_configs_router() -> APIRouter:
         agent: str,
         body: UpdateAnalysisConfigRequest,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
+        client: AsyncNemoClient = Depends(get_nemo_client),
     ) -> AnalysisConfig:
-        """Partially update periodic analysis state for one agent."""
+        """Partially update periodic analysis state for one agent.
+
+        Also creates the workspace's Compass agent (`compass.analyst`) if it has none.
+        That is best effort: if the caller may not create agents, the config is still
+        saved, and the scheduler reports the missing agent on the analysis status.
+        """
         try:
             config = await entity_client.get(AnalysisConfig, name=agent, workspace=workspace)
         except NemoEntityNotFoundError as exc:
@@ -546,6 +590,7 @@ def _build_analysis_configs_router() -> APIRouter:
 
         for field, value in body.model_dump(exclude_unset=True).items():
             setattr(config, field, value)
+        await _ensure_compass_agent(client, workspace=workspace)
 
         try:
             return await entity_client.update(config)

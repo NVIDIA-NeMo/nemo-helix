@@ -7,10 +7,8 @@ from __future__ import annotations
 
 from abc import abstractmethod
 
-from nemo_compass_plugin.entities import AnalysisConfig, AnalysisRun, AnalysisRunStatus, Insight
+from nemo_compass_plugin.entities import AnalysisConfig, AnalysisRunStatus, Insight
 from nemo_compass_plugin.schema import (
-    AnalysisRunResponse,
-    CreateAnalysisRunRequest,
     CreateInsightRequest,
     EnableAnalysisConfigRequest,
     InsightListItem,
@@ -20,7 +18,6 @@ from nemo_compass_plugin.schema import (
 )
 from nemo_compass_plugin.types import (
     ListAnalysisConfigsQueryParams,
-    ListAnalysisRunsQueryParams,
     ListAnalysisRunStatusesQueryParams,
     ListInsightsQueryParams,
 )
@@ -105,20 +102,3 @@ def get_analysis_run_status(*, workspace: str | None = None, agent: str) -> Anal
 def update_analysis_run_status(
     *, workspace: str | None = None, agent: str, body: UpdateAnalysisRunStatusRequest
 ) -> AnalysisRunStatus: ...
-
-
-@post(f"{_COMPASS_BASE}/analysis-runs")
-@abstractmethod
-def create_analysis_run(*, workspace: str | None = None, body: CreateAnalysisRunRequest) -> AnalysisRunResponse: ...
-
-
-@get(f"{_COMPASS_BASE}/analysis-runs")
-@abstractmethod
-def list_analysis_runs(
-    *, workspace: str | None = None, query_params: ListAnalysisRunsQueryParams | None = None
-) -> Paginated[AnalysisRun]: ...
-
-
-@get(f"{_COMPASS_BASE}/analysis-runs/{{name}}")
-@abstractmethod
-def get_analysis_run(*, workspace: str | None = None, name: str) -> AnalysisRunResponse: ...

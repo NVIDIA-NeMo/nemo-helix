@@ -331,14 +331,22 @@ class TestConfigureRetrievalDataset:
             def can_generate(cls) -> bool:
                 return True
 
+        loaded: list[tuple[Path, bool]] = []
+        new_model_config = SimpleNamespace(model_type="new_model", architectures=["NewModelForCausalLM"])
+
+        def load(model_path: Path, *, trust_remote_code: bool) -> SimpleNamespace:
+            loaded.append((model_path, trust_remote_code))
+            return new_model_config
+
+        registry = "nhx.automodel.tasks.training.backends.registry"
+        monkeypatch.setattr(f"{registry}._load_checkpoint_config", load)
         monkeypatch.setattr(
-            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
-            lambda _config: NewCausalReranker,
+            f"{registry}._automodel_cross_encoder_class",
+            lambda config: NewCausalReranker if config is new_model_config else None,
         )
         base = tmp_path / "base"
-        base.mkdir()
-        (base / "config.json").write_text('{"model_type": "new_model", "architectures": ["NewModelForCausalLM"]}')
         mock_customizer_config.model.path = str(base)
+        mock_customizer_config.model.trust_remote_code = True
         train_file = tmp_path / "train.jsonl"
         train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
 
@@ -352,6 +360,8 @@ class TestConfigureRetrievalDataset:
                 retrieval_config=RetrievalConfig(),
                 recipe=TrainingRecipe.CROSS_ENCODER,
             )
+        # The checkpoint loads with the job's flag, as Automodel's loader does.
+        assert loaded == [(base, True)]
 
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,

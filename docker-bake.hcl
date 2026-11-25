@@ -134,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "88e6156d24726bfc23c4eb0109c58bf77e742f12" # soluwalana/RL nhx/rl-20261110
+  default = "6014fd297b25165b71bb37a34247a19f0dc091d3" # soluwalana/RL nhx/rl-20261110
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -399,6 +399,8 @@ group "docker-cpu-ci" {
     "nhx-gym-tasks-smoke-test",
     "nhx-gym-host-docker",
     "nhx-gym-host-smoke-test",
+    "nhx-gym-host-podman-docker",
+    "nhx-gym-host-podman-smoke-test",
     "nhx-agent-hardener-tasks-smoke-test",
     "nhx-builder-tasks-docker",
     "nhx-builder-tasks-smoke-test",
@@ -947,6 +949,42 @@ target "nhx-gym-host-smoke-test" {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-from = maybe_registry_cache_from("nhx-gym-host")
+  output     = ["type=cacheonly"]
+  platforms  = get_platforms()
+}
+
+# Sandboxed Gym host with rootless Podman behind the Docker CLI, for environments whose resource
+# servers run `docker compose`. Opt-in through `sandbox_runtime_image`; Kata sandboxes only.
+target "nhx-gym-host-podman-docker" {
+  target     = "podman"
+  context    = "."
+  dockerfile = "docker/gym-host/Dockerfile"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nhx-gym-host-podman")
+  cache-from = concat(maybe_registry_cache_from("nhx-gym-host"), maybe_registry_cache_from("nhx-gym-host-podman"))
+  tags       = sha_and_maybe_latest_tags("nhx-gym-host-podman")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-gym-host-podman-smoke-test" {
+  target     = "podman-smoke-test"
+  context    = "."
+  dockerfile = "docker/gym-host/Dockerfile"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+  }
+  args = {
+    NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-from = concat(maybe_registry_cache_from("nhx-gym-host"), maybe_registry_cache_from("nhx-gym-host-podman"))
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
 }

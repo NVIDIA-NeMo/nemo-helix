@@ -230,6 +230,7 @@ class JWTValidator:
                         "verify_iss": False,
                         "require": ["sub", "exp", "iat"],
                     },
+                    leeway=self.config.oidc.clock_skew_leeway_seconds,
                 )
                 return self._claims_extractor.extract(claims)
 
@@ -251,6 +252,7 @@ class JWTValidator:
                     algorithms=["RS256", "ES256"],
                     audience=audience,
                     options=decode_options,
+                    leeway=self.config.oidc.clock_skew_leeway_seconds,
                 )
 
                 # Validate issuer manually (PyJWT only supports single issuer)

@@ -110,24 +110,24 @@ nemo setup --auto --workspace default --start-services --install-skills
 
 </details>
 
-## What is in the box
+## What you can do
 
 ### Capabilities
 
 | Domain | What it covers | Components |
 |---|---|---|
-| **Connectivity & Observability** | Connect agents to Helix and see what they actually do in production | NeMo Fabric (specialized agents, formerly NAT), NeMo Relay (black-box and general-purpose harnesses), trace ingestion, session and cost inspection |
+| **Connectivity & Observability** | Connect agents to Helix and see what they actually do in production | NeMo Fabric (specialized agents, formerly NAT), NeMo Relay (runtime observability and control for agent runs), trace ingestion, session and cost inspection |
 | **Data** | Generate the training and evaluation data you do not have, and keep sensitive data out of it | Data Designer, Safe Synthesizer, Anonymizer|
-| **Optimization** | Make the agent more accurate, faster or cheaper | Prompt-optimization, Hyper-Parameter Search with Optuna, model-routing with Switchyard|
-| **Fine-tuning** | Make OSS models more accurate, faster, or cheaper|  LoRA, Full SFT, DPO, GRPO for LLMs, Embedding and Re-ranking models with Customizer plugin ( AutoModel, NeMoRL, Unsloth ) |
+| **Optimization** | Make the agent more accurate, faster or cheaper | Prompt-optimization, Hyperparameter Search, model-routing with Switchyard|
+| **Fine-tuning** | Make OSS models more accurate, faster, or cheaper|  LoRA, Full SFT, DPO, GRPO for LLMs, Embedding and Re-ranking models with Customizer plugin ( AutoModel, NeMo RL, Unsloth ) |
 | **Evaluation** | Score candidates against your benchmarks before you ship them | NeMo Gym environments, Harbor eval suites, LLM-as-judge, deterministic, agentic, and RAG metrics, experiments |
-| **Safety** | Catch unsafe behavior before and during production | Guardrails (content safety, jailbreak detection, PII redaction), garak red-teaming, OpenShell sandboxing |
+| **Safety** | Catch unsafe behavior before and during production | Guardrails (content safety, jailbreak detection, PII redaction), garak red-teaming, sandboxing |
 
 ### Built-in agents
 
 Two agents work the loop with you rather than waiting for you to drive it.
 
-- **Analyst.** Reads production traces and surfaces where and why the agent is failing.
+- **Compass.** Reads production traces and surfaces where and why the agent is failing.
 - **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
 
 ### Surfaces

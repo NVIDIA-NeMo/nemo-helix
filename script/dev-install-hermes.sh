@@ -10,7 +10,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM_PY="${REPO_ROOT}/.venv/bin/python"
 HERMES_VENV="${REPO_ROOT}/.venv-hermes"
 HERMES_PY="${HERMES_VENV}/bin/python"
-# Fabric 0.6's tested Hermes revision; its isolated adapter requires Relay 0.10.
+# Hermes v0.22.5 requires Relay 0.10 in its isolated environment.
 HERMES_COMMIT="bf0203a794a07aac3ff764972ab9087baa4e4f4e"
 HERMES_CHECKOUT="${HERMES_VENV}/src/hermes-agent"
 

@@ -60,6 +60,9 @@ navigation:
               - page: Execute as Jobs
                 slug: execute-agents-as-jobs
                 path: ../../agents/execute-agent-jobs.mdx
+              - page: Plugin-Managed Agents
+                slug: plugin-managed-agents
+                path: ../../agents/plugin-managed-agents.mdx
           - section: Insights
             skip-slug: true
             contents:
@@ -111,7 +114,7 @@ navigation:
           - section: Migration & Compatibility
             skip-slug: true
             contents:
-              - page: Fabric 0.6 Upgrade and Adapter Support
+              - page: Fabric 0.7 Upgrade and Adapter Support
                 slug: fabric-upgrade
                 path: ../../agents/fabric-upgrade.mdx
       - section: Evaluate Agents & Models

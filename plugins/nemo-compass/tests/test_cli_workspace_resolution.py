@@ -15,14 +15,11 @@ from __future__ import annotations
 
 import pytest
 from nemo_compass_plugin.testing.cli import (
-    RUN_NAME,
     FakeCompassAPI,
     WireState,
     app_with_state,
     config_json,
     page_json,
-    run_json,
-    run_response_json,
 )
 from typer.testing import CliRunner
 
@@ -42,9 +39,6 @@ def api() -> FakeCompassAPI:
     api.on("POST", "/analysis-configs/demo-agent/disable", config_json(enabled=False))
     api.on("GET", "/analysis-configs/demo-agent", config_json())
     api.on("GET", "/analysis-configs", page_json([config_json()]))
-    api.on("POST", "/analysis-runs", run_response_json())
-    api.on("GET", "/analysis-runs", page_json([run_json()]))
-    api.on("GET", f"/analysis-runs/{RUN_NAME}", run_response_json("completed"))
     return api
 
 
@@ -55,9 +49,6 @@ COMMANDS: list[tuple[str, list[str]]] = [
     ("analysis disable", ["compass", "analysis", "disable", "--agent", "demo-agent"]),
     ("analysis status (one agent)", ["compass", "analysis", "status", "--agent", "demo-agent"]),
     ("analysis status (all)", ["compass", "analysis", "status"]),
-    ("analysis-runs create", ["compass", "analysis-runs", "create", "--agent", "demo-agent"]),
-    ("analysis-runs list", ["compass", "analysis-runs", "list"]),
-    ("analysis-runs get", ["compass", "analysis-runs", "get", RUN_NAME]),
 ]
 IDS = [label for label, _ in COMMANDS]
 

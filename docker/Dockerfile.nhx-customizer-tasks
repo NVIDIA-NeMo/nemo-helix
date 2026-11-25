@@ -85,17 +85,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --reinstall-package wandb \
     --reinstall-package fsspec \
     --overrides /app/docker/customizer/preserve_base_torch.txt \
-    "aiohttp>=3.14.1,<4" \
+    "aiohttp>=3.14.5,<4" \
     "fsspec>=2026.6.0" \
     "grpcio>=1.81.1,<2" \
     "jupyter-server>=2.20.0,<3" \
     "mistune>=3.3.3,<4" \
     "notebook>=7.6.3,<8" \
-    "pillow>=12.3.0,<13" \
+    "pillow>=13.0.0,<14" \
     "soupsieve>=2.8.4,<3" \
     "tornado>=6.5.7,<7" \
     "urllib3>=2.7.0,<3" \
-    "GitPython>=3.1.60,<4" \
+    "GitPython>=3.2.1,<4" \
     "wandb>=0.31.0"
 
 # CVE cleanup for unused/stale packages from the NGC base image. The task entry

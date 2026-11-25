@@ -75,25 +75,25 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.garak_venv/bin/python "setuptools>=78.1.1" && \
     uv --no-config pip install --no-deps --python /app/.garak_venv/bin/python \
     "urllib3==2.8.0" \
-    "aiohttp>=3.14.3,<4" \
-    "pyasn1>=0.6.4" \
+    "aiohttp>=3.14.5,<4" \
+    "pyasn1>=0.6.5" \
     "protobuf>=6.33.5,<7.0.0" \
     "langchain-core>=1.2.22" \
     "orjson>=3.11.6" \
     "cryptography>=50.0.0,<51" \
-    "nltk>=3.10.3"
+    "nltk>=3.10.4"
 
 # CVE Remediation
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv --no-config pip install --no-deps \
     "urllib3==2.8.0" \
     "protobuf>=5.29.6,<6.0.0" \
-    "aiohttp>=3.14.3,<4" \
-    "pyasn1>=0.6.4" \
+    "aiohttp>=3.14.5,<4" \
+    "pyasn1>=0.6.5" \
     "wheel>=0.46.2" \
     "orjson>=3.11.6" \
     "cryptography>=50.0.0,<51" \
-    "nltk>=3.10.3"
+    "nltk>=3.10.4"
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}

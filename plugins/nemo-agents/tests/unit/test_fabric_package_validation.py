@@ -15,7 +15,7 @@ import nemo_agents_plugin.container.fabric_validator as fabric_validator
 import nemo_agents_plugin.container.metadata as metadata
 import nemo_agents_plugin.container.template as template
 import pytest
-from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.agent_config import AgentConfig, SkillsConfig
 from nemo_agents_plugin.container.builder import build_fabric_agent_image
 from nemo_agents_plugin.container.errors import ManagedFileConflictError
 from nemo_agents_plugin.container.fabric_validator import (
@@ -554,13 +554,17 @@ class TestValidateFabricPackageArtifacts:
             context_dir=tmp_path,
         )
 
-    def test_rejects_absolute_skill_path(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("field", ["paths", "skill", "folder"])
+    def test_rejects_absolute_skill_path(self, tmp_path: Path, field: str) -> None:
         agent_config_path = _agent_config_path(tmp_path)
         absolute_skill = _skill(tmp_path / "skills" / "review")
 
+        config = _agent_config(str(absolute_skill))
+        if field != "paths":
+            config.skills = SkillsConfig.model_validate({"directories": [{field: str(absolute_skill)}]})
         with pytest.raises(FabricPackageArtifactError, match="must be relative to agent.yaml"):
             validate_fabric_package_artifacts(
-                _agent_config(str(absolute_skill)),
+                config,
                 agent_config_path=agent_config_path,
                 context_dir=tmp_path,
             )
