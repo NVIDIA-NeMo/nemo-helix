@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 from nemo_agent_hardener_plugin.cli._shared import (
     ATTACK_INTENSITIES,
+    api_errors,
     command_context,
     models_from_flags,
     validated_defenders,
@@ -19,7 +20,6 @@ from nemo_agent_hardener_plugin.cli._shared import (
 )
 from nemo_agent_hardener_plugin.config import missing_secrets
 from nemo_agent_hardener_plugin.jobs.defenses import defense_ids, select_defense_ids
-from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
 
 
@@ -27,6 +27,7 @@ def register(app: typer.Typer) -> None:
     """Attach the war-game commands to *app*."""
 
     @app.command()
+    @api_errors
     def run(
         config_file: str | None = typer.Option(
             None, "--config", "-c", help="Local manifest produced by `init` (default: agent-hardener.yaml)."
@@ -124,11 +125,7 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(code=1)
             env_files = [ctx.config.operator_env_file] + ([Path(env_file)] if env_file else [])
-            try:
-                missing = missing_secrets(Path(config_file), env_files=env_files)
-            except AgentHardenerRunError as exc:
-                typer.secho(f"{exc} {exc.remediation}", fg="red")
-                raise typer.Exit(code=1) from exc
+            missing = missing_secrets(Path(config_file), env_files=env_files)
             if missing:
                 typer.secho(
                     f"Missing required secrets: {', '.join(missing)}. Provide them via --env-file "
@@ -171,6 +168,7 @@ def register(app: typer.Typer) -> None:
         raise typer.Exit(code=0 if result.get("status") == "completed" else 1)
 
     @app.command(name="synth-benign")
+    @api_errors
     def synth_benign(
         manifest_id: str = typer.Option(..., "--manifest-id", help="Saved manifest to synthesize a suite for."),
         env_file: str | None = typer.Option(None, "--env-file", help="Dotenv with the agent's secrets."),
@@ -209,6 +207,7 @@ def register(app: typer.Typer) -> None:
         raise typer.Exit(code=1)
 
     @app.command(name="sanity-check")
+    @api_errors
     def sanity_check(
         manifest_id: str = typer.Option(..., "--manifest-id", help="Saved manifest to validate against."),
         mitigations_file: str = typer.Option(

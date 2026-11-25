@@ -177,6 +177,29 @@ def test_init_omits_backends_when_none_given(tmp_path: Path, monkeypatch: pytest
     assert "backends" not in created
 
 
+def test_init_shows_the_backend_rejection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from nemo_helix_plugin.cli_error_handling import REMOTE_ERROR_EXIT_CODE
+    from nemo_helix_plugin.client.errors import ConflictError
+    from typer.testing import CliRunner
+
+    app = _patch_cli(cli_main, monkeypatch, [], {}, _project(tmp_path))
+    response = httpx.Response(
+        409, json={"detail": "Manifest 'clockbot' already exists."}, request=httpx.Request("POST", "http://h/m")
+    )
+
+    def reject(**_kwargs: Any) -> Any:
+        raise ConflictError(response)
+
+    _shared.make_sdk("http://h").agent_hardener.manifests.create = reject
+
+    result = CliRunner().invoke(app, ["init", "--agent", "clockbot", "--output", str(tmp_path / "out.yaml")])
+
+    assert result.exit_code == REMOTE_ERROR_EXIT_CODE, result.output
+    assert "Manifest 'clockbot' already exists." in result.output
+    assert not (tmp_path / "out.yaml").exists()
+
+
 # --------------------------------------------------------------------------- init -o
 def _stored_manifest(project_dir: str = ".agent-hardener-agents/x") -> dict[str, Any]:
     manifest_yaml = yaml.safe_dump({"agent": {"name": "x", "project_dir": project_dir, "port": 8000}})

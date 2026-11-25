@@ -14,6 +14,7 @@ import json
 import typer
 from nemo_agent_hardener_plugin.cli._shared import (
     ATTACK_INTENSITIES,
+    api_errors,
     command_context,
     json_mapping,
     merge_models,
@@ -34,6 +35,7 @@ def build_app() -> typer.Typer:
     )
 
     @app.command("show")
+    @api_errors
     def manifest_show(
         name: str = typer.Argument(..., help="Saved manifest to display."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
@@ -41,14 +43,11 @@ def build_app() -> typer.Typer:
         """Print a saved manifest's stored war-game defaults."""
         # No preflight: reading a manifest record doesn't need Docker/OpenShell/the venvs.
         ctx = command_context(workspace, preflight=False)
-        try:
-            record = ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace)
-        except Exception as exc:
-            typer.secho(f"Error: could not read manifest {name!r} — {exc}", fg="red")
-            raise typer.Exit(code=1) from exc
+        record = ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace)
         typer.echo(json.dumps(record, indent=2, default=str))
 
     @app.command("set")
+    @api_errors
     def manifest_set(
         name: str = typer.Argument(..., help="Saved manifest to edit."),
         rounds: int | None = typer.Option(None, "--rounds", min=1, help="Default hardening rounds."),
@@ -150,21 +149,13 @@ def build_app() -> typer.Typer:
         ctx = command_context(workspace, preflight=False)
         stored: JsonMap | None = None
         if chosen_models:
-            try:
-                stored = json_mapping(ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models"))
-            except Exception as exc:
-                typer.secho(f"Error: could not read manifest {name!r} — {exc}", fg="red")
-                raise typer.Exit(code=1) from exc
+            stored = json_mapping(ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models"))
             preflight_models(ctx, chosen_models, stored)
-        try:
-            if chosen_models:
-                # PATCH replaces `models` wholesale, so merge over the stored selection first — otherwise
-                # setting one group would silently clear the others.
-                body["models"] = merge_models(stored, chosen_models)
-            ctx.agent_hardener.manifests.update(name, workspace=ctx.workspace, **body)
-        except Exception as exc:
-            typer.secho(f"Error: could not update manifest {name!r} — {exc}", fg="red")
-            raise typer.Exit(code=1) from exc
+        if chosen_models:
+            # PATCH replaces `models` wholesale, so merge over the stored selection first — otherwise
+            # setting one group would silently clear the others.
+            body["models"] = merge_models(stored, chosen_models)
+        ctx.agent_hardener.manifests.update(name, workspace=ctx.workspace, **body)
         typer.secho(f"Updated manifest '{name}': {', '.join(sorted(body))}", fg="green")
 
     return app
