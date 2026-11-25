@@ -83,8 +83,12 @@ def test_list_field_rejects_invalid_values(value: Any):
 @pytest.mark.parametrize(
     ("operator", "value", "expected"),
     [
-        (FilterOperator.GTE, 8191.5, 8191.5),
-        (FilterOperator.LT, "8192.5", 8192.5),
+        (FilterOperator.GTE, 8191.5, 8192),
+        (FilterOperator.GT, 8191.5, 8191),
+        (FilterOperator.LT, "8192.5", 8193),
+        (FilterOperator.LTE, "8192.5", 8192),
+        (FilterOperator.LT, "8192.0000000000001", 8193),
+        (FilterOperator.GTE, "-0.5", 0),
         (FilterOperator.GT, "8192.0", 8192),
         (FilterOperator.LTE, "1e5", 100000),
         (FilterOperator.EQ, "8192", 8192),
@@ -92,7 +96,7 @@ def test_list_field_rejects_invalid_values(value: Any):
         (FilterOperator.EQ, "123456789012345678901", 123456789012345678901),
     ],
 )
-def test_number_field_keeps_value(operator: FilterOperator, value: Any, expected: int | float):
+def test_number_field_sends_the_store_an_equivalent_integer(operator: FilterOperator, value: Any, expected: int):
     translated = _translate("context_length", operator, value)
     assert translated == ComparisonOperation(operator=operator, field=CONTEXT_LENGTH, value=expected)
     assert isinstance(translated, ComparisonOperation)
@@ -115,6 +119,8 @@ def test_number_field_eq_list_becomes_in():
     ("operator", "value"),
     [
         (FilterOperator.EQ, "8192.5"),
+        (FilterOperator.EQ, "8192.0000000000001"),
+        (FilterOperator.GTE, "1e999999999"),
         (FilterOperator.IN, ["8192", 8192.5]),
         (FilterOperator.NIN, ["0.5"]),
         (FilterOperator.EQ, None),

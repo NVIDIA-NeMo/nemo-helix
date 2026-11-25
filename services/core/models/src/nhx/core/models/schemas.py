@@ -4,8 +4,8 @@
 import math
 import re
 from abc import ABC
-from contextlib import suppress
 from datetime import datetime
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 from urllib.parse import urlparse
@@ -1402,7 +1402,13 @@ _METADATA_LIST_FILTER_FIELDS: dict[str, type[StrEnum]] = {
     "output_modalities": ModelModality,
 }
 _METADATA_NUMBER_FILTER_FIELDS = frozenset({"context_length", "max_output_tokens", "parameter_count"})
-_ORDERED_FILTER_OPERATORS = frozenset({FilterOperator.GT, FilterOperator.GTE, FilterOperator.LT, FilterOperator.LTE})
+# Metadata numbers are integers, so a fractional bound rounds to the integer bound that selects the same rows.
+_INTEGER_BOUND_ROUNDING = {
+    FilterOperator.GT: ROUND_FLOOR,
+    FilterOperator.GTE: ROUND_CEILING,
+    FilterOperator.LT: ROUND_CEILING,
+    FilterOperator.LTE: ROUND_FLOOR,
+}
 
 
 def _invalid_filter_value(field: str, value: Any) -> ValueError:
@@ -1427,23 +1433,23 @@ def _as_enum_value(field: str, enum_type: type[StrEnum], value: Any) -> str:
         raise _invalid_filter_value(field, value) from None
 
 
-def _as_number(field: str, value: Any, *, integral: bool) -> int | float:
-    if isinstance(value, bool):
+def _as_decimal(field: str, value: Any) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise _invalid_filter_value(field, value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        with suppress(ValueError):
-            return int(value)
     try:
-        number = float(value)
-    except (TypeError, ValueError):
+        number = Decimal(value)
+    except ArithmeticError:
         raise _invalid_filter_value(field, value) from None
-    if not math.isfinite(number) or (integral and not number.is_integer()):
+    if not number.is_finite() or not math.isfinite(float(number)):
         raise _invalid_filter_value(field, value)
-    if number.is_integer():
-        return int(number)
     return number
+
+
+def _as_integer(field: str, value: Any) -> int:
+    number = _as_decimal(field, value)
+    if number != number.to_integral_value():
+        raise _invalid_filter_value(field, value)
+    return int(number)
 
 
 def _contains_each(field: str, enum_type: type[StrEnum], value: Any, combine: FilterOperator) -> FilterOperation:
@@ -1479,16 +1485,17 @@ def _list_field_operation(operation: ComparisonOperation, enum_type: type[StrEnu
 
 def _number_field_operation(operation: ComparisonOperation) -> FilterOperation:
     field, operator, value = operation.field, operation.operator, operation.value
-    if operator in _ORDERED_FILTER_OPERATORS:
-        return operation.model_copy(update={"value": _as_number(field, value, integral=False)})
+    if operator in _INTEGER_BOUND_ROUNDING:
+        bound = _as_decimal(field, value).to_integral_value(rounding=_INTEGER_BOUND_ROUNDING[operator])
+        return operation.model_copy(update={"value": int(bound)})
     if operator == FilterOperator.EQ and isinstance(value, list):
         operator = FilterOperator.IN
     # The store compares $eq/$in/$nin as text, so the operand must render exactly as the stored integer.
     if operator in (FilterOperator.IN, FilterOperator.NIN):
-        numbers = [_as_number(field, item, integral=True) for item in _filter_values(field, value)]
+        numbers = [_as_integer(field, item) for item in _filter_values(field, value)]
         return operation.model_copy(update={"operator": operator, "value": numbers})
     if operator == FilterOperator.EQ:
-        return operation.model_copy(update={"value": _as_number(field, value, integral=True)})
+        return operation.model_copy(update={"value": _as_integer(field, value)})
     raise _unsupported_filter_operator(field, operator)
 
 
