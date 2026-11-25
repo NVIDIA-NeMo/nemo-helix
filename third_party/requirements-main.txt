@@ -764,9 +764,9 @@ cut-cross-entropy==25.1.1 ; (platform_machine == 'arm64' and sys_platform == 'da
     --hash=sha256:5fe5924509248b1aea5c890f8887c6a7759f7c8b1ebc0490e42c247c4f7c1e34 \
     --hash=sha256:e46f26d348f6a67927d17e65c5a212e795be13dcad5b10a77a200d6b8102d9d1
     # via unsloth-zoo
-cwevals==0.0.1b1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:2ae997369ff44941925e4db1bd07eb4e13c05de412e615636fd12881d63f8a13 \
-    --hash=sha256:6936baf0ccdc5d9092abd5c2ab628cedcdae9bb72edfdf730f7aaac19118855a
+cwevals==0.0.1b3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:2647ffa8338634db70e9cbd1d9232f0a62f2b7d7b2c5d8a2f0bb750d4aeced45 \
+    --hash=sha256:3ff43ebab38a553877da8951305924a39a6f30809aae7f567de9ed1104d7ef15
     # via wandb
 cycler==0.12.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30 \
@@ -2539,6 +2539,7 @@ opentelemetry-exporter-otlp-proto-common==1.43.0 ; (platform_machine == 'arm64' 
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
+    #   wandb
 opentelemetry-exporter-otlp-proto-grpc==1.43.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:1b3e0627daa9bc21884d4a13946807c255eb558bfe5bdd543dffb6f4c9faee0d \
     --hash=sha256:6a10d1feacffffda19acacbf277b736094b1e2f4dbb98c90ccb2c6e1962e2ec6
@@ -2552,7 +2553,6 @@ opentelemetry-exporter-otlp-proto-http==1.43.0 ; (platform_machine == 'arm64' an
     #   nemo-compass
     #   nhx-common
     #   opentelemetry-exporter-otlp
-    #   wandb
 opentelemetry-exporter-prometheus==0.64b0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:96fec79be9527cb9dc994d7e663051df35161eb936fe2d41954725e4595abbc1 \
     --hash=sha256:9979a15f8d007d442bc7a6e16f4cbde5e8e0c5e99689887ceb5f33da251f0655
@@ -4328,13 +4328,13 @@ validators==0.35.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     --hash=sha256:992d6c48a4e77c81f1b4daba10d16c3a9bb0dbb79b3a19ea847ff0928e70497a \
     --hash=sha256:e8c947097eae7892cb3d26868d637f79f47b4a0554bc6b80065dfe5aac3705dd
     # via ngcsdk
-wandb==0.31.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:009bcf370598d5e7a3d3bb66e33510f78c17fcc0505f8aa7ecf51dbc4378f979 \
-    --hash=sha256:0cbd8986ca56115897defcfd8ad8def1a871b99d1e8bde4f106633dc9969b7a3 \
-    --hash=sha256:28389f1c932b5d3fc11293fd50c24f308c6a1e1dd952783b96d9703062302bb5 \
-    --hash=sha256:cb20ed655fb6e301b27f9974ae639176ec3a0e81aa9135d107491d618206ad5f \
-    --hash=sha256:dcdaa635576ff17b18a757b39fc22b0db3d1c6e01d5ce090fe80f6adc776028d \
-    --hash=sha256:df16a46cd6468e6580783b02560c79991c181f63a4691949020fff1b4ac87072
+wandb==0.31.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:0a0227581a6f412430ce2b70d4932259f1423fa5034ca4a6789a8904a1142ab4 \
+    --hash=sha256:27b093559e0d46600df5f06416d4b2491ae35eae5f9a60bc5d8f8df1284a882a \
+    --hash=sha256:809f513214589958fddc3e86b98694009ff1222f16445c6b1509aa10ef84931c \
+    --hash=sha256:8e4afd2684847f747a3b4b745191659d5bd9fa0ba478cde9f45e165cb1e3dcdf \
+    --hash=sha256:ba2bc69e062c1b4d7898cd8ff7b579bf261d2895ebced84e95467958dab1c122 \
+    --hash=sha256:d47d0c5ebcb5f91e4acb5e1546a8f553fa9e5590629c2fe24e666b98dc5ca3fb
     # via
     #   nhx-rl
     #   nhx-unsloth

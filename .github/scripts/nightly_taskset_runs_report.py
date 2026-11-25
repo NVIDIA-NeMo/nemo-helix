@@ -92,7 +92,11 @@ class Run:
 
 def failure_stage(needs: Mapping[str, Mapping[str, Any]], junit: str) -> str:
     """The job that failed before the test, or the ``[stage]`` the test's own failure message names."""
-    if (needs.get("build-images") or {}).get("result") != "success":
+    image_jobs = ("build-api-images", "build-task-images", "build-tooling-images")
+    # Older workflow runs can still be classified through workflow_dispatch.
+    if "build-images" in needs:
+        image_jobs = ("build-images",)
+    if any(needs.get(job, {}).get("result") != "success" for job in image_jobs):
         return "build-images"
     if match := STAGE_IN_FAILURE.search(junit):
         return match.group(1)
