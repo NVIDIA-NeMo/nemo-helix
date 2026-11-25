@@ -236,9 +236,9 @@ def test_the_workspace_handover_skips_an_entry_removed_during_the_walk(
             raise FileNotFoundError(2, "No such file or directory", target)
         record(target, uid, gid, **kwargs)
 
-    def fwalk(top: Path, **kwargs: bool) -> Iterator[tuple[str, list[str], list[str], int]]:
+    def fwalk(top: Path, *, follow_symlinks: bool) -> Iterator[tuple[str, list[str], list[str], int]]:
         # Lists the removed entry first, so the handover must carry on to its sibling.
-        for path, dirnames, filenames, dir_fd in walk(top, **kwargs):
+        for path, dirnames, filenames, dir_fd in walk(top, follow_symlinks=follow_symlinks):
             yield path, dirnames, sorted(filenames, key=lambda name: name != "gone"), dir_fd
 
     monkeypatch.setattr(container_engine, "chown", chown)
