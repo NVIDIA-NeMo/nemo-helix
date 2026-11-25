@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
-RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
@@ -52,7 +52,12 @@ COPY --from=gym-builder /usr/local/include/python3.13 /usr/local/include/python3
 COPY --from=gym-builder /usr/local/lib/libpython3.13* /usr/local/lib/
 COPY --from=gym-builder --exclude=site-packages --exclude=site-packages/** \
     /usr/local/lib/python3.13 /usr/local/lib/python3.13
-RUN rm -rf /home/nvs/.cache/uv
+# Gym builds each component's venv under its working directory, /app, so a job running as a
+# non-root UID (the chart's pod security context, or an OpenShift UID in group 0) must be able to
+# create directories there.
+RUN rm -rf /home/nvs/.cache/uv \
+    && chown 1000:0 /app \
+    && chmod 2775 /app
 ENV PATH="/opt/gym-venv/bin:/app/.venv/bin:$PATH" \
     PYTHONPATH=""
 
@@ -61,6 +66,8 @@ RUN gym --help >/dev/null \
     && /app/.venv/bin/python -c \
         'import importlib.metadata as m; import nemo_evals, sandboxed_gym; from opensandbox.config import ConnectionConfig; print({"nemo-evals-plugin": m.version("nemo-evals-plugin"), "nemo-sandboxed-gym": m.version("nemo-sandboxed-gym"), "opensandbox": m.version("opensandbox"), "connection_config": ConnectionConfig.__name__})' \
     && /opt/gym-venv/bin/python -c \
-        'import importlib.metadata as m; import nemo_gym, ray, tiktoken; print({"nemo-gym": m.version("nemo-gym"), "ray": m.version("ray"), "tiktoken": m.version("tiktoken")})'
+        'import importlib.metadata as m; import nemo_gym, ray, tiktoken; print({"nemo-gym": m.version("nemo-gym"), "ray": m.version("ray"), "tiktoken": m.version("tiktoken")})' \
+    && /opt/gym-venv/bin/python -c \
+        'import os; os.setgid(0); os.setuid(1001); os.makedirs("/app/environment_servers/smoke"); os.rmdir("/app/environment_servers/smoke"); os.rmdir("/app/environment_servers")'
 
 FROM runtime

@@ -5,6 +5,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -38,18 +39,26 @@ def _pending() -> AnalysisRunStatus:
     )
 
 
+def _compass_run(agent: str | None, status: HelixJobStatus = HelixJobStatus.COMPLETED) -> SimpleNamespace:
+    """A compass.analyst execute job analyzing *agent*, as the Jobs service returns it."""
+    spec = {"plugin_managed_agent_type": "compass.analyst", "subject": agent} if agent is not None else {}
+    return SimpleNamespace(status=status, spec=spec, custom_fields=None)
+
+
 def _controller(job_status: HelixJobStatus = HelixJobStatus.COMPLETED):
     controller = CompassAnalysisController()
     entities = AsyncMock(spec=NemoEntitiesClient)
     entities.update.side_effect = lambda status: status
     jobs = AsyncMock(spec=AsyncJobsClient)
-    job = MagicMock(status=job_status, custom_fields={"insights_analysis_agent": "demo"})
+    job = _compass_run("demo", job_status)
     jobs.get_job.return_value = MagicMock(data=lambda: job)
     controller._entities = entities
     controller._jobs = jobs
     # The controller only derives typed clients from this idle client.
     controller._client = AsyncNemoClient(base_url="http://insights.test")
     controller._config = CompassConfig()
+    controller._compass_agent_name = AsyncMock(return_value="compass-analyst")
+    controller._create_execute_job = AsyncMock()
     return controller, entities, jobs
 
 
@@ -155,15 +164,15 @@ async def test_name_is_persisted_before_submission_even_when_submission_times_ou
         assert status.last_completed_at is None
         return status
 
-    async def submit(**kwargs):
+    async def submit(*, workspace, body):
         events.append("submit")
         saved = (entities.update if existing else entities.create).await_args.args[0]
-        assert kwargs["name"] == saved.last_submitted_job
+        assert body.name == saved.last_submitted_job
         raise TimeoutError("Response lost")
 
     entities.create.side_effect = save
     entities.update.side_effect = save
-    monkeypatch.setattr("nemo_compass_plugin.controller.submit_analysis_run", submit)
+    controller._create_execute_job = submit
     with pytest.raises(TimeoutError):
         await controller._submit_analysis_job(_config(), _pending() if existing else None, NOW)
     assert events == ["save", "submit"]
@@ -173,11 +182,9 @@ async def test_name_is_persisted_before_submission_even_when_submission_times_ou
 async def test_failed_status_write_prevents_submission(monkeypatch) -> None:
     controller, entities, _ = _controller()
     entities.create.side_effect = RuntimeError("Store unavailable")
-    submit = AsyncMock()
-    monkeypatch.setattr("nemo_compass_plugin.controller.submit_analysis_run", submit)
     with pytest.raises(RuntimeError, match="Store unavailable"):
         await controller._submit_analysis_job(_config(), None, NOW)
-    submit.assert_not_awaited()
+    controller._create_execute_job.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -186,13 +193,13 @@ async def test_overlap_query_only_reads_active_jobs_and_matches_agent(agent, exp
     controller, _, jobs = _controller()
 
     async def items():
-        yield MagicMock(custom_fields={"insights_analysis_agent": agent})
+        yield _compass_run(agent)
 
     jobs.list_jobs.return_value = MagicMock(items=items)
     assert await controller._has_active_job(_config()) is expected
     query = json.loads(jobs.list_jobs.await_args.kwargs["query_params"]["filter"])
     assert set(query["status"]["$in"]) == {status.value for status in HelixJobStatus.non_terminals()}
-    assert query["source"] == {"$in": ["nemo-agents-plugin-execute", "insights"]}
+    assert query["source"] == "nemo-agents-plugin-execute"
     jobs.get_job.assert_not_awaited()
 
 
@@ -205,12 +212,11 @@ async def test_overlap_query_failure_defers_submission() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("job_status", [HelixJobStatus.COMPLETED, HelixJobStatus.ACTIVE])
-@pytest.mark.parametrize("agent_tag", ["another-agent", None])
-async def test_wrong_or_missing_agent_tag_preserves_cursor(job_status, agent_tag) -> None:
+@pytest.mark.parametrize("subject", ["another-agent", None])
+async def test_wrong_or_missing_subject_preserves_cursor(job_status, subject) -> None:
     controller, entities, jobs = _controller(job_status)
-    jobs.get_job.return_value.data().custom_fields = (
-        {"insights_analysis_agent": agent_tag} if agent_tag is not None else None
-    )
+    job = _compass_run(subject, job_status)
+    jobs.get_job.return_value = MagicMock(data=lambda: job)
     status = await controller._reconcile_run(_config(), _pending())
     assert status.status == AnalysisConfigStatus.ERROR
     assert status.last_successful_run_at == PREVIOUS
@@ -228,21 +234,19 @@ async def test_same_prefix_agents_submitted_together_reconcile_only_their_own_jo
         attempts[status.agent] = status
         return status
 
-    async def submit(**kwargs):
-        agent = kwargs["request"].agent
-        name = kwargs["name"]
+    async def submit(*, workspace, body):
+        agent = body.spec["context"]["agent"]
+        name = body.name
         assert attempts[agent].last_submitted_job == name
         assert name not in submitted_jobs
-        submitted_jobs[name] = MagicMock(
-            status=HelixJobStatus.COMPLETED, custom_fields={"insights_analysis_agent": agent}
-        )
+        submitted_jobs[name] = _compass_run(agent)
 
     async def get_job(*, workspace, name):
         return MagicMock(data=lambda: submitted_jobs[name])
 
     entities.create.side_effect = save
     jobs.get_job.side_effect = get_job
-    monkeypatch.setattr("nemo_compass_plugin.controller.submit_analysis_run", submit)
+    controller._create_execute_job = submit
     configs = [
         _config().model_copy(update={"name": agent, "agent": agent})
         for agent in ("research-agent-shared-v1", "research-agent-shared-v2")

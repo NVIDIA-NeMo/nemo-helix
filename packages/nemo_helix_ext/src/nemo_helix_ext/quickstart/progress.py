@@ -34,10 +34,13 @@ def wait_for_training(
 ) -> Any:
     """Poll a customization job until it finishes, refreshing the notebook output."""
     start = monotonic()
+    job_reference: str | None = None
     while True:
         if timeout_seconds is not None and monotonic() - start > timeout_seconds:
             raise TimeoutError(f"{job_name} took longer than {timeout_seconds} seconds")
-        status = client.jobs.get_job_status(name=job_name, workspace=workspace).data()
+        status = client.jobs.get_job_status(name=job_reference or job_name, workspace=workspace).data()
+        if job_reference is None:
+            job_reference = status.id
         _clear_output()
         print(f"Job: {job_name}")
         print(f"Status: {status_text(status.status)}")

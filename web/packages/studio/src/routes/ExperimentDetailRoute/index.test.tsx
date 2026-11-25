@@ -83,7 +83,7 @@ describe('ExperimentDetailRoute', () => {
       await screen.findByRole('button', { name: `Delete experiment ${GROUP_NAME}` })
     );
     await userEvent.click(
-      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete Experiment' })
     );
     expect(await screen.findByText('Experiment list destination')).toBeVisible();
   });
@@ -99,7 +99,7 @@ describe('ExperimentDetailRoute', () => {
         /Evaluations belonging only to the selected experiments will also be deleted/
       )
     ).toBeVisible();
-    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: 'Delete Experiment' })).toBeVisible();
   });
 
   it('renders the group description and summary without requesting Optimizer when disabled', async () => {

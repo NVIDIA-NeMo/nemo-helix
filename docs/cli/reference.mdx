@@ -4950,7 +4950,7 @@ nemo jobs steps update-status [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: creation_pending, deletion_pending, created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
 
@@ -5020,7 +5020,7 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 * `--step`: (required)
 * `--error-details`: JSON string
 * `--error-stack`
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: creation_pending, deletion_pending, created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--status-details`: JSON string
 
 **Help:**
@@ -6242,6 +6242,8 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `redeploy`: Redeploy an agent from a new config, in one command.
 * `logs`: Show logs for an agent deployment.
 * `undeploy`: Stop and remove a deployment (or all deployments for an...
+* `types`: List the plugin-managed agent types installed on the...
+* `create`: Create this workspace's agent of a plugin-managed agent...
 * `deployments`: Manage agent deployments.
 * `environment-specs`: Manage agent environment specs.
 * `environments`: Manage agent environments.
@@ -6683,6 +6685,63 @@ nemo agents undeploy [OPTIONS] [NAME]
 * `--agent, --all, -a`: Remove all deployments for this agent.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents types
+
+List the plugin-managed agent types installed on the platform.
+
+Each row shows the context a run takes (optional keys in brackets) and
+this workspace's agent of the type, if it has one. Create one with
+`nemo agents create <type>`, then run it with `nemo agents execute --agent <name>`.
+
+**Usage:**
+
+```shell
+nemo agents types [OPTIONS]
+```
+
+**Options:**
+
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+#### nemo agents create
+
+Create this workspace's agent of a plugin-managed agent type.
+
+The type supplies the agent's config, so there is nothing to write: a
+workspace holds at most one agent of each type, and it stays current as
+the plugin is upgraded.
+
+**Usage:**
+
+```shell
+nemo agents create [OPTIONS] TYPE
+```
+
+**Arguments:**
+
+* `<TYPE>`: Plugin-managed agent type ID. List the installed types with `nemo agents types`.
+
+**Options:**
+
+* `--name, -n`: Agent name. Defaults to the type's default name.
+* `--description`: [default: ]
+* `--label, -l`: Agent label as KEY=VALUE, e.g. team=search. Repeatable. [default: ]
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
 
@@ -10454,6 +10513,9 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.lora.use-triton`: Use the optimized Triton LoRA kernel.
 * `--training.lora.use-memory-efficient-lora`: Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.
 * `--training.max-seq-length <INTEGER>`: Override `training.max_seq_length` in the spec.
+* `--training.max-pixels <INTEGER>`: Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not pass this name to transformers. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
+* `--training.image-size.longest-edge <INTEGER>`: Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.
+* `--training.image-size.shortest-edge <INTEGER>`: Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.
 * `--training.execution-profile`: Override `training.execution_profile` in the spec.
 * `--training.teacher-model`: Override `training.teacher_model` in the spec.
 * `--training.distillation-ratio <FLOAT>`: Override `training.distillation_ratio` in the spec.
@@ -10463,13 +10525,13 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
 * `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
 * `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
+* `--training.retrieval.normalize`: Scale bi_encoder embeddings to unit length, so a dot product equals cosine similarity. Omit to keep the base checkpoint's choice: normalize unless its Sentence Transformers files leave out Normalize. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
 * `--training.retrieval.query-prefix`: Literal prefix prepended to each query. Empty string disables prefixing.
 * `--training.retrieval.passage-prefix`: Literal prefix prepended to each passage. Empty string disables prefixing.
 * `--training.retrieval.temperature <FLOAT>`: Softmax temperature of the training loss: contrastive for bi_encoder, listwise for cross_encoder. Omit for 0.02 (bi_encoder) or 1.0 (cross_encoder). A Qwen3 causal reranker scores with raw yes/no logits, so this is its only temperature setting.
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
-* `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--training.activation-checkpointing`: Recompute intermediate activations in the backward pass instead of storing them. Substantially lowers memory use for a modest slowdown, and is commonly enabled when training large MoE models.
 * `--training.mtp.num-nextn-predict-layers <INTEGER>`: How many tokens ahead to predict. Omit to keep the checkpoint's own value.
@@ -10539,7 +10601,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `training.freeze_modules`, `training.unfreeze_modules`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.pooling`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `training.freeze_modules`, `training.unfreeze_modules`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -10763,7 +10825,6 @@ nemo compass [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `analysis`: Manage periodic agent analysis opt-in state.
-* `analysis-runs`: Submit and inspect on-demand analysis runs.
 
 #### nemo compass analysis
 
@@ -10800,7 +10861,7 @@ nemo compass analysis enable [OPTIONS]
 * `--agent`: Name of the agent to opt in to periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
-* `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
+* `--fast-model`: Faster Model Entity ref Compass uses for part of its analysis. Default: the configured fast model.
 
 **Help:**
 
@@ -10863,125 +10924,6 @@ nemo compass analysis status [OPTIONS]
 **Pagination Options:**
 
 * `--all-pages`: Fetch all pages
-
-#### nemo compass analysis-runs
-
-Submit and inspect on-demand analysis runs.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs [OPTIONS] COMMAND [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Commands:**
-
-* `create`: Submit an analysis run for an agent.
-* `list`: List analysis runs.
-* `get`: Get one analysis run, joined with the live state of its...
-
-##### nemo compass analysis-runs create
-
-Submit an analysis run for an agent.
-
-The run is backed by an agents.execute job that shares its name.
-With `--wait`, exits non-zero if that job does not complete.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs create [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Name of the agent whose telemetry should be analyzed.
-* `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
-* `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
-* `--since`: ISO-8601 lower bound enforced on Compass's trace/span reads.
-* `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
-* `--evaluation-id`: Restrict the run to spans from one evaluation.
-* `--timeout-seconds <FLOAT>`: Timeout applied to the backing execute-agent job.
-* `--wait`: Poll the run until its backing job reaches a terminal state.
-* `--poll-timeout <FLOAT>`: How long `--wait` polls before giving up. [default: 900.0]
-* `--poll-interval <FLOAT>`: Seconds between `--wait` polls. [default: 5.0]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
-
-##### nemo compass analysis-runs list
-
-List analysis runs. Job state is not joined — read one run to get it.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs list [OPTIONS]
-```
-
-**Options:**
-
-* `--agent`: Only list runs that analyzed this agent.
-* `--workspace, -w`: Workspace to inspect. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--page <INTEGER>`: Page number (1-indexed). [default: 1]
-* `--page-size <INTEGER>`: Items per page. [default: 20]
-* `--sort`: Sort field; prefix with '-' for descending. [default: -created_at]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
-* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
-* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
-
-**Pagination Options:**
-
-* `--all-pages`: Fetch all pages
-
-##### nemo compass analysis-runs get
-
-Get one analysis run, joined with the live state of its backing job.
-
-A null job means submission never landed: no job exists under the
-run's name, and the run can be resubmitted.
-
-**Usage:**
-
-```shell
-nemo compass analysis-runs get [OPTIONS] NAME
-```
-
-**Arguments:**
-
-* `<NAME>`: Name of the analysis run.
-
-**Options:**
-
-* `--workspace, -w`: Workspace the run belongs to. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--wait`: Poll until the run's backing job reaches a terminal state.
-* `--poll-timeout <FLOAT>`: How long `--wait` polls before giving up. [default: 900.0]
-* `--poll-interval <FLOAT>`: Seconds between `--wait` polls. [default: 5.0]
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Output Options:**
-
-* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ### nemo safe-synthesizer
 

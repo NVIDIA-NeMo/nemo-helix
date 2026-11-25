@@ -116,7 +116,6 @@ const mockLatestRun = (
     latestRun: latestRun && {
       name: 'analysis-run-1',
       requestedAt: new Date(Date.now() - 125_000).toISOString(),
-      submitted: true,
       ...latestRun,
     },
     isActive,
@@ -362,16 +361,5 @@ describe('AnalysisConfigPanel', () => {
     expect(
       within(screen.getByTestId('latest-analysis-run')).getByText('Failed')
     ).toBeInTheDocument();
-  });
-
-  it('flags a run whose job never landed and hides the job link', () => {
-    useConfig.mockReturnValue(queryResult(config()));
-    mockLatestRun({ submitted: false, status: undefined });
-
-    renderPanel('email-security-triage');
-
-    const row = within(screen.getByTestId('latest-analysis-run'));
-    expect(row.getByText('Not submitted')).toBeInTheDocument();
-    expect(row.queryByRole('button', { name: 'View job' })).not.toBeInTheDocument();
   });
 });

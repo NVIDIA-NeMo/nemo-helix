@@ -335,14 +335,22 @@ class TestConfigureRetrievalDataset:
             def can_generate(cls) -> bool:
                 return True
 
+        loaded: list[tuple[Path, bool]] = []
+        new_model_config = SimpleNamespace(model_type="new_model", architectures=["NewModelForCausalLM"])
+
+        def load(model_path: Path, *, trust_remote_code: bool) -> SimpleNamespace:
+            loaded.append((model_path, trust_remote_code))
+            return new_model_config
+
+        registry = "nhx.automodel.tasks.training.backends.registry"
+        monkeypatch.setattr(f"{registry}._load_checkpoint_config", load)
         monkeypatch.setattr(
-            "nhx.automodel.tasks.training.backends.registry._automodel_cross_encoder_class",
-            lambda _config: NewCausalReranker,
+            f"{registry}._automodel_cross_encoder_class",
+            lambda config: NewCausalReranker if config is new_model_config else None,
         )
         base = tmp_path / "base"
-        base.mkdir()
-        (base / "config.json").write_text('{"model_type": "new_model", "architectures": ["NewModelForCausalLM"]}')
         mock_customizer_config.model.path = str(base)
+        mock_customizer_config.model.trust_remote_code = True
         train_file = tmp_path / "train.jsonl"
         train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
 
@@ -356,6 +364,8 @@ class TestConfigureRetrievalDataset:
                 retrieval_config=RetrievalConfig(),
                 recipe=TrainingRecipe.CROSS_ENCODER,
             )
+        # The checkpoint loads with the job's flag, as Automodel's loader does.
+        assert loaded == [(base, True)]
 
     def test_bi_encoder_strips_trailing_space_from_nemotron_prefixes(
         self,
@@ -1223,6 +1233,46 @@ def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path
     assert compiled["model"]["do_distributed_inbatch_negative"] is requested
 
 
+@pytest.mark.parametrize(
+    ("retrieval", "automodel_answer", "expected"),
+    [
+        (RetrievalConfig(), ("last", False), ("last", False)),
+        (RetrievalConfig(pooling="cls", normalize=True), ("cls", True), ("cls", True)),
+        (RetrievalConfig(), ("weighted_avg", True), "Set training.retrieval.pooling"),
+    ],
+    ids=["base-choice", "job-values", "pooling-it-cannot-declare"],
+)
+def test_bi_encoder_compile_takes_pooling_from_automodel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retrieval: RetrievalConfig,
+    automodel_answer: tuple[str, bool],
+    expected: tuple[str, bool] | str,
+) -> None:
+    """Automodel picks the pooling from the job's values and the base; Helix sends it explicitly.
+
+    How Automodel reads the base's files is covered against the real Automodel in tests/smoke_gpu.
+    """
+    asked: list[tuple[str, str | None, bool | None]] = []
+
+    def automodel(model_path: str, pooling: str | None, normalize: bool | None) -> tuple[str, bool]:
+        asked.append((model_path, pooling, normalize))
+        return automodel_answer
+
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.checkpoints._automodel_bi_encoder_pooling", automodel)
+    config, prepared = _embed_training_config(tmp_path, retrieval=retrieval)
+    config.training.recipe = TrainingRecipe.BI_ENCODER
+
+    if isinstance(expected, str):
+        with pytest.raises(ValueError, match=expected):
+            _compile_retrieval(config, tmp_path, prepared)
+        return
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert asked == [(config.model.path, retrieval.pooling, retrieval.normalize)]
+    assert (compiled["model"]["pooling"], compiled["model"]["l2_normalize"]) == expected
+
+
 def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
     config, prepared = _embed_training_config(
         tmp_path,
@@ -1416,6 +1466,8 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     ]
     assert "target_modules" not in compiled["peft"]
     assert "collate_fn" not in compiled["dataloader"]
+    assert compiled["dataset"]["max_length"] == config.model.max_seq_length
+    assert compiled["validation_dataset"]["max_length"] == config.model.max_seq_length
 
     train_rows = [
         json.loads(line)
@@ -1427,9 +1479,82 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert train_rows[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
 
     loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
-    assert "_injected_fake" not in loaded[0]
-    assert loaded[1]["_injected_fake"] is True
-    assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
+    assert loaded[0]["conversation"][0]["content"][0]["type"] == "image"
+    assert loaded[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
+
+
+def test_max_pixels_reaches_the_vision_processor_as_size(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    config.model.max_pixels = 2_621_440
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
+    assert compiled["processor"]["size"] == {"longest_edge": 2_621_440, "shortest_edge": 65_536}
+    assert "max_pixels" not in compiled["processor"]
+    config.model.max_seq_length = 4096
+    compiled = _compile_vision(config, tmp_path)
+    assert compiled["dataset"]["max_length"] == 4096
+    assert compiled["validation_dataset"]["max_length"] == 4096
+    assert compiled["processor"]["size"] == {"longest_edge": 2_621_440, "shortest_edge": 65_536}
+
+
+def test_max_pixels_is_absent_from_the_processor_when_unset(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
+    assert "max_pixels" not in compiled["processor"]
+    assert "size" not in compiled["processor"]
+
+
+def test_a_caller_exclude_keeps_the_vision_patterns(tmp_path: Path) -> None:
+    """`*.out_proj` must not replace the compiler's vision-tower freeze."""
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    assert config.training.lora is not None
+    config.training.lora.exclude_modules = ["*.out_proj"]
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["exclude_modules"] == [
+        "*vision_tower*",
+        "*vision_model*",
+        "*vision_projector*",
+        "*visual*",
+        "*image_encoder*",
+        "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
+        "*mlp1*",
+        "*lm_head*",
+        "*.out_proj",
+    ]
+    assert "target_modules" not in compiled["peft"]
+
+
+def test_nemotron_h_vision_excludes_mamba_out_proj_when_unset(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows, checkpoint_model_name="NemotronH_Omni_Reasoning_V3")
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["exclude_modules"][-1] == "*.out_proj"
+
+
+def test_a_named_target_list_is_not_replaced_on_a_vision_checkpoint(tmp_path: Path) -> None:
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    config = _vision_training_config(tmp_path, rows)
+    assert config.training.lora is not None
+    config.training.lora.target_modules = ["*.q_proj"]
+
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["peft"]["target_modules"] == ["*.q_proj"]
+    assert "exclude_modules" not in compiled["peft"]
 
 
 def test_vlm_module_selectors_layer_over_the_frozen_vision_tower(tmp_path: Path) -> None:
@@ -1457,7 +1582,7 @@ def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_pa
 
     assert compiled["_recipe"] == "vlm_sft"
     loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
-    assert loaded[0]["_injected_fake"] is True
+    assert loaded[0]["conversation"][0]["content"] == [{"type": "text", "text": "say hi"}]
     assert loaded[0]["conversation"][1]["content"] == [{"type": "text", "text": "hi"}]
 
 

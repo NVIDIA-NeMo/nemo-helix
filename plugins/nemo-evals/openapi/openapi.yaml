@@ -5943,6 +5943,13 @@ components:
           description: Auto-bind the agent's `resources_server.name` via a Hydra override.
             Set False for self-contained agents that already bind their own resources-server.
           default: true
+        docker:
+          type: boolean
+          title: Docker
+          description: Let the environment's resources servers and agents run `docker`
+            and `docker compose`. Requires sandboxed Gym and the deployment's `sandbox_docker_profile`;
+            a deployment without them refuses the job at submit.
+          default: false
         hydra_params:
           additionalProperties: true
           type: object
@@ -6532,6 +6539,8 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - creation_pending
+      - deletion_pending
       - created
       - queued
       - pending
@@ -8160,13 +8169,15 @@ components:
           type: string
           title: Query Prefix
           description: Literal prefix prepended to each query. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the query prefix it was trained
+            with.
           default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
           description: Literal prefix prepended to each passage. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the passage prefix it was trained
+            with.
           default: 'passage: '
       additionalProperties: false
       type: object
@@ -8226,13 +8237,15 @@ components:
           type: string
           title: Query Prefix
           description: Literal prefix prepended to each query. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the query prefix it was trained
+            with.
           default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
           description: Literal prefix prepended to each passage. Empty string disables
-            prefixing.
+            prefixing. An embedder scores best with the passage prefix it was trained
+            with.
           default: 'passage: '
       additionalProperties: false
       type: object

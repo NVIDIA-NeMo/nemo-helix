@@ -256,7 +256,7 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
     environment = add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
     if sandbox_plan is None:
         return environment
-    environment.append(EnvironmentVariable(name=GYM_SANDBOX_PLAN_ENVVAR, value=sandbox_plan.model_dump_json()))
+    environment.append(EnvironmentVariable(name=GYM_SANDBOX_PLAN_ENVVAR, value=sandbox_plan.serialized()))
     return environment
 
 

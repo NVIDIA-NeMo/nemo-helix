@@ -11,9 +11,9 @@ The API compiler image does not install ``nemo_automodel``, so only the causal-r
 which run in the training image, import it.
 """
 
-import json
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 # Static mapping: architecture name → (module_path, class_name[, tags]).
 # Analogous to HuggingFace transformers' MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.
@@ -379,19 +379,29 @@ def uses_custom_automodel_impl(architecture: str | None) -> bool:
     return architecture in MODEL_ARCH_MAPPING
 
 
-def _automodel_cross_encoder_class(config: dict) -> type | None:
-    """The class Automodel's retrieval dispatch builds for a cross-encoder on *config*, if it has one.
+def _load_checkpoint_config(model_path: Path, *, trust_remote_code: bool) -> Any:
+    """The checkpoint's config, loaded as Automodel's retrieval loader loads it.
 
-    Training image only: it imports ``nemo_automodel`` and ``transformers``.
+    That is its own config class, a remote one under ``trust_remote_code``. A bare
+    ``PretrainedConfig`` lacks the fields a model config sets, such as the
+    ``max_position_embeddings`` that RoPE scaling reads.
+    """
+    from transformers import AutoConfig
+
+    return AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code)
+
+
+def _automodel_cross_encoder_class(config: Any) -> type | None:
+    """The class Automodel's retrieval dispatch builds for a cross-encoder with *config*, if it has one.
+
+    Training image only: it imports ``nemo_automodel``.
     """
     from nemo_automodel._transformers.retrieval import _get_supported_backbone_class
-    from transformers import PretrainedConfig
 
-    model_type = str(config.get("model_type", ""))
-    return _get_supported_backbone_class(model_type, "score", PretrainedConfig.from_dict(config))
+    return _get_supported_backbone_class(config.model_type, "score", config)
 
 
-def causal_reranker_class(model_path: str | Path) -> type | None:
+def causal_reranker_class(model_path: str | Path, *, trust_remote_code: bool) -> type | None:
     """The Automodel class that trains this checkpoint as a yes/no causal reranker, else ``None``.
 
     Such a reranker scores with ``logit("yes") - logit("no")`` from the language-model head instead
@@ -403,20 +413,21 @@ def causal_reranker_class(model_path: str | Path) -> type | None:
     causal reranker Automodel adds later is found with no change here. A generative class is the
     sign, the same test Automodel uses to keep such a backbone's language-model export
     (``CrossEncoderModel._get_consolidated_hf_metadata_exporter``).
+
+    ``trust_remote_code`` is the job's flag, which Automodel also loads the checkpoint with. A config
+    that does not load is not a causal reranker; Automodel's loader reports why when it loads the model.
     """
     try:
-        config = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8"))
+        config = _load_checkpoint_config(Path(model_path), trust_remote_code=trust_remote_code)
     except (OSError, ValueError):
-        return None
-    if not isinstance(config, dict):
         return None
     backbone = _automodel_cross_encoder_class(config)
     return backbone if backbone is not None and backbone.can_generate() else None
 
 
-def is_causal_reranker_checkpoint(model_path: str | Path) -> bool:
+def is_causal_reranker_checkpoint(model_path: str | Path, *, trust_remote_code: bool) -> bool:
     """True when Automodel trains this checkpoint as a yes/no causal reranker (see ``causal_reranker_class``)."""
-    return causal_reranker_class(model_path) is not None
+    return causal_reranker_class(model_path, trust_remote_code=trust_remote_code) is not None
 
 
 # The training collator for each causal reranker class; see ``causal_reranker_collator``.

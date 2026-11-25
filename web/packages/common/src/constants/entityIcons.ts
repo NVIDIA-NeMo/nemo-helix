@@ -8,6 +8,7 @@ import {
   ChartBar,
   Collection,
   Db,
+  DocumentCheckmark,
   Beaker,
   FolderOpen,
   LayoutList,
@@ -26,6 +27,9 @@ import {
   ProfileGroup,
   Route,
   Faders,
+  ChatMulti,
+  Paperclip,
+  Book,
 } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
@@ -55,6 +59,8 @@ export const ENTITY_ICONS = {
   agentMonitorRuns: ListBullet,
   // Every run that tunes an agent — parameter sweeps, insight loops.
   agentOptimizations: Sliders,
+  // A study's individual trials are read as part of the study, so they take its glyph.
+  optimizationTrials: Sliders,
 
   // Models
   baseModels: CubeStack,
@@ -69,6 +75,8 @@ export const ENTITY_ICONS = {
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
   dataDesignerJobs: LayoutList,
+  // A job's output is read as part of the job, so it takes the job's glyph.
+  dataDesignerJobOutput: LayoutList,
   safeSynthesizerJobs: Generate,
 
   // Governance. A config and its tests are one thing to the user, so the tests
@@ -85,12 +93,20 @@ export const ENTITY_ICONS = {
   evalComparison: ScmCompare,
   // A taskset is the stored group of tasks an evaluation run scores.
   tasksets: Collection,
+  // A task is one scored unit of work: an instruction plus how it is graded.
+  tasks: DocumentCheckmark,
 
   // Observability
   optimizerInsights: Lightbulb,
   telemetryTraces: ChartTree,
   insightTraces: ChartTree,
   telemetrySpans: ListBullet,
+
+  // NeMo Assistant. In-app chat surfaces rather than platform entities — they
+  // have no CLI equivalent, so they carry copy and a glyph but no bridge.
+  assistantSessions: ChatMulti,
+  assistantArtifacts: Paperclip,
+  assistantSkills: Book,
 
   // System
   jobs: ListCheckmark,

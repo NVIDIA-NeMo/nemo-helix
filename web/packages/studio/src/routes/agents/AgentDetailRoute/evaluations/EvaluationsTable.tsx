@@ -5,23 +5,24 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
   StudioDataView,
 } from '@nemo/common/src/components/DataView/StudioDataView';
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { ElapsedTime } from '@nemo/common/src/components/ElapsedTime';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { utcToLocalDate } from '@nemo/common/src/utils/date';
-import { Beaker, Trash } from '@nemo/icons/icons';
+import { Trash } from '@nemo/icons/icons';
 import {
   deleteEvaluation,
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
-import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { type EvalJobRow, evalDurationMs, evalJobDetailRoute } from '@studio/api/evaluation/utils';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import {
@@ -57,6 +58,23 @@ const timestampMs = (value?: string): number => {
 
 const createdAtMs = (row: AgentEvalTableRow): number =>
   timestampMs(row.job?.created_at ?? row.evaluation?.created_at);
+
+// A run that never publishes (no `publication.intake`) has no evaluation record, so its job
+// stands in for the name, test case count and token spend.
+const rowName = ({ evaluation, job }: AgentEvalTableRow): string | undefined =>
+  evaluation?.name ?? job?.evaluationName ?? job?.name;
+
+const testCaseCount = ({ evaluation, job }: AgentEvalTableRow): number | undefined =>
+  evaluation?.test_case_count ?? job?.outcome?.total;
+
+const totalTokens = ({ evaluation, job }: AgentEvalTableRow): number | undefined =>
+  evaluation?.tokens?.sum ?? job?.totalTokens;
+
+const meanTokens = ({ evaluation, job }: AgentEvalTableRow): number | undefined => {
+  if (evaluation?.tokens?.mean != null) return evaluation.tokens.mean;
+  const cases = job?.outcome?.total;
+  return job?.totalTokens != null && cases ? job.totalTokens / cases : undefined;
+};
 
 const preferredJob = (a: EvalJobRow, b: EvalJobRow): EvalJobRow => {
   if (isTerminalJob(a) !== isTerminalJob(b)) return isTerminalJob(a) ? b : a;
@@ -164,15 +182,18 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
     [workspace, queryClient]
   );
 
-  // Always the evaluation's own results, never the job that produced them — the Job cell links
-  // there. The route is nested under an experiment, so a row whose experiment has not resolved has
-  // nowhere to go.
+  // The evaluation's own results when there is one; its route is nested under an experiment, so a
+  // row whose experiment has not resolved has nowhere to go. A run with no evaluation opens the
+  // job's results instead.
   const destinationFor = useCallback(
     (row: AgentEvalTableRow): string | undefined => {
-      const experimentName = row.evaluation ? primaryExperimentName(row.evaluation) : undefined;
-      return row.evaluation && experimentName
-        ? getEvaluationDetailRoute(workspace, experimentName, row.evaluation.name)
-        : undefined;
+      if (row.evaluation) {
+        const experimentName = primaryExperimentName(row.evaluation);
+        return experimentName
+          ? getEvaluationDetailRoute(workspace, experimentName, row.evaluation.name)
+          : undefined;
+      }
+      return row.job ? evalJobDetailRoute(workspace, row.job) : undefined;
     },
     [workspace]
   );
@@ -181,12 +202,12 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
     useCallback(
       ({ accessor }, { rowSelectionColumn, rowActionsColumn }) => [
         rowSelectionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
-        accessor((row) => row.evaluation?.name ?? row.job?.evaluationName ?? undefined, {
+        accessor(rowName, {
           id: 'name',
           header: 'Evaluation',
           cell: ({ row }) => {
-            const name = row.original.evaluation?.name ?? row.original.job?.evaluationName;
-            return <Text title={name ?? undefined}>{name ?? '—'}</Text>;
+            const name = rowName(row.original);
+            return <Text title={name}>{name ?? '—'}</Text>;
           },
         }),
         accessor((row) => (row.evaluation ? primaryExperimentName(row.evaluation) : undefined), {
@@ -215,12 +236,12 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             return evaluation ? <StatusBadge status="completed" /> : <Text>—</Text>;
           },
         }),
-        accessor((row) => row.evaluation?.test_case_count, {
+        accessor(testCaseCount, {
           id: 'test_case_count',
           header: 'Test Cases',
           size: 100,
           cell: ({ row }) => {
-            const count = row.original.evaluation?.test_case_count;
+            const count = testCaseCount(row.original);
             return <Text>{count ? count : '—'}</Text>;
           },
         }),
@@ -277,21 +298,21 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             );
           },
         }),
-        accessor((row) => row.evaluation?.tokens?.mean, {
+        accessor(meanTokens, {
           id: 'tokens',
           header: 'Avg Tokens',
           enableSorting: false,
           cell: ({ row }) => {
-            const mean = row.original.evaluation?.tokens?.mean;
+            const mean = meanTokens(row.original);
             return <Text>{mean != null ? Math.round(mean).toLocaleString() : '—'}</Text>;
           },
         }),
-        accessor((row) => row.evaluation?.tokens?.sum, {
+        accessor(totalTokens, {
           id: 'total_tokens',
           header: 'Total Tokens',
           enableSorting: false,
           cell: ({ row }) => {
-            const sum = row.original.evaluation?.tokens?.sum;
+            const sum = totalTokens(row.original);
             return <Text>{sum != null ? Math.round(sum).toLocaleString() : '—'}</Text>;
           },
         }),
@@ -299,12 +320,13 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           id: 'duration',
           header: 'Duration',
           enableSorting: false,
-          // Duration comes from the evaluation because a row may have no job.
+          // The evaluation's recorded duration first; else the job's own start → last update.
           cell: ({ row }) => {
             const { job, evaluation } = row.original;
             return (
               <ElapsedTime
                 start={job?.created_at}
+                end={job?.updated_at}
                 durationMs={evalDurationMs(evaluation?.metadata)}
                 running={job != null && !isTerminalJob(job)}
               />
@@ -399,28 +421,37 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             },
           },
           DataViewTableContent: {
-            renderEmptyState: () => (
-              <TableEmptyState
-                className="py-density-3xl"
-                icon={<Beaker className="size-16" />}
-                header="No evaluations yet"
-                emptyMessage="Runs appear here as soon as they are submitted, before any results are published."
+            renderEmptyState: (state) => (
+              <EntityEmptyState
+                entity="agentEvaluations"
+                workspace={workspace}
+                {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
               />
             ),
           },
         }}
       />
 
-      <BulkDeleteModal
-        items={deleteRows}
-        open={deleteRows.length > 0}
-        onDelete={handleDelete}
-        title={(count) => `Delete ${count} Evaluation${count !== 1 ? 's' : ''}`}
-        onClose={() => {
-          setDeleteRows([]);
-          dataViewState.rowSelection.set({});
-        }}
-      />
+      {deleteRows.length > 0 && (
+        <DeleteConfirmationModal
+          open
+          entity="evaluation"
+          ids={deleteRows.map((row) => row.name)}
+          description={
+            deleteRows.length === 1
+              ? "The evaluation and its results are deleted and can't be restored."
+              : "The evaluations and their results are deleted and can't be restored."
+          }
+          onDelete={async () => {
+            await handleDelete(deleteRows);
+            return true;
+          }}
+          onClose={() => {
+            setDeleteRows([]);
+            dataViewState.rowSelection.set({});
+          }}
+        />
+      )}
     </>
   );
 };

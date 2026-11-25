@@ -28,9 +28,17 @@ import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
+import {
+  TASK_DETAIL_TABS,
+  type TaskDetailTab,
+} from '@studio/routes/evaluation/tasks/TaskDetailRoute/tabs';
+import {
+  TASKSET_DETAIL_TABS,
+  type TasksetDetailTab,
+} from '@studio/routes/evaluation/tasksets/TasksetDetailRoute/tabs';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
-import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { createSearchParams, generatePath, type RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
@@ -170,20 +178,38 @@ export const getWorkspaceCustomizationJobDetailsRoute = (
   });
 };
 
+// Details is the page's default, so its URL has no tab segment.
+const toModelTabSegment = (tab?: ModelDetailTab) =>
+  tab === ModelDetailTab.Details ? undefined : tab;
+
 export const getModelDetailRoute = (
   workspace: string,
   modelName: string,
   options?: { adapterName?: string; tab?: ModelDetailTab }
 ) => {
-  const base = options?.adapterName
-    ? generatePath(ROUTES.workspace.modelAdapterDetail, {
-        workspace,
-        modelName,
-        adapterName: options.adapterName,
-      })
-    : generatePath(ROUTES.workspace.modelDetail, { workspace, modelName });
-  return options?.tab ? `${base}?${QUERY_PARAMETERS.tab}=${options.tab}` : base;
+  const modelTab = toModelTabSegment(options?.tab);
+  if (options?.adapterName) {
+    return generatePath(ROUTES.workspace.modelAdapterDetail, {
+      workspace,
+      modelName,
+      adapterName: options.adapterName,
+      modelTab,
+    });
+  }
+  return generatePath(ROUTES.workspace.modelDetail, { workspace, modelName, modelTab });
 };
+
+/** The model detail page of a catalog model. */
+export const getBaseModelDetailRoute = (
+  workspace: string,
+  modelName: string,
+  tab?: ModelDetailTab
+) =>
+  generatePath(ROUTES.workspace.baseModelsModel, {
+    workspace,
+    modelName,
+    modelTab: toModelTabSegment(tab),
+  });
 
 export const getWorkspaceCustomizationJobListRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.customizationJobList, { workspace });
@@ -423,16 +449,30 @@ export const getNewFilesetRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.filesetNew, { workspace });
 };
 
+export const getTasksRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.tasks, { workspace });
+
+/** A task's page; a tab other than the first gets its own path segment. */
+export const getTaskDetailRoute = (workspace: string, taskName: string, tab?: TaskDetailTab) =>
+  tab && tab !== TASK_DETAIL_TABS[0].value
+    ? generatePath(ROUTES.workspace.taskDetailTab, { workspace, taskName, taskTab: tab })
+    : generatePath(ROUTES.workspace.taskDetail, { workspace, taskName });
+
 export const getTasksetsRoute = (workspace: string) =>
   generatePath(ROUTES.workspace.tasksets, { workspace });
 
-/** A taskset's page, optionally with one member task's drawer open. */
+/** A taskset's page at a tab (a tab other than the first gets its own path segment),
+ *  optionally with one member task's drawer open. */
 export const getTasksetDetailRoute = (
   workspace: string,
   tasksetName: string,
-  options?: { task?: string }
+  options?: { task?: string; tab?: TasksetDetailTab }
 ) => {
-  const base = generatePath(ROUTES.workspace.tasksetDetail, { workspace, tasksetName });
+  const tab = options?.tab;
+  const base =
+    tab && tab !== TASKSET_DETAIL_TABS[0].value
+      ? generatePath(ROUTES.workspace.tasksetDetailTab, { workspace, tasksetName, tasksetTab: tab })
+      : generatePath(ROUTES.workspace.tasksetDetail, { workspace, tasksetName });
   return options?.task
     ? `${base}?${createSearchParams({ [QUERY_PARAMETERS.task]: options.task })}`
     : base;

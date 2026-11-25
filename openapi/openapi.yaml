@@ -6777,6 +6777,14 @@ paths:
         schema:
           type: string
           title: Span Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the span. Required for ambiguous span IDs.
+          title: Session Id
+          type: string
+        description: Session containing the span. Required for ambiguous span IDs.
       responses:
         '200':
           description: Successful Response
@@ -6790,6 +6798,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Span ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -7009,6 +7019,15 @@ paths:
         schema:
           type: string
           title: Id
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          description: Session containing the trace. Required for ambiguous trace
+            IDs.
+          title: Session Id
+          type: string
+        description: Session containing the trace. Required for ambiguous trace IDs.
       - name: mode
         in: query
         required: false
@@ -7039,6 +7058,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Trace ID belongs to multiple sessions; supply session_id.
         '422':
           description: Validation Error
           content:
@@ -13855,6 +13876,11 @@ components:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model - Automatically generated
             by the platform at creation when fileset provided.
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -17644,8 +17670,8 @@ components:
           type: string
           title: Id
         attempt_id:
-          type: string
           title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -17677,7 +17703,7 @@ components:
         fileset:
           type: string
           title: Fileset
-          description: Fileset ID for storing job artifacts
+          description: Fileset name for storing job artifacts
         output_location:
           title: Output Location
           description: Caller-supplied artifact fileset; None when the fileset was
@@ -17714,7 +17740,6 @@ components:
       type: object
       required:
       - id
-      - attempt_id
       - name
       - workspace
       - source
@@ -17866,6 +17891,8 @@ components:
     HelixJobStatus:
       type: string
       enum:
+      - creation_pending
+      - deletion_pending
       - created
       - queued
       - pending
@@ -20059,6 +20086,16 @@ components:
       type: object
       title: ModelCacheConfig
       description: Configuration for model caching.
+    ModelCapability:
+      type: string
+      enum:
+      - tool_calling
+      - reasoning
+      - structured_output
+      - embedding
+      - reranking
+      title: ModelCapability
+      description: A capability a model advertises beyond plain text generation.
     ModelDeployment:
       properties:
         id:
@@ -20513,6 +20550,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length.
         finetuning_type:
           allOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -20704,6 +20746,67 @@ components:
       required:
       - data
       title: ModelEntitysPage
+    ModelMetadata:
+      properties:
+        display_name:
+          title: Display Name
+          description: Human-readable model name.
+          type: string
+          maxLength: 255
+        description:
+          title: Description
+          description: Summary of what the model is for.
+          type: string
+          maxLength: 4000
+        capabilities:
+          items:
+            $ref: '#/components/schemas/ModelCapability'
+          type: array
+          title: Capabilities
+          description: Capabilities the model supports, such as tool calling or reasoning.
+        input_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Input Modalities
+          description: Content types the model accepts.
+        output_modalities:
+          items:
+            $ref: '#/components/schemas/ModelModality'
+          type: array
+          title: Output Modalities
+          description: Content types the model produces.
+        parameter_count:
+          title: Parameter Count
+          description: Total number of model parameters.
+          type: integer
+          minimum: 0.0
+        context_length:
+          title: Context Length
+          description: Maximum context window, in tokens.
+          type: integer
+          minimum: 0.0
+        max_output_tokens:
+          title: Max Output Tokens
+          description: Maximum tokens in a single response.
+          type: integer
+          minimum: 0.0
+        sources:
+          items:
+            type: string
+          type: array
+          title: Sources
+          description: Metadata sources that contributed these values. Empty means
+            the metadata was set by hand, and automatic enrichment leaves it unchanged.
+        refreshed_at:
+          title: Refreshed At
+          description: When the metadata was last fetched.
+          type: string
+          format: date-time
+      type: object
+      title: ModelMetadata
+      description: Descriptive details about a model, gathered from the services that
+        serve it.
     ModelMetadataContent:
       properties:
         tool_calling:
@@ -20716,6 +20819,16 @@ components:
         Contains tool calling configuration that is merged into the ModelSpec
 
         during checkpoint analysis.'
+    ModelModality:
+      type: string
+      enum:
+      - text
+      - image
+      - audio
+      - video
+      - pdf
+      title: ModelModality
+      description: A kind of content a model accepts or produces.
     ModelParameters:
       properties:
         base_url:
@@ -21098,6 +21211,12 @@ components:
           title: Has Vision Tower
           description: True when the checkpoint config contains a vision tower.
           default: false
+        vision_patch_size:
+          title: Vision Patch Size
+          description: Side length, in pixels, of one image token. Read from the checkpoint
+            vision config as patch_size times the spatial merge. None when the checkpoint
+            does not declare a patch size.
+          type: integer
         has_audio_tower:
           type: boolean
           title: Has Audio Tower
@@ -24308,6 +24427,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/ModelSpec'
           description: Detailed specification for the model
+        metadata:
+          allOf:
+          - $ref: '#/components/schemas/ModelMetadata'
+          description: Descriptive model details such as capabilities, modalities,
+            and context length. Send null to clear it.
+          nullable: true
         fileset:
           title: Fileset
           description: 'A set of checkpoint files, configs, and other auxiliary info

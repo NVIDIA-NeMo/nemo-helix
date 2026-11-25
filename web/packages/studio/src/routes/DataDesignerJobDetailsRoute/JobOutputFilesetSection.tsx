@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
+import { getDataViewEmptyStateVariant } from '@nemo/common/src/components/EntityEmptyState/getDataViewEmptyStateVariant';
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import {
   getFilesListFilesetFilesQueryKey,
@@ -246,11 +247,11 @@ export const JobOutputFilesetSection: FC = () => {
                 },
                 DataViewTableContent: {
                   className: 'studio-data-view-table',
-                  renderEmptyState: () => (
-                    <TableEmptyState
-                      className="py-4"
-                      header="No files yet"
-                      emptyMessage="This fileset has no files, or they are not visible yet."
+                  renderEmptyState: (state) => (
+                    <EntityEmptyState
+                      entity="dataDesignerJobOutput"
+                      workspace={filesetWorkspace}
+                      {...getDataViewEmptyStateVariant(state, dataViewState.resetFilters)}
                     />
                   ),
                 },

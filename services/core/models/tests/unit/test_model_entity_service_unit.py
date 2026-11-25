@@ -32,6 +32,7 @@ from nhx.core.models.schemas import (
     LinearLayerSpec,
     MambaConfig,
     ModelEntity,
+    ModelMetadata,
     ModelSpec,
     MoEConfig,
     SlidingWindowConfig,
@@ -542,6 +543,60 @@ async def test_update_model_entity_can_clear_backend_format(model_entity_service
     assert sample_model.backend_format is None
     assert result.backend_format is None
     mock_entity_client.update.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_model_entity_sets_metadata(model_entity_service, mock_entity_client, sample_model):
+    mock_entity_client.list = AsyncMock(return_value=_empty_adapters_page())
+    mock_entity_client.update.side_effect = lambda model: model
+    metadata = ModelMetadata(
+        display_name="Llama 3.1 8B Instruct",
+        capabilities=["tool_calling"],
+        input_modalities=["text"],
+        context_length=131072,
+        sources=["models.dev"],
+    )
+
+    result = await model_entity_service.update_model_entity(
+        sample_model, "default", "test-model", UpdateModelEntityRequest(metadata=metadata)
+    )
+
+    assert sample_model.metadata == metadata
+    assert result is not None
+    assert result.metadata == metadata
+
+
+@pytest.mark.asyncio
+async def test_update_model_entity_without_metadata_keeps_existing(
+    model_entity_service, mock_entity_client, sample_model
+):
+    existing = ModelMetadata(display_name="Existing", sources=[])
+    sample_model.metadata = existing
+    mock_entity_client.list = AsyncMock(return_value=_empty_adapters_page())
+    mock_entity_client.update.side_effect = lambda model: model
+
+    result = await model_entity_service.update_model_entity(
+        sample_model, "default", "test-model", UpdateModelEntityRequest(description="changed")
+    )
+
+    assert result is not None
+    assert result.metadata == existing
+
+
+@pytest.mark.asyncio
+async def test_update_model_entity_clears_metadata_with_explicit_null(
+    model_entity_service, mock_entity_client, sample_model
+):
+    sample_model.metadata = ModelMetadata(display_name="Existing", sources=[])
+    mock_entity_client.list = AsyncMock(return_value=_empty_adapters_page())
+    mock_entity_client.update.side_effect = lambda model: model
+
+    result = await model_entity_service.update_model_entity(
+        sample_model, "default", "test-model", UpdateModelEntityRequest(metadata=None)
+    )
+
+    assert result is not None
+    assert result.metadata is None
 
 
 @pytest.mark.asyncio

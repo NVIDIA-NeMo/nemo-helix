@@ -27,10 +27,10 @@ import {
   type TriggerInsightsRunVariables,
   useTriggerInsightsRun,
 } from '@studio/api/useTriggerInsightsRun';
+import { DetailPanel } from '@studio/components/DetailPanel';
 import { LatestAnalysisRun } from '@studio/routes/agents/AgentDetailRoute/analysis/LatestAnalysisRun';
 import { RunAnalysisModal } from '@studio/routes/agents/AgentDetailRoute/analysis/RunAnalysisModal';
 import { saveAnalysisConfig } from '@studio/routes/agents/AgentDetailRoute/analysis/saveAnalysisConfig';
-import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { type FC, useEffect, useState } from 'react';
 
 interface AnalysisConfigPanelProps {

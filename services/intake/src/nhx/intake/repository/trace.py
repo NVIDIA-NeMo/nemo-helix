@@ -16,6 +16,10 @@ from nhx.intake.spans.domain import (
 )
 
 
+class TraceAmbiguousError(Exception):
+    """A workspace trace ID belongs to more than one session."""
+
+
 class TraceRepository(ABC):
     """Domain-facing interface for trace reads."""
 
@@ -32,7 +36,9 @@ class TraceRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_trace(self, *, workspace: str, trace_id: str, mode: TraceMode) -> IntakeTrace | None:
+    async def get_trace(
+        self, *, workspace: str, trace_id: str, mode: TraceMode, session_id: str | None = None
+    ) -> IntakeTrace | None:
         pass
 
     @abstractmethod

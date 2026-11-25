@@ -17,7 +17,7 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
-from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype, embedding_pooling
 from nhx.automodel.tasks.training.backends.registry import (
     causal_reranker_class,
     causal_reranker_collator,
@@ -50,11 +50,11 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
 )
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -196,11 +196,14 @@ def _compile_retrieval_config(
         }
     )
     if is_bi_encoder:
-        cfg["model"]["l2_normalize"] = True
+        # The job's pooling, else the base's own. Sent explicitly so the compiled config shows it.
+        cfg["model"]["pooling"], cfg["model"]["l2_normalize"] = embedding_pooling(customizer_config)
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        if is_causal_reranker_checkpoint(customizer_config.model.path):
+        if is_causal_reranker_checkpoint(
+            customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code
+        ):
             # Automodel scores this causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
             del cfg["model"]["pooling"]
@@ -405,6 +408,13 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        cfg["processor"]["size"] = image_size
     freeze_config: dict[str, Any] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
@@ -490,11 +500,16 @@ def _apply_vlm_lora_excludes(cfg: dict[str, Any], customizer_config: TrainingSte
     lora = customizer_config.training.lora
     target = None if lora is None else lora.target_modules
     exclude = None if lora is None else lora.exclude_modules
-    if not lora_uses_default_targets(target, exclude):
+    # PeftConfig takes target_modules or exclude_modules, not both. A named target
+    # list is the caller's filter. An exclude list is unioned with the vision patterns.
+    if target and list(target) != ["*proj"]:
         return
     peft.pop("target_modules", None)
     peft["match_all_linear"] = False
-    peft["exclude_modules"] = list(VLM_LORA_EXCLUDE_MODULES)
+    peft["exclude_modules"] = vlm_lora_exclude_modules(
+        exclude,
+        checkpoint_model_name=customizer_config.model.checkpoint_model_name,
+    )
 
 
 def _configure_vlm_datasets(
@@ -537,8 +552,20 @@ def _configure_vlm_datasets(
         model_name=customizer_config.model.name,
         user_template=customizer_config.model.chat_template,
     )
-    cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
-    cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    # max_length is Automodel's token cap. Setting it also enables the pretokenized
+    # wrapper, which truncates to this length and replaces a sample whose truncation
+    # would split image tokens.
+    seq_length = customizer_config.model.max_seq_length
+    cfg["dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(train_out),
+        "max_length": seq_length,
+    }
+    cfg["validation_dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(val_out),
+        "max_length": seq_length,
+    }
     if chat_template:
         cfg["dataset"]["chat_template"] = chat_template
         cfg["validation_dataset"]["chat_template"] = chat_template
@@ -752,8 +779,9 @@ def _build_schedule(
         "local_batch_size": customizer_config.batch.micro_batch_size,
         "max_steps": max_steps,
         "num_epochs": epochs,
-        # On this signal Automodel saves a checkpoint, skips validation, and stops, on every rank.
-        # The pause poller sends it to global rank 0.
+        # Automodel installs a preemption handler for this signal. A pause sets that handler's flag on
+        # global rank 0, and at the next step Automodel saves a checkpoint, skips validation, and stops
+        # on every rank.
         "preemption_signal": PAUSE_SIGNAL.name,
     }
 
@@ -1303,7 +1331,9 @@ def _configure_retrieval_dataset(
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
     causal_reranker = (
-        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
+        causal_reranker_class(customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code)
+        if recipe == TrainingRecipe.CROSS_ENCODER
+        else None
     )
     if recipe == TrainingRecipe.BI_ENCODER:
         collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"

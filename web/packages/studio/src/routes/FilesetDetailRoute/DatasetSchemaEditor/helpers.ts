@@ -3,6 +3,7 @@
 
 import type { FileFormatType } from '@nemo/common/src/types';
 import type { DatasetMetadataContent } from '@nemo/sdk/generated/platform/schema';
+import { FilesUpdateFilesetMetadataBody } from '@nemo/sdk/generated/platform/zod/files/filesUpdateFilesetMetadata';
 import { FORMAT_BY_EXTENSION } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/constants';
 import {
   DEFAULT_SCHEMA_VALUE,
@@ -118,4 +119,22 @@ export function applySingleSchemaEdit(
   // selection is a schema_defs key
   base.schema_defs = { ...(base.schema_defs ?? {}), [selection]: newSchema };
   return base;
+}
+
+const DatasetMetadataContentSchema = FilesUpdateFilesetMetadataBody.shape.metadata
+  .unwrap()
+  .shape.dataset.unwrap();
+
+/** Check an edited Show All payload against the API's `DatasetMetadataContent` shape. */
+export function validateDatasetMetadata(
+  value: Record<string, unknown>
+): { valid: true; errors: [] } | { valid: false; errors: string[] } {
+  const result = DatasetMetadataContentSchema.safeParse(value);
+  if (result.success) return { valid: true, errors: [] };
+  return {
+    valid: false,
+    errors: result.error.issues.map((issue) =>
+      issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message
+    ),
+  };
 }

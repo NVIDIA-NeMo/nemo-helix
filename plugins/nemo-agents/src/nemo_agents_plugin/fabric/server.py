@@ -450,6 +450,8 @@ def create_fabric_serving_app(
                     detail=str(error),
                     headers=response_headers,
                 ) from error
+            except FabricRuntimeTimeoutError as error:
+                raise HTTPException(status_code=504, detail=str(error), headers=response_headers) from error
             except FabricRuntimeExecutionError as error:
                 raise HTTPException(
                     status_code=502,
@@ -492,8 +494,13 @@ def create_fabric_serving_app(
             ) from error
 
         if result.status != "succeeded":
+            invocation_timeout = (
+                isinstance(result.error, Mapping)
+                and result.error.get("code") == "timeout"
+                and result.error.get("stage") == "invoke"
+            )
             raise HTTPException(
-                status_code=502,
+                status_code=504 if invocation_timeout else 502,
                 detail=_failed_result_detail(result),
                 headers=response_headers,
             )

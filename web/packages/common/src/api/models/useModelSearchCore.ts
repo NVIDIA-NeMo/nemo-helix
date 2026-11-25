@@ -104,6 +104,7 @@ export const useModelSearchCore = ({
     isFetchNextPageError,
     isFetchingNextPage,
     isLoading,
+    isPending,
   } = useInfiniteQuery({
     queryKey: getQueryKeyInfiniteModels(queryWorkspace, query),
     queryFn: ({ pageParam }) => listModels(queryWorkspace, { ...query, page: pageParam }),
@@ -154,7 +155,8 @@ export const useModelSearchCore = ({
     groups,
     search,
     error,
-    loading: isLoading,
+    // An enabled initial query remains pending when offline, even while it is not fetching.
+    loading: isEnabled && isPending,
     onSearchChange: setSearch,
     onLoadMore,
     hasMore,

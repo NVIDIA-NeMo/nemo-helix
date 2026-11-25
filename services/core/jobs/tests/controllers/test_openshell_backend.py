@@ -995,6 +995,8 @@ class TestPolicy:
         assert policy.process.run_as_user == "sandbox"
         assert policy.process.run_as_group == "sandbox"
         assert "/app" in policy.filesystem.read_only
+        assert "/sys/fs/cgroup" in policy.filesystem.read_only
+        assert "/sys/fs/cgroup" not in policy.filesystem.read_write
         assert "/tmp" in policy.filesystem.read_write
         assert "/var/run/scratch" in policy.filesystem.read_write
         # The only network rule is the platform egress, and only the launcher and

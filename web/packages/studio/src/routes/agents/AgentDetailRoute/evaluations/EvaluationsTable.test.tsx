@@ -125,6 +125,47 @@ describe('EvaluationsTable Job column', () => {
   });
 });
 
+describe('EvaluationsTable unpublished runs', () => {
+  it("fills a run with no evaluation from its job and opens the job's results", async () => {
+    const user = userEvent.setup();
+    const job = toEvalJobRow(
+      makeEvaluatorJob({
+        name: 'dataset-run',
+        status: 'completed',
+        created_at: '2024-12-17T16:00:00',
+        updated_at: '2024-12-17T16:00:42',
+        spec: { dataset: [{ question: 'q' }], target: { format: 'generic' } },
+        status_details: {
+          input_tokens: 900,
+          output_tokens: 300,
+          evaluation: {
+            unit: 'rows',
+            total: 3,
+            errored: 0,
+            scored: 3,
+            failed: false,
+            message: '',
+          },
+        },
+      })
+    );
+    renderTable([], [job]);
+
+    const [nameCell] = await screen.findAllByTitle('dataset-run', undefined, {
+      timeout: LG_SELECTOR_TIMEOUT,
+    });
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('400').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1,200').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('42s').length).toBeGreaterThan(0);
+
+    await user.click(nameCell);
+    expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      '/workspaces/default/evaluation/results/dataset-run'
+    );
+  });
+});
+
 describe('EvaluationsTable row actions', () => {
   it('offers View job in the quick actions menu and navigates to the job', async () => {
     const user = userEvent.setup();

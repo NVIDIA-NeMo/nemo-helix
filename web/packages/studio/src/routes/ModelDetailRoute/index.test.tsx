@@ -9,6 +9,7 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { ModelDetailRoute } from '@studio/routes/ModelDetailRoute';
 import { renderRoute } from '@studio/tests/util/render';
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('@studio/hooks/useModelLineage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/hooks/useModelLineage')>()),
@@ -109,7 +110,7 @@ describe('ModelDetailRoute', () => {
 
   it('opens the tab named in the URL, with its actions', async () => {
     mockLineage();
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=training');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/training');
 
     expect(await screen.findByText('training content')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Job' })).toHaveAttribute(
@@ -120,7 +121,7 @@ describe('ModelDetailRoute', () => {
 
   it('links out to the fileset from the Files tab', async () => {
     mockLineage({ fileset: { workspace: 'files-ws', name: 'weights' } });
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/files');
 
     expect(await screen.findByText('files content')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Fileset' })).toHaveAttribute(
@@ -131,15 +132,26 @@ describe('ModelDetailRoute', () => {
 
   it('keeps the Files tab without a fileset, with nothing to open', async () => {
     mockLineage({ fileset: null });
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/files');
 
     expect(await screen.findByText('files content')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open Fileset' })).not.toBeInTheDocument();
   });
 
+  it('moves between tabs through the URL path', async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model');
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Deployment' }));
+    expect(await screen.findByText('deployment content')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Details' }));
+    expect(await screen.findByText('details content')).toBeInTheDocument();
+  });
+
   it('puts the deployment actions in the page header on the Deployment tab only', async () => {
     mockLineage();
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=deployment');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/deployment');
 
     expect(await screen.findByText('deployment content')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'deployment actions' })).toBeInTheDocument();
@@ -163,7 +175,7 @@ describe('ModelDetailRoute', () => {
 
   it('drops the job tabs when no job is found, falling back to Details', async () => {
     mockLineage({ job: { jobName: undefined, workspace: 'ws', isLoading: false } });
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=training');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/training');
 
     expect(await screen.findByText('details content')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Training' })).not.toBeInTheDocument();
@@ -171,7 +183,7 @@ describe('ModelDetailRoute', () => {
 
   it("lists only this model's evaluations, with a run action that pre-selects it", async () => {
     mockLineage();
-    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=evaluations');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/evaluations');
 
     expect(await screen.findByText('evaluations for my-model')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
@@ -182,7 +194,7 @@ describe('ModelDetailRoute', () => {
 
   it("lists an adapter's own evaluations, not its base model's", async () => {
     mockLineage({ adapter });
-    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter/evaluations');
 
     // The composite the run actually stores in `spec.target.name` -- matching on
     // the adapter's bare name would list nothing while looking correct.
@@ -193,7 +205,7 @@ describe('ModelDetailRoute', () => {
 
   it('pre-selects the adapter when running an evaluation from its page', async () => {
     mockLineage({ adapter });
-    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter/evaluations');
 
     expect(await screen.findByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
       'href',
@@ -262,6 +274,13 @@ describe('ModelDetailRoute', () => {
       renderPage('/workspaces/ws/base-models/my-model');
 
       expect(await screen.findByRole('button', { name: 'details actions' })).toBeInTheDocument();
+    });
+
+    it('opens the tab named in the catalog URL', async () => {
+      mockLineage({ model: baseModel });
+      renderPage('/workspaces/ws/base-models/my-model/deployment');
+
+      expect(await screen.findByText('deployment content')).toBeInTheDocument();
     });
 
     it('looks the model up in the default workspace too', async () => {

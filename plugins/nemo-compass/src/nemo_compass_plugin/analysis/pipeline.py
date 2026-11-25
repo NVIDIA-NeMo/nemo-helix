@@ -72,7 +72,9 @@ async def load_existing_insights(backend: CompassBackend, *, workspace: str, age
     while True:
         result = await backend.list_insights(workspace=workspace, agent=agent, status=None, page=page, page_size=100)
         for item in result.data:
-            if item.status == InsightStatus.RESOLVED:
+            # A resolved insight is fixed and a deleted one was judged not a problem; neither should
+            # gather new evidence or count as the existing insight a new finding duplicates.
+            if item.status in (InsightStatus.RESOLVED, InsightStatus.DELETED):
                 continue
             try:
                 if not item.id:

@@ -482,12 +482,12 @@ class TestListAgents:
         ("query", "expected"),
         [
             (
-                "filter[labels.helix-agents/managed-by]=insights",
-                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+                "filter[labels.acme/owner]=insights",
+                {"data.labels.acme/owner": {"$eq": "insights"}},
             ),
             (
-                "filter[labels][helix-agents/managed-by]=insights",
-                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+                "filter[labels][acme/owner]=insights",
+                {"data.labels.acme/owner": {"$eq": "insights"}},
             ),
             ("filter[labels.team][$in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
             ("filter[labels][team][in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
@@ -545,7 +545,7 @@ class TestListAgents:
 
 class TestAgentLabels:
     def test_register_stores_labels(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        labels = {"helix-compass/target-agent": "default/support-bot", "team": "search"}
+        labels = {"acme/target": "default/support-bot", "team": "search"}
         saved = _make_agent("calc")
         saved.labels = labels
         mock_entity_client.create = AsyncMock(return_value=saved)
@@ -835,7 +835,7 @@ class TestAgentRunDeclarations:
                 "name": "analyst",
                 "context_schema": context_schema,
                 "default_input": "Analyze recent traces.",
-                "post_run_actions": ["insights.analysis", "agents.noop"],
+                "post_run_actions": ["compass.save-insights", "agents.noop"],
             },
         )
 
@@ -843,9 +843,9 @@ class TestAgentRunDeclarations:
         created: Agent = mock_entity_client.create.call_args.args[0]
         assert created.context_schema == context_schema
         assert created.default_input == "Analyze recent traces."
-        assert created.post_run_actions == {"agents.noop", "insights.analysis"}
+        assert created.post_run_actions == {"agents.noop", "compass.save-insights"}
         # Serialized as a sorted array of unique strings.
-        assert resp.json()["post_run_actions"] == ["agents.noop", "insights.analysis"]
+        assert resp.json()["post_run_actions"] == ["agents.noop", "compass.save-insights"]
 
     def test_register_defaults_post_run_actions_to_noop(
         self, client: TestClient, mock_entity_client: AsyncMock

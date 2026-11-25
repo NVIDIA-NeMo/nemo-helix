@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ChatNew, Refresh } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Empty } from '@studio/components/Empty';
 import {
   deleteAssistantSessionHistory,
   getAssistantHistorySessionsQueryKey,
@@ -99,16 +99,15 @@ export const HistoryPanelContents = ({
         </div>
       ) : !error ? (
         <Flex className="min-h-0 flex-1" align="center" justify="center">
-          <Empty title="No chats yet" description="NeMo Assistant sessions will appear here." />
+          <EntityEmptyState entity="assistantSessions" variant="first-use" />
         </Flex>
       ) : null}
       {sessionToDelete && (
         <DeleteConfirmationModal
           open
-          title="Delete chat?"
-          description={`Delete “${getHistorySessionTitle(sessionToDelete)}”? This chat cannot be recovered.`}
-          successText="Chat deleted."
-          errorText="Could not delete this chat."
+          entity="chat"
+          ids={[getHistorySessionTitle(sessionToDelete)]}
+          description="The chat and its messages are deleted and can't be restored."
           onClose={() => setSessionToDelete(null)}
           onDelete={handleDelete}
         />

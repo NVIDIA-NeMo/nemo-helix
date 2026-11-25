@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Taskset runs on kind, for e2e/test_taskset_runs.py (the nightly-taskset-runs-e2e workflow). Layer it on kind.yaml
-# and builder.yaml, after install_opensandbox_kind.sh has installed OpenSandbox and copied its key into the release
-# namespace. With builder.enabled, sandboxClusterCapable makes the chart render evals.runs.harbor (harbor-standard).
+# and builder.yaml, after OpenSandbox is installed with batchsandbox-kind-template.yaml (see that file) and its key
+# copied into the release namespace. With builder.enabled, sandboxClusterCapable makes the chart render evals.runs.harbor (harbor-standard).
 
 sandboxClusterCapable: true
 

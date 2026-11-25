@@ -54,6 +54,8 @@ class HelixJobStatus(str, Enum):
     ``PENDING`` means the backend resource exists and is waiting to start.
     """
 
+    CREATION_PENDING = "creation_pending"
+    DELETION_PENDING = "deletion_pending"
     CREATED = "created"
     QUEUED = "queued"
     PENDING = "pending"
@@ -67,12 +69,17 @@ class HelixJobStatus(str, Enum):
     RESUMING = "resuming"
 
     @staticmethod
+    def lifecycle_pending() -> list["HelixJobStatus"]:
+        return [HelixJobStatus.CREATION_PENDING, HelixJobStatus.DELETION_PENDING]
+
+    @staticmethod
     def terminals() -> list["HelixJobStatus"]:
         return [HelixJobStatus.COMPLETED, HelixJobStatus.ERROR, HelixJobStatus.CANCELLED]
 
     @staticmethod
     def non_terminals() -> list["HelixJobStatus"]:
         return [
+            *HelixJobStatus.lifecycle_pending(),
             HelixJobStatus.CREATED,
             HelixJobStatus.QUEUED,
             HelixJobStatus.PENDING,

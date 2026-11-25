@@ -269,13 +269,19 @@ jobs:
         run: |
           test -n "${NHX_E2E_CLUSTER_URL}"
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          # The sandboxed Gym tests need OpenSandbox, which only kind-gym-sandbox-e2e's cluster has.
           uv run --frozen pytest \
             e2e/test_evaluator_plugin.py \
             -v \
-            -m gym_e2e \
+            -m "gym_e2e and not gym_sandbox_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-gym-e2e.xml
+
+          # A sandboxed test missing its gym_sandbox_e2e marker is selected here and skips on its gate,
+          # so a skip fails the job rather than passing as green.
+          uv run --no-cache .github/scripts/check_junit_no_skips.py \
+            report-kubernetes-gym-e2e.xml --label "Gym e2e"
 
       - name: Finalize Kind Gym e2e
         if: always()
@@ -284,6 +290,91 @@ jobs:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-gym-e2e-kubernetes-artifacts
           junit-report: report-kubernetes-gym-*.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
+  # Its own cluster: e2e/k8s/values/gym-sandbox.yaml sandboxes every Gym target, so the colocated
+  # tests in kind-gym-e2e cannot share it.
+  kind-gym-sandbox-e2e:
+    name: Kind sandboxed Gym agent-evaluate e2e
+    needs: [eligibility, build-cpu-smoke-images]
+    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    runs-on: ubuntu-latest
+    # Each of its two tests may take up to 35 minutes. This covers cluster setup and one test
+    # running to its own timeout, so a single hung test ends with pytest's diagnostics and not on
+    # this limit. Two hung tests would reach it first.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      packages: read
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-gym-sandbox
+      # Set once because three things must agree on it: the action installs the release there, the
+      # tests look for Gym hosts there, and gym-sandbox.yaml builds the one URL a host may reach from it.
+      RELEASE_NAMESPACE: nemo-helix
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Kind cluster with OpenSandbox for sandboxed Gym evaluation
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          kube-namespace: ${{ env.RELEASE_NAMESPACE }}
+          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+          install-opensandbox: "true"
+          helm-extra-args: -f e2e/k8s/values/gym-sandbox.yaml
+
+      # OpenSandbox starts the Gym host with IfNotPresent. Pulling the image here keeps that pull
+      # out of the sandbox create wait, where a slow one would fail the job.
+      - name: Pre-pull Gym host image
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-host:${IMAGE_TAG}"
+
+      - name: Run sandboxed Gym agent-evaluate e2e tests
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+          NHX_E2E_SANDBOXED_GYM: "1"
+          NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
+          NHX_E2E_KUBE_NAMESPACE: ${{ env.RELEASE_NAMESPACE }}
+          # The one model endpoint e2e/k8s/values/gym-sandbox.yaml lets a Gym host reach, by the name it allows.
+          NHX_E2E_INTERNAL_BASE_URL: http://nemo-helix-api.${{ env.RELEASE_NAMESPACE }}.svc.cluster.local:8080
+        run: |
+          set -euo pipefail
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          uv run --frozen pytest \
+            e2e/test_evaluator_plugin.py \
+            -v -rs \
+            -m "gym_sandbox_e2e and not gym_docker_e2e" \
+            --run-e2e \
+            --no-cov \
+            --junitxml=report-kubernetes-gym-sandbox-e2e.xml
+
+          # This lane exists to run these tests, so one that skips fails the job rather than passing as
+          # green. A test that loses its gym_sandbox_e2e marker is deselected, not skipped, so the count
+          # is pinned too: change it when a sandboxed test is added or removed.
+          uv run --no-cache .github/scripts/check_junit_no_skips.py \
+            report-kubernetes-gym-sandbox-e2e.xml --label "sandboxed Gym e2e" --expect-tests 2
+
+      - name: Finalize Kind sandboxed Gym e2e
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-gym-sandbox-e2e-kubernetes-artifacts
+          junit-report: report-kubernetes-gym-sandbox-e2e.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
 
   kind-customizer-auth-e2e:
@@ -426,17 +517,8 @@ jobs:
             --junitxml=report-kubernetes-builder-e2e.xml
 
           # A skipped test here means a marker or feature selected the wrong tests, so it fails the job.
-          python3 - <<'EOF'
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("report-kubernetes-builder-e2e.xml").getroot()
-          suites = [root] if root.tag == "testsuite" else list(root)
-          tests = sum(int(suite.get("tests", 0)) for suite in suites)
-          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
-          if tests == 0 or skipped:
-              raise SystemExit(f"builder e2e ran {tests} tests and skipped {skipped}: expected none skipped")
-          print(f"builder e2e: {tests} tests, none skipped")
-          EOF
+          uv run --no-cache .github/scripts/check_junit_no_skips.py \
+            report-kubernetes-builder-e2e.xml --label "builder e2e"
 
       - name: Finalize Kind builder e2e
         if: always()
@@ -790,6 +872,7 @@ jobs:
       - build-cpu-smoke-images
       - kind-cpu-e2e
       - kind-gym-e2e
+      - kind-gym-sandbox-e2e
       - kind-customizer-auth-e2e
       - kind-builder-e2e
       - kind-network-policy-smoke

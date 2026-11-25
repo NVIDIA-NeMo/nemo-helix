@@ -297,6 +297,7 @@ class TestSetupFinishedTelemetry:
             patch(f"{SETUP_MOD}._check_platform_reachable_with_retries", return_value=True),
             patch(f"{SETUP_MOD}._bootstrap_config_if_missing"),
             patch(f"{SETUP_MOD}._run_interactive_mode", interactive),
+            patch("nemo_helix_ext.cli.telemetry.emit.telemetry_opted_in", return_value=True),
         ):
             setup_command(ctx)
 

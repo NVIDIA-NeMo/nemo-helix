@@ -43,6 +43,16 @@ export type BadgeStatus<T = HelixJobStatus> =
   | 'lost';
 
 export const badgeStatus: Record<BadgeStatus | 'default', BadgeProps> = {
+  creation_pending: {
+    label: 'Creation pending',
+    color: 'gray',
+    icon: Refresh,
+  },
+  deletion_pending: {
+    label: 'Deletion pending',
+    color: 'gray',
+    icon: Refresh,
+  },
   created: {
     label: 'Created',
     color: 'teal',

@@ -5,18 +5,12 @@ vi.hoisted(() => {});
 
 import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import { getCompassGetStatusesAnalysisRunStatusQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
-import type {
-  AnalysisRunResponse,
-  CreateAnalysisRunRequest,
-} from '@nemo/sdk/generated/compass/schema';
 import { queryClientConfig } from '@studio/api/queryClient';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
-  agentEthosHandlers,
   agentEvaluationsHandler,
-  analysisRunCreateHandler,
-  analysisRunHandlers,
+  analysisJobCreateHandler,
   analysisRunStatusHandler,
   mockAnalysisConfig,
 } from '@studio/mocks/handlers/insights';
@@ -52,8 +46,7 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
 
 const PERIODIC_CURSOR = '2026-08-14T09:00:00Z';
 
-let runs: AnalysisRunResponse[];
-let requests: CreateAnalysisRunRequest[];
+let requests: Record<string, unknown>[];
 let configWrites: string[];
 
 const recordConfigWrites = ({ request }: { request: Request }) => {
@@ -63,14 +56,11 @@ const recordConfigWrites = ({ request }: { request: Request }) => {
 };
 
 beforeEach(() => {
-  runs = [];
   requests = [];
   configWrites = [];
   server.use(
-    ...analysisRunHandlers(() => runs),
-    ...agentEthosHandlers('react-agent', '# React agent ethos'),
-    analysisRunCreateHandler((body) => {
-      requests.push(body);
+    analysisJobCreateHandler((body) => {
+      requests.push({ ...body.spec.context });
     })
   );
   server.events.on('request:start', recordConfigWrites);
@@ -112,9 +102,9 @@ const submit = async (
   return requests[0];
 };
 
-const expectAbout = (since: string | undefined, expectedMs: number) => {
-  expect(since).toBeDefined();
-  expect(Math.abs(Date.parse(since as string) - expectedMs)).toBeLessThan(60_000);
+const expectAbout = (since: unknown, expectedMs: number) => {
+  expect(typeof since).toBe('string');
+  expect(Math.abs(Date.parse(String(since)) - expectedMs)).toBeLessThan(60_000);
 };
 
 describe('Run analysis modal', () => {
@@ -149,7 +139,6 @@ describe('Run analysis modal', () => {
       agent: 'react-agent',
       default_model: mockAnalysisConfig.default_model,
       fast_model: mockAnalysisConfig.fast_model,
-      ethos: '# React agent ethos',
     });
     expect(body).not.toHaveProperty('evaluation_id');
   });
@@ -323,15 +312,6 @@ describe('Run analysis modal', () => {
     const body = await submit(user, dialog);
 
     expect(body.fast_model).toBe(mockAnalysisConfig.fast_model);
-  });
-
-  it('omits the Ethos when the agent has no ETHOS.md', async () => {
-    server.use(...agentEthosHandlers('react-agent', null));
-    const { user, dialog } = await openModal();
-
-    const body = await submit(user, dialog);
-
-    expect(body).not.toHaveProperty('ethos');
   });
 
   it('rereads the evaluations each time it opens, so a just-indexed one appears', async () => {

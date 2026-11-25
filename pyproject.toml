@@ -77,10 +77,17 @@ typecheck = ["transformers>=5.5.0,<5.9.0"]
 # without it the plugin is not importable there.
 scaled-evals = [
   "nemo-scaled-evals-plugin",
-  # The OpenSandbox server the plugin's server extension is tested against; match the
-  # server image in k8s/helm/examples/opensandbox.
+]
+# The OpenSandbox server that nhx-sandbox's server extension (packages/nhx_sandbox/opensandbox_ext) is
+# tested and type-checked against; match the server image in k8s/helm/examples/opensandbox. Opt-in like
+# scaled-evals, so the server and its Kubernetes client stay out of the regular install.
+opensandbox-ext = [
   "opensandbox-server==0.2.1",
 ]
+# The automodel service loads checkpoint configs with transformers only inside its training image.
+# Its tests load them for real with this opt-in group; without it they use a stand-in. Opt-in like
+# scaled-evals, so the regular install does not carry transformers.
+automodel-tests = ["transformers>=5.5.0,<5.9.0"]
 # Third-party Tavily plugin, published to PyPI by Tavily.
 tavily = ["nemo-helix-tavily-plugin"]
 dev = [
@@ -95,7 +102,7 @@ dev = [
   "pytest>=9.0.3",
   "fastapi[standard]==0.138.0",
   "papermill>=2.6.0",
-  "aiohttp>=3.14.1",
+  "aiohttp>=3.14.5",
   "ipykernel>=6.29.5",
   "ty==0.0.86",
   "hatchling>=1.26.3",
@@ -207,6 +214,8 @@ enabled-plugins = [
   "nemo-garak-plugin",
   "nemo-safe-synthesizer-plugin",
   "nemo-switchyard-plugin",
+  "nemo-bedrock-plugin",
+  "nemo-ngc-plugin",
   "nemo-agents-plugin",
   "nemo-deployments-plugin[docker,k8s,openshell]",
   # OpenShell job backend SDK; the jobs service itself is a root dependency.
@@ -267,7 +276,7 @@ cpu-tasks = [
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[claude,codex,deepagents]",
-  # Compass Fabric adapter and insights.analysis post-run action.
+  # Compass Fabric adapter, compass.analyst agent type and compass.save-insights post-run action.
   { include-group = "compass" },
   "nemo-evals-plugin",
   # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.
@@ -329,10 +338,10 @@ dependency-metadata = [
   ], requires-python = ">=3.12,<3.15" },
 ]
 constraint-dependencies = [
-  "GitPython>=3.1.60",
+  "GitPython>=3.2.1",
   "Mako>=1.3.12",
   "Pygments>=2.20.0",
-  "aiohttp>=3.14.1",                               # High/Medium/Low OOS – nhx-garak-tasks + customizer
+  "aiohttp>=3.14.5",                               # High/Medium/Low OOS – nhx-garak-tasks + customizer
   "authlib>=1.6.11",
   "black>=26.3.1",
   "bleach>=6.4.0",
@@ -341,10 +350,11 @@ constraint-dependencies = [
   "cryptography>=50.0.0,<51",
   "datamodel-code-generator>=0.71.0",
   "diffusers>=0.38.0",
-  "filelock>=3.20.3",
+  "dnspython>=2.9.2",
+  "filelock>=4.2.1",
   "jupyter-server>=2.20.0",
   "jupyterlab>=4.6.1",
-  "joserfc>=1.7.2",
+  "joserfc>=1.8.0",
   "langchain-community>=0.3.31,<0.4",              # 0.4.x removes the vertexai import path used by ragas 0.4.3
   "langchain-core>=1.4.9",
   "langchain-nvidia-ai-endpoints>=1.4.3",
@@ -357,24 +367,25 @@ constraint-dependencies = [
   "mistune>=3.3.2",
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
-  "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-claude>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-codex>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-common>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-deepagents>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-hermes>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-mini-swe-agent>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-nooa>=0.6.0,<0.7.0",
-  "nemo-fabric-adapters-remote-agent>=0.6.0,<0.7.0",
-  "nemo-fabric-collector>=0.6.0,<0.7.0",
-  "nemo-fabric-runtime>=0.6.0,<0.7.0",
-  "nbconvert>=7.17.1",
-  "nltk>=3.10.3",
+  "msgpack>=1.2.3",
+  "nemo-fabric-adapter-contract>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-claude>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-codex>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-common>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-deepagents>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-hermes>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-mini-swe-agent>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-nooa>=0.7.0,<0.8.0",
+  "nemo-fabric-adapters-remote-agent>=0.7.0,<0.8.0",
+  "nemo-fabric-collector>=0.7.0,<0.8.0",
+  "nemo-fabric-runtime>=0.7.0,<0.8.0",
+  "nbconvert>=7.17.2",
+  "nltk>=3.10.4",
+  "oauthlib>=4.0.1",
   "opensandbox==1.2.0",                          # Authenticates proxied SDK requests on multi-tenant servers.
-  "pillow>=12.3.0",
+  "pillow>=13.0.0",
   "postcss>=8.5.10",
-  "pyasn1>=0.6.4",
+  "pyasn1>=0.6.5",
   "pydantic-monty==0.0.18",                        # 0.0.19 dropped MontyRepl required by pydantic-ai-harness==0.3.0 CodeMode
   "python-multipart>=0.0.27",
   "regex>=2025.10.22",
@@ -402,10 +413,10 @@ override-dependencies = [
   "aiodns==3.5.0",
   "pycares==4.11.0",
   "authlib>=1.6.9",           # Critical – nhx-api/core/cpu-tasks/gpu-tasks
-  "aiohttp>=3.14.1",          # High/Medium/Low OOS – nhx-garak-tasks + customizer
+  "aiohttp>=3.14.5",          # High/Medium/Low OOS – nhx-garak-tasks + customizer
   "jaraco-context>=6.1.0",    # High OOS – nhx-garak-tasks + customizer
-  "joserfc>=1.7.2",
-  "pyasn1>=0.6.4",            # High OOS – nhx-garak-tasks + customizer
+  "joserfc>=1.8.0",
+  "pyasn2>=0.6.5",            # High OOS – nhx-garak-tasks + customizer
   "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
   "urllib3>=2.8.0",           # GHSA-vxq7-64xx-v4gw and GHSA-8988-9cw3-xx77
   "wheel>=0.46.2",            # High OOS – widespread
@@ -420,8 +431,8 @@ override-dependencies = [
   "litellm==1.95.1",          # CVE-2026-84377 backport; retain aioboto3 compatibility and avoid compromised 1.107.0
   "python-dotenv>=1.2.2",
   "openai>=2.26.0",
-  "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
-  "gitpython>=3.1.62",        # BDSA-2026-{30097,30098,31388}
+  "nltk>=3.10.4",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
+  "gitpython>=3.2.1",         # BDSA-2026-{30097,30098,31388}
   "accelerate>=1.15.0",       # CVE-2026-69112
 
 ]
@@ -476,6 +487,8 @@ nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard-plugin = { workspace = true }
+nemo-bedrock-plugin = { workspace = true }
+nemo-ngc-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
 nemo-agent-config-example-email-security-triage = { workspace = true }
@@ -535,6 +548,8 @@ members = [
   "plugins/nemo-garak",
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
+  "plugins/nemo-bedrock",
+  "plugins/nemo-ngc",
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-compass",
@@ -700,6 +715,12 @@ exclude = [
   "packages/sandboxed_gym/src/sandboxed_gym/host/opensandbox.py",
   "packages/sandboxed_gym/src/sandboxed_gym/ray/",
   "packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py",
+
+  # The OpenSandbox server extension runs inside the stock server image (Python 3.10) and imports
+  # `opensandbox_server` and `kubernetes`, which are only installed through the `opensandbox-ext`
+  # dependency group. Its tests exercise it against the real server package.
+  "packages/nhx_sandbox/opensandbox_ext/",
+  "packages/nhx_sandbox/tests/opensandbox_ext/",
 
   "packages/nemo_helix_ext/",
   "packages/nemo_nb/",

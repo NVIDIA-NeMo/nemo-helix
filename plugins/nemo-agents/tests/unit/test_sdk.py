@@ -689,9 +689,9 @@ def test_register_sends_labels() -> None:
         captured["body"] = _read_json(req)
         return httpx.Response(201, json={"name": "calc"})
 
-    AgentsResource(_client(handler)).register(name="calc", labels={"helix-agents/managed-by": "insights"})
+    AgentsResource(_client(handler)).register(name="calc", labels={"acme/owner": "insights"})
 
-    assert captured["body"]["labels"] == {"helix-agents/managed-by": "insights"}
+    assert captured["body"]["labels"] == {"acme/owner": "insights"}
 
 
 def test_list_filters_by_labels() -> None:
@@ -702,11 +702,11 @@ def test_list_filters_by_labels() -> None:
         captured["filter"] = req.url.params.get("filter")
         return httpx.Response(200, json=_EMPTY_PAGE)
 
-    AgentsResource(_client(handler)).list(labels={"helix-compass/target-agent": "team-a/bot", "team": "search"})
+    AgentsResource(_client(handler)).list(labels={"acme/target": "team-a/bot", "team": "search"})
 
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
     assert json.loads(captured["filter"]) == {
-        "labels.helix-compass/target-agent": "team-a/bot",
+        "labels.acme/target": "team-a/bot",
         "labels.team": "search",
     }
 

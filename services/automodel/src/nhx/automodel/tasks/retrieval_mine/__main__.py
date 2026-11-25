@@ -20,7 +20,7 @@ from nemo_helix_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nhx.automodel.tasks.retrieval_mine.runner import RetrievalMineStepConfig, run_mine, work_dir
-from nhx.common.client_factory import get_nemo_client
+from nhx.common.client_factory import get_task_nemo_client
 
 
 def _get_ctx(client: NemoClient) -> JobContext:
@@ -53,7 +53,7 @@ def _get_ctx(client: NemoClient) -> JobContext:
 def main() -> int:
     with open(os.environ[NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR], encoding="utf-8") as handle:
         spec = RetrievalMineStepConfig.model_validate_json(handle.read())
-    client = get_nemo_client(as_service="data-designer")
+    client = get_task_nemo_client("data-designer")
     ctx = _get_ctx(client)
     result = run_mine(
         spec.job_config,

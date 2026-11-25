@@ -3,8 +3,8 @@
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { getAgentsListExecuteJobsQueryKey } from '@nemo/sdk/generated/agents/agents';
 import { useCompassGetAnalysisConfig } from '@nemo/sdk/generated/compass/compass-analysis-configs';
-import { getCompassListAnalysisRunsQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-runs';
 import { getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -188,7 +188,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
       const started = triggered.filter(({ status }) => status === 'started').length;
       if (started > 0) {
         void queryClient.invalidateQueries({
-          queryKey: getCompassListAnalysisRunsQueryKey(workspace),
+          queryKey: getAgentsListExecuteJobsQueryKey(workspace),
         });
         toast.success(`Queued ${started} insights analysis run${started === 1 ? '' : 's'}.`);
       }

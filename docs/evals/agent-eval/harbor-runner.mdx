@@ -540,8 +540,7 @@ Submit it from your NeMo Helix source checkout. Save the response so polling can
 generated job name (`jq` is required):
 
 ```bash
-uv run nemo evals agent-evaluate \
-  --base-url http://localhost:8080 \
+uv run nemo --base-url http://localhost:8080 evals agent-evaluate \
   --workspace default \
   --profile default \
   --spec-file harbor-eval.json > harbor-job.json
@@ -562,7 +561,7 @@ Poll every two seconds until the job completes or reaches an unsuccessful termin
 ```bash
 JOB_NAME=$(jq -er '.name' harbor-job.json)
 while true; do
-  STATUS=$(uv run nemo jobs get-status "$JOB_NAME" --workspace default -f json | jq -er '.status') || break
+  STATUS=$(uv run nemo --base-url http://localhost:8080 jobs get-status "$JOB_NAME" --workspace default -f json | jq -er '.status') || break
   printf '%s\n' "$STATUS"
   case "$STATUS" in
     completed|error|cancelled) break ;;
@@ -681,7 +680,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.6.0",
+        "fabric_package": "nemo-fabric[codex]==0.7.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -702,7 +701,7 @@ source directory:
     "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.6.0"
+      "fabric_package": "nemo-fabric[codex]==0.7.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"
@@ -923,6 +922,24 @@ a2: reward=0.8, error=RuntimeError
 | `error_trial_ids` | `{"RuntimeError": ["a2"]}` |
 
 The error changes `a2`'s status and error rollup; it does not discard or replace its finite reward.
+
+## Keep task outputs
+
+A task's container is removed when its trial ends. To keep files the task produces, such as generated
+media or checkpoints, list their container paths in `artifacts`:
+
+```json
+"target": {
+    "kind": "harbor",
+    "artifacts": ["/workspace/scratch"]
+}
+```
+
+Harbor copies each path out of the task container after the trial, mirroring it under the trial's
+`artifacts/` directory, so `/workspace/scratch/video.mp4` lands at `artifacts/workspace/scratch/video.mp4`.
+Files written to `/logs/artifacts/` are collected without being listed. A platform job saves them with the
+rest of Harbor's output under `evidence/harbor/` in the `agent-eval-results` result. Only regular files are
+uploaded; symbolic links are skipped.
 
 ## Attempts and concurrency
 

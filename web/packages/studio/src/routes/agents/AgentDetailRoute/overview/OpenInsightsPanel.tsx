@@ -3,7 +3,7 @@
 
 import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { Button, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
-import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { DetailPanel } from '@studio/components/DetailPanel';
 import { OpenInsightRow } from '@studio/routes/agents/AgentDetailRoute/overview/OpenInsightRow';
 import type { FC } from 'react';
 

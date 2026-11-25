@@ -127,6 +127,8 @@ auth:
     subject_claim: sub
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300
+    # Seconds of clock difference allowed when checking a token's iat, nbf and exp claims. Without it, a token issued a moment ago by an identity provider whose clock is slightly ahead is rejected as not yet valid. Workload tokens and access keys use the same allowance. | default: 30
+    clock_skew_leeway_seconds: 30
   # Shared token signing configuration for NeMo Helix-minted JWTs.
   token_signing:
     # Shared issuer for NeMo Helix-minted JWTs. Defaults to <platform.base_url>/apis/auth.
@@ -241,6 +243,8 @@ files:
   cache_warming_max_concurrent: 3
   # Seconds to reuse S3 object metadata before checking freshness with HEAD. 0 checks every request. API mutations invalidate this process's metadata immediately; direct bucket changes and writes through other processes may remain stale until expiry. | default: 10.0
   s3_metadata_cache_ttl_seconds: 10.0
+  # Maximum completed versions retained per S3 object in the local content cache. Superseded versions are pruned after a successful cache write. | default: 2
+  s3_cache_max_versions_per_object: 2
   # Maximum Hugging Face request attempts for transient failures. | default: 4
   hf_retry_attempts: 4
   # Initial Hugging Face retry delay in seconds before exponential backoff. | default: 0.5
@@ -523,6 +527,8 @@ jobs:
     maximum_pause_ttl_seconds: 2592000
     # How long storage is kept after a job fails, measured from the failed step's stopped_at. 0 reclaims on the next retention pass. | default: 14400
     failed_storage_ttl_seconds: 14400
+    # Grace before the controller abandons a CREATION_PENDING Job; accepted deletion does not wait. | default: 900
+    creation_timeout_seconds: 900
     # How often the jobs controller checks paused, failed and cancelled jobs for storage to reclaim. Storage of deleted jobs is reclaimed on every reconcile tick instead. | default: 300
     retention_interval_seconds: 300
   # Include raw job log lines in controller diagnostics snapshots. Disabled by default because job logs may contain secrets or PII. Enable only for local debugging or test environments. | default: False
@@ -614,6 +620,14 @@ models:
     provider_discovery_timeout_seconds: 180
     # Client retry count for provider autodiscovery requests. The controller loop already retries on each cycle; disabling client retries avoids multi-minute retry storms on slow upstreams. | default: 0
     provider_discovery_max_retries: 0
+  # Model metadata controller configuration
+  metadata:
+    # Seconds between metadata reconcile cycles. | default: 300.0
+    interval_seconds: 300.0
+    # Seconds before a model's metadata, or a lookup that found nothing, is fetched again. | default: 86400.0
+    refresh_interval_seconds: 86400.0
+    # Timeout for each metadata request. | default: 15.0
+    request_timeout_seconds: 15.0
   # Parallelism estimation heuristics (model size thresholds, TP/PP/DP/CP/EP costs, balance bonuses)
   parallelism:
     # Standard node configuration (e.g., DGX H100) | default: 8
@@ -912,10 +926,14 @@ safe_synthesizer:
 
 ### `builder`
 
-Configuration for in-cluster container image builds.
+Configuration for container image builds, in this cluster or by a remote build service.
 
 ```yaml wordWrap
 builder:
+  # Where images are built: `in-cluster`, in sandboxes in this cluster; or `remote`, by the build service that `builder.remote` names. | default: 'in-cluster' | values: 'in-cluster' | 'remote'
+  backend: in-cluster
+  # The build service `backend: remote` uses. Unset refuses every remote submit.
+  remote:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
