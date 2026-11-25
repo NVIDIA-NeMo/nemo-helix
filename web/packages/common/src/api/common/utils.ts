@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaginationData, ValidationError } from '@nemo/sdk/generated/platform/schema';
-import { AxiosError } from 'axios';
+import { AxiosError, isAxiosError } from 'axios';
 
 export const getNextPageParam = <T extends { pagination?: PaginationData }>(lastPage: T) => {
   if (!lastPage.pagination || lastPage.pagination.total_pages <= lastPage.pagination.page) {
@@ -70,7 +70,8 @@ export const isServerError = (error: unknown): boolean =>
  * ```
  */
 export const getErrorMessage = (error: AxiosError | Error, fallbackMessage?: string): string => {
-  if (error instanceof AxiosError) {
+  // isAxiosError, not instanceof: a plugin's bundled axios throws errors of its own AxiosError class.
+  if (isAxiosError(error)) {
     // Try to extract error detail from backend response
     if (error.response?.data?.detail) {
       const detail = error.response.data.detail;

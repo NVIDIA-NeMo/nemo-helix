@@ -7,7 +7,9 @@ import {
   agentHardenerDeleteJob,
   agentHardenerDeleteRun,
   agentHardenerDeleteSynthBenignJob,
+  agentHardenerListRuns,
 } from '@agent-hardener/generated/api';
+import type { AgentHardenerRun } from '@agent-hardener/generated/schema';
 import { isAxiosError } from 'axios';
 
 interface RunJobTarget {
@@ -54,4 +56,27 @@ export const deleteRunWithJob = async (
     }
   }
   await agentHardenerDeleteRun(workspace, run.name);
+};
+
+interface RunPoll {
+  attempts: number;
+  intervalMs: number;
+  /** Checked before each attempt; true gives up, e.g. once the job has failed. */
+  stop?: () => boolean;
+}
+
+// A service-driven job creates its run record shortly after it starts, linked by job_id. Resolves to that
+// run's name, or undefined if it never appeared.
+export const waitForJobRun = async (
+  workspace: string,
+  jobName: string,
+  { attempts, intervalMs, stop }: RunPoll
+): Promise<string | undefined> => {
+  for (let attempt = 0; attempt < attempts && !stop?.(); attempt++) {
+    const { data } = await agentHardenerListRuns(workspace, { sort: '-created_at', page_size: 20 });
+    const run = (data as AgentHardenerRun[] | undefined)?.find((r) => r.job_id === jobName);
+    if (run?.name) return run.name;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return undefined;
 };

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import { cancelRunJob, deleteRunWithJob } from '@agent-hardener/api/runJobs';
 import {
   getAgentHardenerListRunsQueryKey,
@@ -51,7 +52,7 @@ export const AgentHardenerRunsDataView: FC = () => {
       toast.success('Run job cancelled.');
       invalidateRuns();
     },
-    onError: () => toast.error('Failed to cancel the run job.'),
+    onError: toastApiError(toast, 'Failed to cancel the run job'),
   });
 
   const { data: runsResponse, isLoading } = useAgentHardenerListRuns(

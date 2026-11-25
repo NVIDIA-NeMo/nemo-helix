@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { cancelRunJob, deleteRunWithJob } from '@agent-hardener/api/runJobs';
+import { cancelRunJob, deleteRunWithJob, waitForJobRun } from '@agent-hardener/api/runJobs';
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('@agent-hardener/api/fetcher', () => ({ customFetch: request }));
@@ -122,4 +122,29 @@ it('deletes a local run with no linked platform job', async () => {
   request.mockResolvedValue(undefined);
   await deleteRunWithJob('default', { name: 'local-run' });
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE', url: `${base}/runs/local-run` }));
+});
+
+describe('waitForJobRun', () => {
+  const runs = (...rows: { name: string; job_id: string }[]) => ({ data: rows });
+
+  it('resolves the run once the job has created it', async () => {
+    request.mockResolvedValueOnce(runs()).mockResolvedValueOnce(runs({ name: 'r1', job_id: job }));
+    await expect(waitForJobRun('default', job, { attempts: 5, intervalMs: 0 })).resolves.toBe('r1');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores runs of other jobs and gives up after the last attempt', async () => {
+    request.mockResolvedValue(runs({ name: 'other', job_id: 'other-job' }));
+    await expect(waitForJobRun('default', job, { attempts: 3, intervalMs: 0 })).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops polling as soon as the caller says to', async () => {
+    request.mockResolvedValue(runs());
+    const stop = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    await expect(
+      waitForJobRun('default', job, { attempts: 10, intervalMs: 0, stop })
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });

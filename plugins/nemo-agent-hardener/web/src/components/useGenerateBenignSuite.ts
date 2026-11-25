@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import type { JobFailure } from '@agent-hardener/api/jobFailure';
-import { useHelixSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk, usePolledJob } from '@agent-hardener/api/platform';
+import { waitForJobRun } from '@agent-hardener/api/runJobs';
 import {
   pendingInterview,
   pendingReview,
@@ -24,7 +26,7 @@ import {
 } from '@agent-hardener/generated/api';
 import type { AgentHardenerRun } from '@agent-hardener/generated/schema';
 import { useToast } from '@agent-hardener/host';
-import { CJobTerminalStatuses, getJobRefetchInterval } from '@nemo/common';
+import { CJobTerminalStatuses } from '@nemo/common';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface GenerateBenignSuite {
@@ -60,14 +62,11 @@ export const useGenerateBenignSuite = (
   // The service-driven job creates its run record shortly after start (linked by job_id); poll for it so we
   // can subscribe to its event stream.
   const resolveRun = async (job: string): Promise<void> => {
-    for (let attempt = 0; attempt < 15; attempt++) {
-      const { data } = await agentHardenerListRuns(workspace, { sort: '-created_at', page_size: 20 });
-      const run = (data as AgentHardenerRun[] | undefined)?.find((r) => r.job_id === job);
-      if (run?.name) {
-        setRunName(run.name);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const run = await waitForJobRun(workspace, job, { attempts: 15, intervalMs: 1000 });
+      if (run) setRunName(run);
+    } catch (error) {
+      toastApiError(toast, 'Could not follow the generation run')(error);
     }
   };
 
@@ -83,20 +82,24 @@ export const useGenerateBenignSuite = (
     if (jobName || adoptedFor.current === manifestName) return;
     adoptedFor.current = manifestName;
     void (async () => {
-      const { data } = await agentHardenerListRuns(workspace, {
-        sort: '-created_at',
-        page_size: 1,
-        filter: { manifest_id: manifestName, status: 'running' },
-      });
-      const run = (data as AgentHardenerRun[] | undefined)?.[0];
-      // The job poll decides whether it is really still live; a stale run just resolves to terminal.
-      if (run?.job_id) {
-        setRunName(run.name ?? '');
-        setJobName(run.job_id);
-        setAdopted(true);
+      try {
+        const { data } = await agentHardenerListRuns(workspace, {
+          sort: '-created_at',
+          page_size: 1,
+          filter: { manifest_id: manifestName, status: 'running' },
+        });
+        const run = (data as AgentHardenerRun[] | undefined)?.[0];
+        // The job poll decides whether it is really still live; a stale run just resolves to terminal.
+        if (run?.job_id) {
+          setRunName(run.name ?? '');
+          setJobName(run.job_id);
+          setAdopted(true);
+        }
+      } catch (error) {
+        toastApiError(toast, 'Could not check for a generation in progress')(error);
       }
     })();
-  }, [workspace, manifestName, jobName]);
+  }, [workspace, manifestName, jobName, toast]);
 
   const create = useAgentHardenerCreateSynthBenignJob({
     mutation: {
@@ -108,17 +111,12 @@ export const useGenerateBenignSuite = (
         setJobName(job.name);
         void resolveRun(job.name);
       },
-      onError: () => toast.error('Failed to start benign-suite generation.'),
+      onError: toastApiError(toast, 'Failed to start benign-suite generation'),
     },
   });
 
-  const { useJobsGetJob, useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
-  const { data: job } = useJobsGetJob(workspace, jobName, {
-    query: {
-      enabled: Boolean(jobName),
-      refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status),
-    },
-  });
+  const { useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
+  const { data: job } = usePolledJob(workspace, jobName);
   const details = job?.status_details as Record<string, unknown> | undefined;
   const interview = pendingInterview(details);
   const review = pendingReview(details);

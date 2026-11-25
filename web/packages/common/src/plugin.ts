@@ -115,6 +115,7 @@ export type { CsvOptions, CsvRow, DownloadFormat } from '@nemo/common/src/utils/
 export { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
 
 export { getErrorMessage } from '@nemo/common/src/utils/error';
+export { getErrorMessage as getApiErrorMessage } from '@nemo/common/src/api/common/utils';
 export { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 export { logger, toError } from '@nemo/common/src/utils/logger';
 

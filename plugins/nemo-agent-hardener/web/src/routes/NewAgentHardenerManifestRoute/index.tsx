@@ -3,6 +3,7 @@
 
 import { useAgentsForSelect } from '@agent-hardener/api/agents';
 import { apiErrorDetail } from '@agent-hardener/api/fetcher';
+import { toastApiError } from '@agent-hardener/api/apiError';
 import {
   useInspectAgent,
   useInspectProject,
@@ -154,11 +155,11 @@ export const NewAgentHardenerManifestRoute: FC = () => {
                     .join(', ')
                 );
               },
-              onError: () => toast.error('Could not read the project bundle.'),
+              onError: toastApiError(toast, 'Could not read the project bundle'),
             }
           );
         },
-        onError: () => toast.error('Could not upload the project bundle.'),
+        onError: toastApiError(toast, 'Could not upload the project bundle'),
       }
     );
   };
@@ -180,10 +181,7 @@ export const NewAgentHardenerManifestRoute: FC = () => {
         toast.success('Manifest created.');
         navigate(getAgentHardenerManifestListRoute(workspace));
       },
-      onError: (error) =>
-        toast.error(
-          apiErrorDetail(error, 'Failed to create the manifest. Check the agent and try again.')
-        ),
+      onError: toastApiError(toast, 'Failed to create the manifest'),
     },
   });
 

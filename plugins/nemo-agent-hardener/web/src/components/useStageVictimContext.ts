@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import type { JobFailure } from '@agent-hardener/api/jobFailure';
 import { useJobFailure } from '@agent-hardener/components/useJobFailure';
 import {
@@ -46,7 +47,7 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
   const create = useAgentHardenerCreateVictimContextJob({
     mutation: {
       onSuccess: (job) => setJobName(job.name),
-      onError: () => toast.error('Failed to start staging the victim build context.'),
+      onError: toastApiError(toast, 'Failed to start staging the victim build context'),
     },
   });
 
@@ -65,8 +66,8 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
     try {
       const archive = await agentHardenerDownloadVictimContextJobResult(workspace, jobName, CONTEXT_RESULT);
       triggerDownload(archive, archiveName);
-    } catch {
-      toast.error('Failed to download the victim build context.');
+    } catch (error) {
+      toastApiError(toast, 'Failed to download the victim build context')(error);
     } finally {
       setDownloading(false);
     }

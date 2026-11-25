@@ -6,9 +6,10 @@
 // and oidc-client-ts — and therefore Node builtins — into the vendor bundle
 // every plugin loads. The mutation comes off `host.sdk.platform` instead.
 
+import { toastApiError } from '@agent-hardener/api/apiError';
 import { useHelixSdk } from '@agent-hardener/api/platform';
 import { useToast } from '@agent-hardener/host';
-import { CJobCancellableStatuses, FormModal, getErrorMessage } from '@nemo/common';
+import { CJobCancellableStatuses, FormModal } from '@nemo/common';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -51,7 +52,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
       await mutateAsync({ workspace, name: jobName });
       setIsModalOpen(false);
     } catch (e) {
-      toast.error(getErrorMessage(e as Error, 'Failed to cancel job'));
+      toastApiError(toast, 'Failed to cancel job')(e);
     }
   };
 

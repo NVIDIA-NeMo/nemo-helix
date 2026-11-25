@@ -9,6 +9,7 @@
  * lists the models those credentials can actually reach.
  */
 
+import { describeApiError } from '@agent-hardener/api/apiError';
 import { useHelixSdk } from '@agent-hardener/api/platform';
 import { useAgentHardenerValidateModelConfig } from '@agent-hardener/generated/api';
 import type {
@@ -17,7 +18,7 @@ import type {
   WarGameModels,
 } from '@agent-hardener/generated/schema';
 import { useToast } from '@agent-hardener/host';
-import { CreateSecretModal, getErrorMessage } from '@nemo/common';
+import { CreateSecretModal, getApiErrorMessage } from '@nemo/common';
 import {
   Button,
   Flex,
@@ -186,8 +187,8 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
         },
       });
       setTestResult(formatVerdict(res.ok, res.reason, res.available ?? [], res.detail));
-    } catch {
-      setTestResult('Could not reach the validation service.');
+    } catch (error) {
+      setTestResult(describeApiError('Validation failed', error));
     }
   };
 
@@ -270,7 +271,7 @@ const CredentialedGroupFields: FC<CredentialedGroupProps> = ({
           open={createSecretOpen}
           onClose={() => setCreateSecretOpen(false)}
           pending={createSecret.isPending}
-          errorText={createSecret.error ? getErrorMessage(createSecret.error) : undefined}
+          errorText={createSecret.error ? getApiErrorMessage(createSecret.error) : undefined}
           onNotify={notify}
           onCreate={async (data) => {
             const created = await createSecret.mutateAsync({ workspace, data });
