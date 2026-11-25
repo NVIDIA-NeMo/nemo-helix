@@ -14,22 +14,22 @@
       "name": "busybox-no-cbq-patch",
       "version": "1.38.0",
       "license": "GPL-2.0-only",
-      "url": "https://raw.githubusercontent.com/docker-library/busybox/3c8912ca2ca28fbe2d698c8ae6b534bd4eb408cd/.patches/no-cbq.patch",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/fd0ca34e75d3f1aba2da4955a0f8e049aba8f7fe/.patches/no-cbq.patch",
       "sha256": "8451446ee0c7128f3eaca0322f113dadc11d1c05f616f6543a77908648f50785"
     },
     {
       "name": "busybox-x86-hash-hackfix-patch",
       "version": "1.38.0",
       "license": "GPL-2.0-only",
-      "url": "https://raw.githubusercontent.com/docker-library/busybox/3c8912ca2ca28fbe2d698c8ae6b534bd4eb408cd/.patches/hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x86.patch",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/fd0ca34e75d3f1aba2da4955a0f8e049aba8f7fe/.patches/hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x86.patch",
       "sha256": "2371dab4d540b155ca248702a104b27b47844ed9dad31cdabef6d07dcb7c193f"
     },
     {
       "name": "busybox-docker-builder",
       "version": "1.38.0",
       "license": "GPL-2.0-only",
-      "url": "https://raw.githubusercontent.com/docker-library/busybox/3c8912ca2ca28fbe2d698c8ae6b534bd4eb408cd/latest/musl/Dockerfile.builder",
-      "sha256": "3651678db8b9af9c8cbfd9f0bd41bcb42758e4987c872504178aec344433617b"
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/fd0ca34e75d3f1aba2da4955a0f8e049aba8f7fe/latest/musl/Dockerfile.builder",
+      "sha256": "072c8603576e36a730235440b4d48609a3b7b8c6cf8882e65d278c363fdf2b07"
     },
     {
       "name": "musl",

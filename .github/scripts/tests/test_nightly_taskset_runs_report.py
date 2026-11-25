@@ -40,9 +40,18 @@ _spec.loader.exec_module(report_module)
 
 SHA = "a" * 40
 REPO = "NVIDIA-NeMo/nemo-helix"
-GREEN = {"build-images": {"result": "success"}, "kind-taskset-runs-e2e": {"result": "success"}}
-RED_TEST = {"build-images": {"result": "success"}, "kind-taskset-runs-e2e": {"result": "failure"}}
-RED_BUILD = {"build-images": {"result": "failure"}, "kind-taskset-runs-e2e": {"result": "skipped"}}
+BUILD_JOBS = {
+    "build-api-images": {"result": "success"},
+    "build-task-images": {"result": "success"},
+    "build-tooling-images": {"result": "success"},
+}
+GREEN = {**BUILD_JOBS, "kind-taskset-runs-e2e": {"result": "success"}}
+RED_TEST = {**BUILD_JOBS, "kind-taskset-runs-e2e": {"result": "failure"}}
+RED_BUILD = {
+    **BUILD_JOBS,
+    "build-tooling-images": {"result": "failure"},
+    "kind-taskset-runs-e2e": {"result": "skipped"},
+}
 JUNIT_DISPATCH = '<testcase><failure message="AssertionError: [dispatch] run run-1 still running after 900 s"/>'
 
 

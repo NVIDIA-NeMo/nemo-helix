@@ -104,11 +104,11 @@ UI E2E tests. Policy-WASM is built within the E2E workflow, and successful
 published image prerequisites remain enforced. E2E jobs no longer participate
 in the required `CI status` aggregate; auth-IDP static tests remain in CI too.
 
-CI also builds CPU smoke images without E2E opt-in when CPU-smoke, auth-IDP,
-customization-auth, or builder-e2e inputs change (including on PRs and merge
-groups), or on manual dispatch. This build is included in required `CI status` and the
-main-push image failure notification. The CI and E2E build steps are duplicated
-so each workflow runs independently; a static test keeps those steps aligned.
+CI builds the API, task, tooling, and Gym host image families independently
+when their inputs change or on manual dispatch. These jobs feed the required
+`CI status` check and the main-push image failure notification. CI, E2E, and
+nightly taskset runs share the same build workflow and image tags. CI owns
+registry cache writes. E2E and nightly builds import the cache.
 Fork PRs build locally without publishing; same-repository PRs, merge groups,
 and `main` pushes retain publication. Manual CI publication requires
 `publish: true`, and `image_tag` can override the default commit-SHA tag.
