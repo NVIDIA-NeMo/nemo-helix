@@ -328,6 +328,17 @@ helm upgrade "$NHX_HELM_RELEASE" "$NHX_HELM_CHART_REF" \
   --timeout 20m
 ```
 
+### Files volume ownership after upgrading
+
+Earlier chart versions ran the API as root. The chart now runs it as UID/GID 1000, and `fsGroup` does not re-own existing files on local-path or hostPath volumes, such as the default storage in kind. Files written by the old UID then stay unwritable and the Files API returns HTTP 500. If you see this after an upgrade, add the following to your values once, upgrade, and then remove it:
+
+```yaml
+api:
+  fixVolumeOwnership: true
+```
+
+This adds a root init container that runs `chown -R` on the files volume to the API pod's `runAsUser:runAsGroup`, using `core.storage.volumePermissionsImage`. It does not apply to S3 file storage.
+
 ## Uninstall the platform
 
 To uninstall the Helm release:

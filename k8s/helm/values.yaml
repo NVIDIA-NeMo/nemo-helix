@@ -1056,6 +1056,8 @@ api:
   podAnnotations: {}
   # -- Labels for the API service pod.
   podLabels: {}
+  # -- Run a root init container that chowns the local files volume to the API pod's `runAsUser:runAsGroup`. Enable once when upgrading from a chart version that ran the API as root (before the UID 1000 default), because `fsGroup` does not re-own existing files on local-path or hostPath volumes. Uses `core.storage.volumePermissionsImage`; no effect when files use object storage.
+  fixVolumeOwnership: false
   # -- Pod-level security context settings for the API service.
   # @default -- This object has the following default values for the pod security context.
   podSecurityContext:
