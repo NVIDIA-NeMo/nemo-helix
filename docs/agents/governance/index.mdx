@@ -163,7 +163,21 @@ Instead of the host prerequisites above, you need:
    configure OpenShell's `sandboxImagePullSecrets`; the platform chart's image-pull
    credentials do not reach the gateway.
 
-To give a manifest its victim image:
+To give a manifest its victim image, build it in the cluster with the builder
+plugin. In Studio, open the manifest and select **Build in Cluster**. From the CLI:
+
+```bash
+nemo agent-hardener stage --manifest-id <manifest> --build
+```
+
+The job stages the build context, builds it, and records the image's
+digest-pinned reference on the manifest. This needs the builder enabled
+(`builder.enabled`), its registry set (`platformConfig.builder.registry`), and the
+`builder-registry-username`, `builder-registry-password` and
+`builder-signing-key` Secrets in the workspace. The gateway must be able to pull
+from that registry.
+
+To build the image yourself instead:
 
 1. Stage the victim's build context. In Studio, open the manifest and select
    **Stage Build Context**, then download the archive. From the CLI, on a machine

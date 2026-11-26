@@ -16,4 +16,6 @@ export interface VictimContextSpec {
      * @pattern \S
      */
   manifest_id: string;
+  /** Also build the victim image from the staged context with the builder, and record its digest-pinned reference as the manifest's `victim_image` once it is ready. */
+  build?: boolean;
 }

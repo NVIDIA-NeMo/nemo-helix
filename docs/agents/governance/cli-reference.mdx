@@ -143,6 +143,11 @@ a container, as on a Helm deployment, need this image; see
 [On Kubernetes](/documentation/agents/governance#on-kubernetes). Needs
 `nemo agent-hardener setup`, not Docker or OpenShell.
 
+With `--build`, a platform job stages the context, builds it with the builder
+plugin, and records the image's digest-pinned reference as the manifest's victim
+image. That needs the builder enabled with a registry and its Secrets in the
+workspace, not `nemo agent-hardener setup`.
+
 ### `manifest show`
 
 ```bash

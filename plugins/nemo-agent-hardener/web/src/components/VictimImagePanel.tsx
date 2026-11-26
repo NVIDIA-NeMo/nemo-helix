@@ -56,10 +56,10 @@ export const VictimImagePanel: FC<VictimImagePanelProps> = ({
       <Stack gap="density-lg" padding="density-lg">
         <Text kind="body/semibold/md">Victim Image</Text>
         <Text kind="body/regular/sm" className="text-fg-secondary">
-          War-games here run on Kubernetes, which cannot build the victim. Stage its build context, build
-          and push the image to a registry the OpenShell gateway can pull from, then record it below.
-          Re-stage after refreshing the target or upgrading Agent Hardener: a run rejects an image built
-          from a different context.
+          War-games here run on Kubernetes, which cannot build the victim. Build it in the cluster with the
+          builder, which records the image below; or stage its build context, build and push the image to a
+          registry the OpenShell gateway can pull from, then record it below. Rebuild after refreshing the
+          target or upgrading Agent Hardener: a run rejects an image built from a different context.
         </Text>
 
         {victimImage ? null : (
@@ -71,8 +71,11 @@ export const VictimImagePanel: FC<VictimImagePanelProps> = ({
         )}
 
         <Flex gap="density-sm" className="items-center">
+          <Button kind="secondary" size="small" disabled={stage.staging} onClick={stage.startBuild}>
+            {stage.staging && stage.build ? 'Building…' : 'Build in Cluster'}
+          </Button>
           <Button kind="secondary" size="small" disabled={stage.staging} onClick={stage.start}>
-            {stage.staging ? 'Staging…' : 'Stage Build Context'}
+            {stage.staging && !stage.build ? 'Staging…' : 'Stage Build Context'}
           </Button>
           {stage.ready ? (
             <Button
@@ -87,7 +90,7 @@ export const VictimImagePanel: FC<VictimImagePanelProps> = ({
         </Flex>
         {stage.failure && !stage.staging ? (
           <JobFailureNotice
-            title="Staging failed"
+            title={stage.build ? 'Build failed' : 'Staging failed'}
             failure={stage.failure}
             workspace={workspace}
             jobName={stage.jobName}

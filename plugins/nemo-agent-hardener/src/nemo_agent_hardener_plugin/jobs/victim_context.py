@@ -6,11 +6,13 @@
 A job that runs in a container (Helm) has no Docker to build the victim, and OpenShell only creates a sandbox
 from an image the cluster can pull. So the operator builds it: this job runs ``agent-hardener stage`` on the
 frozen manifest and saves the context as a ``.tar.gz`` result, which ``docker build -t <ref> - < archive``
-consumes as-is. The pushed ``<ref>`` then goes on the manifest as ``victim_image``.
+consumes as-is. The pushed ``<ref>`` then goes on the manifest as ``victim_image``. With ``build``, the job does
+that itself through the builder plugin (:mod:`~nemo_agent_hardener_plugin.jobs.victim_build`).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 import tarfile
@@ -29,6 +31,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 )
 from nemo_agent_hardener_plugin.jobs.execution import _build_native_subprocess_env
 from nemo_agent_hardener_plugin.jobs.manifest import _materialize_manifest
+from nemo_agent_hardener_plugin.jobs.victim_build import build_in_cluster
 from nemo_helix_plugin.agent_hardener.types import VictimContextSpec
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -80,7 +83,7 @@ class AgentHardenerVictimContextJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Stage the context, classifying any failure into an operator-facing error result."""
         try:
-            archive = self._execute(VictimContextSpec.model_validate(config), ctx=ctx, sdk=sdk)
+            outputs = self._execute(VictimContextSpec.model_validate(config), ctx=ctx, sdk=sdk)
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener stage failed [%s]: %s", failure.category, failure.message)
@@ -89,17 +92,22 @@ class AgentHardenerVictimContextJob(NemoJob):
                 "returncode": 1,
                 "error": {"category": failure.category, "message": failure.message, "remediation": failure.remediation},
             }
-        return {"status": "completed", "returncode": 0, "context_archive": str(archive)}
+        return {"status": "completed", "returncode": 0, **outputs}
 
-    def _execute(self, spec: VictimContextSpec, *, ctx: JobContext, sdk: Any) -> Path:
+    def _execute(self, spec: VictimContextSpec, *, ctx: JobContext, sdk: Any) -> dict[str, str]:
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
         manifest = _materialize_manifest(sdk, spec.manifest_id, ctx)
         context_dir = _stage(plugin_config, manifest, ctx)
         archive = ctx.storage.persistent / f"{spec.manifest_id}-{CONTEXT_RESULT}.tar.gz"
         _archive_context(context_dir, archive)
-        ctx.results.save(CONTEXT_RESULT, archive)
-        return archive
+        saved = ctx.results.save(CONTEXT_RESULT, archive)
+        outputs = {"context_archive": str(archive)}
+        if spec.build:
+            outputs["victim_image"] = asyncio.run(
+                build_in_cluster(workspace=ctx.workspace, manifest_id=spec.manifest_id, context_ref=saved.artifact_url)
+            )
+        return outputs
 
 
 def _stage(plugin_config: AgentHardenerConfig, manifest: str, ctx: JobContext) -> Path:

@@ -4184,6 +4184,7 @@ source = { editable = "plugins/nemo-agent-hardener" }
 dependencies = [
     { name = "httpx" },
     { name = "nemo-agents-plugin" },
+    { name = "nemo-builder-plugin" },
     { name = "nemo-helix" },
     { name = "nemo-helix-plugin" },
     { name = "pydantic" },
@@ -4202,6 +4203,7 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
+    { name = "nemo-builder-plugin", editable = "plugins/nemo-builder" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "pydantic", specifier = ">=2.10.6" },

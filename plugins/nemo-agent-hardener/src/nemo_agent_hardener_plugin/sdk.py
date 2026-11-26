@@ -366,6 +366,16 @@ class AgentHardenerPluginResource:
             )
         )
 
+    def submit_victim_context(self, *, manifest_id: str, build: bool = False, workspace: str | None = None) -> JsonMap:
+        """Submit the victim-context job to the platform; with *build*, it also builds and records the victim image."""
+        spec: dict[str, JsonValue] = {"manifest_id": manifest_id, "build": build}
+        VictimContextSpec.model_validate(spec)
+        return _to_json_map(
+            NemoJobScheduler().submit_remote(
+                AgentHardenerVictimContextJob, spec, base_url=base_url(), workspace=workspace or "default"
+            )
+        )
+
     def submit(
         self,
         *,

@@ -431,3 +431,48 @@ def test_stage_failure_shows_the_cause_and_its_remedy(monkeypatch: pytest.Monkey
     assert result.exit_code == 1
     assert "agent-hardener is not provisioned" in result.output
     assert "Run `nemo agent-hardener setup`." in result.output
+
+
+def test_stage_build_submits_the_job_with_build_and_reports_the_recorded_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemo_agent_hardener_plugin.cli import lifecycle
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    submitted: dict[str, Any] = {}
+    image = "registry.test/nhx/team/ah-victim-finance@sha256:" + "a" * 64
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.update(kwargs)
+        return {"name": "victim-context-abc"}
+
+    fake = SimpleNamespace(
+        submit_victim_context=_submit,
+        manifests=SimpleNamespace(get=lambda name, *, workspace: {"name": name, "victim_image": image}),
+    )
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace())
+    monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake))
+    waited: list[str] = []
+    monkeypatch.setattr(lifecycle, "wait_for_job", lambda _url, _ws, name: waited.append(name) or True)
+
+    result = CliRunner().invoke(app, ["stage", "--manifest-id", "finance", "--workspace", "team", "--build"])
+
+    assert result.exit_code == 0, result.output
+    assert submitted == {"manifest_id": "finance", "build": True, "workspace": "team"}
+    assert waited == ["victim-context-abc"]
+    assert image in result.output
+    assert "docker build" not in result.output
+
+
+def test_stage_build_exits_non_zero_when_the_job_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import lifecycle
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    fake = SimpleNamespace(submit_victim_context=lambda **_kw: {"name": "victim-context-abc"})
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace())
+    monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake))
+    monkeypatch.setattr(lifecycle, "wait_for_job", lambda *_a: False)
+
+    result = CliRunner().invoke(app, ["stage", "--manifest-id", "finance", "--build"])
+
+    assert result.exit_code == 1
