@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from nemo_evals.image_builds.builder import HttpImageBuilder
+from nemo_builder_plugin.builds import HttpImageBuilder
 from nemo_evals.image_builds.models import TASK_IMAGE_BUILD_JOB_SOURCE
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
 from nemo_helix_plugin.client.client import AsyncNemoClient
