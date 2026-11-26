@@ -135,6 +135,13 @@ rbac:
   # -- Specifies whether to enable the core Controller to have RBAC permissions to Volcano for scheduling distributed jobs.
   volcanoEnabled: true
 
+# -- OpenShell gateway, installed separately (see docs/set-up/helm/openshell.mdx). Naming it adds an `openshell`
+# deployment executor to `platformConfig.deployments.executors` after your values are merged, so platform values that
+# set their own executors keep them.
+openshell:
+  # -- In-cluster gateway URL, e.g. `http://openshell.openshell.svc.cluster.local:8080`. Empty adds no executor.
+  gatewayEndpoint: ""
+
 # -- Container image builds: the builder plugin, which every platform image includes. Builds run in a namespace of
 # their own, which the chart creates with the builder's Jobs execution profiles when this is enabled. Set the
 # builder itself, such as the registry builds publish to, in `platformConfig.builder`. See the builder plugin's README.

@@ -41,31 +41,25 @@ The source checkout includes `k8s/helm/examples/openshell/values.yaml` with this
 opt-in overlay:
 
 ```yaml
+openshell:
+  gatewayEndpoint: http://openshell.openshell.svc.cluster.local:8080
 platformConfig:
   agents:
     deployments:
       openshell_executor: openshell
-  deployments:
-    default_executor: local-k8s
-    executors:
-      - name: local-k8s
-        backend: k8s
-        config:
-          default_namespace: "{{ .Release.Namespace }}"
-      - name: openshell
-        backend: openshell
-        config:
-          gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
-          platform_egress:
-            host: '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
-            port: 8080
-          serve_workdir: /tmp
 ```
 
-Helm evaluates the template expressions in platform configuration. The platform
-egress host follows the actual API Service name, release namespace, and any
-`fullnameOverride`. Change the cluster domain if it is not `cluster.local`.
-Change `gateway_endpoint` to your gateway's reachable Service address.
+Setting `openshell.gatewayEndpoint` makes the chart add an `openshell` executor to
+`platformConfig.deployments.executors` after all values files are merged. Helm
+replaces lists rather than merging them, so the chart adds this entry itself: the
+executors that your other values files set, such as a kind or minikube executor,
+are kept, in any order you apply the files. An executor you name `openshell`
+yourself replaces the chart's.
+
+The chart points the executor's platform egress at the API Service in the release
+namespace, following `fullnameOverride`. Change `gatewayEndpoint` to your gateway's
+reachable Service address. If your cluster domain is not `cluster.local`, define
+the `openshell` executor in `platformConfig.deployments.executors` yourself.
 
 The generated sandbox policy permits platform access for the configured
 executables and denies other network destinations. The OpenShell deployment
