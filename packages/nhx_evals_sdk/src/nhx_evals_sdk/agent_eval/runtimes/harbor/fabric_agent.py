@@ -14,6 +14,8 @@ the container -- the request/response schemas its runner protocol needs, the set
 to run unattended in a task container, and the placeholder key a gateway-routed model's client insists
 on. A config handed to Harbor must therefore hold no credential-named value at all, placeholder
 included; Harbor persists ``agent_kwargs`` unredacted, and :class:`HarborRuntimeConfig` refuses one.
+A stdio MCP server's secret is named in its ``env`` as a ``${NAME}`` template instead, and filled in inside
+the container from the runner's environment (see :mod:`.mcp_env_runner`).
 
 The flat ``fabric_*`` keywords the upstream ``nemo_fabric.integrations.harbor:FabricAgent`` builds a
 config from (``fabric_adapter_id``, ``fabric_system_instruction``, ``fabric_max_turns``, ...) are
@@ -54,7 +56,12 @@ from nemo_fabric import (
     RelayOpenTelemetryEndpointConfig,
     inspect_adapter,
 )
-from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, ensure_success
+from nemo_fabric.integrations.harbor.fabric_agent import (
+    HARBOR_ARTIFACT_ROOT,
+    FabricAgent,
+    ensure_success,
+    fabric_runner_command,
+)
 from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, relay_cli_install, tcp_forwarder
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import TRACES_SUBDIR, fold_exports, otlp_endpoint_fields
@@ -176,6 +183,13 @@ _RECEIVER_PID_PATH = "/tmp/nemo-fabric-otlp-receiver.pid"
 #: forwarder on loopback, one port per gateway host from this one up.
 RELAY_GATEWAY_FORWARD_PORT = 14320
 _FORWARDER_PATH = "/tmp/nemo-fabric-tcp-forwarder.py"
+#: Where the runner shim that fills stdio MCP servers' ``${NAME}`` env goes; see ``mcp_env_runner``.
+_MCP_ENV_RUNNER_PATH = "/tmp/nemo-fabric-mcp-env-runner.py"
+_MCP_ENV_RUNNER_SOURCE = Path(__file__).with_name("mcp_env_runner.py")
+#: How upstream's runner command starts the runner; the shim takes its place, with the same arguments.
+_RUNNER_MODULE = "-m nemo_fabric.integrations.harbor.runner"
+#: A stdio MCP server env value that names a variable, as registered-agent resolution writes it.
+_ENV_TEMPLATE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 _RELAY_PID_GLOB = "/tmp/nemo-fabric-relay-*.pid"
 
 #: Relay's Codex and Claude adapters launch the ``nemo-relay`` CLI, which the ``nemo-relay`` wheel
@@ -372,6 +386,25 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
     async def setup(self, environment: Any) -> None:
         await super().setup(environment)
         await self.prepare_relay(environment)
+        await self.prepare_mcp_env(environment)
+
+    async def prepare_mcp_env(self, environment: Any) -> None:
+        """Upload the runner shim that fills stdio MCP servers' ``${NAME}`` env; nothing when none names one.
+
+        The values are in the runner's environment (Harbor resolves the agent's env templates into it), and a
+        stdio server inherits only its own ``env``, so the shim fills those templates in, inside the container.
+        """
+        if not _has_templated_stdio_env(self.fabric_config):
+            return
+        probe = fabric_runner_command(fabric_python="python", spec_path="spec", result_path="result")
+        if _RUNNER_MODULE not in probe:
+            raise RuntimeError(
+                f"nemo-fabric's Harbor runner command no longer runs {_RUNNER_MODULE!r} ({probe!r}), so stdio MCP "
+                "servers' env templates can't be filled in; update NemoFabricAgent for this nemo-fabric"
+            )
+        script = Path(self.logs_dir) / Path(_MCP_ENV_RUNNER_PATH).name
+        script.write_text(_MCP_ENV_RUNNER_SOURCE.read_text(encoding="utf-8"), encoding="utf-8")
+        await environment.upload_file(script, _MCP_ENV_RUNNER_PATH)
 
     async def prepare_relay(self, environment: Any) -> None:
         """Install what capturing Relay's traces needs in the container; nothing when the config has no Relay."""
@@ -393,6 +426,8 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
 
     async def _run_harness(self, instruction: str, environment: Any, context: Any) -> None:
         """Run Fabric's own harness; a seam so tests can stand in for it without patching ``FabricAgent``."""
+        if _has_templated_stdio_env(self.fabric_config):
+            environment = _ThroughMcpEnvRunner(environment)
         await super().run(instruction, environment, context)
 
     async def run(self, instruction: str, environment: Any, context: Any) -> None:
@@ -550,3 +585,31 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
                     exposure="harness_native",
                 )
         return config
+
+
+def _has_templated_stdio_env(config: FabricConfig) -> bool:
+    """Whether a stdio MCP server in ``config`` names a variable in its ``env``, to be filled in at launch."""
+    servers = config.mcp.servers if config.mcp is not None else {}
+    return any(
+        server.transport == "stdio" and any(_ENV_TEMPLATE.match(value) for value in server.env.values())
+        for server in servers.values()
+    )
+
+
+class _ThroughMcpEnvRunner:
+    """A Harbor environment whose Fabric runner command runs the MCP env shim instead; everything else passes through.
+
+    Upstream's ``FabricAgent.run`` builds and runs the runner command itself, so this is where the shim can take
+    the runner module's place without copying that method.
+    """
+
+    def __init__(self, environment: Any) -> None:
+        self._environment = environment
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._environment, name)
+
+    async def exec(self, command: str, *args: Any, **kwargs: Any) -> Any:
+        return await self._environment.exec(
+            command.replace(_RUNNER_MODULE, shlex.quote(_MCP_ENV_RUNNER_PATH), 1), *args, **kwargs
+        )

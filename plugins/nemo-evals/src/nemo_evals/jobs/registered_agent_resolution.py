@@ -220,24 +220,6 @@ def _require_mcp_env_templates_bound(config: dict[str, Any], bound: set[str], *,
             )
 
 
-def _without_mcp_env_templates(config: dict[str, Any]) -> dict[str, Any]:
-    """The config minus stdio MCP server ``${NAME}`` env templates, for a runtime that cannot expand them."""
-    servers = ((config.get("mcp") or {}).get("servers")) or {}
-    templated = {
-        name: server
-        for name, server in servers.items()
-        if isinstance(server, dict)
-        and any(isinstance(v, str) and _ENV_TEMPLATE.match(v) for v in (server.get("env") or {}).values())
-    }
-    if not templated:
-        return config
-    stripped = copy.deepcopy(config)
-    for name in templated:
-        env = stripped["mcp"]["servers"][name]["env"]
-        stripped["mcp"]["servers"][name]["env"] = {k: v for k, v in env.items() if not _ENV_TEMPLATE.match(v)}
-    return stripped
-
-
 def expand_mcp_secret_env(config: dict[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
     """A copy of ``config`` with stdio MCP server ``env`` templates filled from ``values``.
 
@@ -354,6 +336,9 @@ def _fill_target(
             }
         )
 
+    # The Fabric agent Harbor installs fills these templates in inside the task container, from the runner's
+    # environment, where Harbor puts each `env_secrets` value.
+    _require_mcp_env_templates_bound(agent.config, {*env_secrets, *target.env_vars}, agent=agent.ref.root)
     adapter_id = agent.config["harness"]["adapter_id"]
     fabric_package = target.agent_kwargs.get("fabric_package")
     if fabric_package is not None and not isinstance(fabric_package, str):
@@ -362,9 +347,7 @@ def _fill_target(
         )
     agent_kwargs: dict[str, Any] = {
         **target.agent_kwargs,
-        # The runner inside the task container expands no templates; a literal "${NAME}" is worse than
-        # no variable, so a Harbor agent's stdio servers go without the secret (see the Harbor docs).
-        "fabric_config": _without_mcp_env_templates(_without_gateway_placeholders(agent.config)),
+        "fabric_config": _without_gateway_placeholders(agent.config),
         "fabric_package": fabric_package if fabric_package is not None else fabric_harness_package(adapter_id),
     }
     return target.model_copy(

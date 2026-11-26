@@ -556,7 +556,8 @@ def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric()
     assert "relay" in provided
 
 
-async def test_harbor_drops_stdio_env_templates_the_container_cannot_expand(mocker: MockerFixture) -> None:
+async def test_a_harbor_stdio_servers_secret_stays_a_template_the_container_fills_in(mocker: MockerFixture) -> None:
+    """Harbor persists `agent_kwargs` unredacted, so only the template is in it; the Fabric agent fills it in."""
     config = _calculator_with_mcp_config()
     config["mcp"]["servers"]["calculator"] = {"transport": "stdio", "url": "/usr/bin/python3", "args": ["srv.py"]}
     _platform(mocker, _agent(config))
@@ -570,8 +571,26 @@ async def test_harbor_drops_stdio_env_templates_the_container_cannot_expand(mock
 
     assert isinstance(resolved, HarborRunnerTarget)
     server = resolved.agent_kwargs["fabric_config"]["mcp"]["servers"]["calculator"]
-    assert server["env"] == {"MODE": "mock"}  # the plain env stays; the template that would arrive literal is gone
-    assert resolved.env_secrets["CALC_TOKEN"] == SecretRef(root="dev/t")  # the process still gets the secret
+    assert server["env"] == {"MODE": "mock", "CALC_TOKEN": "${CALC_TOKEN}"}
+    assert resolved.env_secrets["CALC_TOKEN"] == SecretRef(root="dev/t")  # Harbor hands the runner the value
+
+
+async def test_a_harbor_stdio_template_the_job_does_not_set_is_refused_at_submit(mocker: MockerFixture) -> None:
+    """The container would have no value to fill in, so the server would start without its secret."""
+    config = _calculator_with_mcp_config()
+    config["mcp"]["servers"]["calculator"] = {
+        "transport": "stdio",
+        "url": "/usr/bin/python3",
+        "env": {"CALC_TOKEN": "${CALC_TOKEN}"},
+    }
+    _platform(mocker, _agent(config))
+
+    with pytest.raises(ValueError, match=r"server 'calculator' reads CALC_TOKEN"):
+        await _resolve(_harbor_by_agent())
+
+    resolved = await _resolve(_harbor_by_agent(env_secrets={"CALC_TOKEN": SecretRef(root="dev/t")}))
+    server = resolved.agent_kwargs["fabric_config"]["mcp"]["servers"]["calculator"]
+    assert server["env"] == {"CALC_TOKEN": "${CALC_TOKEN}"}
 
 
 async def test_harbor_caller_may_pin_the_fabric_package(mocker: MockerFixture) -> None:
