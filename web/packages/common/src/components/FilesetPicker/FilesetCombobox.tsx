@@ -1,19 +1,26 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
+import {
+  getFilesetQueryKey,
+  type ListFilesets,
+  type RetrieveFileset,
+} from '@nemo/common/src/api/filesets/filesetPages';
+import { useFilesetSearchCore } from '@nemo/common/src/api/filesets/useFilesetSearchCore';
 import { FilesetComboboxRow } from '@nemo/common/src/components/FilesetPicker/FilesetComboboxRow';
 import { FilesetStorageIcon } from '@nemo/common/src/components/FilesetPicker/FilesetStorageIcon';
 import type {
   FilesetPickerNoun,
   FilesetPickerPurpose,
+  FilesetSelectionError,
 } from '@nemo/common/src/components/FilesetPicker/types';
-import { useFilesetSearch } from '@nemo/common/src/components/FilesetSearchableSelect/useFilesetSearch';
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
 import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { Add } from '@nemo/icons/icons';
-import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Combobox, type ComboboxEntry, Text } from '@nvidia/foundations-react-core';
+import { useQuery } from '@tanstack/react-query';
 import { type FC, useEffect, useMemo, useState } from 'react';
 import { useDebounce } from 'use-debounce';
 
@@ -24,6 +31,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 export interface FilesetComboboxProps {
   workspace: string;
+  listFilesets: ListFilesets;
+  retrieveFileset: RetrieveFileset;
   purpose?: FilesetPickerPurpose;
   value: string | null;
   onChange: (value: string | null, fileset?: FilesetOutput) => void;
@@ -32,14 +41,16 @@ export interface FilesetComboboxProps {
   disabled?: boolean;
   status?: 'error' | 'success';
   onBlur?: () => void;
-  /** Called with true when `value` names a fileset that no longer exists. */
-  onMissingChange?: (missing: boolean) => void;
+  /** Reports why `value` couldn't be resolved: deleted (`missing`) or the lookup failed. */
+  onSelectionErrorChange?: (error: FilesetSelectionError | null) => void;
   id?: string;
   'aria-label'?: string;
 }
 
 export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   workspace,
+  listFilesets,
+  retrieveFileset,
   purpose,
   value,
   onChange,
@@ -48,7 +59,7 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   disabled,
   status,
   onBlur,
-  onMissingChange,
+  onSelectionErrorChange,
   id,
   'aria-label': ariaLabel,
 }) => {
@@ -57,22 +68,31 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   const [picked, setPicked] = useState<FilesetOutput | null>(null);
 
   const { filesets, search, setSearch, loadMore, isLoading, isLoadingMore, isError } =
-    useFilesetSearch({ workspace, purpose });
+    useFilesetSearchCore({ workspace, listFilesets, purpose });
 
   const loaded = value ? filesets.find((fileset) => getEntityReference(fileset) === value) : null;
   const pickedMatches = picked && getEntityReference(picked) === value ? picked : null;
   const { workspace: valueWorkspace, name: valueName } = getPartsFromReference(value ?? '');
-  const { data: retrieved, isError: isMissing } = useFilesRetrieveFileset(
-    valueWorkspace,
-    valueName,
-    { query: { enabled: Boolean(value && valueName && !isLoading && !loaded && !pickedMatches) } }
-  );
+  // Remember a preset selection once the results include it, so a later search that hides it
+  // doesn't trigger a lookup.
+  if (loaded && loaded !== picked) setPicked(loaded);
+
+  const { data: retrieved, error: lookupError } = useQuery({
+    queryKey: getFilesetQueryKey(valueWorkspace, valueName),
+    queryFn: ({ signal }) => retrieveFileset(valueWorkspace, valueName, signal),
+    enabled: Boolean(value && valueName && !isLoading && !loaded && !pickedMatches),
+  });
   const selected = loaded ?? pickedMatches ?? (retrieved && value ? retrieved : null);
-  const missing = Boolean(value && !selected && isMissing);
+  const selectionError: FilesetSelectionError | null =
+    value && !selected && lookupError
+      ? isNotFoundError(lookupError)
+        ? 'missing'
+        : 'unavailable'
+      : null;
 
   useEffect(() => {
-    onMissingChange?.(missing);
-  }, [missing, onMissingChange]);
+    onSelectionErrorChange?.(selectionError);
+  }, [selectionError, onSelectionErrorChange]);
 
   // Picking an option writes its name into the input. Treat that as "no search" so reopening
   // the list shows every fileset rather than just the one already chosen.
@@ -107,7 +127,7 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
             filterValue: selected.name,
             children: <FilesetComboboxRow fileset={selected} showPurpose={showPurpose} />,
           }
-        : missing && value
+        : selectionError && value
           ? {
               value,
               filterValue: valueName,
@@ -169,7 +189,7 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
     filesets,
     selected,
     search,
-    missing,
+    selectionError,
     value,
     valueName,
     showPurpose,

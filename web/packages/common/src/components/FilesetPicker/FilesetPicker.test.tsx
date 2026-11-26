@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FilesetPicker, type FilesetPickerProps } from '@nemo/common/src/components/FilesetPicker';
-import { filesListFilesets, useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
+import { FilesetPickerCore } from '@nemo/common/src/components/FilesetPicker/FilesetPickerCore';
+import { filesListFilesets, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -10,8 +11,7 @@ import userEvent from '@testing-library/user-event';
 
 vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesListFilesets: vi.fn(),
-  getFilesListFilesetsQueryKey: vi.fn((workspace: string) => ['filesets', workspace]),
-  useFilesRetrieveFileset: vi.fn(() => ({ data: undefined })),
+  filesRetrieveFileset: vi.fn(),
 }));
 
 const fileset = (
@@ -26,6 +26,8 @@ const fileset = (
     storage: { type: 'local' },
     ...overrides,
   }) as FilesetOutput;
+
+const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
 
 const listResponse = (filesets: FilesetOutput[]) =>
   ({
@@ -57,7 +59,8 @@ const expectEmptyMessage = async (message: string) =>
 
 describe('FilesetPicker', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
   });
 
   it('lists filesets with their storage backend', async () => {
@@ -142,20 +145,12 @@ describe('FilesetPicker', () => {
 
   it('looks up a selected fileset that is not on the loaded page', async () => {
     vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('newer')]));
-    vi.mocked(useFilesRetrieveFileset).mockReturnValue({
-      data: fileset('older'),
-    } as ReturnType<typeof useFilesRetrieveFileset>);
+    vi.mocked(filesRetrieveFileset).mockResolvedValue(fileset('older'));
 
     const { input } = renderPicker({ value: 'default/older' });
 
-    await waitFor(() =>
-      expect(useFilesRetrieveFileset).toHaveBeenLastCalledWith(
-        'default',
-        'older',
-        expect.objectContaining({ query: expect.objectContaining({ enabled: true }) })
-      )
-    );
     await waitFor(() => expect(input).toHaveValue('older'));
+    expect(filesRetrieveFileset).toHaveBeenCalledWith('default', 'older', expect.anything());
   });
 
   it('waits for the first page before looking up a preset selection', () => {
@@ -163,20 +158,12 @@ describe('FilesetPicker', () => {
 
     renderPicker({ value: 'default/sft-chat-v3' });
 
-    expect(useFilesRetrieveFileset).toHaveBeenCalled();
-    expect(useFilesRetrieveFileset).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ query: expect.objectContaining({ enabled: true }) })
-    );
+    expect(filesRetrieveFileset).not.toHaveBeenCalled();
   });
 
   it('flags a selection whose fileset no longer exists', async () => {
     vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('other')]));
-    vi.mocked(useFilesRetrieveFileset).mockReturnValue({
-      data: undefined,
-      isError: true,
-    } as ReturnType<typeof useFilesRetrieveFileset>);
+    vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
 
     renderPicker({ value: 'default/deleted' });
 
@@ -211,5 +198,55 @@ describe('FilesetPicker', () => {
     await userEvent.tab();
 
     expect(onBlur).toHaveBeenCalled();
+  });
+
+  it('runs on the fetchers it is given, so plugins can pass host.sdk', async () => {
+    const listFilesets = vi.fn().mockResolvedValue(listResponse([fileset('from-plugin')]));
+    const retrieveFileset = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FilesetPickerCore
+          workspace="default"
+          value={null}
+          onChange={vi.fn()}
+          label="Dataset"
+          listFilesets={listFilesets}
+          retrieveFileset={retrieveFileset}
+        />
+      </QueryClientProvider>
+    );
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Dataset' }));
+
+    expect(await screen.findByRole('option', { name: /from-plugin/ })).toBeInTheDocument();
+    expect(listFilesets).toHaveBeenCalled();
+    expect(filesListFilesets).not.toHaveBeenCalled();
+  });
+
+  it('does not call a selection deleted when looking it up fails for another reason', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('other')]));
+    vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(500));
+
+    renderPicker({ value: 'default/sft' });
+
+    expect(
+      await screen.findByText("Couldn't load the selected fileset. Try again later.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/no longer exists/)).not.toBeInTheDocument();
+  });
+
+  it('does not look up a preset selection again when a search hides it', async () => {
+    vi.mocked(filesListFilesets).mockImplementation(async (_workspace, params) =>
+      listResponse(params?.filter ? [] : [fileset('sft-chat-v3')])
+    );
+    const { input } = renderPicker({ value: 'default/sft-chat-v3', purpose: undefined });
+    await waitFor(() => expect(input).toHaveValue('sft-chat-v3'));
+
+    await userEvent.clear(input);
+    await userEvent.type(input, 'zzz');
+    await screen.findByText('No filesets match "zzz" — try a different name');
+
+    expect(filesRetrieveFileset).not.toHaveBeenCalled();
   });
 });

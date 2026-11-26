@@ -10,7 +10,6 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 vi.mock('@nemo/sdk/generated/platform/files', () => ({
   filesListFilesets: vi.fn(),
-  getFilesListFilesetsQueryKey: vi.fn((workspace: string) => ['filesets', workspace]),
 }));
 
 const fileset = (name: string) => ({ id: `default/${name}`, name, workspace: 'default' });
