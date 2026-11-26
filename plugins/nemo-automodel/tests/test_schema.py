@@ -30,43 +30,15 @@ def test_reject_output_model() -> None:
         )
 
 
-def test_max_pixels_and_image_size_are_exclusive() -> None:
-    with pytest.raises(ValueError, match="not both"):
+def test_the_removed_pixel_fields_are_rejected_not_ignored() -> None:
+    with pytest.raises(ValueError, match="max_pixels"):
         AutomodelJobInput.model_validate(
             {
                 "model": "llama",
                 "dataset": {"training": "default/train"},
-                "training": {
-                    "training_type": "sft",
-                    "max_pixels": 2_621_440,
-                    "image_size": {"longest_edge": 2_621_440, "shortest_edge": 65536},
-                },
+                "training": {"training_type": "sft", "max_pixels": 2_621_440},
             },
         )
-
-
-def test_image_size_shortest_edge_must_be_below_longest_edge() -> None:
-    for image_size in ({"longest_edge": 65536, "shortest_edge": 65536}, {"longest_edge": 100, "shortest_edge": 200}):
-        with pytest.raises(ValueError, match="must be less than longest_edge"):
-            AutomodelJobInput.model_validate(
-                {
-                    "model": "llama",
-                    "dataset": {"training": "default/train"},
-                    "training": {"training_type": "sft", "image_size": image_size},
-                },
-            )
-
-
-def test_image_size_needs_both_edges() -> None:
-    for image_size in ({}, {"longest_edge": 200}, {"shortest_edge": 65536}):
-        with pytest.raises(ValueError, match="both longest_edge and shortest_edge"):
-            AutomodelJobInput.model_validate(
-                {
-                    "model": "llama",
-                    "dataset": {"training": "default/train"},
-                    "training": {"training_type": "sft", "image_size": image_size},
-                },
-            )
 
 
 def test_distillation_requires_teacher() -> None:

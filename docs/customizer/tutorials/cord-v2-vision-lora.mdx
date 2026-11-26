@@ -77,7 +77,7 @@ PROFILES = {
         "lora_rank": 16,
         "lora_alpha": 32,
         "max_seq_length": 4096,
-        "image_size": {"longest_edge": 2_621_440, "shortest_edge": 65_536},
+        "processor_arguments": {"size": {"longest_edge": 2_621_440, "shortest_edge": 65_536}},
         "activation_checkpointing": True,
         "epochs": 1,
         "max_steps": None,
@@ -255,7 +255,7 @@ while True:
 
 ## 6. Dry-run, then train
 
-`image_size` bounds the pixels, and therefore the image tokens, before the vision tower. `max_seq_length` is the token cap after that: the recipe truncates longer samples, and replaces a sample when truncation would split image tokens. The 8B profile uses 4096 so a receipt at this pixel ceiling still fits.
+`processor_arguments` sets the processor's `size`, which bounds the pixels, and therefore the image tokens, before the vision tower. Qwen3-VL reads `size`; other models read different keys, so check the processor config. `max_seq_length` is the token cap after that: the recipe truncates longer samples, and replaces a sample when truncation would split image tokens. The 8B profile uses 4096 so a receipt at this pixel ceiling still fits.
 
 Leave `lora.exclude_modules` unset. The compiler freezes the vision tower and excludes the fused Mamba `*.out_proj` on this checkpoint. vLLM's "no matching PunicaWrapper" lines for vision modules are harmless.
 
@@ -284,8 +284,8 @@ training = {
     "lora": {"rank": profile["lora_rank"], "alpha": profile["lora_alpha"]},
     "max_seq_length": profile["max_seq_length"],
 }
-if profile.get("image_size"):
-    training["image_size"] = profile["image_size"]
+if profile.get("processor_arguments"):
+    training["processor_arguments"] = profile["processor_arguments"]
 if profile.get("activation_checkpointing"):
     training["activation_checkpointing"] = True
 

@@ -5,6 +5,7 @@ import pytest
 from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.values.models import (
     Model,
+    ModelRef,
     filter_auth_headers,
     is_auth_header_name,
     normalize_header_name,
@@ -181,3 +182,33 @@ class TestModelInferenceConfig:
                     "inference": {"type": "embeddings", "path": "/embeddings"},
                 }
             )
+
+
+class TestModelRef:
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "default/judge",
+            "default/judge&adapters/default/judge-lora",
+            "team-a/base-model&adapters/team-b/adapter.v2",
+        ],
+    )
+    def test_accepts_a_model_or_an_adapter_of_a_model(self, ref):
+        assert ModelRef(ref).root == ref
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "judge",
+            "default/judge/extra",
+            "default/judge&adapters/judge-lora",
+            "default/judge&adapters/default/",
+            "default/judge&adapters//judge-lora",
+            "default/judge&adapters/default/a/b",
+            "default/judge&adapters/default/a&adapters/default/b",
+            "default/&adapters/default/judge-lora",
+        ],
+    )
+    def test_rejects_a_malformed_reference(self, ref):
+        with pytest.raises(ValidationError):
+            ModelRef(ref)

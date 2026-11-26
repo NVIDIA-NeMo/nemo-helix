@@ -7551,11 +7551,12 @@ components:
         a non-IGW external provider endpoint.'
     ModelRef:
       type: string
-      pattern: ^[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}$
+      pattern: ^[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}(?:&adapters/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62})?$
       title: ModelRef
       description: Reference to a model that can be resolved by an evaluator backend.
       examples:
       - workspace/model_name
+      - workspace/model_name&adapters/workspace/adapter_name
     ModelTarget:
       properties:
         kind:

@@ -1533,50 +1533,14 @@ class TestGrpoPassthroughKnobs:
         assert generation["vllm_kwargs"] == {"moe_backend": "triton"}
         assert "vllm_kwargs" not in generation["vllm_cfg"]
 
-    def test_image_size_reaches_vllm_and_the_policy_processor(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+    def test_processor_kwargs_reach_the_policy_processor(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
         step, _ = _prepared_step(tmp_path, has_vision_tower=True)
-        step.model.max_pixels = 2_621_440
+        step.model.processor_kwargs = {"min_num_patches": 256, "max_num_patches": 2304}
 
         cfg = compile_grpo_config(step, job_ctx)
 
-        bounds = {"max_pixels": 2_621_440, "min_pixels": 65_536}
-        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == bounds
-        assert cfg["policy"]["tokenizer"]["tokenizer_kwargs"] == {
-            "size": {"longest_edge": 2_621_440, "shortest_edge": 65_536}
-        }
-
-    def test_caller_mm_processor_kwargs_keep_the_pixel_bounds(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
-        step, _ = _prepared_step(
-            tmp_path,
-            has_vision_tower=True,
-            grpo=GRPOConfig(
-                num_generations_per_prompt=4,
-                vllm_kwargs={"mm_processor_kwargs": {"min_pixels": 1, "do_rescale": False}},
-            ),
-        )
-        step.model.max_pixels = 2_621_440
-
-        cfg = compile_grpo_config(step, job_ctx)
-
-        assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_kwargs"] == {
-            "max_pixels": 2_621_440,
-            "min_pixels": 65_536,
-            "do_rescale": False,
-        }
-
-    @pytest.mark.parametrize("value", ["max_pixels=1", 5, ["min_pixels"]])
-    def test_non_dict_mm_processor_kwargs_is_rejected(
-        self, tmp_path: Path, job_ctx: NHXJobContext, value: object
-    ) -> None:
-        step, _ = _prepared_step(
-            tmp_path,
-            has_vision_tower=True,
-            grpo=GRPOConfig(num_generations_per_prompt=4, vllm_kwargs={"mm_processor_kwargs": value}),
-        )
-        step.model.max_pixels = 2_621_440
-
-        with pytest.raises(ValueError, match="mm_processor_kwargs must be a dict"):
-            compile_grpo_config(step, job_ctx)
+        assert cfg["policy"]["tokenizer"]["tokenizer_kwargs"] == {"min_num_patches": 256, "max_num_patches": 2304}
+        assert "mm_processor_kwargs" not in cfg["policy"]["generation"]["vllm_kwargs"]
 
     @pytest.mark.parametrize("parser", ["hermes", None], ids=["model-declares-parser", "no-parser"])
     def test_rollout_chat_server_gets_the_model_tool_parser(

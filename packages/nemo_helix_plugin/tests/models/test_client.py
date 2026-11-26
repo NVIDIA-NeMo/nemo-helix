@@ -12,6 +12,7 @@ import pytest
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient, UnroutableModelError
+from nemo_helix_plugin.models.refs import split_adapter_ref
 from nemo_helix_plugin.models.types import (
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -810,3 +811,81 @@ async def test_async_wait_for_provider_status_error_returns_false() -> None:
     client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
 
     assert await client.wait_for_provider_status("my-provider", "READY", poll_interval=0.0) is False
+
+
+OPENAI_ROUTE = f"{BASE}/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+ADAPTER_REF = "default/judge&adapters/default/judge-lora"
+
+
+def _judge_gateway(paths: list[str]) -> httpx.MockTransport:
+    """A gateway serving one model, ``judge``, through its own passthrough VirtualModel."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/virtual-models/judge"):
+            return httpx.Response(200, json=_passthrough_json("judge"))
+        if request.url.path.endswith("/models/judge"):
+            return httpx.Response(200, json=_model_json("judge"))
+        return httpx.Response(404, json={"detail": "missing"})
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        ("default/judge", ("default/judge", None)),
+        (ADAPTER_REF, ("default/judge", ("default", "judge-lora"))),
+        # Malformed composites stay whole so the strict parser rejects them.
+        ("default/judge&adapters/judge-lora", ("default/judge&adapters/judge-lora", None)),
+        ("default/judge&adapters/default/", ("default/judge&adapters/default/", None)),
+        ("default/judge&adapters//judge-lora", ("default/judge&adapters//judge-lora", None)),
+        ("default/judge&adapters/default/a/b", ("default/judge&adapters/default/a/b", None)),
+        ("&adapters/default/judge-lora", ("&adapters/default/judge-lora", None)),
+    ],
+)
+def test_split_adapter_ref(ref: str, expected: tuple[str, tuple[str, str] | None]) -> None:
+    assert split_adapter_ref(ref) == expected
+
+
+def test_resolve_model_reference_routes_an_adapter_through_the_gateway_openai_route() -> None:
+    """The gateway sends the composite id through its base model, so the route is the shared OpenAI one."""
+    paths: list[str] = []
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=httpx.Client(transport=_judge_gateway(paths)))
+
+    result = client.resolve_model_reference(ADAPTER_REF)
+
+    assert result.url == OPENAI_ROUTE
+    assert result.name == ADAPTER_REF
+    assert result.host_url is None
+    assert result.served_model_name is None
+    assert any(path.endswith("/virtual-models/judge") for path in paths)
+    assert not any("judge-lora" in path for path in paths)
+
+
+def test_resolve_model_reference_keeps_a_plain_ref_on_its_entity_route() -> None:
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=httpx.Client(transport=_judge_gateway([])))
+
+    result = client.resolve_model_reference("default/judge")
+
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    assert result.name == "judge"
+
+
+def test_resolve_model_reference_for_an_adapter_of_a_missing_base_raises_not_found() -> None:
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=httpx.Client(transport=_judge_gateway([])))
+
+    with pytest.raises(NotFoundError):
+        client.resolve_model_reference("default/absent&adapters/default/judge-lora")
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_routes_an_adapter_through_the_gateway_openai_route() -> None:
+    client = AsyncModelsClient(
+        base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=_judge_gateway([]))
+    )
+
+    result = await client.resolve_model_reference(ADAPTER_REF)
+
+    assert result.url == OPENAI_ROUTE
+    assert result.name == ADAPTER_REF

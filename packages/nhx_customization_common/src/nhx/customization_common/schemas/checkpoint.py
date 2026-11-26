@@ -42,6 +42,7 @@ class CheckpointTraits:
     num_nextn_predict_layers: int | None = None
     checkpoint_model_name: str | None = None
     vision_patch_size: int | None = None
+    vision_processor_keys: tuple[str, ...] | None = None
 
     @property
     def declares_nextn_predict_layers(self) -> bool:
@@ -116,6 +117,7 @@ def traits_from_model_spec(spec: Any) -> CheckpointTraits:
         num_nextn_predict_layers=nextn,
         checkpoint_model_name=name if isinstance(name, str) else None,
         vision_patch_size=_optional_int(getattr(spec, "vision_patch_size", None)),
+        vision_processor_keys=_optional_keys(getattr(spec, "vision_processor_keys", None)),
     )
 
 
@@ -200,4 +202,10 @@ def _optional_int(value: Any) -> int | None:
 def _optional_str(value: Any) -> str | None:
     if isinstance(value, str):
         return value
+    return None
+
+
+def _optional_keys(value: Any) -> tuple[str, ...] | None:
+    if isinstance(value, (list, tuple)) and value and all(isinstance(item, str) for item in value):
+        return tuple(value)
     return None

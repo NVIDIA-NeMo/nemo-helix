@@ -1094,6 +1094,7 @@ nemo chat [OPTIONS] [PROMPT]
 **Chat Options:**
 
 * `--interactive`: Start the terminal chat UI; cannot be used with piped stdin. With PROMPT, send it first.
+* `--image`: Attach an image to the prompt; repeat for several. Accepts a local PNG, JPEG, GIF or WebP file, or a fileset://workspace/fileset#path, http(s):// or data: URL. One-shot chat only.
 
 **Help:**
 
@@ -10494,9 +10495,6 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--training.lora.use-triton`: Use the optimized Triton LoRA kernel.
 * `--training.lora.use-memory-efficient-lora`: Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.
 * `--training.max-seq-length <INTEGER>`: Override `training.max_seq_length` in the spec.
-* `--training.max-pixels <INTEGER>`: Shorthand for image_size.longest_edge. The compiler writes it as the processor size and does not pass this name to transformers. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
-* `--training.image-size.longest-edge <INTEGER>`: Maximum pixels (an area, not a side length) in a resized image. Larger images are scaled down, which loses fine detail. The same ceiling as max_pixels.
-* `--training.image-size.shortest-edge <INTEGER>`: Minimum pixels (an area, not a side length) in a resized image. Smaller images are scaled up, which adds no detail.
 * `--training.execution-profile`: Override `training.execution_profile` in the spec.
 * `--training.teacher-model`: Override `training.teacher_model` in the spec.
 * `--training.distillation-ratio <FLOAT>`: Override `training.distillation_ratio` in the spec.
@@ -10582,7 +10580,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.pooling`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.processor_arguments`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.pooling`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `training.tokenizer_backend`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

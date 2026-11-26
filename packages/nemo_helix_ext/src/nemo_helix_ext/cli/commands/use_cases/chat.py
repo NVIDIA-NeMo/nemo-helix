@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import select
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Annotated, Any, Callable, Literal, TypedDict, cast
 
 import click
@@ -29,15 +32,56 @@ from nemo_helix_ext.cli.core.errors import handle_errors
 from nemo_helix_ext.cli.core.stdin_utils import is_stdin_available
 from nemo_helix_ext.ui.prompts import is_interactive
 
+# A message body: plain text, or OpenAI content parts when the message carries images.
+UserContent = str | list[dict[str, Any]]
+
+# The gateway inlines `fileset://` images up to this size; larger local files are refused up front.
+MAX_IMAGE_BYTES = 25 * 1024 * 1024
+_IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+_PASSTHROUGH_IMAGE_PREFIXES = ("fileset://", "http://", "https://", "data:")
+
 
 class ChatMessage(TypedDict):
     """Type for chat messages."""
 
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: UserContent
 
 
 ChatOutputFormat = Literal["text", "json", "raw"]
+
+
+def _image_url(image: str) -> str:
+    """Return a URL the gateway accepts for ``image``: references pass through, local files become data URLs."""
+    if image.startswith(_PASSTHROUGH_IMAGE_PREFIXES):
+        return image
+    path = Path(image).expanduser()
+    mime_type = _IMAGE_MIME_TYPES.get(path.suffix.lower())
+    if mime_type is None:
+        raise click.UsageError(
+            f"Unsupported image type for '{image}'. Use a {', '.join(_IMAGE_MIME_TYPES)} file, "
+            "or a fileset://, http(s):// or data: reference."
+        )
+    if not path.is_file():
+        raise click.UsageError(f"Image file not found: {image}")
+    if path.stat().st_size > MAX_IMAGE_BYTES:
+        raise click.UsageError(f"Image '{image}' is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MiB.")
+    return f"data:{mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+def build_user_content(prompt: str, images: Sequence[str]) -> UserContent:
+    """Build the user message: the prompt alone, or the images in order followed by the prompt text."""
+    if not images:
+        return prompt
+    parts: list[dict[str, Any]] = [{"type": "image_url", "image_url": {"url": _image_url(image)}} for image in images]
+    parts.append({"type": "text", "text": prompt})
+    return parts
 
 
 def _parse_model_and_workspace(
@@ -271,6 +315,17 @@ def chat(
             rich_help_panel="Model Options",
         ),
     ] = None,
+    image: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--image",
+            help=(
+                "Attach an image to the prompt; repeat for several. Accepts a local PNG, JPEG, GIF or WebP file, "
+                "or a fileset://workspace/fileset#path, http(s):// or data: URL. One-shot chat only."
+            ),
+            rich_help_panel="Chat Options",
+        ),
+    ] = None,
 ) -> None:
     """
     Start an interactive chat session with a model.
@@ -299,6 +354,9 @@ def chat(
       echo "What is machine learning?" | nemo chat
       nemo chat "What is machine learning?" -f json
       nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1.5 --provider nvidia-build
+      nemo chat "Describe this image." --image receipt.png
+      nemo chat "Describe this image." --image 'fileset://default/cord-v2#validation/images/00000.png'
+      nemo chat -m 'default/base&adapters/default/my-adapter' "Describe this image." --image receipt.png
     """
     state: CLIContext = ctx.obj
     if model is not None and fast:
@@ -317,6 +375,8 @@ def chat(
     run_once, effective_prompt = _resolve_chat_mode(prompt, interactive)
     if run_once and not effective_prompt:
         raise click.UsageError("One-shot chat requires a prompt. Provide PROMPT or pipe text on stdin.")
+    if image and not run_once:
+        raise click.UsageError("--image works with one-shot chat only. Remove --interactive and provide a PROMPT.")
     client = state.typed_client(InferenceGatewayClient)
     chat_output_format = _resolve_chat_output_format(state, output_format) if run_once else "text"
     workspace_from_config = state.get_workspace()
@@ -366,7 +426,8 @@ def chat(
 
     if run_once:
         _run_one_shot(
-            user_message=cast(str, effective_prompt),  # UsageError above guarantees non-None.
+            # UsageError above guarantees a prompt.
+            user_message=build_user_content(cast(str, effective_prompt), image or []),
             model_for_body=model_for_body,
             get_response_func=get_response,
             temperature=temperature,
@@ -387,7 +448,7 @@ def chat(
 
 
 def _run_one_shot(
-    user_message: str,
+    user_message: UserContent,
     model_for_body: str,
     get_response_func: Callable[[dict[str, Any]], StreamingResponse],
     temperature: float | None,
@@ -456,7 +517,7 @@ def _run_chat_session(
 
 
 def _create_one_shot_response(
-    user_input: str,
+    user_input: UserContent,
     history: list[ChatMessage],
     model_for_body: str,
     get_response_func: Callable[[dict[str, Any]], StreamingResponse],
@@ -476,7 +537,7 @@ def _create_one_shot_response(
 
 
 def _process_one_shot_message(
-    user_input: str,
+    user_input: UserContent,
     history: list[ChatMessage],
     model_for_body: str,
     get_response_func: Callable[[dict[str, Any]], StreamingResponse],
@@ -499,7 +560,7 @@ def _process_one_shot_message(
 
 
 def _stream_one_shot_text(
-    user_input: str,
+    user_input: UserContent,
     history: list[ChatMessage],
     model_for_body: str,
     get_response_func: Callable[[dict[str, Any]], StreamingResponse],

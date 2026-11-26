@@ -86,6 +86,7 @@ def test_a_recorded_spec_is_trusted() -> None:
         num_nextn_predict_layers=1,
         checkpoint_model_name="NemotronH_Omni",
         vision_patch_size=32,
+        vision_processor_keys=["max_num_patches", "min_num_patches", "patch_size"],
         moe_config=None,
     )
 
@@ -97,6 +98,7 @@ def test_a_recorded_spec_is_trusted() -> None:
     assert traits.declares_nextn_predict_layers
     assert traits.num_nextn_predict_layers == 1
     assert traits.vision_patch_size == 32
+    assert traits.vision_processor_keys == ("max_num_patches", "min_num_patches", "patch_size")
 
 
 def test_step_model_fields_round_trip() -> None:

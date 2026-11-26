@@ -22,7 +22,6 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     ExportParams,
-    ImageSize,
     LoRAParams,
     OutputResponse,
     RetrievalParams,
@@ -362,40 +361,55 @@ def test_compile_training_step_copies_recorded_vision_traits() -> None:
     assert cfg["model"]["checkpoint_model_name"] == "Qwen2_5_VLForConditionalGeneration"
 
 
-def test_compile_training_step_rejects_a_sequence_shorter_than_one_image() -> None:
-    """The patch size comes from the model spec, not a fixed pixels-per-token ratio."""
+def _super_vl_entity(processor_keys: list[str]) -> ModelEntity:
     from nemo_helix_plugin.models.types import ModelSpec
-    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = ModelSpec.model_construct(
         has_vision_tower=True,
         vision_patch_size=32,
+        vision_processor_keys=processor_keys,
         has_audio_tower=False,
-        checkpoint_model_name="Qwen3VLForConditionalGeneration",
+        checkpoint_model_name="NemotronHForCausalLM",
         head_type="causal_lm",
         chat_template=None,
         moe_config=None,
-        family="qwen3_vl",
         is_chat=True,
         is_embedding_model=False,
     )
-    job_output = CustomizationJobOutput(
+    return me
+
+
+# Nemotron 3.5 Super VL processor_config.json: patch counts, no ``size``.
+_PATCH_COUNT_PROCESSOR = ["patch_size", "min_num_patches", "max_num_patches", "downsample_ratio"]
+
+
+def _vision_job(**training_fields) -> CustomizationJobOutput:
+    return CustomizationJobOutput(
         model="default/test-target",
         dataset="default/my-dataset",
-        training=SFTTraining(
-            recipe="sft",
-            max_seq_length=2048,
-            image_size=ImageSize(longest_edge=2_621_440, shortest_edge=65_536),
-        ),
+        training=SFTTraining(recipe="sft", max_seq_length=8192, **training_fields),
         output=_output(output_type=OutputNameType.MODEL),
     )
 
-    with pytest.raises(HelixJobCompilationError, match="must be larger than the 2560 tokens"):
-        compile_training_step(job_output, base_env=[], me=me)
 
-    job_output.training.max_seq_length = 4096
-    compile_training_step(job_output, base_env=[], me=me)
+def test_processor_arguments_reach_the_training_step() -> None:
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    job = _vision_job(processor_arguments={"min_num_patches": 256, "max_num_patches": 2304})
+
+    step = compile_training_step(job, base_env=[], me=_super_vl_entity(_PATCH_COUNT_PROCESSOR))
+
+    assert step.config["model"]["processor_kwargs"] == {"min_num_patches": 256, "max_num_patches": 2304}
+
+
+def test_a_processor_argument_the_processor_does_not_read_is_rejected() -> None:
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    job = _vision_job(processor_arguments={"max_pixels": 589_824})
+
+    with pytest.raises(HelixJobCompilationError, match="not read by this model's processor"):
+        compile_training_step(job, base_env=[], me=_super_vl_entity(_PATCH_COUNT_PROCESSOR))
 
 
 def _text_moe_entity(architecture: str) -> ModelEntity:

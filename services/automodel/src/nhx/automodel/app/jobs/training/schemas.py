@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.automodel.app.constants import (
@@ -113,17 +113,9 @@ class ModelConfig(BaseModel):
         default=2048,
         description="Maximum token sequence length for training; longer sequences are truncated",
     )
-    max_pixels: int | None = Field(
+    processor_kwargs: dict[str, Any] | None = Field(
         default=None,
-        description="Shorthand for image_longest_edge. None keeps the checkpoint ceiling.",
-    )
-    image_longest_edge: int | None = Field(
-        default=None,
-        description="Maximum pixels in a resized image. None keeps the checkpoint ceiling.",
-    )
-    image_shortest_edge: int | None = Field(
-        default=None,
-        description="Minimum pixels in a resized image. None keeps the checkpoint floor.",
+        description="Keyword arguments for AutoProcessor.from_pretrained, such as the keys that bound image size.",
     )
 
     # Model loading options

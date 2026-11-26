@@ -9,7 +9,7 @@ from typing import Callable
 
 import torch
 from accelerate import init_empty_weights
-from nhx.core.models.parallelism.checkpoint import inspect_checkpoint
+from nhx.core.models.parallelism.checkpoint import inspect_checkpoint, read_processor_keys
 from nhx.core.models.parallelism.constants import DEFAULT_EXCLUDE_PATTERNS, DEFAULT_INCLUDE_PATTERNS
 from nhx.core.models.parallelism.hueristics import (
     comm_cost_proxy,
@@ -188,6 +188,7 @@ def infer_model_cfg_from_hf(
 
     # Vision and audio live on the root. Dimensions below prefer the nested language config.
     inspected = inspect_checkpoint(cfg)
+    processor_keys = read_processor_keys(pretrained_or_path) if inspected.has_vision_tower else None
     root_cfg = cfg
     # Read before unwrapping: a multimodal checkpoint's text config only names its language model.
     architectures = list(getattr(cfg, "architectures", None) or []) or None
@@ -238,6 +239,7 @@ def infer_model_cfg_from_hf(
         sliding_window_config=sliding_window_config,
         has_vision_tower=inspected.has_vision_tower,
         vision_patch_size=inspected.vision_patch_size,
+        vision_processor_keys=processor_keys,
         has_audio_tower=inspected.has_audio_tower,
         num_experts=inspected.expert_count,
         num_nextn_predict_layers=inspected.num_nextn_predict_layers,

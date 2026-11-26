@@ -398,3 +398,40 @@ def test_a_gateway_target_is_left_alone_when_the_job_has_no_identity(monkeypatch
 
     with gateway_models_as_job([], target) as called:
         assert called is target
+
+
+async def test_model_resolver_checks_an_adapter_ref_as_its_base_model() -> None:
+    """The caller needs to read the base model; the adapter is served, and checked, by the gateway."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/virtual-models/mm"):
+            body = {"name": "mm", "workspace": "default", "autoprovisioned": True, "default_model_entity": "default/mm"}
+        elif request.url.path.endswith("/models/mm"):
+            body = {
+                "id": "model-mm",
+                "name": "mm",
+                "workspace": "default",
+                "created_at": "2020-01-01T00:00:00Z",
+                "updated_at": "2020-01-01T00:00:00Z",
+            }
+        else:
+            return httpx.Response(404, json={"detail": "missing"})
+        return httpx.Response(200, json=body)
+
+    models_client = AsyncModelsClient(
+        base_url="http://nemo-api:8080",
+        workspace="default",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    checked: list[str] = []
+
+    async def authorize(method: str, path: str) -> None:
+        checked.append(path)
+
+    model = await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(
+        ModelRef(root="default/mm&adapters/default/mm-lora")
+    )
+
+    assert checked == ["/apis/models/v2/workspaces/default/models/mm"]
+    assert model.url == "http://nemo-api:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    assert model.name == "default/mm&adapters/default/mm-lora"

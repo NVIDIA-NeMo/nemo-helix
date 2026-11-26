@@ -3237,29 +3237,6 @@ components:
       title: AutomodelExportSpec
       description: ONNX export and fileset layout. ``primary`` is the artifact at
         the root; the other is under ``alternates/``.
-    AutomodelImageSize:
-      properties:
-        longest_edge:
-          title: Longest Edge
-          description: Maximum pixels (an area, not a side length) in a resized image.
-            Larger images are scaled down, which loses fine detail. The same ceiling
-            as max_pixels.
-          type: integer
-          exclusiveMinimum: 0.0
-        shortest_edge:
-          title: Shortest Edge
-          description: Minimum pixels (an area, not a side length) in a resized image.
-            Smaller images are scaled up, which adds no detail.
-          type: integer
-          exclusiveMinimum: 0.0
-      additionalProperties: false
-      type: object
-      title: AutomodelImageSize
-      description: 'Pixel-area bounds passed to the vision processor as ``size``.
-
-
-        Both edges are required. ``longest_edge`` is the maximum pixel count and matches
-        ``max_pixels``.'
     AutomodelJobInput:
       properties:
         name:
@@ -4323,20 +4300,16 @@ components:
           exclusiveMinimum: 0.0
           title: Max Seq Length
           default: 2048
-        max_pixels:
-          title: Max Pixels
-          description: Shorthand for image_size.longest_edge. The compiler writes
-            it as the processor size and does not pass this name to transformers.
-            Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
-          type: integer
-          exclusiveMinimum: 0.0
-        image_size:
-          allOf:
-          - $ref: '#/components/schemas/AutomodelImageSize'
-          description: Pixel-area bounds for a vision-language processor, as size.longest_edge
-            and size.shortest_edge. Both edges are required, and shortest_edge must
-            be less than longest_edge. Set this or max_pixels, not both. Rejected
-            for text checkpoints.
+        processor_arguments:
+          title: Processor Arguments
+          description: 'Keyword arguments passed as-is to AutoProcessor.from_pretrained
+            for a vision-language model. They set how the processor resizes images,
+            and each processor reads different keys: min_num_patches and max_num_patches
+            for Nemotron Omni, size for Qwen3-VL. Each key must be one the model''s
+            processor config sets, or the job is rejected rather than ignoring it.
+            Rejected for text checkpoints.'
+          additionalProperties: true
+          type: object
         precision:
           title: Precision
           description: Model precision for training. Auto-detected from the checkpoint
@@ -5522,20 +5495,18 @@ components:
             Falls back to the service default when omitted.
           type: string
           minLength: 1
-        max_pixels:
-          title: Max Pixels
-          description: Shorthand for image_size.longest_edge on a vision-language
-            checkpoint. Larger images are downscaled before the policy processor and
-            the vLLM rollout engine see them, so training and generation use the same
-            resolution. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
-          type: integer
-          exclusiveMinimum: 0.0
-        image_size:
-          allOf:
-          - $ref: '#/components/schemas/RlImageSize'
-          description: Pixel-area bounds for a vision-language checkpoint. Both edges
-            are required, and shortest_edge must be less than longest_edge. Set this
-            or max_pixels, not both. Rejected for text checkpoints.
+        processor_arguments:
+          title: Processor Arguments
+          description: 'Keyword arguments passed as-is to AutoProcessor.from_pretrained
+            for a vision-language checkpoint, for the policy and the Gym actor. They
+            set how the processor resizes images, and each processor reads different
+            keys: min_num_patches and max_num_patches for Nemotron Omni, size for
+            Qwen3-VL. Each key must be one the model''s processor config sets, or
+            the job is rejected. The vLLM rollout engine reads its own settings from
+            vllm_kwargs.mm_processor_kwargs, so set the same bound there to keep training
+            and generation at one resolution. Rejected for text checkpoints.'
+          additionalProperties: true
+          type: object
         type:
           type: string
           const: grpo
@@ -5897,29 +5868,6 @@ components:
       - value: 1.0e-05
         when:
           finetuning_type: lora_merged
-    RlImageSize:
-      properties:
-        longest_edge:
-          title: Longest Edge
-          description: Maximum pixels (an area, not a side length) in a resized image.
-            Larger images are scaled down, which loses fine detail. The same ceiling
-            as max_pixels.
-          type: integer
-          exclusiveMinimum: 0.0
-        shortest_edge:
-          title: Shortest Edge
-          description: Minimum pixels (an area, not a side length) in a resized image.
-            Smaller images are scaled up, which adds no detail.
-          type: integer
-          exclusiveMinimum: 0.0
-      additionalProperties: false
-      type: object
-      title: RlImageSize
-      description: 'Pixel-area bounds for a vision processor.
-
-
-        Both edges are required. ``longest_edge`` is the maximum pixel count and matches
-        ``max_pixels``.'
     RlJobInput:
       properties:
         name:

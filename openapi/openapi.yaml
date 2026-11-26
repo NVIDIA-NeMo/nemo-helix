@@ -21217,6 +21217,15 @@ components:
             vision config as patch_size times the spatial merge. None when the checkpoint
             does not declare a patch size.
           type: integer
+        vision_processor_keys:
+          title: Vision Processor Keys
+          description: Keys in the image processor's config file (processor_config.json
+            or preprocessor_config.json). A job's processor_arguments are checked
+            against these. None for a text checkpoint, a checkpoint without a processor
+            config, or a spec registered before this field.
+          items:
+            type: string
+          type: array
         has_audio_tower:
           type: boolean
           title: Has Audio Tower

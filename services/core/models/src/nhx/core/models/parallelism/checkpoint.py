@@ -9,6 +9,7 @@ open ``config.json`` again; they read the fields the job compiler copied onto th
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +34,37 @@ class CheckpointInspection:
     expert_count: int | None = None
     num_nextn_predict_layers: int | None = None
     vision_patch_size: int | None = None
+
+
+_PROCESSOR_CONFIG_FILES = ("processor_config.json", "preprocessor_config.json")
+_NESTED_PROCESSOR_BLOCKS = ("image_processor", "video_processor")
+
+
+def processor_config_keys(config: Any) -> list[str]:
+    """Keys a processor config file sets, including those inside its nested image and video blocks."""
+    if not isinstance(config, dict):
+        return []
+    keys = {key for key in config if key not in _NESTED_PROCESSOR_BLOCKS}
+    for block in _NESTED_PROCESSOR_BLOCKS:
+        if isinstance(config.get(block), dict):
+            keys.update(config[block])
+    return sorted(keys)
+
+
+def read_processor_keys(pretrained_or_path: str) -> list[str] | None:
+    """Keys from the processor config files of a local directory or hub id; ``None`` when none can be read."""
+    from transformers.utils import cached_file
+
+    keys: set[str] = set()
+    for name in _PROCESSOR_CONFIG_FILES:
+        try:
+            path = cached_file(pretrained_or_path, name, _raise_exceptions_for_missing_entries=False)
+            if path:
+                with open(path, encoding="utf-8") as handle:
+                    keys.update(processor_config_keys(json.load(handle)))
+        except (OSError, ValueError):
+            continue
+    return sorted(keys) or None
 
 
 def inspect_checkpoint(config: Any) -> CheckpointInspection:

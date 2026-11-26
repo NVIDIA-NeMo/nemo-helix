@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from contextlib import contextmanager, nullcontext
@@ -29,7 +30,8 @@ import httpx
 import pytest
 from click import UsageError
 from nemo_helix_ext.cli.app import app
-from nemo_helix_ext.cli.commands.use_cases.chat import _parse_model_and_workspace
+from nemo_helix_ext.cli.commands.use_cases import chat as chat_module
+from nemo_helix_ext.cli.commands.use_cases.chat import _parse_model_and_workspace, build_user_content
 from nemo_helix_plugin.client.response import NemoBinaryResponse
 from typer.testing import CliRunner
 
@@ -667,3 +669,74 @@ def test_chat_provider_routing_uses_v1_prefix(runner: CliRunner) -> None:
     assert captured_kwargs["body"].root["messages"] == [{"role": "user", "content": "Hello!"}]
     assert captured_kwargs["body"].root["max_tokens"] == 50
     assert captured_kwargs["body"].root["stream"] is True
+
+
+# =============================================================================
+# Image input
+# =============================================================================
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"not-a-real-image"
+
+
+def test_build_user_content_without_images_is_the_plain_prompt() -> None:
+    assert build_user_content("hello", []) == "hello"
+
+
+def test_build_user_content_puts_images_before_the_text_in_order() -> None:
+    fileset = "fileset://default/cord-v2#validation/images/00000.png"
+    content = build_user_content(
+        "Describe this.", [fileset, "https://example.test/a.jpg", "data:image/png;base64,AAAA"]
+    )
+
+    assert content == [
+        {"type": "image_url", "image_url": {"url": fileset}},
+        {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        {"type": "text", "text": "Describe this."},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime_type"), [("a.png", "image/png"), ("b.JPG", "image/jpeg"), ("c.webp", "image/webp")]
+)
+def test_build_user_content_inlines_a_local_file_as_a_data_url(tmp_path: Path, filename: str, mime_type: str) -> None:
+    image = tmp_path / filename
+    image.write_bytes(PNG_BYTES)
+
+    content = build_user_content("hi", [str(image)])
+
+    assert isinstance(content, list)
+    url = content[0]["image_url"]["url"]
+    prefix = f"data:{mime_type};base64,"
+    assert url.startswith(prefix)
+    assert base64.b64decode(url.removeprefix(prefix)) == PNG_BYTES
+
+
+def test_build_user_content_rejects_an_unsupported_extension(tmp_path: Path) -> None:
+    document = tmp_path / "scan.pdf"
+    document.write_bytes(b"%PDF")
+
+    with pytest.raises(UsageError, match="Unsupported image type"):
+        build_user_content("hi", [str(document)])
+
+
+def test_build_user_content_rejects_a_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(UsageError, match="not found"):
+        build_user_content("hi", [str(tmp_path / "absent.png")])
+
+
+def test_build_user_content_rejects_an_oversized_file(tmp_path: Path) -> None:
+    image = tmp_path / "huge.png"
+    with image.open("wb") as handle:
+        handle.truncate(chat_module.MAX_IMAGE_BYTES + 1)  # sparse; nothing is written
+
+    with pytest.raises(UsageError, match="larger than"):
+        build_user_content("hi", [str(image)])
+
+
+def test_chat_rejects_a_bad_image_before_any_request(runner: CliRunner, tmp_path: Path) -> None:
+    """The image is validated locally, so the user sees the usage error rather than a connection failure."""
+    result = runner.invoke(app, ["chat", "-m", "my-model", "describe", "--image", str(tmp_path / "absent.png")])
+
+    assert result.exit_code == 2
+    assert "Image file not found" in result.output

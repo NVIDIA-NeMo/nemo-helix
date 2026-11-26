@@ -71,6 +71,38 @@ def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "wo
     return workspace, name
 
 
+_ADAPTERS_INFIX = "&adapters/"
+
+
+def split_adapter_ref(ref: str) -> tuple[str, tuple[str, str] | None]:
+    """Split ``base_workspace/base&adapters/adapter_workspace/adapter`` into its base ref and adapter parts.
+
+    A plain ``workspace/name`` returns ``(ref, None)``. A composite whose adapter tail is not exactly
+    ``workspace/name`` is left whole, so the strict parser downstream rejects it with its usual message.
+
+    This mirrors ``nhx.common.entities.utils.parse_adapters_suffix``; this package does not depend on
+    ``nhx_common``, so the small grammar is repeated here.
+    """
+    base, infix, adapter_tail = ref.partition(_ADAPTERS_INFIX)
+    adapter_workspace, separator, adapter_name = adapter_tail.partition("/")
+    if not infix or not base or not separator or not adapter_workspace or not adapter_name or "/" in adapter_name:
+        return ref, None
+    return base, (adapter_workspace, adapter_name)
+
+
+def adapter_model_reference(
+    base: ResolvedModelReference, *, ref: str, openai_route_base_url: str
+) -> ResolvedModelReference:
+    """Route details for a LoRA adapter: the gateway's OpenAI route, naming the composite model id.
+
+    The gateway sends a composite id through its base model's deployment, so the base's entity route and
+    provider details do not apply; only whether a user-managed VirtualModel fronts the base carries over.
+    """
+    return ResolvedModelReference(
+        url=openai_route_base_url, name=ref, host_url=None, served_model_name=None, virtual_model=base.virtual_model
+    )
+
+
 def first_provider_ref(model_providers: list[str] | None) -> tuple[str, str, str] | None:
     """Return the first valid ``(ref, workspace, name)`` provider reference, if present."""
     if not model_providers:

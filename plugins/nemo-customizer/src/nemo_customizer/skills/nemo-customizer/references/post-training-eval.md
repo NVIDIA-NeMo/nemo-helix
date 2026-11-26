@@ -27,7 +27,16 @@ Do this before submitting the job, so the baseline exists however the run ends.
 - **LoRA:** deploy the base model with `lora_enabled: true`. The job's `deployment_config` then reuses that deployment and loads the adapter onto it.
 - **Full weights:** deploy the base model, score it, then delete that deployment unless the user wants to keep it. The job deploys its own output.
 
-Before scoring, wait until the model answers: the deployment is `READY` (`nemo wait inference deployment <name>`), then one request through the gateway succeeds. Hand off to **nemo-evals** (below).
+```bash
+nemo inference deployment-configs create <config> --engine vllm \
+  --model-spec '{"model_namespace":"default","model_name":"<model-entity>","lora_enabled":true}' \
+  --executor-config '{"gpu":1,"disk_size":"50Gi","additional_args":["--max-model-len","8192"]}'
+nemo inference deployments create <deployment> --config <config> --wait   # returns when READY
+```
+
+Set `--max-model-len` for any model whose native context is large; without it vLLM exits at startup (`troubleshooting.md` § **Runtime failures**). Use `"lora_enabled": false` for a full-weights base.
+
+Before scoring, wait until the model answers: the deployment is `READY` (`--wait` above, or `nemo wait inference deployment <name>`), then one request through the gateway succeeds. Hand off to **nemo-evals** (below).
 
 ### Base already deployed without LoRA: ask the user
 
@@ -81,18 +90,15 @@ Leave out `chat_template_kwargs`; it only applies to chat requests.
 | LoRA adapter | `<ws>/<base-entity>&adapters/<ws>/<output.name>` |
 | Full-weight output | `<ws>/<output.name>` |
 
-An adapter has no model entity of its own, so `ModelRef("<ws>/<adapter>")` fails, and a composite ID is not a valid `ModelRef`. Use the inline `Model` above. The gateway routes the adapter through its base model's deployment and applies that model's middleware; if the base model's VirtualModel routes requests to other models (Switchyard), say so in the report, because the scores then include those models.
+An adapter has no model entity of its own, so `ModelRef("<ws>/<adapter>")` fails. The composite ID is a valid `ModelRef`, so a platform eval job takes `"<ws>/<base-entity>&adapters/<ws>/<output.name>"` as its target; the caller needs read access to the base model. A platform that rejects the composite as a `ModelRef` is older than this support: use the inline `Model` above. The gateway routes the adapter through its base model's deployment and applies that model's middleware; if the base model's VirtualModel routes requests to other models (Switchyard), say so in the report, because the scores then include those models.
 
 To spot-check one model by hand:
 
 ```bash
-curl -s "$(nemo inference get-url)/chat/completions" -H 'content-type: application/json' -d '{
-  "model": "<ws>/<base-entity>&adapters/<ws>/<output.name>",
-  "messages": [{"role": "user", "content": "<a prompt from test.jsonl>"}],
-  "max_tokens": 64, "temperature": 0,
-  "chat_template_kwargs": {"enable_thinking": false}
-}'
+nemo chat -m '<ws>/<base-entity>&adapters/<ws>/<output.name>' "<a prompt from test.jsonl>" --max-tokens 64 --temperature 0
 ```
+
+For an image row, attach the image with `--image`, which takes a `fileset://<ws>/<fileset>#<path>` reference, an `http(s)://` or `data:` URL, or a local PNG, JPEG, GIF or WebP file (inlined as a `data:` URL, at most 25 MiB). Repeat it for several images. To send the exact request body, or to turn thinking off with `chat_template_kwargs`, post to `$(nemo inference get-url)/chat/completions` with curl instead.
 
 ## Format contract
 
@@ -138,6 +144,39 @@ Score the official validation split in the `cord-v2` fileset, not a separate tes
 | Inference | `temperature` 0, `max_tokens` 1024, thinking off: `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
 | Both metrics in one job | `evaluator.submit` takes one metric. Put both in one spec and submit it with `nemo evals evaluate --spec-file` (nemo-evals § **Multiple metrics**) |
 
+**From the CLI alone.** `nemo evals evaluate` has no flags for the dataset, prompt template or metrics, so write them in a spec file. This one scores a LoRA adapter on the first 20 rows with both metrics (set `target` to `"<ws>/<base-entity>"` for the base model; each metric needs only the fields shown, and `digest` is optional). Copy `outputs` exactly: the server compares it field by field with the metric bundle and answers 422 `mismatched fields: ['value_json_schema']` on any difference:
+
+```json
+{
+  "dataset": "<ws>/cord-v2#validation/validation.jsonl",
+  "params": {"limit_samples": 20, "inference": {"temperature": 0.0, "max_tokens": 1024,
+    "extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}},
+  "prompt_template": {"messages": [{"role": "user", "content": [
+    {"type": "image_url", "image_url": {"url": "fileset://<ws>/cord-v2#{{ item.messages[0].content[0].image_url.url }}"}},
+    {"type": "text", "text": "{{ item.messages[0].content[1].text }}"}]}]},
+  "metrics": [
+    {"bundle_kind": "metric-bundle", "bundle_format_version": "v1", "metric_type": "string-check",
+     "outputs": [{"name": "string-check", "value_json_schema": {"title": "ContinuousScore", "description": "Continuous numeric metric value.", "type": "number"}}],
+     "payload": {"kind": "inline", "metric": {"type": "string-check", "operation": "equals",
+       "left_template": "{{ sample.output_text | trim }}", "right_template": "{{ item.messages[-1].content }}"}}},
+    {"bundle_kind": "metric-bundle", "bundle_format_version": "v1", "metric_type": "sequence-similarity",
+     "outputs": [{"name": "sequence-similarity", "value_json_schema": {"title": "ContinuousScore", "description": "Continuous numeric metric value.", "type": "number"}}],
+     "payload": {"kind": "inline", "metric": {"type": "sequence-similarity",
+       "reference": "{{ item.messages[-1].content }}", "candidate": "{{ sample.output_text | trim }}"}}}
+  ],
+  "target": "<ws>/<base-entity>&adapters/<ws>/<output.name>"
+}
+```
+
+```bash
+nemo -f json evals evaluate --spec-file spec.json > job.json   # `-f` goes before the subcommand; prints the whole job JSON (about 80 KB), so redirect it
+python3 -c "import json;print(json.load(open('job.json'))['name'])"   # the job name (or `nemo -f json evals list-jobs`)
+nemo jobs watch <job-name>
+nemo jobs results download aggregate-scores --job <job-name> -o scores.json
+```
+
+`scores.json` holds one entry per metric under `scores`, with `mean`, `median`, `min` and `max`.
+
 Published numbers on the first 20 validation rows (Automodel Super VL guide): the base model scores 0/20 exact with mean similarity 0.048; the LoRA (rank 64, step 199, merged) scores 8/20 and 0.954. The base model answers in prose, so near-zero scores for it are expected. Expect small differences from upstream, which decoded merged weights with Hugging Face `generate`.
 
 ## Reading the result
@@ -146,9 +185,14 @@ Published numbers on the first 20 validation rows (Automodel Super VL guide): th
 |---|---|
 | Tuned and base scores match within 1–2 points | The tuned request named the base model; check the model ID. Or the run learned little: check training loss and the epoch count |
 | Base exact match near 0, F1 much higher | Normal when the base model answers in prose around the label |
+| Scores unchanged after a very short run (a few steps) | Expected: too little training to move the output. Evaluator token counts that differ slightly from base are the only sign the adapter is applied. The adapter is also absent from `GET .../v1/models` but still works for chat and evals |
 | Training loss fell sharply but the score did not move | Mismatched inference settings (template, thinking, `max_tokens`) or overfitting. Validation loss is not accuracy |
 
 When comparing several adapters, for example different epoch counts, score each one on the same frozen split. Results from different backends or batch settings have confounds; say so.
+
+## Cleanup
+
+Delete only what this run created, and ask the user first, as for filesets. Order matters: `nemo inference deployments delete <deployment>`, wait until `nemo inference deployments get <deployment>` shows `DELETED` (the delete is asynchronous), then `nemo inference deployment-configs delete <config>`. Deleting the config earlier fails with a "resource already exists / concurrent update" hint: that is a conflict with the live deployment, not a name clash. Retry once the deployment is `DELETED`.
 
 ## Serving the tuned model
 
@@ -168,7 +212,7 @@ vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deplo
 **Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; vLLM needs it to load the checkpoint, and the platform needs it to read the config and size tensor parallelism. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform adds no model-specific vLLM flags, so set the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) yourself in `additional_args`, either on the job's inline `deployment_config` or on a deployment-config template:
 
 - Every deployment: `["--max-model-len", "114688", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice", "--mamba-ssm-cache-dtype", "float32", "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}"]`. Without `--max-model-len`, vLLM sizes the KV cache for the native 1M-token context and exits at startup.
-- Released base model, LoRA disabled: also `"--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"` (MTP). Omit it for LoRA, for fine-tuned checkpoints (Automodel's Super VL recipes set `num_nextn_predict_layers: 0`, so they have no MTP layer), and for Nemotron 3.5 Bolt, which shares the architecture but has no MTP layer.
+- Released base model, LoRA disabled: also `"--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"` (MTP). Omit it for LoRA, for fine-tuned checkpoints (Automodel's Super VL recipes set `num_nextn_predict_layers: 0`, so they have no MTP layer), and for Nemotron 3.5 Bolt, which has no MTP layer.
 - LoRA enabled: also `"--max-lora-rank", "64", "--max-loras", "2"`. vLLM reserves GPU memory for every expert in each LoRA slot, so more slots need more GPU memory.
 
 Two flags stay off unless the user opts in; describe the tradeoff and let the user choose:
