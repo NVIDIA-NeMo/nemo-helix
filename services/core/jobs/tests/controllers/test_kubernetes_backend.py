@@ -39,6 +39,7 @@ from nhx.core.jobs.app.constants import (
     JOB_STEP_NAME_LABEL,
     JOB_TYPE_LABEL,
     JOB_TYPE_STORAGE_CLEANUP,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -4074,15 +4075,17 @@ def test_build_step_network_policy_limits_peers_to_declared_ports(test_step_pend
     assert policy.spec.pod_selector.match_labels == {
         JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
         JOB_ID_LABEL: "test-job-id",
+        JOB_UID_LABEL: "platform-job-test-uid",
         JOB_STEP_ID_LABEL: "test-step-id",
     }
     same_job, sandboxes = policy.spec.ingress
     assert same_job.ports is None
+    # Peers by the job's entity id, not its name: a same-named job in another workspace shares the name.
     assert same_job._from[0].pod_selector.match_labels == {
         JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER,
-        JOB_ID_LABEL: "test-job-id",
+        JOB_UID_LABEL: "platform-job-test-uid",
     }
-    assert sandboxes._from[0].pod_selector.match_labels == {"nemo-rl-job-id": "test-job-id"}
+    assert sandboxes._from[0].pod_selector.match_labels == {"nemo-rl-job-id": "platform-job-test-uid"}
     assert sandboxes._from[0].namespace_selector is None
     ranged = _step_with_network(test_step_pending)
     ranged.step_spec.network.ingress[0].tcp_port_ranges = [TcpPortRange(low=3000, high=4998)]
@@ -4460,3 +4463,14 @@ def test_cancelled_cleanup_budget_resumes_next_workload(kubernetes_job, test_ste
         with patch.object(kubernetes_job, "get_step_safe", side_effect=lookup):
             assert list(kubernetes_job.cancelled_step_workloads(workloads)) == ["a"]
             assert list(kubernetes_job.cancelled_step_workloads(workloads)) == ["b"]
+
+
+def test_step_pods_carry_the_jobs_uid_but_are_not_found_by_it(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    """Network policy peers match the uid; the controller still finds pods an older controller made without it."""
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert job_body.spec.template.metadata.labels[JOB_UID_LABEL] == "platform-job-test-uid"
+    assert JOB_UID_LABEL not in common_labels_for_step(test_step_pending)

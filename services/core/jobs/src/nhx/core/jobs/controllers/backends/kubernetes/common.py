@@ -86,6 +86,7 @@ from nhx.core.jobs.app.constants import (
     JOB_TYPE_JOB,
     JOB_TYPE_LABEL,
     JOB_TYPE_STORAGE_CLEANUP,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -857,6 +858,10 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
     allows are additive across policies, so this only isolates the step when no other policy in the
     namespace selects its pods with a broader allow.
 
+    Peers are matched by the job's entity UUID (``JOB_UID_LABEL``, and each rule's ``job_id_label``), never its
+    name: names are unique only within a workspace, so a same-named job's pods in another workspace sharing the
+    namespace would otherwise be admitted, on every port in the case of the same-job rule.
+
     The Helm chart's ValidatingAdmissionPolicy (``job-step-networkpolicy-vap.yaml``) only admits this exact
     shape from the controller; keep the two in sync.
     """
@@ -868,7 +873,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
         client.V1NetworkPolicyIngressRule(
             _from=[
                 client.V1NetworkPolicyPeer(
-                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_ID_LABEL: step.job})
+                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_UID_LABEL: step.job_id})
                 )
             ]
         )
@@ -878,7 +883,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
             client.V1NetworkPolicyIngressRule(
                 _from=[
                     client.V1NetworkPolicyPeer(
-                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
+                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job_id})
                     )
                 ],
                 ports=_network_policy_ports(rule),
@@ -890,7 +895,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
         metadata=client.V1ObjectMeta(name=name_for_step(step), labels=common_labels_for_step(step)),
         spec=client.V1NetworkPolicySpec(
             pod_selector=client.V1LabelSelector(
-                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_STEP_ID_LABEL: step.id}
+                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_UID_LABEL: step.job_id, JOB_STEP_ID_LABEL: step.id}
             ),
             policy_types=["Ingress"],
             ingress=ingress,

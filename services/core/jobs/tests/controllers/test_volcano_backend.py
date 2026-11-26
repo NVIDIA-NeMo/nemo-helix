@@ -29,6 +29,7 @@ from nhx.core.jobs.app.constants import (
     JOB_NUM_NODES_ANNOTATION,
     JOB_STEP_ID_LABEL,
     JOB_STEP_NAME_LABEL,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -2375,3 +2376,18 @@ def test_cleanup_unfinished_volcano_job_only_for_cancelled_step(
     ):
         volcano_job.cleanup_steps()
     assert terminate.call_count == (1 if platform_status == HelixJobStatus.CANCELLED else 0)
+
+
+def test_volcano_task_pods_carry_the_jobs_uid(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+):
+    """The step NetworkPolicy admits the job's pods by this label, on every Volcano task."""
+    volcano_job._custom_v1.create_namespaced_custom_object.return_value = {"metadata": {"uid": "vcjob-uid"}}  # ty: ignore[invalid-assignment]
+
+    volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
+
+    body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]  # ty: ignore[unresolved-attribute]
+    labels = [task["template"]["metadata"]["labels"] for task in body["spec"]["tasks"]]
+    assert labels and all(task_labels[JOB_UID_LABEL] == "platform-job-test-uid" for task_labels in labels)

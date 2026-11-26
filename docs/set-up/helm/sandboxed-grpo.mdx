@@ -175,10 +175,12 @@ The broker and the policy model are addresses on the training pod. An address ca
 
 For each GRPO training step, the jobs controller creates an ingress NetworkPolicy:
 
-- **Target.** The training step's pods, selected by `nhx.nvidia.com/managed_by=jobs-controller`, `nhx.nvidia.com/job_id`, and `nhx.nvidia.com/job_step_id`.
+- **Target.** The training step's pods, selected by `nhx.nvidia.com/managed_by=jobs-controller`, `nhx.nvidia.com/job_id`, `nhx.nvidia.com/job_uid`, and `nhx.nvidia.com/job_step_id`.
 - **Same job.** Pods of the same job reach every port. Ray traffic between training pods stays inside the job.
-- **Gym sandbox.** Pods labelled `nemo-rl-job-id=<job id>` reach only TCP 51234 (the episode broker) and TCP 3000–4998 (the span vLLM picks its generation port from). OpenSandbox turns sandbox metadata into pod labels, and the broker stamps the job id. The sandbox's `opensandbox.io/id` label names the sandbox; it is not what the policy matches.
+- **Gym sandbox.** Pods labelled `nemo-rl-job-id=<job uid>` reach only TCP 51234 (the episode broker) and TCP 3000–4998 (the span vLLM picks its generation port from). OpenSandbox turns sandbox metadata into pod labels, and the broker stamps the job uid. The sandbox's `opensandbox.io/id` label names the sandbox; it is not what the policy matches.
 - **Everything else.** No other ingress is allowed into the training pods.
+
+Peers are matched by the job's uid (its entity ID, also `NEMO_JOB_UID` in the step's environment), not its name. A job name is unique only within a workspace, so pods of a same-named job in another workspace, in the same namespace, aren't admitted.
 
 Ray's ports stay outside the allowed set: GCS 6379, client 10001, dashboard 8265, node manager and agent ports from 53001, and workers 54001–54257. If you override Ray ports with `GCS_PORT`, `MIN_WORKER_PORT`, or the other Ray port variables, keep them out of 3000–4998 and off 51234.
 
@@ -192,25 +194,29 @@ Before a job, confirm the admission policy is installed:
 kubectl get validatingadmissionpolicy | grep job-step-networkpolicies
 ```
 
-Submit a short GRPO job, as described in [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments). While it runs, set `JOB_ID` to the platform job id and inspect the step policy:
+Submit a short GRPO job, as described in [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments). While it runs, set `JOB_ID` to the platform job name, inspect the step policy, and read the job's uid from it:
 
 ```sh
-export JOB_ID=<platform-job-id>
+export JOB_ID=<platform-job-name>
 
 kubectl -n "$KUBE_NAMESPACE" get networkpolicy \
   -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_id="$JOB_ID" -o yaml
+
+export JOB_UID=$(kubectl -n "$KUBE_NAMESPACE" get networkpolicy \
+  -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_id="$JOB_ID" \
+  -o jsonpath='{.items[0].spec.podSelector.matchLabels.nhx\.nvidia\.com/job_uid}')
 ```
 
 Expect:
 
 - `spec.podSelector` selects one job step, and `policyTypes` is `[Ingress]`.
-- One ingress rule allows pods with `nhx.nvidia.com/job_id: <job id>` on all ports.
-- One ingress rule allows pods with `nemo-rl-job-id: <job id>` on TCP 51234 and TCP 3000–4998, and no other ports.
+- One ingress rule allows pods with `nhx.nvidia.com/managed_by: jobs-controller` and `nhx.nvidia.com/job_uid: <job uid>` on all ports.
+- One ingress rule allows pods with `nemo-rl-job-id: <job uid>` on TCP 51234 and TCP 3000–4998, and no other ports.
 
-Confirm the Gym sandbox pod carries the job id:
+Confirm the Gym sandbox pod carries the job uid:
 
 ```sh
-kubectl -n "$KUBE_NAMESPACE" get pods -l nemo-rl-job-id="$JOB_ID" --show-labels
+kubectl -n "$KUBE_NAMESPACE" get pods -l nemo-rl-job-id="$JOB_UID" --show-labels
 ```
 
 The expected connectivity from the sandbox is:

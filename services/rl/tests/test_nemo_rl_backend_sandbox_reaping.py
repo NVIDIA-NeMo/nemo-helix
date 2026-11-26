@@ -46,6 +46,7 @@ for _name in _stubbed:
     del sys.modules[_name]
 
 JOB_ID = "rl-job-1"
+JOB_UID = "2b7e9c4d-8f1a-4c3e-b5d6-a7f8e9d0c1b2"
 
 
 class _Recorder:
@@ -105,6 +106,7 @@ def _execute(
     exit_code: int = 0,
     gym: Any = None,
     during_driver: Any = None,
+    job_uid: str | None = JOB_UID,
 ) -> None:
     """Run ``execute_training`` against a fake Ray bootstrap, with an optional hook while the driver runs."""
 
@@ -122,7 +124,7 @@ def _execute(
         terminate_driver=recorder.terminate,
     )
     monkeypatch.setattr(backend_module, "create_bootstrap_from_env", lambda: bootstrap)
-    backend = backend_module.NemoRLBackend(cast(NHXJobContext, SimpleNamespace(job_id=JOB_ID)))
+    backend = backend_module.NemoRLBackend(cast(NHXJobContext, SimpleNamespace(job_id=JOB_ID, job_uid=job_uid)))
     config: Any = SimpleNamespace(
         parallelism=SimpleNamespace(num_gpus_per_node=1, num_nodes=1),
         integrations=None,
@@ -150,7 +152,7 @@ def test_a_finished_sandboxed_job_is_swept_with_its_own_job_id_and_connection_op
 
     assert recorder.reap_calls == [
         {
-            "job_id": JOB_ID,
+            "job_id": JOB_UID,
             "host_provider": "opensandbox",
             "host_provider_options": {"connection": {"protocol": "http"}},
             "timeout_s": backend_module.SANDBOX_REAP_TIMEOUT_S,
@@ -265,3 +267,12 @@ def test_a_sweep_after_the_shutdown_budget_is_spent_is_skipped(
         _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), during_driver=_cancel)
 
     assert len(recorder.reap_calls) == 1
+
+
+def test_without_the_jobs_unique_id_nothing_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
+) -> None:
+    """The sandboxes carry the job's unique id; sweeping by the name could reach another workspace's job."""
+    _execute(tmp_path, monkeypatch, recorder, gym=_sandboxed_gym(), job_uid=None)
+
+    assert recorder.reap_calls == []

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR
 from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
     CheckpointTraits,
@@ -399,6 +400,13 @@ def _build_nemo_gym_env_config(
                 f"can mount the environment and dataset; {NHX_JOB_STORAGE_PVC_ENVVAR} is unset. "
                 "Set NHX_RL_JOB_STORAGE_PVC_CLAIM on the rl service."
             )
+        if not job_ctx.job_uid:
+            # The sandboxes are labelled, swept and admitted to the training pods by this id. The job name is
+            # unique only within a workspace, so it would reach, or admit, another workspace's job.
+            raise ValueError(
+                f"Sandboxed GRPO requires {NEMO_JOB_UID_ENVVAR}, the job's unique id, to label its Gym "
+                "sandboxes; it is unset. Upgrade the jobs controller, which sets it."
+            )
         prepare_sandbox_workspace(job_ctx.storage_path)
         mounts = build_sandbox_mounts(
             pvc_claim=pvc_claim,
@@ -450,7 +458,9 @@ def _build_nemo_gym_env_config(
             host_provider="opensandbox",
             environment_path=sandbox_root,
             environment_offline=offline_environment,
-            job_id=job_ctx.job_id,
+            # Not the job name: it is unique only within a workspace. The jobs controller admits the sandboxes
+            # to the training pods by this id (nemo-rl-job-id), and the job's sweeps match it.
+            job_id=job_ctx.job_uid,
             sandbox=sandbox,
         )
         # mode="json", not "python": this dict is written straight to YAML with yaml.dump

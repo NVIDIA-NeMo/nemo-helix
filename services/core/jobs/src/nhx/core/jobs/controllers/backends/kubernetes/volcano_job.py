@@ -25,6 +25,7 @@ from nhx.core.jobs.app.constants import (
     JOB_STEP_NAME_LABEL,
     JOB_TYPE_JOB,
     JOB_TYPE_LABEL,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -266,6 +267,8 @@ class VolcanoJobBackend(
         common_labels = common_labels_for_step(step)
         common_labels[JOB_EXECUTION_BACKEND_LABEL] = self.BACKEND_NAME
         common_labels[JOB_EXECUTION_PROFILE_LABEL] = self._profile_name
+        # Peers are admitted by this, not the job name (see build_step_network_policy).
+        common_labels[JOB_UID_LABEL] = step.job_id
 
         if executor_config.resources is not None and executor_config.resources.num_gpus is not None:
             num_gpus = executor_config.resources.num_gpus
