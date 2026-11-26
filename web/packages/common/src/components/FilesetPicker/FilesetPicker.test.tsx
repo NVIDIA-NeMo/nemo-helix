@@ -298,13 +298,21 @@ describe('FilesetPicker', () => {
   });
 
   it('looks up an unresolved selection even while a search is active', async () => {
-    vi.mocked(filesListFilesets).mockImplementation(async (_workspace, params) =>
-      listResponse(params?.filter ? [] : [fileset('newer')])
+    // The unfiltered page never settles, so the lookup can only start once the search has.
+    vi.mocked(filesListFilesets).mockImplementation((_workspace, params) =>
+      params?.filter ? Promise.resolve(listResponse([])) : new Promise(() => {})
     );
     vi.mocked(filesRetrieveFileset).mockResolvedValue(fileset('older'));
     const { input } = renderPicker({ value: 'default/older', purpose: undefined });
 
     await userEvent.type(input, 'zzz');
+    await waitFor(() =>
+      expect(filesListFilesets).toHaveBeenCalledWith(
+        'default',
+        expect.objectContaining({ filter: expect.anything() }),
+        expect.anything()
+      )
+    );
 
     await waitFor(() =>
       expect(filesRetrieveFileset).toHaveBeenCalledWith('default', 'older', expect.anything())
