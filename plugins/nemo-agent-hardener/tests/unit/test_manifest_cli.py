@@ -399,7 +399,7 @@ def test_cli_init_stores_a_model_whose_endpoint_is_only_busy(monkeypatch: pytest
     from nemo_agent_hardener_plugin.cli import main as cli_main
 
     created: list[dict] = []
-    manifests = _manifests(ok=True, create=lambda **kw: created.append(kw) or {"name": "react-agent"})
+    manifests = _manifests(get=_missing, create=lambda **kw: created.append(kw) or {"name": "react-agent"})
     manifests.validate_model = lambda **_k: {"ok": False, "reason": "provider_error", "detail": "HTTP 429"}
     app = _patch_cli(cli_main, monkeypatch, manifests)
     result = CliRunner().invoke(app, ["init", "--agent", "react-agent", "--attack-model", "busy/model"])
