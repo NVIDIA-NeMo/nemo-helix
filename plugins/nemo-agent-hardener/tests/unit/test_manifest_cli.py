@@ -10,8 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from nemo_agent_hardener_plugin.cli import _shared
+from nemo_helix_plugin.client.errors import NotFoundError
 from typer.testing import CliRunner
 
 
@@ -183,6 +185,7 @@ def test_cli_init_sends_model_selection(monkeypatch: pytest.MonkeyPatch) -> None
 
     captured: dict[str, Any] = {}
     manifests = _manifests(
+        get=_missing,
         create=lambda *, workspace, **body: captured.update(body) or {"name": body["name"]},
     )
     app = _patch_cli(cli_main, monkeypatch, manifests)
@@ -200,6 +203,7 @@ def test_cli_init_omits_models_when_unset(monkeypatch: pytest.MonkeyPatch) -> No
 
     captured: dict[str, Any] = {}
     manifests = _manifests(
+        get=_missing,
         create=lambda *, workspace, **body: captured.update(body) or {"name": body["name"]},
     )
     app = _patch_cli(cli_main, monkeypatch, manifests)
@@ -207,6 +211,11 @@ def test_cli_init_omits_models_when_unset(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert result.exit_code == 0, result.output
     assert "models" not in captured
+
+
+def _missing(name: str, *, workspace: str) -> dict:
+    """`manifests.get` for a name nothing is saved under yet, as `init` sees it."""
+    raise NotFoundError(httpx.Response(404, json={"detail": f"{name} not found"}))
 
 
 def _manifests(*, ok: bool = True, probes: list | None = None, **extra: Any) -> Any:
@@ -379,7 +388,7 @@ def test_cli_init_rejects_an_unusable_model(monkeypatch: pytest.MonkeyPatch) -> 
     def _create(*_a: Any, **_k: Any) -> dict:  # pragma: no cover - must not run
         raise AssertionError("an unusable model must not be stored")
 
-    app = _patch_cli(cli_main, monkeypatch, _manifests(ok=False, create=_create))
+    app = _patch_cli(cli_main, monkeypatch, _manifests(ok=False, get=_missing, create=_create))
     result = CliRunner().invoke(app, ["init", "--agent", "react-agent", "--attack-model", "bad/model"])
 
     assert result.exit_code == 1

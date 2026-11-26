@@ -677,7 +677,22 @@ paths:
       - Agent Hardener Manifests
       summary: Create Manifest
       description: '`init`: resolve the named source into a manifest and persist it
-        by ``name``.'
+        by ``name``.
+
+
+        With ``update_existing``, a project upload on a name that already holds a
+        project manifest updates
+
+        that manifest in place (200, not 201): a project has no registered agent to
+        `refresh` from, so
+
+        re-uploading it is how it takes changes. The flag is opt-in so a form that
+        means "create" cannot
+
+        replace someone''s manifest by reusing its name. Any other collision is refused
+        before anything is
+
+        resolved or uploaded, so a refusal leaves no orphaned scaffold behind.'
       operationId: create_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests_post
       parameters:
       - name: workspace
@@ -3490,6 +3505,16 @@ components:
           - $ref: '#/components/schemas/WarGameModels'
           description: Stored default model selection (attack/analysis/agent groups);
             omit to use agent-hardener's built-in defaults.
+        update_existing:
+          type: boolean
+          title: Update Existing
+          description: 'When a project manifest is already saved under ``name``, read
+            this upload into it instead of failing with 409: what the project states
+            is derived again, and settings not passed here (egress, secrets, env,
+            backends, models, harness, defenders, intensity, rounds, benign suite)
+            are kept. Has no effect on an agent manifest, which takes its agent''s
+            changes through refresh.'
+          default: false
       type: object
       required:
       - name

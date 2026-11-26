@@ -9,10 +9,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.cli import _shared, war_game
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.job_context import JobContext
 from typer.testing import CliRunner
 
@@ -566,10 +568,18 @@ def test_cli_run_rejects_config_and_manifest_id(tmp_path: Path, monkeypatch: pyt
     assert "run" not in captured
 
 
+def _nothing_saved(name: str, **_kw: Any) -> dict[str, Any]:
+    """`manifests.get` when nothing is saved under the name being initialized."""
+    raise NotFoundError(httpx.Response(404, json={"detail": f"{name} not found"}))
+
+
 def _patch_cli_context(
     monkeypatch: pytest.MonkeyPatch, cli_main: Any, sdk: Any, *, bin_path: Path | None = None
 ) -> None:
     """Stub the `_command_context` preamble so an init test never touches a host or a real binary."""
+    manifests = sdk.agent_hardener.manifests
+    if not hasattr(manifests, "get"):
+        manifests.get = _nothing_saved
     monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")

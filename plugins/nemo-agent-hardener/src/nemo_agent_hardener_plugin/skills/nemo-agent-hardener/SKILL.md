@@ -220,7 +220,8 @@ saw and ask the user.
 
 - Manifests are **frozen targets**: after the agent changes, `nemo agent-hardener refresh
   --manifest-id my-agent` re-resolves it (Studio: **Refresh Target**). Runs log a warning when the
-  agent is newer than the manifest.
+  agent is newer than the manifest. A `--project-dir` manifest is updated by re-running the same
+  `init --project-dir` with the same name instead; settings are kept and a staged victim image is cleared.
 - A host service the victim calls (e.g. a remote MCP server) is declared at init with
   `--backend NAME:PORT[,PORT]` (repeatable) and reached via `host.docker.internal`. The gateway
   backend is added automatically (its name is reserved); declared backends survive `refresh`.
