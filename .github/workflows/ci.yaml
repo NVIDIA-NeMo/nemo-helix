@@ -44,6 +44,7 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
+      release-packages: ${{ steps.changes.outputs.release-packages }}
       post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
@@ -88,6 +89,95 @@ jobs:
         run: |
           go_modules=$(bash .github/scripts/go-modules.sh)
           echo "modules=$go_modules" >> "$GITHUB_OUTPUT"
+
+  release-package-access:
+    name: Check new release packages
+    needs: [changes]
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.release-packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      # The PR merge commit's first parent is the base branch.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Find added release images
+        id: images
+        shell: bash
+        env:
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          ids() { yq -r '.env.RELEASE_CONTAINERS_JSON' | jq -c '[.[].id]'; }
+          base="$(git show HEAD^1:.github/workflows/release.yaml | ids)"
+          head="$(ids < .github/workflows/release.yaml)"
+          added="$(jq -cn --argjson base "${base}" --argjson head "${head}" '$head - $base')"
+          echo "images=${added}" >> "${GITHUB_OUTPUT}"
+          echo "Added release images: ${added}"
+          if [[ "${added}" != "[]" && "${FORK}" == "true" ]]; then
+            echo "::error::Adding release images needs a same-repository PR so the release publisher can test push access."
+            exit 1
+          fi
+      - name: Ask the release publisher to push placeholders
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CI_DISPATCH_TOKEN }}
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          IMAGES: ${{ steps.images.outputs.images }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          jq -n --argjson images "${IMAGES}" '{
+            event_type: "release-package-access",
+            client_payload: {
+              sha: env.SHA,
+              images: $images,
+              run_id: env.GITHUB_RUN_ID,
+              run_attempt: env.GITHUB_RUN_ATTEMPT
+            }
+          }' | gh api --method POST "repos/${DISPATCH_REPO}/dispatches" --input -
+      - name: Wait for the release publisher
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          STATUS_CONTEXT: release-package-bootstrap/${{ github.run_id }}/${{ github.run_attempt }}
+        run: |
+          for _ in $(seq 40); do
+            result="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/status?per_page=100" \
+              --jq '.statuses[] | select(.context == env.STATUS_CONTEXT) | "\(.state) \(.target_url)"')"
+            case "${result%% *}" in
+              success) echo "Placeholders pushed: ${result#* }"; exit 0 ;;
+              failure | error) echo "::error::The release publisher could not push the placeholders: ${result#* }"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::Timed out waiting for commit status ${STATUS_CONTEXT}. Rerun this job."
+          exit 1
+      - name: Check the new packages are public
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          IMAGES: ${{ steps.images.outputs.images }}
+        run: |
+          rc=0
+          for id in $(jq -r '.[]' <<< "${IMAGES}"); do
+            repo="nvidia-nemo/nemo-helix/${id}"
+            if token="$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -er .token)" &&
+              curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/${repo}/tags/list"; then
+              echo "ghcr.io/${repo} is public"
+            else
+              echo "::error::ghcr.io/${repo} is not public. An org admin must make the package public and give the release publisher write access under Manage Actions access, then rerun this job."
+              rc=1
+            fi
+          done
+          exit "${rc}"
 
   actionlint:
     name: Run actionlint
@@ -1973,6 +2063,7 @@ jobs:
     name: CI status
     needs:
       - changes
+      - release-package-access
       - actionlint
       - uv-lock
       - docker-bake-graph
