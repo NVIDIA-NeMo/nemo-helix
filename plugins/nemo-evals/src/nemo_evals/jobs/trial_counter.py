@@ -18,7 +18,7 @@ from nemo_evals.taskset_runs.trials import (
     TrialProgress,
     count_trials,
 )
-from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX
+from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX, NG_TASK_INDEX
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import rollout_failure
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
 
@@ -107,9 +107,10 @@ class GymTrialCounter(_CountReporter):
         self._reward_key = reward_key
 
     async def finished(self, records: Sequence[Mapping[str, Any]]) -> None:
+        attributed = [record for record in records if _task_index(record) is not None]
         self._add(
-            [self._trial(record) for record in records],
-            settled=sum(1 for record in records if not record.get(NG_ATTEMPT_INDEX)),
+            [self._trial(record) for record in attributed],
+            settled=sum(1 for record in attributed if not record.get(NG_ATTEMPT_INDEX)),
         )
 
     def _trial(self, record: Mapping[str, Any]) -> TrialProgress:
@@ -125,6 +126,12 @@ def _progress_of(trial: AgentEvalTrial) -> TrialProgress:
             trial=trial.id, phase=TrialPhase.ERRORED, error_type=trial.error.type if trial.error else None
         )
     return TrialProgress(trial=trial.id, phase=TrialPhase.SUCCEEDED)
+
+
+def _task_index(record: Mapping[str, Any]) -> int | None:
+    """The record's task index; None when Gym wrote none it can be attributed by, as the final evaluation skips it."""
+    index = record.get(NG_TASK_INDEX)
+    return index if isinstance(index, int) and not isinstance(index, bool) else None
 
 
 def _reward(value: object) -> float | None:

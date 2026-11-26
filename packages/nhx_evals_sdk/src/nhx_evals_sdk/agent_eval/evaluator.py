@@ -430,10 +430,12 @@ class AgentEvaluator:
                 await tell(self.progress.planned(len(tasks)))
             return await asyncio.gather(*(generate_reporting(index, task) for index, task in enumerate(tasks)))
         finally:
-            if self.progress is not None:
-                await tell(self.progress.stopped())
-            if close_client is not None:
-                await close_client()
+            try:
+                if close_client is not None:
+                    await close_client()
+            finally:
+                if self.progress is not None:
+                    await tell(self.progress.stopped())
 
 
 def _trials_by_task(

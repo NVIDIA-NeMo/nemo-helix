@@ -336,12 +336,14 @@ class FabricAgentRuntime:
                 await tell(self._progress.planned(len(tasks)))
             return await asyncio.gather(*(run_one(index, task) for index, task in enumerate(tasks)))
         finally:
-            if self._progress is not None:
-                await tell(self._progress.stopped())
-            if self._sandbox is not None:
-                # Each sandbox tears itself down; the provider is shared across the batch, so its
-                # process-wide resources are disposed once here, even when setup itself raised.
-                await self._sandbox.aclose()
+            try:
+                if self._sandbox is not None:
+                    # Each sandbox tears itself down; the provider is shared across the batch, so its
+                    # process-wide resources are disposed once here, even when setup itself raised.
+                    await self._sandbox.aclose()
+            finally:
+                if self._progress is not None:
+                    await tell(self._progress.stopped())
 
     def _open_host(self) -> tuple[Fabric, FabricConfig]:
         try:

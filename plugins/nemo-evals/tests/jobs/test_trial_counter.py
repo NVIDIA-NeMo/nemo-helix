@@ -232,3 +232,13 @@ async def test_a_runner_trial_fails_when_it_reports_an_error_or_failed_status_li
 
     await counter.stopped()
     assert (await reports.last())["phases"] == {"succeeded": 1, "errored": 2, "cancelled": 1}
+
+
+async def test_a_gym_record_without_a_task_index_is_not_counted_as_the_final_evaluation_skips_it() -> None:
+    reports = Reports()
+    counter = GymTrialCounter(reports, reward_key="reward")
+    await counter.planned(1)
+
+    await counter.finished([{"reward": 1.0}, {NG_TASK_INDEX: True, "reward": 1.0}, _rollout(0, 0, reward=1.0)])
+
+    assert (await reports.last())["phases"] == {"succeeded": 1}
