@@ -83,7 +83,7 @@ async def test_a_progress_callback_that_raises_never_fails_the_report(
     with caplog.at_level(logging.WARNING):
         await RolloutFileFollower([rollouts], FailingProgress()).report_new()
 
-    assert "Could not report Gym rollout progress" in caplog.text
+    assert "Could not report trial progress" in caplog.text
 
 
 async def test_collection_reports_rollouts_while_gym_is_still_running(tmp_path: Path) -> None:

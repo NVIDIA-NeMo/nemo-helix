@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 import nhx_evals_sdk.inference as inference
+from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, tell
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
 from nhx_evals_sdk.agent_eval.scores import (
     AgentEvalDiagnostic,
@@ -122,6 +123,7 @@ class AgentEvaluator:
         agent_inference_fn_factory: None = None,
         client: AsyncOpenAI | httpx.AsyncClient | None = None,
         default_headers: dict[str, str] | None = None,
+        progress: TrialProgressListener | None = None,
     ) -> None: ...
 
     @overload
@@ -132,6 +134,7 @@ class AgentEvaluator:
         agent_inference_fn_factory: AgentInferenceFnFactory,
         client: AsyncOpenAI | httpx.AsyncClient | None = None,
         default_headers: dict[str, str] | None = None,
+        progress: TrialProgressListener | None = None,
     ) -> None: ...
 
     def __init__(
@@ -141,6 +144,7 @@ class AgentEvaluator:
         agent_inference_fn_factory: AgentInferenceFnFactory | None = None,
         client: AsyncOpenAI | httpx.AsyncClient | None = None,
         default_headers: dict[str, str] | None = None,
+        progress: TrialProgressListener | None = None,
     ) -> None:
         """Configure runtime dependencies for live target generation.
 
@@ -153,6 +157,8 @@ class AgentEvaluator:
             client: Optional transport client matching the target type: ``AsyncOpenAI`` for
                 models or ``httpx.AsyncClient`` for agents.
             default_headers: Additional HTTP headers forwarded to live inference requests.
+            progress: Told how many trials a model or agent target will produce, then each as it finishes.
+                A runner target reports its own progress.
         """
         if inference_fn is not None and agent_inference_fn_factory is not None:
             raise ValueError("provide either inference_fn or agent_inference_fn_factory, not both")
@@ -160,6 +166,7 @@ class AgentEvaluator:
         self.agent_inference_fn_factory = agent_inference_fn_factory
         self.client = client
         self.default_headers = default_headers
+        self.progress = progress
 
     async def run(
         self,
@@ -413,8 +420,18 @@ class AgentEvaluator:
                             raise
                     return _trial_from_sample(task, target, sample, runtime_sec=target_runtime.seconds)
 
-            return await asyncio.gather(*(generate_one(index, task) for index, task in enumerate(tasks)))
+            async def generate_reporting(index: int, task: AgentEvalTask) -> AgentEvalTrial:
+                trial = await generate_one(index, task)
+                if self.progress is not None:
+                    await tell(self.progress.finished([trial]))
+                return trial
+
+            if self.progress is not None:
+                await tell(self.progress.planned(len(tasks)))
+            return await asyncio.gather(*(generate_reporting(index, task) for index, task in enumerate(tasks)))
         finally:
+            if self.progress is not None:
+                await tell(self.progress.stopped())
             if close_client is not None:
                 await close_client()
 

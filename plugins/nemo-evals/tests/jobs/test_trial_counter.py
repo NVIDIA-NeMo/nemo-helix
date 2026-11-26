@@ -9,8 +9,8 @@ import logging
 from typing import Any
 
 import pytest
-from nemo_evals.jobs.gym_progress import GymTrialCounter
 from nemo_evals.jobs.gym_sandbox import collect_reporting
+from nemo_evals.jobs.trial_counter import GymTrialCounter, TrialCounter
 from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     NG_ATTEMPT_INDEX,
@@ -19,6 +19,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     NG_TASK_INDEX,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import AGENT_NEVER_RAN_ERROR_TYPE
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialError
 
 
 class Reports:
@@ -196,3 +197,38 @@ async def test_sandboxed_collection_without_progress_calls_collect_as_before() -
         return batch
 
     assert await collect_reporting(arun_rollouts, [{"n": 1}], progress=None) == [{"n": 1}]
+
+
+def _trial(task_id: str, status: AgentEvalTrialStatus, error: TrialError | None = None) -> AgentEvalTrial:
+    return AgentEvalTrial(
+        id=f"{task_id}:trial",
+        task_id=task_id,
+        status=status,
+        output=AgentOutput(output_text="ok") if status is AgentEvalTrialStatus.COMPLETED else None,
+        error=error,
+    )
+
+
+async def test_a_runner_trial_fails_when_it_reports_an_error_or_failed_status_like_the_final_outcome() -> None:
+    reports = Reports()
+    counter = TrialCounter(reports)
+    await counter.planned(4)
+
+    await counter.finished(
+        [
+            _trial("a", AgentEvalTrialStatus.COMPLETED),
+            _trial("b", AgentEvalTrialStatus.FAILED),
+            _trial("c", AgentEvalTrialStatus.PARTIAL, TrialError(type="AgentTimeoutError", message="slow")),
+        ]
+    )
+
+    assert await reports.last() == {
+        "total": 4,
+        "phases": {"succeeded": 1, "errored": 2, "pending": 1},
+        "rewarded": 0,
+        "reward": None,
+        "errors": {"error": 1, "AgentTimeoutError": 1},
+    }
+
+    await counter.stopped()
+    assert (await reports.last())["phases"] == {"succeeded": 1, "errored": 2, "cancelled": 1}

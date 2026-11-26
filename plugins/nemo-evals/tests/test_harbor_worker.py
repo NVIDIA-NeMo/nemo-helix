@@ -167,7 +167,7 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(
     )
     evaluator = MagicMock()
     job_type = AgentEvalJob if transport == "sync" else AsyncAgentEvalJob
-    monkeypatch.setattr(job_type, "_build_evaluator", lambda *args: evaluator)
+    monkeypatch.setattr(job_type, "_build_evaluator", lambda *args, **kwargs: evaluator)
     # Stop after the public run boundary; persistence is covered by the existing worker tests.
     evaluator.run_sync.side_effect = RuntimeError("captured public evaluator")
     with pytest.raises(RuntimeError, match="captured public evaluator"):

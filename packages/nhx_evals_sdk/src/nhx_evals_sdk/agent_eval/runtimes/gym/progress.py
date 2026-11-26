@@ -13,9 +13,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
+
+from nhx_evals_sdk.agent_eval.progress import tell
 
 logger = logging.getLogger(__name__)
 
@@ -26,25 +28,17 @@ FOLLOW_INTERVAL_S = 5.0
 class RolloutProgress(Protocol):
     """Receives a Gym run's rollout count, then each rollout record as it finishes."""
 
-    async def planned(self, rollouts: int) -> None:
+    async def planned(self, rollouts: int, /) -> None:
         """The run will collect ``rollouts`` rollouts: tasks times repeats."""
         ...
 
-    async def finished(self, records: Sequence[Mapping[str, Any]]) -> None:
+    async def finished(self, records: Sequence[Mapping[str, Any]], /) -> None:
         """``records`` finished since the last call, each as Gym recorded it, failures included."""
         ...
 
     async def stopped(self) -> None:
         """Collection ended, finished or not: a rollout not reported by now never will be."""
         ...
-
-
-async def tell(update: Awaitable[None]) -> None:
-    """Await a progress callback, logging rather than raising when it fails."""
-    try:
-        await update
-    except Exception:
-        logger.warning("Could not report Gym rollout progress", exc_info=True)
 
 
 class RolloutFileFollower:

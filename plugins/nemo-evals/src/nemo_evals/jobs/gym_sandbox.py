@@ -44,7 +44,8 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 )
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
-from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress, tell
+from nhx_evals_sdk.agent_eval.progress import tell
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field

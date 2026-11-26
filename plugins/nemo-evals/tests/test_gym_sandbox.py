@@ -1451,7 +1451,7 @@ async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_return
     import json
 
     import sandboxed_gym
-    from nemo_evals.jobs.gym_progress import GymTrialCounter
+    from nemo_evals.jobs.trial_counter import GymTrialCounter
     from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY
     from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
     from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks

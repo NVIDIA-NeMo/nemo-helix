@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from nhx_evals_sdk.agent_eval.progress import tell
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
     GymRuntimeConfig,
     model_call_capture_dir,
@@ -40,7 +41,6 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.progress import (
     FOLLOW_INTERVAL_S,
     RolloutFileFollower,
     RolloutProgress,
-    tell,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import ENV_LOG_NAME
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (

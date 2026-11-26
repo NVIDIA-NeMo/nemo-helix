@@ -55,7 +55,6 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, TASKS_FROM_ATTEMPT, TASKS_FROM_KEY, frozen_tasks_digest
 from nemo_evals.jobs.gateway_models import TrialRoute
-from nemo_evals.jobs.gym_progress import GymTrialCounter
 from nemo_evals.jobs.gym_sandbox import (
     GYM_SANDBOX_PLAN_ENVVAR,
     SandboxPlan,
@@ -68,6 +67,7 @@ from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, SecretEnvError
+from nemo_evals.jobs.trial_counter import GymTrialCounter, TrialCounter
 from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
@@ -1393,12 +1393,13 @@ def test_build_evaluator_without_identity_headers_forwards_no_headers() -> None:
     assert AgentEvalJob._build_evaluator(sdk, target).default_headers is None
 
 
-def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
-    """Swap in a fake ``AgentEvaluator`` that records the headers ``_build_evaluator`` computed."""
-    captured: dict[str, dict[str, str] | None] = {}
+def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, Any]:
+    """Swap in a fake ``AgentEvaluator`` that records the headers and progress ``_build_evaluator`` passed."""
+    captured: dict[str, Any] = {}
 
-    def _factory(*, default_headers: dict[str, str] | None = None) -> _FakeEvaluator:
+    def _factory(*, default_headers: dict[str, str] | None = None, progress: object = None) -> _FakeEvaluator:
         captured["default_headers"] = default_headers
+        captured["progress"] = progress
         return _FakeEvaluator()
 
     mocker.patch("nemo_evals.jobs.agent_evaluate.AgentEvaluator", _factory)
@@ -1471,6 +1472,18 @@ def test_run_sends_no_identity_to_a_third_party_target_via_typed_async_client(
 
     assert result["status"] == "completed"
     assert captured["default_headers"] is None
+    assert isinstance(captured["progress"], TrialCounter)
+
+
+def test_a_fabric_job_counts_its_trials_as_each_task_finishes(tmp_path: Path) -> None:
+    progress = TrialCounter(AsyncMock())
+
+    runtime, _, _ = AgentEvalJob._resolve_target(
+        _runner_target("openai/gpt-5.4"), _job_context(tmp_path), fabric_progress=progress
+    )
+
+    assert isinstance(runtime, FabricAgentRuntime)
+    assert runtime._progress is progress
 
 
 def test_input_spec_accepts_stored_metric_reference() -> None:
