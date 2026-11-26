@@ -164,9 +164,9 @@ brew install colima docker && colima start          # or Docker Desktop
 
 # Use the native installer — `uv tool install openshell` gives you the CLI
 # without the gateway service, and the war-game needs the gateway. Pinned to a
-# release tag so the script can't change under you; matches the openshell>=0.1.2
-# the deployments plugin requires.
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | sh
+# release tag so the script can't change under you; Agent Hardener refuses
+# anything older than 0.1.6, the openshell>=0.1.6 the rest of Helix requires.
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.6/install.sh | OPENSHELL_VERSION=v0.1.6 sh
 openshell status                                     # expect "Status: Connected"
 ```
 
