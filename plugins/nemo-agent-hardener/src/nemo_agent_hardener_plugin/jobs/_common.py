@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 from subprocess import run
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from nemo_agent_hardener_plugin.config import (
     GARAK_PYTHON_ENVVAR,
@@ -280,38 +280,49 @@ def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -
     the guardrail judge (AGENT_HARDENER_SAFETY_API_KEY).
     """
     env: dict[str, str] = {}
-    for choice, model_envvars, base_url_envvars, key_envvar in _model_groups(models):
-        _apply_group(env, choice, model_envvars, base_url_envvars, key_envvar, sdk, workspace)
+    for group in _model_groups(models):
+        _apply_group(env, group.choice, group.model_envvars, group.base_url_envvars, group.key_envvar, sdk, workspace)
     return env
 
 
 def model_key_secrets(models: WarGameModels | None) -> dict[str, str]:
     """The ``key env var -> Secret name`` bindings :func:`build_model_env` makes for *models*."""
     return {
-        key_envvar: choice.api_key_secret
-        for choice, _, _, key_envvar in _model_groups(models)
-        if choice and choice.api_key_secret
+        group.key_envvar: group.choice.api_key_secret
+        for group in _model_groups(models)
+        if group.choice and group.choice.api_key_secret
     }
 
 
 def model_key_refs(models: WarGameModels | None) -> dict[str, str]:
     """Each group's chosen key Secret, labelled for messages (``"attack model key" -> secret``)."""
-    if models is None:
-        return {}
-    groups = (("attack", models.attack), ("analysis", models.analysis), ("safety", models.safety))
-    return {f"{label} model key": choice.api_key_secret for label, choice in groups if choice and choice.api_key_secret}
+    return {
+        f"{group.label} model key": group.choice.api_key_secret
+        for group in _model_groups(models)
+        if group.choice and group.choice.api_key_secret
+    }
 
 
-def _model_groups(
-    models: WarGameModels | None,
-) -> tuple[tuple[ModelChoice | None, tuple[str, ...], tuple[str, ...], str], ...]:
-    """Each model group with its ``(model, base_url, key)`` env vars; empty when nothing is selected."""
+class _ModelGroup(NamedTuple):
+    """One model group and the env vars its model, endpoint and key are bound to."""
+
+    label: str
+    choice: ModelChoice | None
+    model_envvars: tuple[str, ...]
+    base_url_envvars: tuple[str, ...]
+    key_envvar: str
+
+
+def _model_groups(models: WarGameModels | None) -> tuple[_ModelGroup, ...]:
+    """Each model group of *models*; empty when nothing is selected."""
     if models is None:
         return ()
     return (
-        (models.attack, _ATTACK_MODEL_ENVVARS, _ATTACK_BASE_URL_ENVVARS, _ATTACK_KEY_ENVVAR),
-        (models.analysis, (_ANALYSIS_MODEL_ENVVAR,), (_ANALYSIS_BASE_URL_ENVVAR,), _ANALYSIS_KEY_ENVVAR),
-        (models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR),
+        _ModelGroup("attack", models.attack, _ATTACK_MODEL_ENVVARS, _ATTACK_BASE_URL_ENVVARS, _ATTACK_KEY_ENVVAR),
+        _ModelGroup(
+            "analysis", models.analysis, (_ANALYSIS_MODEL_ENVVAR,), (_ANALYSIS_BASE_URL_ENVVAR,), _ANALYSIS_KEY_ENVVAR
+        ),
+        _ModelGroup("safety", models.safety, (), (_SAFETY_BASE_URL_ENVVAR,), _SAFETY_KEY_ENVVAR),
     )
 
 
