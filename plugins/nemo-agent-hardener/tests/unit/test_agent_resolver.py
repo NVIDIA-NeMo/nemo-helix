@@ -29,10 +29,12 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     detect_custom_components,
     gateway_backend,
     inject_gateway_url,
+    inspect_agent,
     materialize_agent_package,
     parse_agent_ref,
     parse_backends,
     parse_secret_specs,
+    require_fabric_agent,
     require_guardable_harness,
     resolve_agent_to_manifest,
     sandbox_reachable,
@@ -299,6 +301,27 @@ def test_resolve_missing_agent_raises(tmp_path):
         )
 
 
+@pytest.mark.parametrize("entry", ["resolve", "inspect"])
+def test_a_legacy_nat_agent_is_rejected_before_anything_is_built(tmp_path, entry):
+    """A NAT workflow registers and would resolve, then fail Fabric's AgentConfig when the victim starts."""
+    nat = {"config": {"workflow": {"_type": "react_agent"}, "llms": {}}, "config_format": "nat-workflow-v1"}
+    client = _client(nat)
+    with pytest.raises(AgentResolutionError, match="'nat-workflow-v1'.*--project-dir"):
+        if entry == "resolve":
+            resolve_agent_to_manifest(
+                "calc", client=client, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
+            )
+        else:
+            inspect_agent("calc", client=client, default_workspace="default")
+    assert not (tmp_path / ".agent-hardener-agents").exists()
+
+
+def test_an_agent_reporting_no_config_format_is_the_legacy_default() -> None:
+    with pytest.raises(AgentResolutionError, match="'nat-workflow-v1'"):
+        require_fabric_agent({"config": {"name": "x"}}, "ws/x")
+    require_fabric_agent(_agent(), "ws/x")  # the Fabric spec passes
+
+
 # --------------------------------------------------------------------------- platform telemetry
 
 
@@ -400,6 +423,13 @@ def test_the_manifest_carries_the_harness() -> None:
 
     assert manifest["agent"]["harness"] == "hermes"
     assert manifest["agent"]["env"] == {"EXAMPLE": "value"}
+
+
+def test_the_manifest_reads_traces_from_relay() -> None:
+    """The guardrails defender writes each rail from the attack's execution trace, which Relay records."""
+    manifest = build_manifest_dict(agent_name="a", project_dir=".", port=8000, secrets=[])
+
+    assert manifest["traces"] == {"provider": "relay"}
 
 
 @pytest.mark.parametrize("install_dir", ["/custom/python", None, "$PYTHON_ROOT"])

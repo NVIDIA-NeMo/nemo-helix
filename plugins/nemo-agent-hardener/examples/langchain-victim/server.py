@@ -25,9 +25,10 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import nemo_relay
+import openai
 import uvicorn
 from agent import build_agent
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from nemo_relay.plugin import PluginConfig
 from pydantic import BaseModel
 
@@ -77,7 +78,12 @@ def create_app() -> FastAPI:
         # One Relay agent scope per request, so the turn's LLM and tool events nest under one
         # root. The middleware inside the agent records the calls themselves.
         with nemo_relay.scope.scope("langchain-victim", nemo_relay.ScopeType.Agent):
-            result = await agent.ainvoke({"messages": [(m.role, m.content) for m in body.messages]})
+            try:
+                result = await agent.ainvoke({"messages": [(m.role, m.content) for m in body.messages]})
+            except openai.RateLimitError as exc:
+                # Pass the model's 429 through: garak backs off and resends on 429, where a 200
+                # carrying the error would be scored as the victim's reply (and likely as blocked).
+                raise HTTPException(status_code=429, detail=str(exc)) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",

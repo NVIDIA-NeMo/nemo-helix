@@ -20,7 +20,7 @@ class AgentHardenerCLI(NemoCLI):
     """Exposes plugin commands as ``nemo agent-hardener ...``."""
 
     name = "agent-hardener"
-    description = "Red-team and harden deployed NAT agents with Agent Hardener."
+    description = "Red-team and harden deployed agents with Agent Hardener."
 
     def get_cli(self) -> typer.Typer:
         app = typer.Typer(help=self.description, no_args_is_help=True, add_completion=False)

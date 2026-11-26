@@ -47,6 +47,11 @@
       "expected_skill": "nemo-agent-hardener"
     },
     {
+      "type": "contextual",
+      "prompt": "I have a fresh Linux VM with nothing installed. Set up NeMo Helix and run Agent Hardener on the example LangGraph agent.",
+      "expected_skill": "nemo-agent-hardener"
+    },
+    {
       "type": "negative-control",
       "prompt": "Restore last night's Postgres backup to the staging database.",
       "expected_skill_not": "nemo-agent-hardener"
