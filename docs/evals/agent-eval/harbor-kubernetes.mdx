@@ -636,7 +636,7 @@ A dry run checks a run the way submit does, then stops before accepting it. Send
 `?dry_run=true`:
 
 ```bash
-curl -X POST "$NHX_BASE_URL/apis/evals/v2/workspaces/$WS/agent-evaluate/runs?dry_run=true" \
+curl -X POST "${NHX_BASE_URL:-http://localhost:8080}/apis/evals/v2/workspaces/$WS/agent-evaluate/runs?dry_run=true" \
   -H "Content-Type: application/json" -d @openhands-run.json
 ```
 
