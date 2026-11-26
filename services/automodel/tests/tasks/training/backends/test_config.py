@@ -1419,31 +1419,15 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert loaded[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
 
 
-def test_max_pixels_reaches_the_vision_processor_as_size(tmp_path: Path) -> None:
+def test_processor_kwargs_reach_the_vision_processor(tmp_path: Path) -> None:
     rows = [{"prompt": "say hi", "completion": "hi"}]
     config = _vision_training_config(tmp_path, rows)
-    config.model.max_pixels = 2_621_440
+    config.model.processor_kwargs = {"min_num_patches": 256, "max_num_patches": 2304}
 
     compiled = _compile_vision(config, tmp_path)
 
-    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
-    assert compiled["processor"]["size"] == {"longest_edge": 2_621_440, "shortest_edge": 65_536}
-    assert "max_pixels" not in compiled["processor"]
-    config.model.max_seq_length = 4096
-    compiled = _compile_vision(config, tmp_path)
-    assert compiled["dataset"]["max_length"] == 4096
-    assert compiled["validation_dataset"]["max_length"] == 4096
-    assert compiled["processor"]["size"] == {"longest_edge": 2_621_440, "shortest_edge": 65_536}
-
-
-def test_max_pixels_is_absent_from_the_processor_when_unset(tmp_path: Path) -> None:
-    rows = [{"prompt": "say hi", "completion": "hi"}]
-    config = _vision_training_config(tmp_path, rows)
-
-    compiled = _compile_vision(config, tmp_path)
-
-    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
-    assert "max_pixels" not in compiled["processor"]
+    assert compiled["processor"]["max_num_patches"] == 2304
+    assert compiled["processor"]["min_num_patches"] == 256
     assert "size" not in compiled["processor"]
 
 

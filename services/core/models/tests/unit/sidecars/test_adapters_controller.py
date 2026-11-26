@@ -304,6 +304,33 @@ class TestDownloadAdapter:
         assert len(captured_paths) == 1
         assert os.path.basename(captured_paths[0]) == f".{dir_name}.tmp"
 
+    def test_staging_dir_is_outside_peft_source(self, controller, transfer_mock, tmp_path):
+        """NIM scans NIM_PEFT_SOURCE at startup, so a half-downloaded adapter must never sit inside it."""
+        peft_source = tmp_path / "loras"
+        peft_source.mkdir()
+        controller.nim_peft_source = str(peft_source)
+        adapter = _make_adapter("my-adapter", "ws-a/fs", updated_at=None, workspace="ws-a")
+        adapter_dir = str(peft_source / "ws-a--my-adapter")
+
+        seen_during_download: list[list[str]] = []
+        captured_paths: list[str] = []
+
+        def _download(_files, *, fileset, workspace, local_path):
+            captured_paths.append(local_path)
+            seen_during_download.append(os.listdir(peft_source))
+            open(os.path.join(local_path, "adapter_config.json"), "w").write("{}")
+
+        mock_files_response = MagicMock()
+        mock_files_response.data = [MagicMock()]
+        transfer_mock.list_files.return_value = mock_files_response
+        transfer_mock.download.side_effect = _download
+
+        assert controller._download_adapter(adapter_dir, adapter, "ws-a") is True
+
+        assert seen_during_download == [[]]
+        assert os.path.commonpath([captured_paths[0], str(peft_source)]) != str(peft_source)
+        assert os.listdir(peft_source) == ["ws-a--my-adapter"]
+
 
 class TestRewriteAdapterBaseModel:
     """Tests for the vLLM base_model_name_or_path rewrite on downloaded adapters."""

@@ -130,6 +130,7 @@ class AdaptersController(HeartbeatMixin, Controller):
         """Override to perform updates."""
 
         try:
+            shutil.rmtree(self._staging_dir, ignore_errors=True)
             dirs_to_keep: set[str] = set()
             self._update_lora_adapters(dirs_to_keep)
             self.emit_heartbeat()
@@ -245,10 +246,15 @@ class AdaptersController(HeartbeatMixin, Controller):
 
         return False
 
+    @property
+    def _staging_dir(self) -> str:
+        """Staging dir next to ``nim_peft_source`` so NIM's startup scan never sees a partial download."""
+        return os.path.join(os.path.dirname(os.path.normpath(self.nim_peft_source)), ".lora-staging")
+
     def _download_adapter(self, adapter_dir: str, adapter: Adapter, adapter_workspace: str) -> bool:
         """Download adapter fileset atomically using a temp directory + rename.
 
-        Downloads into a sibling temp directory inside nim_peft_source, then
+        Downloads into a sibling temp directory next to nim_peft_source, then
         swaps it into place with os.rename (atomic on the same filesystem).
         This prevents NIM from seeing a partially-downloaded or empty adapter
         directory during the swap. We use the same logic in files service in
@@ -282,7 +288,7 @@ class AdaptersController(HeartbeatMixin, Controller):
             fileset_workspace = parts[0]
             fileset_name = parts[1]
 
-        temp_dir = os.path.join(self.nim_peft_source, f".{os.path.basename(adapter_dir)}.tmp")
+        temp_dir = os.path.join(self._staging_dir, f".{os.path.basename(adapter_dir)}.tmp")
         os.makedirs(temp_dir, exist_ok=True)
         try:
             if self.download_fileset(temp_dir, fileset_workspace, fileset_name):

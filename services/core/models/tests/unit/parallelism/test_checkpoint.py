@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 
 import pytest
-from nhx.core.models.parallelism.checkpoint import inspect_checkpoint
+from nhx.core.models.parallelism.checkpoint import inspect_checkpoint, processor_config_keys
 
 
 def test_vision_tower_is_seen_on_the_root_and_on_a_nested_config() -> None:
@@ -94,3 +94,26 @@ def test_moe_detection_reads_a_nested_language_config() -> None:
 
     assert moe is not None
     assert moe.num_experts == 16
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        # Nemotron 3.5 Super VL processor_config.json nests the image processor and has no ``size``.
+        (
+            {
+                "processor_class": "NemotronOmniProcessor",
+                "image_processor": {"patch_size": 16, "min_num_patches": 1024, "max_num_patches": 13312},
+            },
+            ["max_num_patches", "min_num_patches", "patch_size", "processor_class"],
+        ),
+        # Qwen3-VL preprocessor_config.json is flat.
+        (
+            {"size": {"longest_edge": 16_777_216, "shortest_edge": 65_536}, "patch_size": 16},
+            ["patch_size", "size"],
+        ),
+        ({}, []),
+    ],
+)
+def test_processor_keys_come_from_the_flat_or_the_nested_image_processor(config: dict, expected: list) -> None:
+    assert processor_config_keys(config) == expected

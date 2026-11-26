@@ -400,6 +400,12 @@ class ModelSpec(BaseModel):
         description="Side length, in pixels, of one image token. Read from the checkpoint vision config as "
         "patch_size times the spatial merge. None when the checkpoint does not declare a patch size.",
     )
+    vision_processor_keys: list[str] | None = Field(
+        default=None,
+        description="Keys in the image processor's config file (processor_config.json or preprocessor_config.json). "
+        "A job's processor_arguments are checked against these. None for a text checkpoint, a checkpoint "
+        "without a processor config, or a spec registered before this field.",
+    )
     has_audio_tower: bool = Field(
         default=False,
         description="True when the checkpoint config contains an audio tower.",

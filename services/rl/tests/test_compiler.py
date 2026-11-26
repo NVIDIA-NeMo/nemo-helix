@@ -1144,3 +1144,20 @@ async def test_dpo_does_not_look_up_an_adapter(
     await platform_job_config_compiler("default", _make_job_output(), platform_clients)
 
     _adapter_lookup(platform_clients).assert_not_awaited()
+
+
+def test_grpo_rejects_a_processor_argument_the_processor_does_not_read(sandbox_capable: None) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.customization_common.schemas.checkpoint import traits_from_model_spec
+
+    spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        vision_processor_keys=["patch_size", "min_num_patches", "max_num_patches"],
+        head_type="causal_lm",
+    )
+    job = _make_job_output(
+        GRPOTraining(type="grpo", processor_arguments={"size": {"longest_edge": 1}}), environment="default/env"
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="not read by this model's processor"):
+        _build_training_step_config(job, trust_remote_code=False, traits=traits_from_model_spec(spec))

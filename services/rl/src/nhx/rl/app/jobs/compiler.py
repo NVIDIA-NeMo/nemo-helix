@@ -47,11 +47,11 @@ from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity, M
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nhx.customization_common.image_size import check_seq_length_fits_image
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
 )
+from nhx.customization_common.processor_arguments import check_processor_arguments
 from nhx.customization_common.schemas.checkpoint import (
     CheckpointTraits,
     reject_incompatible_checkpoint,
@@ -487,27 +487,20 @@ def _build_grpo_training_step_config(
         )
 
     recorded = traits or CheckpointTraits()
-    image_size = t.image_size
-    if (t.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
-        raise HelixJobCompilationError("max_pixels and image_size apply only to vision-language checkpoints.")
-    try:
-        check_seq_length_fits_image(
-            t.max_seq_length,
-            t.max_pixels,
-            None if image_size is None else image_size.longest_edge,
-            recorded.vision_patch_size,
-        )
-    except ValueError as exc:
-        raise HelixJobCompilationError(str(exc)) from exc
+    if t.processor_arguments:
+        if not recorded.has_vision_tower:
+            raise HelixJobCompilationError("processor_arguments applies only to vision-language checkpoints.")
+        try:
+            check_processor_arguments(t.processor_arguments, recorded.vision_processor_keys)
+        except ValueError as exc:
+            raise HelixJobCompilationError(str(exc)) from exc
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
         model=ModelConfig(
             path=DEFAULT_MODEL_PATH,
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
-            max_pixels=t.max_pixels,
-            image_longest_edge=None if image_size is None else image_size.longest_edge,
-            image_shortest_edge=None if image_size is None else image_size.shortest_edge,
+            processor_kwargs=t.processor_arguments,
             trust_remote_code=trust_remote_code,
             has_vision_tower=recorded.has_vision_tower,
             has_audio_tower=recorded.has_audio_tower,

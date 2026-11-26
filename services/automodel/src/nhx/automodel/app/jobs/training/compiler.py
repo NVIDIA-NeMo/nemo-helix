@@ -43,11 +43,11 @@ from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
 from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.model_utils import is_embedding_model
-from nhx.customization_common.image_size import check_seq_length_fits_image
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
 )
+from nhx.customization_common.processor_arguments import check_processor_arguments
 from nhx.customization_common.schemas.checkpoint import (
     CheckpointTraits,
     reject_incompatible_checkpoint,
@@ -183,7 +183,7 @@ def compile_training_step(
             enforce_text_moe_expert_parallel=uses_custom_automodel_impl(traits.checkpoint_model_name),
         )
         _reject_inapplicable_options(training, training_recipe, has_vision_tower=traits.has_vision_tower)
-        _reject_sequence_shorter_than_image(training, traits)
+        _check_processor_arguments(training, traits)
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc
 
@@ -313,16 +313,11 @@ def _translate_model_config(
     """Translate job spec to internal ModelConfig."""
     training = job_spec.training
     recorded = traits or CheckpointTraits()
-    image_size = training.image_size
-    if (training.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
-        raise ValueError("max_pixels and image_size apply only to vision-language checkpoints.")
     return ModelConfig(
         path=path,
         name=_extract_model_name(job_spec),
         max_seq_length=training.max_seq_length,
-        max_pixels=training.max_pixels,
-        image_longest_edge=None if image_size is None else image_size.longest_edge,
-        image_shortest_edge=None if image_size is None else image_size.shortest_edge,
+        processor_kwargs=getattr(training, "processor_arguments", None),
         precision=training.precision,
         attn_implementation=training.attn_implementation,
         tokenizer_backend=training.tokenizer_backend,
@@ -381,15 +376,14 @@ def _translate_training_config(
     )
 
 
-def _reject_sequence_shorter_than_image(training: AnyTraining, traits: CheckpointTraits) -> None:
-    """A pixel ceiling that does not fit in max_seq_length would drop the example."""
-    image_size = getattr(training, "image_size", None)
-    check_seq_length_fits_image(
-        training.max_seq_length,
-        getattr(training, "max_pixels", None),
-        None if image_size is None else image_size.longest_edge,
-        traits.vision_patch_size,
-    )
+def _check_processor_arguments(training: AnyTraining, traits: CheckpointTraits) -> None:
+    """Reject processor arguments the model's processor would ignore."""
+    arguments = getattr(training, "processor_arguments", None)
+    if not arguments:
+        return
+    if not traits.has_vision_tower:
+        raise ValueError("processor_arguments applies only to vision-language models.")
+    check_processor_arguments(arguments, traits.vision_processor_keys)
 
 
 def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, *, has_vision_tower: bool) -> None:
