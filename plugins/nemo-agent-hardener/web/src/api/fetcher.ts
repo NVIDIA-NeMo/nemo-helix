@@ -14,7 +14,7 @@ import axios, {
   type AxiosError,
   type AxiosRequestConfig,
   type AxiosResponse,
-} from 'axios';
+} from "axios";
 
 interface RequestOptions extends AxiosRequestConfig {
   params?: Record<string, string | number | boolean | object | unknown>;
@@ -33,7 +33,8 @@ export const configureClient = (next: ClientConfig): void => {
 };
 
 /** Absolute URL for a plugin-owned endpoint not covered by the generated client. */
-export const apiUrl = (path: string): string => `${config?.baseUrl ?? ''}${path}`;
+export const apiUrl = (path: string): string =>
+  `${config?.baseUrl ?? ""}${path}`;
 
 /** Current configured platform bearer, for callers that build their own request. */
 export const authHeader = (): Record<string, string> => {
@@ -41,12 +42,14 @@ export const authHeader = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-export const customFetch = async <TData>(request: RequestOptions): Promise<TData> => {
+export const customFetch = async <TData>(
+  request: RequestOptions,
+): Promise<TData> => {
   const response: AxiosResponse<TData> = await axios({
     ...request,
-    url: apiUrl(request.url ?? ''),
+    url: apiUrl(request.url ?? ""),
     headers: {
-      'X-Source': 'NeMo Studio',
+      "X-Source": "NeMo Studio",
       ...authHeader(),
       ...request.headers,
     },

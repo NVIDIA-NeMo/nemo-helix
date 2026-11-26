@@ -3,6 +3,20 @@
 
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 
+/** The registered agent a generic endpoint calls, read from the platform route it targets. Its
+ *  `name` is only a display label, so the URL is what identifies the agent. */
+const AGENT_ENDPOINT_PATH = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/agents\/([^/]+)\/-\//;
+
+const agentFromEndpointUrl = (url: unknown): string | null => {
+  if (typeof url !== 'string') return null;
+  try {
+    const match = AGENT_ENDPOINT_PATH.exec(new URL(url).pathname);
+    return match ? `${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}` : null;
+  } catch {
+    return null;
+  }
+};
+
 /** Resolve only targets that identify a registered agent, never a runner's display name.
  * Registered source AgentRefs serialize as strings, not objects with a `name` field. */
 export const agentIdentityForTarget = (target: unknown, workspace?: string): string | null => {
@@ -15,6 +29,8 @@ export const agentIdentityForTarget = (target: unknown, workspace?: string): str
     isPlainObject(target.source)
   ) {
     name = target.source.agent;
+  } else if (target.format === 'generic') {
+    name = agentFromEndpointUrl(target.url);
   }
   if (typeof name !== 'string' || name.trim().length === 0) return null;
   return name.includes('/') || !workspace ? name : `${workspace}/${name}`;

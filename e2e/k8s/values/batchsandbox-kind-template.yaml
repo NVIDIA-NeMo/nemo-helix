@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# BatchSandbox template for kind (install_opensandbox_kind.sh). Same ConfigMap name as
-# k8s/helm/examples/opensandbox/batchsandbox-template.yaml. Sized for a 4-CPU runner: task sandboxes ask for 1 CPU.
+# BatchSandbox template for taskset runs on kind (nightly-taskset-runs-e2e: install_opensandbox_minikube.sh with
+# KUBE_CONTEXT=kind-<name> and BATCHSANDBOX_TEMPLATE set to this file). The sandboxed Gym lane uses
+# batchsandbox-kind-gym-template.yaml. Same ConfigMap name as k8s/helm/examples/opensandbox/batchsandbox-template.yaml.
+# Sized for a 4-CPU runner: task sandboxes ask for 1 CPU.
 apiVersion: v1
 kind: ConfigMap
 metadata:

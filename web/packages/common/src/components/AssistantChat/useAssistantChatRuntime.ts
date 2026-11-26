@@ -14,10 +14,7 @@ import {
   getReasoningDelta,
   getUsageCompletionTokens,
 } from '@nemo/common/src/components/AssistantChat/completionMetrics';
-import {
-  appendCompletionDeltaParts,
-  getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionSections';
+import { appendCompletionDeltaParts } from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   getCompletionImages,
   getCompletionText,
@@ -27,7 +24,11 @@ import {
 import {
   CANCELLED_STATUS,
   COMPLETE_STATUS,
+  CONTENT_FILTERED_STATUS,
+  EMPTY_REPLY_STATUS,
+  ENDED_EARLY_STATUS,
   RUNNING_STATUS,
+  TRUNCATED_STATUS,
 } from '@nemo/common/src/components/AssistantChat/constants';
 import {
   appendMessageToThreadMessage,
@@ -37,7 +38,6 @@ import {
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
-import { groupConsecutiveAssistantSubtleToolCalls } from '@nemo/common/src/components/AssistantChat/toolParts';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -48,14 +48,32 @@ type ImagePart = { type: 'image'; image: string };
 
 const getMessageContent = (
   parts: readonly ThreadAssistantMessagePart[],
-  images: readonly ImagePart[],
-  status: MessageStatus
-): ThreadMessageLike['content'] => {
-  const content =
-    status.type === 'complete'
-      ? getWorkDetailsMessageParts(parts)
-      : groupConsecutiveAssistantSubtleToolCalls(parts);
-  return [...(content.length ? content : [{ type: 'text' as const, text: '' }]), ...images];
+  images: readonly ImagePart[]
+): ThreadMessageLike['content'] => [
+  ...(parts.length ? parts : [{ type: 'text' as const, text: '' }]),
+  ...images,
+];
+
+/** Reasoning alone isn't an answer: a reply needs text, a tool call, or an image. */
+const hasAnswer = (
+  parts: readonly ThreadAssistantMessagePart[],
+  images: readonly ImagePart[]
+): boolean =>
+  images.length > 0 ||
+  parts.some((part) => part.type === 'tool-call' || (part.type === 'text' && part.text.trim()));
+
+const getFinishedStatus = (
+  aborted: boolean,
+  finishReason: string | null | undefined,
+  answered: boolean
+): MessageStatus => {
+  if (aborted) return CANCELLED_STATUS;
+  if (finishReason === 'length') return TRUNCATED_STATUS;
+  if (finishReason === 'content_filter') return CONTENT_FILTERED_STATUS;
+  // OpenAI-compatible servers always close with a finish_reason; without one the stream was cut.
+  if (!finishReason) return ENDED_EARLY_STATUS;
+  if (!answered) return EMPTY_REPLY_STATUS;
+  return COMPLETE_STATUS;
 };
 
 type UseAssistantChatRuntimeOptions = Pick<
@@ -115,7 +133,7 @@ export const useAssistantChatRuntime = ({
       setThreadMessages(
         messagesRef.current.map((message) =>
           message.id === assistantMessageId
-            ? { ...message, content: getMessageContent(parts, images, status), status }
+            ? { ...message, content: getMessageContent(parts, images), status }
             : message
         )
       );
@@ -150,6 +168,7 @@ export const useAssistantChatRuntime = ({
       let generatedChunkCount = 0;
       let reasoningChars = 0;
       let usageTokens: number | undefined;
+      let finishReason: string | null | undefined;
 
       try {
         const result = await createChatCompletion({
@@ -185,6 +204,7 @@ export const useAssistantChatRuntime = ({
             if (runController.signal.aborted || !isCurrentRun()) break;
             responseModel ??= chunk.model || undefined;
             usageTokens = getUsageCompletionTokens(chunk) ?? usageTokens;
+            finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
             const delta = chunk.choices[0]?.delta.content ?? '';
             const reasoningDelta = getReasoningDelta(chunk);
             const toolCalls = chunk.choices[0]?.delta.tool_calls ?? [];
@@ -216,7 +236,11 @@ export const useAssistantChatRuntime = ({
             assistantMessage.id!,
             responseParts,
             responseImages,
-            runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS
+            getFinishedStatus(
+              runController.signal.aborted,
+              finishReason,
+              hasAnswer(responseParts, responseImages)
+            )
           );
           if (!runController.signal.aborted && onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);
@@ -240,17 +264,19 @@ export const useAssistantChatRuntime = ({
           }
         } else {
           const text = getCompletionText(result);
+          const parts = appendCompletionDeltaParts([], {
+            text,
+            toolCalls: result.choices[0]?.message.tool_calls?.map((toolCall, index) => ({
+              ...toolCall,
+              index,
+            })),
+          });
+          const images = getCompletionImages(result);
           updateAssistantMessage(
             assistantMessage.id!,
-            appendCompletionDeltaParts([], {
-              text,
-              toolCalls: result.choices[0]?.message.tool_calls?.map((toolCall, index) => ({
-                ...toolCall,
-                index,
-              })),
-            }),
-            getCompletionImages(result),
-            COMPLETE_STATUS
+            parts,
+            images,
+            getFinishedStatus(false, result.choices[0]?.finish_reason, hasAnswer(parts, images))
           );
           if (onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);

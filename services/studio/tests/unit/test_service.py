@@ -468,6 +468,22 @@ class TestStudioConfigEnvReplacements:
         assert replacements["STUDIO_UI_VITE_FF_EVALS_BENCHMARKS_ENABLED"] == expected
         assert not any("FF_EVALUATOR_" in marker for marker in replacements)
 
+    def test_default_model_env_reaches_the_runtime_marker(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: {})
+        monkeypatch.setenv("NEMO_DEFAULT_MODEL", "default/my-model")
+
+        assert StudioConfig().env_replacements["STUDIO_UI_VITE_DEFAULT_MODEL"] == "default/my-model"
+
+    def test_default_model_marker_is_empty_without_one(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: {})
+        monkeypatch.delenv("NEMO_DEFAULT_MODEL", raising=False)
+
+        assert StudioConfig().env_replacements["STUDIO_UI_VITE_DEFAULT_MODEL"] == ""
+
     def test_env_replacements_returns_dict(self):
         """Test that env_replacements returns a dict."""
         config = StudioConfig()

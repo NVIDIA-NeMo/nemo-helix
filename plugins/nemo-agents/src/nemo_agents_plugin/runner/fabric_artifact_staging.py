@@ -16,6 +16,7 @@ from shutil import rmtree
 from typing import Any
 
 import yaml
+from nemo_agents_plugin.agent_config import SkillsConfig
 from nemo_agents_plugin.entities import (
     AGENT_CONFIG_FILENAME,
     AGENT_SPEC_FILENAME,
@@ -356,7 +357,7 @@ def validate_referenced_skill_paths(
     agent_config: dict[str, Any],
     staged_paths: Collection[PurePosixPath],
 ) -> None:
-    """Ensure every ``skills.paths`` entry resolves to staged content.
+    """Ensure every configured skill source resolves to staged content.
 
     *staged_paths* holds the staged files relative to the agent base directory,
     so container ``config_files`` and an on-disk base directory validate against
@@ -365,17 +366,13 @@ def validate_referenced_skill_paths(
     skills = agent_config.get("skills")
     if not isinstance(skills, dict):
         return
-    paths = skills.get("paths")
-    if not isinstance(paths, list) or not paths:
-        return
-
-    for skill_path in paths:
-        if not isinstance(skill_path, str) or not skill_path:
+    for field, skill_path in SkillsConfig.model_validate(skills).configured_paths():
+        if not skill_path:
             continue
         rel = PurePosixPath(skill_path)
         if rel.is_absolute() or ".." in rel.parts:
             raise FabricArtifactStagingError(
-                f"Invalid skills.paths entry {skill_path!r}: must be a relative path under the agent base directory"
+                f"Invalid {field} entry {skill_path!r}: must be a relative path under the agent base directory"
             )
         # "." normalizes to zero parts — the agent root itself, which packaging accepts.
         rel_parts = tuple(part for part in rel.parts if part != ".")
@@ -385,5 +382,5 @@ def validate_referenced_skill_paths(
             matched = bool(staged_paths)
         if not matched:
             raise FabricArtifactStagingError(
-                f"Referenced skills.paths entry {skill_path!r} was not found in staged source fileset"
+                f"Referenced {field} entry {skill_path!r} was not found in staged source fileset"
             )

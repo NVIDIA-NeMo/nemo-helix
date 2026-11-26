@@ -2,15 +2,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Fabric 0.6 Upgrade and Adapter Support"
-description: "Agent migration, HTTP telemetry allowlisting and adapter installation."
+title: "Fabric 0.7 Upgrade and Adapter Support"
+description: "Agent migration, SDK compatibility, HTTP telemetry allowlisting and adapter installation."
 ---
 
-NeMo Helix 0.10 uses Fabric `0.6.0`, Relay `0.11.0`, and Harbor `0.24.0`.
+NeMo Helix uses Fabric `0.7.0`, Relay `0.11.0`, and Harbor `0.24.0`.
 
 Hermes remains on Relay `0.10` in an isolated Python 3.14 environment,
 using Fabric's tested Hermes revision. HTTP allowlisting is not yet supported
 for Hermes.
+
+## Fabric 0.7 SDK compatibility
+
+Custom integrations using `inspect_adapter()` must check the returned `issues`
+or pass `diagnostics=False` to retain exception-based rejection. Helix's Harbor
+preflight uses the latter. Invocation deadlines use error code `timeout` at
+stage `invoke`; startup and shutdown deadlines keep their own lifecycle stage.
 
 ## HTTP OTLP collectors in a cluster
 
@@ -43,7 +50,7 @@ telemetry and authentication headers unencrypted. Model-provider HTTP policy
 is separate.
 
 Rebuild and redeploy existing agent images with the upgraded Helix wheel
-to install Fabric `0.6.0` and Relay `0.11.0`. No manual Relay config edit is needed.
+to install Fabric `0.7.0` and Relay `0.11.0`. No manual Relay config edit is needed.
 
 ## Migrate agent registration
 
@@ -116,7 +123,7 @@ or Pi SDK. There is no `nemo-agents-plugin-pi` Python extra.
 
 For a Pi-selected config, [agent packaging](/documentation/agents/deploy-agents#build-and-publish-agent-images)
 installs Node 22 (Pi requires **Node >=22.19.0**),
-`nemo-fabric-adapters-pi@^0.6.0`, and the `pi-ai`, `pi-coding-agent`, `pi-mcp`
+`nemo-fabric-adapters-pi@^0.7.0`, and the `pi-ai`, `pi-coding-agent`, `pi-mcp`
 and `pi-codemode` SDK peers at `1.0.3` under `@earendil-works`. It links the npm descriptor into
 Fabric discovery and adds Relay CLI 0.11 plus the Relay 0.11.0 Pi extension at
 `/opt/pi-relay-extension`. Subprocess hosts must provision these themselves.

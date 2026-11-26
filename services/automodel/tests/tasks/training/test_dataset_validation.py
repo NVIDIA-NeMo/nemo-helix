@@ -31,14 +31,18 @@ def test_validate_dataset_accepts_embedding_rows(tmp_path: Path) -> None:
     DatasetValidator(training_type=TrainingType.SFT).validate_dataset(str(path))
 
 
-def test_validate_lines_names_the_source_and_line() -> None:
+@pytest.mark.parametrize(
+    "training_type",
+    [TrainingType.SFT, TrainingType.PARTIAL_SFT, TrainingType.DISTILLATION, TrainingType.PARTIAL_DISTILLATION],
+)
+def test_validate_lines_names_the_source_and_line(training_type: TrainingType) -> None:
     lines = [
         json.dumps({"prompt": "p", "completion": "c"}),
         "",
         json.dumps({"question": "no prompt or messages"}),
     ]
     with pytest.raises(DatasetFormatError, match=r"^default/data#train.jsonl line 3 does not conform"):
-        DatasetValidator(training_type=TrainingType.SFT).validate_lines(lines, "default/data#train.jsonl")
+        DatasetValidator(training_type=training_type).validate_lines(lines, "default/data#train.jsonl")
 
 
 def test_validate_lines_counts_validated_rows() -> None:

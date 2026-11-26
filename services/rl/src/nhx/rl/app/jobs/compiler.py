@@ -43,10 +43,11 @@ from nemo_helix_plugin.jobs.api_factory import (
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
-from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
+from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity, ModelSpec
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nhx.customization_common.image_size import check_seq_length_fits_image
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
@@ -459,6 +460,7 @@ def _build_grpo_training_step_config(
     *,
     trust_remote_code: bool,
     traits: CheckpointTraits | None = None,
+    tool_call_parser: str | None = None,
 ) -> TrainingStepConfig:
     """Map a GRPO spec onto the backend-agnostic step config."""
     t = job_spec.training
@@ -485,18 +487,34 @@ def _build_grpo_training_step_config(
         )
 
     recorded = traits or CheckpointTraits()
+    image_size = t.image_size
+    if (t.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
+        raise HelixJobCompilationError("max_pixels and image_size apply only to vision-language checkpoints.")
+    try:
+        check_seq_length_fits_image(
+            t.max_seq_length,
+            t.max_pixels,
+            None if image_size is None else image_size.longest_edge,
+            recorded.vision_patch_size,
+        )
+    except ValueError as exc:
+        raise HelixJobCompilationError(str(exc)) from exc
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
         model=ModelConfig(
             path=DEFAULT_MODEL_PATH,
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
+            max_pixels=t.max_pixels,
+            image_longest_edge=None if image_size is None else image_size.longest_edge,
+            image_shortest_edge=None if image_size is None else image_size.shortest_edge,
             trust_remote_code=trust_remote_code,
             has_vision_tower=recorded.has_vision_tower,
             has_audio_tower=recorded.has_audio_tower,
             num_experts=recorded.expert_count,
             num_nextn_predict_layers=recorded.num_nextn_predict_layers,
             checkpoint_model_name=recorded.checkpoint_model_name,
+            tool_call_parser=tool_call_parser,
         ),
         dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
         gym=TrainingStepConfig.GymConfig(
@@ -616,14 +634,37 @@ def _build_grpo_training_step_config(
     )
 
 
+def rollout_tool_call_parser(spec: ModelSpec | None) -> str | None:
+    """The tool call parser GRPO rollouts use: the one the model declares for serving.
+
+    A parser from a ``tool_call_plugin`` is skipped. Rollouts do not load the plugin, and
+    vLLM fails to start on a parser name it does not know.
+    """
+    config = spec.tool_call_config if spec is not None else None
+    if config is None or not config.tool_call_parser:
+        return None
+    if config.tool_call_plugin:
+        logger.warning(
+            "Model declares tool_call_parser %r from tool_call_plugin %r, which GRPO rollouts do not load; "
+            "rollouts run without a tool parser.",
+            config.tool_call_parser,
+            config.tool_call_plugin,
+        )
+        return None
+    return config.tool_call_parser
+
+
 def _build_training_step_config(
     job_spec: RlJobOutput,
     *,
     trust_remote_code: bool,
     traits: CheckpointTraits | None = None,
+    tool_call_parser: str | None = None,
 ) -> TrainingStepConfig:
     if job_spec.training_type == TrainingType.GRPO:
-        return _build_grpo_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
+        return _build_grpo_training_step_config(
+            job_spec, trust_remote_code=trust_remote_code, traits=traits, tool_call_parser=tool_call_parser
+        )
     return _build_dpo_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
 
 
@@ -634,6 +675,7 @@ def _build_training_step(
     trust_remote_code: bool,
     profile: str | None,
     traits: CheckpointTraits | None = None,
+    tool_call_parser: str | None = None,
 ) -> HelixJobStep:
     """Build the Ray DPO training step, selecting the executor by ``num_nodes``.
 
@@ -644,7 +686,9 @@ def _build_training_step(
     num_nodes = p.num_nodes
     num_gpus_per_node = p.num_gpus_per_node
 
-    step_config = _build_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
+    step_config = _build_training_step_config(
+        job_spec, trust_remote_code=trust_remote_code, traits=traits, tool_call_parser=tool_call_parser
+    )
     step_name = "grpo-training" if job_spec.training_type == TrainingType.GRPO else "dpo-training"
 
     container = ContainerSpec(
@@ -818,7 +862,14 @@ async def platform_job_config_compiler(
             FILE_IO_TASK_COMMAND,
             _build_download_config(job_spec, me, workspace=workspace),
         ),
-        _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile, traits=traits),
+        _build_training_step(
+            job_spec,
+            base_env,
+            trust_remote_code=trust_remote_code,
+            profile=profile,
+            traits=traits,
+            tool_call_parser=rollout_tool_call_parser(me.spec),
+        ),
         _cpu_task_step(
             "model-upload",
             FILE_IO_TASK_COMMAND,

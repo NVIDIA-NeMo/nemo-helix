@@ -44,6 +44,7 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
+      release-packages: ${{ steps.changes.outputs.release-packages }}
       post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
@@ -54,6 +55,7 @@ jobs:
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
+      automodel: ${{ steps.changes.outputs.automodel }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
       customizer-skill-references: ${{ steps.changes.outputs.customizer-skill-references }}
@@ -62,8 +64,14 @@ jobs:
       docker: ${{ steps.changes.outputs.docker }}
       helm: ${{ steps.changes.outputs.helm }}
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
+      cpu-api: ${{ steps.changes.outputs.cpu-api }}
+      cpu-tasks: ${{ steps.changes.outputs.cpu-tasks }}
+      cpu-build-tools: ${{ steps.changes.outputs.cpu-build-tools }}
+      cpu-gym-host: ${{ steps.changes.outputs.cpu-gym-host }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      go: ${{ steps.changes.outputs.go }}
+      go-modules: ${{ steps.go-modules.outputs.modules }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       nightly-taskset-runs-report: ${{ steps.changes.outputs.nightly-taskset-runs-report }}
@@ -76,6 +84,100 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/changes
         id: changes
+      - name: Discover Go modules
+        id: go-modules
+        run: |
+          go_modules=$(bash .github/scripts/go-modules.sh)
+          echo "modules=$go_modules" >> "$GITHUB_OUTPUT"
+
+  release-package-access:
+    name: Check new release packages
+    needs: [changes]
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.release-packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      # The PR merge commit's first parent is the base branch.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Find added release images
+        id: images
+        shell: bash
+        env:
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          ids() { yq -r '.env.RELEASE_CONTAINERS_JSON' | jq -c '[.[].id]'; }
+          base="$(git show HEAD^1:.github/workflows/release.yaml | ids)"
+          head="$(ids < .github/workflows/release.yaml)"
+          added="$(jq -cn --argjson base "${base}" --argjson head "${head}" '$head - $base')"
+          echo "images=${added}" >> "${GITHUB_OUTPUT}"
+          echo "Added release images: ${added}"
+          if [[ "${added}" != "[]" && "${FORK}" == "true" ]]; then
+            echo "::error::Adding release images needs a same-repository PR so the release publisher can test push access."
+            exit 1
+          fi
+      - name: Ask the release publisher to push placeholders
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CI_DISPATCH_TOKEN }}
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          IMAGES: ${{ steps.images.outputs.images }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          jq -n --argjson images "${IMAGES}" '{
+            event_type: "release-package-access",
+            client_payload: {
+              sha: env.SHA,
+              images: $images,
+              run_id: env.GITHUB_RUN_ID,
+              run_attempt: env.GITHUB_RUN_ATTEMPT
+            }
+          }' | gh api --method POST "repos/${DISPATCH_REPO}/dispatches" --input -
+      - name: Wait for the release publisher
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          STATUS_CONTEXT: release-package-bootstrap/${{ github.run_id }}/${{ github.run_attempt }}
+        run: |
+          for _ in $(seq 40); do
+            result="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/status?per_page=100" \
+              --jq '.statuses[] | select(.context == env.STATUS_CONTEXT) | "\(.state) \(.target_url)"')"
+            case "${result%% *}" in
+              success) echo "Placeholders pushed: ${result#* }"; exit 0 ;;
+              failure | error) echo "::error::The release publisher could not push the placeholders: ${result#* }"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::Timed out waiting for commit status ${STATUS_CONTEXT}. Rerun this job."
+          exit 1
+      - name: Check the new packages are public
+        if: steps.images.outputs.images != '[]'
+        shell: bash
+        env:
+          IMAGES: ${{ steps.images.outputs.images }}
+        run: |
+          rc=0
+          for id in $(jq -r '.[]' <<< "${IMAGES}"); do
+            repo="nvidia-nemo/nemo-helix/${id}"
+            if token="$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -er .token)" &&
+              curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/${repo}/tags/list"; then
+              echo "ghcr.io/${repo} is public"
+            else
+              echo "::error::ghcr.io/${repo} is not public. An org admin must make the package public and give the release publisher write access under Manage Actions access, then rerun this job."
+              rc=1
+            fi
+          done
+          exit "${rc}"
 
   actionlint:
     name: Run actionlint
@@ -154,6 +256,8 @@ jobs:
           enable-cache: false
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Run JUnit no-skips check unit tests
+        run: uv run --no-cache .github/scripts/tests/test_check_junit_no_skips.py
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
@@ -203,7 +307,8 @@ jobs:
       - name: Print bake groups
         shell: bash
         run: |
-          make docker-print TARGET=docker-cpu
+          make docker-print TARGET='docker-cpu docker-cpu-ci'
+          make docker-print TARGET='docker-api-ci docker-tasks-ci docker-build-tools-ci docker-gym-host-ci'
           make docker-print TARGET=docker-gpu
           make docker-print TARGET=docker-garak
           make docker-print TARGET=docker-python-base
@@ -213,33 +318,63 @@ jobs:
 
   # Keep the build steps aligned with e2e.yaml. CI validates image builds without
   # requiring E2E opt-in; E2E builds independently to avoid cross-workflow races.
-  build-cpu-smoke-images:
-    name: Build CPU smoke images
+  build-api-images:
+    name: Build API images
     needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.cpu-smoke == 'true' ||
-        needs.changes.outputs.auth-idp == 'true' ||
-        needs.changes.outputs.customization-auth == 'true' ||
-        needs.changes.outputs.builder-e2e == 'true'
-      )
-    permissions:
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-api == 'true' || needs.changes.outputs.auth-idp == 'true')
+    permissions: &cpu-image-permissions
       contents: read
       packages: write
-    # Shared with e2e.yaml and nightly-taskset-runs-e2e.yaml.
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
+      family: api
       source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
-      publish: >-
-        ${{
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-          github.event_name == 'merge_group' ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish)
-        }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-task-images:
+    name: Build task images
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-tasks == 'true' || needs.changes.outputs.auth-idp == 'true')
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: tasks
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-tooling-images:
+    name: Build tooling images
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-build-tools == 'true' || needs.changes.outputs.builder-e2e == 'true')
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: build-tools
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-gym-host-image:
+    name: Build Gym host image
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-gym-host == 'true') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: gym-host
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
 
   build-garak-test-image:
     name: Build garak test image
@@ -602,17 +737,8 @@ jobs:
           enable-cache: true
           python-version: "3.13"
           cache-dependency-glob: uv.lock
-      - name: Install nodejs
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: |
-          npm i -g corepack@0.31.0
-          corepack enable pnpm
-      - name: Install web dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       # Unit tests skip the vendor bundler; exercise the same production mode
       # as the Studio image so asset/loader failures are caught before merge.
       - name: Build Studio production assets
@@ -807,6 +933,33 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+  # The automodel service loads checkpoint configs with transformers, which only its training image
+  # ships. `python-unit-test` reads them from JSON instead. Load them for real here through the opt-in
+  # `automodel-tests` group, so the regular install does not carry transformers.
+  python-unit-test-automodel:
+    name: Python unit tests (automodel, with transformers)
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      (needs.changes.outputs.deps == 'true' || needs.changes.outputs.automodel == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run automodel tests
+        run: uv run --frozen --group automodel-tests pytest services/automodel/tests -v
 
   # The scaled-evals plugin stays out of `enabled-plugins`, so `python-unit-test` cannot
   # import it and skips its tests. Installing it into that shared run is not an option:
@@ -1302,7 +1455,10 @@ jobs:
       - changes
       - policy-wasm
       - python-auth-idp-static-test
-      - build-cpu-smoke-images
+      - build-api-images
+      - build-task-images
+      - build-tooling-images
+      - build-gym-host-image
       - build-garak-test-image
       - build-safe-synthesizer-test-image
     # E2E runs in its own workflow; this notification covers only CI image builds
@@ -1342,14 +1498,8 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test GitHub JavaScript scripts
         run: node --test .github/scripts/tests/*.test.cjs
       - name: Lint GitHub JavaScript scripts
@@ -1375,36 +1525,15 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        id: deps
-        run: pnpm install --frozen-lockfile
-      # Check the committed sources before generation can modify them.
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
+      # Covers @nemo/sdk too. Its generated tree is built fresh, or restored only when
+      # generated/.input-hash matches the current specs and generator.
       - name: Typecheck web packages
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.changes.outputs.openapi }}" != "true" ]; then
-            git fetch origin "${{ github.base_ref }}" --depth=1
-            pnpm --filter="...[origin/${{ github.base_ref }}]" run --parallel --if-present typecheck
-          else
-            pnpm run --recursive --parallel --if-present typecheck
-          fi
-      - name: Generate SDK from OpenAPI specs
-        id: sdk
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk gen:all-force
-      - name: Typecheck SDK generated output
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
-        run: pnpm --filter @nemo/sdk typecheck
-      - name: Typecheck web packages against regenerated SDK
-        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
         run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
-    name: Web tests
+    name: Web tests (${{ matrix.shard }}/4)
     needs: [changes]
     if: >
       !cancelled() && (
@@ -1412,6 +1541,10 @@ jobs:
         needs.changes.outputs.web-studio == 'true'
       )
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: web
@@ -1420,15 +1553,13 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Set up web dependencies
+        uses: ./.github/actions/setup-web
       - name: Test changed packages
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
+          filters=(--recursive)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.base_ref }}" --depth=1
             filters=(--filter="...[origin/${{ github.base_ref }}]")
@@ -1437,9 +1568,14 @@ jobs:
             if [ "${{ needs.changes.outputs.customizer-skill-references }}" = "true" ]; then
               filters+=(--filter=nemo-studio-ui)
             fi
-            pnpm "${filters[@]}" run --parallel --if-present test:ci
+          fi
+          if [ "${SHARD}" = 1 ]; then
+            pnpm "${filters[@]}" --filter='!nemo-studio-ui' run --parallel --if-present test:ci
+          fi
+          if pnpm "${filters[@]}" ls --depth -1 --json | jq -e 'any(.[]; .name == "nemo-studio-ui")' > /dev/null; then
+            pnpm --filter nemo-studio-ui run test:ci --shard="${SHARD}/4"
           else
-            pnpm run --recursive --parallel --if-present test:ci
+            echo "nemo-studio-ui is unaffected by this change; skipping."
           fi
 
   web-static:
@@ -1459,14 +1595,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
+      - name: Set up web dependencies
         id: deps
-        run: pnpm install --frozen-lockfile
+        uses: ./.github/actions/setup-web
       - name: Check formatting
         run: pnpm format
       - name: Lint
@@ -1632,6 +1763,38 @@ jobs:
         env:
           ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  go-test:
+    name: Go tests (${{ matrix.module }})
+    needs: [changes]
+    if: >
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.go == 'true'
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go-modules) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NHX_GO_MODULE: ${{ matrix.module }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
+        with:
+          disable-metrics: "true"
+      - name: Test and vet Go module
+        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
+        with:
+          dir: ./tools/go
+          command: >-
+            bash -euc 'cd "$NHX_GO_MODULE" && go test -race ./... && go vet ./...'
 
   openshell-tests:
     # Share setup between backend suites while retaining each suite's path filter.
@@ -1900,10 +2063,14 @@ jobs:
     name: CI status
     needs:
       - changes
+      - release-package-access
       - actionlint
       - uv-lock
       - docker-bake-graph
-      - build-cpu-smoke-images
+      - build-api-images
+      - build-task-images
+      - build-tooling-images
+      - build-gym-host-image
       - helm-lint
       - helm-chart-verifier
       - lint
@@ -1915,6 +2082,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - python-unit-test-automodel
       - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests
@@ -1930,6 +2098,7 @@ jobs:
       - web-typecheck
       - web-test
       - web-static
+      - go-test
       - openshell-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
@@ -1956,6 +2125,22 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+      - name: Verify selected CPU image jobs ran
+        env:
+          API_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-api == 'true' || needs.changes.outputs.auth-idp == 'true') }}
+          TASKS_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-tasks == 'true' || needs.changes.outputs.auth-idp == 'true') }}
+          TOOLS_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-build-tools == 'true' || needs.changes.outputs.builder-e2e == 'true') }}
+          GYM_HOST_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-gym-host == 'true') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          jq -e --arg api "$API_REQUIRED" --arg tasks "$TASKS_REQUIRED" \
+            --arg tools "$TOOLS_REQUIRED" --arg gym "$GYM_HOST_REQUIRED" '
+            ($api != "true" or ."build-api-images".result == "success") and
+            ($tasks != "true" or ."build-task-images".result == "success") and
+            ($tools != "true" or ."build-tooling-images".result == "success") and
+            ($gym != "true" or ."build-gym-host-image".result == "success")
+          ' <<< "$NEEDS_JSON"
 
       - name: Check OPA policy test outcome
         if: always()

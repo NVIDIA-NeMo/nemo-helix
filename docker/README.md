@@ -6,6 +6,11 @@
 Dockerfiles and Docker build support files live under this directory. The
 canonical Buildx Bake file is `docker-bake.hcl`.
 
+Use `docker-api`, `docker-tasks`, `docker-build-tools`, or `docker-gym-host`
+to build one CPU image family. The corresponding `-ci` groups add the smoke
+stages or the DeepAgents E2E image. `docker-cpu` builds the API, tasks, and
+tooling images together. `docker-cpu-ci` also includes Gym host and CI targets.
+
 Examples:
 
 ```bash

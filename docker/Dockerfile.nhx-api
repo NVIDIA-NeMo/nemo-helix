@@ -15,11 +15,6 @@ COPY --from=nhx-workspace . .
 # version instead of assuming a hard-coded site-packages path.
 COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
 
-# Prevents annoy (a dependency of the nemoguardrails library) from generating CPU-specific instructions
-# that cause Guardrails to crash at inference-time with SIGILL on AVX2-only CPUs (e.g. AMD EPYC Zen 2).
-# When ANNOY_COMPILER_ARGS is set, annoy uses these arguments as-is, replacing its defaults.
-ENV ANNOY_COMPILER_ARGS="-D_CRT_SECURE_NO_WARNINGS,-DANNOYLIB_MULTITHREADED_BUILD"
-
 # --reinstall-package pip forces uv to uninstall the seed pip (planted by
 # `uv venv --seed` in the base image) via its RECORD before installing the
 # locked pip, so exactly one pip remains. Without it, uv copies the locked pip
@@ -28,14 +23,6 @@ ENV ANNOY_COMPILER_ARGS="-D_CRT_SECURE_NO_WARNINGS,-DANNOYLIB_MULTITHREADED_BUIL
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
     --reinstall-package pip
-
-# annoy must be reinstalled from the committed lockfile without wheel cache reuse: uv's wheel cache
-# key does not include env vars, so the first sync can reuse a stale native-compiled wheel that
-# ignores ANNOY_COMPILER_ARGS.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    VIRTUAL_ENV=/app/.venv \
-    uv sync --frozen --active --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
-    --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
 # The release workspace relock is blocked by the DataDesignerPlugins index.
 # Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
@@ -70,7 +57,7 @@ RUN if find /tmp/fastembed_cache/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
-RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \

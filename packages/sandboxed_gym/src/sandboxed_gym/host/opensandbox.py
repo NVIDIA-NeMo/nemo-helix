@@ -6,10 +6,10 @@
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
     from sandboxed_gym.backends._opensandbox_driver import OpenSandboxDriver
@@ -22,14 +22,28 @@ from sandboxed_gym.host.models import (
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    open_host,
     render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
+from sandboxed_gym.quantity import quantity_bytes, quantity_gib_rounded_up
 
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 2.0
-_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+# Isolated (-I): `-m` would otherwise put the working directory, the job's writable workspace, first on the
+# import path, and PYTHON* variables would apply too. The host starts as root on the Docker-enabled image.
+# Unbuffered (-u), since -I also ignores the image's PYTHONUNBUFFERED.
+_DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-I", "-u", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+# Match nhx_sandbox.harbor_opensandbox_services, which this package does not depend on.
+AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
+INSTALLED_AGENT_DIR = "/installed-agent"
+# Prepends the agent's directory to the image's PATH, then fails the host at once if the agent can't run.
+_BUNDLE_LAUNCHER = 'export PATH="${0%/*}:$PATH" && "$0" --version >&2 && exec "$@"'
+#: The OpenSandbox server's auth header, and the variable the SDK reads its key from when the
+#: connection names none. Spelled out so the provider still imports without the SDK.
+OPEN_SANDBOX_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
+_OPEN_SANDBOX_API_KEY_ENV = "OPEN_SANDBOX_API_KEY"
 
 
 def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]:
@@ -53,6 +67,32 @@ def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]
     if memory is not None and str(memory) != "":
         limits["memory"] = str(memory)
     return limits
+
+
+EPHEMERAL_STORAGE = "ephemeral-storage"
+
+
+def host_disk_request_gib(resources: Mapping[str, str] | None, create: Mapping[str, Any]) -> int | None:
+    """The host's ephemeral-storage request in whole GiB, rounded up, or ``None`` when it asks for none.
+
+    The sandbox API takes the request in GiB. It is a request only: the scheduler places the host where that
+    much node disk is free. An operator's own ``ephemeral-storage`` limit in ``create.resource`` must not be
+    below it, or Kubernetes rejects the pod, which surfaces only as a create call that never finishes.
+    """
+    if not resources or resources.get(EPHEMERAL_STORAGE) in (None, ""):
+        return None
+    request = str(resources[EPHEMERAL_STORAGE])
+    try:
+        gib = quantity_gib_rounded_up(request)
+    except ValueError as exc:
+        raise ValueError(f"sandbox resource {EPHEMERAL_STORAGE}: {exc}") from None
+    limit = (create.get("resource") or {}).get(EPHEMERAL_STORAGE)
+    if limit is not None and gib * 2**30 > quantity_bytes(str(limit)):
+        raise ValueError(
+            f"sandbox resource {EPHEMERAL_STORAGE} requests {request} ({gib}Gi, the sandbox API's whole-GiB "
+            f"request) but the create options limit it to {limit}"
+        )
+    return gib
 
 
 def _create_options_for_host(create: Mapping[str, Any], resources: Mapping[str, str] | None) -> dict[str, Any]:
@@ -88,10 +128,16 @@ class OpenSandboxGymHostProvider:
         create: Mapping[str, Any] | None = None,
         probe: Mapping[str, Any] | None = None,
         operations: Mapping[str, Any] | None = None,
+        agent_bundle: Mapping[str, str] | None = None,
     ) -> None:
+        """``agent_bundle`` is a validated ``SandboxAgentBundle`` dict: an agent CLI installed into the host.
+
+        Gym's agents skip their own install when their CLI is on ``PATH``.
+        """
         from sandboxed_gym.backends._opensandbox_driver import OpenSandboxDriver
         from sandboxed_gym.sandbox_types import SandboxHandle
 
+        self._agent_bundle = dict(agent_bundle) if agent_bundle else None
         self.provider_class = OpenSandboxDriver
         self._connection = dict(connection) if connection else {}
         if "use_server_proxy" not in self._connection:
@@ -168,12 +214,23 @@ class OpenSandboxGymHostProvider:
                     resource_kwargs["memory_mib"] = int(float(memory_s[:-2]))
                 else:
                     resource_kwargs["memory_mib"] = int(memory_s)
+            disk_gib = host_disk_request_gib(spec.resources, self._create_options)
+            if disk_gib is not None:
+                resource_kwargs["disk_gib"] = disk_gib
             resources = SandboxResources.from_mapping(resource_kwargs)
 
         # OpenSandbox treats an omitted entrypoint as a request for its persistent-sandbox
         # keepalive (`tail -f /dev/null`), rather than preserving the image CMD. Start the standard
         # Gym host explicitly while still allowing runtime images to configure their own command.
-        entrypoint = spec.entrypoint or _DEFAULT_RUNTIME_ENTRYPOINT
+        entrypoint = list(spec.entrypoint or _DEFAULT_RUNTIME_ENTRYPOINT)
+        provider_options: dict[str, Any] = {"volumes": volumes}
+        if self._agent_bundle is not None:
+            # ponytail: no extension health check. A server without bundle support starts the host with no
+            # agent, the launcher's --version fails, and the readiness wait reports it. Harbor checks
+            # /v1/nemo-ext/health first; do the same if that timeout turns out to be too slow a signal.
+            provider_options["extensions"] = {AGENT_BUNDLE_EXTENSION_KEY: json.dumps(self._agent_bundle)}
+            executable = f"{INSTALLED_AGENT_DIR}/{self._agent_bundle['entrypoint']}"
+            entrypoint = ["/bin/sh", "-c", _BUNDLE_LAUNCHER, executable, *entrypoint]
         return SandboxSpec(
             image=spec.runtime_image,
             ttl_s=spec.ttl_s,
@@ -181,8 +238,8 @@ class OpenSandboxGymHostProvider:
             env=dict(spec.bootstrap_env),
             metadata=metadata,
             resources=resources,
-            entrypoint=list(entrypoint),
-            provider_options={"volumes": volumes},
+            entrypoint=entrypoint,
+            provider_options=provider_options,
         )
 
     async def _resolve_routes(self, sandbox: Any, port: int) -> _HostRoutes:
@@ -193,6 +250,21 @@ class OpenSandboxGymHostProvider:
             rollout_url=f"{base}/rollouts/run",
             headers={str(k): str(v) for k, v in (endpoint.headers or {}).items()},
         )
+
+    def _proxy_credential_headers(self) -> dict[str, str]:
+        """The API key for requests that reach the host through the OpenSandbox server's proxy.
+
+        A server with tenants checks the key on proxied requests as well as on its own API, and answers
+        401 without it, so the host never reports ready. A single-tenant server doesn't check, and
+        ignores the header. The server drops it before forwarding, so the host never sees it.
+
+        Same rule as the SDK's own requests to a sandbox: only through the proxy. Direct to the pod,
+        the key would reach the sandbox, which runs untrusted environment code.
+        """
+        if not self._connection.get("use_server_proxy"):
+            return {}
+        api_key = self._connection.get("api_key") or os.environ.get(_OPEN_SANDBOX_API_KEY_ENV, "")
+        return {OPEN_SANDBOX_API_KEY_HEADER: str(api_key)} if api_key else {}
 
     def _absolute_url(self, endpoint: str) -> str:
         """Add http or https to a bare host:port returned by the SDK.
@@ -230,6 +302,7 @@ class OpenSandboxGymHostProvider:
             rollout_url=routes.rollout_url,
             headers=routes.headers,
             provider=provider,
+            _credentials=self._proxy_credential_headers(),
         )
 
     async def wait_ready(self, handle: "GymHostHandle[OpenSandboxDriver]", timeout_s: float) -> None:
@@ -238,7 +311,7 @@ class OpenSandboxGymHostProvider:
         last_error: Exception | None = None
         while asyncio.get_running_loop().time() < deadline:
             try:
-                body = await asyncio.to_thread(self._get_json, handle.health_url, handle.headers)
+                body = await asyncio.to_thread(self._get_json, handle)
                 if body.get("status") == "ready":
                     return
                 if body.get("status") == "failed":
@@ -258,10 +331,9 @@ class OpenSandboxGymHostProvider:
             + (f": {last_error}" if last_error is not None else "")
         )
 
-    def _get_json(self, url: str, headers: Mapping[str, str]) -> dict[str, Any]:
-        request = Request(url, method="GET", headers=dict(headers))
+    def _get_json(self, handle: "GymHostHandle[OpenSandboxDriver]") -> dict[str, Any]:
         try:
-            with urlopen(request, timeout=10) as response:
+            with open_host(handle, handle.health_url, timeout=10) as response:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:

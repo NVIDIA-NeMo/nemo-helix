@@ -15,6 +15,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -23,12 +24,15 @@ from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
+from nemo_evals.jobs.attempt_tasks import TASKS_FROM_KEY, load_attempt_tasks
 from nemo_evals.jobs.fileset_tasks import gym_reward_metric
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.service import EvaluatorPluginService
 from nemo_helix_plugin.dependencies import get_submission_authorizer
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx.core.entities.service import EntitiesService
 from nhx.core.files.service import FilesService
@@ -187,6 +191,27 @@ def test_a_snapshot_publishes_the_file_and_the_job_runs_exactly_that(ctx: Client
         assert provenance is not None
         assert f"{provenance.entity_name}#{provenance.revision_digest}" in pins
     assert len(pins) == 2
+
+
+@pytest.mark.parametrize("snapshot", [TASKSET, None], ids=["snapshot", "inline"])
+def test_the_worker_loads_the_tasks_the_job_froze(ctx: ClientContext, snapshot: str | None) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+    response = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        json={"spec": _spec(_tasks(snapshot=snapshot)), "profile": "default"},
+    )
+    assert response.status_code < 300, response.text
+    jobs_route = f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{response.json()['name']}"
+    frozen = ctx.test_client.get(jobs_route).raise_for_status().json()["spec"]["tasks"]
+    [attempt] = JobsClient.from_client(ctx.client).list_job_attempts(job=response.json()["name"]).items()
+    assert attempt.platform_spec is not None
+    [config] = [step.config for step in attempt.platform_spec.steps if TASKS_FROM_KEY in step.config]
+    job_ctx = MagicMock(spec=JobContext, workspace="default", job_id=attempt.job, attempt_id=attempt.id)
+
+    loaded = load_attempt_tasks(config, ctx=job_ctx, client=ctx.client)
+
+    assert loaded["tasks"] == frozen
+    assert all((task["spec"].get("provenance") is not None) == (snapshot is not None) for task in loaded["tasks"])
 
 
 def test_resubmitting_an_unchanged_file_writes_no_task(ctx: ClientContext) -> None:

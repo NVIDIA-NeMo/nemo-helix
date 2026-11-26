@@ -104,6 +104,10 @@ func (c *secretClient) GetSecret(ctx context.Context, workspaceID, secretName st
 		return nil, err
 	}
 
+	if req.URL.User != nil && !c.session.BearerMode() && (c.principal == nil || c.principal.ID == "") {
+		return nil, fmt.Errorf("URL credentials are not supported for anonymous Secret requests")
+	}
+
 	resp, err := c.session.do(req, c.httpClient, c.principal)
 	if err != nil {
 		return nil, err

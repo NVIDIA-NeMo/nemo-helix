@@ -381,7 +381,7 @@ const SeededIntakeSpansTable: FC<
                 onClearFilters={dataViewState.resetFilters}
               />
             ) : (
-              <EntityEmptyState entity="telemetrySpans" variant="first-use" />
+              <EntityEmptyState entity="telemetrySpans" variant="first-use" workspace={workspace} />
             ),
         },
       }}

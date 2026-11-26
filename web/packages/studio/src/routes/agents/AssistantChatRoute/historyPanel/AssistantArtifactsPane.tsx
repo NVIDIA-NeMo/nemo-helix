@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ChevronDoubleRight } from '@nemo/icons/icons';
 import { Button, Divider, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Empty } from '@studio/components/Empty';
 import {
   ArtifactRow,
   FileArtifacts,
@@ -116,7 +116,7 @@ export const AssistantArtifactsPane = ({
         </Stack>
       ) : (
         <Flex className="min-h-0 flex-1 px-density-md" align="center" justify="center">
-          <Empty title="No artifacts yet" description="Selections and outputs will appear here." />
+          <EntityEmptyState entity="assistantArtifacts" variant="first-use" />
         </Flex>
       )}
     </section>

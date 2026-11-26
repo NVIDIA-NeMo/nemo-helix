@@ -82,42 +82,6 @@ class Insight(NemoEntity, EvidenceCompatibility, entity_type="insights_insight")
     )
 
 
-class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
-    """One Compass analysis run — what was asked for, not how it went.
-
-    The record's ``name`` is also the name of the backing ``agents.execute``
-    job. Compass mints that name before submitting, so the link between a run
-    and its job is *derivable* rather than written back after the fact. That
-    removes the dual write, and with it the failure mode where a job exists
-    that no run points at: a run whose job name 404s simply never landed. There
-    is no resubmit-under-an-existing-name route yet, so such a run is a read
-    today, not something a caller can drive back to completion.
-
-    Progress is deliberately absent. Status, logs, and results belong to the
-    Job and are read from it; mirroring them here would go stale immediately.
-    Compass owns only what no lower layer knows: that this job was an analysis
-    run, over which agent and scope.
-    """
-
-    agent: str = Field(description="Agent whose telemetry this run analyzed.")
-    since: datetime | None = Field(
-        default=None,
-        description="Lower bound the run enforced on trace/span reads.",
-    )
-    evaluation_id: str = Field(
-        default="",
-        description="Run scope AND-pinned onto every span read, when one was requested.",
-    )
-    default_model: str = Field(
-        default="",
-        description="Workspace-qualified Model Entity the run used for analysis work.",
-    )
-    fast_model: str = Field(
-        default="",
-        description="Workspace-qualified Model Entity the run used for context summarization.",
-    )
-
-
 class AnalysisConfig(NemoEntity, entity_type="insights_analysis_config"):
     """Per-agent opt-in state for framework-managed periodic analysis.
 

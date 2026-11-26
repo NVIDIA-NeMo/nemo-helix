@@ -12,12 +12,11 @@ import { useNavigate } from 'react-router';
 
 const RUN_BADGES: Partial<Record<HelixJobStatus, { status: BadgeStatus; label: string }>> = {
   created: { status: 'pending', label: 'Queued' },
+  queued: { status: 'pending', label: 'Queued' },
   pending: { status: 'pending', label: 'Queued' },
   active: { status: 'active', label: 'Running' },
   error: { status: 'error', label: 'Failed' },
 };
-
-const NOT_SUBMITTED = { status: 'unavailable', label: 'Not submitted' } as const;
 
 interface LatestAnalysisRunProps {
   workspace: string;
@@ -27,9 +26,7 @@ interface LatestAnalysisRunProps {
 
 export const LatestAnalysisRun: FC<LatestAnalysisRunProps> = ({ workspace, run, isActive }) => {
   const navigate = useNavigate();
-  const badge = run.submitted
-    ? ((run.status && RUN_BADGES[run.status]) ?? { status: run.status, label: undefined })
-    : NOT_SUBMITTED;
+  const badge = (run.status && RUN_BADGES[run.status]) ?? { status: run.status, label: undefined };
 
   return (
     <Stack gap="1" data-testid="latest-analysis-run">
@@ -41,15 +38,13 @@ export const LatestAnalysisRun: FC<LatestAnalysisRunProps> = ({ workspace, run, 
         <Text kind="body/regular/sm" className="text-secondary">
           requested <RelativeTime datetime={run.requestedAt} />
         </Text>
-        {run.submitted ? (
-          <Button
-            kind="tertiary"
-            size="small"
-            onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, run.name))}
-          >
-            View job
-          </Button>
-        ) : null}
+        <Button
+          kind="tertiary"
+          size="small"
+          onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, run.name))}
+        >
+          View job
+        </Button>
       </Flex>
       {isActive ? (
         <Text kind="body/regular/xs" className="text-secondary">

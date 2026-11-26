@@ -29,6 +29,8 @@ function getFilterLabel(column: DataViewColumn): string {
 function formatFilterValue(column: DataViewColumn): string {
   const filter = column.columnDef.meta?.filter;
   const value = column.getFilterValue();
+  const options = filter && 'options' in filter ? filter.options : undefined;
+  const labelFor = (v: unknown) => options?.find((opt) => opt.value === v)?.label ?? String(v);
 
   if (isDateTimeFilter(filter)) {
     const dt = value as DatetimeFilterValue | undefined;
@@ -40,38 +42,10 @@ function formatFilterValue(column: DataViewColumn): string {
     return formatNumberRange(range?.$gte, range?.$lte);
   }
 
-  if (typeof value === 'string') {
-    const options =
-      (filter?.type === 'single-select' || filter?.type === 'multi-select') && filter.options;
-    if (options) {
-      const match = options.find((opt) => opt.value === value);
-      return match?.label ?? value;
-    }
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const options =
-      (filter?.type === 'single-select' || filter?.type === 'multi-select') && filter.options;
-    return value
-      .map((v) => {
-        if (options) {
-          const match = options.find((opt) => opt.value === v);
-          return match?.label ?? v;
-        }
-        return String(v);
-      })
-      .join(', ');
-  }
-
+  if (typeof value === 'string') return labelFor(value);
+  if (Array.isArray(value)) return value.map(labelFor).join(', ');
   if (typeof value === 'object' && value != null) {
-    const keys = Object.keys(value);
-    const options =
-      (filter?.type === 'single-select' || filter?.type === 'multi-select') && filter.options;
-    if (options) {
-      return keys.map((k) => options.find((opt) => opt.value === k)?.label ?? k).join(', ');
-    }
-    return keys.join(', ');
+    return Object.keys(value).map(labelFor).join(', ');
   }
 
   return value != null ? String(value) : '';

@@ -2593,20 +2593,6 @@ components:
           title: Attn Implementation
           description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
           default: eager
-        pooling:
-          type: string
-          enum:
-          - avg
-          - cls
-          - last
-          title: Pooling
-          description: Embedding pooling. Ignored for cross_encoder.
-          default: avg
-        normalize:
-          type: boolean
-          title: Normalize
-          description: L2-normalize embeddings. Ignored for cross_encoder.
-          default: true
         dimensions:
           type: boolean
           title: Dimensions
@@ -2618,6 +2604,29 @@ components:
       title: AutomodelExportSpec
       description: ONNX export and fileset layout. ``primary`` is the artifact at
         the root; the other is under ``alternates/``.
+    AutomodelImageSize:
+      properties:
+        longest_edge:
+          title: Longest Edge
+          description: Maximum pixels (an area, not a side length) in a resized image.
+            Larger images are scaled down, which loses fine detail. The same ceiling
+            as max_pixels.
+          type: integer
+          exclusiveMinimum: 0.0
+        shortest_edge:
+          title: Shortest Edge
+          description: Minimum pixels (an area, not a side length) in a resized image.
+            Smaller images are scaled up, which adds no detail.
+          type: integer
+          exclusiveMinimum: 0.0
+      additionalProperties: false
+      type: object
+      title: AutomodelImageSize
+      description: 'Pixel-area bounds passed to the vision processor as ``size``.
+
+
+        Both edges are required. ``longest_edge`` is the maximum pixel count and matches
+        ``max_pixels``.'
     AutomodelJobInput:
       properties:
         name:
@@ -3062,6 +3071,29 @@ components:
 
         setting, and only the fields that are set reach the model. Support differs
         per model.'
+    AutomodelModuleSelector:
+      oneOf:
+      - required:
+        - path
+      - required:
+        - glob
+      properties:
+        path:
+          title: Path
+          description: Exact module path, e.g. 'model.multi_modal_projector'.
+          type: string
+          minLength: 1
+        glob:
+          title: Glob
+          description: Case-sensitive shell-style pattern over module paths; '*' also
+            crosses '.', e.g. '*.embed_tokens'.
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: AutomodelModuleSelector
+      description: One module, and everything under it, picked by exact path or by
+        glob.
     AutomodelOptimizerSpec:
       properties:
         learning_rate:
@@ -3269,6 +3301,25 @@ components:
           description: Score each query against every passage in the global batch
             rather than only its own train_n_passages. Ignored for cross_encoder.
           default: false
+        pooling:
+          title: Pooling
+          description: 'How a bi_encoder turns its token vectors into one embedding:
+            ''avg'' (mean of all tokens), ''cls'' (first token), or ''last'' (last
+            token). Omit to keep the pooling the base checkpoint was pretrained with:
+            its Sentence Transformers files, else its config''s ''pooling'', else
+            ''avg''. Ignored for cross_encoder.'
+          type: string
+          enum:
+          - avg
+          - cls
+          - last
+        normalize:
+          title: Normalize
+          description: 'Scale bi_encoder embeddings to unit length, so a dot product
+            equals cosine similarity. Omit to keep the base checkpoint''s choice:
+            normalize unless its Sentence Transformers files leave out Normalize.
+            Ignored for cross_encoder.'
+          type: boolean
         query_max_length:
           type: integer
           minimum: 1.0
@@ -3356,7 +3407,12 @@ components:
           enum:
           - sft
           - distillation
+          - partial_sft
+          - partial_distillation
           title: Training Type
+          description: Training algorithm. 'partial_sft' and 'partial_distillation'
+            train like 'sft' and 'distillation', but only the modules that freeze_modules
+            and unfreeze_modules leave trainable.
           default: sft
         recipe:
           type: string
@@ -3384,6 +3440,20 @@ components:
           exclusiveMinimum: 0.0
           title: Max Seq Length
           default: 2048
+        max_pixels:
+          title: Max Pixels
+          description: Shorthand for image_size.longest_edge. The compiler writes
+            it as the processor size and does not pass this name to transformers.
+            Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
+          type: integer
+          exclusiveMinimum: 0.0
+        image_size:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelImageSize'
+          description: Pixel-area bounds for a vision-language processor, as size.longest_edge
+            and size.shortest_edge. Both edges are required, and shortest_edge must
+            be less than longest_edge. Set this or max_pixels, not both. Rejected
+            for text checkpoints.
         precision:
           title: Precision
           description: Model precision for training. Auto-detected from the checkpoint
@@ -3480,6 +3550,21 @@ components:
             such as ''<think></think>''. The model never generates them. Chat-format
             (messages) datasets only.'
           default: false
+        freeze_modules:
+          title: Freeze Modules
+          description: Modules to freeze, each with everything under it. Partial training
+            types only. A selector that matches no module fails the job.
+          items:
+            $ref: '#/components/schemas/AutomodelModuleSelector'
+          type: array
+        unfreeze_modules:
+          title: Unfreeze Modules
+          description: Modules to make trainable, each with everything under it. Wins
+            over freeze_modules and over the frozen vision tower of vision-language
+            jobs. Partial training types only.
+          items:
+            $ref: '#/components/schemas/AutomodelModuleSelector'
+          type: array
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -4569,6 +4654,20 @@ components:
             Falls back to the service default when omitted.
           type: string
           minLength: 1
+        max_pixels:
+          title: Max Pixels
+          description: Shorthand for image_size.longest_edge on a vision-language
+            checkpoint. Larger images are downscaled before the policy processor and
+            the vLLM rollout engine see them, so training and generation use the same
+            resolution. Unset keeps the checkpoint ceiling. Rejected for text checkpoints.
+          type: integer
+          exclusiveMinimum: 0.0
+        image_size:
+          allOf:
+          - $ref: '#/components/schemas/RlImageSize'
+          description: Pixel-area bounds for a vision-language checkpoint. Both edges
+            are required, and shortest_edge must be less than longest_edge. Set this
+            or max_pixels, not both. Rejected for text checkpoints.
         type:
           type: string
           const: grpo
@@ -4930,6 +5029,29 @@ components:
       - value: 1.0e-05
         when:
           finetuning_type: lora_merged
+    RlImageSize:
+      properties:
+        longest_edge:
+          title: Longest Edge
+          description: Maximum pixels (an area, not a side length) in a resized image.
+            Larger images are scaled down, which loses fine detail. The same ceiling
+            as max_pixels.
+          type: integer
+          exclusiveMinimum: 0.0
+        shortest_edge:
+          title: Shortest Edge
+          description: Minimum pixels (an area, not a side length) in a resized image.
+            Smaller images are scaled up, which adds no detail.
+          type: integer
+          exclusiveMinimum: 0.0
+      additionalProperties: false
+      type: object
+      title: RlImageSize
+      description: 'Pixel-area bounds for a vision processor.
+
+
+        Both edges are required. ``longest_edge`` is the maximum pixel count and matches
+        ``max_pixels``.'
     RlJobInput:
       properties:
         name:
@@ -6170,6 +6292,29 @@ components:
         entity, downloads its fileset to a local path, and hands that path
 
         to :func:`train_sft`.'
+    UnslothModuleSelector:
+      oneOf:
+      - required:
+        - path
+      - required:
+        - glob
+      properties:
+        path:
+          title: Path
+          description: Exact module path, e.g. 'model.embed_tokens'.
+          type: string
+          minLength: 1
+        glob:
+          title: Glob
+          description: Case-sensitive shell-style pattern over module paths; '*' also
+            crosses '.', e.g. '*.layers.0.*'.
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: UnslothModuleSelector
+      description: One module, and everything under it, picked by exact path or by
+        glob.
     UnslothOptimizerSpec:
       properties:
         learning_rate:
@@ -6377,8 +6522,12 @@ components:
       properties:
         training_type:
           type: string
-          const: sft
+          enum:
+          - sft
+          - partial_sft
           title: Training Type
+          description: Training algorithm. 'partial_sft' trains like 'sft', but only
+            the modules that freeze_modules and unfreeze_modules leave trainable.
           default: sft
         finetuning_type:
           type: string
@@ -6400,6 +6549,21 @@ components:
           - 'false'
           title: Use Gradient Checkpointing
           default: unsloth
+        freeze_modules:
+          title: Freeze Modules
+          description: Modules to freeze, each with everything under it. partial_sft
+            only. A selector that matches no module fails the job.
+          items:
+            $ref: '#/components/schemas/UnslothModuleSelector'
+          type: array
+        unfreeze_modules:
+          title: Unfreeze Modules
+          description: Modules to train in full, each with everything under it. Wins
+            over freeze_modules. partial_sft only. With LoRA they become the adapter's
+            modules_to_save.
+          items:
+            $ref: '#/components/schemas/UnslothModuleSelector'
+          type: array
       additionalProperties: false
       type: object
       title: UnslothTrainingSpec

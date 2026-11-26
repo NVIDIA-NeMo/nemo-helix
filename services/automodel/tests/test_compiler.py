@@ -22,7 +22,9 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     ExportParams,
+    ImageSize,
     LoRAParams,
+    ModuleSelectorParams,
     OutputResponse,
     RetrievalParams,
     SFTTraining,
@@ -143,6 +145,8 @@ def test_compile_training_step_carries_pass2_fields() -> None:
             sequence_packing_max_samples=256,
             max_seq_length=2048,
             mask_generation_prompt=True,
+            type="partial_sft",
+            freeze_modules=[ModuleSelectorParams(glob="*.layers.0.*")],
         ),
         output=_output(),
     )
@@ -150,6 +154,9 @@ def test_compile_training_step_carries_pass2_fields() -> None:
     cfg = step.config if hasattr(step, "config") else step["config"]
 
     assert cfg["dataset"]["mask_generation_prompt"] is True
+    assert cfg["training"]["training_type"] == "partial_sft"
+    assert cfg["training"]["freeze_modules"] == [{"path": None, "glob": "*.layers.0.*"}]
+    assert cfg["training"]["unfreeze_modules"] is None
     assert cfg["model"]["tokenizer_backend"] is None
     assert cfg["optimizer"]["optimizer_name"] == "AdamW"
     assert cfg["optimizer"]["lr_decay_style"] == "linear"
@@ -284,12 +291,51 @@ def test_sft_training_encoder_defaults_do_not_override_explicit_hparams() -> Non
     assert training.warmup_steps == 1
 
 
-def test_distillation_with_resolved_recipe_rejects_encoder_recipes() -> None:
-    training = DistillationTraining.model_validate({"recipe": "auto", "teacher_model": "default/teacher"})
+@pytest.mark.parametrize(
+    "selectors",
+    [{}, {"type": "partial_distillation", "freeze_modules": [{"glob": "*.layers.0.*"}]}],
+    ids=["distillation", "partial-distillation"],
+)
+def test_distillation_with_resolved_recipe_rejects_encoder_recipes(selectors: dict[str, object]) -> None:
+    training = DistillationTraining.model_validate({"recipe": "auto", "teacher_model": "default/teacher", **selectors})
     with pytest.raises(ValueError, match="only supports the sft recipe"):
         training.with_resolved_recipe("bi_encoder")
     resolved = training.with_resolved_recipe("sft")
     assert resolved.recipe == "sft"
+
+
+@pytest.mark.parametrize(
+    ("model", "fields", "error"),
+    [
+        (SFTTraining, {"type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+        (
+            DistillationTraining,
+            {"type": "partial_distillation", "teacher_model": "default/teacher"},
+            "needs freeze_modules or unfreeze_modules",
+        ),
+        (
+            SFTTraining,
+            {"freeze_modules": [{"path": "lm_head"}]},
+            "need training type partial_sft or partial_distillation",
+        ),
+        (
+            DistillationTraining,
+            {"teacher_model": "default/teacher", "unfreeze_modules": [{"path": "lm_head"}]},
+            "need training type partial_sft or partial_distillation",
+        ),
+    ],
+    ids=[
+        "partial-sft-without-selectors",
+        "partial-distillation-without-selectors",
+        "selectors-on-sft",
+        "selectors-on-distillation",
+    ],
+)
+def test_module_selectors_belong_to_the_partial_training_types(
+    model: type[SFTTraining | DistillationTraining], fields: dict[str, object], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        model.model_validate(fields)
 
 
 def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:
@@ -359,6 +405,42 @@ def test_compile_training_step_copies_recorded_vision_traits() -> None:
 
     assert cfg["model"]["has_vision_tower"] is True
     assert cfg["model"]["checkpoint_model_name"] == "Qwen2_5_VLForConditionalGeneration"
+
+
+def test_compile_training_step_rejects_a_sequence_shorter_than_one_image() -> None:
+    """The patch size comes from the model spec, not a fixed pixels-per-token ratio."""
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    me = _make_mock_model_entity()
+    me.spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        vision_patch_size=32,
+        has_audio_tower=False,
+        checkpoint_model_name="Qwen3VLForConditionalGeneration",
+        head_type="causal_lm",
+        chat_template=None,
+        moe_config=None,
+        family="qwen3_vl",
+        is_chat=True,
+        is_embedding_model=False,
+    )
+    job_output = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(
+            recipe="sft",
+            max_seq_length=2048,
+            image_size=ImageSize(longest_edge=2_621_440, shortest_edge=65_536),
+        ),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="must be larger than the 2560 tokens"):
+        compile_training_step(job_output, base_env=[], me=me)
+
+    job_output.training.max_seq_length = 4096
+    compile_training_step(job_output, base_env=[], me=me)
 
 
 def _text_moe_entity(architecture: str) -> ModelEntity:

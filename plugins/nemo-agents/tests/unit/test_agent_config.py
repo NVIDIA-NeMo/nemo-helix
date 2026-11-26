@@ -312,7 +312,7 @@ class TestLoadAgentConfig:
             "reference": {"fileset": "default/source", "container_image": "agent:1"},
             "context_schema": {"type": "object"},
             "default_input": "Analyze recent runs.",
-            "post_run_actions": ["agents.noop", "insights.analysis"],
+            "post_run_actions": ["agents.noop", "compass.save-insights"],
         }
         _write_agent_yaml(config_path, payload)
 
@@ -322,7 +322,7 @@ class TestLoadAgentConfig:
             reference=ReferenceConfig(fileset="default/source", container_image="agent:1"),
             context_schema={"type": "object"},
             default_input="Analyze recent runs.",
-            post_run_actions={"agents.noop", "insights.analysis"},
+            post_run_actions={"agents.noop", "compass.save-insights"},
         )
         assert config.model_copy(update={"helix_registration": None}) == AgentConfig.model_validate(
             _example_yaml_config()

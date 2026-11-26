@@ -40,8 +40,9 @@ class FakeEntity(Base):
 # The compared JSON fields (score, tier, flag) are present on every row so the
 # suite exercises agreeing semantics, not SQL's literal-"null" handling of
 # absent keys (a documented native divergence pinned in the unit tests). A
-# plain-column NULL (name on row 5) and an explicit/absent ``k`` for $eq-None
-# coverage are the only nullable bits, and $eq agrees with SQL on both.
+# plain-column NULL (name on row 5), an explicit/absent ``k`` for $eq-None, and a
+# ``rank`` holding numbers, null, a string, and a boolean for ordered comparisons
+# are the only nullable or mixed-type bits.
 SEED = [
     dict(
         id=1,
@@ -52,6 +53,7 @@ SEED = [
             "tier": "free",
             "flag": True,
             "k": None,
+            "rank": 3,
             "tags": ["red", "blue"],
             "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
             "members": ["ws/task_a#d1", "ws/task-b#d2"],
@@ -75,6 +77,7 @@ SEED = [
             "score": 9,
             "tier": "pro",
             "flag": False,
+            "rank": None,
             "tags": ["red"],
             "meta": [{"key": "owner", "value": "bob"}, {"key": "level", "value": 3}],
             # Near misses for "ws/task_a#": a longer workspace, "ws/taskXa" if "_" were a LIKE wildcard,
@@ -94,6 +97,7 @@ SEED = [
             "tier": "pro",
             "flag": True,
             "k": "v",
+            "rank": 7,
             "tags": ["green", "redish"],
             "meta": [{"key": "owner", "value": None}, {"key": "team", "value": "alice"}],
             "members": ["ws/task_a#d9"],
@@ -109,6 +113,7 @@ SEED = [
             "score": 100,
             "tier": "enterprise",
             "flag": False,
+            "rank": "n/a",
             "tags": [],
             "meta": {"key": "owner", "value": "alice"},
         },
@@ -122,6 +127,7 @@ SEED = [
             "score": 1,
             "tier": "free",
             "flag": False,
+            "rank": True,
             "tags": ["blue"],
             "meta": ["red", 3, None, True],
         },
@@ -174,6 +180,17 @@ CASES = [
     ("nin_name", C(FilterOperator.NIN, "name", ["llama"])),
     ("nin_data_tier", C(FilterOperator.NIN, "data.tier", ["pro"])),
     ("nin_data_score", C(FilterOperator.NIN, "data.score", [5, 9])),
+    ("lt_rank_numbers_only", C(FilterOperator.LT, "data.rank", 5)),
+    ("lte_rank_numbers_only", C(FilterOperator.LTE, "data.rank", 7)),
+    ("gt_rank_negative_numbers_only", C(FilterOperator.GT, "data.rank", -1)),
+    ("gte_rank_numbers_only", C(FilterOperator.GTE, "data.rank", 7)),
+    ("not_lt_rank", NOT(C(FilterOperator.LT, "data.rank", 5))),
+    ("not_gt_rank_negative", NOT(C(FilterOperator.GT, "data.rank", -1))),
+    ("not_gte_rank", NOT(C(FilterOperator.GTE, "data.rank", 7))),
+    ("lt_absent_field", C(FilterOperator.LT, "data.nope", 5)),
+    ("not_lt_absent_field", NOT(C(FilterOperator.LT, "data.nope", 5))),
+    ("not_gte_absent_field", NOT(C(FilterOperator.GTE, "data.nope", 0))),
+    ("not_gt_text_null_or_absent", NOT(C(FilterOperator.GT, "data.k", "a"))),
     ("contains_tags_red", C(FilterOperator.CONTAINS, "data.tags", "red")),
     ("contains_tags_blue", C(FilterOperator.CONTAINS, "data.tags", "blue")),
     ("contains_tags_absent", C(FilterOperator.CONTAINS, "data.tags", "nope")),

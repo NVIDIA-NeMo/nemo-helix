@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+greeting_verifier:
+  resources_servers:
+    greeting_verifier:
+      entrypoint: app.py
+      domain: instruction_following
+      verified: false
+      description: e2e greeting verifier
+      value: Verify the expected greeting

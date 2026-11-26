@@ -14,9 +14,7 @@ const VALIDATION_RESULT = 'validation';
 // …and a `composed-guardrails` result: the exact plugins.toml it validated, so "Apply to Agent" survives a reload.
 const COMPOSED_GUARDRAILS_RESULT = 'composed-guardrails';
 
-// With the victim's execution traces, a validator relabels an item by what its tool call did. The label says
-// what happened; `outcome` says how it counts. Results from releases before the traces labels carry no
-// `outcome`, only the first three statuses.
+// `status` says what happened and `outcome` how it counts; older results have only the first three statuses.
 export type AttackStatus =
   | 'blocked'
   | 'not_blocked'

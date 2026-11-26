@@ -35,7 +35,7 @@ This page walks through the full workflow:
 
 ## View jobs
 
-Navigate to **Data > Datasets > Data Designer** in the workspace sidebar to open the jobs list. The list shows every Data Designer job in the current workspace with its status, and supports searching by name, filtering by status, and narrowing by creation or update date range.
+Navigate to **Data Preparation > Data Designer** in the workspace sidebar to open the jobs list. The list shows every Data Designer job in the current workspace with its status, and supports searching by name, filtering by status, and narrowing by creation or update date range.
 
 Selecting a job opens its [details page](#view-job-details). Each row also has a quick-actions menu with **View details**, **Clone**, **Cancel** (when the job is still cancellable; asks for confirmation before stopping the job), and **Delete**.
 
@@ -179,6 +179,21 @@ Common patterns:
 - **Field checks** — the builder validates your entries as you go and flags anything that isn't valid, such as a number field left with text or a malformed entry.
 
 Empty required fields, invalid values, and duplicate or invalid names are all called out when you preview or create the job.
+
+<a id="person-sampler"></a>
+
+### Person Sampler prerequisites
+
+The **Person** sampler draws people from a Nemotron Personas dataset for the column's **Locale**. If you leave **Locale** empty, Data Designer uses `en_US`. Supported locales are `en_US`, `en_GB`, `en_IN`, `en_SG`, `de_DE`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, and `pt_BR`. For any other locale, the config pane warns that no Nemotron Personas dataset exists for it.
+
+Each locale's dataset must be registered once, as the `system/nemotron-personas-dataset-<locale>` fileset. For example, `en_US` uses `system/nemotron-personas-dataset-en_us`. The fileset lives in the `system` workspace, so a single registration serves every workspace on the platform. When the dataset for the selected locale is missing, the config pane shows a warning such as **Nemotron Personas for en_US isn't set up**. To register it:
+
+1. Under **NGC API key secret**, select a secret in the current workspace that holds your NGC API key, or choose **New Secret** to create one.
+2. Select **Register dataset**. Studio creates the NGC-backed fileset in the `system` workspace; the data is read from NGC with that key.
+
+You need permission to create filesets in the `system` workspace. Without it, registration fails and the error appears under the button; ask a platform administrator to register the dataset. Administrators can also register it with [`nemo data-designer personas make-fileset`](/documentation/design-synthetic-data/cli#personas), which creates the same fileset.
+
+When registration finishes, the warning disappears and you can [preview the job](#preview-a-job) with the Person column.
 
 ---
 

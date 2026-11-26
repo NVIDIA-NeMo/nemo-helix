@@ -17,7 +17,7 @@ from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
 from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
-from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype
+from nhx.automodel.tasks.training.backends.checkpoints import auto_torch_dtype, embedding_pooling
 from nhx.automodel.tasks.training.backends.registry import (
     causal_reranker_class,
     causal_reranker_collator,
@@ -50,11 +50,11 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
 )
+from nhx.customization_common.image_size import image_size_bounds
 from nhx.customization_common.schemas.checkpoint import (
-    VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
-    lora_uses_default_targets,
     traits_from_step_model,
+    vlm_lora_exclude_modules,
 )
 from nhx.customization_common.service.context import NHXJobContext
 
@@ -161,7 +161,7 @@ def _compile_retrieval_config(
     by default,
     inline retrieval data with its own collator, and no sequence packing or LM loss.
     """
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         raise ValueError(
             f"Knowledge distillation is not supported by the '{recipe.value}' recipe; "
             "use the 'sft' recipe or drop the teacher model."
@@ -196,11 +196,14 @@ def _compile_retrieval_config(
         }
     )
     if is_bi_encoder:
-        cfg["model"]["l2_normalize"] = True
+        # The job's pooling, else the base's own. Sent explicitly so the compiled config shows it.
+        cfg["model"]["pooling"], cfg["model"]["l2_normalize"] = embedding_pooling(customizer_config)
         cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
-        if is_causal_reranker_checkpoint(customizer_config.model.path):
+        if is_causal_reranker_checkpoint(
+            customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code
+        ):
             # Automodel scores this causal LM by its yes/no next-token logits. That reranker
             # has no classifier head to pool for, and takes the recipe's temperature (above).
             del cfg["model"]["pooling"]
@@ -223,6 +226,8 @@ def _compile_retrieval_config(
         # tekken.json, but carries only tokenizer.json.
         "tokenizer_backend": customizer_config.model.tokenizer_backend or "nemo_wrapped_auto",
     }
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
 
     _build_distributed(
         cfg,
@@ -336,6 +341,8 @@ def _compile_llm_config(
     }
 
     _build_peft(cfg, customizer_config)
+    if freeze_config := _module_selector_freeze_config(customizer_config):
+        cfg["freeze_config"] = freeze_config
     _keep_full_weight_kd_student_in_fp32(cfg, customizer_config)
 
     cfg["loss_fn"] = {
@@ -346,7 +353,7 @@ def _compile_llm_config(
     # configure backend/parallelizer settings.
     _configure_moe_backend(cfg, customizer_config)
 
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         _configure_kd(cfg, customizer_config, trust_remote_code=trust_remote_code)
 
     _build_integrations(cfg, customizer_config, job_ctx)
@@ -364,7 +371,7 @@ def _compile_vlm_config(
     Text rows and image rows share this recipe. The causal-LM target cannot
     load an image-text checkpoint, and a mixed fileset cannot be two recipes.
     """
-    if customizer_config.training.training_type == TrainingType.DISTILLATION:
+    if customizer_config.training.training_type.is_distillation:
         raise ValueError(
             "Knowledge distillation is not supported for a vision-language checkpoint; "
             "use the 'sft' recipe without a teacher model."
@@ -401,12 +408,21 @@ def _compile_vlm_config(
         "pretrained_model_name_or_path": customizer_config.model.path,
         "trust_remote_code": trust_remote_code,
     }
-    freeze_config: dict[str, bool] = {
+    image_size = image_size_bounds(
+        customizer_config.model.max_pixels,
+        customizer_config.model.image_longest_edge,
+        customizer_config.model.image_shortest_edge,
+    )
+    if image_size is not None:
+        cfg["processor"]["size"] = image_size
+    freeze_config: dict[str, Any] = {
         "freeze_vision_tower": True,
         "freeze_language_model": False,
     }
     if traits.has_audio_tower:
         freeze_config["freeze_audio_tower"] = True
+    # Automodel applies the booleans first, then freeze_modules, then unfreeze_modules, which wins.
+    freeze_config.update(_module_selector_freeze_config(customizer_config))
     cfg["freeze_config"] = freeze_config
 
     _build_distributed(
@@ -484,11 +500,16 @@ def _apply_vlm_lora_excludes(cfg: dict[str, Any], customizer_config: TrainingSte
     lora = customizer_config.training.lora
     target = None if lora is None else lora.target_modules
     exclude = None if lora is None else lora.exclude_modules
-    if not lora_uses_default_targets(target, exclude):
+    # PeftConfig takes target_modules or exclude_modules, not both. A named target
+    # list is the caller's filter. An exclude list is unioned with the vision patterns.
+    if target and list(target) != ["*proj"]:
         return
     peft.pop("target_modules", None)
     peft["match_all_linear"] = False
-    peft["exclude_modules"] = list(VLM_LORA_EXCLUDE_MODULES)
+    peft["exclude_modules"] = vlm_lora_exclude_modules(
+        exclude,
+        checkpoint_model_name=customizer_config.model.checkpoint_model_name,
+    )
 
 
 def _configure_vlm_datasets(
@@ -531,8 +552,20 @@ def _configure_vlm_datasets(
         model_name=customizer_config.model.name,
         user_template=customizer_config.model.chat_template,
     )
-    cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
-    cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    # max_length is Automodel's token cap. Setting it also enables the pretokenized
+    # wrapper, which truncates to this length and replaces a sample whose truncation
+    # would split image tokens.
+    seq_length = customizer_config.model.max_seq_length
+    cfg["dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(train_out),
+        "max_length": seq_length,
+    }
+    cfg["validation_dataset"] = {
+        "_target_": CONVERSATION_DATASET_TARGET,
+        "path_or_dataset": str(val_out),
+        "max_length": seq_length,
+    }
     if chat_template:
         cfg["dataset"]["chat_template"] = chat_template
         cfg["validation_dataset"]["chat_template"] = chat_template
@@ -746,8 +779,9 @@ def _build_schedule(
         "local_batch_size": customizer_config.batch.micro_batch_size,
         "max_steps": max_steps,
         "num_epochs": epochs,
-        # On this signal Automodel saves a checkpoint, skips validation, and stops, on every rank.
-        # The pause poller sends it to global rank 0.
+        # Automodel installs a preemption handler for this signal. A pause sets that handler's flag on
+        # global rank 0, and at the next step Automodel saves a checkpoint, skips validation, and stops
+        # on every rank.
         "preemption_signal": PAUSE_SIGNAL.name,
     }
 
@@ -842,7 +876,9 @@ def _build_peft(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> N
     """Write the LoRA adapter config for both unmerged and merged LoRA."""
     if customizer_config.training.training_type not in (
         TrainingType.SFT,
+        TrainingType.PARTIAL_SFT,
         TrainingType.DISTILLATION,
+        TrainingType.PARTIAL_DISTILLATION,
     ):
         return
     if customizer_config.training.finetuning_type not in (
@@ -1295,7 +1331,9 @@ def _configure_retrieval_dataset(
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
     causal_reranker = (
-        causal_reranker_class(customizer_config.model.path) if recipe == TrainingRecipe.CROSS_ENCODER else None
+        causal_reranker_class(customizer_config.model.path, trust_remote_code=customizer_config.model.trust_remote_code)
+        if recipe == TrainingRecipe.CROSS_ENCODER
+        else None
     )
     if recipe == TrainingRecipe.BI_ENCODER:
         collator_target = "nemo_automodel.components.datasets.llm.BiEncoderCollator"
@@ -1409,6 +1447,19 @@ def _verify_tokenizer_compatibility(student_path: str, teacher_path: str, trust_
         logger.warning(f"Could not verify tokenizer compatibility: {e}")
 
 
+def _module_selector_freeze_config(customizer_config: TrainingStepConfig) -> dict[str, list[dict[str, str]]]:
+    """The job's freeze_modules / unfreeze_modules in Automodel's freeze_config form."""
+    training = customizer_config.training
+    freeze_config: dict[str, list[dict[str, str]]] = {}
+    for key, selectors in (
+        ("freeze_modules", training.freeze_modules),
+        ("unfreeze_modules", training.unfreeze_modules),
+    ):
+        if selectors:
+            freeze_config[key] = [selector.model_dump(exclude_none=True) for selector in selectors]
+    return freeze_config
+
+
 def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config: TrainingStepConfig) -> None:
     """Store a full-weight distillation student in fp32 when the job sets no precision.
 
@@ -1416,7 +1467,7 @@ def _keep_full_weight_kd_student_in_fp32(cfg: dict[str, Any], customizer_config:
     Adam state. Automodel r0.6.0's KD recipe stored such a student in fp32; v0.7.0 dropped that.
     """
     if (
-        customizer_config.training.training_type == TrainingType.DISTILLATION
+        customizer_config.training.training_type.is_distillation
         and "peft" not in cfg
         and customizer_config.model.precision is None
         and str(cfg["optimizer"]["_target_"]).startswith("torch.optim.")

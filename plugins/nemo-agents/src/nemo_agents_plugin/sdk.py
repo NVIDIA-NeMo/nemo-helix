@@ -70,7 +70,6 @@ exposes ``jobs`` only; agent CRUD, deployments, and ``invoke`` remain sync-only.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from typing import TypeVar
 
@@ -101,7 +100,6 @@ from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
-_DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
 _DEFAULT_WORKSPACE = "default"
 _JSON_MAP_ADAPTER = TypeAdapter(JsonMap)
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
@@ -130,18 +128,6 @@ def _spec_to_dict(spec: BaseModel | Mapping[str, object] | None) -> JsonMap:
     if isinstance(spec, BaseModel):
         return _json_map(spec.model_dump(exclude_unset=True, mode="json"))
     return _json_map(dict(spec))
-
-
-def _contains_default_model_placeholder(value: object) -> bool:
-    """Return True when *value* still contains an unresolved default-model placeholder."""
-    if isinstance(value, str):
-        protected = value.replace("$$", "\0DOLLAR\0")
-        return _DEFAULT_MODEL_PLACEHOLDER.search(protected) is not None
-    if isinstance(value, dict):
-        return any(_contains_default_model_placeholder(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_default_model_placeholder(item) for item in value)
-    return False
 
 
 def _agents_client_from_client(client: NemoClient) -> AgentsClient:
@@ -222,7 +208,7 @@ class AgentsResource:
         Returns:
             The registered agent as a dict.
         """
-        from nemo_agents_plugin.utils import inject_default_model
+        from nemo_agents_plugin.utils import contains_default_model_placeholder, inject_default_model
 
         payload: JsonMap = {"name": name}
         if description:
@@ -231,7 +217,7 @@ class AgentsResource:
             payload["labels"] = dict(labels)
         if config is not None:
             resolved_config = _json_map(inject_default_model(dict(config)))
-            if _contains_default_model_placeholder(resolved_config):
+            if contains_default_model_placeholder(resolved_config):
                 raise ValueError(
                     "Agent config references ${NEMO_DEFAULT_MODEL}, but no default model is selected. "
                     "Run `nemo setup`, set NEMO_DEFAULT_MODEL, or replace the placeholder with an explicit "

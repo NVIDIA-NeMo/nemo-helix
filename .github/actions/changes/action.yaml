@@ -7,6 +7,9 @@ description: >
   Outputs boolean flags that downstream jobs use to decide whether to run.
 
 outputs:
+  release-packages:
+    description: "'true' if the release catalog workflow changed"
+    value: ${{ steps.filter.outputs.release-packages }}
   openapi:
     description: "'true' if any file under openapi/ changed"
     value: ${{ steps.filter.outputs.openapi }}
@@ -34,6 +37,9 @@ outputs:
   scaled-evals:
     description: "'true' if the temporary scaled-evals plugin changed"
     value: ${{ steps.filter.outputs.scaled-evals }}
+  automodel:
+    description: "'true' if the automodel service or the customization code its tests import changed"
+    value: ${{ steps.filter.outputs.automodel }}
   e2e:
     description: "'true' if any e2e test files changed"
     value: ${{ steps.filter.outputs.e2e }}
@@ -73,6 +79,9 @@ outputs:
   deployments-openshell:
     description: "'true' if OpenShell deployment or credential authorization dependencies changed"
     value: ${{ steps.filter.outputs.deployments-openshell }}
+  go:
+    description: "'true' if Go source, modules, or Go CI configuration changed"
+    value: ${{ steps.filter.outputs.go }}
   jobs-openshell:
     description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
     value: ${{ steps.filter.outputs.jobs-openshell }}
@@ -85,6 +94,18 @@ outputs:
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
     value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
+  cpu-api:
+    description: "'true' if API build inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.api-docker == 'true' }}
+  cpu-tasks:
+    description: "'true' if shared task image inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.tasks-docker == 'true' }}
+  cpu-build-tools:
+    description: "'true' if build tooling image inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.tooling-docker == 'true' }}
+  cpu-gym-host:
+    description: "'true' if Gym host build inputs changed"
+    value: ${{ steps.filter.outputs.cpu-shared == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.k8s-smoke == 'true' || steps.filter.outputs.gym-host-docker == 'true' }}
   auth-idp:
     description: "'true' if auth-idp tests or their containerized E2E harness inputs changed"
     value: ${{ steps.filter.outputs.auth-idp == 'true' }}
@@ -106,6 +127,8 @@ runs:
       uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d
       with:
         filters: |
+          release-packages:
+            - '.github/workflows/release.yaml'
           openapi:
             - 'openapi/**'
             - 'plugins/*/openapi/**'
@@ -205,6 +228,15 @@ runs:
             - 'uv.lock'  # locked versions installed for the package
             - '.github/workflows/ci.yaml'  # smoke job definition
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
+          automodel:
+            - 'services/automodel/**'
+            - 'packages/nhx_customization_common/**'
+            # services/automodel/tests import these packages too.
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/**'
+            - 'plugins/nemo-automodel/**'
+            - '.github/workflows/ci.yaml'  # the automodel-tests job definition
+            - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
@@ -254,6 +286,50 @@ runs:
           docker-scripts:
             - 'script/install_duckdb_extensions.sh'
             - 'script/build_policy_wasm.sh'
+          cpu-shared:
+            - 'docker-bake.hcl'
+            - '.dockerignore'
+            - 'Makefile'
+            - 'docker/Dockerfile.bake'
+            - 'docker/base/Dockerfile.nhx-python-base'
+            - 'docker/scripts/**'
+            - 'docker/removals/**'
+            - '.github/workflows/build-cpu-smoke-images.yaml'
+            - '.github/actions/bake-cache-branch/**'
+            - '.github/actions/free-disk-space/**'
+            - '.github/actions/changes/action.yaml'
+            - '.github/workflows/ci.yaml'
+          api-docker:
+            - 'docker/Dockerfile.nhx-api'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/base/Dockerfile.nhx-studio-ui'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'docker/base/Dockerfile.policy-wasm'
+            - 'docker/fastembed-cache-empty/**'
+            - 'skills/**'
+            - 'README.md'
+          tasks-docker:
+            - 'docker/Dockerfile.nhx-tasks'
+            - 'docker/Dockerfile.nhx-gym-tasks'
+            - 'docker/Dockerfile.nhx-agent-hardener-tasks'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'docker/locks/nhx-gym-tasks/**'
+            - 'docker/locks/nhx-agent-hardener-tasks/**'
+            - 'skills/**'
+            - 'README.md'
+          tooling-docker:
+            - 'docker/builder/**'
+            - 'docker/Dockerfile.nhx-agent-installer'
+            - 'docker/base/Dockerfile.nhx-workspace'
+            - 'docker/sources/**'
+            - 'skills/**'
+            - 'README.md'
+          gym-host-docker:
+            - 'docker/gym-host/**'
+            - 'docker/locks/nhx-gym-host/**'
+            - 'packages/nhx_build_tools/**'
+            - 'packages/sandboxed_gym/**'
           helm:
             - 'k8s/**'
             - 'tools/lint/lint-helm.sh'
@@ -287,6 +363,18 @@ runs:
             - 'services/core/entities/**'
             - 'services/core/secrets/**'
             - 'services/core/jobs/src/nhx/core/jobs/controllers/backends/openshell/**'
+          go:
+            - '**/*.go'
+            - '**/go.mod'
+            - '**/go.sum'
+            - '**/go.work'
+            - '**/go.work.sum'
+            - '**/testdata/**'
+            - '.github/scripts/go-modules.sh'
+            - 'docker/base/Dockerfile.nhx-jobs-launcher'
+            - 'tools/go/**'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/**'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'

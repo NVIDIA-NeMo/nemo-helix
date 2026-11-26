@@ -29,6 +29,7 @@ import {
   getExperimentSideNavItems,
   getFilesetSideNavItems,
   getGuardrailsSideNavItems,
+  getInferenceProviderSideNavItems,
   getIntakeSideNavItems,
   getJobSideNavItems,
   getModelCompareSideNavItems,
@@ -56,7 +57,6 @@ const PluginNavIcon = lazy(() =>
 // These rows stand for the entity their landing page lists, so they take
 // that entity's canonical glyph.
 const AgentsIcon = ENTITY_ICONS.agents;
-const ModelsIcon = ENTITY_ICONS.baseModels;
 const DatasetsIcon = ENTITY_ICONS.datasets;
 
 export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
@@ -69,98 +69,79 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
   const showAgents = agentsInstalled || !manifestResolved;
 
   const items = useMemo<NavInputItem[]>(() => {
-    const dashboardNav = getDashboardSideNavItems(workspace);
-    const customizerNav = getCustomizationSideNavItems(workspace);
-    const evalNav = getEvaluationSideNavItems(workspace);
-    const tracesNav = getIntakeSideNavItems(workspace);
-    const evaluationItems = [
-      ...getExperimentSideNavItems(workspace),
-      ...getTasksetSideNavItems(workspace),
-    ];
-    const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);
-    const dataDesignerNav = getDataDesignerSideNavItems(workspace);
-    const anonymizerNav = getAnonymizerSideNavItems(workspace);
-    const agentItems = showAgents ? getAgentSideNavItems(workspace) : [];
-    const optimizerNav = getOptimizerSideNavItems(workspace);
-    const virtualModelsNav = getVirtualModelsSideNavItems(workspace);
-    const modelCompareNav = getModelCompareSideNavItems(workspace);
-    const deploymentsNav = getDeploymentSideNavItems(workspace);
+    const agentsRow = showAgents
+      ? [
+          {
+            id: 'agents',
+            slotIcon: <AgentsIcon className={iconColorClass} />,
+            slotLabel: 'Agents',
+            href: getAgentsListRoute(workspace),
+          },
+        ]
+      : [];
 
-    const observabilityItems = [...optimizerNav, ...tracesNav];
-
-    // Ordered as the funnel a user walks: pick a model, measure it, improve it, try it, ship it.
-    // Virtual Models trails the funnel because it composes models rather than producing one.
-    const modelSubItems = [
-      ...getBaseModelsSideNavItems(workspace),
-      ...evalNav,
-      ...customizerNav,
-      ...modelCompareNav,
-      ...deploymentsNav,
-      ...virtualModelsNav,
-    ];
-
-    // Agents links to its entity list page; Models is a disclosure whose 'Model Catalog' child
-    // is the list page. The chevron expands any sub-items.
-    const agentsHref = showAgents ? getAgentsListRoute(workspace) : undefined;
-
-    const componentItems = [
-      ...(agentsHref !== undefined
-        ? [
-            {
-              id: 'agents-group',
-              slotIcon: <AgentsIcon className={iconColorClass} />,
-              slotLabel: 'Agents',
-              href: agentsHref,
-              subItems: agentItems,
-            },
-          ]
-        : []),
-      ...(modelSubItems.length > 0
-        ? [
-            {
-              id: 'models-group',
-              slotIcon: <ModelsIcon className={iconColorClass} />,
-              slotLabel: 'Models',
-              subItems: modelSubItems,
-            },
-          ]
-        : []),
-    ];
-
-    const dataItems = [
+    const sections: { group?: string; items: NavItemData[] }[] = [
       {
-        id: 'dataset-list',
-        slotIcon: <DatasetsIcon className={iconColorClass} />,
-        slotLabel: 'Datasets',
-        href: getWorkspaceDatasetsRoute(workspace),
+        items: [...getDashboardSideNavItems(workspace), ...getModelCompareSideNavItems(workspace)],
       },
-      ...anonymizerNav,
-      ...dataDesignerNav,
-      ...safeSynthesizerNav,
+      {
+        group: 'Agent Development',
+        items: [
+          ...agentsRow,
+          ...(showAgents ? getAgentSideNavItems(workspace) : []),
+          ...getExperimentSideNavItems(workspace),
+          ...getTasksetSideNavItems(workspace),
+          ...getOptimizerSideNavItems(workspace),
+          ...getIntakeSideNavItems(workspace),
+        ],
+      },
+      {
+        group: 'Models',
+        items: [
+          ...getBaseModelsSideNavItems(workspace),
+          ...getEvaluationSideNavItems(workspace),
+          ...getCustomizationSideNavItems(workspace),
+          ...getDeploymentSideNavItems(workspace),
+          ...getVirtualModelsSideNavItems(workspace),
+        ],
+      },
+      {
+        group: 'Resources',
+        items: [
+          {
+            id: 'dataset-list',
+            slotIcon: <DatasetsIcon className={iconColorClass} />,
+            slotLabel: 'Datasets',
+            href: getWorkspaceDatasetsRoute(workspace),
+          },
+        ],
+      },
+      { group: 'Safety', items: getGuardrailsSideNavItems(workspace) },
+      {
+        group: 'Data Preparation',
+        items: [
+          ...getDataDesignerSideNavItems(workspace),
+          ...getSafeSynthesizerSideNavItems(workspace),
+          ...getAnonymizerSideNavItems(workspace),
+        ],
+      },
+      {
+        group: 'Workspace',
+        items: [
+          ...getInferenceProviderSideNavItems(workspace),
+          ...getFilesetSideNavItems(workspace),
+          ...getJobSideNavItems(workspace),
+          ...getSettingsSideNavItems(workspace),
+        ],
+      },
     ];
 
-    const governanceItems = getGuardrailsSideNavItems(workspace);
-
-    return [
-      ...dashboardNav,
-      ...(observabilityItems.length > 0
-        ? [{ group: 'Observability', items: observabilityItems }]
-        : []),
-      ...(componentItems.length > 0 ? [{ group: 'Components', items: componentItems }] : []),
-      ...(evaluationItems.length > 0 ? [{ group: 'Evaluations', items: evaluationItems }] : []),
-      { group: 'Data', items: dataItems },
-      ...(governanceItems.length > 0 ? [{ group: 'Governance', items: governanceItems }] : []),
-    ];
+    // Empty sections are kept so plugin groups can merge into them (e.g. Safety);
+    // the drawer drops any group that is still empty. The first section is heading-less.
+    return sections.map((s) =>
+      s.group === undefined ? { items: s.items } : { group: s.group, items: s.items }
+    );
   }, [workspace, showAgents]);
-
-  const systemNavGroup = useMemo(() => {
-    const systemItems = [
-      ...getFilesetSideNavItems(workspace),
-      ...getJobSideNavItems(workspace),
-      ...getSettingsSideNavItems(workspace),
-    ];
-    return systemItems.length > 0 ? [{ group: 'System', items: systemItems }] : [];
-  }, [workspace]);
 
   const pluginNavGroups = useMemo(
     () =>
@@ -208,8 +189,8 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     for (const [group, groupItems] of pending) {
       merged.push({ group, items: groupItems });
     }
-    return [...merged, ...systemNavGroup];
-  }, [items, pluginNavGroups, systemNavGroup]);
+    return merged;
+  }, [items, pluginNavGroups]);
 
   return <NavigationDrawer items={allItems} collapsed={collapsed} />;
 };

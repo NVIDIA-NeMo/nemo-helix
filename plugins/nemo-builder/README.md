@@ -6,7 +6,8 @@
 Container image builds for NeMo Helix. You submit Dockerfiles whose build context is in a Files
 fileset. The plugin builds them with kaniko, in a sandbox pod that holds no credentials. Then it
 pushes each image to the deployment's registry, signs it with your workspace's key, and records it
-as a `ContainerImage` you can pin by digest.
+as a `ContainerImage` you can pin by digest. With the [remote backend](#remote-backend), a build
+service outside the cluster builds and publishes the images instead.
 
 **Status: proof of concept.** It runs end to end, installed with the platform's Helm chart, on minikube
 and on a shared multi-node cluster publishing to Harbor, and it has the [limitations](#limitations)
@@ -657,6 +658,7 @@ Operator settings live under `builder:` in the platform config, which with the c
 
 ```yaml
 builder:
+  backend: in-cluster                            # the default; remote: see Remote backend
   registry: us-central1-docker.pkg.dev           # a host only, never host/path; http://host for plain HTTP
   repository_prefix: my-project/my-repo          # images land at <prefix>/<workspace>/...
   # The push step's platform secrets, in the submitting workspace. These are the defaults; null turns one off.
@@ -684,6 +686,9 @@ without logging in; set both or neither. With `signing_key_secret` `null`, it pu
 unsigned. Both suit a local registry rather than a shared one: anything that can reach a registry
 open to anonymous pushes can overwrite any workspace's images, and an unsigned image can be checked
 only against the digest its row records.
+
+The settings above, `sandbox` and the build profiles are the in-cluster backend's. The remote
+backend reads `default_platform` and its own `remote` section: see [Remote backend](#remote-backend).
 
 `config/minikube-values.yaml` is the quickstart's chart values. They work, but they are local-only in
 the ways their header lists, auth being off among them; don't start a shared deployment from them.
@@ -762,6 +767,62 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
   after it was submitted, with a `status_detail` saying to submit the next revision.
 - **The queued builds 0.10 stored** are deleted by `builder-settle`, since each holds its submitter's
   principal.
+
+## Remote backend
+
+Set `backend: remote` to have a build service outside the cluster build and publish images instead
+of the in-cluster sandboxes. The builder doesn't know which service: you supply a step image that
+holds its client.
+
+```yaml
+builder:
+  backend: remote
+  remote:
+    registry: registry.example.com      # where the service publishes (host only)
+    repository: builds/images           # images go under <repository>/<workspace>/<set>/<name>
+    per_workspace: true                 # false for a service that publishes to `repository` only
+    profile: build-remote               # Jobs cpu profile that runs the build step
+    image: registry.example.com/tools/remote-build:1.0
+    command: [remote-build]
+    credential_secret: build-service-token   # platform secret; null to use the pod's own identity
+    platforms: [linux/amd64]
+    build_timeout_seconds: 1800
+    settings: {endpoint: https://builds.example.com}   # passed as-is to the client
+```
+
+Submit returns `409` if `remote` or its profile is missing, or if a request uses a copy, `mounts`,
+an `output`, an unsupported platform, or a Dockerfile other than `Dockerfile` at the context root.
+With `per_workspace: false`, every workspace's images share `remote.repository`, so anyone who can
+pull from it can pull them all.
+
+**Writing a client.** The step image's console script calls `step_main` from
+`nemo_builder_plugin.run.remote`:
+
+```python
+def main() -> int:
+    return step_main(lambda config, credential: MyService(config.settings, credential))
+```
+
+`MyService` implements `RemoteBuildService`: `upload_context`, `start`, `status` (returning
+`Running`, `Failed` or `Succeeded`) and `cancel`. Each call must finish in bounded time. Raise
+`RetryableError` for failures worth retrying and `PermanentError` for the rest. `upload_context`
+and `start` must be safe to repeat with the same `key`. The context arrives as a `.tar.gz` of plain
+files and directories with `Dockerfile` at the root. If the service takes its own timeout, pass it
+`timeout_seconds`.
+
+**What the driver does.** For each image still `queued` or `pending`, it uploads the context,
+starts the build and polls it. Upload, start and cancel are retried up to three times. It cancels
+the build on timeout, on `SIGTERM`, or on any error after the start. It marks the row ready only if
+the service published to the row's own repository by digest. Images build one at a
+time, so size the profile's deadline for all of them.
+
+**Credentials and signing.** The credential comes only from the platform secret, so submit refuses
+anyone who can't read it. The step removes it from the environment before the client starts and
+masks it in logs (the exact string only). The builder doesn't push or sign remote builds; any
+signing is up to the service.
+
+**Known gaps.** Uploaded contexts aren't deleted from the service, `.dockerignore` isn't applied before upload, a failed row's `status_detail` is
+generic (the cause is in the step's log), and `Succeeded.attributes` is logged but not stored.
 
 ## Limitations
 

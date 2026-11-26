@@ -194,6 +194,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
                   entity="agentOptimizations"
                   variant="first-use"
                   workspace={workspace}
+                  params={{ 'agent-name': agentName }}
                   onCreate={onOptimize}
                 />
               ),

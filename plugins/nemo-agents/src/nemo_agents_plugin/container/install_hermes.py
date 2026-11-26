@@ -33,8 +33,7 @@ def install_hermes(checkout: Path, python: Path) -> None:
                 "--overrides",
                 str(overrides),
                 f"nemo-fabric=={version('nemo-fabric')}",
-                # Fabric deliberately gives Hermes its own Relay 0.10 range.
-                # The umbrella Fabric relay extra selects 0.11 and conflicts.
+                # The pinned Hermes v0.22.5 requires Relay 0.10.
                 f"nemo-fabric-adapters-hermes[relay]=={version('nemo-fabric')}",
                 "nemo-relay==0.10.0",
                 "--editable",

@@ -93,6 +93,13 @@ class PipelineConfig(BaseModel):
     patch_causal_lm_model: Optional[bool] = None
 
 
+class ModuleSelectorConfig(BaseModel):
+    """Exactly one of an exact module path or a glob, matched recursively by Automodel."""
+
+    path: Optional[str] = None
+    glob: Optional[str] = None
+
+
 class MTPConfig(BaseModel):
     """Multi-Token Prediction settings for checkpoints trained with MTP heads."""
 
@@ -112,6 +119,18 @@ class ModelConfig(BaseModel):
     max_seq_length: int = Field(
         default=2048,
         description="Maximum token sequence length for training; longer sequences are truncated",
+    )
+    max_pixels: int | None = Field(
+        default=None,
+        description="Shorthand for image_longest_edge. None keeps the checkpoint ceiling.",
+    )
+    image_longest_edge: int | None = Field(
+        default=None,
+        description="Maximum pixels in a resized image. None keeps the checkpoint ceiling.",
+    )
+    image_shortest_edge: int | None = Field(
+        default=None,
+        description="Minimum pixels in a resized image. None keeps the checkpoint floor.",
     )
 
     # Model loading options
@@ -205,11 +224,6 @@ class ExportConfig(BaseModel):
         default="eager",
         description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
     )
-    pooling: Literal["avg", "cls", "last"] = Field(
-        default="avg",
-        description="Embedding pooling over hidden states. Ignored for cross_encoder.",
-    )
-    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
     dimensions: bool = Field(
         default=False,
         description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
@@ -249,6 +263,19 @@ class RetrievalConfig(BaseModel):
     do_distributed_inbatch_negative: bool = Field(
         default=False,
         description=("Use other queries' passages in the global batch as extra negatives. Ignored for cross_encoder."),
+    )
+
+    # Embedding pooling
+    pooling: Optional[Literal["avg", "cls", "last"]] = Field(
+        default=None,
+        description=(
+            "How a bi_encoder turns token vectors into one embedding: 'avg' (mean), 'cls' (first token), "
+            "or 'last' (last token). Unset uses the base checkpoint's pooling. Ignored for cross_encoder."
+        ),
+    )
+    normalize: Optional[bool] = Field(
+        default=None,
+        description="L2-normalize bi_encoder embeddings. Unset uses the base checkpoint's choice. Ignored for cross_encoder.",
     )
 
     # Tokenization configuration
@@ -294,6 +321,8 @@ class TrainingStepConfig(BaseModel):
         activation_checkpointing: bool = False
         mtp: Optional[MTPConfig] = None
         backend: Optional[BackendConfig] = None
+        freeze_modules: Optional[list[ModuleSelectorConfig]] = None
+        unfreeze_modules: Optional[list[ModuleSelectorConfig]] = None
 
     class ScheduleConfig(BaseModel):
         epochs: int = 1

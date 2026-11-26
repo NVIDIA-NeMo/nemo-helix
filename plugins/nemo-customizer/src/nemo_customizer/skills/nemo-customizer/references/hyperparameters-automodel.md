@@ -111,7 +111,7 @@ Full template:
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `training_type` | `sft` | `distillation` requires `teacher_model` (entity ref) |
+| `training_type` | `sft` | `distillation` requires `teacher_model` (entity ref). `partial_sft` / `partial_distillation` train only the modules the selectors leave trainable; see **Module freezing** below |
 | `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. A Qwen3 reranker without a `pipeline_tag: text-ranking` model card (any Customizer output, or one fine-tuned elsewhere) reads as a chat model, so set `cross_encoder` explicitly for it. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
 | `finetuning_type` | `lora` | `all_weights` (full fine-tune), `lora_merged` (merge adapter into base) |
 | `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32. Default vLLM deployments load adapters up to **rank 32** and model-free NIM deployments up to **rank 16**; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**) |
@@ -121,11 +121,14 @@ Full template:
 | `lora.target_modules` | `null` | e.g. `["q_proj","v_proj"]`; null = platform default targets |
 | `lora.exclude_modules` | `null` | Patterns to exclude from LoRA, e.g. `["*.out_proj"]` |
 | `lora.use_triton` | `true` | Use the optimized Triton LoRA kernel |
-| `max_seq_length` | `2048` | Truncate/pack to this length; lower if OOM |
+| `max_seq_length` | `2048` | Token cap. With `image_size` or `max_pixels`, this must exceed the tokens one image can use at that ceiling, plus the text tokens in each row. The model spec's `vision_patch_size` is the side of one image token. A shorter cap is rejected, but only when the model spec has `vision_patch_size`. Without it the check is skipped and a short cap can truncate rows, so work out the image token count yourself. Lower it if the run OOMs |
+| `image_size` | `null` | `{longest_edge, shortest_edge}` pixel-area bounds. Both required, `shortest_edge` < `longest_edge`. Set this or `max_pixels`, not both. Vision-language checkpoints only |
 | `precision` | `null` | `bf16` \| `fp16` \| `fp32` \| `fp8`; null auto-detects from the checkpoint. Exception: full-weight distillation with `Adam`/`AdamW` keeps the student in fp32, because those optimizers hold no separate fp32 copy of the weights. Set `precision` to override |
 | `attn_implementation` | `sdpa` | `sdpa` (PyTorch native) \| `flash_attention_2` \| `eager` |
 | `tokenizer_backend` | `null` | **Leave unset** unless the tokenizer fails to load. See **Tokenizer backend** below |
 | `mask_generation_prompt` | `false` | Chat (messages) data only. `true` stops training on the role header and empty `<think></think>` the chat template writes before each reply. See below |
+| `freeze_modules` | `null` | Partial training types only. List of `{"path": ...}` or `{"glob": ...}` selectors to freeze. See **Module freezing** below |
+| `unfreeze_modules` | `null` | Partial training types only. Selectors to make trainable; wins over `freeze_modules`. **With LoRA, not saved** (see below) |
 | `teacher_model` | — | **Model entity ref** (not HF id). Required for distillation; see below |
 | `distillation_ratio` | `0.5` | KD blend (0–1) |
 | `distillation_temperature` | `1.0` | KD temperature |
@@ -171,6 +174,20 @@ At inference, the chat template writes the assistant role header, and for hybrid
 - **Loss and validation loss read lower**, because the hard-to-predict template tokens no longer count.
 
 Chat-format (messages) data only. Prompt/completion data fails the job, and vision-language and retrieval recipes are rejected at submission.
+
+### Module freezing (`partial_sft` / `partial_distillation`)
+
+Set `training_type` to `partial_sft` or `partial_distillation` to train only some modules. These run the same algorithm as `sft` and `distillation`, with every `finetuning_type`, and need at least one of `freeze_modules` / `unfreeze_modules` (the selectors are rejected on the other training types). The output is the usual one for the `finetuning_type`: a full checkpoint, an adapter, or a merged model.
+
+Each selector is `{"path": "<exact module path>"}` or `{"glob": "<pattern>"}`, where `*` also crosses `.`. A selected module's whole subtree is frozen or unfrozen. Training starts from the `finetuning_type`'s baseline (`all_weights`: everything trains; LoRA: only the adapters train) plus Helix's built-in settings (for VLM jobs, the frozen vision tower). Then `freeze_modules` apply, then `unfreeze_modules`, which win on overlap. To train only some modules, freeze everything and unfreeze those: `"freeze_modules": [{"glob": "*"}], "unfreeze_modules": [...]`. A selector that matches no module fails the job, so check the module names first (for example, the weight names in `model.safetensors.index.json`, minus the trailing `.weight`). For models that Automodel trains with its own implementation, such as Nemotron-H, module paths can differ from those names.
+
+- **`freeze_modules` with LoRA** freezes the adapters inside the selected modules. `lora.exclude_modules` gets the same result by not adding them.
+- **`unfreeze_modules` with LoRA (`lora`, `lora_merged`): the trained modules are lost.** Automodel 0.7.0 trains them, but its adapter save keeps only LoRA tensors, so the adapter and the merged model fall back to the base weights for those modules (a resumed run most likely does too). Use `all_weights` to keep them until Automodel saves them.
+
+Examples:
+- Train a VLM's projector along with the language model: `"training_type": "partial_sft", "finetuning_type": "all_weights", "unfreeze_modules": [{"path": "model.multi_modal_projector"}]`.
+- Keep the embeddings fixed during full fine-tuning: `"training_type": "partial_sft", "finetuning_type": "all_weights", "freeze_modules": [{"glob": "*.embed_tokens"}]`.
+- Train only the last two layers: `"freeze_modules": [{"glob": "*"}], "unfreeze_modules": [{"glob": "*.layers.30.*"}, {"glob": "*.layers.31.*"}]`.
 
 ### Automodel `schedule`
 
@@ -273,7 +290,9 @@ Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `tra
 
 `retrieval.temperature` is the loss softmax temperature. Unset means `0.02` for `bi_encoder` and `1.0` for `cross_encoder`. Lower values sharpen the contrast between the positive and the negatives. For a Qwen3 causal reranker it is the only temperature setting; Automodel's Qwen3-Reranker example recipe uses `0.3`.
 
-`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+`retrieval.pooling` (`avg`, `cls`, or `last`) and `retrieval.normalize` set how a `bi_encoder` turns its token vectors into one embedding. Leave them unset to keep what the base was pretrained with: its Sentence Transformers files, else its config's `pooling`, else `avg` with normalization. Both supported bases use `avg` with normalization. The HF output, `lora_merged` included, carries Sentence Transformers files (`modules.json`, `1_Pooling/`) with this pooling and the job's `query_prefix`/`passage_prefix` as prompts, so vLLM and Sentence Transformers pool it the way it trained.
+
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit `embeddings` pooled the way the model trained (`retrieval.pooling` and `normalize`). Cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
 
 **Qwen3 causal rerankers** (a `cross_encoder` job on a `Qwen3ForCausalLM` base such as Qwen3-Reranker) have no score head:
 - **Training prompt.** Helix trains them on Qwen3-Reranker's own prompt: system message, `<Instruct>`/`<Query>`/`<Document>`, then the empty think block. Classifier rerankers keep `question:{query} \n \n passage:{passage}`.

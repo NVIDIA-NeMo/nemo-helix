@@ -19,6 +19,8 @@ from nhx.automodel.tasks.training.backends.checkpoints import (
     _probe_bidirectional_mask,
     _restructure_encoder_output,
     auto_torch_dtype,
+    copy_auto_map_code,
+    declare_embedding_pooling,
     find_selected_checkpoints,
     merge_lora_cross_encoder_adapter,
     process_checkpoint,
@@ -69,8 +71,12 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
         "merge_embed": mocker.patch(f"{CHECKPOINTS}.merge_lora_embedding_adapter"),
         "export_onnx": mocker.patch(f"{CHECKPOINTS}.export_onnx", side_effect=_record("export")),
         "sanitize": mocker.patch(f"{CHECKPOINTS}.sanitize_encoder_hf", side_effect=_record("sanitize")),
+        "declare_pooling": mocker.patch(
+            f"{CHECKPOINTS}.declare_embedding_pooling", side_effect=_record("declare_pooling")
+        ),
         "restructure": mocker.patch(f"{CHECKPOINTS}._restructure_encoder_output", side_effect=_record("restructure")),
         "copytree": mocker.patch(f"{CHECKPOINTS}.copytree"),
+        "copy_code": mocker.patch(f"{CHECKPOINTS}.copy_auto_map_code", side_effect=_record("copy_code")),
     }
 
 
@@ -117,8 +123,9 @@ class TestCrossEncoderCheckpoint:
         assert call["trust_remote_code"] is False
         assert call["load_trust_remote_code"] is False
         assert call["causal_reranker"] is causal_reranker
+        assert call["pooling"] is None, "a reranker pools inside its own head"
         patched_checkpoint_io["sanitize"].assert_called_once_with(output_path, tmp_path / "base")
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        assert patched_checkpoint_io["order"] == ["copy_code", "export", "sanitize", "restructure"]
 
 
 class TestLlmLoraMerged:
@@ -392,7 +399,8 @@ def test_embedding_pooling_supports_both_padding_sides(
     export_model = _build_export_module(
         torch.nn.Identity(),
         ModelType.EMBEDDING,
-        ExportConfig(pooling=pooling, normalize=False),
+        pooling=pooling,
+        normalize=False,
     )
 
     actual = export_model._pool(hidden, torch.tensor(mask))
@@ -509,6 +517,43 @@ class TestSanitizeEncoderHf:
         assert (output / "model.py").is_file()
 
 
+@pytest.mark.parametrize(
+    ("auto_map", "output_has", "expected"),
+    [
+        (
+            {"AutoConfig": "llama_bidirectional_model.LlamaBidirectionalConfig"},
+            [],
+            {"llama_bidirectional_model.py", "helpers.py"},
+        ),
+        ({"AutoConfig": "llama_bidirectional_model.LlamaBidirectionalConfig"}, ["llama_bidirectional_model.py"], None),
+        ({"AutoConfig": "org/repo--llama_bidirectional_model.LlamaBidirectionalConfig"}, [], set()),
+        (None, [], set()),
+    ],
+    ids=["copies-referenced-code", "keeps-existing-file", "other-repository", "no-auto-map"],
+)
+def test_copy_auto_map_code(
+    tmp_path: Path, auto_map: dict[str, str] | None, output_has: list[str], expected: set[str] | None
+) -> None:
+    """A published checkpoint ships the code its auto_map loads, taken from the base checkpoint."""
+    base = tmp_path / "base"
+    output = tmp_path / "hf"
+    base.mkdir()
+    output.mkdir()
+    (base / "llama_bidirectional_model.py").write_text("from .helpers import x\n")
+    (base / "helpers.py").write_text("x = 1\n")
+    (output / "config.json").write_text(json.dumps({"auto_map": auto_map} if auto_map else {}))
+    for name in output_has:
+        (output / name).write_text("trained\n")
+
+    copy_auto_map_code(output, base)
+
+    if expected is None:
+        assert (output / "llama_bidirectional_model.py").read_text() == "trained\n"
+        assert (output / "helpers.py").read_text() == "x = 1\n"
+    else:
+        assert {path.name for path in output.glob("*.py")} == expected
+
+
 class TestProcessCheckpointSanitize:
     def _full_sft_config(self, tmp_path: Path, *, trust_remote_code: bool) -> MagicMock:
         customizer_config = MagicMock()
@@ -532,12 +577,15 @@ class TestProcessCheckpointSanitize:
         assert export_call.call_args.kwargs["load_trust_remote_code"] is True
         assert export_call.call_args.kwargs["trust_remote_code"] is False
         assert sanitize_call.call_args.args == (output_path, tmp_path / "base")
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        assert patched_checkpoint_io["order"] == ["copy_code", "export", "sanitize", "declare_pooling", "restructure"]
 
     def test_full_sft_trusted_skips_sanitize(self, patched_checkpoint_io: dict, tmp_path: Path) -> None:
+        """A trusted encoder keeps its auto_map, so its code files must be in the published tree."""
         config = self._full_sft_config(tmp_path, trust_remote_code=True)
         process_checkpoint(tmp_path / "ckpt", tmp_path / "output", config, model_type=ModelType.EMBEDDING)
         patched_checkpoint_io["sanitize"].assert_not_called()
+        assert patched_checkpoint_io["copy_code"].call_args.args == (tmp_path / "output", tmp_path / "base")
+        assert patched_checkpoint_io["order"] == ["copy_code", "export", "declare_pooling", "restructure"]
         assert patched_checkpoint_io["export_onnx"].call_args.kwargs["load_trust_remote_code"] is True
         assert patched_checkpoint_io["export_onnx"].call_args.kwargs["trust_remote_code"] is True
 
@@ -550,11 +598,12 @@ class TestProcessCheckpointSanitize:
         process_checkpoint(tmp_path / "adapter", tmp_path / "output", config, model_type=ModelType.EMBEDDING)
         patched_checkpoint_io["sanitize"].assert_not_called()
         patched_checkpoint_io["export_onnx"].assert_not_called()
+        patched_checkpoint_io["copy_code"].assert_not_called()
 
     def test_merged_lora_untrusted_sanitizes_and_loads_native(
         self, merged_lora_config: MagicMock, patched_checkpoint_io: dict, tmp_path: Path
     ) -> None:
-        merged_lora_config.retrieval = RetrievalConfig(export=ExportConfig(primary="hf"))
+        merged_lora_config.retrieval = RetrievalConfig(pooling="last", export=ExportConfig(primary="hf"))
         process_checkpoint(
             tmp_path / "adapter",
             tmp_path / "output",
@@ -570,8 +619,83 @@ class TestProcessCheckpointSanitize:
         call = patched_checkpoint_io["export_onnx"].call_args.kwargs
         assert call["load_trust_remote_code"] is False
         assert call["trust_remote_code"] is False
+        # The ONNX graph pools the way the model trained: the job's pooling, the base's normalize.
+        assert (call["pooling"], call["normalize"]) == ("last", True)
         patched_checkpoint_io["sanitize"].assert_called_once()
-        assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+        patched_checkpoint_io["declare_pooling"].assert_called_once_with(tmp_path / "output", merged_lora_config)
+        assert patched_checkpoint_io["order"] == ["copy_code", "export", "sanitize", "declare_pooling", "restructure"]
+
+
+_ST = "sentence_transformers.models."
+
+
+class TestDeclareEmbeddingPooling:
+    @pytest.mark.parametrize(
+        ("retrieval", "pooling", "modules", "pooling_flag", "prompts", "similarity"),
+        [
+            (
+                RetrievalConfig(),
+                "avg",
+                [f"{_ST}Transformer", f"{_ST}Pooling", f"{_ST}Normalize"],
+                "pooling_mode_mean_tokens",
+                {"query": "query: ", "document": "passage: "},
+                "cosine",
+            ),
+            (
+                RetrievalConfig(pooling="last", normalize=False, query_prefix="search_query:", passage_prefix=""),
+                "last",
+                [f"{_ST}Transformer", f"{_ST}Pooling"],
+                "pooling_mode_lasttoken",
+                {"query": "search_query: ", "document": ""},
+                "dot",
+            ),
+        ],
+        ids=["defaults", "job-settings"],
+    )
+    def test_declares_the_trained_pooling_and_prefixes(
+        self,
+        merged_lora_config: MagicMock,
+        tmp_path: Path,
+        retrieval: RetrievalConfig,
+        pooling: str,
+        modules: list[str],
+        pooling_flag: str,
+        prompts: dict[str, str],
+        similarity: str,
+    ) -> None:
+        """The files describe the trained model; only max_seq_length comes from the base."""
+        (tmp_path / "base").mkdir()
+        (tmp_path / "base" / "sentence_bert_config.json").write_text('{"max_seq_length": 8192, "do_lower_case": false}')
+        output = tmp_path / "output"
+        output.mkdir()
+        (output / "config.json").write_text('{"hidden_size": 2048, "pooling": "cls"}')
+        merged_lora_config.retrieval = retrieval
+
+        declare_embedding_pooling(output, merged_lora_config)
+
+        # vLLM reads config.json's pooling for Llama bidirectional models; the merge left the base's there.
+        assert json.loads((output / "config.json").read_text()) == {"hidden_size": 2048, "pooling": pooling}
+        assert [module["type"] for module in json.loads((output / "modules.json").read_text())] == modules
+        pooling_config = json.loads((output / "1_Pooling" / "config.json").read_text())
+        assert [key for key, value in pooling_config.items() if value is True] == [pooling_flag, "include_prompt"]
+        assert pooling_config["word_embedding_dimension"] == 2048
+        settings = json.loads((output / "config_sentence_transformers.json").read_text())
+        assert settings["prompts"] == prompts
+        assert settings["similarity_fn_name"] == similarity
+        assert json.loads((output / "sentence_bert_config.json").read_text()) == {
+            "max_seq_length": 8192,
+            "do_lower_case": False,
+        }
+
+    def test_keeps_files_automodel_wrote(self, merged_lora_config: MagicMock, tmp_path: Path) -> None:
+        output = tmp_path / "output"
+        output.mkdir()
+        (output / "modules.json").write_text("[]")
+
+        declare_embedding_pooling(output, merged_lora_config)
+
+        assert (output / "modules.json").read_text() == "[]"
+        assert not (output / "1_Pooling").exists()
 
 
 @pytest.mark.parametrize(

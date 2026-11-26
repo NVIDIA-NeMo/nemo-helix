@@ -18,7 +18,7 @@ import {
   ChartTree,
   LockClosed,
   ListBullet,
-  Radar,
+  NeuralNetwork,
   Rocket,
   Secure,
   Sliders,
@@ -27,6 +27,9 @@ import {
   ProfileGroup,
   Route,
   Faders,
+  ChatMulti,
+  Paperclip,
+  Book,
 } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
@@ -56,13 +59,15 @@ export const ENTITY_ICONS = {
   agentMonitorRuns: ListBullet,
   // Every run that tunes an agent — parameter sweeps, insight loops.
   agentOptimizations: Sliders,
+  // A study's individual trials are read as part of the study, so they take its glyph.
+  optimizationTrials: Sliders,
 
   // Models
   baseModels: CubeStack,
   customModels: Faders,
   deployments: Rocket,
   virtualModels: Route,
-  inferenceProviders: Radar,
+  inferenceProviders: NeuralNetwork,
 
   // Data
   datasets: Db,
@@ -70,6 +75,8 @@ export const ENTITY_ICONS = {
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
   dataDesignerJobs: LayoutList,
+  // A job's output is read as part of the job, so it takes the job's glyph.
+  dataDesignerJobOutput: LayoutList,
   safeSynthesizerJobs: Generate,
 
   // Governance. A config and its tests are one thing to the user, so the tests
@@ -94,6 +101,12 @@ export const ENTITY_ICONS = {
   telemetryTraces: ChartTree,
   insightTraces: ChartTree,
   telemetrySpans: ListBullet,
+
+  // NeMo Assistant. In-app chat surfaces rather than platform entities — they
+  // have no CLI equivalent, so they carry copy and a glyph but no bridge.
+  assistantSessions: ChatMulti,
+  assistantArtifacts: Paperclip,
+  assistantSkills: Book,
 
   // System
   jobs: ListCheckmark,

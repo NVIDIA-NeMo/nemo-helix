@@ -3,33 +3,37 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Insights from Traces"
-description: "Run NeMo Compass over an agent's traces to file evidence-backed Insights, on demand or on a schedule."
+description: "Run the workspace's Compass agent over another agent's traces to file evidence-backed Insights, on demand or on a schedule."
 ---
 
 <a id="agents-insights-analysis"></a>
 
-An **analysis run** reads an agent's traces from NeMo Intake, looks for
-problems that recur across them, and files each one as an **Insight**: a
-named, persistent description of a recurring problem, backed by the traces
-that show it. Review Insights in [NeMo Studio Insights](/documentation/studio/insights),
-then resolve them as you fix the agent.
+NeMo Compass reads an agent's traces from NeMo Intake, looks for problems that
+recur across them, and files each one as an **Insight**: a named, persistent
+description of a recurring problem, backed by the traces that show it. Review
+Insights in [NeMo Studio Insights](/documentation/studio/insights), then
+resolve them as you fix the agent.
 
-You can start a run on demand, or opt an agent in to periodic analysis and let
-the platform run it on a daily or weekly schedule.
+Compass is itself an agent in your workspace: a
+[plugin-managed agent](/documentation/agents/plugin-managed-agents) of type
+`compass.analyst`, named `compass-analyst`. Each analysis is an
+[execute job](/documentation/agents/execute-agents-as-jobs) of that agent,
+whose context names the agent to analyze. Submit one on demand, or opt an agent
+in to periodic analysis and let the platform submit them on a daily or weekly
+schedule.
 
 ## Before You Start
 
 You need:
 
-- A running NeMo Helix with the Compass plugin and Intake. The plugin is installed by
-  default. Runs execute as [execute-agent jobs](/documentation/agents/execute-agents-as-jobs),
-  so the platform also needs a working `agents.execute` runtime.
+- A running NeMo Helix with the Compass plugin and Intake. The plugin is
+  installed by default. Analyses run as execute jobs, so the platform also
+  needs a working `agents.execute` runtime.
 - Traces for the agent in Intake. Compass can only diagnose what it can
   observe. See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
-- A default and fast model pair. `nemo setup` stores one, or you can pass
-  `--default-model` and `--fast-model` (Model Entity refs such as
-  `default/<model>`) on each command. The fast model reviews traces in each
-  Compass Signal; the default model compiles the findings into Insights.
+- A default and fast model pair. `nemo setup` stores one, and the CLI fills it
+  in on each run; you can also name the models in the run's context.
+- The workspace's Compass agent. See [Create the Compass Agent](#create-the-compass-agent) below.
 
 <Warning>
 
@@ -51,28 +55,73 @@ Python 3.12 and 3.13.
 ### Telemetry Requirement
 
 The analysis selects traces by agent name, so the normalized `agent_name` on
-the agent's traces must match the `--agent` you pass. For OTLP, set
-`gen_ai.agent.name` on every span; Intake also normalizes `llm.agent.name` and
-`agent.name`. ATIF trajectories map their required `agent.name` automatically.
+the agent's traces must match the `agent` you name in the run's context. For
+OTLP, set `gen_ai.agent.name` on every span; Intake also normalizes
+`llm.agent.name` and `agent.name`. ATIF trajectories map their required
+`agent.name` automatically.
 
-## How an Analysis Run Works
+## Create the Compass Agent
+
+A workspace has at most one Compass agent, used to analyze any agent traces in the
+workspace. Create it once:
+
+```bash
+nemo agents create compass.analyst
+```
+
+It is named `compass-analyst`; pass `--name` to choose another name. Its config
+comes from the installed Compass plugin whenever it runs, so there is nothing to
+configure, and it picks up plugin upgrades without being created again.
+Creating it requires permission to create agents in the workspace.
+
+`nemo compass analysis enable` also creates it when the workspace has none. See
+[Run Analysis on a Schedule](#run-analysis-on-a-schedule).
+
+## Give the Agent an Ethos
+
+An **Ethos** is a Markdown document that describes an agent's intended
+behavior, constraints, and success criteria: context that its traces don't
+contain. With one, Compass's `ethos-divergence` Signal looks for behavior that
+departs from it. Without one, Compass can only judge the agent against itself.
+
+Compass reads the Ethos from `ETHOS.md` in the analyzed agent's Ethos fileset,
+`<agent>-ethos`, in the workspace the analysis runs in. Every analysis reads
+it, on demand or scheduled, when its job is submitted.
+
+When you register an agent from a directory with `nemo agents register`, the
+directory's text files are uploaded to that fileset, so an `ETHOS.md` beside
+`agent.yaml` is picked up. Otherwise, such as for an agent known only from its
+traces, upload it yourself. `--exist-ok` keeps an existing fileset:
+
+```bash
+nemo files filesets create my-agent-ethos --exist-ok
+nemo files upload ETHOS.md my-agent-ethos
+```
+
+An agent with no `ETHOS.md`, or a blank one, is analyzed without an Ethos, and
+`ethos-divergence` is skipped. If you are not allowed to read the fileset, the
+run is rejected when you submit it, rather than analyzing the agent without
+the Ethos you expected it to apply.
+
+## How an Analysis Works
 
 1. **Load traces.** The run reads the agent's traces and their spans from
-   Intake. `--since` and `--evaluation-id` narrow which traces are read.
-1. **Collect evidence.** Several Compass Signals (evidence streams) examine the traces in
-   parallel. Each stream either reports the problems it found or is skipped with a
-   reason.
+   Intake. The optional `since` and `evaluation_id` context keys narrow which traces
+   are read.
+1. **Collect evidence.** Several Compass Signals (evidence streams) examine the
+   traces in parallel. Each stream either reports the problems it found or is
+   skipped with a reason.
 1. **Apply recurrence thresholds.** Isolated failures are dropped. Only
    observations that recur often enough become Insight candidates. See
    [Recurrence Thresholds](#recurrence-thresholds).
 1. **Compile Insights.** The default model turns candidates into Insights and
-   compares them with the agent's existing unresolved Insights. A new problem becomes a
-   new Insight; more evidence for an existing problem is appended to that
-   Insight's evidence. Compass does not change the title,
-   description, or status of an existing Insight.
-1. **Save the report.** The run files the Insights and saves an
-   `analysis-report` result that records what the run created, updated, and
-   left out.
+   compares them with the agent's existing unresolved Insights. A new problem
+   becomes a new Insight; more evidence for an existing problem is appended to
+   that Insight's evidence. Compass does not change the title, description, or
+   status of an existing Insight.
+1. **Save the report.** The job's `compass.save-insights` post-run action files
+   the Insights and saves an `analysis-report` result that records what the run
+   created, updated, and left out.
 
 ### Compass Signals
 
@@ -81,8 +130,8 @@ the agent's traces must match the `--agent` you pass. For OTLP, set
 | `tool-issues` | Problems in tool calls, such as explicit tool failures, grouped by tool and issue type. | The traces contain no tool calls. |
 | `anomaly-and-patterns` | Statistical outliers, clusters of similar trajectories, and failures that recur with the same signature. | — |
 | `grader-failure-patterns` | Patterns among traces linked to failed evaluation results. | The traces have no evaluator results. |
-| `ethos-divergence` | Behavior that diverges from the agent's intended behavior, as described in an Ethos document. | No `--ethos` file was given. |
-| `user-sentiment` | User complaints in recorded user messages. | No embedding backend is configured. Analysis runs do not configure one, so this stream is always skipped. |
+| `ethos-divergence` | Behavior that diverges from the agent's intended behavior, as described in its [Ethos](#give-the-agent-an-ethos). | The agent has no Ethos. |
+| `user-sentiment` | User complaints in recorded user messages. | No embedding backend is configured. Compass runs do not configure one, so this stream is always skipped. |
 
 Every stream is skipped with `No traces loaded` when the run finds no traces.
 
@@ -101,58 +150,63 @@ count as one case, even when they come from separate sessions or repeated
 attempts. For example, three failing traces for one test case count as 1 of 3,
 and that tool issue is not filed.
 
-The thresholds are fixed; you cannot configure them. A run scoped with
-`--since` or `--evaluation-id`, or a run over a low-traffic agent, can see a
-real problem that does not yet meet them. The report lists these near misses
-so you can tell "nothing is wrong" apart from "not enough evidence yet". See
+The thresholds are fixed; you cannot configure them. A run scoped with `since`
+or `evaluation_id`, or a run over a low-traffic agent, can see a real problem
+that does not yet meet them. The report lists these near misses so you can tell
+"nothing is wrong" apart from "not enough evidence yet". See
 [Read the Analysis Report](#read-the-analysis-report).
 
 ## Run an Analysis On Demand
 
-Submit a run and wait for it to finish:
+Submit an execute job of the Compass agent, naming the agent to analyze in its
+context:
 
 ```bash
-nemo compass analysis-runs create --agent my-agent --wait
+nemo agents execute --agent compass-analyst \
+  --spec '{"context": {"agent": "my-agent"}}'
 ```
 
-With `--wait`, the command prints each job status change, then the final run.
-It exits non-zero unless the backing job completes. Without `--wait`, it
-returns as soon as the run is submitted.
+The CLI fills in `default_model` and `fast_model` from `nemo setup` when the
+context leaves them out, and says so on stderr. The command prints the created
+job. Watch it by its `name`:
 
-Useful options:
+```bash
+nemo jobs watch <job-name>
+```
 
-| Option | Effect |
-| ------ | ------ |
-| `--since <timestamp>` | Analyze only traces that started at or after this ISO-8601 timestamp, such as `2026-10-01T00:00:00+00:00`. |
-| `--evaluation-id <id>` | Analyze only traces from one evaluation. |
-| `--ethos <path>` | Send an Ethos Markdown file describing the agent's intended behavior. This enables the `ethos-divergence` stream. |
-| `--default-model`, `--fast-model` | Override the model pair from `nemo setup`. If you pass only `--default-model`, the fast model falls back to the configured fast model, then to the default model. |
-| `--timeout-seconds <seconds>` | Timeout for the backing job. |
+`nemo jobs watch` streams the job's logs and exits non-zero unless the job completes.
 
-The models are checked when you submit the run. A model that does not
-exist or uses an unsupported backend is rejected before anything is recorded.
+The context takes these keys:
 
-To analyze one candidate of an agent, pass its Evaluation name to `--evaluation-id` rather than
-bounding the run with `--since`. Refer to
+| Key | Effect |
+| --- | ------ |
+| `agent` | Required. The agent to analyze, by the name its traces carry. It does not need to be a registered Helix agent entity. |
+| `default_model` | Required. The default model, as a Model Entity name or a `<workspace>/<name>` ref; a bare name resolves in the job's workspace. The CLI fills it in from `nemo setup`. |
+| `fast_model` | A second, typically faster model Compass uses for part of its analysis, in the same form. The CLI fills in the configured fast model; a run without one uses `default_model`. |
+| `since` | Analyze only traces that started at or after this ISO-8601 timestamp, such as `2026-10-01T00:00:00+00:00`. |
+| `evaluation_id` | Analyze only traces from one Evaluation. |
+
+The context is checked when you submit the run. An unknown key, or a model that
+does not exist or uses an unsupported backend, is rejected before the job is
+created.
+
+To analyze one candidate of an agent, set `evaluation_id` to its Evaluation
+name rather than bounding the run with `since`. Refer to
 [Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates).
 
 An on-demand run does not have a minimum trace count. A run that finds no traces
 still completes, files nothing, and reports `Analyzed 0 traces`.
 
-### Track a Run
+### List Analyses
 
-Each run is backed by an execute-agent job that has the same name as the run.
-`list` does not include job state; use `get` to see it:
+Each Compass job records the agent it analyzed as its `spec.subject`. To list one
+agent's analyses, on demand and scheduled, newest first:
 
 ```bash
-nemo compass analysis-runs list --agent my-agent
-nemo compass analysis-runs get <run-name>
-nemo compass analysis-runs get <run-name> --wait
+nemo agents list-jobs --agent compass-analyst --filter '{"spec.subject": "my-agent"}'
 ```
 
-The `job` field in `get` shows the backing job's status: `completed`, `error`, or
-`cancelled` once the job finishes. A `job` of `null` means the submission never
-reached the job service. That run never finishes, so submit it again.
+Drop `--filter` to list every analysis in the workspace.
 
 ## Read the Analysis Report
 
@@ -161,7 +215,7 @@ record which run created them. Download it like any other
 [job result](/documentation/agents/execute-agents-as-jobs#track-a-job-and-fetch-its-results):
 
 ```bash
-nemo jobs results download analysis-report --job <run-name> -o analysis-report.txt
+nemo jobs results download analysis-report --job <job-name> -o analysis-report.txt
 cat analysis-report.txt
 ```
 
@@ -194,12 +248,12 @@ sentence about minimum recurrence thresholds.
 
 When the report shows a `below threshold` line, you can:
 
-- Widen the run: drop or move back `--since`, or drop `--evaluation-id`.
+- Widen the run: drop `since` or move it back, or drop `evaluation_id`.
 - Wait for more traffic and run again. For an evaluation, add test cases that
   exercise the failing tool; repeating the same test case does not add
   independent cases.
-- Supply the missing input for a skipped stream, such as `--ethos` or
-  evaluator results.
+- Supply the missing input for a skipped stream, such as an
+  [Ethos](#give-the-agent-an-ethos) or evaluator results.
 
 ## Run Analysis on a Schedule
 
@@ -216,11 +270,19 @@ nemo compass analysis disable --agent my-agent
 or the pair from `--default-model` and `--fast-model`. Scheduled runs do not read
 your CLI configuration, so run `enable` again after you change the pair.
 
+`enable` also creates the workspace's Compass agent when it has none. If you
+cannot create agents, the agent is still opted in, but its scheduled runs do
+not start until someone
+[creates the Compass agent](#create-the-compass-agent).
+
+Scheduled runs are ordinary Compass jobs: they read the agent's Ethos and show
+up in [its list of analyses](#list-analyses) like on-demand runs.
+
 A controller checks each opted-in agent every 60 seconds and submits a run when
 all of the following are true:
 
 - The scheduled time has passed since the agent's last successful run.
-- No analysis job is already active for the agent.
+- No Compass job is already active for the agent, whether scheduled or on demand.
 - At least 10 new sessions have arrived since the last successful run. The
   first scheduled run for an agent skips this check.
 
@@ -241,8 +303,14 @@ state = compass_client.analysis_run_statuses.get(workspace="default", agent="my-
 print(state.status, state.last_successful_run_at, state.last_error)
 ```
 
-`status` is `idle`, `running`, or `error`. When a scheduled job fails, the
-state is `error` and `last_error` records the job status.
+`status` is `idle`, `running`, or `error`. The state is `error` when a scheduled
+run cannot start or does not succeed, and `last_error` says why:
+
+| `last_error` | Meaning |
+| ------------ | ------- |
+| `Workspace '<workspace>' has no Compass agent; ...` | [Create the Compass agent](#create-the-compass-agent). |
+| `Analysis job was rejected: <detail>` | The run was rejected when it was submitted, for example because a stored model no longer exists. Run `enable` again with a working model pair. |
+| `Analysis job <status>`, such as `Analysis job error` | The scheduled job ran and did not complete. The state's `last_submitted_job` names it; check its logs with `nemo jobs tail <job-name>`. |
 
 ### Configure the Schedule
 
@@ -257,8 +325,7 @@ compass:
     run_at_hour: 0           # local hour of day, 0-23
     run_on_weekday: monday   # used only when frequency is weekly
     timezone: UTC            # IANA name, such as America/Denver
-    job_profile: default     # jobs execution profile for scheduled runs
-    base_url: null           # platform URL passed to Compass jobs; unset uses the job's platform context
+    job_profile: default     # jobs execution profile for every Compass run
 ```
 
 | Setting | Default | Description |
@@ -268,12 +335,11 @@ compass:
 | `run_at_hour` | `0` | Hour of day that runs become due, in `timezone`. |
 | `run_on_weekday` | `monday` | Day of week runs become due. Used only with `weekly`. |
 | `timezone` | `UTC` | IANA time zone name. Runs keep their local hour across daylight saving changes. An unknown name fails validation. |
-| `job_profile` | `default` | Jobs execution profile for scheduled Compass jobs. |
-| `base_url` | unset | Platform base URL passed to Compass jobs. When unset, jobs use their active platform context. |
+| `job_profile` | `default` | Jobs execution profile for Compass runs, scheduled or on demand, whose job request names none. |
 
 ## Review Insights
 
-Open **Observability > Insights** in NeMo Studio to review, resolve, delete, or
+Open **Agent Development > Insights** in NeMo Studio to review, resolve, delete, or
 reopen Insights. See [NeMo Studio Insights](/documentation/studio/insights).
 
 To list Insights from Python:
@@ -316,14 +382,26 @@ new Insight.
 
 ## Troubleshooting
 
+### The Run Is Rejected When You Submit It
+
+- **The Compass agent does not exist.** `nemo agents execute` fails because the
+  workspace has no `compass-analyst`. [Create it](#create-the-compass-agent).
+- **The context has no `default_model`.** The CLI had no model pair to fill in.
+  Run `nemo setup`, or set `default_model` (and optionally `fast_model`) in the
+  context.
+- **A model is unknown or unsupported.** Use a Model Entity that exists and that
+  Compass can call. A bare name resolves in the job's workspace.
+- **Permission denied.** Submitting needs permission to run the Compass agent,
+  and to read the analyzed agent's Ethos fileset when it has one.
+
 ### The Run Completes but Files No Insights
 
 Download the `analysis-report` result and check it:
 
-- `Analyzed 0 traces`: no traces matched. Check that `--agent` matches the
-  agent name on the traces (see [Telemetry Requirement](#telemetry-requirement)),
-  that the workspace is correct, and that `--since` and `--evaluation-id` are
-  not too narrow.
+- `Analyzed 0 traces`: no traces matched. Check that the context's `agent`
+  matches the agent name on the traces (see
+  [Telemetry Requirement](#telemetry-requirement)), that the workspace is
+  correct, and that `since` and `evaluation_id` are not too narrow.
 - `below threshold` lines: the problem is real but has not recurred enough.
   See [Read the Analysis Report](#read-the-analysis-report).
 - Only `skipped` lines: no stream that ran found a problem.
@@ -331,6 +409,8 @@ Download the `analysis-report` result and check it:
 ### Periodic Analysis Does Not Start
 
 - Check that the agent is enabled with `nemo compass analysis status`.
+- Check the scheduler's `last_error` for the agent. See
+  [Run Analysis on a Schedule](#run-analysis-on-a-schedule).
 - Check that `compass.analysis.enabled` is true.
 - Check that the scheduled time has passed in the configured `timezone`.
 - After the first scheduled run, a run starts only when at least 10 new sessions
@@ -338,16 +418,12 @@ Download the `analysis-report` result and check it:
 - If status shows no model pair, run `nemo compass analysis enable` again
   with a model pair.
 
-### `create` Fails Without a Model Pair
-
-When `nemo setup` has not stored a model pair, pass `--default-model` and
-`--fast-model` explicitly.
-
 ## Related Topics
 
 - [NeMo Studio Insights](/documentation/studio/insights)
 - [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
 - [Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates)
-- [Optimize Agents](/documentation/agents/optimize-agents)
+- [Plugin-Managed Agents](/documentation/agents/plugin-managed-agents)
 - [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs)
+- [Optimize Agents](/documentation/agents/optimize-agents)
 - [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-compass)

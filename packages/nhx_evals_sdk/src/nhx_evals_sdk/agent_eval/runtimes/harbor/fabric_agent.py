@@ -224,7 +224,7 @@ def _require_adapter_inspectable(config: FabricConfig, descriptor_path: Path | N
     """
     assert config.harness is not None  # checked by _parse_fabric_config
     try:
-        inspect_adapter(config, _host_adapter_descriptor(config.harness.adapter_id, descriptor_path))
+        inspect_adapter(config, _host_adapter_descriptor(config.harness.adapter_id, descriptor_path), diagnostics=False)
     except FabricConfigError as error:
         raise ValueError(
             f"fabric_config: {error}. A catalog adapter needs the `nemo-fabric-adapter-catalog` package on the "

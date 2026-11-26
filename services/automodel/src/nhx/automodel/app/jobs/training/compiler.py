@@ -20,6 +20,7 @@ from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     LoRAParams,
+    ModuleSelectorParams,
 )
 from nhx.automodel.app.constants import (
     DEFAULT_DATASET_PATH,
@@ -31,6 +32,7 @@ from nhx.automodel.app.jobs.training.schemas import (
     DistillationConfig,
     LoRAConfig,
     ModelConfig,
+    ModuleSelectorConfig,
     MTPConfig,
     PipelineConfig,
     RetrievalConfig,
@@ -43,6 +45,7 @@ from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
 from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.model_utils import is_embedding_model
+from nhx.customization_common.image_size import check_seq_length_fits_image
 from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
@@ -182,6 +185,7 @@ def compile_training_step(
             enforce_text_moe_expert_parallel=uses_custom_automodel_impl(traits.checkpoint_model_name),
         )
         _reject_inapplicable_options(training, training_recipe, has_vision_tower=traits.has_vision_tower)
+        _reject_sequence_shorter_than_image(training, traits)
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc
 
@@ -306,10 +310,16 @@ def _translate_model_config(
     """Translate job spec to internal ModelConfig."""
     training = job_spec.training
     recorded = traits or CheckpointTraits()
+    image_size = training.image_size
+    if (training.max_pixels is not None or image_size is not None) and not recorded.has_vision_tower:
+        raise ValueError("max_pixels and image_size apply only to vision-language checkpoints.")
     return ModelConfig(
         path=path,
         name=_extract_model_name(job_spec),
         max_seq_length=training.max_seq_length,
+        max_pixels=training.max_pixels,
+        image_longest_edge=None if image_size is None else image_size.longest_edge,
+        image_shortest_edge=None if image_size is None else image_size.shortest_edge,
         precision=training.precision,
         attn_implementation=training.attn_implementation,
         tokenizer_backend=training.tokenizer_backend,
@@ -365,6 +375,19 @@ def _translate_training_config(
         activation_checkpointing=training.activation_checkpointing,
         mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
         backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
+        freeze_modules=_translate_module_selectors(training.freeze_modules),
+        unfreeze_modules=_translate_module_selectors(training.unfreeze_modules),
+    )
+
+
+def _reject_sequence_shorter_than_image(training: AnyTraining, traits: CheckpointTraits) -> None:
+    """A pixel ceiling that does not fit in max_seq_length would drop the example."""
+    image_size = getattr(training, "image_size", None)
+    check_seq_length_fits_image(
+        training.max_seq_length,
+        getattr(training, "max_pixels", None),
+        None if image_size is None else image_size.longest_edge,
+        traits.vision_patch_size,
     )
 
 
@@ -381,6 +404,12 @@ def _reject_inapplicable_options(training: AnyTraining, recipe: TrainingRecipe, 
             "mask_generation_prompt applies only to chat-format data in the text sft recipe, not to "
             "vision-language models or the bi_encoder and cross_encoder recipes."
         )
+
+
+def _translate_module_selectors(selectors: list[ModuleSelectorParams] | None) -> list[ModuleSelectorConfig] | None:
+    if not selectors:
+        return None
+    return [ModuleSelectorConfig(path=selector.path, glob=selector.glob) for selector in selectors]
 
 
 def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:

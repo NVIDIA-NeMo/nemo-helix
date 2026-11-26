@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from typing import Any
 
+import jsonschema
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
 from nemo_automodel_plugin.schema import (
@@ -12,6 +14,7 @@ from nemo_automodel_plugin.schema import (
     BackendSpec,
     DeploymentParams,
     ExportSpec,
+    ModuleSelector,
 )
 from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from pydantic import ValidationError
@@ -27,6 +30,45 @@ def test_reject_output_model() -> None:
                 "output_model": "old-field",
             },
         )
+
+
+def test_max_pixels_and_image_size_are_exclusive() -> None:
+    with pytest.raises(ValueError, match="not both"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "llama",
+                "dataset": {"training": "default/train"},
+                "training": {
+                    "training_type": "sft",
+                    "max_pixels": 2_621_440,
+                    "image_size": {"longest_edge": 2_621_440, "shortest_edge": 65536},
+                },
+            },
+        )
+
+
+def test_image_size_shortest_edge_must_be_below_longest_edge() -> None:
+    for image_size in ({"longest_edge": 65536, "shortest_edge": 65536}, {"longest_edge": 100, "shortest_edge": 200}):
+        with pytest.raises(ValueError, match="must be less than longest_edge"):
+            AutomodelJobInput.model_validate(
+                {
+                    "model": "llama",
+                    "dataset": {"training": "default/train"},
+                    "training": {"training_type": "sft", "image_size": image_size},
+                },
+            )
+
+
+def test_image_size_needs_both_edges() -> None:
+    for image_size in ({}, {"longest_edge": 200}, {"shortest_edge": 65536}):
+        with pytest.raises(ValueError, match="both longest_edge and shortest_edge"):
+            AutomodelJobInput.model_validate(
+                {
+                    "model": "llama",
+                    "dataset": {"training": "default/train"},
+                    "training": {"training_type": "sft", "image_size": image_size},
+                },
+            )
 
 
 def test_distillation_requires_teacher() -> None:
@@ -456,6 +498,82 @@ def test_backend_rope_fusion_defaults_off_and_accepts_a_stored_null() -> None:
 
 
 @pytest.mark.parametrize(
+    ("training", "error"),
+    [
+        (
+            {
+                "training_type": "partial_sft",
+                "finetuning_type": "all_weights",
+                "freeze_modules": [{"glob": "*.layers.0.*"}],
+                "unfreeze_modules": [{"path": "lm_head"}],
+            },
+            None,
+        ),
+        ({"training_type": "partial_sft", "freeze_modules": [{"glob": "*.layers.0.*"}]}, None),
+        ({"training_type": "partial_sft", "unfreeze_modules": [{"path": "lm_head"}]}, None),
+        (
+            {
+                "training_type": "partial_distillation",
+                "teacher_model": "default/teacher",
+                "finetuning_type": "lora_merged",
+                "unfreeze_modules": [{"path": "lm_head"}],
+            },
+            None,
+        ),
+        ({"training_type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+        ({"training_type": "partial_distillation", "freeze_modules": [{"path": "lm_head"}]}, "teacher_model"),
+        ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft or partial_distillation"),
+        (
+            {"training_type": "distillation", "teacher_model": "default/teacher", "unfreeze_modules": [{"path": "x"}]},
+            "need training_type partial_sft or partial_distillation",
+        ),
+        (
+            {"training_type": "partial_sft", "freeze_modules": [{"path": "lm_head", "glob": "*.lm_head"}]},
+            "exactly one",
+        ),
+        ({"training_type": "partial_sft", "freeze_modules": [{}]}, "exactly one"),
+        ({"training_type": "partial_sft", "freeze_modules": [{"path": ""}]}, "at least 1"),
+    ],
+    ids=[
+        "partial-full-weights-both",
+        "partial-lora-freeze",
+        "partial-lora-unfreeze",
+        "partial-distillation-lora-merged",
+        "partial-without-selectors",
+        "partial-distillation-without-teacher",
+        "selectors-on-sft",
+        "selectors-on-distillation",
+        "path-and-glob",
+        "neither",
+        "empty-path",
+    ],
+)
+def test_module_selectors(training: dict[str, object], error: str | None) -> None:
+    """Selectors belong to the partial training types, which need at least one."""
+    payload = {"model": "qwen", "dataset": {"training": "default/train"}, "training": training}
+    if error is None:
+        AutomodelJobInput.model_validate(payload)
+    else:
+        with pytest.raises(ValidationError, match=error):
+            AutomodelJobInput.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("selector", "valid"),
+    [({"path": "lm_head"}, True), ({"glob": "*.lm_head"}, True), ({}, False), ({"path": "a", "glob": "b"}, False)],
+    ids=["path", "glob", "neither", "both"],
+)
+def test_module_selector_json_schema_matches_validator(selector: dict[str, str], valid: bool) -> None:
+    """The published schema rejects exactly the selectors the validator rejects."""
+    assert jsonschema.Draft202012Validator(ModuleSelector.model_json_schema()).is_valid(selector) is valid
+    if valid:
+        ModuleSelector.model_validate(selector)
+    else:
+        with pytest.raises(ValidationError, match="exactly one"):
+            ModuleSelector.model_validate(selector)
+
+
+@pytest.mark.parametrize(
     ("training", "match"),
     [
         ({"tokenizer_backend": "huggingface"}, "tokenizer_backend"),
@@ -517,25 +635,42 @@ def test_pipeline_schedule_rejects_an_unknown_rounding_mode() -> None:
         )
 
 
-def test_a_separate_validation_fileset_is_rejected() -> None:
-    """Validation files live in the dataset fileset; there is no second reference to set."""
-    with pytest.raises(ValidationError, match="validation"):
-        AutomodelJobInput.model_validate(
-            {
-                "model": "llama",
-                "dataset": {"training": "default/train", "validation": "default/val"},
-                "training": {"training_type": "sft"},
-            },
-        )
+@pytest.mark.parametrize(
+    ("dataset", "training", "match"),
+    [
+        ({"training": "default/train", "validation": "default/val"}, {"training_type": "sft"}, "validation"),
+        (
+            {"training": "default/train"},
+            {"training_type": "sft", "retrieval": {"export": {"pooling": "avg"}}},
+            "Set training.retrieval.pooling",
+        ),
+    ],
+    ids=["validation-fileset", "export-pooling"],
+)
+def test_a_removed_field_is_rejected(dataset: dict[str, Any], training: dict[str, Any], match: str) -> None:
+    """Validation files live in the dataset fileset, and ONNX pools the way the model trained."""
+    with pytest.raises(ValidationError, match=match):
+        AutomodelJobInput.model_validate({"model": "llama", "dataset": dataset, "training": training})
 
 
-@pytest.mark.parametrize("validation", [None, "default/val"])
-def test_a_stored_job_with_the_removed_validation_field_still_renders(validation: str | None) -> None:
-    """Jobs stored before ``dataset.validation`` was removed carry it, as null or a reference."""
+@pytest.mark.parametrize(
+    ("dataset", "export"),
+    [
+        ({"training": "default/train", "validation": None}, None),
+        ({"training": "default/train", "validation": "default/val"}, None),
+        ({"training": "default/train"}, {"primary": "hf", "pooling": "avg", "normalize": True}),
+    ],
+    ids=["validation-null", "validation-reference", "export-pooling"],
+)
+def test_a_stored_job_with_a_removed_field_still_renders(dataset: dict[str, Any], export: dict | None) -> None:
+    """Jobs stored before ``dataset.validation`` or ``export.pooling``/``normalize`` were removed carry them."""
+    training: dict[str, Any] = {"training_type": "sft"}
+    if export is not None:
+        training["retrieval"] = {"export": export}
     stored = {
         "model": "default/base",
-        "dataset": {"training": "default/train", "validation": validation},
-        "training": {"training_type": "sft"},
+        "dataset": dataset,
+        "training": training,
         "schedule": {"epochs": 1},
         "batch": {"global_batch_size": 4, "micro_batch_size": 1},
         "optimizer": {},
@@ -543,4 +678,9 @@ def test_a_stored_job_with_the_removed_validation_field_still_renders(validation
         "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
     }
 
-    assert "validation" not in AutomodelJobOutput.model_validate(stored).dataset.model_dump()
+    job = AutomodelJobOutput.model_validate(stored)
+
+    assert "validation" not in job.dataset.model_dump()
+    if export is not None:
+        assert job.training.retrieval is not None and job.training.retrieval.export is not None
+        assert job.training.retrieval.export.primary == "hf"

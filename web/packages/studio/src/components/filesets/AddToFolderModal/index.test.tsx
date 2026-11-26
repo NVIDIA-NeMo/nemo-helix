@@ -386,6 +386,7 @@ describe('AddToFolderModal', () => {
         <FilesetDetailParentContext.Provider
           value={{
             label: 'Datasets',
+            entity: 'dataset',
             getListRoute: getWorkspaceDatasetsRoute,
             getDetailRoute: getDatasetDetailRoute,
           }}

@@ -1,0 +1,56 @@
+diff --git a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/cache.py b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/cache.py
+--- a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/cache.py
++++ b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/cache.py
+@@ -61,7 +61,7 @@ class NemotronHybridCache:
+         # Identify first attention layer for get_seq_length()
+         self._attention_layer_idx = None
+         for i, block_type in enumerate(config.layers_block_type):
+-            if block_type == "attention":
++            if block_type in ("attention", "full_attention"):
+                 self._attention_layer_idx = i
+                 break
+ 
+diff --git a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/layers.py b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/layers.py
+--- a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/layers.py
++++ b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/layers.py
+@@ -668,9 +668,14 @@ class NemotronV3Block(nn.Module):
+             dtype=get_dtype(getattr(config, "torch_dtype", None), torch.bfloat16),
+         )
+ 
+-        # Determine layer type from config
+-        # 'M' → mamba, '*' → attention, '-' → mlp, other → moe
+-        self.block_type = block_type if block_type is not None else config.layers_block_type[layer_idx]
++        # Transformers 5.15 canonicalized the hybrid discriminators. Keep the
++        # local implementation's names at the boundary so downstream routing and
++        # cache logic remain unchanged.
++        configured_block_type = block_type if block_type is not None else config.layers_block_type[layer_idx]
++        self.block_type = {
++            "linear_attention": "mamba",
++            "full_attention": "attention",
++        }.get(configured_block_type, configured_block_type)
+ 
+         # Create mixer based on block type
+         if self.block_type == "mamba":
+diff --git a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/mtp.py b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/mtp.py
+--- a/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/mtp.py
++++ b/3rdparty/Automodel-workspace/Automodel/nemo_automodel/components/models/nemotron_v3/mtp.py
+@@ -169,6 +169,10 @@ class NemotronV3MTPSublayer(NemotronV3Block):
+ 
+ _VALID_BLOCK_TYPES = frozenset(_PATTERN_SYMBOL_TO_BLOCK_TYPE.values())
+ 
++# Transformers 5.15 canonicalized the hybrid discriminators. Map them back to the
++# local names, matching NemotronV3Block and NemotronHybridCache.
++_CANONICAL_BLOCK_TYPE_ALIASES = {"linear_attention": "mamba", "full_attention": "attention"}
++
+ 
+ def _resolve_block_types_per_sublayer(config) -> list[str] | None:
+     """Resolve the per-depth MTP block-type list from either HF field.
+@@ -192,7 +196,7 @@ def _resolve_block_types_per_sublayer(config) -> list[str] | None:
+         return parse_mtp_layer_pattern(pattern)
+     block_types = getattr(config, "mtp_layers_block_type", None)
+     if block_types:
+-        block_types = list(block_types)
++        block_types = [_CANONICAL_BLOCK_TYPE_ALIASES.get(bt, bt) for bt in block_types]
+         for bt in block_types:
+             if bt not in _VALID_BLOCK_TYPES:
+                 raise ValueError(

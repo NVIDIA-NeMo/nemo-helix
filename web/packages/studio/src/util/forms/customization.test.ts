@@ -17,6 +17,7 @@ import {
   formToUnslothCreate,
   getInitialFormValuesFromState,
   jobToFormFields,
+  resolveTrainingType,
   templateToFormFields,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
@@ -146,6 +147,17 @@ describe('customizationFormSchema', () => {
       data.unsloth.dataset.path = '';
       expect(messages(data)).toContain('Training dataset is required');
     });
+  });
+});
+
+describe('resolveTrainingType', () => {
+  it.each([
+    ['sft', 'sft'],
+    ['distillation', 'distillation'],
+    ['partial_sft', 'sft'],
+    ['partial_distillation', 'distillation'],
+  ] as const)('reads automodel %s data as %s', (automodelTrainingType, expected) => {
+    expect(resolveTrainingType('automodel', automodelTrainingType, undefined)).toBe(expected);
   });
 });
 

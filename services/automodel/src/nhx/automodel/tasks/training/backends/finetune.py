@@ -14,7 +14,6 @@ import logging
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from os import kill
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -27,7 +26,7 @@ from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenP
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
 from nemo_automodel.recipes.vlm.finetune import FinetuneRecipeForVLM
-from nhx.automodel.app.constants import PAUSE_SIGNAL, SERVICE_NAME
+from nhx.automodel.app.constants import SERVICE_NAME
 from nhx.automodel.app.jobs.training.schemas import TrainingRecipe
 from nhx.automodel.tasks.tqdm_logging import install_line_tqdm
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
@@ -334,16 +333,26 @@ class AutomodelRecipeWrapper:
     def _start_pause_poller(self) -> PausePoller | None:
         """Watch for a pause on global rank 0 only.
 
-        The signal goes to this process, and Automodel shares it with every rank at
-        the next step, so one rank is enough.
+        A pause sets the flag that the step scheduler's preemption handler sets when
+        its signal arrives. At the next step the scheduler gathers that flag from every
+        rank, so one rank is enough, and every rank saves a checkpoint and stops.
+        Signalling this process instead left the pause to whichever handler owned the
+        signal in the training process, and the pause was lost when it was not
+        Automodel's.
         """
         if not _is_global_rank_zero():
             return None
-        pid = os.getpid()
-        return PausePoller(self._job_ctx, SERVICE_NAME, on_pause=lambda: kill(pid, PAUSE_SIGNAL)).start()
+        handler = self._recipe.step_scheduler.sig_handler
+        if handler is None:
+            raise RuntimeError("Pause needs the step scheduler's preemption handler, but the config sets no signal")
+
+        def request_stop() -> None:
+            handler._signal_received = True
+
+        return PausePoller(self._job_ctx, SERVICE_NAME, on_pause=request_stop).start()
 
     def _stopped_for_pause(self) -> bool:
-        """Whether the loop ended on the pause signal rather than by finishing.
+        """Whether the loop ended on a pause rather than by finishing.
 
         A pause that arrives as training reaches its last step loses the race:
         training finished, so it publishes as usual.

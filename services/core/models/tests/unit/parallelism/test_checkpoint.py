@@ -36,6 +36,25 @@ def test_omni_experts_and_mtp_live_on_the_language_config() -> None:
     assert traits.num_nextn_predict_layers == 1
 
 
+def test_vision_patch_size_is_the_patch_times_the_spatial_merge() -> None:
+    qwen = inspect_checkpoint({"vision_config": {"patch_size": 16, "spatial_merge_size": 2}})
+    merge_alias = inspect_checkpoint({"text_config": {"vision_config": {"patch_size": 14, "merge_size": 2}}})
+    patch_only = inspect_checkpoint({"vision_config": {"patch_size": 16}})
+
+    assert qwen.vision_patch_size == 32
+    assert merge_alias.vision_patch_size == 28
+    assert patch_only.vision_patch_size == 16
+    nemotron = inspect_checkpoint({"downsample_ratio": 0.5, "vision_config": {"patch_size": 16}})
+    assert nemotron.vision_patch_size == 32
+    explicit_merge = inspect_checkpoint(
+        {"downsample_ratio": 0.5, "vision_config": {"patch_size": 14, "spatial_merge_size": 3}}
+    )
+    assert explicit_merge.vision_patch_size == 42
+    assert inspect_checkpoint({"downsample_ratio": 1.0, "vision_config": {"patch_size": 16}}).vision_patch_size == 16
+    assert inspect_checkpoint({"vision_config": {"hidden_size": 4}}).vision_patch_size is None
+    assert inspect_checkpoint({"hidden_size": 8}).vision_patch_size is None
+
+
 def test_a_single_expert_is_not_mixture_of_experts() -> None:
     assert inspect_checkpoint({"num_local_experts": 1}).expert_count is None
 

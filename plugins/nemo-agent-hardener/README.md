@@ -275,7 +275,7 @@ uv run nemo services run --service-group all --controllers models,jobs \
   --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
-Open **http://localhost:8080/studio/** → **Governance → Agent Hardening**. If the entry is missing,
+Open **http://localhost:8080/studio/** → **Safety → Agent Hardening**. If the entry is missing,
 confirm the plugin is installed (`curl -s localhost:8080/apis/plugins`) and hard-reload (⌘⇧R).
 
 1. **Manifests → New Manifest** — pick `react-agent`, accept the detected port and secrets, add any

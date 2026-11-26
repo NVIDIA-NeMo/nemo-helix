@@ -1133,6 +1133,21 @@ def build_launcher_init_container(launcher_image: str, launcher_tool_path: str) 
     )
 
 
+#: Creates the job directory given as ``$1`` and opens it up. Something still running for the job,
+#: such as a sandbox from an earlier attempt, can delete entries while ``chmod -R`` walks the tree;
+#: one that vanished has nothing left to change, so those errors pass. Any other error fails the
+#: container. Both busybox and GNU chmod end such a line with the ENOENT message. Only grep's
+#: "no line selected" (1) passes: a line that isn't ENOENT (0) or grep failing to run fails closed.
+PERMISSIONS_INIT_SCRIPT = """\
+mkdir -p "$1" || exit 1
+out=$(chmod -R 777 "$1" 2>&1) && exit 0
+printf '%s\\n' "$out" >&2
+printf '%s\\n' "$out" | grep -qv ': No such file or directory$'
+[ $? -eq 1 ] || exit 1
+exit 0
+"""
+
+
 def build_permissions_init_container(
     volume_name: str, workspace: str, job_id: str, permissions_image: str
 ) -> client.V1Container:
@@ -1148,7 +1163,7 @@ def build_permissions_init_container(
     return client.V1Container(
         name="fix-permissions",
         image=permissions_image,
-        command=["sh", "-c", f"mkdir -p /vol/{volume_subpath} && chmod -R 777 /vol/{volume_subpath}"],
+        command=["sh", "-c", PERMISSIONS_INIT_SCRIPT, "fix-permissions", f"/vol/{volume_subpath}"],
         volume_mounts=[client.V1VolumeMount(name=volume_name, mount_path="/vol")],
     )
 

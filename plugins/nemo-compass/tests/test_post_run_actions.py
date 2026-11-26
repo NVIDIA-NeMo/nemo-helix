@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_compass_plugin.post_run_actions import REPORT_RESULT_NAME, CompassAnalysisAction
+from nemo_compass_plugin.post_run_actions import REPORT_RESULT_NAME, SaveInsightsAction
 from nemo_helix_plugin.agents.post_run_actions import (
     FabricRuntimeResult,
     PostRunActionContext,
@@ -48,6 +48,41 @@ class FakeBackend:
         return "Persisted analysis report"
 
 
+def _fabric_result() -> FabricRuntimeResult:
+    return FabricRuntimeResult(
+        status="succeeded",
+        output={
+            "response": "summary",
+            "compass_result": {"summary": "summary", "new_insights": [], "updated_insights": []},
+        },
+    )
+
+
+def test_the_action_is_registered_under_its_kind() -> None:
+    assert SaveInsightsAction.kind == "compass.save-insights"
+
+
+def test_the_analyzed_agent_comes_from_the_run_context(ctx: JobContext, monkeypatch) -> None:
+    """A compass.analyst run names its target in the prepared context; the action config needs none."""
+    backend = FakeBackend()
+    monkeypatch.setattr("nemo_compass_plugin.post_run_actions.get_async_task_nemo_client", lambda service: FakeClient())
+    monkeypatch.setattr("nemo_compass_plugin.post_run_actions.make_backend", lambda **_kwargs: backend)
+
+    SaveInsightsAction().after_invoke(
+        PostRunActionContext(
+            ctx=ctx,
+            config={},
+            agent_name="compass-analyst",
+            agent_config={},
+            fabric_result=_fabric_result(),
+            run_context={"agent": "research-agent", "default_model": "default/m", "fast_model": "default/m"},
+        )
+    )
+
+    assert backend.calls[0]["agent"] == "research-agent"
+    assert backend.calls[0]["workspace"] == "default"
+
+
 def test_compass_action_persists_compass_result_and_saves_report(
     ctx: JobContext,
     monkeypatch,
@@ -58,13 +93,14 @@ def test_compass_action_persists_compass_result_and_saves_report(
     monkeypatch.setattr("nemo_compass_plugin.post_run_actions.get_async_task_nemo_client", lambda service: client)
     monkeypatch.setattr("nemo_compass_plugin.post_run_actions.make_backend", lambda **_kwargs: backend)
 
-    action = CompassAnalysisAction()
+    action = SaveInsightsAction()
     action.after_invoke(
         PostRunActionContext(
             ctx=ctx,
-            config={"agent": "research-agent"},
+            config={},
             agent_name="compass",
             agent_config={},
+            run_context={"agent": "research-agent"},
             fabric_result=FabricRuntimeResult(
                 status="succeeded",
                 output={
@@ -88,15 +124,16 @@ def test_compass_action_persists_compass_result_and_saves_report(
 
 def test_compass_action_names_the_missing_compass_result_key(ctx: JobContext) -> None:
     """An output without the key is a wiring problem, not a malformed CompassResult."""
-    action = CompassAnalysisAction()
+    action = SaveInsightsAction()
 
     with pytest.raises(ValueError) as excinfo:
         action.after_invoke(
             PostRunActionContext(
                 ctx=ctx,
-                config={"agent": "research-agent"},
+                config={},
                 agent_name="compass",
                 agent_config={},
+                run_context={"agent": "research-agent"},
                 fabric_result=FabricRuntimeResult(status="succeeded", output={"response": "summary"}),
             )
         )
@@ -104,3 +141,22 @@ def test_compass_action_names_the_missing_compass_result_key(ctx: JobContext) ->
     message = str(excinfo.value)
     assert "compass_result" in message
     assert "'response'" in message, "the message should show what the output actually carried"
+
+
+def test_a_run_context_without_an_agent_fails_rather_than_guessing(ctx: JobContext) -> None:
+    """The invoked agent is Compass itself, so it is never the right fallback."""
+    with pytest.raises(ValueError, match="name the analyzed agent"):
+        SaveInsightsAction().after_invoke(
+            PostRunActionContext(
+                ctx=ctx,
+                config={},
+                agent_name="compass-analyst",
+                agent_config={},
+                fabric_result=_fabric_result(),
+            )
+        )
+
+
+def test_the_action_takes_no_config() -> None:
+    with pytest.raises(ValueError, match="agent"):
+        SaveInsightsAction.config_model.model_validate({"agent": "research-agent"})
