@@ -1540,7 +1540,10 @@ async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_return
     "job_id", ["job-1", SessionBackedGymRunner.LOCAL_JOB_ID], ids=["job", "job-named-like-the-local-label"]
 )
 async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
-    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str
+    monkeypatch: pytest.MonkeyPatch,
+    reaps: list[tuple[str, dict[str, object]]],
+    job_id: str,
+    armed: list[tuple[str, dict[str, object], str]],
 ) -> None:
     """A rerun reuses the job's storage; a host its killed earlier attempt left must not keep writing to it.
 
@@ -1586,7 +1589,10 @@ async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
 async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
-    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str | None
+    monkeypatch: pytest.MonkeyPatch,
+    reaps: list[tuple[str, dict[str, object]]],
+    armed: list[tuple[str, dict[str, object], str]],
+    job_id: str | None,
 ) -> None:
     """Without a platform job id, the run's sandboxes carry LOCAL_JOB_ID, as do those of any other local run."""
     import sandboxed_gym
