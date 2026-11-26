@@ -269,28 +269,35 @@ class TestReportRunOutcome:
         )
 
 
-async def test_status_writes_land_in_order_and_a_superseded_queued_snapshot_is_skipped(monkeypatch):
-    """A slow write still lands, an older snapshot never overwrites a newer one, and the queue never grows.
+async def test_status_writes_land_in_order_and_a_superseded_pending_snapshot_is_dropped(monkeypatch):
+    """A slow write still lands, an older snapshot never overwrites a newer one, and only the newest one waits.
 
-    Without skipping, a backlog of writes the reporter gave up on would hold the job's process open at exit.
+    Without dropping, a backlog of writes the reporter gave up on would hold the job's process open at exit.
     """
+    first_started = threading.Event()
     first_may_finish = threading.Event()
     landed: list[int] = []
 
     def write(details: dict[str, Any], **kwargs: Any) -> None:
         if details["n"] == 1:
+            first_started.set()
             first_may_finish.wait(timeout=5)
         landed.append(details["n"])
 
     monkeypatch.setattr(run_outcome, "report_status_details", write)
     publish = run_outcome.status_details_writer(MagicMock(), None)
 
-    for n in (1, 2):
+    for n in (1, 2, 3):
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.05):  # the reporter gives up waiting, as it does after 15s
                 await publish({"n": n})
+        if n == 1:
+            assert await asyncio.to_thread(first_started.wait, 5)
 
     first_may_finish.set()
-    await publish({"n": 3})
+    async with asyncio.timeout(5):
+        while len(landed) < 2:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
 
     assert landed == [1, 3]

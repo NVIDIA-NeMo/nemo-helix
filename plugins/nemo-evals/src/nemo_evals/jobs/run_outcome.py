@@ -11,9 +11,9 @@ job's status details under :data:`STATUS_DETAILS_KEY` and decides the job's fina
 from __future__ import annotations
 
 import asyncio
-import itertools
 import logging
 import math
+import threading
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -140,25 +140,37 @@ def report_status_details(details: dict[str, object], *, ctx: JobContext, async_
 def status_details_writer(
     ctx: JobContext, async_client: AsyncNemoClient | None
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
-    """Writes snapshots of the job's progress to its status details, in order, keeping only the newest queued one.
+    """Writes snapshots of the job's progress to its status details, in order, keeping only the newest pending one.
 
-    Each snapshot replaces the one before under the same keys, so a snapshot still queued when a newer one
-    arrives is skipped: at most one write is in flight and one waits, however slow the writes are. One thread
-    keeps them in order; the write is synchronous, so it stays off the event loop.
+    Each snapshot replaces the one before under the same keys, so a snapshot still pending when a newer one
+    arrives is dropped: one worker writes the newest pending snapshot until none is left, so at most one write
+    is in flight and one snapshot waits, however slow the writes are. ``publish`` returns once its snapshot, or
+    a newer one, has been written; the write is synchronous, so it stays off the event loop.
     """
     writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="status-details")
-    newest = itertools.count()
-    latest = 0
+    lock = threading.Lock()
+    pending: dict[str, Any] | None = None
+    draining: asyncio.Future[None] | None = None
 
-    def write(ticket: int, details: dict[str, Any]) -> None:
-        if ticket == latest:
+    def drain() -> None:
+        nonlocal pending, draining
+        while True:
+            with lock:
+                details, pending = pending, None
+                if details is None:
+                    draining = None
+                    return
             report_status_details(details, ctx=ctx, async_client=async_client)
 
     async def publish(details: dict[str, Any]) -> None:
-        nonlocal latest
-        latest = next(newest)
-        # Shielded: when the caller stops waiting, the write keeps its place in line rather than being dropped.
-        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write, latest, details))
+        nonlocal pending, draining
+        with lock:
+            pending = details
+            if draining is None:
+                draining = asyncio.get_running_loop().run_in_executor(writer, drain)
+            written = draining
+        # Shielded: when the caller stops waiting, the write keeps going rather than being dropped.
+        await asyncio.shield(written)
 
     return publish
 
