@@ -117,6 +117,9 @@ export const useModelSearchCore = ({
 }: UseModelSearchCoreOptions): UseModelSearchResult => {
   const [search, setSearch] = useState('');
   const [filterState, setFilterState] = useState({ workspace, values: initialFilters });
+  if (filterState.workspace !== workspace) {
+    setFilterState({ workspace, values: initialFilters });
+  }
   const filters = filterState.workspace === workspace ? filterState.values : initialFilters;
   const setFilters = useCallback(
     (values: ModelFilterValues) => setFilterState({ workspace, values }),

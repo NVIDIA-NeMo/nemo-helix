@@ -222,6 +222,21 @@ describe('useModelSearchCore', () => {
       );
     });
 
+    it('keeps the filters dropped after returning to the earlier workspace', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+      const { result, rerender } = renderHook(
+        ({ workspace }) => useModelSearchCore({ workspace, listModels: mockListModels }),
+        { wrapper: createWrapper(), initialProps: { workspace: 'ws1' } }
+      );
+      act(() => result.current.modelFilters.onChange({ providers: ['ws1/build'] }));
+      await waitFor(() => expect(result.current.modelFilters.values.providers).toHaveLength(1));
+
+      rerender({ workspace: 'ws2' });
+      rerender({ workspace: 'ws1' });
+
+      expect(result.current.modelFilters.values).toEqual({});
+    });
+
     it('lists providers from every page', async () => {
       mockListProviders
         .mockResolvedValueOnce({
