@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoTransportError, UnprocessableEntityError
+from nemo_safe_synthesizer.config.evaluation_report_data import EvaluationReportData, Metrics
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 from nemo_safe_synthesizer_plugin.sdk.resources import (
@@ -294,6 +295,33 @@ def test_safe_synthesizer_job_fetch_summary_parses_json() -> None:
     assert summary.synthetic_data_quality_score == 8.5
     assert summary.data_privacy_score == 9.0
     assert summary.timing.total_time_sec == 12.5
+
+
+def test_safe_synthesizer_job_fetch_report_data_parses_json() -> None:
+    mock_jobs = MagicMock()
+    payload = {
+        **dict.fromkeys(EvaluationReportData.model_fields),
+        "schema_version": 1,
+        "library_version": "test",
+        "scores": {
+            "synthetic_quality": {"raw_score": 7.1, "score": 7.1, "grade": "Very Good", "notes": None},
+            "data_privacy": None,
+        },
+        "metrics": dict.fromkeys(Metrics.model_fields),
+        "columns": [],
+        "any_column_transformed": False,
+        "differential_privacy": {"enabled": False, "epsilon": None, "delta": None},
+    }
+    mock_jobs.download_job_result.return_value = _binary_resp(json.dumps(payload).encode())
+    job = _make_job(mock_jobs)
+
+    report_data = job.fetch_report_data()
+
+    mock_jobs.download_job_result.assert_called_once_with(
+        name="evaluation-report-data", job="platform-job-original", workspace="default"
+    )
+    assert report_data.scores.synthetic_quality is not None
+    assert report_data.scores.synthetic_quality.score == 7.1
 
 
 def test_safe_synthesizer_job_fetch_logs_follows_pagination() -> None:

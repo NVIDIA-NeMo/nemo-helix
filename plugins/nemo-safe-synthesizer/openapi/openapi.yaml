@@ -135,6 +135,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report-data/download:
+    get:
+      tags:
+      - Safe Synthesizer
+      summary: Download Job Result Evaluation-Report-Data
+      operationId: download_job_result_evaluation_report_data_apis_safe_synthesizer_v2_workspaces__workspace__jobs__job__results_evaluation_report_data_download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationReportData'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/safe-synthesizer/v2/workspaces/{workspace}/jobs/{job}/results/evaluation-report/download:
     get:
       tags:
@@ -699,6 +733,261 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AttackOutcome:
+      properties:
+        grade:
+          type: string
+          title: Grade
+          description: Protection grade, such as 'Poor' or 'Excellent'.
+        count:
+          title: Count
+          description: Attack evaluations with this grade, or null if only percentages
+            exist.
+          type: integer
+        percentage:
+          title: Percentage
+          description: Share of attack evaluations with this grade.
+          type: number
+      type: object
+      required:
+      - grade
+      - count
+      - percentage
+      title: AttackOutcome
+      description: How many membership inference attack evaluations got one grade.
+    AttributeInferenceMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        columns:
+          items:
+            $ref: '#/components/schemas/ColumnProtection'
+          type: array
+          title: Columns
+          description: Columns from least to most protected.
+      type: object
+      required:
+      - score
+      - columns
+      title: AttributeInferenceMetric
+      description: Attribute inference protection, with the protection of each column.
+    AutocorrelationCounts:
+      properties:
+        groups:
+          type: integer
+          title: Groups
+          description: Groups evaluated.
+        shared_groups:
+          type: integer
+          title: Shared Groups
+          description: Groups in both the training and synthetic data.
+        omitted_shared_groups:
+          type: integer
+          title: Omitted Shared Groups
+          description: Shared groups left out by sampling.
+        columns:
+          type: integer
+          title: Columns
+          description: Columns evaluated.
+        evaluated_profiles:
+          type: integer
+          title: Evaluated Profiles
+          description: Group and column pairs compared.
+        skipped:
+          type: integer
+          title: Skipped
+          description: Group and column pairs left out.
+      type: object
+      required:
+      - groups
+      - shared_groups
+      - omitted_shared_groups
+      - columns
+      - evaluated_profiles
+      - skipped
+      title: AutocorrelationCounts
+      description: How many groups, columns, and pairs were compared.
+    AutocorrelationDetails:
+      properties:
+        evaluation_mode:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationEvaluationMode'
+          description: '''per_group'' or ''global'', or null when no pair could be
+            compared.'
+        timestamp_column:
+          title: Timestamp Column
+          description: Column the values are ordered by, or null.
+          type: string
+        group_column:
+          title: Group Column
+          description: Column that separates sequences, or null.
+          type: string
+        max_lag:
+          title: Max Lag
+          description: Configured largest lag, or null.
+          type: integer
+        min_points:
+          title: Min Points
+          description: Configured fewest values a sequence needs, or null.
+          type: integer
+        counts:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationCounts'
+          description: Counts, or null.
+        group_selection:
+          allOf:
+          - $ref: '#/components/schemas/GroupSelection'
+          description: Group selection, or null.
+        per_group:
+          items:
+            $ref: '#/components/schemas/GroupSimilarity'
+          type: array
+          title: Per Group
+          description: Similarity by group.
+        per_column:
+          items:
+            $ref: '#/components/schemas/ColumnSimilarity'
+          type: array
+          title: Per Column
+          description: Similarity by column.
+        profiles:
+          items:
+            $ref: '#/components/schemas/AutocorrelationProfile'
+          type: array
+          title: Profiles
+          description: Compared group and column pairs.
+        skipped:
+          items:
+            $ref: '#/components/schemas/SkippedComparison'
+          type: array
+          title: Skipped
+          description: Group and column pairs left out, at most the first 12 the report
+            lists; `counts.skipped` is the total.
+        excluded_columns:
+          items:
+            type: string
+          type: array
+          title: Excluded Columns
+          description: Numeric training columns left out because the synthetic data
+            lacks them or has non-numeric values.
+        groups_only_in_training_count:
+          type: integer
+          title: Groups Only In Training Count
+          description: Groups found only in the training data.
+        groups_only_in_synthetic_count:
+          type: integer
+          title: Groups Only In Synthetic Count
+          description: Groups found only in the synthetic data.
+      type: object
+      required:
+      - evaluation_mode
+      - timestamp_column
+      - group_column
+      - max_lag
+      - min_points
+      - counts
+      - group_selection
+      - per_group
+      - per_column
+      - profiles
+      - skipped
+      - excluded_columns
+      - groups_only_in_training_count
+      - groups_only_in_synthetic_count
+      title: AutocorrelationDetails
+      description: Autocorrelation profiles and summaries; null or empty where the
+        metric stopped before them.
+    AutocorrelationEvaluationMode:
+      type: string
+      enum:
+      - per_group
+      - global
+      title: AutocorrelationEvaluationMode
+      description: Whether autocorrelation is compared per group or over one global
+        sequence.
+    AutocorrelationProfile:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          type: string
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        lags:
+          items:
+            type: integer
+          type: array
+          title: Lags
+          description: Lags compared, from 1 to `effective_max_lag`.
+        effective_max_lag:
+          type: integer
+          title: Effective Max Lag
+          description: Largest lag, capped at half the shorter sequence.
+        evaluated_lags:
+          type: integer
+          title: Evaluated Lags
+          description: Lags with enough value pairs in both sequences; 0 when the
+            synthetic sequence is constant.
+        error:
+          type: number
+          title: Error
+          description: Share of the lag structure that differs beyond sampling noise,
+            from 0 to 1.
+        similarity:
+          type: number
+          title: Similarity
+          description: 1 minus `error`.
+        reason:
+          title: Reason
+          description: Why the pair scores 0, such as a constant synthetic sequence,
+            or null.
+          type: string
+        training_acf:
+          items:
+            type: number
+          type: array
+          title: Training Acf
+          description: Training autocorrelation per lag, or null where undefined.
+        synthetic_acf:
+          items:
+            type: number
+          type: array
+          title: Synthetic Acf
+          description: Synthetic autocorrelation per lag, or null where undefined.
+      type: object
+      required:
+      - group
+      - column
+      - lags
+      - effective_max_lag
+      - evaluated_lags
+      - error
+      - similarity
+      - reason
+      - training_acf
+      - synthetic_acf
+      title: AutocorrelationProfile
+      description: Training and synthetic autocorrelation of one column in one group.
+    AutocorrelationSimilarityMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        details:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationDetails'
+          description: Profiles, skipped pairs, and summaries.
+      type: object
+      required:
+      - score
+      - details
+      title: AutocorrelationSimilarityMetric
+      description: Autocorrelation similarity, with the profiles it compares.
     AutocorrelationSimilarityParameters:
       properties:
         value_columns:
@@ -744,6 +1033,204 @@ components:
         constant synthetic profile paired with varying training data receives zero
 
         similarity.'
+    ClosestMatch:
+      properties:
+        distance:
+          title: Distance
+          description: Euclidean distance between the windows after standardizing
+            each value by the training windows, or null when it overflows.
+          type: number
+        exact_copy:
+          type: boolean
+          title: Exact Copy
+          description: Whether the synthetic window copies the training window exactly.
+        synthetic_values:
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+          title: Synthetic Values
+          description: Synthetic window values, as `values[column][step]`.
+        training_values:
+          title: Training Values
+          description: Training window values, as `values[column][step]`, only for
+            an exact copy so the data holds no training values that the synthetic
+            data lacks; null otherwise.
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+      type: object
+      required:
+      - distance
+      - exact_copy
+      - synthetic_values
+      - training_values
+      title: ClosestMatch
+      description: The synthetic window closest to any training window.
+    ColumnPIIStatistics:
+      properties:
+        assigned_type:
+          title: Assigned Type
+          description: Column type assigned by PII detection.
+          type: string
+        assigned_entity:
+          title: Assigned Entity
+          description: Entity assigned to the column.
+          type: string
+        detected_entity_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Detected Entity Counts
+          description: Times each entity type was detected.
+        is_transformed:
+          type: boolean
+          title: Is Transformed
+          description: Whether the column was transformed.
+        transform_functions:
+          items:
+            type: string
+          type: array
+          title: Transform Functions
+          description: Transforms applied to the column, sorted.
+      type: object
+      required:
+      - assigned_type
+      - assigned_entity
+      - detected_entity_counts
+      - is_transformed
+      - transform_functions
+      title: ColumnPIIStatistics
+      description: PII detected in a training column and how it was replaced.
+    ColumnProfile:
+      properties:
+        type:
+          type: string
+          title: Type
+          description: Inferred column type, such as 'numeric', 'categorical', or
+            'text'.
+        count:
+          type: integer
+          title: Count
+          description: Non-null values.
+        unique_count:
+          type: integer
+          title: Unique Count
+          description: Distinct non-null values.
+        unique_percent:
+          title: Unique Percent
+          description: Distinct values as a percentage of non-null values.
+          type: number
+        missing_count:
+          type: integer
+          title: Missing Count
+          description: Null values.
+        missing_percent:
+          title: Missing Percent
+          description: Null values as a percentage of all values.
+          type: number
+        avg_str_length:
+          type: number
+          title: Avg Str Length
+          description: Mean length of the values as strings, or 0 without values.
+      type: object
+      required:
+      - type
+      - count
+      - unique_count
+      - unique_percent
+      - missing_count
+      - missing_percent
+      - avg_str_length
+      title: ColumnProfile
+      description: Summary statistics of one column in one dataset.
+    ColumnProtection:
+      properties:
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        protection:
+          title: Protection
+          description: Protection from 0 to 10; higher is better.
+          type: number
+        grade:
+          type: string
+          title: Grade
+          description: Protection grade.
+      type: object
+      required:
+      - column
+      - protection
+      - grade
+      title: ColumnProtection
+      description: Attribute inference protection of one column.
+    ColumnResult:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Column name.
+        training:
+          allOf:
+          - $ref: '#/components/schemas/ColumnProfile'
+          description: Training column statistics.
+        synthetic:
+          allOf:
+          - $ref: '#/components/schemas/ColumnProfile'
+          description: Synthetic column statistics.
+        distribution_distance:
+          title: Distribution Distance
+          description: Jensen-Shannon distance between the distributions.
+          type: number
+        distribution_stability:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: Distribution stability of the column.
+        distribution:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Training and synthetic distributions, or null for columns that
+            are not charted, such as text.
+        pii:
+          allOf:
+          - $ref: '#/components/schemas/ColumnPIIStatistics'
+          description: PII statistics, or null without PII detection.
+      type: object
+      required:
+      - name
+      - training
+      - synthetic
+      - distribution_distance
+      - distribution_stability
+      - distribution
+      - pii
+      title: ColumnResult
+      description: Statistics and distribution stability of one training column.
+    ColumnSimilarity:
+      properties:
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        similarity:
+          type: number
+          title: Similarity
+          description: Mean pair similarity from 0 to 1.
+        count:
+          type: integer
+          title: Count
+          description: Pairs compared.
+      type: object
+      required:
+      - column
+      - similarity
+      - count
+      title: ColumnSimilarity
+      description: Mean similarity of the compared pairs in one column.
     ConditioningColumn:
       properties:
         column_name:
@@ -768,6 +1255,63 @@ components:
         ``first_name``), ``entity_type`` may be omitted: the plan fills it in from\
         \ that\ncolumn's entry, and an explicit value must match it. Downstream nodes\
         \ see the\ncell after upstream replacements."
+    CorrelationMatrices:
+      properties:
+        columns:
+          items:
+            type: string
+          type: array
+          title: Columns
+          description: Column names.
+        training:
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+          title: Training
+          description: Training correlations, or null where undefined.
+        synthetic:
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+          title: Synthetic
+          description: Synthetic correlations, or null where undefined.
+        difference:
+          items:
+            items:
+              type: number
+            type: array
+          type: array
+          title: Difference
+          description: Absolute difference of the two, or null where undefined.
+      type: object
+      required:
+      - columns
+      - training
+      - synthetic
+      - difference
+      title: CorrelationMatrices
+      description: Pairwise column correlations, with rows and columns in the order
+        of ``columns``.
+    CorrelationMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        correlations:
+          allOf:
+          - $ref: '#/components/schemas/CorrelationMatrices'
+          description: Correlation matrices, or null if not computed.
+      type: object
+      required:
+      - score
+      - correlations
+      title: CorrelationMetric
+      description: Column correlation stability, with the correlations it compares.
     DataParameters:
       properties:
         group_training_examples_by:
@@ -816,6 +1360,48 @@ components:
       title: DataParameters
       description: Configuration for grouping, ordering, and splitting input data
         for training and evaluation.
+    DatasetCounts:
+      properties:
+        training_rows:
+          type: integer
+          title: Training Rows
+          description: Training rows evaluated.
+        training_cols:
+          type: integer
+          title: Training Cols
+          description: Training columns evaluated.
+        training_missing_percent:
+          type: number
+          title: Training Missing Percent
+          description: Percentage of missing training values.
+        synthetic_rows:
+          type: integer
+          title: Synthetic Rows
+          description: Synthetic rows evaluated.
+        synthetic_cols:
+          type: integer
+          title: Synthetic Cols
+          description: Synthetic columns evaluated.
+        synthetic_missing_percent:
+          type: number
+          title: Synthetic Missing Percent
+          description: Percentage of missing synthetic values.
+        memorized_lines:
+          type: integer
+          title: Memorized Lines
+          description: Training rows duplicated in the synthetic data.
+      type: object
+      required:
+      - training_rows
+      - training_cols
+      - training_missing_percent
+      - synthetic_rows
+      - synthetic_cols
+      - synthetic_missing_percent
+      - memorized_lines
+      title: DatasetCounts
+      description: Row, column, and missing-value counts for the training and synthetic
+        data.
     DatetimeFilter:
       additionalProperties: false
       properties:
@@ -831,6 +1417,24 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    DeepStructureMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        projection:
+          allOf:
+          - $ref: '#/components/schemas/Projection'
+          description: Projected records, sampled to at most 5000 per dataset, or
+            null if not computed.
+      type: object
+      required:
+      - score
+      - projection
+      title: DeepStructureMetric
+      description: Deep structure stability, with the principal component projection
+        it compares.
     DifferentialPrivacyHyperparams:
       properties:
         dp_enabled:
@@ -872,6 +1476,67 @@ components:
         noise
 
         during training.'
+    DifferentialPrivacySettings:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          description: Whether training used differential privacy.
+        epsilon:
+          title: Epsilon
+          description: Privacy budget, or null when disabled.
+          type: number
+        delta:
+          anyOf:
+          - type: number
+          - type: string
+          title: Delta
+          description: Privacy delta, 'auto', or null when disabled.
+      type: object
+      required:
+      - enabled
+      - epsilon
+      - delta
+      title: DifferentialPrivacySettings
+      description: Differential privacy settings of the training run.
+    Distribution:
+      properties:
+        labels:
+          items:
+            type: string
+          type: array
+          title: Labels
+          description: Category names, with categories under 5 training records folded
+            into one 'Other (N categories)' label ('Other (1 category)' for one),
+            or bin labels such as '[0, 10)', or '3' for a one-value bin.
+        bin_edges:
+          title: Bin Edges
+          description: For numeric values, the increasing bin edges, one more than
+            the labels; null for categories.
+          items:
+            type: number
+          type: array
+        training_percent:
+          items:
+            type: number
+          type: array
+          title: Training Percent
+          description: Percentage of training values per label, or null where undefined.
+        synthetic_percent:
+          items:
+            type: number
+          type: array
+          title: Synthetic Percent
+          description: Percentage of synthetic values per label, or null where undefined.
+      type: object
+      required:
+      - labels
+      - bin_edges
+      - training_percent
+      - synthetic_percent
+      title: Distribution
+      description: Percentage of training and synthetic values in each category or
+        bin.
     EntityType:
       type: string
       enum:
@@ -985,6 +1650,68 @@ components:
         It includes privacy attack evaluations, statistical quality metrics, and downstream
 
         machine learning performance assessments.'
+    EvaluationReportData:
+      properties:
+        schema_version:
+          type: integer
+          title: Schema Version
+          description: Schema version; readers accept higher versions.
+        library_version:
+          type: string
+          title: Library Version
+          description: nemo-safe-synthesizer version that built the data.
+        job_id:
+          title: Job Id
+          description: Job ID from the NEMO_JOB_ID environment variable, or null.
+          type: string
+        scores:
+          $ref: '#/components/schemas/Scores'
+        metrics:
+          allOf:
+          - $ref: '#/components/schemas/Metrics'
+          description: Per-metric results.
+        dataset:
+          allOf:
+          - $ref: '#/components/schemas/DatasetCounts'
+          description: Dataset counts, or null when they were not computed.
+        columns:
+          items:
+            $ref: '#/components/schemas/ColumnResult'
+          type: array
+          title: Columns
+          description: 'Evaluated training columns, in training order: those also
+            in the synthetic data, sampled down to `evaluation.sqs_report_columns`.'
+        any_column_transformed:
+          type: boolean
+          title: Any Column Transformed
+          description: Whether PII replacement transformed any training column, including
+            ones not in `columns`.
+        differential_privacy:
+          allOf:
+          - $ref: '#/components/schemas/DifferentialPrivacySettings'
+          description: Differential privacy settings.
+        pii_replacement:
+          allOf:
+          - $ref: '#/components/schemas/PIIReplacement'
+          description: PII replacement applied to the training data, or null when
+            none was applied or checked.
+      type: object
+      required:
+      - schema_version
+      - library_version
+      - job_id
+      - scores
+      - metrics
+      - dataset
+      - columns
+      - any_column_transformed
+      - differential_privacy
+      - pii_replacement
+      title: EvaluationReportData
+      description: 'Evaluation results, including everything the HTML report shows.
+
+
+        Metric keys match the scores in ``SafeSynthesizerSummary``.'
     FileStorageType:
       type: string
       enum:
@@ -1416,6 +2143,61 @@ components:
 
         They affect the quality, diversity, and validity of the generated synthetic
         records.'
+    GroupSelection:
+      properties:
+        shared_groups:
+          type: integer
+          title: Shared Groups
+          description: Groups in both the training and synthetic data.
+        evaluated_groups:
+          type: integer
+          title: Evaluated Groups
+          description: Groups evaluated.
+        omitted_shared_groups:
+          type: integer
+          title: Omitted Shared Groups
+          description: Shared groups left out.
+        policy:
+          allOf:
+          - $ref: '#/components/schemas/GroupSelectionPolicy'
+          description: '''all_shared_groups'', or ''seeded_random_sample'' when groups
+            were sampled.'
+      type: object
+      required:
+      - shared_groups
+      - evaluated_groups
+      - omitted_shared_groups
+      - policy
+      title: GroupSelection
+      description: How the evaluated groups were chosen from the shared groups.
+    GroupSelectionPolicy:
+      type: string
+      enum:
+      - all_shared_groups
+      - seeded_random_sample
+      title: GroupSelectionPolicy
+      description: How groups were chosen for autocorrelation similarity.
+    GroupSimilarity:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          type: string
+        similarity:
+          type: number
+          title: Similarity
+          description: Mean pair similarity from 0 to 1.
+        count:
+          type: integer
+          title: Count
+          description: Pairs compared.
+      type: object
+      required:
+      - group
+      - similarity
+      - count
+      title: GroupSimilarity
+      description: Mean similarity of the compared pairs in one group.
     HTTPValidationError:
       properties:
         detail:
@@ -1735,6 +2517,338 @@ components:
         ``NSS_INFERENCE_ENDPOINT`` or ``--inference-endpoint-url`` rather than persisted
 
         in NSS configuration.'
+    MembershipInferenceMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        outcomes:
+          items:
+            $ref: '#/components/schemas/AttackOutcome'
+          type: array
+          title: Outcomes
+          description: Outcomes from the best grade to the worst.
+        excluded_columns:
+          items:
+            type: string
+          type: array
+          title: Excluded Columns
+          description: Columns left out via `evaluation.mia_excluded_columns`.
+      type: object
+      required:
+      - score
+      - outcomes
+      - excluded_columns
+      title: MembershipInferenceMetric
+      description: Membership inference protection, with its attack outcomes and the
+        columns left out of the attack.
+    Metric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+      type: object
+      required:
+      - score
+      title: Metric
+      description: A metric's score.
+    MetricScore:
+      properties:
+        raw_score:
+          title: Raw Score
+          description: Unscaled metric value, or null if it could not be computed.
+          type: number
+        score:
+          title: Score
+          description: Score from 0 to 10, or null if it could not be computed.
+          type: number
+        grade:
+          type: string
+          title: Grade
+          description: Qualitative grade, such as 'Unavailable', 'Poor', 'Good', or
+            'Excellent'.
+        notes:
+          title: Notes
+          description: Warning or error about the score, or null.
+          type: string
+      type: object
+      required:
+      - raw_score
+      - score
+      - grade
+      - notes
+      title: MetricScore
+      description: A metric's score and grade.
+    Metrics:
+      properties:
+        column_correlation_stability:
+          allOf:
+          - $ref: '#/components/schemas/CorrelationMetric'
+          description: Column Correlation Stability.
+        deep_structure_stability:
+          allOf:
+          - $ref: '#/components/schemas/DeepStructureMetric'
+          description: Deep Structure Stability.
+        column_distribution_stability:
+          allOf:
+          - $ref: '#/components/schemas/Metric'
+          description: Column Distribution Stability; each column's distributions
+            are in `columns`.
+        text_semantic_similarity:
+          allOf:
+          - $ref: '#/components/schemas/TextSemanticMetric'
+          description: Text Semantic Similarity.
+        text_structure_similarity:
+          allOf:
+          - $ref: '#/components/schemas/TextStructureMetric'
+          description: Text Structure Similarity.
+        membership_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/MembershipInferenceMetric'
+          description: Membership Inference Protection.
+        attribute_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/AttributeInferenceMetric'
+          description: Attribute Inference Protection.
+        pii_replay:
+          allOf:
+          - $ref: '#/components/schemas/PIIReplayMetric'
+          description: PII Replay.
+        autocorrelation_similarity:
+          allOf:
+          - $ref: '#/components/schemas/AutocorrelationSimilarityMetric'
+          description: Autocorrelation Similarity.
+        window_membership_inference_protection:
+          allOf:
+          - $ref: '#/components/schemas/WindowMembershipInferenceMetric'
+          description: Window Membership Inference Protection.
+      type: object
+      required:
+      - column_correlation_stability
+      - deep_structure_stability
+      - column_distribution_stability
+      - text_semantic_similarity
+      - text_structure_similarity
+      - membership_inference_protection
+      - attribute_inference_protection
+      - pii_replay
+      - autocorrelation_similarity
+      - window_membership_inference_protection
+      title: Metrics
+      description: 'Per-metric results. A metric is null when it is not part of the
+        evaluation; a metric that was turned off or
+
+        could not run is present with an ''Unavailable'' grade.'
+    PIIDependency:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        entity_type:
+          title: Entity Type
+          description: Entity type of the column, or null.
+          type: string
+      type: object
+      required:
+      - column_name
+      - entity_type
+      title: PIIDependency
+      description: A column whose values a replaced column depends on.
+    PIIReplacement:
+      properties:
+        replaced:
+          type: boolean
+          title: Replaced
+          description: False when PII replacement was off and PII was detected only
+            to check replay.
+        columns:
+          items:
+            $ref: '#/components/schemas/PIIReplacementColumn'
+          type: array
+          title: Columns
+          description: Replaced columns, in training order.
+        kept_columns:
+          items:
+            type: string
+          type: array
+          title: Kept Columns
+          description: Training columns left as they were.
+        sampler:
+          title: Sampler
+          description: Sampler that generated replacement values, or null.
+          type: string
+        locale:
+          title: Locale
+          description: Sampler locale, or null.
+          type: string
+        seed:
+          title: Seed
+          description: Sampler seed, or null for a random seed.
+          type: integer
+        value_mappings:
+          additionalProperties:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+          type: object
+          title: Value Mappings
+          description: '`replace_pii.data_to_sampler_value_mapping`: values in each
+            dependency column mapped to sampler values.'
+      type: object
+      required:
+      - replaced
+      - columns
+      - kept_columns
+      - sampler
+      - locale
+      - seed
+      - value_mappings
+      title: PIIReplacement
+      description: The PII replacement applied to the training data.
+    PIIReplacementColumn:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        entity_type:
+          type: string
+          title: Entity Type
+          description: Entity type the column was replaced as.
+        replaced_with:
+          type: string
+          title: Replaced With
+          description: How replacement values were generated.
+        pattern:
+          title: Pattern
+          description: Replacement pattern, or null.
+          type: string
+        pattern_symbols:
+          items:
+            $ref: '#/components/schemas/PatternSymbol'
+          type: array
+          title: Pattern Symbols
+          description: The pattern's symbols in order of first use.
+        depends_on:
+          items:
+            $ref: '#/components/schemas/PIIDependency'
+          type: array
+          title: Depends On
+          description: Columns the replacement values depend on.
+        found_by:
+          items:
+            type: string
+          type: array
+          title: Found By
+          description: Free-text detectors that found the replaced values.
+        entity_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Entity Counts
+          description: Times each entity type was found in the column.
+      type: object
+      required:
+      - column_name
+      - entity_type
+      - replaced_with
+      - pattern
+      - pattern_symbols
+      - depends_on
+      - found_by
+      - entity_counts
+      title: PIIReplacementColumn
+      description: How one training column was replaced.
+    PIIReplayEntry:
+      properties:
+        column_name:
+          type: string
+          title: Column Name
+          description: Column name.
+        column_assigned_type:
+          type: string
+          title: Column Assigned Type
+          description: Column type assigned by PII detection.
+        pii_type:
+          type: string
+          title: Pii Type
+          description: PII type, or 'none' for a whole column checked by name.
+        total_training_data:
+          type: integer
+          title: Total Training Data
+          description: Training rows containing a value of this type.
+        unique_training_data:
+          type: integer
+          title: Unique Training Data
+          description: Distinct training values of this type.
+        total_synthetic_data:
+          type: integer
+          title: Total Synthetic Data
+          description: Synthetic rows containing one of the training values.
+        unique_synthetic_data:
+          type: integer
+          title: Unique Synthetic Data
+          description: Distinct training values found in the synthetic data.
+        unique_synthetic_data_percentage:
+          type: number
+          title: Unique Synthetic Data Percentage
+          description: unique_synthetic_data / unique_training_data * 100.
+      type: object
+      required:
+      - column_name
+      - column_assigned_type
+      - pii_type
+      - total_training_data
+      - unique_training_data
+      - total_synthetic_data
+      - unique_synthetic_data
+      - unique_synthetic_data_percentage
+      title: PIIReplayEntry
+      description: Replay counts for one PII type in one column.
+    PIIReplayMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        enabled:
+          title: Enabled
+          description: Whether `evaluation.pii_replay_enabled` was on, or null when
+            the evaluation had no configuration.
+          type: boolean
+        training_total_records:
+          type: integer
+          title: Training Total Records
+          description: Training rows checked.
+        synthetic_total_records:
+          type: integer
+          title: Synthetic Total Records
+          description: Synthetic rows checked.
+        entries:
+          items:
+            $ref: '#/components/schemas/PIIReplayEntry'
+          type: array
+          title: Entries
+          description: Replay counts per column and PII type.
+        skipped_reason:
+          title: Skipped Reason
+          description: Why PII replay did not run in full, or null.
+          type: string
+      type: object
+      required:
+      - score
+      - enabled
+      - training_total_records
+      - synthetic_total_records
+      - entries
+      - skipped_reason
+      title: PIIReplayMetric
+      description: How many training PII values reappear in the synthetic data.
     PaginationData:
       properties:
         page:
@@ -1765,6 +2879,22 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PatternSymbol:
+      properties:
+        symbol:
+          type: string
+          title: Symbol
+          description: The symbol as written in the pattern.
+        meaning:
+          type: string
+          title: Meaning
+          description: What the symbol is replaced with.
+      type: object
+      required:
+      - symbol
+      - meaning
+      title: PatternSymbol
+      description: One symbol of a replacement pattern and what it stands for.
     PiiColumnPlan:
       properties:
         column_name:
@@ -1827,6 +2957,26 @@ components:
       type: object
       title: PiiSamplerConfig
       description: Settings for Nemotron-Personas or Faker-backed person sampling.
+    Points:
+      properties:
+        x:
+          items:
+            type: number
+          type: array
+          title: X
+          description: First principal component of each point, or null where undefined.
+        y:
+          items:
+            type: number
+          type: array
+          title: Y
+          description: Second principal component of each point, or null where undefined.
+      type: object
+      required:
+      - x
+      - y
+      title: Points
+      description: Points on the first two principal components.
     PreflightParameters:
       properties:
         disabled_checks:
@@ -1839,6 +2989,31 @@ components:
       type: object
       title: PreflightParameters
       description: User-controllable overrides for the preflight validation layer.
+    Projection:
+      properties:
+        axes:
+          items:
+            type: string
+          type: array
+          title: Axes
+          description: Names of the two components, such as 'pc1', with any explained
+            variance.
+        training:
+          allOf:
+          - $ref: '#/components/schemas/Points'
+          description: Training records.
+        synthetic:
+          allOf:
+          - $ref: '#/components/schemas/Points'
+          description: Synthetic records.
+      type: object
+      required:
+      - axes
+      - training
+      - synthetic
+      title: Projection
+      description: Training and synthetic records projected onto the same two principal
+        components.
     QuantizationScheme:
       type: string
       enum:
@@ -2248,6 +3423,43 @@ components:
       type: object
       title: SafeSynthesizerTiming
       description: Wall-clock durations for each pipeline stage.
+    Scores:
+      properties:
+        synthetic_quality:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: Synthetic Quality Score.
+        data_privacy:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: Data Privacy Score.
+      type: object
+      required:
+      - synthetic_quality
+      - data_privacy
+      title: Scores
+      description: Overall scores.
+    SkippedComparison:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          type: string
+        column:
+          type: string
+          title: Column
+          description: Column name.
+        reason:
+          type: string
+          title: Reason
+          description: Why the pair was left out.
+      type: object
+      required:
+      - group
+      - column
+      - reason
+      title: SkippedComparison
+      description: A group and column pair left out of the score.
     StringFilter:
       additionalProperties: false
       properties:
@@ -2329,6 +3541,64 @@ components:
         output, which backend enforces the constraint, and how the constraint schema
 
         is built.'
+    TextSemanticMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        projections:
+          additionalProperties:
+            $ref: '#/components/schemas/Projection'
+          type: object
+          title: Projections
+          description: Projected embeddings by text column.
+      type: object
+      required:
+      - score
+      - projections
+      title: TextSemanticMetric
+      description: Text semantic similarity, with each text column's embeddings projected
+        onto two principal components.
+    TextStructureDistributions:
+      properties:
+        sentence_count:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Sentences per record.
+        words_per_sentence:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Average words per sentence.
+        characters_per_word:
+          allOf:
+          - $ref: '#/components/schemas/Distribution'
+          description: Average characters per word.
+      type: object
+      required:
+      - sentence_count
+      - words_per_sentence
+      - characters_per_word
+      title: TextStructureDistributions
+      description: Distributions of per-record text statistics in one column.
+    TextStructureMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        columns:
+          additionalProperties:
+            $ref: '#/components/schemas/TextStructureDistributions'
+          type: object
+          title: Columns
+          description: Text statistics by text column.
+      type: object
+      required:
+      - score
+      - columns
+      title: TextStructureMetric
+      description: Text structure similarity, with the statistics it compares.
     TimeSeriesEvaluationParameters:
       properties:
         enabled:
@@ -2631,6 +3901,114 @@ components:
         These parameters control the validation and automatic fixes when going
 
         from LLM output to tabular data.'
+    WindowAttack:
+      properties:
+        threshold:
+          title: Threshold
+          description: Distance at or below which a window is flagged, or null when
+            it overflows.
+          type: number
+        training_flag_rate:
+          type: number
+          title: Training Flag Rate
+          description: Share of training windows flagged.
+        holdout_flag_rate:
+          type: number
+          title: Holdout Flag Rate
+          description: Share of holdout windows flagged.
+        privacy_loss_beyond_chance:
+          type: number
+          title: Privacy Loss Beyond Chance
+          description: Privacy loss after removing the expected chance loss.
+        holdout_exact_match_rate:
+          type: number
+          title: Holdout Exact Match Rate
+          description: Share of holdout windows with an exact synthetic copy.
+        exact_copy_privacy_loss:
+          type: number
+          title: Exact Copy Privacy Loss
+          description: Privacy loss from exact training copies beyond the holdout's.
+      type: object
+      required:
+      - threshold
+      - training_flag_rate
+      - holdout_flag_rate
+      - privacy_loss_beyond_chance
+      - holdout_exact_match_rate
+      - exact_copy_privacy_loss
+      title: WindowAttack
+      description: Membership inference attack results against the holdout.
+    WindowCounts:
+      properties:
+        training_windows_total:
+          type: integer
+          title: Training Windows Total
+          description: Training windows before sampling.
+        training_windows:
+          type: integer
+          title: Training Windows
+          description: Training windows compared.
+        synthetic_windows_total:
+          type: integer
+          title: Synthetic Windows Total
+          description: Synthetic windows before sampling.
+        synthetic_windows:
+          type: integer
+          title: Synthetic Windows
+          description: Synthetic windows compared.
+        holdout_windows_total:
+          type: integer
+          title: Holdout Windows Total
+          description: Holdout windows before sampling.
+        holdout_windows:
+          type: integer
+          title: Holdout Windows
+          description: Holdout windows compared.
+        holdout_groups_with_windows:
+          type: integer
+          title: Holdout Groups With Windows
+          description: Holdout groups with at least one window.
+      type: object
+      required:
+      - training_windows_total
+      - training_windows
+      - synthetic_windows_total
+      - synthetic_windows
+      - holdout_windows_total
+      - holdout_windows
+      - holdout_groups_with_windows
+      title: WindowCounts
+      description: Windows per dataset, before and after sampling.
+    WindowDistances:
+      properties:
+        training:
+          items:
+            type: number
+          type: array
+          title: Training
+          description: Distance of each training window, or null where undefined.
+        holdout:
+          title: Holdout
+          description: Distance of each holdout window, null where undefined, or null
+            without the attack.
+          items:
+            type: number
+          type: array
+      type: object
+      required:
+      - training
+      - holdout
+      title: WindowDistances
+      description: Euclidean distance from each window to its nearest synthetic window,
+        after standardizing each value.
+    WindowEvaluationMode:
+      type: string
+      enum:
+      - full
+      - copy_diagnostics_only
+      - unavailable
+      title: WindowEvaluationMode
+      description: How much of window membership inference ran.
     WindowGroupMIAParameters:
       properties:
         value_columns:
@@ -2682,3 +4060,119 @@ components:
         ``data.group_training_examples_by`` is set. Without them, only copy
 
         diagnostics are reported.'
+    WindowGroupSummary:
+      properties:
+        group:
+          title: Group
+          description: Group label, or null for one global sequence.
+          type: string
+        windows:
+          type: integer
+          title: Windows
+          description: Windows compared.
+        exact_copy_rate:
+          type: number
+          title: Exact Copy Rate
+          description: Share of windows with an exact synthetic copy.
+        flag_rate:
+          title: Flag Rate
+          description: Share of windows flagged, or null without the attack.
+          type: number
+      type: object
+      required:
+      - group
+      - windows
+      - exact_copy_rate
+      - flag_rate
+      title: WindowGroupSummary
+      description: Windows of one training group.
+    WindowMembershipInferenceDetails:
+      properties:
+        evaluation_mode:
+          allOf:
+          - $ref: '#/components/schemas/WindowEvaluationMode'
+          description: '''full'', ''copy_diagnostics_only'' without a usable holdout,
+            or ''unavailable''.'
+        columns:
+          items:
+            type: string
+          type: array
+          title: Columns
+          description: Columns in each window, in the order of window values.
+        excluded_columns:
+          items:
+            type: string
+          type: array
+          title: Excluded Columns
+          description: Numeric training columns left out because the synthetic data
+            lacks them or has non-numeric values.
+        window_size:
+          title: Window Size
+          description: Steps per window, or null.
+          type: integer
+        counts:
+          allOf:
+          - $ref: '#/components/schemas/WindowCounts'
+          description: Window counts, or null.
+        exact_copy_rate:
+          title: Exact Copy Rate
+          description: Share of training windows with an exact synthetic copy, or
+            null.
+          type: number
+        closest_match:
+          allOf:
+          - $ref: '#/components/schemas/ClosestMatch'
+          description: Closest synthetic window, or null.
+        distances:
+          allOf:
+          - $ref: '#/components/schemas/WindowDistances'
+          description: Window distances, or null.
+        attack:
+          allOf:
+          - $ref: '#/components/schemas/WindowAttack'
+          description: Attack results, or null without a usable holdout.
+        training_group_count:
+          type: integer
+          title: Training Group Count
+          description: Training groups with at least one window.
+        per_group:
+          items:
+            $ref: '#/components/schemas/WindowGroupSummary'
+          type: array
+          title: Per Group
+          description: The most-flagged training groups, at most 12, as the report
+            charts them; empty without a holdout, since then no group is flagged and
+            other training group names are left out.
+      type: object
+      required:
+      - evaluation_mode
+      - columns
+      - excluded_columns
+      - window_size
+      - counts
+      - exact_copy_rate
+      - closest_match
+      - distances
+      - attack
+      - training_group_count
+      - per_group
+      title: WindowMembershipInferenceDetails
+      description: Window counts, distances, copies, and attack results; null or empty
+        where the metric stopped before them.
+    WindowMembershipInferenceMetric:
+      properties:
+        score:
+          allOf:
+          - $ref: '#/components/schemas/MetricScore'
+          description: The metric's score.
+        details:
+          allOf:
+          - $ref: '#/components/schemas/WindowMembershipInferenceDetails'
+          description: Window counts, distances, and attack results.
+      type: object
+      required:
+      - score
+      - details
+      title: WindowMembershipInferenceMetric
+      description: Window membership inference protection, with its windows and attack
+        results.
