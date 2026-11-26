@@ -332,6 +332,7 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
             builder_image=image.builder_image,
             build_job=image.build_job,
             source_archive_digest=definition.source.files_hash if built else None,
+            platform=image.platform,
             runtime_config=image.runtime_config,
         )
         if image_type is None:

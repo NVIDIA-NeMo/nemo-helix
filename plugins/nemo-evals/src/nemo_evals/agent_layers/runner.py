@@ -151,7 +151,10 @@ async def _submit(
             main = await asyncio.to_thread(_plan_main, definition, archive)
             base_image = _base_image(main.image, layer.environment_digest) if main.image is not None else None
             environment = main.context_digest if base_image is None else base_image
-            platform = main.platform
+            # The platform the run's image build chose for the environment image, so the layer matches the image the
+            # run prepared; asking the registry again could fail and fall back to the node's platform. The registry
+            # only for a layer recorded without one, before the run carried it.
+            platform = layer.platform or main.platform
             if platform is None and base_image is not None:
                 platform = await published_platform(builder, base_image)
             name = layer_builder_name(

@@ -41,11 +41,13 @@ _TTL = timedelta(hours=1)
 _ENVIRONMENT_DIGEST = "sha256:" + "e" * 64
 
 
-def _prepared(digest: str = _ENVIRONMENT_DIGEST, user: str | None = "") -> PreparedImage:
-    """The environment image a run prepared: at ``digest``, running as ``user`` (empty for root)."""
+def _prepared(digest: str = _ENVIRONMENT_DIGEST, user: str | None = "", platform: str | None = None) -> PreparedImage:
+    """The environment image a run prepared: at ``digest``, running as ``user`` (empty for root), built or copied for
+    ``platform``."""
     return PreparedImage(
         image_ref=f"registry.example/env@{digest}",
         preparation_key=digest,
+        platform=platform,
         runtime_config=ImageRuntimeConfig(user=user),
     )
 
@@ -301,12 +303,20 @@ async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
     assert dockerfile.splitlines()[0] == f"FROM docker.io/library/python@{_ENVIRONMENT_DIGEST}"
 
 
-async def _prebuilt(entity_store, store_task, monkeypatch) -> AgentLayerBuildSpec:
-    """A requested layer of a task whose environment is the prebuilt image ``python:3.12``."""
+async def _prebuilt(
+    entity_store, store_task, monkeypatch, environment_platform: str | None = None
+) -> AgentLayerBuildSpec:
+    """A requested layer of a task whose environment is the prebuilt image ``python:3.12``, which the run's image build
+    copied for ``environment_platform``."""
     config = {"agent": {"user": "agent"}, "environment": {"docker_image": "python:3.12"}}
     _serve_archive(monkeypatch, {"task.toml": b'[agent]\nuser = "agent"\n'})
     digest = await store_task("sort-task", config=config)
-    layer = await _request(AgentLayerService(entity_store, _Jobs(), _allow), "sort-task", digest)
+    layer = await _request(
+        AgentLayerService(entity_store, _Jobs(), _allow),
+        "sort-task",
+        digest,
+        environment=_prepared(platform=environment_platform),
+    )
     assert layer is not None
     return AgentLayerBuildSpec(
         workspace="default", task="sort-task", revision_digest=digest, agent_key=layer.agent_key, attempt=1
@@ -322,13 +332,35 @@ def _mounted_python(builder: _Builder, files: _Files) -> str:
 async def test_an_amd64_only_images_layer_is_built_for_amd64_on_an_arm64_node(
     entity_store, store_task, monkeypatch, tmp_path
 ) -> None:
-    """The run's images copied the image for its only platform: the layer, and the installer run in it, match it."""
+    """The run's images copied the image for its only platform: the layer, and the installer run in it, match it.
+
+    From the platform the run's image build recorded, not the registry: one that can't be read now (a network error,
+    a rate limit) doesn't fall back to the node's platform.
+    """
+    monkeypatch.setattr("nemo_evals.agent_layers.runner.machine", lambda: "aarch64")
+    spec = await _prebuilt(entity_store, store_task, monkeypatch, environment_platform="linux/amd64")
+    # The registry lists no platforms, as when it can't be read.
+    builder, files = _Builder(published=()), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path)
+
+    assert layer.platform == "linux/amd64"
+    assert layer.status == "ready" and layer.image is not None and layer.image.platform == "linux/amd64"
+    assert builder.platforms == ["linux/amd64"]
+    assert "linux-x86_64-gnu" in _mounted_python(builder, files)
+
+
+async def test_a_layer_recorded_without_its_images_platform_reads_it_from_the_registry(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """A layer an earlier version requested carries no platform: its image's only published platform stands in."""
     monkeypatch.setattr("nemo_evals.agent_layers.runner.machine", lambda: "aarch64")
     spec = await _prebuilt(entity_store, store_task, monkeypatch)
     builder, files = _Builder(published=("linux/amd64",)), _Files()
 
     layer = await _run(entity_store, spec, builder, files, tmp_path)
 
+    assert layer.platform is None
     assert layer.status == "ready" and layer.image is not None and layer.image.platform == "linux/amd64"
     assert builder.platforms == ["linux/amd64"]
     assert "linux-x86_64-gnu" in _mounted_python(builder, files)

@@ -29,6 +29,13 @@ class PreparedImage(BaseModel):
         default=None, description="Built images only: the Builder Job (BuildImage.build_job)."
     )
     source_archive_digest: str | None = Field(default=None, description="Built images only: digest of the build input.")
+    platform: str | None = Field(
+        default=None,
+        description=(
+            "The platform the image build built or copied the image for, as `os/architecture`. None: the deployment's "
+            "default, or not recorded."
+        ),
+    )
     runtime_config: ImageRuntimeConfig | None = Field(
         default=None,
         description=(

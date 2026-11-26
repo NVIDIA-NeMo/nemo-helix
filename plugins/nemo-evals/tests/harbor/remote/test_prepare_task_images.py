@@ -239,6 +239,18 @@ async def test_a_prebuilt_copy_is_marked_prebuilt(clients, builds, store_task, s
     assert result.images["agent"].source == "prebuilt" and result.environment.agent.source_archive_digest is None
 
 
+async def test_a_prepared_image_carries_the_platform_its_build_chose(
+    clients, builds, store_task, sandbox_policy, entity_store
+):
+    """An agent layer is built for that platform, without asking the registry again."""
+    digest = await store_task(config={"environment": {"docker_image": "docker.io/library/ubuntu:24.04"}})
+    await build(builds, digest)
+    copied = image("main", digest_ref("c"), source="prebuilt").model_copy(update={"platform": "linux/amd64"})
+    await settle(entity_store, digest, 1, "ready", images=[copied])
+    result = await prepare(task(digest), clients, sandbox_policy)
+    assert result.environment is not None and result.environment.agent.platform == "linux/amd64"
+
+
 async def test_a_failed_build_fails_the_task_without_a_new_attempt(
     clients, builds, store_task, sandbox_policy, entity_store, jobs
 ):

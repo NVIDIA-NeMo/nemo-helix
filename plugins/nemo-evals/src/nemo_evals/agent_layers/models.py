@@ -89,6 +89,14 @@ class AgentLayerEntity(EntityBase):
             "uses."
         ),
     )
+    platform: str | None = Field(
+        default=None,
+        description=(
+            "The platform the run's image build built or copied that image for. The layer is built for it, with that "
+            "platform's installer, so it matches the image the run prepared. None: the deployment's default, or a "
+            "layer made before this was recorded."
+        ),
+    )
     image_user: str | None = Field(
         default=None,
         description=(
