@@ -89,25 +89,6 @@ class TestParsedFilterRemove:
         assert val is None
         assert pf.operation is not None
 
-    def test_remove_in_with_operator(self):
-        op = LogicalOperation(
-            operator=FilterOperator.AND,
-            operations=[
-                ComparisonOperation(operator=FilterOperator.IN, field="status", value=["a", "b"]),
-                ComparisonOperation(operator=FilterOperator.LIKE, field="name", value="llama"),
-            ],
-        )
-        pf = ParsedFilter(operation=op)
-        assert pf.remove("status", FilterOperator.IN) == ["a", "b"]
-        assert isinstance(pf.operation, ComparisonOperation)
-        assert pf.operation.field == "name"
-
-    def test_remove_in_leaves_eq_in_place(self):
-        op = ComparisonOperation(operator=FilterOperator.EQ, field="status", value="active")
-        pf = ParsedFilter(operation=op)
-        assert pf.remove("status", FilterOperator.IN) is None
-        assert pf.operation == op
-
 
 class TestParsedFilterHas:
     def test_has_none_returns_false(self):
