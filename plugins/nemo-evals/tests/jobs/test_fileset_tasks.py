@@ -523,7 +523,7 @@ def test_a_job_stored_with_its_tasks_in_a_file_renders_without_them(ctx: ClientC
     described = ctx.test_client.patch(f"{route}/{name}", json={"description": "still owned"})
 
     assert one.status_code == 200, one.text
-    assert one.json()["spec"].get("tasks") is None
+    assert "tasks" not in one.json()["spec"]  # omitted, not null: the schema allows only a list
     assert one.json()["spec"]["task_count"] == 2
     assert FROZEN_TASKS_KEY not in one.json()["spec"]  # the service's own pointer never reaches a reply
     # The SDK parses replies with the same model: the reply, without tasks or pointer, has to parse.
