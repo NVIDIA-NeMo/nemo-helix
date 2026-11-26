@@ -346,9 +346,7 @@ export interface ReconStep {
 
 // Fold `synth_phase` events into an ordered recon checklist. agent-hardener emits one event per completed recon
 // node, so every received step is done; the consumer shows a trailing "working" affordance while the job runs.
-// Deduped by phase, preserving first-seen order; a step that runs again (the profile is re-merged after the
-// interview) keeps its row and shows its latest result. The label carries what the step produced when the
-// event says (`detail`, e.g. "58 → 42 kept"), so a step that went wrong shows it as it happens.
+// Deduped by phase in first-seen order; a step that runs again keeps its row with its latest result.
 export const reconSteps = (events: SwarmEvent[]): ReconStep[] => {
   const byPhase = new Map<string, ReconStep>();
   for (const ev of events) {
