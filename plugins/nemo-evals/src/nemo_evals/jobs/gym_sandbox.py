@@ -622,7 +622,7 @@ class SessionBackedGymRunner:
         self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
         # A platform job sweeps by its unique id, which no other job shares. LOCAL_JOB_ID is shared by every
         # local run, so a local run doesn't sweep: it could destroy the host of another local run in progress.
-        self._swept_before_start = self._sandbox_id != self.LOCAL_JOB_ID
+        self._should_sweep_before_start = self._sandbox_id != self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
         self._progress = progress
@@ -697,9 +697,8 @@ class SessionBackedGymRunner:
         # Sandboxes an earlier attempt of this job left behind, when its pod was killed before its own
         # sweep ran: a rerun reuses the job's storage, and they would keep writing to it. This run starts
         # the job's only Gym session, so nothing of its own exists yet. Never raises: a sweep that fails
-        # leaves things as they were. A platform job only: every local run shares LOCAL_JOB_ID, so a sweep
-        # of it would destroy the host of another local run still in progress.
-        if self._swept_before_start:
+        # leaves things as they were. A platform job only; see ``__init__``.
+        if self._should_sweep_before_start:
             await asyncio.to_thread(
                 reap_job_sandboxes,
                 serve.job_id,

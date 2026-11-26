@@ -1536,10 +1536,16 @@ async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_return
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job_id", ["job-1", SessionBackedGymRunner.LOCAL_JOB_ID], ids=["job", "job-named-like-the-local-label"]
+)
 async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
-    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]]
+    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str
 ) -> None:
-    """A rerun reuses the job's storage; a host its killed earlier attempt left must not keep writing to it."""
+    """A rerun reuses the job's storage; a host its killed earlier attempt left must not keep writing to it.
+
+    The sweep matches the job's unique id, so a platform job sweeps whatever its name, even the local label's.
+    """
     import sandboxed_gym
     from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
 
@@ -1566,7 +1572,7 @@ async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
     monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
     monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
     plan = capable_plan()
-    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1", job_uid="job-1-uid")
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id=job_id, job_uid="job-1-uid")
 
     await runner.run_tasks([])
 
@@ -1578,11 +1584,7 @@ async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "job_id",
-    [None, "", SessionBackedGymRunner.LOCAL_JOB_ID],
-    ids=["no-job-id", "empty-job-id", "job-named-like-the-local-label"],
-)
+@pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
 async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
     monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str | None
 ) -> None:
