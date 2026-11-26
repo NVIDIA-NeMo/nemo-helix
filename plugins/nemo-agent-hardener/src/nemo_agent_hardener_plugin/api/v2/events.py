@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Durable event relay for a war-game run: the run POSTs events here, Studio polls for them.
+"""Live event relay for a war-game run: the run POSTs events here, Studio polls for them.
 
-Poll model: agent-hardener's EventBus POSTs each event to ``POST /runs/{name}/events``; the
-:class:`EventHub` appends it to a per-run ``events.jsonl`` (write-through). The file is the
-durable history — the full per-agent transcript survives a service restart. Each event's id is
-its 1-based line number in the file.
+Each event is stored as an :class:`AgentHardenerRunEvent` child of its run in the Entity Store, so every
+API replica serves the same history and no volume is shared. The API numbers events in arrival order
+(``seq``, the id Studio polls after); the store's unique child name makes concurrent ingests for one run
+take different numbers. Runs recorded before this kept their events in a fileset (``events_fileset``),
+which is still served for a run that has no event children.
 """
 
 from __future__ import annotations
@@ -14,23 +15,34 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from nemo_agent_hardener_plugin._perms import AgentHardenerRunPerms
 from nemo_agent_hardener_plugin.authz import scope
-from nemo_agent_hardener_plugin.config import AgentHardenerConfig
-from nemo_agent_hardener_plugin.entities import AGENT_HARDENER_RUN_TYPE
+from nemo_agent_hardener_plugin.entities import AgentHardenerRun, AgentHardenerRunEvent, event_name
 from nemo_agent_hardener_plugin.filesets import download_fileset
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
-from nemo_helix_plugin.entities.client import EntitiesClient
-from pydantic import BaseModel
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    get_entity_client,
+)
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
+
+_EVENT_PAGE_SIZE = 200
+_SEQ_ATTEMPTS = 5
+_RUN_ID_CACHE_LIMIT = 4096
+_run_ids: dict[tuple[str, str], str] = {}
 
 
 def _get_client() -> NemoClient:
@@ -39,73 +51,111 @@ def _get_client() -> NemoClient:
     return get_nemo_client(as_service="agent-hardener", internal=True)
 
 
-def _events_path(workspace: str, run_name: str) -> Path:
-    """Durable per-run events log: ``<run_events_dir>/<workspace>/<safe-run-name>.jsonl``."""
-    safe = "".join(ch if ch.isalnum() or ch in "-._" else "_" for ch in run_name) or "run"
-    return AgentHardenerConfig.get().run_events_dir / workspace / f"{safe}.jsonl"
-
-
 class EventIn(BaseModel):
     """Body for ``POST /runs/{name}/events`` — one event emitted by the run's EventBus."""
 
     event: str
     payload: dict[str, Any] = {}
+    sink_id: str | None = Field(
+        default=None, description="Id of the sending process's sink; with `seq`, makes a resent event idempotent."
+    )
+    seq: int | None = Field(
+        default=None, ge=1, description="The sender's own counter for this event, increasing within one `sink_id`."
+    )
 
 
-class _RunStream:
-    """One run's durable ``events.jsonl`` (all on the event loop).
+class EventsResponse(BaseModel):
+    """Response for GET /runs/{name}/events — events after the given sequence id."""
 
-    The file is the source of truth for history + sequence ids (id == 1-based line number); ``_seq`` is
-    seeded from the existing line count so ids stay monotonic across a restart.
+    events: list[dict[str, Any]]
+
+
+async def _run_id(entity_client: NemoEntitiesClient, workspace: str, name: str) -> str | None:
+    """The run's entity id, or None when there is no such run. Cached: a run's id never changes."""
+    key = (workspace, name)
+    if (run_id := _run_ids.get(key)) is None:
+        try:
+            run = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        except NemoEntityNotFoundError:
+            return None
+        if len(_run_ids) >= _RUN_ID_CACHE_LIMIT:
+            _run_ids.clear()
+        run_id = _run_ids[key] = run.id
+    return run_id
+
+
+def forget_run(workspace: str, name: str) -> None:
+    """Drop a deleted run from the id cache; the store deletes its event children with it."""
+    _run_ids.pop((workspace, name), None)
+
+
+def _children_of(run_id: str, *conditions: FilterOperation) -> FilterOperation:
+    parent = ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run_id)
+    return LogicalOperation(operator=FilterOperator.AND, operations=[parent, *conditions])
+
+
+async def _list_events(
+    entity_client: NemoEntitiesClient,
+    workspace: str,
+    run_id: str,
+    *conditions: FilterOperation,
+    sort: str,
+    page_size: int,
+) -> list[AgentHardenerRunEvent]:
+    page = await entity_client.list(
+        AgentHardenerRunEvent,
+        workspace=workspace,
+        filter_operation=_children_of(run_id, *conditions),
+        sort=sort,
+        page_size=page_size,
+    )
+    return page.data
+
+
+async def _last_seq(entity_client: NemoEntitiesClient, workspace: str, run_id: str) -> int:
+    latest = await _list_events(entity_client, workspace, run_id, sort="-name", page_size=1)
+    return latest[0].seq if latest else 0
+
+
+async def _already_stored(
+    entity_client: NemoEntitiesClient, workspace: str, run_id: str, sink_id: str, sink_seq: int
+) -> bool:
+    match = await _list_events(
+        entity_client,
+        workspace,
+        run_id,
+        ComparisonOperation(field="data.sink_id", operator=FilterOperator.EQ, value=sink_id),
+        ComparisonOperation(field="data.sink_seq", operator=FilterOperator.EQ, value=sink_seq),
+        sort="name",
+        page_size=1,
+    )
+    return bool(match)
+
+
+async def _events_after(
+    entity_client: NemoEntitiesClient, workspace: str, run_id: str, after: int
+) -> list[AgentHardenerRunEvent]:
+    """Every event with ``seq > after``, in order.
+
+    Pages by name rather than by offset, so an ingest landing mid-read cannot shift a page boundary.
     """
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._seq = self._line_count()
-
-    def _line_count(self) -> int:
-        if not self._path.exists():
-            return 0
-        with self._path.open("r", encoding="utf-8") as handle:
-            return sum(1 for _ in handle)
-
-    def publish(self, event: dict[str, Any]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
-        self._seq += 1
-
-    def history(self, after_id: int) -> list[tuple[int, dict[str, Any]]]:
-        """Replay persisted events with a line-number id greater than *after_id*."""
-        if not self._path.exists():
-            return []
-        items: list[tuple[int, dict[str, Any]]] = []
-        with self._path.open("r", encoding="utf-8") as handle:
-            for line_no, line in enumerate(handle, start=1):
-                if line_no <= after_id or not line.strip():
-                    continue
-                with contextlib.suppress(json.JSONDecodeError):
-                    items.append((line_no, json.loads(line)))
-        return items
+    events: list[AgentHardenerRunEvent] = []
+    cursor = event_name(after)
+    while True:
+        page = await _list_events(
+            entity_client,
+            workspace,
+            run_id,
+            ComparisonOperation(field="name", operator=FilterOperator.GT, value=cursor),
+            sort="name",
+            page_size=_EVENT_PAGE_SIZE,
+        )
+        events.extend(page)
+        if len(page) < _EVENT_PAGE_SIZE:
+            return events
+        cursor = page[-1].name
 
 
-class EventHub:
-    """Per-run event streams for this plugin process (created on first access).
-
-    Keyed by ``(workspace, run_name)`` so runs sharing a name across workspaces never cross streams.
-    """
-
-    def __init__(self) -> None:
-        self._streams: dict[tuple[str, str], _RunStream] = {}
-
-    def stream(self, workspace: str, run_name: str) -> _RunStream:
-        key = (workspace, run_name)
-        if key not in self._streams:
-            self._streams[key] = _RunStream(_events_path(workspace, run_name))
-        return self._streams[key]
-
-
-hub = EventHub()
 router = APIRouter()
 
 
@@ -117,62 +167,80 @@ router = APIRouter()
     callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
     permissions=[AgentHardenerRunPerms.EVENTS_WRITE],
 )
-async def ingest_event(workspace: str, name: str, body: EventIn) -> None:
-    """Ingest one run event (the run's EventBus POSTs here)."""
-    hub.stream(workspace, name).publish({"event": body.event, "payload": body.payload})
-
-
-class EventsResponse(BaseModel):
-    """Response for GET /runs/{name}/events — events after the given sequence id."""
-
-    events: list[dict[str, Any]]
+async def ingest_event(
+    workspace: str,
+    name: str,
+    body: EventIn,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> None:
+    """Ingest one run event (the run's EventBus POSTs here); a resent event is stored once."""
+    run_id = await _run_id(entity_client, workspace, name)
+    if run_id is None:
+        raise HTTPException(status_code=404, detail=f"AgentHardenerRun '{name}' not found in workspace '{workspace}'.")
+    if body.sink_id and body.seq and await _already_stored(entity_client, workspace, run_id, body.sink_id, body.seq):
+        return
+    for _ in range(_SEQ_ATTEMPTS):
+        seq = await _last_seq(entity_client, workspace, run_id) + 1
+        event = AgentHardenerRunEvent(
+            name=event_name(seq),
+            workspace=workspace,
+            seq=seq,
+            event=body.event,
+            payload=body.payload,
+            sink_id=body.sink_id or "",
+            sink_seq=body.seq or 0,
+        )
+        event._parent = run_id
+        try:
+            await entity_client.create(event)
+            return
+        except NemoEntityConflictError:
+            continue  # another ingest took this seq; number after it
+    raise HTTPException(status_code=503, detail=f"Too many concurrent events for run {name!r}; retry.")
 
 
 @router.get("/runs/{name}/events", tags=["Agent Hardener Events"])
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerRunPerms.EVENTS_READ])
-async def get_events(workspace: str, name: str, after: int = 0) -> EventsResponse:
-    """Return all persisted run events with sequence id greater than *after*.
+async def get_events(
+    workspace: str,
+    name: str,
+    after: int = 0,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> EventsResponse:
+    """Return the run's events with sequence id greater than *after*.
 
-    Falls back to downloading from the run's ``events_fileset`` when the local
-    file is absent (e.g. after a pod restart).
+    A run recorded before events moved to the Entity Store is served from its ``events_fileset``.
     """
-    stream = hub.stream(workspace, name)
-    result = stream.history(after_id=after)
+    run_id = await _run_id(entity_client, workspace, name)
+    if run_id is None:
+        return EventsResponse(events=[])
+    stored = await _events_after(entity_client, workspace, run_id, after)
+    if stored or (after > 0 and await _last_seq(entity_client, workspace, run_id)):
+        return EventsResponse(events=[{"id": e.seq, "event": e.event, "payload": e.payload} for e in stored])
 
-    if not result and not stream._path.exists():
-        # The fallback does blocking sync I/O (SDK entity lookup + fileset download) that calls back into
-        # this same platform. Running it on the event loop self-deadlocks — the server can't answer its own
-        # lookup, so the SDK retries for ~181s while every other request (incl. the inference gateway) is
-        # frozen. Offload to a worker thread so the loop stays free and the lookup resolves promptly.
-        result = await run_in_threadpool(_fileset_fallback, workspace, name, stream, after)
+    try:
+        run = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+    except NemoEntityNotFoundError:
+        return EventsResponse(events=[])
+    if not run.events_fileset:
+        return EventsResponse(events=[])
+    # The download is blocking sync I/O that calls back into this same platform; on the event loop it
+    # would self-deadlock (the server cannot answer its own request), so it runs on a worker thread.
+    return EventsResponse(events=await run_in_threadpool(_legacy_events, name, run.events_fileset, after))
 
-    return EventsResponse(events=[{"id": seq, **event} for seq, event in result])
 
+def _legacy_events(name: str, fileset_ref: str, after: int) -> list[dict[str, Any]]:
+    """Blocking: the events of a run whose history is an ``events.jsonl`` fileset (id = line number).
 
-def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> list[tuple[int, dict[str, Any]]]:
-    """Blocking: fetch the run's ``events_fileset`` and re-read history. Must run off the event loop.
-
-    Empty only when there is nothing to fall back to; a failed lookup or download is a 502, since an
-    empty list would read as a run that emitted no events.
+    Empty only when the fileset is gone; a failed download is a 502, since an empty list would read as a
+    run that emitted no events.
     """
     try:
-        client = _get_client()
-        # get_entity_by_name returns a generic Entity; its domain fields live under `.data`
-        # (same access pattern as sdk.py::_run_to_dict), not as top-level attributes.
-        run = (
-            EntitiesClient.from_client(client)
-            .get_entity_by_name(
-                name=name,
-                entity_type=AGENT_HARDENER_RUN_TYPE,
-                workspace=workspace,
-            )
-            .data()
-        )
-        fileset_ref = (getattr(run, "data", None) or {}).get("events_fileset")
-        if fileset_ref:
-            download_fileset(client, fileset_ref, stream._path.parent)
-            return stream.history(after_id=after)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = download_fileset(_get_client(), fileset_ref, Path(tmp))
+            log = next(iter(sorted(dest.rglob("*.jsonl"))), None)
+            return _read_jsonl(log, after) if log else []
     except NotFoundError:
         return []
     except Exception as exc:
@@ -180,4 +248,14 @@ def _fileset_fallback(workspace: str, name: str, stream: Any, after: int) -> lis
         raise HTTPException(
             status_code=502, detail=f"Could not load the persisted events for run {name!r}: {exc}"
         ) from exc
-    return []
+
+
+def _read_jsonl(path: Path, after: int) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            if line_no <= after or not line.strip():
+                continue
+            with contextlib.suppress(json.JSONDecodeError):
+                events.append({"id": line_no, **json.loads(line)})
+    return events

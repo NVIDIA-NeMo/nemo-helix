@@ -4,10 +4,9 @@
 """Shared test doubles for the agent-hardener plugin unit tests.
 
 The records/manifest/sdk modules talk to the entity store through the typed
-:class:`EntitiesClient` via :func:`client_from_platform`, and the events module derives it
-with ``EntitiesClient.from_client``. Unit tests fake the entity store as a
-``SimpleNamespace(entities=...)`` shape, so both boundaries must be patched to route the
-typed-client calls back onto that fake.
+:class:`EntitiesClient` via :func:`client_from_platform`. Unit tests fake the entity store as a
+``SimpleNamespace(entities=...)`` shape, so that boundary is patched to route the typed-client
+calls back onto that fake.
 This keeps the per-test ``entities`` fakes (and the capturing run-service doubles) unchanged.
 
 The typed client method calls are translated to the fake's shape here, once:
@@ -23,7 +22,6 @@ from typing import Any
 
 import pytest
 from nemo_agent_hardener_plugin import sdk as sdk_module
-from nemo_agent_hardener_plugin.api.v2 import events as events_module
 from nemo_agent_hardener_plugin.cli import _shared as shared_module
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_module
 from nemo_agent_hardener_plugin.jobs import records as records_module
@@ -90,11 +88,6 @@ def _fake_entities_client_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     for mod in (records_module, manifest_module):
         monkeypatch.setattr(mod, "client_from_platform", _fake_entities_client)
     monkeypatch.setattr(sdk_module, "client_from_platform", _fake_entities_client)
-    monkeypatch.setattr(
-        events_module.EntitiesClient,
-        "from_client",
-        classmethod(lambda cls, platform: _fake_entities_client(platform, cls)),
-    )
     monkeypatch.setattr(shared_module, "AgentHardenerPluginResource", _fake_agent_hardener_resource)
 
 

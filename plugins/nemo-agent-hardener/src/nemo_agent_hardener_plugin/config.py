@@ -18,6 +18,7 @@ conflict with agent-hardener's dependencies. The plugin points agent-hardener at
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -28,6 +29,8 @@ import yaml
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 # Env var agent-hardener reads to locate the garak venv its agent_breaker attacker spawns. The plugin
 # exports it (to ``garak_python``) for both ``agent-hardener setup`` (provision) and ``agent-hardener run``.
@@ -273,10 +276,10 @@ class AgentHardenerConfig(NemoConfig):
     )
     events_dir: Path | None = Field(
         default=None,
+        deprecated=True,
         description=(
-            "Where the API keeps each live run's event log. Unset uses {state_dir}/run-events, local to one API "
-            "process; on Helm point it at the shared files volume so a live run's log survives an API restart and "
-            "every replica sees it. Set NEMO_AGENT_HARDENER_EVENTS_DIR to override."
+            "Deprecated and ignored: live run events are kept in the Entity Store, so no volume is needed. "
+            "Still accepted so existing values files keep loading."
         ),
     )
     openshell_gateway_endpoint: str | None = Field(
@@ -310,6 +313,13 @@ class AgentHardenerConfig(NemoConfig):
         return value
 
     @model_validator(mode="after")
+    def _warn_events_dir(self) -> AgentHardenerConfig:
+        # Read from the field set, not the attribute: reading a deprecated field warns on every read.
+        if "events_dir" in self.model_fields_set:
+            logger.warning("agent_hardener.events_dir is deprecated and ignored: run events live in the Entity Store")
+        return self
+
+    @model_validator(mode="after")
     def _require_mtls_secrets(self) -> AgentHardenerConfig:
         endpoint = self.openshell_gateway_endpoint
         if not endpoint or urlsplit(endpoint).scheme != "https":
@@ -325,11 +335,6 @@ class AgentHardenerConfig(NemoConfig):
     def state_dir(self) -> Path:
         """Base dir for agent-hardener on-host state (the venvs live under it)."""
         return self.venv_path.parent
-
-    @property
-    def run_events_dir(self) -> Path:
-        """Root of the per-run event logs the API serves to Studio."""
-        return self.events_dir or self.state_dir / "run-events"
 
     @property
     def agent_hardener_bin(self) -> Path:

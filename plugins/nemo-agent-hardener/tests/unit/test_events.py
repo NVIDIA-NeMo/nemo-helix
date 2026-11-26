@@ -1,20 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the event relay: durable ``events.jsonl`` history, ingest, and polling."""
+"""Unit tests for the event relay: the job's sink identity and the legacy fileset read.
+
+Ingest and reads against a real Entity Store are in ``tests/integration/test_run_events.py``.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from _doubles import make_job_context
-from fastapi import FastAPI
+from fastapi import HTTPException
 from nemo_agent_hardener_plugin.api.v2 import events
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import execution
@@ -22,14 +23,6 @@ from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import NotFoundError
 from pytest_httpserver import HTTPServer
-from starlette.testclient import TestClient
-
-
-def _write_events(path: Path, event_list: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        for e in event_list:
-            f.write(json.dumps(e) + "\n")
 
 
 def test_run_events_use_parent_workload_identity(
@@ -72,172 +65,22 @@ def test_run_events_use_parent_workload_identity(
     httpserver.check_assertions()
 
 
-def test_history_filters_by_last_seen_id(tmp_path: Path) -> None:
-    stream = events._RunStream(tmp_path / "events.jsonl")
-    for i in range(3):
-        stream.publish({"event": f"e{i}", "payload": {}})
-    assert [seq for seq, _ in stream.history(after_id=0)] == [1, 2, 3]
-    assert [seq for seq, _ in stream.history(after_id=2)] == [3]
-
-
-def test_replicas_sharing_events_dir_serve_each_others_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Two API replicas = two hubs. With events_dir on a shared volume, the replica that took the job's POST
-    # and the one Studio polls see the same log.
-    shared = tmp_path / "shared"
-    config = AgentHardenerConfig(venv_path=tmp_path / "local" / "venv", events_dir=shared)
-    monkeypatch.setattr(events.AgentHardenerConfig, "get", lambda: config)
-
-    events.EventHub().stream("ws", "run/1").publish({"event": "round_completed", "payload": {}})
-
-    assert [event["event"] for _, event in events.EventHub().stream("ws", "run/1").history(after_id=0)] == [
-        "round_completed"
-    ]
-    assert (shared / "ws" / "run_1.jsonl").is_file()
-    assert not (tmp_path / "local" / "run-events").exists()
-
-
-def test_publish_persists_and_a_fresh_stream_replays(tmp_path: Path) -> None:
-    # Durability: events written by one stream survive on disk and replay from a brand-new stream on the
-    # same file (as after a service restart), with ids continuing monotonically from the file's line count.
-    path = tmp_path / "events.jsonl"
-    first = events._RunStream(path)
-    first.publish({"event": "agent_exchange", "payload": {"agent_name": "Direct Prompt Attacker"}})
-    first.publish({"event": "agent_completed", "payload": {"agent_name": "Direct Prompt Attacker"}})
-
-    assert path.exists()
-    assert [json.loads(line)["event"] for line in path.read_text().splitlines()] == [
-        "agent_exchange",
-        "agent_completed",
-    ]
-
-    reopened = events._RunStream(path)
-    assert [seq for seq, _ in reopened.history(after_id=0)] == [1, 2]
-    reopened.publish({"event": "round_completed", "payload": {}})  # id continues from the persisted count
-    assert reopened.history(after_id=2)[0][0] == 3
-
-
-def test_ingest_endpoint_publishes_to_hub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(events, "hub", events.EventHub())
-    monkeypatch.setattr(events, "_events_path", lambda ws, name: tmp_path / f"{ws}-{name}.jsonl")
-    app = FastAPI()
-    app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
-    with TestClient(app) as client:
-        resp = client.post(
-            "/v2/workspaces/default/runs/run-42/events",
-            json={"event": "FINAL_VERDICT", "payload": {"passed": True}},
-        )
-    assert resp.status_code == 204
-    persisted = events.hub.stream("default", "run-42").history(after_id=0)
-    assert persisted[-1][1] == {"event": "FINAL_VERDICT", "payload": {"passed": True}}
-
-
-def test_get_events_endpoint_returns_events_after_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(events, "hub", events.EventHub())
-    monkeypatch.setattr(events, "_events_path", lambda ws, name: tmp_path / f"{ws}-{name}.jsonl")
-    app = FastAPI()
-    app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
-    with TestClient(app) as client:
-        for i in range(3):
-            client.post(
-                "/v2/workspaces/default/runs/run-1/events",
-                json={"event": f"e{i}", "payload": {"i": i}},
-            )
-        resp = client.get("/v2/workspaces/default/runs/run-1/events?after=1")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert [e["id"] for e in body["events"]] == [2, 3]
-    assert body["events"][0]["event"] == "e1"
-    assert body["events"][1]["event"] == "e2"
-
-
-def test_get_events_falls_back_to_fileset_when_local_missing(tmp_path: Path) -> None:
-    """When the local log is absent but the run entity has events_fileset, download and serve.
-
-    The log is named per run (`_events_path` -> ``<safe-run-name>.jsonl``), and the fileset member
-    carries that same basename because `_save_events_fileset` uploads that exact file. Naming both
-    ``events.jsonl`` here would pass even if the fallback wrote somewhere the reader never looks.
-    """
-    events_file = tmp_path / "source" / "my-run.jsonl"
-    _write_events(events_file, [{"event": "run_started", "payload": {}}])
-
-    missing_path = tmp_path / "missing" / "my-run.jsonl"
-
-    mock_platform = MagicMock()
-    # Shaped like the real entity-store record: get_entity_by_name returns a generic Entity whose
-    # domain fields live under `.data` (a bare MagicMock would falsely expose `.events_fileset`).
-    mock_run = SimpleNamespace(name="my-run", data={"events_fileset": "default/my-events-fs"})
-    mock_platform.entities.get_entity_by_name.return_value = mock_run
-
-    def fake_download(sdk, ref, dest):
-        # download_fileset preserves the member basename, so the run-named file lands in `dest`.
-        dest.mkdir(parents=True, exist_ok=True)
-        (dest / "my-run.jsonl").write_text(events_file.read_text())
-        return dest
-
+def _legacy_events_failing_with(failure: Exception) -> list[dict[str, Any]]:
     with (
-        patch.object(events, "hub", events.EventHub()),
-        patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
-        patch("nemo_agent_hardener_plugin.api.v2.events.download_fileset", side_effect=fake_download),
+        patch.object(events, "_get_client", return_value=MagicMock()),
+        patch.object(events, "download_fileset", side_effect=failure),
     ):
-        app = FastAPI()
-        app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
-        client = TestClient(app)
-        resp = client.get("/v2/workspaces/default/runs/my-run/events?after=0")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["events"]) == 1
-    assert data["events"][0]["event"] == "run_started"
+        return events._legacy_events("my-run", "default/my-events-fs", after=0)
 
 
-def test_get_events_returns_empty_when_no_local_and_no_fileset(tmp_path: Path) -> None:
-    """When local file is missing and no fileset ref exists, return empty list."""
-    missing_path = tmp_path / "missing" / "events.jsonl"
-
-    mock_platform = MagicMock()
-    mock_run = SimpleNamespace(name="my-run", data={"events_fileset": ""})
-    mock_platform.entities.get_entity_by_name.return_value = mock_run
-
-    with (
-        patch.object(events, "hub", events.EventHub()),
-        patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
-    ):
-        app = FastAPI()
-        app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
-        client = TestClient(app)
-        resp = client.get("/v2/workspaces/default/runs/my-run/events?after=0")
-
-    assert resp.status_code == 200
-    assert resp.json() == {"events": []}
-
-
-def _get_events_with_fallback(tmp_path: Path, failure: Exception) -> Any:
-    mock_platform = MagicMock()
-    mock_platform.entities.get_entity_by_name.return_value = SimpleNamespace(
-        name="my-run", data={"events_fileset": "default/my-events-fs"}
-    )
-    with (
-        patch.object(events, "hub", events.EventHub()),
-        patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=tmp_path / "missing.jsonl"),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
-        patch("nemo_agent_hardener_plugin.api.v2.events.download_fileset", side_effect=failure),
-    ):
-        app = FastAPI()
-        app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
-        return TestClient(app).get("/v2/workspaces/default/runs/my-run/events?after=0")
-
-
-def test_get_events_is_empty_when_the_events_fileset_is_gone(tmp_path: Path) -> None:
+def test_legacy_events_are_empty_when_the_events_fileset_is_gone() -> None:
     gone = NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://files")))
-    resp = _get_events_with_fallback(tmp_path, gone)
-    assert resp.status_code == 200
-    assert resp.json() == {"events": []}
+    assert _legacy_events_failing_with(gone) == []
 
 
-def test_get_events_reports_a_failed_fallback_instead_of_an_empty_run(tmp_path: Path) -> None:
+def test_a_failed_legacy_download_is_reported_instead_of_an_empty_run() -> None:
     """An empty list would read as a run that emitted nothing; the caller needs to know the load failed."""
-    resp = _get_events_with_fallback(tmp_path, RuntimeError("files service down"))
-    assert resp.status_code == 502
-    assert "files service down" in resp.json()["detail"]
+    with pytest.raises(HTTPException) as raised:
+        _legacy_events_failing_with(RuntimeError("files service down"))
+    assert raised.value.status_code == 502
+    assert "files service down" in str(raised.value.detail)

@@ -1102,8 +1102,8 @@ paths:
       tags:
       - Agent Hardener Runs
       summary: Delete Run
-      description: Delete a war-game run record. The underlying platform job is cancelled/deleted
-        separately.
+      description: Delete a war-game run record and, by cascade, its events. The platform
+        job is cancelled/deleted separately.
       operationId: delete_run_apis_agent_hardener_v2_workspaces__workspace__runs__name__delete
       parameters:
       - name: workspace
@@ -1235,7 +1235,8 @@ paths:
       tags:
       - Agent Hardener Events
       summary: Ingest Event
-      description: Ingest one run event (the run's EventBus POSTs here).
+      description: Ingest one run event (the run's EventBus POSTs here); a resent
+        event is stored once.
       operationId: ingest_event_apis_agent_hardener_v2_workspaces__workspace__runs__name__events_post
       parameters:
       - name: workspace
@@ -1269,13 +1270,11 @@ paths:
       tags:
       - Agent Hardener Events
       summary: Get Events
-      description: 'Return all persisted run events with sequence id greater than
-        *after*.
+      description: 'Return the run''s events with sequence id greater than *after*.
 
 
-        Falls back to downloading from the run''s ``events_fileset`` when the local
-
-        file is absent (e.g. after a pod restart).'
+        A run recorded before events moved to the Entity Store is served from its
+        ``events_fileset``.'
       operationId: get_events_apis_agent_hardener_v2_workspaces__workspace__runs__name__events_get
       parameters:
       - name: workspace
@@ -2755,8 +2754,9 @@ components:
         events_fileset:
           type: string
           title: Events Fileset
-          description: Fileset ref of the run's events.jsonl, uploaded at completion
-            for durable history.
+          description: 'Legacy: fileset ref of the run''s events.jsonl, set by releases
+            that kept events in a local file. Newer runs keep their events as AgentHardenerRunEvent
+            children and leave this empty.'
           default: ''
         source_run:
           type: string
@@ -2913,6 +2913,17 @@ components:
           type: object
           title: Payload
           default: {}
+        sink_id:
+          title: Sink Id
+          description: Id of the sending process's sink; with `seq`, makes a resent
+            event idempotent.
+          type: string
+        seq:
+          title: Seq
+          description: The sender's own counter for this event, increasing within
+            one `sink_id`.
+          type: integer
+          minimum: 1.0
       type: object
       required:
       - event

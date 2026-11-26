@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agent_hardener_plugin._perms import AgentHardenerRunPerms
 from nemo_agent_hardener_plugin.agent_resolver import parse_agent_ref, strip_gateway_url
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
+from nemo_agent_hardener_plugin.api.v2.events import forget_run
 from nemo_agent_hardener_plugin.api.v2.manifests import refresh_manifest
 from nemo_agent_hardener_plugin.api.v2.schemas import (
     ApplyMitigationRequest,
@@ -294,12 +295,13 @@ async def delete_run(
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
-    """Delete a war-game run record. The underlying platform job is cancelled/deleted separately."""
+    """Delete a war-game run record and, by cascade, its events. The platform job is cancelled/deleted separately."""
     try:
         _delete_target = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
         await entity_client.delete_by_id(
             AgentHardenerRun, _delete_target.id, expected_db_version=_delete_target.db_version
         )
+        forget_run(workspace, name)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail=f"AgentHardenerRun '{name}' not found in workspace '{workspace}'."

@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_agent_hardener_plugin.api.v2.events import _events_path
 from nemo_agent_hardener_plugin.filesets import download_fileset, upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, CATEGORY_MANIFEST, AgentHardenerRunError
 from nemo_helix_plugin.job_context import JobContext
@@ -254,20 +253,6 @@ def _save_composed_guardrails(ctx: JobContext, defense_guardrails: str | None) -
         ctx.results.save("composed-guardrails", path)
     except Exception:  # capturing the artifact is best-effort, not part of the war-game
         logger.warning("failed to save composed guardrails result", exc_info=True)
-
-
-def _save_events_fileset(sdk: Any, *, workspace: str, run_name: str) -> str:
-    """Upload the run's events.jsonl to a fileset; return its ref or '' on any failure."""
-    path = _events_path(workspace, run_name)
-    if not path.exists():
-        return ""
-    try:
-        return upload_file_to_fileset(sdk, path, workspace=workspace)
-    except Exception:
-        logger.warning(
-            "Failed to upload events.jsonl for run %r; history will not survive pod restart", run_name, exc_info=True
-        )
-        return ""
 
 
 def _save_hitlog_fileset(sdk: Any, workspace: str, capture: ArtifactCapture) -> str:

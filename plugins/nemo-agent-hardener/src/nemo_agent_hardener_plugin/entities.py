@@ -5,14 +5,15 @@
 
 A :class:`AgentHardenerRun` records one war-game run (agent targeted, victim port, manifest, outcome); a
 :class:`AgentHardenerManifest` is a named, reusable war-game target scaffolded from a deployed agent or an
-uploaded NAT project. ``name``/``workspace``/``created_at``/``id`` are inherited from the base and
+uploaded NAT project; an :class:`AgentHardenerRunEvent` is one live event of a run, stored as its child.
+``name``/``workspace``/``created_at``/``id`` are inherited from the base and
 managed by the store; only domain fields are declared here. The ``AGENT_HARDENER_*_TYPE`` constants are
 the canonical entity-type strings used at every call site.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from nemo_agent_hardener_plugin.model_config import WarGameModels
 from nemo_helix_plugin.entity import NemoEntity
@@ -20,6 +21,7 @@ from pydantic import Field
 
 AGENT_HARDENER_RUN_TYPE = "agent_hardener_run"
 AGENT_HARDENER_MANIFEST_TYPE = "agent_hardener_manifest"
+AGENT_HARDENER_RUN_EVENT_TYPE = "agent_hardener_run_event"
 
 RunStatus = Literal["running", "completed", "failed"]
 
@@ -50,13 +52,37 @@ class AgentHardenerRun(NemoEntity, entity_type=AGENT_HARDENER_RUN_TYPE):
     )
     events_fileset: str = Field(
         default="",
-        description="Fileset ref of the run's events.jsonl, uploaded at completion for durable history.",
+        description="Legacy: fileset ref of the run's events.jsonl, set by releases that kept events in a local "
+        "file. Newer runs keep their events as AgentHardenerRunEvent children and leave this empty.",
     )
     source_run: str = Field(
         default="",
         description="For a validate-only sanity-check run, the name of the harden run it was launched from; "
         "lets the Harden tab re-attach the scorecard on reload. Empty for normal war-game runs.",
     )
+
+
+class AgentHardenerRunEvent(NemoEntity, entity_type=AGENT_HARDENER_RUN_EVENT_TYPE):
+    """One live event of a war-game run, created as a child of its :class:`AgentHardenerRun`.
+
+    ``name`` is ``seq`` zero-padded (:func:`event_name`), so the store's unique child name serializes
+    ingest and name order is event order. ``sink_id``/``sink_seq`` identify the event at its sender, so a
+    resent POST is recognized instead of stored twice.
+    """
+
+    seq: int = Field(description="Position of the event in its run, from 1; the id Studio polls after.")
+    event: str = Field(description="Event type emitted by agent-hardener's EventBus.")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Event payload as emitted.")
+    sink_id: str = Field(default="", description="The sending process's sink id; empty from older senders.")
+    sink_seq: int = Field(default=0, description="The sender's own counter for the event; 0 from older senders.")
+
+
+def event_name(seq: int) -> str:
+    """The child-entity name for event *seq*: zero-padded so name order is numeric order.
+
+    Entity names must start with a letter, hence the ``e`` prefix.
+    """
+    return f"e{seq:08d}"
 
 
 class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE):
