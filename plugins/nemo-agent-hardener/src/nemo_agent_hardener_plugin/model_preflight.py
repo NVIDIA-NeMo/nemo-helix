@@ -17,16 +17,17 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from nemo_helix_plugin.client.retry import is_retryable, retry_delay
+from nemo_helix_plugin.client.types import RetryPolicy
 
 _PROBE_TIMEOUT_S = 10.0
-#: Brief provider hiccups a one-token probe retries so they don't fail a launch or "Test connection".
-_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
-_PROBE_ATTEMPTS = 3
-_PROBE_BACKOFF_S = 1.0
+#: Brief provider hiccups (429, 502-504) a one-token probe retries so they don't fail a launch or "Test
+#: connection": three attempts, 1s then 2s apart unless the provider sends ``Retry-After``.
+PROBE_RETRY = RetryPolicy(max_retries=2, backoff_base=1.0, respect_retry_after_headers=True)
+#: A probe is interactive, so a provider's ``Retry-After`` is honored only up to this.
 _MAX_RETRY_AFTER_S = 5.0
 #: Hosts where plaintext http:// carries the credential no further than this machine, so sending it
 #: is safe. Anything else over http:// would put the key on the wire in the clear.
@@ -107,17 +108,25 @@ def probe_models(base_url: str, api_key: str | None, *, client: httpx.Client | N
     return ProbeResult(reachable=True, auth_ok=True, available=ids)
 
 
-def _probe_chat(model: str, base_url: str, api_key: str | None, client: httpx.Client | None) -> Validation:
+def _probe_chat(
+    model: str, base_url: str, api_key: str | None, client: httpx.Client | None, retry: RetryPolicy
+) -> Validation:
     """One-token ``POST /chat/completions``: the only check that the key can actually use *model*.
 
     ``/models`` is often public or key-agnostic, so listing alone can pass a key the endpoint rejects.
     """
     headers, withheld = _auth_headers(base_url, api_key)
     body = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+    url = base_url.rstrip("/") + "/chat/completions"
     owns = client is None
     client = client or httpx.Client(timeout=_PROBE_TIMEOUT_S)
     try:
-        resp = _post_retrying_transient(client, base_url.rstrip("/") + "/chat/completions", headers, body)
+        resp = client.post(url, headers=headers, json=body)
+        for attempt in range(retry.max_retries):
+            if not is_retryable(retry, resp):
+                break
+            time.sleep(min(retry_delay(retry, attempt, resp), _MAX_RETRY_AFTER_S))
+            resp = client.post(url, headers=headers, json=body)
     except httpx.HTTPError as exc:
         return Validation(ok=False, reason="unreachable", detail=str(exc) or exc.__class__.__name__)
     finally:
@@ -139,26 +148,6 @@ def _probe_chat(model: str, base_url: str, api_key: str | None, client: httpx.Cl
     return Validation(ok=False, reason="provider_error", detail=detail)
 
 
-def _post_retrying_transient(
-    client: httpx.Client, url: str, headers: dict[str, str], body: dict[str, Any]
-) -> httpx.Response:
-    resp = client.post(url, headers=headers, json=body)
-    for attempt in range(1, _PROBE_ATTEMPTS):
-        if resp.status_code not in _TRANSIENT_STATUSES:
-            break
-        time.sleep(_retry_delay(resp, attempt))
-        resp = client.post(url, headers=headers, json=body)
-    return resp
-
-
-def _retry_delay(resp: httpx.Response, attempt: int) -> float:
-    """The endpoint's ``Retry-After`` seconds (capped), else 1s then 3s."""
-    try:
-        return min(float(resp.headers["retry-after"]), _MAX_RETRY_AFTER_S)
-    except (KeyError, ValueError):
-        return _PROBE_BACKOFF_S * 3.0 ** (attempt - 1)
-
-
 def _server_message(resp: httpx.Response) -> str:
     """The ``error.message`` of an OpenAI-style error body, else the start of the raw body."""
     try:
@@ -171,14 +160,19 @@ def _server_message(resp: httpx.Response) -> str:
 
 
 def validate_choice(
-    model: str | None, base_url: str, api_key: str | None, *, client: httpx.Client | None = None
+    model: str | None,
+    base_url: str,
+    api_key: str | None,
+    *,
+    client: httpx.Client | None = None,
+    retry: RetryPolicy = PROBE_RETRY,
 ) -> Validation:
     """Validate one model group's (model, base_url, key): reachable, authorized, and the model exists.
 
     A model that isn't in the reachable list fails with ``reason="unknown_model"`` and the available
     list, so the caller can present real choices. A model that passes the list (or whose endpoint has no
     ``/models``) must still answer a one-token chat call with the key. With no model to test and no
-    ``/models``, reachability is all that can be confirmed.
+    ``/models``, reachability is all that can be confirmed. *retry* governs re-sending that chat call.
     """
     result = probe_models(base_url, api_key, client=client)
     if not result.reachable:
@@ -191,7 +185,7 @@ def validate_choice(
         return Validation(ok=False, reason="unknown_model", available=result.available)
     detail = "" if result.list_supported else result.detail
     if model:
-        chat = _probe_chat(model, base_url, api_key, client)
+        chat = _probe_chat(model, base_url, api_key, client, retry)
         if not chat.ok:
             return Validation(ok=False, reason=chat.reason, available=result.available, detail=chat.detail)
         detail = chat.detail or detail
