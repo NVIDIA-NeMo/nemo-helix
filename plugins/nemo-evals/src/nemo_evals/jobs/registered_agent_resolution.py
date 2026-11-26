@@ -5,9 +5,11 @@
 
 ``resolve_registered_agent`` is the one entry point: it looks the agent up, resolves its config as a
 deployment would, snapshots the files it refers to, and writes the result into the Fabric or Harbor
-target. The helpers around it (gateway placeholders, stdio MCP secret templates, secret-ref merging)
-are the details of that translation. The job module calls the entry point and nothing else here, apart
-from ``expand_mcp_secret_env``, which the host Fabric path applies at run time.
+target. Asked to, it only names the snapshot, and ``take_registered_agent_files_snapshot`` takes it once
+the submission's checks have passed, so a dry run copies nothing. The helpers around it (gateway
+placeholders, stdio MCP secret templates, secret-ref merging) are the details of that translation. The
+job module calls those two and nothing else here, apart from ``expand_mcp_secret_env``, which the host
+Fabric path applies at run time.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from urllib.parse import quote
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
@@ -35,7 +38,11 @@ from nemo_agents_plugin.fabric.translator import (
 from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.filesets import FilesetRef
-from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files, snapshot_registered_agent_files
+from nemo_evals.jobs.agent_files_snapshot import (
+    discard_registered_agent_files,
+    snapshot_fileset_name,
+    snapshot_registered_agent_files,
+)
 from nemo_evals.jobs.agent_spec import (
     FabricRunnerTarget,
     GymRunnerTarget,
@@ -48,6 +55,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.fabric_harness_packages import fabric_harness_package
 from nemo_evals.jobs.utils import require_platform_client
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
@@ -86,7 +94,28 @@ class _ResolvedRegisteredAgent:
     ref: AgentRef
     config: dict[str, Any]
     env_secrets: dict[str, SecretRef]
+    #: The files snapshot resolution took, if it took one.
     files: FilesetReceipt | None
+    #: ``workspace/name`` of the snapshot still to take, when resolution named it and left the copy for later.
+    pending_files: str | None = None
+
+
+async def _authorize_files_snapshot(
+    authorize: SourceReadAuthorizer | None, *, workspace: str, agent_name: str, snapshot: str
+) -> None:
+    """Check as the caller what taking the files snapshot does, before any of it.
+
+    The snapshot is taken with the caller's client, so a caller who may not do this is refused when it's
+    taken. Checking first refuses them before anything is written, and gives a dry run, which takes no
+    snapshot, the same answer.
+    """
+    if authorize is None:
+        return
+    filesets = f"/apis/files/v2/workspaces/{quote(workspace, safe='')}/filesets"
+    await authorize("GET", f"{filesets}/{quote(ethos_fileset_name(agent_name), safe='')}/files")
+    await authorize("POST", filesets)
+    # One representative file path: the platform authorizes file writes per workspace collection.
+    await authorize("PUT", f"{filesets}/{quote(snapshot, safe='')}/-/file")
 
 
 async def _load_registered_agent(
@@ -95,12 +124,15 @@ async def _load_registered_agent(
     *,
     workspace: str,
     async_sdk: AsyncHelixClient | None,
+    authorize: SourceReadAuthorizer | None,
+    snapshot_files: bool,
 ) -> _ResolvedRegisteredAgent:
     """Look a registered agent up and resolve it as ``nemo agents deploy`` would.
 
     Inference Gateway binding first, then the environment spec merged on top, then translation of the
     platform ``agent.yaml`` into a Fabric config. A config that refers to files by relative path must have
     the agent's Ethos FileSet to stage them from; that is checked here, once, rather than in every job.
+    Its files are snapshotted here too, unless ``snapshot_files`` is off: then the snapshot is only named.
     """
     parsed = parse_entity_ref(agent_ref, workspace)
     agent_workspace, agent_name = parsed.workspace, parsed.name
@@ -137,7 +169,10 @@ async def _load_registered_agent(
 
     config = _template_mcp_secret_env(fabric_config.model_dump(mode="json", exclude_none=True), environment)
     files: FilesetReceipt | None = None
+    pending_files: str | None = None
     if registered_agent_config_needs_files(config):
+        snapshot = snapshot_fileset_name()
+        await _authorize_files_snapshot(authorize, workspace=agent_workspace, agent_name=agent_name, snapshot=snapshot)
         files_client = client_from_platform(platform, AsyncFilesClient)
         try:
             await files_client.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
@@ -146,13 +181,19 @@ async def _load_registered_agent(
                 f"registered agent {agent_workspace}/{agent_name} refers to files by relative path but has no "
                 f"Ethos FileSet {agent_workspace}/{ethos_fileset_name(agent_name)} to stage them from"
             ) from None
-        # The Ethos FileSet is rewritten on every re-registration; the job stages a copy taken now.
-        files = await snapshot_registered_agent_files(files_client, workspace=agent_workspace, agent_name=agent_name)
+        # The Ethos FileSet is rewritten on every re-registration; the job stages a copy taken at submit.
+        if snapshot_files:
+            files = await snapshot_registered_agent_files(
+                files_client, workspace=agent_workspace, agent_name=agent_name, snapshot=snapshot
+            )
+        else:
+            pending_files = f"{agent_workspace}/{snapshot}"
     return _ResolvedRegisteredAgent(
         ref=AgentRef(root=f"{agent_workspace}/{agent_name}"),
         config=config,
         env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
         files=files,
+        pending_files=pending_files,
     )
 
 
@@ -263,12 +304,18 @@ async def resolve_registered_agent(
     *,
     workspace: str,
     async_sdk: AsyncHelixClient | None,
+    authorize: SourceReadAuthorizer | None = None,
+    snapshot_files: bool = True,
 ) -> Target | None:
     """Fill a Fabric, Harbor or Gym runner target that names a registered agent with what that agent is.
 
     The source keeps its ``agent``, workspace-qualified. A Fabric or Gym target gets the config it resolved
     to as ``resolved_config``; a Harbor target gets it in its kwargs, for the installed Fabric agent its
     source implies. Either way the job runs the agent fresh per trial without ever looking it up itself.
+
+    ``authorize``, when set, checks as the caller what snapshotting the agent's files takes, before taking
+    it. With ``snapshot_files`` off, the source names the snapshot without an ID, and nothing is written
+    until :func:`take_registered_agent_files_snapshot` takes it.
     """
     if not isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget)):
         return target
@@ -279,7 +326,12 @@ async def resolve_registered_agent(
         return upgrade_registered_agent_config(target)
 
     agent = await _load_registered_agent(
-        source.agent.root, source.environment, workspace=workspace, async_sdk=async_sdk
+        source.agent.root,
+        source.environment,
+        workspace=workspace,
+        async_sdk=async_sdk,
+        authorize=authorize,
+        snapshot_files=snapshot_files,
     )
     try:
         return _fill_target(target, source, agent)
@@ -289,6 +341,37 @@ async def resolve_registered_agent(
         if agent.files is not None and async_sdk is not None:
             await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), agent.files)
         raise
+
+
+def has_pending_files_snapshot(target: Target | None) -> bool:
+    """Whether resolution named a files snapshot for ``target`` and left taking it for later."""
+    source = registered_agent_source(target)
+    return source is not None and source.files is not None and source.fileset_id is None
+
+
+async def take_registered_agent_files_snapshot(
+    target: Target | None, *, async_sdk: AsyncHelixClient | None
+) -> Target | None:
+    """Take the files snapshot :func:`resolve_registered_agent` named and left for later, and record its ID.
+
+    Only for a target that resolution just produced: a stored legacy source also lacks an ID, but its snapshot
+    exists. A target without a pending snapshot comes back as it is.
+    """
+    source = registered_agent_source(target)
+    if target is None or source is None or not has_pending_files_snapshot(target):
+        return target
+    assert source.files is not None
+    agent = parse_entity_ref(source.agent.root)
+    snapshot_workspace, _, snapshot = source.files.root.partition("/")
+    assert snapshot_workspace == agent.workspace, "the snapshot is taken in the agent's workspace"
+    platform = require_platform_client(async_sdk, "snapshotting a registered agent's files")
+    receipt = await snapshot_registered_agent_files(
+        client_from_platform(platform, AsyncFilesClient),
+        workspace=agent.workspace,
+        agent_name=agent.name,
+        snapshot=snapshot,
+    )
+    return target.model_copy(update={"source": source.model_copy(update={"fileset_id": receipt.fileset_id})})
 
 
 _RunnerTargetT = TypeVar("_RunnerTargetT", bound=FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget)
@@ -330,11 +413,12 @@ def _fill_target(
     agent: _ResolvedRegisteredAgent,
 ) -> FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget:
     """The target with the loaded agent written into it, per runner kind. Pure: no I/O, so it can fail freely."""
+    files = agent.files.ref if agent.files is not None else agent.pending_files
     resolved_source = source.model_copy(
         update={
             "agent": agent.ref,
-            "files": FilesetRef(root=agent.files.ref) if agent.files else None,
-            "fileset_id": agent.files.fileset_id if agent.files else None,
+            "files": FilesetRef(root=files) if files is not None else None,
+            "fileset_id": agent.files.fileset_id if agent.files is not None else None,
         }
     )
     env_secrets = _merge_env_secrets(target.env_secrets, agent.env_secrets, agent=agent.ref.root)

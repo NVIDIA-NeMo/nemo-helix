@@ -65,7 +65,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.attempt_tasks import load_attempt_tasks
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
-from nemo_evals.jobs.fileset_tasks import load_task_inputs, publish_snapshot
+from nemo_evals.jobs.fileset_tasks import authorize_snapshot_publish, load_task_inputs, publish_snapshot
 from nemo_evals.jobs.gateway_models import (
     TrialRoute,
     add_gateway_key_placeholder,
@@ -98,7 +98,9 @@ from nemo_evals.jobs.publication import publish_agent_eval_result
 from nemo_evals.jobs.registered_agent_cleanup import discard_snapshot_sync
 from nemo_evals.jobs.registered_agent_resolution import (
     expand_mcp_secret_env,
+    has_pending_files_snapshot,
     resolve_registered_agent,
+    take_registered_agent_files_snapshot,
     upgrade_registered_agent_config,
 )
 from nemo_evals.jobs.result_persistence import persist_agent_eval_result
@@ -134,6 +136,7 @@ from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
     CPUExecutionProviderSpec,
+    DeferredWrite,
     DeferWrite,
     HelixJobSpec,
     SubprocessExecutionProviderSpec,
@@ -281,8 +284,10 @@ class _AgentEvalJobBase(NemoJob):
         """Resolve each task's metric references into inline metrics for the canonical spec.
 
         ``authorize``, when set, checks each stored task, metric and model as the caller before it is read.
-        ``defer``, when set, receives a FileSet source's snapshot publication, which the job route runs only
-        once compilation has also passed; without it the snapshot is published here, after every check.
+        ``defer``, when set, receives the submission's writes: the registered agent's files snapshot, then a
+        FileSet source's snapshot publication. The job route runs them only once compilation has also passed,
+        and a dry run never does. Without it they run here, after every check. Either way, the caller's
+        permission for them is checked with every other check.
         """
         del is_local
         submit_spec = (
@@ -317,7 +322,16 @@ class _AgentEvalJobBase(NemoJob):
         loaded_tasks = await load_tasks(selection, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
-        target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
+        # With ``defer``, the agent's files are only named here: the route snapshots them once compilation has
+        # passed too, and a dry run never does.
+        target = await resolve_registered_agent(
+            submit_spec.target,
+            workspace=workspace,
+            async_sdk=async_sdk,
+            authorize=authorize,
+            snapshot_files=defer is None,
+        )
+        writes: list[DeferredWrite] = []
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
             await require_closed_book_route(target, async_sdk=async_sdk, authorize=authorize)
@@ -329,37 +343,52 @@ class _AgentEvalJobBase(NemoJob):
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
-            if fileset_source is None or fileset_source.snapshot is None:
-                return spec
-            source = fileset_source
 
-            async def publish(canonical: BaseModel) -> BaseModel:
-                # Publishing is the submission's only write, so it runs after every check.
-                assert isinstance(canonical, AgentEvalSpec)
-                try:
-                    pinned = await publish_snapshot(
-                        source,
-                        file_inputs,
-                        canonical.tasks,
-                        source_sha256=source_sha256,
-                        workspace=workspace,
-                        async_client=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
-                        authorize=authorize,
-                    )
-                except Exception:
-                    await _discard_resolved_agent_files(canonical.target, async_sdk)
-                    raise
-                return canonical.model_copy(update={"tasks": pinned})
+            if has_pending_files_snapshot(spec.target):
 
+                async def snapshot_agent_files(canonical: BaseModel) -> BaseModel:
+                    assert isinstance(canonical, AgentEvalSpec)
+                    taken = await take_registered_agent_files_snapshot(canonical.target, async_sdk=async_sdk)
+                    return canonical.model_copy(update={"target": taken})
+
+                writes.append(snapshot_agent_files)
+            if fileset_source is not None and fileset_source.snapshot is not None:
+                source = fileset_source
+                # Checked now, so a dry run, which defers the publish and never runs it, is refused as well.
+                await authorize_snapshot_publish(source, file_inputs, workspace=workspace, authorize=authorize)
+
+                async def publish(canonical: BaseModel) -> BaseModel:
+                    # Writes run after every check; this one runs last.
+                    assert isinstance(canonical, AgentEvalSpec)
+                    try:
+                        pinned = await publish_snapshot(
+                            source,
+                            file_inputs,
+                            canonical.tasks,
+                            source_sha256=source_sha256,
+                            workspace=workspace,
+                            async_client=require_platform_client(async_sdk, "publishing a FileSet task snapshot"),
+                        )
+                    except Exception:
+                        # The route undoes no earlier write, so this one deletes the agent's files snapshot.
+                        await _discard_resolved_agent_files(canonical.target, async_sdk)
+                        raise
+                    return canonical.model_copy(update={"tasks": pinned})
+
+                writes.append(publish)
             if defer is not None:
-                defer(publish)
+                for write in writes:
+                    defer(write)
                 return spec
         except Exception:
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
             await _discard_resolved_agent_files(target, async_sdk)
             raise
-        return await publish(spec)
+        stored: BaseModel = spec
+        for write in writes:
+            stored = await write(stored)
+        return stored
 
     @classmethod
     async def compile(

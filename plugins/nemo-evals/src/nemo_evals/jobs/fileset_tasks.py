@@ -11,8 +11,9 @@ write returned, and pins the evaluation's tasks to those same revisions. Nothing
 afterwards by name or "newest", so a concurrent submission cannot swap another file's rows in.
 
 Writes go through the submitter's request-scoped client, so the platform authorizes each as the
-submitter. ``authorize``, which the job route supplies, additionally checks the file read and the
-writes with the submitter's token scopes.
+submitter. ``authorize``, which the job route supplies, additionally checks the file read and, through
+:func:`authorize_snapshot_publish` before any write is deferred, the writes with the submitter's token
+scopes, so a dry run that publishes nothing is refused as the real submission would be.
 """
 
 from __future__ import annotations
@@ -145,6 +146,32 @@ async def load_task_inputs(
     return hashlib.sha256(body).hexdigest(), inputs
 
 
+async def authorize_snapshot_publish(
+    source: FilesetTaskSource,
+    inputs: Sequence[AgentEvalTaskInput],
+    *,
+    workspace: str,
+    authorize: SourceReadAuthorizer | None,
+) -> None:
+    """Check as the submitter every read and write :func:`publish_snapshot` makes, before it may run.
+
+    Raises:
+        Exception: Whatever ``authorize`` raises for a denied call, typically a 403 ``HTTPException``.
+    """
+    if authorize is None:
+        return
+    assert source.snapshot is not None
+    ts_workspace, ts_name, _ = parse_subentity_ref(source.snapshot.root, workspace)
+    # One representative task path: the platform authorizes task writes per workspace collection.
+    await authorize(
+        "PUT", f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasks/{quote(inputs[0].id, safe='')}"
+    )
+    # Reading the current revision is how unchanged rows are skipped, so a snapshot needs both.
+    taskset_path = f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasksets/{quote(ts_name, safe='')}"
+    await authorize("GET", taskset_path)
+    await authorize("PUT", taskset_path)
+
+
 async def publish_snapshot(
     source: FilesetTaskSource,
     inputs: Sequence[AgentEvalTaskInput],
@@ -153,28 +180,19 @@ async def publish_snapshot(
     source_sha256: str,
     workspace: str,
     async_client: AsyncHelixClient,
-    authorize: SourceReadAuthorizer | None,
 ) -> list[ResolvedTask]:
     """Publish ``inputs`` as tasks and a taskset revision, and return ``resolved`` pinned to them.
 
-    Call only after every submission check has passed on ``resolved``, which must be ``inputs``
-    resolved inline, in the same order: this is the submission's first write.
+    Call only after :func:`authorize_snapshot_publish` and every submission check have passed on
+    ``resolved``, which must be ``inputs`` resolved inline, in the same order: this is the submission's
+    first write.
 
     Raises:
-        PermissionError: The submitter may not read the taskset, or write it or its tasks.
+        PermissionError: The platform refused the submitter a read of the taskset, or a write of it or its tasks.
         ValueError: The writes kept conflicting, or the evals service did not respond.
     """
     assert source.snapshot is not None
     ts_workspace, ts_name, _ = parse_subentity_ref(source.snapshot.root, workspace)
-    taskset_path = f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasksets/{quote(ts_name, safe='')}"
-    if authorize is not None:
-        # One representative task path: the platform authorizes task writes per workspace collection.
-        await authorize(
-            "PUT", f"/apis/evals/v2/workspaces/{quote(ts_workspace, safe='')}/tasks/{quote(inputs[0].id, safe='')}"
-        )
-        # Reading the current revision is how unchanged rows are skipped, so a snapshot needs both.
-        await authorize("GET", taskset_path)
-        await authorize("PUT", taskset_path)
     client = client_from_platform(async_client, AsyncEvaluatorClient)
     tasks_resource = AsyncEvaluatorTasksResource(client)
     tasksets_resource = AsyncEvaluatorTasksetsResource(client)

@@ -106,9 +106,11 @@ def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> AgentEvalSpec:
     return AgentEvalSpec.model_validate(job.raise_for_status().json()["spec"])
 
 
-def _refused(ctx: ClientContext, tasks: dict[str, Any]) -> str:
+def _refused(ctx: ClientContext, tasks: dict[str, Any], *, dry_run: bool = False) -> str:
     response = ctx.test_client.post(
-        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(tasks), "profile": "default"}
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        params={"dry_run": "true"} if dry_run else None,
+        json={"spec": _spec(tasks), "profile": "default"},
     )
     assert response.status_code == 422, response.text
     return response.text
@@ -144,6 +146,7 @@ def test_rows_run_inline_and_nothing_is_stored(ctx: ClientContext) -> None:
     assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
 
 
+@pytest.mark.parametrize("dry_run", [False, True], ids=["submit", "dry run"])
 @pytest.mark.parametrize(
     ("lines", "message"),
     [
@@ -153,15 +156,32 @@ def test_rows_run_inline_and_nothing_is_stored(ctx: ClientContext) -> None:
     ],
 )
 def test_a_bad_row_is_refused_naming_its_line_and_writes_nothing(
-    ctx: ClientContext, lines: list[str], message: str
+    ctx: ClientContext, lines: list[str], message: str, dry_run: bool
 ) -> None:
     _upload(ctx, *lines)
-    assert re.search(message, _refused(ctx, _tasks()))
+    assert re.search(message, _refused(ctx, _tasks(), dry_run=dry_run))
     assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
 
 
-def test_a_missing_file_is_refused(ctx: ClientContext) -> None:
-    assert "does not exist" in _refused(ctx, _tasks())
+@pytest.mark.parametrize("dry_run", [False, True], ids=["submit", "dry run"])
+def test_a_missing_file_is_refused(ctx: ClientContext, dry_run: bool) -> None:
+    assert "does not exist" in _refused(ctx, _tasks(), dry_run=dry_run)
+
+
+def test_a_dry_run_checks_the_file_like_a_submission_and_writes_nothing(ctx: ClientContext) -> None:
+    _upload(ctx, _row("q1"), _row("q2"))
+
+    response = ctx.test_client.post(
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        params={"dry_run": "true"},
+        json={"spec": _spec(_tasks()), "profile": "default"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["spec"]["tasks"]) == 2
+    assert [check["passed"] for check in response.json()["status_details"]["checks"]] == [True]
+    assert _writes(ctx, "tasks") == _writes(ctx, "tasksets") == 0
+    assert _jobs(ctx) == 0
 
 
 def test_files_past_the_limits_are_refused(ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,7 +399,9 @@ def test_the_route_checks_the_file_read_with_the_callers_scopes(ctx: ClientConte
     assert _jobs(ctx) == 0
 
 
-def test_the_route_checks_every_snapshot_read_and_write_before_any_write(ctx: ClientContext) -> None:
+@pytest.mark.parametrize("dry_run", [False, True], ids=["submit", "dry run"])
+def test_the_route_checks_every_snapshot_read_and_write_before_any_write(ctx: ClientContext, dry_run: bool) -> None:
+    """A dry run publishes nothing, so it must check the publish as the submission would."""
     _upload(ctx, _row("q"))
     checked: list[tuple[str, str]] = []
 
@@ -390,7 +412,9 @@ def test_the_route_checks_every_snapshot_read_and_write_before_any_write(ctx: Cl
 
     _authorize_as(ctx, authorize)
     response = ctx.test_client.post(
-        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(_tasks())}
+        "/apis/evals/v2/workspaces/default/agent-evaluate/jobs",
+        params={"dry_run": "true"} if dry_run else None,
+        json={"spec": _spec(_tasks())},
     )
 
     assert response.status_code == 403, response.text

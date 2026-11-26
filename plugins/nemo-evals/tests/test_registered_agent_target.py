@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,8 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_compiler import _secret_refs, compile_agent_eval_job
@@ -244,6 +247,84 @@ async def test_a_submission_that_fails_after_resolution_discards_its_snapshot(mo
 
     deleted = files.delete_fileset_by_id.await_args.kwargs
     assert deleted == {"workspace": "dev", "fileset_id": "snapshot-id"}
+
+
+def _with_skills() -> dict[str, Any]:
+    config = _calculator_config()
+    config["skills"] = {"paths": ["skills/arithmetic"]}
+    return config
+
+
+def _input_spec(target: dict[str, Any]) -> AgentEvalInputSpec:
+    """A submission of one task that passes every check, so the snapshot is all that is left to do."""
+    metric = bundle_metric(
+        ExactMatchMetric(reference="{{reference.expected}}", candidate="{{sample.output_text}}"),
+        InlineMetricBundlePackager(),
+    ).model_dump(mode="json")
+    task = {"id": "t", "intent": "x", "inputs": {"instruction": "hi"}, "metrics": [metric]}
+    return AgentEvalInputSpec.model_validate({"tasks": [task], "target": target})
+
+
+async def test_a_deferred_snapshot_is_named_at_resolution_and_taken_only_by_its_write(mocker: MockerFixture) -> None:
+    """The job route defers the copy, so a dry run, which never runs its writes, leaves no FileSet."""
+    files = _platform(mocker, _agent(_with_skills()), ethos_fileset=True).files
+    deferred: list[Any] = []
+
+    spec = await AgentEvalJob.to_spec(
+        _input_spec({"kind": "fabric", "source": {"agent": "calc"}}),
+        workspace="dev",
+        entity_client=None,
+        async_sdk=_async_platform(),
+        is_local=False,
+        defer=deferred.append,
+    )
+
+    assert isinstance(spec, AgentEvalSpec) and isinstance(spec.target, FabricRunnerTarget)
+    named = registered_agent_files(spec.target)
+    assert named is not None and named.root.startswith("dev/agent-files-")
+    assert registered_agent_files_receipt(spec.target) is None  # nothing to delete if the submission stops here
+    files.create_fileset.assert_not_awaited()
+    # The job compiles as it will run: staging from the snapshot it names.
+    staging = compile_agent_eval_job(spec, use_subprocess=True).steps[0]
+    assert (staging.name, staging.config) == ("stage-environment", {"environment": named.root})
+
+    [write] = deferred
+    stored = await write(spec)
+
+    created = files.create_fileset.await_args.kwargs
+    assert f"dev/{created['body'].name}" == named.root
+    assert registered_agent_files_receipt(stored.target) == FilesetReceipt(ref=named.root, fileset_id="snapshot-id")
+
+
+@pytest.mark.parametrize("deferred", [False, True], ids=["inline", "deferred"])
+async def test_a_caller_who_may_not_snapshot_the_files_is_refused_before_any_is_read_or_written(
+    mocker: MockerFixture, deferred: bool
+) -> None:
+    """The snapshot is taken as the caller, so a dry run, which takes none, checks the caller may take it."""
+    files = _platform(mocker, _agent(_with_skills()), ethos_fileset=True).files
+    checked: list[tuple[str, str]] = []
+
+    async def authorize(method: str, path: str) -> None:
+        checked.append((method, path))
+        if method == "PUT" and "/files/" in path:
+            raise HTTPException(status_code=403, detail="may not write files")
+
+    with pytest.raises(HTTPException, match="may not write files"):
+        await AgentEvalJob.to_spec(
+            _input_spec({"kind": "fabric", "source": {"agent": "calc"}}),
+            workspace="dev",
+            entity_client=None,
+            async_sdk=_async_platform(),
+            is_local=False,
+            authorize=authorize,
+            defer=[].append if deferred else None,
+        )
+
+    filesets = "/apis/files/v2/workspaces/dev/filesets"
+    assert checked[:2] == [("GET", f"{filesets}/calc-ethos/files"), ("POST", filesets)]
+    assert re.fullmatch(rf"{filesets}/agent-files-[0-9a-f]{{12}}/-/file", checked[2][1])
+    files.get_fileset.assert_not_awaited()
+    files.create_fileset.assert_not_awaited()
 
 
 async def test_skills_without_an_ethos_fileset_are_a_submit_error(mocker: MockerFixture) -> None:

@@ -37,15 +37,16 @@ def snapshot_fileset_name() -> str:
 
 
 async def snapshot_registered_agent_files(
-    files: AsyncFilesClient, *, workspace: str, agent_name: str
+    files: AsyncFilesClient, *, workspace: str, agent_name: str, snapshot: str | None = None
 ) -> FilesetReceipt:
     """Copy the agent's Ethos FileSet into a fresh job-owned FileSet and return that FileSet's ref.
 
-    The caller has already checked the Ethos FileSet exists. A failure after the snapshot FileSet was
-    created deletes it again so a failed submission does not leave a half-copied FileSet behind.
+    The caller has already checked the Ethos FileSet exists. ``snapshot`` names the new FileSet when the
+    caller chose its name in advance; otherwise it gets a fresh one. A failure after the snapshot FileSet
+    was created deletes it again so a failed submission does not leave a half-copied FileSet behind.
     """
     source = f"{workspace}/{ethos_fileset_name(agent_name)}"
-    snapshot = snapshot_fileset_name()
+    snapshot = snapshot or snapshot_fileset_name()
     description = f"Ethos files of agent {workspace}/{agent_name} as evaluated; snapshot of {source}."
     allocated = (
         await files.create_fileset(
