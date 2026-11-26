@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { runDisplayStatus } from '@agent-hardener/api/jobFailure';
 import { useHelixSdk, usePolledJob } from '@agent-hardener/api/platform';
 import { CancelJobButton } from '@agent-hardener/components/CancelJobButton';
 import { HardenPanel } from '@agent-hardener/components/HardenPanel';
@@ -201,7 +202,10 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
         />
 
         {run?.status === 'failed' && (
-          <Banner kind="inline" status="error">
+          <Banner
+            kind="inline"
+            status={runDisplayStatus(run) === 'not_hardened' ? 'warning' : 'error'}
+          >
             <Stack gap="density-xs">
               <Text kind="body/semibold/md">{failureMessage}</Text>
               {run.error_remediation ? (
@@ -277,6 +281,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
                   sanityJob={sanityJob}
                   onSanityJobChange={setSanityJob}
                   composedGuardrails={composedGuardrails}
+                  notApplicable={swarm.notApplicable}
                   onComposedGuardrailsChange={setComposedGuardrails}
                 />
               </TabsContent>

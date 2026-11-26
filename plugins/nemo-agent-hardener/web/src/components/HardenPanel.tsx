@@ -7,6 +7,7 @@ import { usePolledJob } from '@agent-hardener/api/platform';
 import { ConfigDiff } from '@agent-hardener/components/ConfigDiff';
 import { JobFailureNotice } from '@agent-hardener/components/JobFailureNotice';
 import { SanityCheckReport } from '@agent-hardener/components/SanityCheckReport';
+import { NODES } from '@agent-hardener/components/swarm/swarmModel';
 import {
   cleanAttackPrompt,
   shortProbe,
@@ -53,6 +54,8 @@ interface HardenPanelProps {
   onSanityJobChange: (job: string | undefined) => void;
   composedGuardrails?: string;
   onComposedGuardrailsChange: (guardrails: string | undefined) => void;
+  // Defenders that abstained (node id -> reason), listed when no mitigations were produced.
+  notApplicable?: Record<string, string>;
 }
 
 interface DefenseGroup {
@@ -192,6 +195,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
   onSanityJobChange,
   composedGuardrails,
   onComposedGuardrailsChange,
+  notApplicable = {},
 }) => {
   const toast = useToast();
   const notify = useNotify();
@@ -247,9 +251,16 @@ export const HardenPanel: FC<HardenPanelProps> = ({
   if (defenses.length === 0 && !mitigations?.guardrails && !mitigations?.policy) {
     return (
       <Card className="p-6">
-        <Text kind="body/regular/md" className="text-subtle">
-          No mitigations were produced for this run.
-        </Text>
+        <Stack gap="density-xs">
+          <Text kind="body/regular/md" className="text-subtle">
+            No mitigations were produced for this run.
+          </Text>
+          {Object.entries(notApplicable).map(([id, reason]) => (
+            <Text key={id} kind="body/regular/sm" className="text-subtle">
+              {NODES.find((n) => n.id === id)?.title ?? id}: did not apply — {reason}
+            </Text>
+          ))}
+        </Stack>
       </Card>
     );
   }

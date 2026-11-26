@@ -13,6 +13,14 @@ type JobLike =
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
+type RunLike = { status?: string | null; error_category?: string | null } | null | undefined;
+
+// A war-game that completed but did not harden the agent is a result, not a crash; the run stays `failed`.
+export const runDisplayStatus = (run: RunLike): string | null | undefined =>
+  run?.status === 'failed' && run.error_category === 'validation_failed'
+    ? 'not_hardened'
+    : run?.status;
+
 // The job's own failure, as the backend wrote it (jobs/errors.py `as_error_details`); undefined when it left none.
 export function jobFailure(job: JobLike): JobFailure | undefined {
   const message = text(job?.error_details?.message);
