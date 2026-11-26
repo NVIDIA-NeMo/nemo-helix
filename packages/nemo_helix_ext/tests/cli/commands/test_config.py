@@ -133,6 +133,75 @@ def test_view_all_contexts(config_file: Path):
     assert '"name": "production"' in result.stdout
 
 
+def _stdout_is_tty(monkeypatch, value: bool) -> None:
+    monkeypatch.setattr("nemo_helix_ext.cli.core.api.is_tty", lambda: value)
+
+
+def test_view_defaults_to_yaml_on_a_terminal(config_file: Path, monkeypatch):
+    _stdout_is_tty(monkeypatch, True)
+
+    result = runner.invoke(app, "config view")
+
+    assert_exit_code(result, 0)
+    assert not result.stdout.lstrip().startswith("{")
+    data = yaml.safe_load(result.stdout)
+    assert data["current_context"] == "local"
+    assert [context["name"] for context in data["contexts"]] == ["local"]
+
+
+def test_view_defaults_to_json_when_piped(config_file: Path, monkeypatch):
+    _stdout_is_tty(monkeypatch, False)
+
+    result = runner.invoke(app, "config view")
+
+    assert_exit_code(result, 0)
+    assert json.loads(result.stdout)["current_context"] == "local"
+
+
+@pytest.mark.parametrize("tty", [True, False])
+def test_view_honors_configured_output_format(config_file: Path, monkeypatch, tty: bool):
+    _stdout_is_tty(monkeypatch, tty)
+    assert_exit_code(runner.invoke(app, "config set --output-format yaml"), 0)
+
+    result = runner.invoke(app, "config view")
+
+    assert_exit_code(result, 0)
+    assert not result.stdout.lstrip().startswith("{")
+    data = yaml.safe_load(result.stdout)
+    assert data["contexts"][0]["preferences"]["output_format"] == "yaml"
+
+
+def test_view_flag_overrides_configured_output_format(config_file: Path, monkeypatch):
+    _stdout_is_tty(monkeypatch, True)
+    assert_exit_code(runner.invoke(app, "config set --output-format yaml"), 0)
+
+    result = runner.invoke(app, "config view --output-format json")
+
+    assert_exit_code(result, 0)
+    assert json.loads(result.stdout)["current_context"] == "local"
+
+
+def test_view_global_output_format_overrides_configured_format(config_file: Path, monkeypatch):
+    _stdout_is_tty(monkeypatch, True)
+    assert_exit_code(runner.invoke(app, "config set --output-format yaml"), 0)
+
+    result = runner.invoke(app, "--output-format json config view")
+
+    assert_exit_code(result, 0)
+    assert json.loads(result.stdout)["current_context"] == "local"
+
+
+def test_view_renders_table_preference_as_yaml(config_file: Path, monkeypatch):
+    _stdout_is_tty(monkeypatch, True)
+    assert_exit_code(runner.invoke(app, "config set --output-format markdown"), 0)
+
+    result = runner.invoke(app, "config view")
+
+    assert_exit_code(result, 0)
+    assert yaml.safe_load(result.stdout)["current_context"] == "local"
+    assert not result.stdout.lstrip().startswith("{")
+
+
 def test_view_context_hint_omits_all_contexts_when_single_context(tmp_path: Path, monkeypatch):
     config_data = {
         "current_context": "local",
