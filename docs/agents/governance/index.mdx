@@ -200,6 +200,26 @@ A run checks that the image was built from the context it stages, and fails if
 it was not. Stage and build again after you refresh the manifest or upgrade
 Agent Hardener.
 
+#### Cluster notes
+
+- **Node architecture.** The builder builds for `linux/amd64` unless told
+  otherwise. On arm64 nodes, such as kind on Apple silicon, set
+  `platformConfig.builder.default_platform: linux/arm64`. An image for the wrong
+  architecture is pulled, but its sandbox never becomes ready.
+- **OpenShell version.** Agent Hardener needs OpenShell 0.1.6 or newer, and the
+  task image ships a 0.1.6 CLI. Run a gateway of that version or newer.
+- **File storage.** Agent Hardener reads and writes through filesets and keeps
+  live run events in the Entity Store, so it works with either
+  [Files backend](/documentation/kubernetes-deployment/setup/helm/file-storage).
+  Use S3-compatible storage on a multi-node cluster. The default PVC suits a
+  single-node cluster such as kind. If you upgrade a release whose API ran as
+  root and the files API then returns HTTP 500, set `api.fixVolumeOwnership=true`
+  for one upgrade.
+- **Values files.** Set the OpenShell gateway with `openshell.gatewayEndpoint`
+  (as `k8s/helm/examples/openshell/values.yaml` does) rather than restating
+  `platformConfig.deployments.executors`, so your other values files keep their
+  executors.
+
 ## Scope
 
 - **Attacks focus on agent behavior.** Probes exercise how the agent responds to
