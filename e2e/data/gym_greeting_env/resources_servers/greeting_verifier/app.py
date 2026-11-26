@@ -52,6 +52,8 @@ class GreetingVerifyResponse(BaseVerifyResponse):
     probe: str = ""
     probe_target: str = ""
     observed_text: str
+    # Why a probe did not hold, when it can say: it lands in the trial's metadata, which outlives the sandbox.
+    probe_detail: str = ""
 
 
 def _assistant_text(response):
@@ -142,8 +144,16 @@ def _execd_refuses(target):
 
 # Two nginx services and a client that must reach both by service name, get an HTTP answer from
 # Docker Hub's registry, and get none from a public name or address the egress allowlist leaves out.
-# An answer, not a connection, so that a DNS or TLS failure cannot pass for the egress policy.
-DOCKER_COMPOSE_PROJECT = """\
+#
+# No healthchecks: Podman runs them from systemd timers, and this sandbox has no systemd, so a
+# `service_healthy` dependency would never be met. The client retries each server for a while instead.
+#
+# `egress` names how a request ended, as `_does_not_connect` does for the sandbox itself. The registry
+# answering is the control: it shows DNS, TLS and wget work in the client, so silence elsewhere is the
+# policy's. Silent is only a name that didn't resolve, a timeout, or a connection the network refused;
+# any other failure, such as a TLS error after the connection succeeded, is a fault in the probe and
+# never passes for denied. `$$` is Compose's escape for a `$` the shell should see.
+DOCKER_COMPOSE_PROJECT = r"""
 services:
   web:
     image: docker.io/library/nginx:1.27-alpine
@@ -152,13 +162,35 @@ services:
   client:
     image: docker.io/library/alpine:3.20
     depends_on: [web, web2]
-    command: >-
-      sh -c "sleep 3;
-      wget -qO- http://web | grep -q nginx && echo web-ok;
-      wget -qO- http://web2 | grep -q nginx && echo web2-ok;
-      wget -S -T 8 -O /dev/null https://registry-1.docker.io/v2/ 2>&1 | grep -q HTTP/ && echo allowed-answered;
-      wget -S -T 8 -O /dev/null https://example.com 2>&1 | grep -q HTTP/ && echo denied-ANSWERED || echo denied-silent;
-      wget -S -T 8 -O /dev/null https://1.1.1.1/ 2>&1 | grep -q HTTP/ && echo denied-ip-ANSWERED || echo denied-ip-silent"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ready() {
+          for _ in $$(seq 30); do
+            wget -q -T 3 -O- "http://$$1" 2>/dev/null | grep -q nginx && { echo "$$1-ok"; return; }
+            sleep 1
+          done
+          echo "$$1-unreachable"
+        }
+        egress() {
+          out=$$(wget -S -T 8 -O /dev/null "$$2" 2>&1)
+          case "$$out" in
+            *HTTP/*) echo "$$1-answered"; return ;;
+            *"bad address"*|*"timed out"*) echo "$$1-silent"; return ;;
+            *"can't connect to remote host"*)
+              case "$$out" in
+                *"Connection refused"*|*"Connection reset by peer"*|*"Host is unreachable"*|\
+                *"Network unreachable"*|*"Operation not permitted"*|*"Permission denied"*)
+                  echo "$$1-silent"; return ;;
+              esac ;;
+          esac
+          echo "$$1-error: $$(echo "$$out" | tr '\n' ' ')"
+        }
+        ready web
+        ready web2
+        egress allowed https://registry-1.docker.io/v2/
+        egress denied https://example.com
+        egress denied-ip https://1.1.1.1/
 """
 DOCKER_COMPOSE_EXPECTED = {"web-ok", "web2-ok", "allowed-answered", "denied-silent", "denied-ip-silent"}
 DOCKER_SHELL_PROJECT = "services:\n  hello:\n    image: docker.io/library/alpine:3.20\n    command: echo shell-ok\n"
@@ -196,10 +228,16 @@ def _compose_project_works():
             )
         finally:
             subprocess.run([*compose, "down"], cwd=work, capture_output=True, timeout=120)
-    said = {
+    client_lines = [
         line.split("|", 1)[1].strip() for line in up.stdout.splitlines() if line.startswith("client") and "|" in line
-    }
-    return up.returncode == 0 and DOCKER_COMPOSE_EXPECTED <= said
+    ]
+    if up.returncode == 0 and DOCKER_COMPOSE_EXPECTED <= set(client_lines):
+        return True, ""
+    # `compose down` has removed the containers, so this is the only record of what the client saw. Compose's own
+    # output, mostly the servers' logs, only matters when the client never ran.
+    if client_lines:
+        return False, f"exit {up.returncode}; client: {client_lines}"
+    return False, f"exit {up.returncode}; the client printed nothing; compose: {up.stderr[-1500:]}"
 
 
 def _compose_works_from_an_empty_environment():
@@ -222,15 +260,20 @@ def _compose_works_from_an_empty_environment():
 
 def _docker_compose(target):
     # Unprivileged, unable to read execd's token anywhere, and still able to run Compose projects.
-    return (
-        _unprivileged()
-        and not _execd_token_readable()
-        and _compose_project_works()
-        and _compose_works_from_an_empty_environment()
-    )
+    if not _unprivileged():
+        return False, "the server holds root, capabilities, or no_new_privs unset"
+    if _execd_token_readable():
+        return False, "a process environment the server can read holds execd's token"
+    works, detail = _compose_project_works()
+    if not works:
+        return False, detail
+    if not _compose_works_from_an_empty_environment():
+        return False, "compose from an empty environment failed"
+    return True, ""
 
 
-# Each takes the probe's target, whether or not it needs one, so all can be called the same way.
+# Each takes the probe's target, whether or not it needs one, so all can be called the same way. A probe returns
+# whether its fact held, or that and why not.
 PROBES = {
     "environment_staged": _environment_staged,
     "environment_read_only": _environment_read_only,
@@ -249,16 +292,20 @@ class GreetingVerifier(SimpleResourcesServer):
         if body.probe == "hang":
             await asyncio.sleep(3600)
         observed = _assistant_text(body.response)
+        detail = ""
         if not body.probe:
             held = normalize(body.expected_greeting) in normalize(observed)
         else:
             try:
                 # Off the event loop: a denied connection takes its whole timeout to fail.
-                held = await asyncio.to_thread(PROBES[body.probe], body.probe_target)
-            except (KeyError, OSError, ValueError):
+                result = await asyncio.to_thread(PROBES[body.probe], body.probe_target)
+                held, detail = result if isinstance(result, tuple) else (result, "")
+            except (KeyError, OSError, ValueError) as error:
                 # An unknown probe, or one that could not run, has not shown its fact.
-                held = False
-        return GreetingVerifyResponse(**body.model_dump(), reward=float(held), observed_text=observed)
+                held, detail = False, f"{type(error).__name__}: {error}"
+        return GreetingVerifyResponse(
+            **body.model_dump(), reward=float(held), observed_text=observed, probe_detail=detail
+        )
 
 
 if __name__ == "__main__":

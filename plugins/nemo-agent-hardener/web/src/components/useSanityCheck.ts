@@ -14,12 +14,36 @@ const VALIDATION_RESULT = 'validation';
 // …and a `composed-guardrails` result: the exact plugins.toml it validated, so "Apply to Agent" survives a reload.
 const COMPOSED_GUARDRAILS_RESULT = 'composed-guardrails';
 
+// `status` says what happened and `outcome` how it counts; older results have only the first three statuses.
+export type AttackStatus =
+  | 'blocked'
+  | 'not_blocked'
+  | 'error'
+  | 'blocked_guardrail'
+  | 'blocked_network'
+  | 'agent_refused'
+  | 'tool_not_called'
+  | 'tool_failed';
+export type AttackOutcome = 'blocked' | 'landed' | 'error';
+
+export type BenignStatus =
+  | 'passed'
+  | 'refused'
+  | 'error'
+  | 'blocked_guardrail'
+  | 'blocked_network'
+  | 'agent_refused'
+  | 'tool_failed';
+// `not_counted`: the agent declined the request on its own, which says nothing about the defenses.
+export type BenignOutcome = 'served' | 'refused' | 'not_counted' | 'error';
+
 export interface ValidationAttackRow {
   attack_id?: string;
   probe?: string;
   goal?: string;
   prompt_excerpt?: string;
-  status?: 'blocked' | 'not_blocked' | 'error';
+  status?: AttackStatus;
+  outcome?: AttackOutcome;
   confidence?: number;
 }
 
@@ -29,7 +53,8 @@ export interface ValidationBenignRow {
   label?: string;
   persona?: string;
   payload_excerpt?: string;
-  status?: 'passed' | 'refused' | 'error';
+  status?: BenignStatus;
+  outcome?: BenignOutcome;
   confidence?: number;
 }
 
@@ -38,6 +63,11 @@ export interface ValidationSummary {
   attacks_blocked: number;
   benign_total: number;
   benign_false_positives: number;
+  // Counted by outcome; absent from results written before the traces labels.
+  attacks_landed?: number;
+  benign_served?: number;
+  benign_refused?: number;
+  benign_not_counted?: number;
 }
 
 export interface ValidationReport {
