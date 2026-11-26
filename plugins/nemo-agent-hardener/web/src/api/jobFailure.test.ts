@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { endedJobFailure, jobFailure } from '@agent-hardener/api/jobFailure';
+import { endedJobFailure, jobFailure, runDisplayStatus } from '@agent-hardener/api/jobFailure';
 
 it('reads the message and remediation the backend wrote', () => {
   const job = { error_details: { message: ' victim answered HTTP 500 ', remediation: 'Check the victim logs.' } };
@@ -42,5 +42,18 @@ describe('endedJobFailure', () => {
     expect(endedJobFailure({ status: 'cancelled', error_details: { message: 'boom' } })).toEqual({
       message: 'The job was cancelled.',
     });
+  });
+});
+
+describe('runDisplayStatus', () => {
+  it('shows a failed run whose defenses did not hold as not hardened', () => {
+    expect(runDisplayStatus({ status: 'failed', error_category: 'validation_failed' })).toBe('not_hardened');
+  });
+
+  it('keeps other failures, and non-failed runs, as they are', () => {
+    expect(runDisplayStatus({ status: 'failed', error_category: 'victim_unreachable' })).toBe('failed');
+    expect(runDisplayStatus({ status: 'failed' })).toBe('failed');
+    expect(runDisplayStatus({ status: 'completed', error_category: 'validation_failed' })).toBe('completed');
+    expect(runDisplayStatus({ status: 'running' })).toBe('running');
   });
 });

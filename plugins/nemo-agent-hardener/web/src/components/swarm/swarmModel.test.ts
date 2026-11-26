@@ -89,7 +89,7 @@ describe('deriveSwarmState', () => {
   });
 
   it('shows a defender that abstained as not applicable, not failed', () => {
-    const { statuses, nodeLogs } = deriveSwarmState([
+    const { statuses, nodeLogs, notApplicable } = deriveSwarmState([
       evt('agent_completed', {
         agent_name: 'openshell-policy-defender',
         agent_role: 'defender',
@@ -98,6 +98,7 @@ describe('deriveSwarmState', () => {
       }),
     ]);
     expect(statuses.openshell_defender).toBe('skipped');
+    expect(notApplicable).toEqual({ openshell_defender: 'out_of_scope: no network signature' });
     expect(nodeLogs.openshell_defender?.[0]?.text).toBe('did not apply: out_of_scope: no network signature');
   });
 

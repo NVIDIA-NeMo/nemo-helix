@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toastApiError } from '@agent-hardener/api/apiError';
+import { runDisplayStatus } from '@agent-hardener/api/jobFailure';
 import { cancelRunJob, deleteRunWithJob } from '@agent-hardener/api/runJobs';
 import {
   getAgentHardenerListRunsQueryKey,
@@ -23,6 +24,7 @@ const RUN_STATUS_CONFIG: Record<string, StatusConfigEntry> = {
   running: { label: 'Running', color: 'blue' },
   completed: { label: 'Completed', color: 'green' },
   failed: { label: 'Failed', color: 'red' },
+  not_hardened: { label: 'Not hardened', color: 'yellow' },
 };
 
 const STATUS_FILTER_OPTIONS = [
@@ -112,7 +114,7 @@ export const AgentHardenerRunsDataView: FC = () => {
       },
       cell: ({ row }) => {
         if (!row.original.status) return null;
-        const badge = <StatusBadge status={row.original.status} statusConfig={RUN_STATUS_CONFIG} />;
+        const badge = <StatusBadge status={runDisplayStatus(row.original) ?? row.original.status} statusConfig={RUN_STATUS_CONFIG} />;
         // Surface the classified failure cause on hover for a failed run.
         return row.original.status === 'failed' && row.original.error_message ? (
           <span title={row.original.error_message}>{badge}</span>

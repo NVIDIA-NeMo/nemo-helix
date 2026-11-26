@@ -184,6 +184,8 @@ export interface SwarmState {
   nodeLogs: Record<string, LogEntry[]>;
   nodeExchanges: Record<string, Exchange[]>;
   nodeLlmCalls: Record<string, LlmCall[]>;
+  // Defenders that abstained: node id -> reason.
+  notApplicable: Record<string, string>;
 }
 
 // Fold the ordered event stream into node statuses + per-node logs/exchanges + run progress. Deterministic:
@@ -195,6 +197,7 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
   const nodeLogs: Record<string, LogEntry[]> = {};
   const nodeExchanges: Record<string, Exchange[]> = {};
   const nodeLlmCalls: Record<string, LlmCall[]> = {};
+  const notApplicableByNode: Record<string, string> = {};
   let phase = '';
   let round = 0;
   let finalPass = false;
@@ -241,6 +244,7 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
         if (id) {
           // A defender whose remit does not cover the attack abstains; that is not a failure.
           const notApplicable = asString(payload.not_applicable);
+          if (notApplicable) notApplicableByNode[id] = notApplicable;
           statuses[id] = notApplicable ? 'skipped' : payload.ok === false ? 'failed' : 'success';
           const seconds =
             typeof payload.duration_seconds === 'number'
@@ -337,7 +341,7 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
     }
   }
 
-  return { statuses, phase, round, finalPass, nodeLogs, nodeExchanges, nodeLlmCalls };
+  return { statuses, phase, round, finalPass, nodeLogs, nodeExchanges, nodeLlmCalls, notApplicable: notApplicableByNode };
 };
 
 // One benign-suite recon step (from `synth_phase`), shown as a checklist in the manifest generate flow.
