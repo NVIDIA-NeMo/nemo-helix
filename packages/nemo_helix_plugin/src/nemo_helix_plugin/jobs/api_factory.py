@@ -112,6 +112,7 @@ from nemo_helix_plugin.jobs.types import (
 from nemo_helix_plugin.jobs.types import (
     generate_job_name as jobs_service_job_name,
 )
+from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page, PaginationData
 from pydantic import (
     BaseModel,
@@ -863,7 +864,12 @@ async def _discard_stored_spec(stored: StoredJobSpec, *, workspace: str, job_nam
     try:
         await stored.discard()
     except Exception:
-        logger.warning("Could not remove what job %s/%s stored outside its record", workspace, job_name, exc_info=True)
+        logger.warning(
+            "Could not remove what job %s/%s stored outside its record",
+            sanitize_for_log(workspace),
+            sanitize_for_log(job_name),
+            exc_info=True,
+        )
 
 
 async def _compile_platform_spec(
@@ -1358,7 +1364,12 @@ def job_route_factory(
             await _discard_stored_spec(stored, workspace=workspace, job_name=job_name)
             # Locations and messages only: a spec's values may hold credentials.
             problems = [(error["loc"], error["msg"]) for error in exc.errors(include_url=False, include_input=False)]
-            logger.error("Job %s/%s stored a spec its replies can't render: %s", workspace, job_name, problems)
+            logger.error(
+                "Job %s/%s stored a spec its replies can't render: %s",
+                sanitize_for_log(workspace),
+                sanitize_for_log(job_name),
+                problems,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to submit {service_name} job: its stored spec doesn't match its schema.",
