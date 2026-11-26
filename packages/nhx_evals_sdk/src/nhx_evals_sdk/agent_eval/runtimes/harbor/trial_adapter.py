@@ -171,7 +171,7 @@ def _trial_from_harbor_result(
     reward = _primary_reward(rewards, reward_key)
     error = _trial_error(_reported_exception_info(data))
     if error is not None:
-        error = _with_sandbox_termination(error, _sandbox_terminations(trial_dir))
+        error = with_sandbox_terminations(error, trial_dir)
 
     metadata: dict[str, Any] = {
         HARBOR_PRIMARY_REWARD_KEY: reward_key,
@@ -631,6 +631,19 @@ def _trial_error(exception_info: Any) -> TrialError | None:
         traceback=traceback[:_MAX_TRACEBACK_CHARS] if traceback is not None else None,
         occurred_at=_error_timestamp(exception_info.get("occurred_at")),
     )
+
+
+def with_sandbox_terminations(error: TrialError, trial_dir: Path) -> TrialError:
+    """``error`` as the trial reports it: as the sandbox that stopped under the trial, when one did.
+
+    Args:
+        error: The error Harbor reported for the attempt.
+        trial_dir: Harbor attempt directory, holding the environment's termination records.
+
+    Returns:
+        ``error`` as :func:`_with_sandbox_termination` reports it.
+    """
+    return _with_sandbox_termination(error, _sandbox_terminations(trial_dir))
 
 
 def _sandbox_terminations(trial_dir: Path) -> list[Mapping[str, Any]]:

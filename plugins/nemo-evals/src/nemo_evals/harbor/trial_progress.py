@@ -17,7 +17,10 @@ import logging
 import math
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from harbor.job import CANCELLED_ERROR_TYPE, Job
 from harbor.models.job.config import RetryConfig
@@ -34,6 +37,8 @@ from nemo_evals.taskset_runs.trials import (
     count_trials,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborJobScope
+from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import with_sandbox_terminations
+from nhx_evals_sdk.agent_eval.trials import TrialError
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,16 @@ def trial_error(result: TrialResult) -> ExceptionInfo | None:
     if result.exception_info is not None:
         return result.exception_info
     return next((step.exception_info for step in result.step_results or () if step.exception_info is not None), None)
+
+
+def reported_error(result: TrialResult) -> TrialError | None:
+    """The attempt's error as its final result reports it, so live progress and results agree on the type."""
+    error = trial_error(result)
+    if error is None:
+        return None
+    harbor = TrialError(type=error.exception_type, message=error.exception_message)
+    uri = urlparse(result.trial_uri)
+    return with_sandbox_terminations(harbor, Path(url2pathname(uri.path))) if uri.scheme == "file" else harbor
 
 
 def trial_reward(result: TrialResult, reward_key: str) -> float | None:
@@ -176,6 +191,7 @@ class TrialProgressReporter:
     def _finished(self, result: TrialResult) -> None:
         """Record a trial an earlier run of this job already settled, from the result Harbor kept."""
         error = trial_error(result)
+        reported = reported_error(result)
         if error is None:
             phase = TrialPhase.SUCCEEDED
         elif error.exception_type == CANCELLED_ERROR_TYPE:
@@ -191,8 +207,8 @@ class TrialProgressReporter:
             started_at=result.started_at,
             finished_at=result.finished_at,
             reward=trial_reward(result, self._reward_key),
-            error_type=error.exception_type if error is not None else None,
-            error=error.exception_message[:MAX_ERROR_CHARS] if error is not None else None,
+            error_type=reported.type if reported is not None else None,
+            error=reported.message[:MAX_ERROR_CHARS] if reported is not None and reported.message else None,
         )
 
     def _on(self, phase: TrialPhase) -> Callable[[TrialHookEvent], Awaitable[None]]:
@@ -212,6 +228,7 @@ class TrialProgressReporter:
         trial = self._trial(event)
         self._ended[trial.trial] = self._ended.get(trial.trial, 0) + 1
         error = trial_error(event.result)
+        reported = reported_error(event.result)
 
         if trial.phase is TrialPhase.CANCELLED:
             phase = TrialPhase.CANCELLED
@@ -228,8 +245,8 @@ class TrialProgressReporter:
                 "phase": phase,
                 "finished_at": (event.result.finished_at or event.timestamp) if settled else None,
                 "reward": trial_reward(event.result, self._reward_key),
-                "error_type": error.exception_type if error is not None else None,
-                "error": error.exception_message[:MAX_ERROR_CHARS] if error is not None else None,
+                "error_type": reported.type if reported is not None else None,
+                "error": reported.message[:MAX_ERROR_CHARS] if reported is not None and reported.message else None,
             }
         )
 

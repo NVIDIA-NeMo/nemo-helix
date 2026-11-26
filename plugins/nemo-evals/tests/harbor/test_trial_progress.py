@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -76,14 +77,25 @@ class Harbor:
         await self.fire(TrialEvent.END, config, _result(error=error, reward=reward))
 
 
-def _result(*, error: str | None = None, reward: float | None = None, trial_name: str = "") -> TrialResult:
+def _result(
+    *, error: str | None = None, reward: float | None = None, trial_name: str = "", trial_dir: Path = Path("/no-trial")
+) -> TrialResult:
     return TrialResult.model_construct(
         trial_name=trial_name,
+        trial_uri=trial_dir.as_uri(),
         started_at=STARTED,
         finished_at=STARTED.replace(minute=5),
         exception_info=_error(error) if error is not None else None,
         verifier_result=VerifierResult(rewards={"reward": reward}) if reward is not None else None,
     )
+
+
+def _stopped_sandbox(trial_dir: Path, cause: str) -> Path:
+    """A trial directory holding the record NeMo's OpenSandbox environment writes for a sandbox that stopped."""
+    trial_dir.mkdir(parents=True)
+    record = {"role": "agent", "sandbox_id": "sbx-1", "cause": cause, "detail": f"the sandbox stopped: {cause}"}
+    (trial_dir / "nemo-sandbox-termination-sbx-1.json").write_text(json.dumps(record))
+    return trial_dir
 
 
 def _error(kind: str) -> ExceptionInfo:
@@ -203,12 +215,54 @@ async def test_an_error_is_retrying_until_harbor_stops_retrying_it(job: Job, har
     assert (timed_out.phase, timed_out.attempts, timed_out.reward) == (TrialPhase.ERRORED, 1, 0.0)
 
 
+async def test_a_trial_whose_sandbox_stopped_reports_the_error_type_its_final_result_has(
+    job: Job, harbor: Harbor, tmp_path: Path
+) -> None:
+    """Harbor reports whichever call hit the dead sandbox; the final result names the sandbox, and so must live progress.
+
+    Retrying still follows Harbor's own exception, since that is what Harbor's retry rule matches.
+    """
+    reports = Reports()
+    first, second = job._remaining_trial_configs
+    out_of_memory = _stopped_sandbox(tmp_path / "first", "out_of_memory")
+    evicted = _stopped_sandbox(tmp_path / "second", "evicted")
+
+    async with _reporter(reports).job_scope()(job):
+        await harbor.fire(TrialEvent.END, first, _result(error="ExecInterrupted", trial_dir=out_of_memory))
+        await harbor.fire(TrialEvent.END, second, _result(error="ExecInterrupted", trial_dir=evicted))
+        oom, stopped = reports.last()
+
+    assert (oom.phase, oom.error_type) == (TrialPhase.RETRYING, "SandboxOutOfMemory")
+    assert oom.error == (
+        "agent sandbox sbx-1 out_of_memory: the sandbox stopped: out_of_memory. "
+        "Harbor then reported ExecInterrupted: ExecInterrupted: boom"
+    )
+    assert stopped.error_type == "SandboxTerminated"
+
+
+async def test_a_resumed_trial_whose_sandbox_stopped_reports_the_error_type_its_final_result_has(
+    job: Job, tmp_path: Path
+) -> None:
+    reports = Reports()
+    first, _ = job._remaining_trial_configs
+    trial_dir = _stopped_sandbox(tmp_path / "first", "out_of_memory")
+    job._existing_trial_results = [_result(error="ExecInterrupted", trial_name=first.trial_name, trial_dir=trial_dir)]
+    job._remaining_trial_configs = []
+
+    async with _reporter(reports).job_scope()(job):
+        pass
+
+    (resumed,) = reports.last()
+    assert (resumed.phase, resumed.error_type) == (TrialPhase.ERRORED, "SandboxOutOfMemory")
+
+
 async def test_an_error_only_a_step_recorded_is_not_retried_and_stays_errored(job: Job, harbor: Harbor) -> None:
     """Harbor retries on the trial's own exception; a multi-step trial's step-only error ends the trial."""
     reports = Reports()
     first, _ = job._remaining_trial_configs
     step_only = TrialResult.model_construct(
         trial_name=first.trial_name,
+        trial_uri=Path("/no-trial").as_uri(),
         started_at=STARTED,
         finished_at=STARTED.replace(minute=5),
         exception_info=None,
