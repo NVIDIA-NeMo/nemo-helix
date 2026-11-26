@@ -22,6 +22,7 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -30,6 +31,7 @@ from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWri
 from nhx.common.api.common import DeleteResponse, ErrorResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
+from nhx.common.auth.target import AuthorizationTarget, AuthorizationTargetRoute
 from nhx.common.entities.client import EntityValidationError
 from nhx.core.entities.api.dependencies import (
     AuthClientDep,
@@ -62,7 +64,15 @@ class EntitiesPage(Page[Entity]):
     group_counts: dict[str, int] | None = None
 
 
-router = APIRouter()
+class EntityRoute(AuthorizationTargetRoute):
+    def pdp_target(self, path_params: Mapping[str, object]) -> AuthorizationTarget | None:
+        entity_type = path_params.get("entity_type")
+        if isinstance(entity_type, str):
+            return AuthorizationTarget(service="entities", entity_type=entity_type)
+        return None
+
+
+router = APIRouter(route_class=EntityRoute)
 API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
 

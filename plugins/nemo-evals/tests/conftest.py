@@ -64,7 +64,7 @@ from nemo_helix_plugin.entities import (
     PaginationInfo,
     parse_qualified_name,
 )
-from nemo_helix_plugin.entities.types import DeleteResponse
+from nemo_helix_plugin.entities.types import DeleteResponse, Entity
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
@@ -72,6 +72,7 @@ from nemo_helix_plugin.intake.types import EvaluationCreateRequest, EvaluationPa
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from pydantic import ValidationError
 from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
@@ -226,6 +227,7 @@ class FakeEntityStore(EntityClient):
         filter_obj: dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = 100,
+        on_decode_error: Callable[[Entity, ValidationError], None] | None = None,
     ) -> ListResponse:
         if filter_str is not None or filter_obj is not None:
             raise NotImplementedError("the fake entity store filters by filter_operation only")

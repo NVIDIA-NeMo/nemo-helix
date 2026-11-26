@@ -123,6 +123,28 @@ class TestHasPermissionsFormatValidation:
         assert out.allowed is True
         body = mock_post.call_args[1]["json"]["input"]
         assert body["scopes"] == ["platform:read", "models:read"]
+        assert "target" not in body
+
+    @pytest.mark.asyncio
+    async def test_authorize_request_posts_explicit_target(self, auth_config, principal):
+        async with httpx.AsyncClient() as http_client:
+            with patch.object(http_client, "post", new_callable=AsyncMock) as post:
+                post.return_value = httpx.Response(
+                    200,
+                    json={"result": {"allowed": True}},
+                    request=httpx.Request("POST", "http://pdp/allow"),
+                )
+                client = AuthClient(principal=principal, config=auth_config, http_client=http_client)
+                await client.authorize_request(
+                    "PUT",
+                    "/apis/entities/v2/workspaces/ws/entities/platform_job_group/by-id/group-id",
+                    target={"service": "entities", "entity_type": "platform_job_group"},
+                )
+
+        assert post.call_args.kwargs["json"]["input"]["target"] == {
+            "service": "entities",
+            "entity_type": "platform_job_group",
+        }
 
     @pytest.mark.asyncio
     async def test_authorize_request_uses_service_bearer_for_pdp_in_token_exchange_mode(

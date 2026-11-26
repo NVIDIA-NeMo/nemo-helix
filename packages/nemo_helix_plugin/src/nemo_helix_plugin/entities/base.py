@@ -6,7 +6,7 @@ from __future__ import annotations
 import functools
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Self, Set, Type, TypeVar, get_type_hints
 
@@ -36,6 +36,7 @@ from pydantic import (
     ModelWrapValidatorHandler,
     PrivateAttr,
     TypeAdapter,
+    ValidationError,
     ValidationInfo,
     computed_field,
     model_validator,
@@ -321,7 +322,8 @@ class EntityDeleteClientProtocol(EntityGetterProtocol[EntityT], Protocol[EntityT
 
     # ``filter_str`` and ``filter_obj`` exist on the client but are deliberately absent here:
     # ``filter_operation`` is the sanctioned structured form, and the other two are a JSON-string
-    # variant and an exact-match shorthand kept for older callers.
+    # variant and an exact-match shorthand kept for older callers. The concrete client also
+    # exposes a decode hook for callers that need to handle malformed records in a page.
     async def list(
         self,
         entity_type: Type[EntityT],
@@ -650,6 +652,7 @@ class EntityClient:
         filter_obj: Optional[Dict[str, Any]] = None,
         page: int = 1,
         page_size: int = 100,
+        on_decode_error: Callable[[Entity, ValidationError], None] | None = None,
     ) -> ListResponse[EntityT]:
         """List entities with filtering and pagination.
 
@@ -671,6 +674,7 @@ class EntityClient:
             filter_obj: Exact-match shorthand; only used when no other filter is supplied
             page: Page number
             page_size: Items per page
+            on_decode_error: Report and skip a row whose model fails validation
 
         Returns:
             ListResponse containing data and pagination info
@@ -708,12 +712,19 @@ class EntityClient:
         )
         result_page = response.page()
 
-        entities = [self._convert_api_entity_to_model(entity, entity_type) for entity in result_page.items]
+        entities: list[EntityT] = []
+        for entity in result_page.items:
+            try:
+                entities.append(self._convert_api_entity_to_model(entity, entity_type))
+            except ValidationError as exc:
+                if on_decode_error is None:
+                    raise
+                on_decode_error(entity, exc)
         metadata = result_page.metadata
         pagination = PaginationInfo(
             page=metadata["page"],
             page_size=metadata["page_size"],
-            current_page_size=metadata["current_page_size"],
+            current_page_size=len(entities),
             total_pages=metadata["total_pages"],
             total_results=metadata["total_results"],
         )

@@ -11,6 +11,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from nhx.common.auth.access_keys import public_jwk_from_private_key_pem, validate_access_key_token
+from nhx.common.auth.client import AuthClient
 from nhx.common.auth.token_claims import TokenClaims
 from nhx.common.config import AuthConfig, HelixConfig
 from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
@@ -63,6 +64,50 @@ def platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[ClientC
         },
     ) as context:
         yield context, shared
+
+
+def test_job_group_mutations_use_one_authorization_with_the_matched_entity_type(
+    platform: tuple[ClientContext, AuthConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context, _ = platform
+    client = context.test_client
+    workspace = short_unique_name("route-authz")
+    response = client.post(WORKSPACES, json={"name": workspace}, headers={"X-NHX-Principal-Id": "service:files"})
+    assert response.status_code == 201, response.text
+    subject = short_unique_name("jobs-submitter")
+    response = client.post(
+        IAM, json={"principal": subject, "role": "Admin", "workspace": workspace}, headers=INFRASTRUCTURE
+    )
+    assert response.status_code in {200, 201}, response.text
+    base = f"{WORKSPACES}/{workspace}/entities/platform_job_group"
+    owner = {"X-NHX-Principal-Id": "service:jobs", "X-NHX-Principal-On-Behalf-Of": subject}
+    other = {**owner, "X-NHX-Principal-Id": "service:evals", "X-NHX-Authorization-Target": "operational_record"}
+    original = AuthClient.authorize_request
+    calls = []
+
+    async def authorize(self, method, path, *args, **kwargs):
+        if path.startswith(base):
+            calls.append((method, path, kwargs.get("target")))
+        return await original(self, method, path, *args, **kwargs)
+
+    monkeypatch.setattr(AuthClient, "authorize_request", authorize)
+
+    def mutate(method: str, path: str, expected: int, body: dict | None = None):
+        denied = client.request(method, path, headers=other, params={"entity_type": "operational_record"}, json=body)
+        assert denied.status_code == 403, denied.text
+        allowed = client.request(method, path, headers=owner, json=body)
+        assert allowed.status_code == expected, allowed.text
+        assert calls == [(method, path, {"service": "entities", "entity_type": "platform_job_group"})] * 2
+        calls.clear()
+        return allowed
+
+    created = mutate("POST", base, 201, {"name": "by-name", "data": {}})
+    entity_id = created.json()["id"]
+    mutate("PUT", f"{base}/by-name", 200, {"data": {"changed": True}})
+    mutate("PUT", f"{base}/by-id/{entity_id}", 200, {"data": {"changed": False}})
+    mutate("DELETE", f"{base}/by-name", 200)
+    created = mutate("POST", base, 201, {"name": "by-id", "data": {}})
+    mutate("DELETE", f"{base}/by-id/{created.json()['id']}", 200)
 
 
 @pytest.mark.parametrize("actor_role", [None, "Admin", "HelixAdmin"])
