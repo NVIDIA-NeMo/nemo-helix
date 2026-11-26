@@ -98,6 +98,46 @@ def test_model_providers_filter_does_not_match_provider_name_prefix(test_clients
     assert _list_names(test_clients, {"filter[model_providers]": provider}) == [exact]
 
 
+def test_model_providers_in_filter_matches_models_linked_to_any_provider(test_clients: ClientContext):
+    first_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    second_provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    first = _uid("first")
+    second = _uid("second")
+    unlinked = _uid("unlinked")
+    _create_model(test_clients, first, model_providers=[first_provider])
+    _create_model(test_clients, second, model_providers=[second_provider])
+    _create_model(test_clients, unlinked, model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
+
+    response = test_clients.test_client.get(
+        MODELS_PATH,
+        params=[
+            ("filter[model_providers][$in]", first_provider),
+            ("filter[model_providers][$in]", second_provider),
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    assert sorted(m["name"] for m in response.json()["data"]) == sorted([first, second])
+
+
+def test_model_providers_in_filter_with_one_provider(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    linked = _uid("linked")
+    _create_model(test_clients, linked, model_providers=[provider])
+    _create_model(test_clients, _uid("unlinked"), model_providers=[f"{DEFAULT_WORKSPACE}/{_uid('other')}"])
+
+    assert _list_names(test_clients, {"filter[model_providers][$in]": provider}) == [linked]
+
+
+def test_model_providers_filter_with_unsupported_operator_is_rejected(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+
+    response = test_clients.test_client.get(MODELS_PATH, params={"filter[model_providers][$like]": provider})
+
+    assert response.status_code == 400, response.text
+    assert "model_providers" in response.text
+
+
 def test_model_providers_filter_nested_in_or_is_rejected(test_clients: ClientContext):
     provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
     nested = json.dumps({"$or": [{"model_providers": provider}, {"name": _uid("any")}]})

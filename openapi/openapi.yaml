@@ -20700,6 +20700,7 @@ components:
           title: Family
         model_providers:
           description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
+            Use $in to match models served by any of several providers, e.g. filter[model_providers][$in]=default/a&filter[model_providers][$in]=default/b.
           title: Model Providers
           type: string
         display_name:

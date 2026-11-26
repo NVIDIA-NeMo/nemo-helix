@@ -137,17 +137,17 @@ class ParsedFilter:
                 return op.value
         return None
 
-    def remove(self, field_name: str) -> Any | None:
-        """Remove a top-level ``$eq`` field from the operation tree and return its value.
+    def remove(self, field_name: str, operator: FilterOperator = FilterOperator.EQ) -> Any | None:
+        """Remove a top-level ``operator`` comparison on a field from the operation tree and return its value.
 
-        Returns ``None`` if the field was not present.
+        Returns ``None`` if the field was not present with that operator.
         """
         mapped = self._resolve_field(field_name)
         if self.operation is None:
             return None
 
         if isinstance(self.operation, ComparisonOperation):
-            if self.operation.field == mapped and self.operation.operator == FilterOperator.EQ:
+            if self.operation.field == mapped and self.operation.operator == operator:
                 value = self.operation.value
                 self.operation = None
                 return value
@@ -160,7 +160,7 @@ class ParsedFilter:
                 if (
                     isinstance(op, ComparisonOperation)
                     and op.field == mapped
-                    and op.operator == FilterOperator.EQ
+                    and op.operator == operator
                     and removed_value is None
                 ):
                     removed_value = op.value

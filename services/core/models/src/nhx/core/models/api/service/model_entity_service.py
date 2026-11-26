@@ -200,6 +200,22 @@ def _model_to_model_entity(
     return entity
 
 
+def _served_by_provider(provider: str) -> FilterOperation:
+    return ComparisonOperation(operator=FilterOperator.CONTAINS, field="data.model_providers", value=provider)
+
+
+def _served_by_any_provider(providers: str | list[str]) -> FilterOperation:
+    provider_list = [providers] if isinstance(providers, str) else providers
+    if not provider_list:
+        raise InvalidFilterError("model_providers $in needs at least one provider.")
+    if len(provider_list) == 1:
+        return _served_by_provider(provider_list[0])
+    return LogicalOperation(
+        operator=FilterOperator.OR,
+        operations=[_served_by_provider(provider) for provider in provider_list],
+    )
+
+
 def _build_lora_filter_operation(
     lora_model_ids: list[tuple[str, str]],
     lora_exclude: bool,
@@ -496,17 +512,16 @@ class ModelEntityService:
             # If no models have lora and lora_enabled=false, all models qualify — no extra filter.
 
         model_provider = parsed_filter.remove("model_providers")
+        any_model_providers = parsed_filter.remove("model_providers", FilterOperator.IN)
         if parsed_filter.has("model_providers"):
             raise InvalidFilterError(
-                "model_providers is only supported as a top-level equality filter; "
+                "model_providers is only supported as a top-level $eq or $in filter; "
                 "remove it from $or, $not, or nested expressions."
             )
         if model_provider is not None:
-            parsed_filter.and_with(
-                ComparisonOperation(
-                    operator=FilterOperator.CONTAINS, field="data.model_providers", value=model_provider
-                )
-            )
+            parsed_filter.and_with(_served_by_provider(model_provider))
+        if any_model_providers is not None:
+            parsed_filter.and_with(_served_by_any_provider(any_model_providers))
 
         result: ListResponse[Model] = await self.entity_client.list(
             Model,

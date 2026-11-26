@@ -1553,7 +1553,11 @@ class ModelEntityFilter(Filter):
     )
     model_providers: Optional[str] = Field(
         default=None,
-        description="Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.",
+        description=(
+            "Filter models served by this ModelProvider, in the form {workspace}/{provider_name}. "
+            "Use $in to match models served by any of several providers, "
+            "e.g. filter[model_providers][$in]=default/a&filter[model_providers][$in]=default/b."
+        ),
     )
     display_name: Annotated[StringFilter | str | None, map_entity_field("data.metadata.display_name")] = Field(
         default=None, description="Filter by the display name in the model's metadata."
