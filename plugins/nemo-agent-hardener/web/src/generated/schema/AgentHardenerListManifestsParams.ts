@@ -9,16 +9,18 @@
 import type { ManifestFilter } from './ManifestFilter.ts';
 
 export type AgentHardenerListManifestsParams = {
+sort?: string;
 /**
+ * Page number.
  * @minimum 1
  */
 page?: number;
 /**
+ * Page size.
  * @minimum 1
  * @maximum 100
  */
 page_size?: number;
-sort?: string;
 /**
  * Filter results on various criteria. Supports bracket notation (?filter[field][$op]=value), JSON ({"field":{"$op":"value"}}), and text syntax (field:"value"). Operators: $eq (exact match), $like (substring), $lt, $lte, $gt, $gte (comparison), $in, $nin (set membership), $and, $or, $not (logical). Default operator is $eq.
  */

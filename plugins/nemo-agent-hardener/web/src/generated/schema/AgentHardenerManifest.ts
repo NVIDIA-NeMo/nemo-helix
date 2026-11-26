@@ -39,6 +39,8 @@ export interface AgentHardenerManifest {
   agent?: string;
   /** Fileset ref holding the uploaded project bundle, for a 'project' manifest. The run expands this instead of ``agent_fileset``. */
   project_fileset?: string;
+  /** Allocation ID of the owned scaffold; absent on legacy manifests. */
+  agent_fileset_id?: string;
   /** Fileset ref holding the agent package resolved from the agent — its config plus the Dockerfile that serves it. Empty on manifests created before targets were frozen; those re-resolve once, then store a ref. */
   agent_fileset?: string;
   /** The agent's own timestamp when this manifest froze it. A run compares it with the agent's current one to warn that the frozen copy is stale. Empty on manifests created before it was recorded. */
