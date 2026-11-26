@@ -714,9 +714,11 @@ class SessionBackedGymRunner:
                     reward_key=self._target.reward_key,
                 ),
                 collect=functools.partial(
-                    collect_within,
-                    functools.partial(collect_reporting, session.arun_rollouts, progress=self._progress),
-                    timeout_s=self._target.collection_timeout_s,
+                    collect_reporting,
+                    functools.partial(
+                        collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                    ),
+                    progress=self._progress,
                 ),
             )
             return await self._delegate.run_tasks(tasks, config)
@@ -741,15 +743,18 @@ async def collect_reporting(
 
 
 async def collect_within(
-    collect: Callable[[list[dict[str, Any]]], Awaitable[list[Any]]],
+    collect: Callable[..., Awaitable[list[Any]]],
     examples: list[dict[str, Any]],
     *,
     timeout_s: float | None,
+    on_results: Callable[[list[Any]], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """Run ``collect`` under one absolute deadline, or none when ``timeout_s`` is ``None``."""
     try:
         async with asyncio.timeout(timeout_s) as deadline:
-            return await collect(examples)
+            if on_results is None:
+                return await collect(examples)
+            return await collect(examples, on_results=on_results)
     except TimeoutError as exc:
         if not deadline.expired():
             raise

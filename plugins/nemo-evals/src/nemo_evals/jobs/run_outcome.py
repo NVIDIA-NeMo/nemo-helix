@@ -11,7 +11,7 @@ job's status details under :data:`STATUS_DETAILS_KEY` and decides the job's fina
 from __future__ import annotations
 
 import asyncio
-import functools
+import itertools
 import logging
 import math
 from collections import Counter
@@ -140,18 +140,25 @@ def report_status_details(details: dict[str, object], *, ctx: JobContext, async_
 def status_details_writer(
     ctx: JobContext, async_client: AsyncNemoClient | None
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
-    """Writes the job's status details one at a time, in the order they were made.
+    """Writes snapshots of the job's progress to its status details, in order, keeping only the newest queued one.
 
-    Each write replaces what the last one reported under the same keys. A caller may stop waiting on a slow
-    write but can't stop the write itself, so with more than one thread an older report could land after a
-    newer one. One thread keeps them in order; the write is synchronous, so it stays off the event loop.
+    Each snapshot replaces the one before under the same keys, so a snapshot still queued when a newer one
+    arrives is skipped: at most one write is in flight and one waits, however slow the writes are. One thread
+    keeps them in order; the write is synchronous, so it stays off the event loop.
     """
     writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="status-details")
+    newest = itertools.count()
+    latest = 0
+
+    def write(ticket: int, details: dict[str, Any]) -> None:
+        if ticket == latest:
+            report_status_details(details, ctx=ctx, async_client=async_client)
 
     async def publish(details: dict[str, Any]) -> None:
-        write = functools.partial(report_status_details, details, ctx=ctx, async_client=async_client)
+        nonlocal latest
+        latest = next(newest)
         # Shielded: when the caller stops waiting, the write keeps its place in line rather than being dropped.
-        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write))
+        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write, latest, details))
 
     return publish
 

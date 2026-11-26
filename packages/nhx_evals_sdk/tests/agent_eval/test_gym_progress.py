@@ -144,3 +144,19 @@ async def test_a_failing_progress_callback_never_fails_the_run(tmp_path: Path, m
         await runner.run_tasks(discover_gym_tasks(EXAMPLE), AgentEvalRunConfig(work_dir=tmp_path))
 
     assert reached == [True]
+
+
+async def test_a_rollout_file_that_cannot_be_read_still_reports_the_others(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    unreadable = tmp_path / "out.jsonl"
+    unreadable.mkdir()  # opening a directory raises an OSError other than FileNotFoundError
+    failures = tmp_path / "out_failures.jsonl"
+    failures.write_text('{"n": 1}\n', encoding="utf-8")
+    progress = RecordingProgress()
+
+    with caplog.at_level(logging.WARNING):
+        await RolloutFileFollower([unreadable, failures], progress).report_new()
+
+    assert progress.batches == [[{"n": 1}]]
+    assert "Could not read Gym's rollouts" in caplog.text

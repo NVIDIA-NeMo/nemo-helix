@@ -73,6 +73,11 @@ class RolloutFileFollower:
                 data = file.read()
         except FileNotFoundError:
             return []
+        except OSError:
+            logger.warning(
+                "Could not read Gym's rollouts from %s for progress; trying again later", path, exc_info=True
+            )
+            return []
 
         complete = data[: data.rfind(b"\n") + 1]
         self._offsets[path] += len(complete)

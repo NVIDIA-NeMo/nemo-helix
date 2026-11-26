@@ -269,8 +269,11 @@ class TestReportRunOutcome:
         )
 
 
-async def test_a_status_write_that_outlives_its_timeout_still_lands_before_the_next(monkeypatch):
-    """An older trial list can't overwrite the newer one sent after it, and a write given up on still lands."""
+async def test_status_writes_land_in_order_and_a_superseded_queued_snapshot_is_skipped(monkeypatch):
+    """A slow write still lands, an older snapshot never overwrites a newer one, and the queue never grows.
+
+    Without skipping, a backlog of writes the reporter gave up on would hold the job's process open at exit.
+    """
     first_may_finish = threading.Event()
     landed: list[int] = []
 
@@ -290,4 +293,4 @@ async def test_a_status_write_that_outlives_its_timeout_still_lands_before_the_n
     first_may_finish.set()
     await publish({"n": 3})
 
-    assert landed == [1, 2, 3]
+    assert landed == [1, 3]
