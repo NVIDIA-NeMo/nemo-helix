@@ -11,6 +11,7 @@ cannot ride into user-supplied environment code.
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -891,9 +892,26 @@ def test_an_empty_injected_secret_is_refused(monkeypatch: pytest.MonkeyPatch) ->
         serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
 
 
+@pytest.fixture
+def armed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], str]]:
+    """Records the runner arming the job's sandbox reaper, and on which thread.
+
+    The real call installs a SIGTERM handler and an atexit hook in the test process.
+    """
+    import sandboxed_gym.orchestrator as gym_orchestrator
+
+    calls: list[tuple[str, dict[str, object], str]] = []
+
+    def arm(job_id: str, **kwargs: object) -> None:
+        calls.append((job_id, kwargs, threading.current_thread().name))
+
+    monkeypatch.setattr(gym_orchestrator, "install_job_sandbox_reaper", arm)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_session_runner_records_target_provenance_before_and_after_run(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
 ) -> None:
     import sandboxed_gym
     from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
@@ -939,7 +957,7 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
 
 @pytest.mark.asyncio
 async def test_a_platform_run_scores_each_reward_component_per_trial(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
 ) -> None:
     # The platform hands AgentEvaluator this wrapper, not SandboxedGymAgentTaskRunner, so the wrapper has to
     # carry the scoring hook too; without it the components stay in trial metadata, unscored.
@@ -1266,3 +1284,52 @@ def test_a_disk_request_reaches_the_built_host_spec() -> None:
     spec = built_host_spec(capable_plan(sandbox_resources={"cpu": "2", "ephemeral-storage": "40Gi"}))
 
     assert spec.resources == {"cpu": "2", "ephemeral-storage": "40Gi"}
+
+
+@pytest.mark.asyncio
+async def test_the_runner_arms_the_job_reaper_on_its_own_thread_before_starting_a_host(
+    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+) -> None:
+    """Only the main thread can install the reaper's SIGTERM handler, and `start` runs in a worker thread.
+
+    Armed only from `start`, a cancel during the host's startup leaves the process blocked until the
+    kubelet's SIGKILL, and the host outlives the job until its TTL.
+    """
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    started_on: list[tuple[int, str]] = []
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            started_on.append((len(armed), threading.current_thread().name))
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    plan = capable_plan()
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1")
+    caller = threading.current_thread().name
+
+    await runner.run_tasks([])
+
+    assert armed == [
+        ("job-1", {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options}, caller)
+    ]
+    # Armed before the host existed, and `start` itself ran on another thread.
+    ((armed_before_start, start_thread),) = started_on
+    assert armed_before_start == 1
+    assert start_thread != caller

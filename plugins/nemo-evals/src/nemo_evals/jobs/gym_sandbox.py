@@ -643,6 +643,7 @@ class SessionBackedGymRunner:
         return gym_scoring_metrics(task, trials)
 
     async def run_tasks(self, tasks: Any, config: Any = None) -> Any:
+        import sandboxed_gym.orchestrator as gym_orchestrator
         from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
             SandboxedGymAgentTaskRunner,
             SandboxedGymRuntimeConfig,
@@ -665,6 +666,16 @@ class SessionBackedGymRunner:
             "collection_timeout_s": self._target.collection_timeout_s,
             "environment_offline": serve.environment_offline,
         }
+        # Armed here, on the event loop's thread, because only the main thread can install a signal
+        # handler: `start` arms the same reaper, but in a worker thread it gets only `atexit`. A cancel
+        # (SIGTERM) then can't unwind past `start` blocked on the host's readiness, or past a blocked
+        # rollout, before the kubelet's SIGKILL, so `atexit` never runs and the host outlives the job.
+        # With the handler, SIGTERM destroys every sandbox labelled with this job, then exits by the signal.
+        gym_orchestrator.install_job_sandbox_reaper(
+            serve.job_id,
+            host_provider=serve.host_provider,
+            host_provider_options=serve.sandbox.host_provider_options,
+        )
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
         session = await asyncio.to_thread(orchestrator.start, serve)
