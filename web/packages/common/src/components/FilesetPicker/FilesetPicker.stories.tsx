@@ -91,6 +91,7 @@ const meta = {
     label: 'Training dataset',
     purpose: 'dataset',
     noun: { one: 'dataset', many: 'datasets' },
+    onRequestNew: () => {},
   },
   parameters: {
     msw: { handlers: [listFilesets(FILESETS)] },
@@ -102,12 +103,12 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
-export const DefaultNoun: Story = {
-  args: { label: 'Fileset', purpose: undefined, noun: undefined },
+export const WithoutNewRow: Story = {
+  args: { onRequestNew: undefined },
 };
 
-export const WithNewDataset: Story = {
-  args: { onRequestNew: () => {} },
+export const DefaultNoun: Story = {
+  args: { label: 'Fileset', purpose: undefined, noun: undefined },
 };
 
 export const SeveralPurposes: Story = {
@@ -119,11 +120,6 @@ export const SeveralPurposes: Story = {
 };
 
 export const EmptyWorkspace: Story = {
-  parameters: { msw: { handlers: [listFilesets([])] } },
-};
-
-export const EmptyWorkspaceWithNewDataset: Story = {
-  args: { onRequestNew: () => {} },
   parameters: { msw: { handlers: [listFilesets([])] } },
 };
 

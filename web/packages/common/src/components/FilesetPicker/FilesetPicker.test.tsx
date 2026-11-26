@@ -134,6 +134,20 @@ describe('FilesetPicker', () => {
 
     expect(onRequestNew).toHaveBeenCalledTimes(1);
     expect(onChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue('');
+  });
+
+  it('keeps showing the current selection after the New row is picked', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('sft-chat-v3')]));
+    const onRequestNew = vi.fn();
+    const { input } = renderPicker({ value: 'default/sft-chat-v3', onRequestNew });
+    await waitFor(() => expect(input).toHaveValue('sft-chat-v3'));
+
+    await userEvent.click(input);
+    await userEvent.click(await screen.findByRole('option', { name: 'New fileset' }));
+
+    expect(onRequestNew).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue('sft-chat-v3');
   });
 
   it('shows each purpose only when several are allowed', async () => {
