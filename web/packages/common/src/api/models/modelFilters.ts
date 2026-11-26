@@ -7,11 +7,12 @@ import { ModelModality } from '@nemo/sdk/generated/platform/schema/ModelModality
 
 export type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
 
+/** Each list matches models with any of its values; the lists combine with AND. */
 export interface ModelFilterValues {
-  provider?: string;
-  capability?: ModelCapability;
-  inputModality?: ModelModality;
-  size?: ModelSizeBucket;
+  providers?: string[];
+  capabilities?: ModelCapability[];
+  inputModalities?: ModelModality[];
+  sizes?: ModelSizeBucket[];
 }
 
 export interface ModelFilterOption {
@@ -28,6 +29,9 @@ export interface ModelFilterControls {
   sizeOptions: ModelFilterOption[];
   providersLoading: boolean;
 }
+
+/** One `parameter_count` range, or several sent as a JSON-encoded `$or`. */
+export type ParameterCountFilter = NumberFilter | { $or: string };
 
 interface ModelSizeBucketDefinition {
   value: ModelSizeBucket;
@@ -48,9 +52,6 @@ export const MODEL_SIZE_BUCKETS: readonly ModelSizeBucketDefinition[] = [
 export const MODEL_SIZE_OPTIONS: ModelFilterOption[] = MODEL_SIZE_BUCKETS.map(
   ({ value, label }) => ({ value, label })
 );
-
-export const toModelSizeBucket = (value?: string): ModelSizeBucket | undefined =>
-  MODEL_SIZE_BUCKETS.find((bucket) => bucket.value === value)?.value;
 
 const CAPABILITY_LABELS: Record<ModelCapability, string> = {
   tool_calling: 'Tool calling',
@@ -76,36 +77,61 @@ export const MODEL_INPUT_MODALITY_OPTIONS: ModelFilterOption[] = Object.values(M
   (value) => ({ value, label: MODALITY_LABELS[value] })
 );
 
-export const toModelCapability = (value?: string): ModelCapability | undefined =>
-  Object.values(ModelCapability).find((capability) => capability === value);
+const knownValues = <T extends string>(allowed: readonly T[], values: readonly string[]): T[] =>
+  values.filter((value): value is T => (allowed as readonly string[]).includes(value));
 
-export const toModelModality = (value?: string): ModelModality | undefined =>
-  Object.values(ModelModality).find((modality) => modality === value);
+export const toModelSizeBuckets = (values: readonly string[]): ModelSizeBucket[] =>
+  knownValues(
+    MODEL_SIZE_BUCKETS.map((bucket) => bucket.value),
+    values
+  );
+
+export const toModelCapabilities = (values: readonly string[]): ModelCapability[] =>
+  knownValues(Object.values(ModelCapability), values);
+
+export const toModelModalities = (values: readonly string[]): ModelModality[] =>
+  knownValues(Object.values(ModelModality), values);
 
 export const EMPTY_MODEL_FILTERS: ModelFilterValues = {};
 
 export const countActiveModelFilters = (filters: ModelFilterValues): number =>
-  [filters.provider, filters.capability, filters.inputModality, filters.size].filter(Boolean)
-    .length;
+  [filters.providers, filters.capabilities, filters.inputModalities, filters.sizes].filter(
+    (values) => !!values?.length
+  ).length;
 
 export const hasActiveModelFilters = (filters: ModelFilterValues): boolean =>
   countActiveModelFilters(filters) > 0;
 
-export const modelSizeFilter = (size: ModelSizeBucket): NumberFilter | undefined => {
-  const bucket = MODEL_SIZE_BUCKETS.find((candidate) => candidate.value === size);
-  if (!bucket) {
-    return undefined;
-  }
+const bucketRange = (bucket: ModelSizeBucketDefinition): NumberFilter => {
   if (bucket.maxParameters === undefined) {
     return { $gte: bucket.minParameters };
   }
   return { $gte: bucket.minParameters, $lt: bucket.maxParameters };
 };
 
-export const withSelectedOption = (
+export const modelSizeFilter = (
+  sizes: readonly ModelSizeBucket[]
+): ParameterCountFilter | undefined => {
+  const ranges = MODEL_SIZE_BUCKETS.filter((bucket) => sizes.includes(bucket.value)).map(
+    bucketRange
+  );
+  if (ranges.length === 0) {
+    return undefined;
+  }
+  if (ranges.length === 1) {
+    return ranges[0];
+  }
+  // qs cannot encode an array of objects in a query string; the API decodes JSON-valued filters.
+  return { $or: JSON.stringify(ranges) };
+};
+
+export const withSelectedOptions = (
   options: ModelFilterOption[],
-  selected?: string
+  selected: readonly string[] = []
 ): ModelFilterOption[] => {
-  if (!selected || options.some((option) => option.value === selected)) return options;
-  return [{ value: selected, label: selected }, ...options];
+  const missing = selected.filter((value) => !options.some((option) => option.value === value));
+  if (missing.length === 0) {
+    return options;
+  }
+  return [...missing.map((value) => ({ value, label: value })), ...options];
 };

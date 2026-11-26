@@ -8,10 +8,11 @@ import {
   MODEL_INPUT_MODALITY_OPTIONS,
   MODEL_SIZE_OPTIONS,
   modelSizeFilter,
-  withSelectedOption,
+  withSelectedOptions,
   type ModelFilterControls,
   type ModelFilterOption,
   type ModelFilterValues,
+  type ParameterCountFilter,
 } from '@nemo/common/src/api/models/modelFilters';
 import {
   getNextModelsPageParam,
@@ -105,13 +106,16 @@ export const useModelSearchCore = ({
 
   const query = useMemo(() => {
     const trimmed = search.trim();
-    const parameterCount = filters.size ? modelSizeFilter(filters.size) : undefined;
-    const merged: ModelSearchFilter = {
+    const { providers, capabilities, inputModalities, sizes } = filters;
+    const parameterCount = sizes?.length ? modelSizeFilter(sizes) : undefined;
+    const merged: Omit<ModelSearchFilter, 'parameter_count'> & {
+      parameter_count?: ModelSearchFilter['parameter_count'] | ParameterCountFilter;
+    } = {
       ...filter,
       ...(trimmed ? { name: { $like: trimmed } } : {}),
-      ...(filters.provider ? { model_providers: filters.provider } : {}),
-      ...(filters.capability ? { capabilities: filters.capability } : {}),
-      ...(filters.inputModality ? { input_modalities: filters.inputModality } : {}),
+      ...(providers?.length ? { model_providers: { $in: providers } } : {}),
+      ...(capabilities?.length ? { capabilities: { $in: capabilities } } : {}),
+      ...(inputModalities?.length ? { input_modalities: { $in: inputModalities } } : {}),
       ...(parameterCount ? { parameter_count: parameterCount } : {}),
     };
     return {
@@ -156,14 +160,14 @@ export const useModelSearchCore = ({
 
   const providerOptions = useMemo<ModelFilterOption[]>(
     () =>
-      withSelectedOption(
+      withSelectedOptions(
         (providersPage?.data ?? []).map((provider) => ({
           value: `${provider.workspace}/${provider.name}`,
           label: provider.name,
         })),
-        filters.provider
+        filters.providers
       ),
-    [filters.provider, providersPage?.data]
+    [filters.providers, providersPage?.data]
   );
 
   const modelFilters = useMemo<ModelFilterControls>(

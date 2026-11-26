@@ -7,10 +7,10 @@ import {
   MODEL_CAPABILITY_OPTIONS,
   MODEL_INPUT_MODALITY_OPTIONS,
   modelSizeFilter,
-  toModelCapability,
-  toModelModality,
-  toModelSizeBucket,
-  withSelectedOption,
+  toModelCapabilities,
+  toModelModalities,
+  toModelSizeBuckets,
+  withSelectedOptions,
 } from '@nemo/common/src/api/models/modelFilters';
 import { ModelCapability } from '@nemo/sdk/generated/platform/schema/ModelCapability';
 import { ModelModality } from '@nemo/sdk/generated/platform/schema/ModelModality';
@@ -23,18 +23,28 @@ describe('modelSizeFilter', () => {
     ['medium', { $gte: 3 * BILLION, $lt: 10 * BILLION }],
     ['large', { $gte: 10 * BILLION, $lt: 50 * BILLION }],
     ['xlarge', { $gte: 50 * BILLION }],
-  ] as const)('bounds the %s bucket', (bucket, expected) => {
-    expect(modelSizeFilter(bucket)).toEqual(expected);
+  ] as const)('bounds the %s bucket on its own', (bucket, expected) => {
+    expect(modelSizeFilter([bucket])).toEqual(expected);
+  });
+
+  it('sends several buckets as a JSON-encoded $or in bucket order', () => {
+    const filter = modelSizeFilter(['xlarge', 'small']);
+
+    expect(filter).toEqual({
+      $or: JSON.stringify([{ $gte: 0, $lt: 3 * BILLION }, { $gte: 50 * BILLION }]),
+    });
+  });
+
+  it('sends nothing with no buckets', () => {
+    expect(modelSizeFilter([])).toBeUndefined();
   });
 });
 
-describe('toModelSizeBucket', () => {
-  it('passes a known bucket through', () => {
-    expect(toModelSizeBucket('large')).toBe('large');
-  });
-
-  it.each([undefined, '', 'huge'])('drops %j', (value) => {
-    expect(toModelSizeBucket(value)).toBeUndefined();
+describe('known value guards', () => {
+  it('keeps known values and drops the rest', () => {
+    expect(toModelSizeBuckets(['large', 'huge', 'small'])).toEqual(['large', 'small']);
+    expect(toModelCapabilities(['reasoning', 'flying'])).toEqual(['reasoning']);
+    expect(toModelModalities(['image', ''])).toEqual(['image']);
   });
 });
 
@@ -55,41 +65,39 @@ describe('capability and input options', () => {
     });
     expect(MODEL_INPUT_MODALITY_OPTIONS).toContainEqual({ value: 'pdf', label: 'PDF' });
   });
-
-  it('passes known values through and drops the rest', () => {
-    expect(toModelCapability('reasoning')).toBe('reasoning');
-    expect(toModelCapability('flying')).toBeUndefined();
-    expect(toModelModality('image')).toBe('image');
-    expect(toModelModality(undefined)).toBeUndefined();
-  });
 });
 
-describe('withSelectedOption', () => {
+describe('withSelectedOptions', () => {
   const options = [{ value: 'llama', label: 'llama' }];
 
-  it('keeps the options when the selection is already listed', () => {
-    expect(withSelectedOption(options, 'llama')).toBe(options);
+  it('keeps the options when every selection is already listed', () => {
+    expect(withSelectedOptions(options, ['llama'])).toBe(options);
   });
 
-  it('prepends a selection the loaded options do not include', () => {
-    expect(withSelectedOption(options, 'gemma')).toEqual([
+  it('prepends selections the loaded options do not include', () => {
+    expect(withSelectedOptions(options, ['llama', 'gemma'])).toEqual([
       { value: 'gemma', label: 'gemma' },
       ...options,
     ]);
   });
 
   it('leaves the options alone with no selection', () => {
-    expect(withSelectedOption(options)).toBe(options);
+    expect(withSelectedOptions(options)).toBe(options);
   });
 });
 
 describe('active filter helpers', () => {
-  it('counts only the filters that are set', () => {
+  it('counts the filters with at least one value', () => {
     expect(countActiveModelFilters({})).toBe(0);
+    expect(countActiveModelFilters({ providers: [], sizes: ['small'] })).toBe(1);
     expect(
-      countActiveModelFilters({ provider: 'ws/p', inputModality: 'image', size: 'small' })
+      countActiveModelFilters({
+        providers: ['ws/p'],
+        inputModalities: ['image', 'video'],
+        sizes: ['small'],
+      })
     ).toBe(3);
-    expect(hasActiveModelFilters({ capability: 'reasoning' })).toBe(true);
-    expect(hasActiveModelFilters({})).toBe(false);
+    expect(hasActiveModelFilters({ capabilities: ['reasoning'] })).toBe(true);
+    expect(hasActiveModelFilters({ capabilities: [] })).toBe(false);
   });
 });

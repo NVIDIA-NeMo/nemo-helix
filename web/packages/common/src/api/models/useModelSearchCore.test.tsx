@@ -146,16 +146,16 @@ describe('useModelSearchCore', () => {
   });
 
   describe('model filters', () => {
-    it('sends the provider, capability and input to the server alongside caller filters', async () => {
+    it('sends each filter as an any-of list alongside caller filters', async () => {
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
       const { result } = renderSearch({ filter: { lora_enabled: true } });
       await waitFor(() => expect(mockListModels).toHaveBeenCalled());
 
       act(() =>
         result.current.modelFilters.onChange({
-          provider: 'ws1/build',
-          capability: 'tool_calling',
-          inputModality: 'image',
+          providers: ['ws1/build', 'ws1/local'],
+          capabilities: ['tool_calling', 'reasoning'],
+          inputModalities: ['image'],
         })
       );
 
@@ -165,9 +165,9 @@ describe('useModelSearchCore', () => {
           expect.objectContaining({
             filter: {
               lora_enabled: true,
-              model_providers: 'ws1/build',
-              capabilities: 'tool_calling',
-              input_modalities: 'image',
+              model_providers: { $in: ['ws1/build', 'ws1/local'] },
+              capabilities: { $in: ['tool_calling', 'reasoning'] },
+              input_modalities: { $in: ['image'] },
             },
           })
         )
@@ -177,7 +177,7 @@ describe('useModelSearchCore', () => {
     it('sends the size as a parameter count range', async () => {
       mockListModels.mockResolvedValue(makePage([makeModel('mid')], 1, 1));
 
-      renderSearch({ initialFilters: { size: 'medium' } });
+      renderSearch({ initialFilters: { sizes: ['medium'] } });
 
       await waitFor(() =>
         expect(mockListModels).toHaveBeenCalledWith(
@@ -185,6 +185,19 @@ describe('useModelSearchCore', () => {
           expect.objectContaining({
             filter: { parameter_count: { $gte: 3_000_000_000, $lt: 10_000_000_000 } },
           })
+        )
+      );
+    });
+
+    it('leaves out filters whose lists are empty', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      renderSearch({ initialFilters: { providers: [], capabilities: [], sizes: [] } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.not.objectContaining({ filter: expect.anything() })
         )
       );
     });
@@ -207,7 +220,7 @@ describe('useModelSearchCore', () => {
     it('offers a selected provider the list does not include', async () => {
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
 
-      const { result } = renderSearch({ initialFilters: { provider: 'other/gone' } });
+      const { result } = renderSearch({ initialFilters: { providers: ['other/gone'] } });
 
       expect(result.current.modelFilters.providerOptions).toEqual([
         { value: 'other/gone', label: 'other/gone' },

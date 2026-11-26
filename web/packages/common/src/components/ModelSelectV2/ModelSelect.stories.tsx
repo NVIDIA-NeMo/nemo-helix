@@ -5,7 +5,7 @@ import {
   MODEL_CAPABILITY_OPTIONS,
   MODEL_INPUT_MODALITY_OPTIONS,
   MODEL_SIZE_OPTIONS,
-  modelSizeFilter,
+  MODEL_SIZE_BUCKETS,
   type ModelFilterValues,
   type ModelSizeBucket,
 } from '@nemo/common/src/api/models/modelFilters';
@@ -191,14 +191,21 @@ const withMetadataFromName = (model: ModelEntity): ModelEntity => {
   };
 };
 
-const isInSizeBucket = (model: ModelEntity, size: ModelSizeBucket): boolean => {
+const isInAnySizeBucket = (model: ModelEntity, sizes: readonly ModelSizeBucket[]): boolean => {
   const parameterCount = model.metadata?.parameter_count;
-  const bounds = modelSizeFilter(size);
-  if (parameterCount === undefined || !bounds) {
+  if (parameterCount === undefined) {
     return false;
   }
-  return parameterCount >= (bounds.$gte ?? 0) && parameterCount < (bounds.$lt ?? Infinity);
+  return MODEL_SIZE_BUCKETS.some(
+    (bucket) =>
+      sizes.includes(bucket.value) &&
+      parameterCount >= bucket.minParameters &&
+      parameterCount < (bucket.maxParameters ?? Infinity)
+  );
 };
+
+const includesAny = <T,>(values: readonly T[] | undefined, wanted: readonly T[] | undefined) =>
+  !wanted?.length || wanted.some((value) => values?.includes(value));
 
 const EXTRA_NVIDIA_MODELS = [
   'nemotron-4-340b-instruct',
@@ -224,16 +231,16 @@ const sizedMockGroups = mockGroups.map((group) => ({
 const WithFiltersRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [filters, setFilters] = useState<ModelFilterValues>({});
-  const { provider, capability, inputModality, size } = filters;
+  const { providers, capabilities, inputModalities, sizes } = filters;
   const groups = sizedMockGroups
-    .filter((group) => !provider || group.workspace === provider)
+    .filter((group) => includesAny([group.workspace], providers))
     .map((group) => ({
       ...group,
       models: group.models.filter(
         (model) =>
-          (!capability || !!model.metadata?.capabilities?.includes(capability)) &&
-          (!inputModality || !!model.metadata?.input_modalities?.includes(inputModality)) &&
-          (!size || isInSizeBucket(model, size))
+          includesAny(model.metadata?.capabilities, capabilities) &&
+          includesAny(model.metadata?.input_modalities, inputModalities) &&
+          (!sizes?.length || isInAnySizeBucket(model, sizes))
       ),
     }))
     .filter((group) => group.models.length > 0);

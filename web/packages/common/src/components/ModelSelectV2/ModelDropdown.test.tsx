@@ -148,25 +148,63 @@ describe('ModelDropdown', () => {
       expect(screen.queryByTestId('model-select-v2-filters')).not.toBeInTheDocument();
     });
 
-    it('renders a provider, capability, input and size filter', () => {
+    it('renders a provider, size and capabilities filter', () => {
       renderOpen({ modelFilters: makeFilters() });
 
       expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Filter by input' })).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Filter by size' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toBeInTheDocument();
     });
 
-    it('reports a picked option merged with the other filters', async () => {
+    it('lists what a model can do and what it accepts in one filter', async () => {
+      renderOpen({ modelFilters: makeFilters() });
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by capability' }));
+
+      expect(await screen.findByText('Can do')).toBeInTheDocument();
+      expect(screen.getByText('Accepts')).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Tool calling' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Image' })).toBeInTheDocument();
+    });
+
+    it('adds a ticked option to the ones already picked', async () => {
       const onChange = vi.fn();
       renderOpen({
-        modelFilters: makeFilters({ values: { capability: 'tool_calling' }, onChange }),
+        modelFilters: makeFilters({
+          values: { capabilities: ['tool_calling'], inputModalities: ['text'] },
+          onChange,
+        }),
       });
 
-      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by input' }));
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by capability' }));
       fireEvent.click(await screen.findByRole('option', { name: 'Image' }));
 
-      expect(onChange).toHaveBeenCalledWith({ capability: 'tool_calling', inputModality: 'image' });
+      expect(onChange).toHaveBeenCalledWith({
+        capabilities: ['tool_calling'],
+        inputModalities: ['text', 'image'],
+      });
+    });
+
+    it('lists capability and input picks on the trigger', () => {
+      renderOpen({
+        modelFilters: makeFilters({
+          values: { capabilities: ['reasoning'], inputModalities: ['image'] },
+        }),
+      });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toHaveTextContent(
+        'Reasoning, Image'
+      );
+    });
+
+    it('counts several picks on a narrow filter', () => {
+      renderOpen({
+        modelFilters: makeFilters({ values: { sizes: ['small', 'xlarge'] } }),
+      });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by size' })).toHaveTextContent(
+        'Size · 2'
+      );
     });
 
     it('disables a filter that has nothing to offer', () => {
@@ -179,7 +217,7 @@ describe('ModelDropdown', () => {
       renderOpen({
         groups: [],
         emptyMessage: 'No models',
-        modelFilters: makeFilters({ values: { size: 'xlarge' } }),
+        modelFilters: makeFilters({ values: { sizes: ['xlarge'] } }),
       });
 
       expect(screen.getByText('No models match these filters')).toBeInTheDocument();

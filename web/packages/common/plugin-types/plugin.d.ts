@@ -10074,11 +10074,12 @@ export declare const LogViewer: FC<LogViewerProps>;
 //#endregion
 //#region src/api/models/modelFilters.d.ts
 type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
+/** Each list matches models with any of its values; the lists combine with AND. */
 interface ModelFilterValues {
-  provider?: string;
-  capability?: ModelCapability;
-  inputModality?: ModelModality;
-  size?: ModelSizeBucket;
+  providers?: string[];
+  capabilities?: ModelCapability[];
+  inputModalities?: ModelModality[];
+  sizes?: ModelSizeBucket[];
 }
 interface ModelFilterOption {
   value: string;
