@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.errors import (
+    CATEGORY_MANIFEST,
     CATEGORY_PROVISIONING,
     CATEGORY_VICTIM_UNAVAILABLE,
     AgentHardenerRunError,
@@ -111,6 +113,14 @@ async def _record_victim_image(entities: EntityClient, *, workspace: str, manife
         try:
             await entities.update(manifest)
             return
-        except EntityConflictError:
+        except EntityConflictError as exc:
             if attempt:
-                raise
+                command = (
+                    f"nemo agent-hardener manifest set {shlex.quote(manifest_id)} "
+                    f"--workspace {shlex.quote(workspace)} --victim-image {shlex.quote(image_ref)}"
+                )
+                raise AgentHardenerRunError(
+                    CATEGORY_MANIFEST,
+                    f"Built the victim image {image_ref}, but could not record it on manifest {manifest_id!r}.",
+                    remediation=f"The manifest changed during the build; set the image with `{command}`.",
+                ) from exc

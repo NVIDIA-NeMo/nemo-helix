@@ -16,6 +16,7 @@ from _doubles import make_job_context
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs import victim_build, victim_context
 from nemo_agent_hardener_plugin.jobs.errors import (
+    CATEGORY_MANIFEST,
     CATEGORY_PROVISIONING,
     CATEGORY_VICTIM_UNAVAILABLE,
     AgentHardenerRunError,
@@ -23,7 +24,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import BuildMount, BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities import EntityClient, EntityConflictError
 from nemo_helix_plugin.job_results import ResultRef
 
 _CONTEXT_REF = "default/job-fileset-victim-context-abc#results/attempt-1/victim-context"
@@ -100,6 +101,13 @@ class _Manifests:
         return entity
 
 
+class _ChurningManifests(_Manifests):
+    """A manifest someone else edits between every read and write."""
+
+    async def update(self, entity: AgentHardenerManifest) -> AgentHardenerManifest:
+        raise EntityConflictError("db_version mismatch")
+
+
 async def _build(builder: _Builder, manifests: _Manifests, context_ref: str = _CONTEXT_REF) -> str:
     return await victim_build.build_victim_image(
         builder,
@@ -134,6 +142,17 @@ async def test_a_failed_build_reports_the_builders_cause_and_leaves_the_manifest
     assert "kaniko: COPY failed: no such file" in str(raised.value)
     assert "builder-ah-victim-finance-1" in str(raised.value)
     assert manifests.updates == []
+
+
+async def test_a_manifest_that_keeps_changing_says_how_to_record_the_built_image() -> None:
+    with pytest.raises(AgentHardenerRunError) as raised:
+        await _build(_Builder(), _ChurningManifests())
+
+    image_ref = f"registry.test/nhx/default/ah-victim-finance@{_DIGEST}"
+    assert raised.value.category == CATEGORY_MANIFEST
+    assert raised.value.remediation.endswith(
+        f"`nemo agent-hardener manifest set finance --workspace default --victim-image {image_ref}`."
+    )
 
 
 async def test_a_builder_that_cannot_build_says_how_to_enable_it() -> None:
