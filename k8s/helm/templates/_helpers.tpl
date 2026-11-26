@@ -40,26 +40,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{/*
 Calculate the config from structured and unrendered base platform, with overrides.
 
-The chart's own Jobs execution profiles (nemo-helix.chartExecutors) are added after the merge, which replaces lists:
-merged, a user's jobs.executors would drop them. A user's profile with the same provider and profile replaces the chart's.
+The chart's own executors are added after the merge, which replaces lists: merged, a user's list would drop them.
+That covers its Jobs execution profiles (nemo-helix.chartExecutors) and its OpenShell deployment executor
+(nemo-helix.openshell.deploymentExecutors). A user's entry with the same key replaces the chart's.
 */}}
 {{- define "nemo-helix.calculatedConfig" -}}
 {{- $config := mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) (include "nemo-helix.builder.platformConfig" . | fromYaml) (deepCopy .Values.platformConfig) -}}
 {{- $chartExecutors := include "nemo-helix.chartExecutors" . | fromYamlArray -}}
 {{- if $chartExecutors }}
 {{- $jobs := default (dict) $config.jobs -}}
-{{- $executors := default (list) $jobs.executors -}}
-{{- $taken := dict -}}
-{{- range $executors }}
-{{- $_ := set $taken (printf "%s/%s" .provider .profile) true -}}
-{{- end }}
-{{- range $chartExecutors }}
-{{- if not (hasKey $taken (printf "%s/%s" .provider .profile)) }}
-{{- $executors = append $executors . -}}
-{{- end }}
-{{- end }}
-{{- $_ := set $jobs "executors" $executors -}}
+{{- $merge := dict "items" (default (list) $jobs.executors) "extra" $chartExecutors "keys" (list "provider" "profile") -}}
+{{- $_ := set $jobs "executors" (include "nemo-helix.appendMissing" $merge | fromYamlArray) -}}
 {{- $_ := set $config "jobs" $jobs -}}
+{{- end -}}
+{{- $deploymentExecutors := include "nemo-helix.openshell.deploymentExecutors" . | fromYamlArray -}}
+{{- if $deploymentExecutors }}
+{{- $deployments := default (dict) $config.deployments -}}
+{{- $merge := dict "items" (default (list) $deployments.executors) "extra" $deploymentExecutors "keys" (list "name") -}}
+{{- $_ := set $deployments "executors" (include "nemo-helix.appendMissing" $merge | fromYamlArray) -}}
+{{- $_ := set $config "deployments" $deployments -}}
 {{- end -}}
 {{- $auth := default (dict) $config.auth -}}
 {{- if empty (get $auth "policy_decision_point_base_url") -}}
@@ -67,6 +66,49 @@ merged, a user's jobs.executors would drop them. A user's profile with the same 
 {{- $_ := set $config "auth" $auth -}}
 {{- end -}}
 {{ tpl ($config | toYaml) . }}
+{{- end -}}
+
+{{/*
+`items` plus each entry of `extra` whose key, the values of `keys` joined, no item already has. A YAML list.
+*/}}
+{{- define "nemo-helix.appendMissing" -}}
+{{- $items := .items -}}
+{{- $keys := .keys -}}
+{{- $taken := dict -}}
+{{- range $items }}
+{{- $_ := set $taken (include "nemo-helix.itemKey" (dict "item" . "keys" $keys)) true -}}
+{{- end }}
+{{- range .extra }}
+{{- if not (hasKey $taken (include "nemo-helix.itemKey" (dict "item" . "keys" $keys))) }}
+{{- $items = append $items . -}}
+{{- end }}
+{{- end }}
+{{ toYaml $items }}
+{{- end -}}
+
+{{- define "nemo-helix.itemKey" -}}
+{{- $item := .item -}}
+{{- $parts := list -}}
+{{- range .keys }}
+{{- $parts = append $parts (toString (get $item .)) -}}
+{{- end }}
+{{- join "/" $parts -}}
+{{- end -}}
+
+{{/*
+The OpenShell deployment executor, as a YAML list, once `openshell.gatewayEndpoint` names a gateway.
+*/}}
+{{- define "nemo-helix.openshell.deploymentExecutors" -}}
+{{- with .Values.openshell.gatewayEndpoint }}
+- name: openshell
+  backend: openshell
+  config:
+    gateway_endpoint: {{ . | quote }}
+    platform_egress:
+      host: {{ printf "%s.%s.svc.cluster.local" (include "nhx-api.api-servicename" $) $.Release.Namespace | quote }}
+      port: {{ $.Values.api.service.port }}
+    serve_workdir: /tmp
+{{- end }}
 {{- end -}}
 
 {{/*
