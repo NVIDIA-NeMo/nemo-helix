@@ -149,7 +149,7 @@ async def test_an_unavailable_model_is_rejected_listing_what_the_key_reaches(mon
     monkeypatch.setattr(
         run_module,
         "validate_choice",
-        lambda *_a: SimpleNamespace(ok=False, reason="unknown_model", available=["real/a"], detail=""),
+        lambda *_a, **_k: SimpleNamespace(ok=False, reason="unknown_model", available=["real/a"], detail=""),
     )
     models = WarGameModels(analysis=ModelChoice(model="typo", base_url="https://x/v1"))
 
@@ -166,7 +166,7 @@ async def test_compile_probes_the_merged_models(
     monkeypatch.setattr(run_module, "get_nemo_client", lambda **_k: object())
     monkeypatch.setattr(_common, "resolve_model_key", lambda *_a, **_k: "k")
     monkeypatch.setattr(
-        run_module, "validate_choice", lambda model, *_a: probes.append(model) or SimpleNamespace(ok=True)
+        run_module, "validate_choice", lambda model, *_a, **_k: probes.append(model) or SimpleNamespace(ok=True)
     )
     stored = WarGameModels(analysis=ModelChoice(model="stored", base_url="https://x/v1"))
     override = WarGameModels(analysis=ModelChoice(model="override"))
@@ -184,7 +184,7 @@ async def test_a_busy_model_endpoint_does_not_block_submit(monkeypatch: pytest.M
     monkeypatch.setattr(
         run_module,
         "validate_choice",
-        lambda *_a: SimpleNamespace(ok=False, reason="provider_error", available=[], detail="HTTP 429"),
+        lambda *_a, **_k: SimpleNamespace(ok=False, reason="provider_error", available=[], detail="HTTP 429"),
     )
     models = WarGameModels(analysis=ModelChoice(model="busy", base_url="https://x/v1"))
 
