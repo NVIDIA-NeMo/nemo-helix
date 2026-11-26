@@ -21,7 +21,7 @@ import { Add } from '@nemo/icons/icons';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Combobox, type ComboboxEntry, Text } from '@nvidia/foundations-react-core';
 import { useQuery } from '@tanstack/react-query';
-import { type FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 import { useDebounce } from 'use-debounce';
 
 const NEW_FILESET_VALUE = '__new_fileset__';
@@ -61,17 +61,11 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   id,
   'aria-label': ariaLabel,
 }) => {
+  // The input shows the selection's name unless the user is typing a search. KUI's own writes
+  // (a row's label after a click, the label restored on blur) are ignored, so the "New" row
+  // never lands in the input.
+  const [editing, setEditing] = useState(false);
   const [inputText, setInputText] = useState('');
-  // KUI writes the clicked row's label into the input after every selection, including the
-  // "New" action row, which never becomes the value. Swallow that one write.
-  const skipNextInputChange = useRef(false);
-  const handleInputChange = (text: string) => {
-    if (skipNextInputChange.current) {
-      skipNextInputChange.current = false;
-      return;
-    }
-    setInputText(text);
-  };
   const [debouncedInput] = useDebounce(inputText, SEARCH_DEBOUNCE_MS);
   const [picked, setPicked] = useState<FilesetOutput | null>(null);
 
@@ -105,19 +99,11 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
     onSelectionErrorChange?.(selectionError);
   }, [selectionError, onSelectionErrorChange]);
 
-  // The input is controlled, so show the selection's name whenever the selection resolves or
-  // changes; KUI only writes it on a click.
   const selectedLabel = selected?.name ?? (selectionError && value ? valueName : '');
-  useEffect(() => {
-    setInputText(selectedLabel);
-  }, [selectedLabel]);
 
-  // Picking an option writes its name into the input. Treat that as "no search" so reopening
-  // the list shows every fileset rather than just the one already chosen.
   useEffect(() => {
-    const term = debouncedInput.trim();
-    setSearch(selected && term === selected.name ? '' : term);
-  }, [debouncedInput, selected, setSearch]);
+    setSearch(editing ? debouncedInput.trim() : '');
+  }, [editing, debouncedInput, setSearch]);
 
   const showPurpose = Array.isArray(purpose) && purpose.length > 1;
 
@@ -216,8 +202,8 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   ]);
 
   const handleValueChange = (next: string) => {
+    setEditing(false);
     if (next === NEW_FILESET_VALUE) {
-      skipNextInputChange.current = true;
       onRequestNew?.();
       return;
     }
@@ -241,9 +227,19 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
       items={items}
       value={value ?? ''}
       onValueChange={handleValueChange}
-      inputValue={inputText}
-      onInputValueChange={handleInputChange}
-      attributes={{ ComboboxTrigger: { onBlur } }}
+      inputValue={editing ? inputText : selectedLabel}
+      attributes={{
+        ComboboxTrigger: {
+          onChange: (event) => {
+            setEditing(true);
+            setInputText(event.currentTarget.value);
+          },
+          onBlur: () => {
+            setEditing(false);
+            onBlur?.();
+          },
+        },
+      }}
       filterMatchFn="disable"
       onScrollToBottom={() => void loadMore()}
       emptyStateMessage={emptyMessage}
