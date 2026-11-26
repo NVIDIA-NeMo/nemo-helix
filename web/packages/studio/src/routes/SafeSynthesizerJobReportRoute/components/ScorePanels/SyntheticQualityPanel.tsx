@@ -7,75 +7,103 @@ import { LINK_SAFE_SYNTHESIZER_LOW_SQS, LINK_SAFE_SYNTHESIZER_SQS } from '@studi
 import { ScoreGuidance } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreGuidance';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
 import { TitledDial } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/TitledDial';
+import { METRIC_COPY } from '@studio/routes/SafeSynthesizerJobReportRoute/reportCopy';
 import { QUALITY_RECOMMENDED_USES } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface SyntheticQualityPanelProps {
   reportSummary?: SafeSynthesizerSummary;
+  /** Overrides the summary's SQS, such as with the report data's. */
+  score?: number | null;
   title: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
+  /** Per-metric cards; without them the panel lists the summary's subscores. */
+  children?: ReactNode;
 }
 
 export const SyntheticQualityPanel: FC<SyntheticQualityPanelProps> = ({
   reportSummary,
+  score,
   title,
   icon,
+  children,
 }) => {
-  const sqsScore = reportSummary?.synthetic_data_quality_score;
+  const sqsScore = score ?? reportSummary?.synthetic_data_quality_score;
+
+  const dial = (
+    <TitledDial
+      title="Synthetic Quality Score (SQS)"
+      score={sqsScore}
+      description={
+        <>
+          The{' '}
+          <Anchor href={LINK_SAFE_SYNTHESIZER_SQS} textKind="body/regular/sm" external>
+            SQS measures
+          </Anchor>{' '}
+          how well synthetic data preserves the statistical properties of your training data,
+          scoring 0.0–10.0 (higher is better) across up to 5 subscores.
+        </>
+      }
+    />
+  );
+  const guidance = (
+    <ScoreGuidance
+      heading="Understanding Quality Scores"
+      intro="Some quality loss is expected — and acceptable — since it's inherent to privacy preservation. Mid-range scores are often sufficient for model training. You should test your synthetic data on the downstream use case to assess true viability."
+      lowScoreGoal="model learning"
+      lowScoreHref={LINK_SAFE_SYNTHESIZER_LOW_SQS}
+      uses={QUALITY_RECOMMENDED_USES}
+      score={sqsScore}
+    />
+  );
+
+  if (children) {
+    return (
+      <Panel slotHeading={title} slotIcon={icon} elevation="high" density="standard">
+        <Stack gap="density-2xl">
+          <Grid cols={{ xs: 1, md: 2 }} gap="density-2xl">
+            {dial}
+            {guidance}
+          </Grid>
+          {children}
+        </Stack>
+      </Panel>
+    );
+  }
 
   return (
     <Panel slotHeading={title} slotIcon={icon} elevation="high" density="standard">
       <Grid cols={{ xs: 1, md: 2 }} gap="density-2xl">
         <Stack>
-          <TitledDial
-            title="Synthetic Quality Score (SQS)"
-            score={sqsScore}
-            description={
-              <>
-                The{' '}
-                <Anchor href={LINK_SAFE_SYNTHESIZER_SQS} textKind="body/regular/sm" external>
-                  SQS measures
-                </Anchor>{' '}
-                how well synthetic data preserves the statistical properties of your training data,
-                scoring 0.0–10.0 (higher is better) across up to 5 subscores.
-              </>
-            }
-          />
-          <ScoreGuidance
-            heading="Understanding Quality Scores"
-            intro="Some quality loss is expected — and acceptable — since it's inherent to privacy preservation. Mid-range scores are often sufficient for model training. You should test your synthetic data on the downstream use case to assess true viability."
-            lowScoreGoal="model learning"
-            lowScoreHref={LINK_SAFE_SYNTHESIZER_LOW_SQS}
-            uses={QUALITY_RECOMMENDED_USES}
-            score={sqsScore}
-          />
+          {dial}
+          {guidance}
         </Stack>
         <Stack>
           <ScoreTable
             scores={[
               {
-                name: 'Column Correlation Stability',
-                description: 'Measures how well correlations between columns are preserved.',
+                name: METRIC_COPY.column_correlation_stability.name,
+                description: `${METRIC_COPY.column_correlation_stability.description}.`,
                 value: reportSummary?.column_correlation_stability_score,
               },
               {
-                name: 'Deep Structure Stability',
-                description: 'Measures how well structural relationships are maintained.',
+                name: METRIC_COPY.deep_structure_stability.name,
+                description: `${METRIC_COPY.deep_structure_stability.description}.`,
                 value: reportSummary?.deep_structure_stability_score,
               },
               {
-                name: 'Column Distribution Stability',
-                description: 'Measures how well value distributions are preserved.',
+                name: METRIC_COPY.column_distribution_stability.name,
+                description: `${METRIC_COPY.column_distribution_stability.description}.`,
                 value: reportSummary?.column_distribution_stability_score,
               },
               {
-                name: 'Text Semantic Similarity',
-                description: 'Measures meaning preservation in text fields.',
+                name: METRIC_COPY.text_semantic_similarity.name,
+                description: `${METRIC_COPY.text_semantic_similarity.description}.`,
                 value: reportSummary?.text_semantic_similarity_score,
               },
               {
-                name: 'Text Structure Similarity',
-                description: 'Measures structural pattern preservation in text fields.',
+                name: METRIC_COPY.text_structure_similarity.name,
+                description: `${METRIC_COPY.text_structure_similarity.description}.`,
                 value: reportSummary?.text_structure_similarity_score,
               },
             ]}
