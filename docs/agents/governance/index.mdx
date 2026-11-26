@@ -109,10 +109,24 @@ Before running a war-game, make sure you have:
 1. At least one [Inference Gateway](/documentation/models-and-inference) model
    provider, so the attackers, defenders and the agent under test can all reach
    models.
-1. An agent registered with `nemo agents register`. Unlike the other agent
+1. An agent registered with `nemo agents register`, written in the Fabric agent
+   spec (`config_format: nemo-agents-spec-v1`). Unlike the other agent
    workflows, Agent Governance does not need the agent deployed: it reads the
    stored config and builds its own sandboxed copy. You can also point a run at
    a local agent project directory instead of registering anything.
+1. On a development build installed from source, the sandbox image tag. To build
+   a registered agent's sandboxed copy, the plugin copies files from the sandbox
+   images. It looks for images tagged with the installed nemo-helix version,
+   and a development version such as `0.10.0.post226.dev0+70332d17b` has no published
+   images, so `init --agent` fails with HTTP 400. Set these variables in the
+   environment of `nemo services run`, not of the CLI:
+
+   | Variable | Value | Default |
+   |----------|-------|---------|
+   | `NEMO_AGENTS_SANDBOX_IMAGE_TAG` | A published nemo-helix release tag | The installed nemo-helix version |
+   | `NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY` | Optional. The registry holding the images, if not the default | `nvcr.io/nvidia/nemo-helix` |
+
+   A release install already matches a published tag and needs neither variable.
 
 ### On Kubernetes
 
@@ -149,10 +163,12 @@ already carries the Agent Hardener and garak virtual environments and the
 
 ## Scope
 
-- **Local deployments only.** Agent Governance runs on a platform started from
-  source with `nemo services run`. The Helm chart and container images do not
-  include it, so the Agent hardening plugin API and the Studio Agent Hardening
-  page are absent there.
+- **War-games run on local deployments.** The Helm chart and the release API
+  image include the Agent hardening plugin, so the `/apis/agent-hardener`
+  endpoints and the Studio Agent Hardening pages are available on Kubernetes.
+  The war-game and benign-suite jobs are not supported there yet. See
+  [On Kubernetes](#on-kubernetes). To run them, start the platform locally with
+  `nemo services run`.
 - **Attacks focus on agent behavior.** Probes exercise how the agent responds to
   adversarial input, including prompt injection, indirect injection through tool
   output and jailbreaks. Network reach is covered on the defense side, where the
