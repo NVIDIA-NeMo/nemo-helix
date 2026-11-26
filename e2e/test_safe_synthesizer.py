@@ -67,29 +67,20 @@ def _unique_name(prefix: str) -> str:
 
 
 def _deterministic_pii_replacement_config() -> dict[str, Any]:
-    # Select fixture columns explicitly so this e2e does not depend on an
-    # external LLM column-classification provider being configured in CI.
+    # An inline plan keeps this e2e independent of an LLM provider for plan discovery.
     return {
         "enable_synthesis": False,
         "enable_replace_pii": True,
         "replace_pii": {
-            "globals": {
-                "classify": {"enable_classify": False},
-                "seed": 7,
-                "locales": ["en_US"],
+            "seed": 7,
+            "locale": "en_US",
+            "replacement_plan": {
+                "columns_to_replace": [
+                    {"column_name": "email", "entity_type": "email"},
+                    {"column_name": "phone_number", "entity_type": "phone_number"},
+                    {"column_name": "review", "entity_type": "free_text"},
+                ]
             },
-            "steps": [
-                {
-                    "vars": {"row_seed": "random.random()"},
-                    "rows": {
-                        "update": [
-                            {"name": "email", "value": "fake.persona(row_index=vars.row_seed + index).email"},
-                            {"name": "phone_number", "value": "fake.msisdn()"},
-                            {"name": "review", "value": "this | fake_entities"},
-                        ]
-                    },
-                }
-            ],
         },
     }
 
@@ -106,12 +97,9 @@ def test_safe_synthesizer_pii_replacement_config_validates() -> None:
 
     assert spec.enable_synthesis is False
     assert spec.config.replace_pii is not None
-    assert spec.config.replace_pii.globals.classify.enable_classify is False
-    rows = spec.config.replace_pii.steps[0].rows
-    assert rows is not None
-    updates = rows.update
-    assert updates is not None
-    assert {rule.name for rule in updates} == {"email", "phone_number", "review"}
+    plan = spec.config.replace_pii.inline_plan
+    assert plan is not None
+    assert {column.column_name for column in plan.columns_to_replace} == {"email", "phone_number", "review"}
 
 
 def _string_headers(client: NemoClient) -> dict[str, str]:
