@@ -151,8 +151,10 @@ tasks: default/my-gym-taskset
 target:
   kind: gym
   environment: default/my-gym-environment
-  agent: simple_agent
-  agent_config: responses_api_agents/simple_agent/configs/simple_agent.yaml
+  source:
+    component: simple_agent
+    config: responses_api_agents/simple_agent/configs/simple_agent.yaml
+    instance: simple_agent
   resources_server: custom_greeting
   num_repeats: 1
   concurrency: 1
@@ -172,8 +174,10 @@ The Evals plugin skill includes the same shape as a validated JSON starting poin
 Replace the service URL, workspace, model, taskset, and component names for your deployment.
 The model URL must be present in the deployment's sandbox egress configuration.
 
-If the package declares the selected agent instance, you can omit `agent_config`. Set
-`agent_ref_name` when the instance name registered by the package differs from `agent`.
+If the package declares the selected agent instance, you can omit `source.config`.
+`source.instance` defaults to `source.component`; set it explicitly when the package
+registers the instance under a different name. The nested `source` fields replace
+the deprecated flat `agent`, `agent_config`, and `agent_ref_name` fields.
 
 For an environment variable containing a credential, use a platform secret reference:
 
@@ -209,11 +213,9 @@ Submit the runner object rather than the spec file. The runner carries the evalu
 `GymPlacement` carries the deployment, so the configuration is written once and
 `evaluator.submit` returns a job handle that polls itself.
 
-<Warning>
-
-In NeMo Helix 0.7, `GymRuntimeConfig` does not expose the YAML `hydra_params` fields used above for `policy_base_url`, `policy_api_key`, and `policy_model_name`. If your custom environment needs per-job model endpoint overrides, submit the YAML spec with the CLI. Use the Python SDK path only when the model connection is already provided by the environment package or deployment defaults.
-
-</Warning>
+`GymRuntimeConfig.hydra_params` supplies the same per-job model endpoint overrides
+as the CLI YAML. Pass structured configuration values, not serialized Hydra command
+strings. Keep real credentials in `env_secrets`, not in `hydra_params`.
 
 ```python
 from nemo_evals.api.schemas import TasksetRef
@@ -232,6 +234,14 @@ runner = GymAgentTaskRunner(
         agent="simple_agent",
         agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
         resources_server="custom_greeting",
+        hydra_params={
+            "policy_base_url": (
+                "http://nemo-helix-api.default.svc.cluster.local:8080"
+                "/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1"
+            ),
+            "policy_api_key": "not-used",
+            "policy_model_name": "my-model",
+        },
         env_secrets={"EXTERNAL_MODEL_API_KEY": SecretRef("default/my-model-api-key")},
     )
 )
@@ -284,7 +294,7 @@ for the queryable result record and SDK retrieval path.
   the runtime image, a shared PVC, and model egress.
 - **PVC mismatch:** The Jobs execution profile and `sandbox_job_storage_pvc_claim` must name the same
   claim.
-- **Agent returns no rollout:** Set `agent_ref_name` to the agent instance registered by the package.
+- **Agent returns no rollout:** Set `source.instance` in the CLI YAML to the agent instance registered by the package.
 - **Model connection failure:** Add the model host and port to the deployment-owned egress allowlist.
 - **`uv` reports a package "not found in the cache", or a Hugging Face load fails on a missing
   file:** The host ran a `wheels-v1` package offline because the deployment allows no egress

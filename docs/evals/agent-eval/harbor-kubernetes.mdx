@@ -15,12 +15,12 @@ description: "Submit Harbor tasks as a taskset run: one Kubernetes Job and OpenS
 
 | Aspect | [Local Harbor runner](/documentation/evaluate-models/agent-eval/harbor-runner) | Kubernetes taskset run (this page) |
 | --- | --- | --- |
-| Interface | Python SDK (`HarborAgentTaskRunner`) | `nemo evals runs` CLI, or the REST API: `POST /apis/evals/v2/workspaces/<ws>/agent-evaluate/runs` |
+| Interface | Python SDK (`HarborAgentTaskRunner`) | Python SDK (`Evaluator.taskset_runs`), `nemo evals runs` CLI, or the REST API: `POST /apis/evals/v2/workspaces/<ws>/agent-evaluate/runs` |
 | Sandbox | Docker on your machine | OpenSandbox pod in the cluster |
 | Parallelism | Your machine's resources | One Job per task in the cluster |
 | Network policy | Task's own | Task's own, narrowed by the [sandbox profile](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles) set by a cluster admin |
 
-- The Python SDK publishes tasks and tasksets (`Evaluator.tasks`, `Evaluator.tasksets`). It has no method to submit or track a Kubernetes run.
+- The Python SDK publishes tasks and tasksets (`Evaluator.tasks`, `Evaluator.tasksets`) and submits, tracks, lists, and reads Kubernetes runs through `Evaluator.taskset_runs`. See [Submit and track with the Python SDK](#submit-and-track-with-the-python-sdk).
 
 ```mermaid
 flowchart LR
@@ -190,6 +190,69 @@ To prepare a taskset without submitting a run:
 
    - Submit rejects the run if any task's image isn't built yet.
    - To keep the source dataset's name in the Experiment leaderboard, add `--experiment` and `--intake-dataset`. See [Label the dataset](#label-the-dataset).
+
+### Submit and track with the Python SDK
+
+Use `Evaluator.taskset_runs` for Kubernetes execution, rather than the local
+`HarborAgentTaskRunner`. First publish the taskset and build its images as above.
+Export its pinned reference (`export TASKSET`) before running this example; the SDK
+submission does not upload tasks or build missing images.
+
+```python
+import os
+import time
+from uuid import uuid4
+
+from nemo_evals.api.fields import TasksetRef
+from nemo_evals.api.taskset_run_schemas import HarborTaskJobsExecutionInput, TasksetRunInput
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalInputSpec,
+    HarborBuiltinAgentSource,
+    HarborRunnerTarget,
+)
+from nemo_evals.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+evaluator = Evaluator.from_client(client)
+request = TasksetRunInput(
+    spec=AgentEvalInputSpec(
+        tasks=TasksetRef(os.environ["TASKSET"]),
+        target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
+    ),
+    execution=HarborTaskJobsExecutionInput(max_concurrent_task_jobs=2),
+    idempotency_key=str(uuid4()),
+)
+run = evaluator.taskset_runs.submit(request)
+run_id = run.run_id
+print("Run ID:", run_id, "Idempotency key:", request.idempotency_key)
+
+# Keep run_id: retrieve/results also work in a new process with the same workspace.
+deadline = time.monotonic() + 3600  # Client-side tracking budget, not a run timeout.
+while run.phase in {"accepted", "running"} or run.result_state == "pending":
+    if time.monotonic() >= deadline:
+        raise TimeoutError(f"Stopped tracking {run_id}; resume with retrieve(run_id)")
+    time.sleep(5)
+    run = evaluator.taskset_runs.retrieve(run_id)
+    print(run.phase, run.result_state, run.progress)
+
+results = evaluator.taskset_runs.results(run_id)
+for task in results.tasks:
+    print(task.name, task.result)  # None until that task has a result record.
+print("Combined result:", results.result)
+
+for recent in evaluator.taskset_runs.list(page_size=10).data:
+    print(recent.run_id, recent.phase)
+```
+
+Execution and result finalization are separate: a terminal `phase` does not imply
+that the merged result is ready. `results.result` is available once `result_state`
+is `ready`; failed runs can have no result, and cancelled or expired runs can have
+results for the tasks that finished. Save the run ID and idempotency key so you can
+resume tracking or retry the same request without creating a duplicate run. The
+one-hour client tracking budget also bounds waiting if a terminal run remains
+`pending`; reaching it does not cancel the remote run. The `oracle` agent above
+uses no model or provider key.
 
 ## Run with a model-calling agent (openhands)
 
