@@ -29,6 +29,10 @@ const IMAGE_PLACEHOLDER = '<registry>/<image>:<tag>';
 /** Image reference syntax only — the registry is never contacted from here. Empty clears the image. */
 const isValidImageRef = (value: string): boolean => !/\s/.test(value);
 
+/** A digest-pinned reference (`repo@sha256:...`) cannot be a build tag, so the recipe tags its repository `latest`. */
+export const buildTag = (image: string): string =>
+  image.includes('@') ? `${image.slice(0, image.indexOf('@'))}:latest` : image;
+
 /**
  * The victim image a containerized war-game runs, and the steps to produce it.
  *
@@ -48,7 +52,7 @@ export const VictimImagePanel: FC<VictimImagePanelProps> = ({
   useEffect(() => setDraft(victimImage), [victimImage]);
   const valid = isValidImageRef(draft.trim());
 
-  const image = draft.trim() || IMAGE_PLACEHOLDER;
+  const image = buildTag(draft.trim()) || IMAGE_PLACEHOLDER;
   const commands = [`docker build -t ${image} - < ${stage.archiveName}`, `docker push ${image}`].join('\n');
 
   return (
