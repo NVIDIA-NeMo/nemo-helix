@@ -265,25 +265,24 @@ def test_authentik_static_ci_prepares_envoy_validation_inputs() -> None:
 def test_cpu_smoke_image_build_is_required_in_ci_without_e2e_opt_in() -> None:
     ci = _load_yaml(Path(".github/workflows/ci.yaml"))
     e2e = _load_yaml(Path(".github/workflows/e2e.yaml"))
-    job = ci["jobs"]["build-cpu-smoke-images"]
-
-    assert job["needs"] == ["changes"]
-    assert job["if"].strip() == (
-        "!cancelled() && (\n"
-        "  github.event_name == 'workflow_dispatch' ||\n"
-        "  needs.changes.outputs.cpu-smoke == 'true' ||\n"
-        "  needs.changes.outputs.auth-idp == 'true' ||\n"
-        "  needs.changes.outputs.customization-auth == 'true' ||\n"
-        "  needs.changes.outputs.builder-e2e == 'true'\n"
-        ")"
-    )
-    assert "build-cpu-smoke-images" in ci["jobs"]["ci-status"]["needs"]
-    assert "build-cpu-smoke-images" in ci["jobs"]["post-merge-image-status"]["needs"]
-    # Both build through the shared workflow with the same inputs, so they tag the same images.
-    e2e_job = e2e["jobs"]["build-cpu-smoke-images"]
-    assert job["uses"] == e2e_job["uses"] == "./.github/workflows/build-cpu-smoke-images.yaml"
-    assert job["with"] == e2e_job["with"]
-    assert job["permissions"] == e2e_job["permissions"]
+    families = {
+        "build-api-images": ("api", "cpu-api"),
+        "build-task-images": ("tasks", "cpu-tasks"),
+        "build-tooling-images": ("build-tools", "cpu-build-tools"),
+        "build-gym-host-image": ("gym-host", "cpu-gym-host"),
+    }
+    for job_id, (family, filter_name) in families.items():
+        job = ci["jobs"][job_id]
+        e2e_job = e2e["jobs"][job_id]
+        assert job["needs"] == ["changes"]
+        assert f"needs.changes.outputs.{filter_name} == 'true'" in job["if"]
+        assert job_id in ci["jobs"]["ci-status"]["needs"]
+        assert job_id in ci["jobs"]["post-merge-image-status"]["needs"]
+        assert job_id in e2e["jobs"]["post-merge-e2e-status"]["needs"]
+        assert job["uses"] == e2e_job["uses"] == "./.github/workflows/build-cpu-smoke-images.yaml"
+        assert job["with"] == {**e2e_job["with"], "write_cache": True}
+        assert job["with"]["family"] == family
+        assert job["permissions"] == e2e_job["permissions"]
 
 
 def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
@@ -297,8 +296,8 @@ def test_builder_e2e_moves_to_opt_in_workflow_with_both_auth_modes() -> None:
     assert "kind-builder-e2e" not in ci["jobs"]["ci-status"]["needs"]
     assert "kind-builder-e2e" not in ci["jobs"]["post-merge-image-status"]["needs"]
     assert "kind-builder-e2e" in e2e["jobs"]["post-merge-e2e-status"]["needs"]
-    assert job["needs"] == ["eligibility", "build-cpu-smoke-images"]
-    assert job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
+    assert job["needs"] == ["eligibility", "build-api-images", "build-task-images", "build-tooling-images"]
+    assert job["if"] == "needs.build-api-images.outputs.publish_images == 'true'"
     assert job["strategy"]["matrix"]["auth"] == ["off", "on"]
     assert "needs.changes.outputs" not in block
     steps = {step["name"]: step for step in job["steps"]}
@@ -318,10 +317,11 @@ def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
     assert set(runtime_job["needs"]) == {
         "eligibility",
         "policy-wasm",
-        "build-cpu-smoke-images",
+        "build-api-images",
+        "build-task-images",
         "python-auth-idp-static-test",
     }
-    assert runtime_job["if"] == "needs.build-cpu-smoke-images.outputs.publish_images == 'true'"
+    assert runtime_job["if"] == "needs.build-api-images.outputs.publish_images == 'true'"
     assert '--image "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"' in job
 
 
@@ -1362,7 +1362,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     assert "--skip-image-load" in run_sh
     expected_skip_image_load_line = (
         "NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: "
-        "${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}"
+        "${{ needs.build-api-images.outputs.publish_images == 'true' && '1' || '0' }}"
     )
     assert expected_skip_image_load_line in ci_workflow
     assert "namespace: nemo-authentik" in ci_workflow

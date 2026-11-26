@@ -22,7 +22,7 @@
 
 ARG NHX_PYTHON_BASE=nhx-python-base
 
-FROM ghcr.io/osscontainertools/kaniko:v1.28.5-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
+FROM ghcr.io/osscontainertools/kaniko:v1.29.2-debug@sha256:b3cadc638a5b0a7e8ae7b3b76704821b2b5f191163222da401283541c8fa2d41 AS kaniko
 
 FROM ${NHX_PYTHON_BASE} AS builder
 ARG PYTHON_VERSION=3.12.15

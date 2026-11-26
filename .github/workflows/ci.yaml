@@ -63,6 +63,10 @@ jobs:
       docker: ${{ steps.changes.outputs.docker }}
       helm: ${{ steps.changes.outputs.helm }}
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
+      cpu-api: ${{ steps.changes.outputs.cpu-api }}
+      cpu-tasks: ${{ steps.changes.outputs.cpu-tasks }}
+      cpu-build-tools: ${{ steps.changes.outputs.cpu-build-tools }}
+      cpu-gym-host: ${{ steps.changes.outputs.cpu-gym-host }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
@@ -204,7 +208,8 @@ jobs:
       - name: Print bake groups
         shell: bash
         run: |
-          make docker-print TARGET=docker-cpu
+          make docker-print TARGET='docker-cpu docker-cpu-ci'
+          make docker-print TARGET='docker-api-ci docker-tasks-ci docker-build-tools-ci docker-gym-host-ci'
           make docker-print TARGET=docker-gpu
           make docker-print TARGET=docker-garak
           make docker-print TARGET=docker-python-base
@@ -214,33 +219,63 @@ jobs:
 
   # Keep the build steps aligned with e2e.yaml. CI validates image builds without
   # requiring E2E opt-in; E2E builds independently to avoid cross-workflow races.
-  build-cpu-smoke-images:
-    name: Build CPU smoke images
+  build-api-images:
+    name: Build API images
     needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.cpu-smoke == 'true' ||
-        needs.changes.outputs.auth-idp == 'true' ||
-        needs.changes.outputs.customization-auth == 'true' ||
-        needs.changes.outputs.builder-e2e == 'true'
-      )
-    permissions:
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-api == 'true' || needs.changes.outputs.auth-idp == 'true')
+    permissions: &cpu-image-permissions
       contents: read
       packages: write
-    # Shared with e2e.yaml and nightly-taskset-runs-e2e.yaml.
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
+      family: api
       source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
-      publish: >-
-        ${{
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-          github.event_name == 'merge_group' ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish)
-        }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-task-images:
+    name: Build task images
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-tasks == 'true' || needs.changes.outputs.auth-idp == 'true')
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: tasks
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-tooling-images:
+    name: Build tooling images
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-build-tools == 'true' || needs.changes.outputs.builder-e2e == 'true')
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: build-tools
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-gym-host-image:
+    name: Build Gym host image
+    needs: [changes]
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-gym-host == 'true') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: gym-host
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      write_cache: true
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
 
   build-garak-test-image:
     name: Build garak test image
@@ -1330,7 +1365,10 @@ jobs:
       - changes
       - policy-wasm
       - python-auth-idp-static-test
-      - build-cpu-smoke-images
+      - build-api-images
+      - build-task-images
+      - build-tooling-images
+      - build-gym-host-image
       - build-garak-test-image
       - build-safe-synthesizer-test-image
     # E2E runs in its own workflow; this notification covers only CI image builds
@@ -1931,7 +1969,10 @@ jobs:
       - actionlint
       - uv-lock
       - docker-bake-graph
-      - build-cpu-smoke-images
+      - build-api-images
+      - build-task-images
+      - build-tooling-images
+      - build-gym-host-image
       - helm-lint
       - helm-chart-verifier
       - lint
@@ -1985,6 +2026,22 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+      - name: Verify selected CPU image jobs ran
+        env:
+          API_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-api == 'true' || needs.changes.outputs.auth-idp == 'true') }}
+          TASKS_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-tasks == 'true' || needs.changes.outputs.auth-idp == 'true') }}
+          TOOLS_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-build-tools == 'true' || needs.changes.outputs.builder-e2e == 'true') }}
+          GYM_HOST_REQUIRED: ${{ (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpu-gym-host == 'true') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          jq -e --arg api "$API_REQUIRED" --arg tasks "$TASKS_REQUIRED" \
+            --arg tools "$TOOLS_REQUIRED" --arg gym "$GYM_HOST_REQUIRED" '
+            ($api != "true" or ."build-api-images".result == "success") and
+            ($tasks != "true" or ."build-task-images".result == "success") and
+            ($tools != "true" or ."build-tooling-images".result == "success") and
+            ($gym != "true" or ."build-gym-host-image".result == "success")
+          ' <<< "$NEEDS_JSON"
 
       - name: Check OPA policy test outcome
         if: always()
