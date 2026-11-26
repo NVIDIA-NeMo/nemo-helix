@@ -18,15 +18,14 @@ from nemo_evals.taskset_runs.trials import (
     TrialProgress,
     count_trials,
 )
-from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import rollout_failure
 
 
 class GymTrialCounter:
     """Counts a Gym run's rollouts as they finish and reports them under :data:`TRIAL_COUNTS_STATUS_KEY`.
 
-    One trial is one rollout: a task run once, so a run has tasks times repeats of them. Gym writes a record
-    per attempt, so a retried rollout's latest record stands. Satisfies
+    A run plans one trial per rollout (tasks times repeats), and every record Gym writes is a trial, as in the
+    final evaluation: a retried rollout counts once per attempt. Satisfies
     :class:`~nhx_evals_sdk.agent_eval.runtimes.gym.progress.RolloutProgress`.
     """
 
@@ -42,7 +41,7 @@ class GymTrialCounter:
         self._publish_timeout = publish_timeout
         self._planned = 0
         self._unfinished = TrialPhase.PENDING
-        self._rollouts: dict[str, TrialProgress] = {}
+        self._finished: list[TrialProgress] = []
         self._lock = asyncio.Lock()
 
     async def planned(self, rollouts: int) -> None:
@@ -50,9 +49,7 @@ class GymTrialCounter:
         await self._report()
 
     async def finished(self, records: Sequence[Mapping[str, Any]]) -> None:
-        for record in records:
-            rollout = self._rollout(record)
-            self._rollouts[rollout.trial] = rollout
+        self._finished.extend(self._trial(record) for record in records)
         await self._report()
 
     async def stopped(self) -> None:
@@ -61,7 +58,7 @@ class GymTrialCounter:
 
     def counts(self) -> TrialCounts:
         """The finished rollouts counted as recorded; the rest pending, or cancelled once collection stopped."""
-        counts = count_trials(list(self._rollouts.values()))
+        counts = count_trials(self._finished)
         unfinished = self._planned - counts.total
         if unfinished <= 0:
             return counts
@@ -69,13 +66,11 @@ class GymTrialCounter:
             update={"total": self._planned, "phases": {**counts.phases, self._unfinished: unfinished}}
         )
 
-    def _rollout(self, record: Mapping[str, Any]) -> TrialProgress:
-        task, rollout = record.get(NG_TASK_INDEX), record.get(NG_ROLLOUT_INDEX)
-        name = f"{task}:{rollout}" if isinstance(task, int) and isinstance(rollout, int) else f"#{len(self._rollouts)}"
+    def _trial(self, record: Mapping[str, Any]) -> TrialProgress:
         failure = rollout_failure(record)
         if failure is not None:
-            return TrialProgress(trial=name, phase=TrialPhase.ERRORED, error_type=failure)
-        return TrialProgress(trial=name, phase=TrialPhase.SUCCEEDED, reward=_reward(record.get(self._reward_key)))
+            return TrialProgress(trial="", phase=TrialPhase.ERRORED, error_type=failure)
+        return TrialProgress(trial="", phase=TrialPhase.SUCCEEDED, reward=_reward(record.get(self._reward_key)))
 
     async def _report(self) -> None:
         async with self._lock:

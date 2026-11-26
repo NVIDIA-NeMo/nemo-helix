@@ -65,28 +65,21 @@ async def test_a_rollout_whose_agent_never_ran_counts_as_failed_like_its_final_t
     assert reports.last()["rewarded"] == 0
 
 
-async def test_a_retried_rollout_counts_once_by_its_latest_record() -> None:
-    """Gym records each attempt; the rollout is one trial, so a retry can't push finished past the total."""
+async def test_every_record_counts_as_a_trial_like_the_final_evaluation() -> None:
+    """A sandboxed host restamps rollout indices per chunk, so repeats share them: identity can't dedupe records.
+
+    A retried rollout therefore counts once per attempt, and the total can pass the plan, as the final
+    evaluation counts it.
+    """
     reports = Reports()
     counter = GymTrialCounter(reports, reward_key="reward")
-    await counter.planned(1)
+    await counter.planned(2)
 
-    await counter.finished([_rollout(0, 0, **{NG_FAILURE_CLASS: "transient"})])
-    await counter.finished([_rollout(0, 0, reward=1.0)])
+    await counter.finished([_rollout(0, 0, reward=1.0), _rollout(0, 0, reward=0.0)])
+    await counter.finished([_rollout(1, 0, **{NG_FAILURE_CLASS: "transient"}), _rollout(1, 0, reward=1.0)])
 
-    assert reports.last()["total"] == 1
-    assert reports.last()["phases"] == {"succeeded": 1}
-
-
-async def test_rollouts_without_indices_each_count_and_can_exceed_the_plan() -> None:
-    reports = Reports()
-    counter = GymTrialCounter(reports, reward_key="reward")
-    await counter.planned(1)
-
-    await counter.finished([{"reward": 1.0}, {"reward": 0.0}])
-
-    assert reports.last()["total"] == 2
-    assert reports.last()["phases"] == {"succeeded": 2}
+    assert reports.last()["total"] == 4
+    assert reports.last()["phases"] == {"succeeded": 3, "errored": 1}
 
 
 async def test_rollouts_unfinished_when_collection_stops_count_as_cancelled() -> None:
