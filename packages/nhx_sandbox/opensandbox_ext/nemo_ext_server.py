@@ -51,6 +51,7 @@ from fastapi import APIRouter, HTTPException
 from kubernetes import client as k8s
 from kubernetes.stream import stream
 from nemo_ext_pod import (
+    SANDBOX_CONTAINER,
     add_agent_bundle,
     add_process_oom_kill,
     add_services,
@@ -211,7 +212,7 @@ class NemoComposeProvider(BatchSandboxProvider):
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
         """The stock status, except where the pod says more than the BatchSandbox does.
 
-        A Pending sandbox whose pod has a stopped container, or one the runtime refused to create, is
+        A Pending or Allocated sandbox whose pod has a stopped container, or one the runtime refused to create, is
         ``Failed``, with the container's reason (``OOMKilled``, say) as its message, so a client can
         tell why its sandbox died. get_workload and list_workloads read the pod; this does no I/O.
 
@@ -222,14 +223,12 @@ class NemoComposeProvider(BatchSandboxProvider):
         failing or slow service or bundle is seen by the client's wait, not hidden behind the create call.
         """
         status = super().get_status(workload)
-        if status["state"] != "Pending":
-            return status
-
-        # The controller leaves a sandbox whose container stopped in Pending; only the pod says why.
         failed = workload.get(_FAILED_CONTAINER_KEY)
-        if failed is not None:
+        if failed is not None and status["state"] in ("Pending", "Allocated"):
             reason, message = failed
             return {**status, "state": "Failed", "reason": reason, "message": message}
+        if status["state"] != "Pending":
+            return status
 
         if not self._parse_pod_ip(workload):
             return status
@@ -271,7 +270,8 @@ class NemoComposeProvider(BatchSandboxProvider):
         for pod in pods:
             for container in (pod.status.container_statuses if pod.status is not None else None) or []:
                 terminated = container.state.terminated if container.state is not None else None
-                if terminated is not None:
+                # A service container that finished its work exits 0; the sandbox container never stops on its own.
+                if terminated is not None and (container.name == SANDBOX_CONTAINER or terminated.exit_code != 0):
                     return (
                         "CONTAINER_TERMINATED",
                         f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})",
@@ -431,6 +431,8 @@ def _read_output(ws: Any, timeout: float) -> tuple[str, str]:
 
 def end_create_wait(status_info: dict[str, Any]) -> bool:
     """The stock create wait's unschedulable check, which also ends the wait with the message of a Failed sandbox."""
+    if _stock_is_unschedulable_status(status_info):
+        return True
     if status_info.get("state") == "Failed":
         raise HTTPException(
             status_code=500,
@@ -439,7 +441,7 @@ def end_create_wait(status_info: dict[str, Any]) -> bool:
                 "message": f"Sandbox failed to start: {status_info.get('message') or 'no message'}",
             },
         )
-    return _stock_is_unschedulable_status(status_info)
+    return False
 
 
 def _error(status: int, code: str, message: str) -> HTTPException:

@@ -307,6 +307,27 @@ def test_pending_sandbox_whose_container_stopped_is_failed_with_its_reason(
     assert k8s.listed_namespaces == ["nemo"]
 
 
+def test_allocated_sandbox_whose_container_stopped_is_failed_with_its_reason(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    """A BatchSandbox with no phase and a pod IP reads as Allocated, which would end the create wait as a success."""
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+
+    status = _status(provider, k8s, _labelled_workload({}, "", "10.0.0.5"))
+
+    assert (status["state"], status["message"]) == ("Failed", "container sandbox: OOMKilled (exit 137)")
+
+
+@pytest.mark.parametrize(("name", "state"), [("db-init", "Allocated"), ("sandbox", "Failed")])
+def test_only_the_sandbox_container_has_failed_when_it_exits_0(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient, name: str, state: str
+) -> None:
+    """A service container that finished its work exits 0; the sandbox container is never meant to stop."""
+    k8s.pods = [_pod(_container(name, V1ContainerStateTerminated(exit_code=0, reason="Completed")))]
+
+    assert _status(provider, k8s, _labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))["state"] == state
+
+
 def test_pending_sandbox_whose_containers_run_keeps_the_stock_status(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient
 ) -> None:
@@ -376,9 +397,18 @@ async def test_stock_create_wait_ends_with_the_message_of_a_sandbox_that_cannot_
     }
 
 
-@pytest.mark.parametrize(("reason", "unschedulable"), [("POD_PLATFORM_UNSCHEDULABLE", True), ("POD_PENDING", False)])
-def test_create_wait_keeps_the_stock_check_for_a_sandbox_that_has_not_failed(reason: str, unschedulable: bool) -> None:
-    assert ext.end_create_wait({"state": "Pending", "reason": reason, "message": ""}) is unschedulable
+@pytest.mark.parametrize(
+    ("state", "reason", "unschedulable"),
+    [
+        # The stock provider reports an unschedulable sandbox as Failed; the stock wait answers it with a 400.
+        ("Failed", "POD_PLATFORM_UNSCHEDULABLE", True),
+        ("Pending", "POD_PENDING", False),
+    ],
+)
+def test_create_wait_keeps_the_stock_check_for_a_sandbox_that_has_not_failed(
+    state: str, reason: str, unschedulable: bool
+) -> None:
+    assert ext.end_create_wait({"state": state, "reason": reason, "message": ""}) is unschedulable
 
 
 def test_status_reads_no_pod_on_the_server_event_loop(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
