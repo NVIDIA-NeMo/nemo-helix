@@ -9,6 +9,3 @@ export const PURPOSE_LABELS: Record<FilesetPurpose, string> = {
   [FilesetPurpose.model]: 'Model',
   [FilesetPurpose.environment]: 'Environment',
 };
-
-export const isFilesetPurpose = (value: string): value is FilesetPurpose =>
-  Object.hasOwn(FilesetPurpose, value);

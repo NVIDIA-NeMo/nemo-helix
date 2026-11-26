@@ -3,7 +3,6 @@
 
 import { getFilesetsQueryKey, type ListFilesets } from '@nemo/common/src/api/filesets/filesetPages';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
-import { isFilesetPurpose } from '@nemo/common/src/utils/filesetPurpose';
 import type {
   FilesetOutput,
   FilesetPurpose,
@@ -46,25 +45,18 @@ export const useFilesetSearchCore = ({
   const [search, setSearch] = useState('');
 
   // Sorted so callers passing a fresh array literal each render share one cache entry.
-  const purposeKey = typeof purpose === 'string' ? purpose : [...(purpose ?? [])].sort().join(',');
+  const purposes = typeof purpose === 'string' ? [purpose] : [...(purpose ?? [])].sort();
+  const purposeKey = purposes.join(',');
 
-  const filter = useMemo<FilesListFilesetsParams['filter'] | undefined>(() => {
-    const purposes = purposeKey.split(',').filter(isFilesetPurpose);
-    const purposeClause =
-      purposes.length === 1
-        ? { purpose: purposes[0] }
-        : purposes.length > 1
-          ? { purpose: { $in: purposes } }
-          : {};
-    const clauses = {
-      ...(search ? { name: { $like: `%${search}%` } } : {}),
-      ...purposeClause,
-      ...(description !== undefined ? { description: { $eq: description } } : {}),
-    };
-    return Object.keys(clauses).length
-      ? withOperators<FilesListFilesetsParams['filter']>(clauses)
-      : undefined;
-  }, [search, purposeKey, description]);
+  const clauses = {
+    ...(search ? { name: { $like: `%${search}%` } } : {}),
+    ...(purposes.length === 1 ? { purpose: purposes[0] } : {}),
+    ...(purposes.length > 1 ? { purpose: { $in: purposes } } : {}),
+    ...(description !== undefined ? { description: { $eq: description } } : {}),
+  };
+  const filter = Object.keys(clauses).length
+    ? withOperators<FilesListFilesetsParams['filter']>(clauses)
+    : undefined;
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error } =
     useInfiniteQuery({
