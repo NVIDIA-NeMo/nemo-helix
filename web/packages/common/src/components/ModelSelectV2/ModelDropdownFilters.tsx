@@ -8,7 +8,7 @@ import {
   type ModelFilterControls,
   type ModelFilterOption,
 } from '@nemo/common/src/api/models/modelFilters';
-import { Grid, Select, Stack, type SelectEntry } from '@nvidia/foundations-react-core';
+import { Flex, Select, type SelectEntry } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 const CAPABILITY_PREFIX = 'capability:';
@@ -21,6 +21,7 @@ interface ModelFilterSelectProps {
   options: ModelFilterOption[];
   items?: SelectEntry[];
   placeholder: string;
+  className?: string;
   listSelected?: boolean;
   disabled?: boolean;
   onChange: (values: string[]) => void;
@@ -60,17 +61,17 @@ const ModelFilterSelect: FC<ModelFilterSelectProps> = ({
   options,
   items,
   placeholder,
+  className = 'min-w-0',
   listSelected = false,
   disabled,
   onChange,
 }) => (
   <Select
-    className="min-w-0"
+    className={className}
     size="small"
     multiple
     placeholder={placeholder}
     value={[...values]}
-    dismissible
     disabled={disabled}
     onValueChange={onChange}
     renderValue={(selected) => selectionSummary(selected, options, placeholder, listSelected)}
@@ -97,29 +98,30 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
   const prefixedInputs = withPrefix(INPUT_PREFIX, inputModalityOptions);
 
   return (
-    <Stack gap="density-sm" className="px-2 pb-2 w-full" data-testid="model-select-v2-filters">
-      <Grid cols={2} gap="density-sm">
-        <ModelFilterSelect
-          name="providers"
-          label="Filter by provider"
-          placeholder={providersLoading ? 'Loading...' : 'Provider'}
-          values={values.providers}
-          options={providerOptions}
-          disabled={!values.providers?.length && providerOptions.length === 0}
-          onChange={(providers) => onChange({ ...values, providers })}
-        />
-        <ModelFilterSelect
-          name="sizes"
-          label="Filter by size"
-          placeholder="Size"
-          values={values.sizes}
-          options={sizeOptions}
-          onChange={(next) => onChange({ ...values, sizes: toModelSizeBuckets(next) })}
-        />
-      </Grid>
+    <Flex gap="density-sm" className="px-2 pb-2 w-full" data-testid="model-select-v2-filters">
+      <ModelFilterSelect
+        name="providers"
+        label="Filter by provider"
+        className="min-w-0 w-[30%] shrink-0"
+        placeholder={providersLoading ? 'Loading...' : 'Provider'}
+        values={values.providers}
+        options={providerOptions}
+        disabled={!values.providers?.length && providerOptions.length === 0}
+        onChange={(providers) => onChange({ ...values, providers })}
+      />
+      <ModelFilterSelect
+        name="sizes"
+        label="Filter by size"
+        className="min-w-0 w-[24%] shrink-0"
+        placeholder="Size"
+        values={values.sizes}
+        options={sizeOptions}
+        onChange={(next) => onChange({ ...values, sizes: toModelSizeBuckets(next) })}
+      />
       <ModelFilterSelect
         name="capabilities"
         label="Filter by capability"
+        className="min-w-0 flex-1"
         placeholder="Capabilities"
         listSelected
         values={[
@@ -139,6 +141,6 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
           })
         }
       />
-    </Stack>
+    </Flex>
   );
 };
