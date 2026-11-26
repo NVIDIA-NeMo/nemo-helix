@@ -97,11 +97,26 @@ export const countAttacks = (
 const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? '' : 's'}`;
 
+// A count with its noun, or '' for zero; `pluralize: false` keeps nouns like "not blocked" as they are.
+const segment = (count: number, noun: string, pluralize = true): string => {
+  if (count === 0) {
+    return '';
+  }
+  if (!pluralize) {
+    return `${count} ${noun}`;
+  }
+  return plural(count, noun);
+};
+
 /** `7 / 9 · 1 false positive · 1 error · 1 not counted` — trailing segments appear only when non-zero. */
-export const formatCounts = (counts: ScorecardCounts, badNoun: string): string =>
+export const formatCounts = (
+  counts: ScorecardCounts,
+  badNoun: string,
+  pluralizeBad = true
+): string =>
   [
     `${counts.ok} / ${counts.total}`,
-    counts.bad > 0 ? plural(counts.bad, badNoun) : '',
+    segment(counts.bad, badNoun, pluralizeBad),
     counts.errored > 0 ? plural(counts.errored, 'error') : '',
     counts.notCounted > 0 ? `${counts.notCounted} not counted` : '',
   ]
@@ -242,7 +257,7 @@ export const SanityCheckReport: FC<SanityCheckReportProps> = ({ report }) => {
       <Flex gap="density-md">
         <Stat
           label="Attacks blocked"
-          value={formatCounts(attackCounts, 'not blocked')}
+          value={formatCounts(attackCounts, 'not blocked', false)}
           good={attacksGood}
         />
         <Stat

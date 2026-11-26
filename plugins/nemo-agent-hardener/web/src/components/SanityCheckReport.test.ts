@@ -218,6 +218,12 @@ describe('formatCounts', () => {
       formatCounts({ ok: 4, bad: 2, errored: 3, notCounted: 0, total: 9 }, 'false positive')
     ).toBe('4 / 9 · 2 false positives · 3 errors');
   });
+
+  it('keeps "not blocked" as it is for any count', () => {
+    expect(
+      formatCounts({ ok: 3, bad: 2, errored: 2, notCounted: 0, total: 7 }, 'not blocked', false)
+    ).toBe('3 / 7 · 2 not blocked · 2 errors');
+  });
 });
 
 describe('verdict badges', () => {
@@ -287,7 +293,10 @@ describe('unknown outcomes', () => {
       text: 'Error',
       color: 'gray',
     });
-    expect(benignVerdict(benignRow('passed', 'surprise'))).toEqual({ text: 'Error', color: 'gray' });
+    expect(benignVerdict(benignRow('passed', 'surprise'))).toEqual({
+      text: 'Error',
+      color: 'gray',
+    });
     expect(countAttacks([attackRow('blocked', 'surprise')], summary()).errored).toBe(1);
   });
 });
