@@ -41,7 +41,6 @@ def _run_data(
     manifest_id: str = "",
     source_run: str = "",
     failure: RunFailure | None = None,
-    events_fileset: str = "",
 ) -> dict[str, Any]:
     """The AgentHardenerRun data payload (whole record, since updates replace it).
 
@@ -64,7 +63,6 @@ def _run_data(
         "returncode": returncode,
         "summary": summary,
         "hitlog_fileset": hitlog_fileset,
-        "events_fileset": events_fileset,
         "source_run": source_run,
         "error_category": failure.category if failure else "",
         "error_message": failure.message if failure else "",

@@ -379,7 +379,6 @@ def test_synth_benign_job_service_driver_runs_serve_and_finalizes(
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(job_mod, "_effective_models", lambda sdk, config, ctx: None)
     monkeypatch.setattr(job_mod, "_manifest_facts", lambda mani: ("agent-x", 8000))
-    monkeypatch.setattr(job_mod, "_save_events_fileset", lambda *a, **k: "")
     monkeypatch.setattr(
         job_mod.AgentHardenerConfig,
         "get",

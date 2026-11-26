@@ -14,4 +14,11 @@ import type { EventInPayload } from './EventInPayload.ts';
 export interface EventIn {
   event: string;
   payload?: EventInPayload;
+  /** Id of the sending process's sink; with `seq`, makes a resent event idempotent. */
+  sink_id?: string;
+  /**
+     * The sender's own counter for this event, increasing within one `sink_id`.
+     * @minimum 1
+     */
+  seq?: number;
 }

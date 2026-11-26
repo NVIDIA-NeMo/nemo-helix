@@ -425,6 +425,13 @@ def test_the_gateway_endpoint_must_be_http_or_https(tmp_path: Path) -> None:
         _config(tmp_path, openshell_gateway_endpoint="ssh://ops@gateway:8080")
 
 
+def test_a_values_file_still_setting_events_dir_loads_with_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _config(tmp_path, events_dir=tmp_path / "run-events")
+    assert "events_dir is deprecated and ignored" in caplog.text
+
+
 async def test_a_host_platform_needs_no_victim_image() -> None:
     assert await _common.victim_image_required(async_sdk=None) is False
 

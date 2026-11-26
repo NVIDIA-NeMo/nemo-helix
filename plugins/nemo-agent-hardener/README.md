@@ -485,7 +485,7 @@ CLI-only. `uv tool uninstall openshell`, then use the curl installer above.
 | `NEMO_AGENT_HARDENER_OPENSHELL_CA_SECRET` | unset | NeMo Secret with the CA for an `https://` gateway |
 | `NEMO_AGENT_HARDENER_OPENSHELL_CLIENT_CERT_SECRET` | unset | NeMo Secret with the client certificate for an `https://` gateway |
 | `NEMO_AGENT_HARDENER_OPENSHELL_CLIENT_KEY_SECRET` | unset | NeMo Secret with the client key for an `https://` gateway |
-| `NEMO_AGENT_HARDENER_EVENTS_DIR` | `<venv parent>/run-events` | Where the API keeps live run events. On Helm, point it at the shared files volume so they survive a restart and every replica serves them |
+| `NEMO_AGENT_HARDENER_EVENTS_DIR` | unset | Deprecated and ignored: live run events are kept in the Entity Store |
 
 All `NEMO_AGENT_HARDENER_*` values can also be set via Helm `platformConfig.agent_hardener.*`. On Helm, war-game and
 benign-suite jobs are refused unless `container_jobs` is `true`. When enabled, the jobs run in the

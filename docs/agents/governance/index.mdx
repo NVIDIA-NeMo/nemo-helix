@@ -150,7 +150,7 @@ Instead of the host prerequisites above, you need:
 1. Agent Hardener jobs turned on and pointed at the gateway. Apply
    `k8s/helm/examples/openshell/agent-hardener-values.yaml` after your platform
    values and change the endpoint to your gateway's Service address. It sets
-   `container_jobs`, `openshell_gateway_endpoint` and `events_dir`, and, when
+   `container_jobs` and `openshell_gateway_endpoint`, and, when
    `networkPolicies.enabled` is set, lets job pods reach the gateway. Each job
    registers the gateway with the `openshell` CLI before it starts.
 1. For an `https` endpoint, the gateway's mTLS client bundle stored as three NeMo

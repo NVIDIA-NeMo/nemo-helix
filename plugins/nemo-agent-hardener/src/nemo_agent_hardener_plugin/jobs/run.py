@@ -30,7 +30,6 @@ from nemo_agent_hardener_plugin.jobs.artifacts import (
     _prepare_artifact_capture,
     _replay_args,
     _save_composed_guardrails,
-    _save_events_fileset,
     _save_hitlog_fileset,
     _save_mitigations,
     _save_validation,
@@ -526,8 +525,6 @@ class AgentHardenerRunJob(NemoJob):
         elif not config.get("stop_after_synth"):
             _save_mitigations(ctx, artifact_capture)
 
-        events_fileset = _save_events_fileset(sdk, workspace=ctx.workspace, run_name=outcome.record_name or "")
-
         # Finalize the up-front record (service path) or create one now (one-shot). Preserve source_run from
         # the config so a validate-only sanity check stays linked to its harden run (the update replaces the
         # whole record, which would otherwise drop the pre-created link).
@@ -542,7 +539,6 @@ class AgentHardenerRunJob(NemoJob):
             manifest_id or "",
             source_run=str(config.get("source_run") or ""),
             failure=outcome.failure,
-            events_fileset=events_fileset,
         )
         if outcome.record_name:
             _update_run(sdk, workspace=ctx.workspace, name=outcome.record_name, data=data)

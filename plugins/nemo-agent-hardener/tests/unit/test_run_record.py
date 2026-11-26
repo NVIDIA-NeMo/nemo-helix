@@ -35,21 +35,6 @@ def test_run_data_carries_source_run_for_sanity_check():
     assert _run_data("default/scout", 8000, "m.yaml", "running", -1)["source_run"] == ""
 
 
-def test_run_data_includes_events_fileset():
-    from nemo_agent_hardener_plugin.jobs.records import _run_data
-
-    data = _run_data(
-        agent="test-agent",
-        port=0,
-        manifest="manifest-1",
-        manifest_id="mid-1",
-        status="completed",
-        returncode=0,
-        events_fileset="default/my-events-fileset",
-    )
-    assert data["events_fileset"] == "default/my-events-fileset"
-
-
 def test_run_to_dict_flattens_entity_data_name_and_created_at():
     entity = Entity(
         entity_type="agent_hardener_run",

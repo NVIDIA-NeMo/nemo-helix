@@ -23,7 +23,6 @@ from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common
-from nemo_agent_hardener_plugin.jobs.artifacts import _save_events_fileset
 from nemo_agent_hardener_plugin.jobs.errors import classify_exception
 from nemo_agent_hardener_plugin.jobs.execution import (
     RunOutcome,
@@ -216,7 +215,6 @@ class AgentHardenerSynthBenignJob(NemoJob):
         stale_warning: str | None = None,
     ) -> None:
         """Finalize the run record ``_run_service_driven`` left as ``running`` (synth-only: no hitlog)."""
-        events_fileset = _save_events_fileset(sdk, workspace=ctx.workspace, run_name=outcome.record_name or "")
         data = _run_data(
             agent,
             port,
@@ -227,7 +225,6 @@ class AgentHardenerSynthBenignJob(NemoJob):
             manifest_id=manifest_id,
             source_run=str(config.get("source_run") or ""),
             failure=outcome.failure,
-            events_fileset=events_fileset,
         )
         if outcome.record_name:
             _update_run(sdk, workspace=ctx.workspace, name=outcome.record_name, data=data)
