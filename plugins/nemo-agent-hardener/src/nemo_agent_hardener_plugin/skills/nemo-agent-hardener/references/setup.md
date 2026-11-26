@@ -102,13 +102,13 @@ nemo services status               # Health:   healthy, Address: 0.0.0.0:8080
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/health/ready   # 200
 ```
 
-## 3. OpenShell 0.1.4 or later
+## 3. OpenShell 0.1.6 or later
 
 OpenShell runs the agent in a sandbox. It does not depend on Helix.
 
 ```bash
 which openshell                    # a path that does not contain uv/tools
-openshell --version                # 0.1.4 or later
+openshell --version                # 0.1.6 or newer or later
 openshell status                   # Status: Connected
 ```
 
@@ -131,8 +131,8 @@ which openshell                    # prints nothing
 Install (CLI and gateway service; `uv tool install openshell` installs only the CLI):
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION=v0.1.4 sh
-openshell --version                # 0.1.4
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION=v0.1.6 sh
+openshell --version                # 0.1.6 or newer
 openshell status                   # Status: Connected
 ```
 

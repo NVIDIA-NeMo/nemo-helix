@@ -28,7 +28,7 @@ preconditions:
   - nemo_cli_available
 compatibility: >
   nemo-helix >= 0.1.0 installed from source (the PyPI package has no Agent Hardener plugin); needs
-  Docker, OpenShell >= 0.1.4 with its gateway, and an NVIDIA API key — `nemo agent-hardener doctor`
+  Docker, OpenShell >= 0.1.6 with its gateway, and an NVIDIA API key — `nemo agent-hardener doctor`
   checks them, and references/setup.md sets up a clean VM. Not sandbox-safe: it builds images, starts
   containers, and makes network calls. Give the machine >= 16 GB memory (32 GB recommended) and
   50 GB free disk.
@@ -66,7 +66,7 @@ services, OpenShell, the model key, `setup`) and come back here with `doctor` gr
 which nemo                         # a source checkout's .venv/bin/nemo
 nemo agent-hardener --help         # lists setup, doctor, init, synth-benign, run, status (else not a source install)
 nemo services status               # Health: healthy, on port 8080
-openshell --version                # 0.1.4 or later
+openshell --version                # 0.1.6 or later
 # `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
 # or an explicit NHX_BASE_URL. Do NOT export a localhost fallback here — it would
 # override a configured remote. Leave NHX_BASE_URL unset to use your saved context;
