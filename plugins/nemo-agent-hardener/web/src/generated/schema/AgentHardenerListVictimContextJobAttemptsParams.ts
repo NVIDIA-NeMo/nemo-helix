@@ -9,14 +9,17 @@
 import type { AgentHardenerListVictimContextJobAttemptsSort } from './AgentHardenerListVictimContextJobAttemptsSort.ts';
 
 export type AgentHardenerListVictimContextJobAttemptsParams = {
+sort?: AgentHardenerListVictimContextJobAttemptsSort;
+filter?: string;
 /**
- * @exclusiveMinimum 0
+ * Page number.
+ * @minimum 1
  */
 page?: number;
 /**
- * @exclusiveMinimum 0
+ * Page size.
+ * @minimum 1
+ * @maximum 1000
  */
 page_size?: number;
-sort?: AgentHardenerListVictimContextJobAttemptsSort;
-filter?: string;
 };

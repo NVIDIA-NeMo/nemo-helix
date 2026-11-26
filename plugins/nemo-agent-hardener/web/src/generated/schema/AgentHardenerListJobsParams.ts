@@ -11,19 +11,20 @@ import type { WarGameJobsSortField } from './WarGameJobsSortField.ts';
 
 export type AgentHardenerListJobsParams = {
 /**
+ * The field to sort by. To sort in decreasing order, use `-` in front of the field name.
+ */
+sort?: WarGameJobsSortField;
+/**
  * Page number.
- * @exclusiveMinimum 0
+ * @minimum 1
  */
 page?: number;
 /**
  * Page size.
- * @exclusiveMinimum 0
+ * @minimum 1
+ * @maximum 1000
  */
 page_size?: number;
-/**
- * The field to sort by. To sort in decreasing order, use `-` in front of the field name.
- */
-sort?: WarGameJobsSortField;
 /**
  * Filter jobs on various criteria.
  */
