@@ -19,6 +19,7 @@ from nemo_safe_synthesizer_plugin.job_config import DEFAULT_PRETRAINED_MODEL
 if TYPE_CHECKING:
     from nemo_safe_synthesizer.sdk.library_builder import SafeSynthesizer
     from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig
+    from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.pii_inference import PiiInference
 
 logger = logging.getLogger("safe_synthesizer")
 
@@ -166,9 +167,11 @@ def run_generation_from_prior_adapter(
     save_path: Path,
     *,
     adapter_location: str | None = None,
+    pii_inference: PiiInference | None = None,
 ) -> tuple[SafeSynthesizerResults, Path | None]:
     """Generate synthetic data from a prior adapter without retraining."""
     from nemo_safe_synthesizer.sdk.library_builder import SafeSynthesizer
+    from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.pii_inference import with_pii_inference
 
     if adapter_location is None:
         if not job_config.config.training.pretrained_model:
@@ -191,6 +194,7 @@ def run_generation_from_prior_adapter(
     ss = SafeSynthesizer(config=job_config.config, workdir=gen_workdir)
     if data_source is not None:
         ss = ss.with_data_source(data_source)
+    ss = with_pii_inference(ss, pii_inference)
     ss.load_from_save_path()
     _apply_generation_overrides(ss, job_config)
     ss.generate().evaluate()

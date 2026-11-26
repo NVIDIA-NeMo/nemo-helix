@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.adapter_resolution import (
@@ -115,3 +118,64 @@ def test_is_adapter_reuse_requested_for_pretrained_model_job(tmp_path):
         }
     )
     assert is_adapter_reuse_requested(job_config) is True
+
+
+@pytest.mark.parametrize("with_provider", [True, False])
+def test_generation_from_prior_adapter_routes_pii_inference_to_the_provider(tmp_path, monkeypatch, with_provider):
+    pytest.importorskip("nemo_safe_synthesizer.config.job")
+    from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig
+    from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer import adapter_resolution
+
+    calls = []
+
+    class FakeSafeSynthesizer:
+        def __init__(self, config, workdir):
+            self.results = SimpleNamespace()
+
+        def with_inference(self, endpoint_url, model_id, *, timeout_seconds=None):
+            calls.append(("with_inference", endpoint_url, model_id, timeout_seconds))
+            return self
+
+        def load_from_save_path(self):
+            calls.append(("load_from_save_path",))
+            return self
+
+        def generate(self):
+            calls.append(("generate",))
+            return self
+
+        def evaluate(self):
+            calls.append(("evaluate",))
+            return self
+
+        def save_results(self):
+            return None
+
+    library_builder = ModuleType("nemo_safe_synthesizer.sdk.library_builder")
+    setattr(library_builder, "SafeSynthesizer", FakeSafeSynthesizer)
+    monkeypatch.setitem(sys.modules, "nemo_safe_synthesizer.sdk.library_builder", library_builder)
+    from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.pii_inference import (
+        PII_INFERENCE_TIMEOUT_SECONDS,
+        PiiInference,
+    )
+
+    parent_workdir = SimpleNamespace(adapter_path=tmp_path / "adapter")
+    monkeypatch.setattr(adapter_resolution, "resolve_prior_training_workdir", lambda location: parent_workdir)
+    monkeypatch.setattr(adapter_resolution, "create_generation_workdir", lambda parent, save_path: MagicMock())
+    monkeypatch.setattr(adapter_resolution, "_apply_generation_overrides", lambda ss, job_config: None)
+    job_config = SafeSynthesizerJobConfig.model_validate({"data_source": "default/data#input.csv", "config": {}})
+    pii_inference = PiiInference(endpoint_url="http://127.0.0.1:4321/v1", model_id="nvidia/pii-model")
+
+    adapter_resolution.run_generation_from_prior_adapter(
+        job_config,
+        None,
+        tmp_path,
+        adapter_location=str(tmp_path / "adapter"),
+        pii_inference=pii_inference if with_provider else None,
+    )
+
+    expected_inference = [
+        ("with_inference", "http://127.0.0.1:4321/v1", "nvidia/pii-model", PII_INFERENCE_TIMEOUT_SECONDS)
+    ]
+    assert [call for call in calls if call[0] == "with_inference"] == (expected_inference if with_provider else [])
+    assert calls[-2:] == [("generate",), ("evaluate",)]
