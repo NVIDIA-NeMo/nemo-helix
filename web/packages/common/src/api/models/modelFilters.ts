@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntity, NumberFilter } from '@nemo/sdk/generated/platform/schema';
 
 export type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -29,7 +29,7 @@ interface ModelSizeBucketDefinition {
   value: ModelSizeBucket;
   label: string;
   minParameters: number;
-  maxParameters: number;
+  maxParameters?: number;
 }
 
 const BILLION = 1_000_000_000;
@@ -38,7 +38,7 @@ export const MODEL_SIZE_BUCKETS: readonly ModelSizeBucketDefinition[] = [
   { value: 'small', label: 'Up to 3B', minParameters: 0, maxParameters: 3 * BILLION },
   { value: 'medium', label: '3B to 10B', minParameters: 3 * BILLION, maxParameters: 10 * BILLION },
   { value: 'large', label: '10B to 50B', minParameters: 10 * BILLION, maxParameters: 50 * BILLION },
-  { value: 'xlarge', label: 'Over 50B', minParameters: 50 * BILLION, maxParameters: Infinity },
+  { value: 'xlarge', label: 'Over 50B', minParameters: 50 * BILLION },
 ];
 
 export const MODEL_SIZE_OPTIONS: ModelFilterOption[] = MODEL_SIZE_BUCKETS.map(
@@ -56,13 +56,15 @@ export const hasActiveModelFilters = (filters: ModelFilterValues): boolean =>
 export const countActiveModelFilters = (filters: ModelFilterValues): number =>
   [filters.provider, filters.family, filters.size].filter(Boolean).length;
 
-/** A model with no recorded size never matches a size filter, so it cannot be mistaken for a small one. */
-export const matchesModelSize = (model: ModelEntity, size: ModelSizeBucket): boolean => {
-  const parameters = model.spec?.base_num_parameters;
-  if (typeof parameters !== 'number') return false;
+export const modelSizeFilter = (size: ModelSizeBucket): NumberFilter | undefined => {
   const bucket = MODEL_SIZE_BUCKETS.find((candidate) => candidate.value === size);
-  if (!bucket) return false;
-  return parameters >= bucket.minParameters && parameters < bucket.maxParameters;
+  if (!bucket) {
+    return undefined;
+  }
+  if (bucket.maxParameters === undefined) {
+    return { $gte: bucket.minParameters };
+  }
+  return { $gte: bucket.minParameters, $lt: bucket.maxParameters };
 };
 
 export const collectModelFamilies = (models: readonly ModelEntity[]): ModelFilterOption[] => {

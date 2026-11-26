@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  matchesModelSize,
   MODEL_SIZE_OPTIONS,
+  modelSizeFilter,
   type ModelFilterValues,
+  type ModelSizeBucket,
 } from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelSelect } from '@nemo/common/src/components/ModelSelectV2/ModelSelect';
@@ -12,7 +13,7 @@ import type {
   ModelSelection,
   ModelSelectProps,
 } from '@nemo/common/src/components/ModelSelectV2/types';
-import type { InferenceParams, ModelEntity, ModelSpec } from '@nemo/sdk/generated/platform/schema';
+import type { InferenceParams, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -165,7 +166,16 @@ const MOCK_FAMILIES = ['llama', 'mistral', 'nemotron'];
 const withParameterCountFromName = (model: ModelEntity): ModelEntity => {
   const billions = /-(\d+)b/.exec(model.name)?.[1];
   if (!billions) return model;
-  return { ...model, spec: { base_num_parameters: Number(billions) * 1e9 } as ModelSpec };
+  return { ...model, metadata: { parameter_count: Number(billions) * 1e9 } };
+};
+
+const isInSizeBucket = (model: ModelEntity, size: ModelSizeBucket): boolean => {
+  const parameterCount = model.metadata?.parameter_count;
+  const bounds = modelSizeFilter(size);
+  if (parameterCount === undefined || !bounds) {
+    return false;
+  }
+  return parameterCount >= (bounds.$gte ?? 0) && parameterCount < (bounds.$lt ?? Infinity);
 };
 
 const EXTRA_NVIDIA_MODELS = [
@@ -199,7 +209,7 @@ const WithFiltersRender = (args: ModelSelectProps) => {
       ...group,
       models: group.models.filter(
         (model) =>
-          (!family || model.name.startsWith(family)) && (!size || matchesModelSize(model, size))
+          (!family || model.name.startsWith(family)) && (!size || isInSizeBucket(model, size))
       ),
     }))
     .filter((group) => group.models.length > 0);

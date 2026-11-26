@@ -5,8 +5,8 @@ import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import {
   collectModelFamilies,
   EMPTY_MODEL_FILTERS,
-  matchesModelSize,
   MODEL_SIZE_OPTIONS,
+  modelSizeFilter,
   withSelectedOption,
   type ModelFilterControls,
   type ModelFilterOption,
@@ -105,18 +105,20 @@ export const useModelSearchCore = ({
 
   const query = useMemo(() => {
     const trimmed = search.trim();
+    const parameterCount = filters.size ? modelSizeFilter(filters.size) : undefined;
     const merged: ModelSearchFilter = {
       ...filter,
       ...(trimmed ? { name: { $like: trimmed } } : {}),
       ...(filters.provider ? { model_providers: filters.provider } : {}),
       ...(filters.family ? { family: filters.family } : {}),
+      ...(parameterCount ? { parameter_count: parameterCount } : {}),
     };
     return {
       page_size: pageSize,
       sort,
       ...(Object.keys(merged).length > 0 ? { filter: merged as ModelEntityFilter } : {}),
     };
-  }, [filter, filters.family, filters.provider, pageSize, search, sort]);
+  }, [filter, filters.family, filters.provider, filters.size, pageSize, search, sort]);
 
   const isEnabled = enabled && !!workspace;
   const queryWorkspace = workspace ?? 'default';
@@ -142,16 +144,9 @@ export const useModelSearchCore = ({
     [data?.pages]
   );
 
-  const size = filters.size;
-  const includeModel = useMemo(() => {
-    if (!size && !include) return undefined;
-    return (model: ModelEntity) =>
-      (!size || matchesModelSize(model, size)) && (!include || include(model));
-  }, [include, size]);
-
   const models = useMemo(
-    () => (includeModel ? loadedModels.filter(includeModel) : loadedModels),
-    [includeModel, loadedModels]
+    () => (include ? loadedModels.filter(include) : loadedModels),
+    [include, loadedModels]
   );
 
   const groups = useMemo(() => groupModelsByWorkspace(models, { sort: true }), [models]);

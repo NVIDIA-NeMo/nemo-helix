@@ -146,8 +146,8 @@ describe('useModelSearchCore', () => {
   });
 
   describe('model filters', () => {
-    const sized = (name: string, billions: number, family = 'llama') =>
-      makeModel(name, { spec: { family, base_num_parameters: billions * 1_000_000_000 } as never });
+    const withFamily = (name: string, family: string) =>
+      makeModel(name, { spec: { family } as never });
 
     it('sends the provider and family to the server alongside the search term', async () => {
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
@@ -166,27 +166,19 @@ describe('useModelSearchCore', () => {
       );
     });
 
-    it('filters by size in the browser without changing the request', async () => {
-      mockListModels.mockResolvedValue(
-        makePage([sized('tiny', 1), sized('mid', 7), sized('huge', 70)], 1, 1)
+    it('sends the size as a parameter count range', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('mid')], 1, 1));
+
+      renderSearch({ initialFilters: { size: 'medium' } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.objectContaining({
+            filter: { parameter_count: { $gte: 3_000_000_000, $lt: 10_000_000_000 } },
+          })
+        )
       );
-      const { result } = renderSearch({ initialFilters: { size: 'medium' } });
-
-      await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['mid']));
-      expect(mockListModels).toHaveBeenCalledWith(
-        'ws1',
-        expect.not.objectContaining({ filter: expect.anything() })
-      );
-    });
-
-    it('keeps paging when the size filter empties a whole page', async () => {
-      mockListModels
-        .mockResolvedValueOnce(makePage([sized('tiny', 1)], 1, 2))
-        .mockResolvedValueOnce(makePage([sized('mid', 7)], 2, 2));
-
-      const { result } = renderSearch({ initialFilters: { size: 'medium' } });
-
-      await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['mid']));
     });
 
     it('lists providers as workspace-qualified options', async () => {
@@ -216,7 +208,7 @@ describe('useModelSearchCore', () => {
 
     it('keeps every family it has seen as options after narrowing to one', async () => {
       mockListModels.mockResolvedValueOnce(
-        makePage([sized('a', 1, 'llama'), sized('b', 1, 'mixtral')], 1, 1)
+        makePage([withFamily('a', 'llama'), withFamily('b', 'mixtral')], 1, 1)
       );
       const { result } = renderSearch();
       await waitFor(() =>
@@ -226,7 +218,7 @@ describe('useModelSearchCore', () => {
         ])
       );
 
-      mockListModels.mockResolvedValue(makePage([sized('a', 1, 'llama')], 1, 1));
+      mockListModels.mockResolvedValue(makePage([withFamily('a', 'llama')], 1, 1));
       act(() => result.current.modelFilters.onChange({ family: 'llama' }));
 
       await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['a']));

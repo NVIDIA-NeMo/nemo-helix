@@ -5,7 +5,7 @@ import {
   collectModelFamilies,
   countActiveModelFilters,
   hasActiveModelFilters,
-  matchesModelSize,
+  modelSizeFilter,
   toModelSizeBucket,
   withSelectedOption,
 } from '@nemo/common/src/api/models/modelFilters';
@@ -16,28 +16,14 @@ const BILLION = 1_000_000_000;
 const makeModel = (spec?: { family?: string; base_num_parameters?: number }): ModelEntity =>
   ({ id: 'm', name: 'm', workspace: 'ws', spec }) as ModelEntity;
 
-describe('matchesModelSize', () => {
+describe('modelSizeFilter', () => {
   it.each([
-    [1 * BILLION, 'small'],
-    [3 * BILLION, 'medium'],
-    [9 * BILLION, 'medium'],
-    [10 * BILLION, 'large'],
-    [49 * BILLION, 'large'],
-    [50 * BILLION, 'xlarge'],
-    [400 * BILLION, 'xlarge'],
-  ] as const)('puts %i parameters in the %s bucket only', (parameters, bucket) => {
-    const model = makeModel({ base_num_parameters: parameters });
-
-    const matching = (['small', 'medium', 'large', 'xlarge'] as const).filter((candidate) =>
-      matchesModelSize(model, candidate)
-    );
-
-    expect(matching).toEqual([bucket]);
-  });
-
-  it('never matches a model with no recorded size', () => {
-    expect(matchesModelSize(makeModel(), 'small')).toBe(false);
-    expect(matchesModelSize(makeModel({ family: 'llama' }), 'xlarge')).toBe(false);
+    ['small', { $gte: 0, $lt: 3 * BILLION }],
+    ['medium', { $gte: 3 * BILLION, $lt: 10 * BILLION }],
+    ['large', { $gte: 10 * BILLION, $lt: 50 * BILLION }],
+    ['xlarge', { $gte: 50 * BILLION }],
+  ] as const)('bounds the %s bucket', (bucket, expected) => {
+    expect(modelSizeFilter(bucket)).toEqual(expected);
   });
 });
 
