@@ -510,7 +510,7 @@ def _patch_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> Any
         run=lambda **kw: captured.update(run=kw) or {"status": "completed"},
         synth_benign=lambda **kw: captured.update(synth=kw) or {"status": "completed", "suite_size": 4},
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared, "require_host_preflight", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake_iron))
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(war_game, "missing_secrets", lambda _p, env_files: [])
@@ -585,7 +585,7 @@ def _patch_cli_context(
     monkeypatch: pytest.MonkeyPatch, cli_main: Any, sdk: Any, *, bin_path: Path | None = None
 ) -> None:
     """Stub the `_command_context` preamble so an init test never touches a host or a real binary."""
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared, "require_host_preflight", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(

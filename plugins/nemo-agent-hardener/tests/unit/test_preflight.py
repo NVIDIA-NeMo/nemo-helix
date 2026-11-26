@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 import typer
-from nemo_agent_hardener_plugin.cli import checks
+from nemo_agent_hardener_plugin.cli import _shared, checks
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
 
 # Real `openshell status --gateway auto-defender` output, ANSI codes included.
 CONNECTED = (
@@ -83,3 +84,26 @@ def test_require_preflight_exits_when_a_check_fails(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(checks, "run_checks", lambda _c: [checks.CheckResult("docker", False, "daemon down")])
     with pytest.raises(typer.Exit):
         checks.require_preflight(_config(tmp_path))
+
+
+@pytest.mark.parametrize(("runs_in_containers", "checked"), [(True, False), (False, True)])
+def test_host_preflight_runs_only_where_war_games_run_on_this_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runs_in_containers: bool, checked: bool
+) -> None:
+    asked: list[str] = []
+    ran: list[bool] = []
+
+    class _Deployment(AgentHardenerPluginResource):
+        def __init__(self) -> None:  # no platform: only the execution answer is consulted
+            pass
+
+        def runs_in_containers(self, *, workspace: str = "default") -> bool:
+            asked.append(workspace)
+            return runs_in_containers
+
+    monkeypatch.setattr(checks, "run_checks", lambda _c: ran.append(True) or [])
+
+    _shared.require_host_preflight(_config(tmp_path), _Deployment(), workspace="ws1")
+
+    assert asked == ["ws1"]
+    assert bool(ran) is checked
