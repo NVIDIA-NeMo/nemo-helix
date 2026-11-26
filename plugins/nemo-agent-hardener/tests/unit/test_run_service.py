@@ -450,7 +450,6 @@ async def test_compile_builds_subprocess_step_carrying_the_spec() -> None:
         "defense_policy": None,
         "source_run": None,
         "models": None,
-        "models_preflighted": True,
     }
 
 

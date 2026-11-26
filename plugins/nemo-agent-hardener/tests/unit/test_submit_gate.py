@@ -140,7 +140,7 @@ async def test_a_container_job_leaves_declared_secrets_to_the_task_pod(
 
     step_config = await _compile(_manifest(secrets=[_DECLARED], victim_image="reg/victim:1"))
 
-    assert step_config[run_module._MODELS_PREFLIGHTED] is True
+    assert step_config["manifest_id"] == "m1"
 
 
 async def test_an_unavailable_model_is_rejected_listing_what_the_key_reaches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,7 +159,7 @@ async def test_an_unavailable_model_is_rejected_listing_what_the_key_reaches(mon
     assert "Check the model name" in message
 
 
-async def test_compile_probes_the_merged_models_and_tells_the_job_not_to_repeat_it(
+async def test_compile_probes_the_merged_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     probes: list[str] = []
@@ -174,4 +174,20 @@ async def test_compile_probes_the_merged_models_and_tells_the_job_not_to_repeat_
     config = await _compile(_manifest(models=stored), models=override)
 
     assert probes == ["override"]
-    assert config[run_module._MODELS_PREFLIGHTED] is True
+    assert config["manifest_id"] == "m1"
+
+
+async def test_a_busy_model_endpoint_does_not_block_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A 429/5xx means the key was accepted; the run itself waits a rate limit out.
+    monkeypatch.setattr(run_module, "get_nemo_client", lambda **_k: object())
+    monkeypatch.setattr(_common, "resolve_model_key", lambda *_a, **_k: "k")
+    monkeypatch.setattr(
+        run_module,
+        "validate_choice",
+        lambda *_a: SimpleNamespace(ok=False, reason="provider_error", available=[], detail="HTTP 429"),
+    )
+    models = WarGameModels(analysis=ModelChoice(model="busy", base_url="https://x/v1"))
+
+    config = await _compile(_manifest(), models=models)
+
+    assert config["manifest_id"] == "m1"
