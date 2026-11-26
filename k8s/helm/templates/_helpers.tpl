@@ -99,7 +99,7 @@ That covers its Jobs execution profiles (nemo-helix.chartExecutors) and its Open
 The OpenShell deployment executor, as a YAML list, once `openshell.gatewayEndpoint` names a gateway.
 */}}
 {{- define "nemo-helix.openshell.deploymentExecutors" -}}
-{{- with .Values.openshell.gatewayEndpoint }}
+{{- with (default dict .Values.openshell).gatewayEndpoint }}
 - name: openshell
   backend: openshell
   config:
