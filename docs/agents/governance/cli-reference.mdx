@@ -127,6 +127,12 @@ Re-resolves the manifest against the agent as it is now. Egress, backends, secre
 models, defenders and the cached benign suite are preserved. A run logs a warning
 when the agent is newer than its manifest.
 
+A project manifest has no agent to refresh from. Update it by re-running
+`init --project-dir <path>` with the same name: the project is uploaded and read
+again, the settings above are kept unless you pass them again, and the command
+prints what changed. A victim image you built with `stage` is cleared, because it
+was built from the previous upload.
+
 ### `stage`
 
 ```bash

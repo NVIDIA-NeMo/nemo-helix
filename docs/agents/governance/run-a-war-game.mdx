@@ -235,6 +235,9 @@ newer than its manifest. In Studio, use **Refresh Target**, or call
 Applying a mitigation refreshes the manifest for you, so a run, harden, apply,
 run sequence measures the change you just made.
 
+A manifest made with `init --project-dir` is updated by running the same `init`
+again with the same name. It uploads the project again and keeps your settings.
+
 ## Run It in Studio
 
 Studio drives the same cycle and is the only surface that can apply fixes back
