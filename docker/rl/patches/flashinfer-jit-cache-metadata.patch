@@ -1,0 +1,25 @@
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -725,4 +725,21 @@
++# FlashInfer's ARM wheel adds two providers absent from the x86_64 wheel,
++# without architecture markers. uv needs consistent metadata across wheels
++# when producing one lock for both platforms. Keep the actual dependencies.
++[[tool.uv.dependency-metadata]]
++name = "flashinfer-jit-cache"
++version = "0.7.0.post1+cu130"
++requires-dist = [
++  "flashinfer-jit-cache-sm100a==0.7.0.post1+cu130",
++  "flashinfer-jit-cache-sm103a==0.7.0.post1+cu130",
++  "flashinfer-jit-cache-sm110a==0.7.0.post1+cu130; platform_machine == 'aarch64'",
++  "flashinfer-jit-cache-sm120f==0.7.0.post1+cu130",
++  "flashinfer-jit-cache-sm121a==0.7.0.post1+cu130; platform_machine == 'aarch64'",
++  "flashinfer-jit-cache-sm80==0.7.0.post1+cu130",
++  "flashinfer-jit-cache-sm89==0.7.0.post1+cu130",
++  "flashinfer-jit-cache-sm90a==0.7.0.post1+cu130",
++]
++
+ [tool.black]
+ line-length = 120
+ include = '\.pyi?$'
+ exclude = '''
