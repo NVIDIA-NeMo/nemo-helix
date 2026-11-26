@@ -12,12 +12,12 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 from fastapi import HTTPException
-from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.jobs.metric_resolution import (
     HelixMetricModelResolver,
     HelixMetricSecretResolver,
     gateway_models_as_job,
 )
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
@@ -143,7 +143,7 @@ def test_gateway_models_point_at_the_job_proxy_for_the_block_and_are_restored(
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+        auth_proxy_server, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
     )
     resolved = f"http://nemo-api:8080{JUDGE_ROUTE}"
     ragas = TopicAdherenceMetric(metric_mode="f1", judge_model=Model(url=resolved, name="judge"))
@@ -172,7 +172,7 @@ def test_a_failed_rebind_still_restores_the_metrics_already_moved(
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+        auth_proxy_server, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
     )
     resolved = f"http://nemo-api:8080{JUDGE_ROUTE}"
     moved = _judge(Model(url=resolved, name="judge"))

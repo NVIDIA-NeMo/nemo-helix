@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
@@ -53,6 +52,7 @@ from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundle
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.task_jobs import TaskJobDetails
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
@@ -682,7 +682,7 @@ def job_identity(monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer) -> str
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken(access_token))
+        auth_proxy_server, "resolve_workload_exchange_provider", Mock(return_value=StaticToken(access_token))
     )
     return access_token
 

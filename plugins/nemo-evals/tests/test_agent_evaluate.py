@@ -18,7 +18,6 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
-from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.cli import EvaluatorPluginCLI
@@ -71,6 +70,7 @@ from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
@@ -335,7 +335,7 @@ def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+        auth_proxy_server, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
     )
     resolved = "http://nemo-api:8080/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     judge = LLMJudgeMetric(

@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
-from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.oidc import WorkloadTokenExchangeProvider
 from nemo_helix_plugin.config import Configuration
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -43,7 +43,7 @@ def test_real_agent_calls_gateway_and_returns_file(
         monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(proof))
         # Only discovery is replaced. Token exchange, expiry handling, the proxy,
         # Fabric, Deep Agents and its file tool all execute normally.
-        monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", lambda **kwargs: provider)
+        monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", lambda **kwargs: provider)
     elif identity_mode == "principal":
         monkeypatch.setenv("NHX_PRINCIPAL", json.dumps({"id": "test-job-user", "groups": ["test-workspace-users"]}))
     else:
@@ -210,7 +210,7 @@ def test_real_agent_exports_its_trajectory_through_the_proxy(
         subject_token_file=proof,
         allow_http=True,
     )
-    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", lambda **kwargs: provider)
+    monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", lambda **kwargs: provider)
     issued: list[str] = []
     exports: list[tuple[str, int]] = []
 
