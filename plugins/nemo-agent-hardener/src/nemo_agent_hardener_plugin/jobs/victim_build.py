@@ -10,9 +10,11 @@ would set it by hand.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import shlex
+import time
 
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.errors import (
@@ -21,8 +23,10 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     CATEGORY_VICTIM_UNAVAILABLE,
     AgentHardenerRunError,
 )
-from nemo_builder_plugin.builds import HttpImageBuilder, ImageBuilder, archive_source, ensure_build, wait_for_image
-from nemo_helix_plugin.client.errors import ConflictError
+from nemo_builder_plugin.client import AsyncBuilderClient
+from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.schema import BuildSet, BuildSpec, FileSetSource, SubmitBuildResponse
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.client_provider import get_async_task_nemo_client
 from nemo_helix_plugin.entities import EntityClient, EntityConflictError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -54,7 +58,7 @@ async def build_in_cluster(*, workspace: str, manifest_id: str, context_ref: str
     """Build the victim from the staged archive at *context_ref*, as the job's submitter; return its image."""
     async with get_async_task_nemo_client("agent-hardener") as client:
         return await build_victim_image(
-            HttpImageBuilder(client, workspace=workspace),
+            AsyncBuilderClient.from_client(client),
             EntityClient(AsyncEntitiesClient.from_client(client)),
             workspace=workspace,
             manifest_id=manifest_id,
@@ -63,7 +67,7 @@ async def build_in_cluster(*, workspace: str, manifest_id: str, context_ref: str
 
 
 async def build_victim_image(
-    builder: ImageBuilder,
+    builder: AsyncBuilderClient,
     entities: EntityClient,
     *,
     workspace: str,
@@ -80,9 +84,7 @@ async def build_victim_image(
             remediation="Run `nemo agent-hardener stage --build` against a NeMo Helix deployment with the builder.",
         )
     try:
-        submitted = await ensure_build(
-            builder, name=victim_build_name(manifest_id), source=archive_source(context_ref), dockerfile=None
-        )
+        submitted = await _submit(builder, workspace, victim_build_name(manifest_id), context_ref)
     except ConflictError as exc:
         raise AgentHardenerRunError(
             CATEGORY_PROVISIONING,
@@ -91,8 +93,8 @@ async def build_victim_image(
         ) from exc
     job_hint = f"Read the logs of builder job {submitted.job}, fix the victim's build context, then stage again."
     try:
-        image = await wait_for_image(builder, submitted.images[0], poll_interval=poll_interval, timeout=timeout)
-    except (TimeoutError, LookupError) as exc:
+        image = await _wait(builder, workspace, submitted.images[0].name, poll_interval=poll_interval, timeout=timeout)
+    except (TimeoutError, NotFoundError) as exc:
         raise AgentHardenerRunError(CATEGORY_VICTIM_UNAVAILABLE, str(exc), remediation=job_hint) from exc
     if image.status != "ready" or not image.image_ref:
         detail = image.status_detail or "its job ended without publishing the image"
@@ -103,6 +105,49 @@ async def build_victim_image(
         )
     await _record_victim_image(entities, workspace=workspace, manifest_id=manifest_id, image_ref=image.image_ref)
     return image.image_ref
+
+
+async def _submit(builder: AsyncBuilderClient, workspace: str, name: str, context_ref: str) -> SubmitBuildResponse:
+    """Rejoin the newest revision of *name*, or submit the next one when it failed or was a different request."""
+    fileset, _, archive = context_ref.partition("#")
+    spec = BuildSpec(source=FileSetSource(fileset=fileset, archive=archive or None))
+
+    async def submit(revision: int) -> SubmitBuildResponse:
+        body = BuildSet(name=name, revision=revision, build_specs=[spec])
+        return (await builder.submit_build(workspace=workspace, body=body)).data()
+
+    newest, revision = None, 1
+    while (row := await _image(builder, workspace, f"{name}-{revision}")) is not None:
+        newest, revision = row, revision + 1
+    if newest is not None and newest.status != "failed":
+        # Resubmitting the same request returns its rows; another staged archive at that revision is a 409.
+        try:
+            return await submit(revision - 1)
+        except ConflictError:
+            pass
+    return await submit(revision)
+
+
+async def _image(builder: AsyncBuilderClient, workspace: str, name: str) -> ContainerImage | None:
+    try:
+        return (await builder.get_container_image(workspace=workspace, name=name)).data()
+    except NotFoundError:
+        return None
+
+
+async def _wait(
+    builder: AsyncBuilderClient, workspace: str, name: str, *, poll_interval: float, timeout: float
+) -> ContainerImage:
+    """The image row *name* once it is ready or failed; the builder fails a row whose job ended without it."""
+    deadline = time.monotonic() + timeout
+    while (image := (await builder.get_container_image(workspace=workspace, name=name)).data()).status not in (
+        "ready",
+        "failed",
+    ):
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Builder image {name} was still building after {timeout:.0f}s")
+        await asyncio.sleep(poll_interval)
+    return image
 
 
 async def _record_victim_image(entities: EntityClient, *, workspace: str, manifest_id: str, image_ref: str) -> None:

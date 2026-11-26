@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.builds import ImageBuilder, adopt_or_build, archive_source, ensure_build, job_gone
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import ImageSource
@@ -24,7 +23,15 @@ from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, run_block
 from nemo_evals.harbor.archive_io import download_verified_async
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.parser import parse_compose
-from nemo_evals.image_builds.builder import builder_name, copy_builder_name
+from nemo_evals.image_builds.builder import (
+    ImageBuilder,
+    adopt_or_build,
+    archive_source,
+    builder_name,
+    copy_builder_name,
+    ensure_build,
+    job_gone,
+)
 from nemo_evals.image_builds.models import (
     TERMINAL_BUILD_STATUSES,
     TERMINAL_IMAGE_STATUSES,

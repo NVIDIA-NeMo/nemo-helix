@@ -23,7 +23,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
-from nemo_builder_plugin.builds import ImageBuilder, adopt_or_build, usable_build
 from nemo_builder_plugin.identity import normalize_reference
 from nemo_builder_plugin.schema import BuildMount, FileSetSource
 from nemo_evals.agent_layers.dockerfile import (
@@ -38,6 +37,7 @@ from nemo_evals.agent_layers.dockerfile import (
 from nemo_evals.agent_layers.models import AgentLayerEntity, layer_entity_name
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build, usable_build
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, TERMINAL_IMAGE_STATUSES, BuildImage
 from nemo_evals.image_builds.planning import MAIN_SERVICE, ImagePlanError, TaskArchive, parse_task_config, plan_images
 from nemo_evals.image_builds.runner import apply_builder_image, downloaded_archive, refresh_images
