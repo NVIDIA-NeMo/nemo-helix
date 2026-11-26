@@ -16,6 +16,7 @@ from nemo_helix_plugin.agent_hardener.types import (
     ComposeDefenseResponse,
     EventIn,
     EventsResponse,
+    ExecutionSettings,
     GetEventsQueryParams,
     InspectAgentRequest,
     InspectAgentResponse,
@@ -184,6 +185,11 @@ def delete_manifest(*, workspace: str | None = None, name: str) -> None: ...
 @get(f"{_ROOT}/model-config-defaults")
 @abstractmethod
 def get_model_config_defaults(*, workspace: str | None = None) -> ModelConfigDefaults: ...
+
+
+@get(f"{_ROOT}/execution")
+@abstractmethod
+def get_execution_settings(*, workspace: str | None = None) -> ExecutionSettings: ...
 
 
 @post(f"{_ROOT}/model-config/validate")

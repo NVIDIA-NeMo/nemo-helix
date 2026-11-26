@@ -40,7 +40,7 @@ def _raise(exc: Exception) -> Any:
 
 def _app(monkeypatch: pytest.MonkeyPatch, **sdk_methods: Any) -> Any:
     fake_sdk = SimpleNamespace(agent_hardener=SimpleNamespace(**sdk_methods))
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared, "require_host_preflight", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(

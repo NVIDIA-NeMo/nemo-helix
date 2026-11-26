@@ -57,6 +57,14 @@ class CommandContext:
     workspace: str
 
 
+def require_host_preflight(
+    config: AgentHardenerConfig, agent_hardener: AgentHardenerPluginResource, *, workspace: str
+) -> None:
+    """Check this host's venvs, Docker and gateway, unless the deployment runs war-games in its task image."""
+    if not agent_hardener.runs_in_containers(workspace=workspace):
+        checks.require_preflight(config)
+
+
 def command_context(workspace: str | None, *, preflight: bool = True) -> CommandContext:
     """Shared command preamble: config, host preflight, SDK client, resolved workspace.
 
@@ -64,17 +72,13 @@ def command_context(workspace: str | None, *, preflight: bool = True) -> Command
     policy one decision instead of one per command.
     """
     config = AgentHardenerConfig.get()
-    if preflight:
-        checks.require_preflight(config)
     url = base_url()
     sdk = make_sdk(url)
-    return CommandContext(
-        config=config,
-        sdk=sdk,
-        agent_hardener=AgentHardenerPluginResource(sdk),
-        base_url=url,
-        workspace=workspace or config.default_workspace,
-    )
+    agent_hardener = AgentHardenerPluginResource(sdk)
+    workspace = workspace or config.default_workspace
+    if preflight:
+        require_host_preflight(config, agent_hardener, workspace=workspace)
+    return CommandContext(config=config, sdk=sdk, agent_hardener=agent_hardener, base_url=url, workspace=workspace)
 
 
 def wait_for_job(base_url: str, workspace: str, job_name: str) -> bool:

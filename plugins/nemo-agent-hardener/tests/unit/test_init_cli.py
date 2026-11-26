@@ -46,7 +46,7 @@ def _patch_cli(
             manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project)
         )
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared, "require_host_preflight", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(

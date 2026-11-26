@@ -285,6 +285,11 @@ class AgentHardenerPluginResource:
             self._manifests = _ManifestsResource(self._platform)
         return self._manifests
 
+    def runs_in_containers(self, *, workspace: str = "default") -> bool:
+        """Whether this deployment runs war-games in the task image, not on the platform's host."""
+        settings = client_from_platform(self._platform, AgentHardenerClient).get_execution_settings(workspace=workspace)
+        return settings.data().victim_image_required
+
     def run(
         self,
         *,

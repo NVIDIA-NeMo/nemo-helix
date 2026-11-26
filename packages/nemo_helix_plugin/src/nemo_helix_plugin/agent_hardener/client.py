@@ -35,6 +35,7 @@ class _AgentHardenerMethods:
     refresh_manifest = method(endpoints.refresh_manifest)
     delete_manifest = method(endpoints.delete_manifest)
     get_model_config_defaults = method(endpoints.get_model_config_defaults)
+    get_execution_settings = method(endpoints.get_execution_settings)
     validate_model = method(endpoints.validate_model)
 
     get_run = method(endpoints.get_run)
