@@ -92,8 +92,6 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
-# Step-config marker: compile already probed the run's models, so the job need not probe them again.
-_MODELS_PREFLIGHTED = "models_preflighted"
 
 
 def _merge_choice(default: ModelChoice | None, override: ModelChoice | None) -> ModelChoice | None:
@@ -158,6 +156,10 @@ def _preflight_models(models: WarGameModels | None, *, sdk: Any, workspace: str,
         key = _common._resolve_secret(sdk, choice.api_key_secret, workspace) if choice.api_key_secret else default_key
         verdict = validate_choice(choice.model, choice.base_url or default_base_url, key)
         if verdict.ok:
+            continue
+        if verdict.reason == "provider_error":
+            # The key was accepted; a busy provider (429/5xx) is waited out by the run itself, so don't fail here.
+            logger.warning("%s model endpoint is busy (%s); submitting anyway", label, verdict.detail or "error")
             continue
         raise AgentHardenerRunError(CATEGORY_MODEL_UNAVAILABLE, _preflight_message(label, choice, verdict))
 
@@ -236,11 +238,6 @@ def _preflight_message(label: str, choice: ModelChoice, verdict: Any) -> str:
         return f"The {label} model credentials were rejected by {endpoint} ({verdict.detail or 'unauthorized'})."
     if verdict.reason == "unreachable":
         return f"Could not reach the {label} model endpoint {endpoint} ({verdict.detail or 'no response'})."
-    if verdict.reason == "provider_error":
-        return (
-            f"The {label} model endpoint {endpoint} returned an error ({verdict.detail or 'unknown'}); "
-            "the credentials were accepted, so this is the provider's side — retry shortly."
-        )
     available = ", ".join(verdict.available[:20]) or "none"
     return (
         f"The {label} model {choice.model!r} is not available at {endpoint}. "
@@ -317,7 +314,6 @@ class AgentHardenerRunJob(NemoJob):
                     executor=executor,
                     config={
                         **war_game.model_dump(mode="json"),
-                        _MODELS_PREFLIGHTED: True,
                         **({"run_name": run_name} if run_name else {}),
                     },
                     environment=environment,
@@ -422,18 +418,6 @@ class AgentHardenerRunJob(NemoJob):
             plugin_config, sdk=sdk, workspace=ctx.workspace, openshell_home=openshell_home
         )
         model_env = {**runtime_env, **_common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)}
-        # Preflight user-chosen models against their endpoint before the (minutes-long) sandbox spin-up, so
-        # a wrong model name / key fails in seconds with the list of models the credentials can actually reach.
-        # A submitted job was already probed at compile; only a local, uncompiled run is probed here.
-        if not config.get(_MODELS_PREFLIGHTED):
-            _preflight_models(
-                models,
-                sdk=sdk,
-                workspace=ctx.workspace,
-                # Same resolver the validate endpoint uses, so a run is never preflighted against a
-                # different credential than it runs with.
-                default_key=_common.resolve_model_key(sdk, None, workspace=ctx.workspace),
-            )
         validate_only = bool(config.get("validate_only"))
         stale_warning: str | None = None
         secret_values: dict[str, str] = {}
