@@ -9,7 +9,7 @@ from nemo_helix_plugin.auth import AuthContext
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import AuthContext as CapturedAuthContext
 from nhx.common.auth.models import Principal
-from nhx.common.auth.token_claims import ActorClaims, TokenClaims
+from nhx.common.auth.token_claims import SUBJECT_ALIASES_CLAIM, ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken
 from nhx.common.config import AuthConfig
 
@@ -23,11 +23,17 @@ async def test_delegation_fact_is_bound_to_verified_credential(credential: str, 
         email="creator@example.test",
         groups=["readers"],
         scopes=[],
-        raw_claims={},
+        raw_claims={SUBJECT_ALIASES_CLAIM: ["creator-alias", 7, "creator"]},
         actor=ActorClaims(subject="docker-runtime", groups=[]),
     )
     workload = ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
     principal = workload.principal
+    assert principal.verified_workload_delegation
+    assert (principal.id, principal.authz_aliases) == ("docker-runtime", ["docker-runtime"])
+    assert principal.on_behalf_of == "creator"
+    assert principal.on_behalf_of_email == "creator@example.test"
+    assert principal.on_behalf_of_groups == ["readers"]
+    assert principal.on_behalf_of_authz_aliases == ["creator", "creator@example.test", "creator-alias"]
     if substitute == "actor":
         principal = principal.model_copy(update={"id": "different-actor"})
     elif substitute == "subject":

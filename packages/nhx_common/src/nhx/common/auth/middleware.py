@@ -214,7 +214,9 @@ def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, conf
             "account_type": "user",
             "display_name": principal.on_behalf_of_email or principal.on_behalf_of,
             "primary_email": principal.on_behalf_of_email,
-            "authz_aliases": _dedupe_non_empty([principal.on_behalf_of, principal.on_behalf_of_email]),
+            "authz_aliases": _dedupe_non_empty(
+                [principal.on_behalf_of, principal.on_behalf_of_email, *principal.on_behalf_of_authz_aliases]
+            ),
             "claims_snapshot": {},
         }
     return resolution

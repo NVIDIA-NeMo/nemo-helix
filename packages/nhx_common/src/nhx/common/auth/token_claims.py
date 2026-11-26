@@ -11,6 +11,8 @@ from nhx.common.config import AuthConfig
 
 from .json_payload import JsonObject
 
+SUBJECT_ALIASES_CLAIM = "nhx_subject_aliases"
+
 logger = logging.getLogger(__name__)
 
 

@@ -191,7 +191,9 @@ func fetchSecretsWithContext(ctx context.Context, client nhxclient.SecretClient,
 
 	for _, ref := range secretRefs {
 		logger.Printf("Fetching secret %s from workspace %s...\n", ref.secretName, ref.workspace)
-		secret, err := client.GetSecret(ctx, ref.workspace, ref.secretName)
+		requestCtx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
+		secret, err := client.GetSecret(requestCtx, ref.workspace, ref.secretName)
+		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch secret %s/%s: %w", ref.workspace, ref.secretName, err)
 		}
@@ -279,9 +281,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			principal := nhxclient.PrincipalFromEnv()
 
 			session := launcherSession(ctx)
-			fetchCtx, cancel := context.WithTimeout(ctx, secretFetchTimeout)
-			secretEnvVars, err := fetchSecretsWithContext(fetchCtx, session.SecretClient(secretEndpoint, principal), secretRefs)
-			cancel()
+			secretEnvVars, err := fetchSecretsWithContext(ctx, session.SecretClient(secretEndpoint, principal), secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err

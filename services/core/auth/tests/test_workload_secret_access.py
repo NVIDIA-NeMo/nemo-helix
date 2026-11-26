@@ -87,6 +87,7 @@ def launcher_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "missing-grant",
         "cross-workspace",
         "cross-workspace-allowed",
+        "alias-grant",
         "scope-denied",
         "tampered",
     ],
@@ -97,7 +98,7 @@ def test_signed_workload_reads_persisted_secret(
     outcome: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    launcher_binary: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     key_file = tmp_path / "workload.pem"
@@ -168,21 +169,25 @@ def test_signed_workload_reads_persisted_secret(
         workspaces = WorkspacesClient.from_client(admin)
         workspace = short_unique_name("workload-secret")
         other = short_unique_name("other-secret")
-        for name in (workspace, other):
+        secret_values = {workspace: "persisted-value", other: "other-workspace-value"}
+        for name, value in secret_values.items():
             workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
             SecretsClient.from_client(admin).create_secret(
                 workspace=name,
-                body=HelixSecretCreateRequest(name="credential", value=SecretStr("persisted-value")),
+                body=HelixSecretCreateRequest(name="credential", value=SecretStr(value)),
             ).data()
         creator = Principal(
-            id="creator@example.com",
+            id="creator-id",
             email="creator@example.com",
             groups=["runtime-readers"],
+            authz_aliases=["creator-alias"],
         )
         if outcome != "missing-grant":
             workspaces.create_workspace_member(
                 workspace=workspace,
-                body=CreateWorkspaceMemberRequest(principal="runtime-readers", roles=["Viewer"]),
+                body=CreateWorkspaceMemberRequest(
+                    principal="creator-alias" if outcome == "alias-grant" else "runtime-readers", roles=["Viewer"]
+                ),
                 query_params={"wait_role_propagation": True},
             ).data()
         if outcome == "cross-workspace-allowed":
@@ -286,7 +291,14 @@ def test_signed_workload_reads_persisted_secret(
                 },
                 flush=True,
             )
+            assert resolved.principal.on_behalf_of == "creator-id"
+            assert resolved.principal.on_behalf_of_email == "creator@example.com"
             assert resolved.principal.on_behalf_of_groups == ["runtime-readers"]
+            assert resolved.principal.on_behalf_of_authz_aliases == [
+                "creator-id",
+                "creator@example.com",
+                "creator-alias",
+            ]
         target = other if outcome.startswith("cross-workspace") else workspace
         response = ctx.test_client.get(
             f"/apis/secrets/v2/workspaces/{target}/secrets/credential/access",
@@ -299,11 +311,12 @@ def test_signed_workload_reads_persisted_secret(
             response.text if response.status_code != 200 else "value retrieved",
             flush=True,
         )
-        assert response.status_code == (
-            200 if outcome in {"allowed", "cross-workspace-allowed"} else 401 if outcome == "tampered" else 403
-        ), response.text
+        allowed = outcome in {"allowed", "cross-workspace-allowed", "alias-grant"}
+        assert response.status_code == (200 if allowed else 401 if outcome == "tampered" else 403), response.text
+        if allowed:
+            assert response.json()["value"] == secret_values[target]
         if outcome == "allowed":
-            assert response.json()["value"] == "persisted-value"
+            launcher_binary = request.getfixturevalue("launcher_binary")
             _run_launcher_against_service(ctx, launcher_binary, proof, workspace, tmp_path, creator)
 
 
@@ -359,29 +372,20 @@ def _run_launcher_against_service(
             env.pop("NHX_WORKLOAD_IDENTITY_TOKEN_FILE")
             env.pop("NHX_ACCESS_TOKEN_FILE")
             env["NHX_PRINCIPAL"] = creator.model_dump_json(exclude_none=True)
+        child_marker = tmp_path / "child-started"
         check_script = tmp_path / "check-secret.sh"
-        check_script.write_text('test "$TEST_SECRET" = "persisted-value"')
-        result = subprocess.run(
-            [str(binary), "run", "--", "/bin/sh", str(check_script)],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        check_script.write_text(f'touch "{child_marker}" && test "$TEST_SECRET" = "persisted-value"')
+        child = [str(binary), "run", "--", "/bin/sh", str(check_script)]
+        result = subprocess.run(child, env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stderr
+        assert child_marker.exists()
         assert "persisted-value" not in result.stdout + result.stderr
+        child_marker.unlink()
         # A selected credential failure must stop before child execution.
         proof_file.write_text("invalid-proof")
         if proof is None:
             env.pop("NHX_PRINCIPAL")
-        child_marker = tmp_path / "child-started"
-        result = subprocess.run(
-            [str(binary), "run", "--", "/usr/bin/touch", str(child_marker)],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = subprocess.run(child, env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode != 0
         assert not child_marker.exists()
     finally:

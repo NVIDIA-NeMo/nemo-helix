@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -618,5 +619,52 @@ func restoreEnvVars(envVars map[string]envVarState) {
 		} else {
 			os.Unsetenv(key)
 		}
+	}
+}
+
+type recordingSecretClient struct {
+	contexts []context.Context
+}
+
+func (c *recordingSecretClient) GetSecret(ctx context.Context, workspaceID, secretName string) (*nhxclient.HelixSecretAccessResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.contexts = append(c.contexts, ctx)
+	return &nhxclient.HelixSecretAccessResponse{Value: secretName}, nil
+}
+
+// A shared deadline would let several slow Secrets exhaust one budget before the job starts.
+func TestFetchSecretsGivesEachRequestItsOwnDeadline(t *testing.T) {
+	client := &recordingSecretClient{}
+	refs := []secretReference{
+		{envVarName: "A", workspace: "default", secretName: "a"},
+		{envVarName: "B", workspace: "default", secretName: "b"},
+	}
+	if _, err := fetchSecretsWithContext(context.Background(), client, refs); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.contexts) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(client.contexts))
+	}
+	for i, ctx := range client.contexts {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatalf("request %d has no deadline", i)
+		}
+		if ctx.Err() == nil {
+			t.Fatalf("request %d context was not released after the request", i)
+		}
+	}
+	if client.contexts[0] == client.contexts[1] {
+		t.Fatal("requests share one deadline")
+	}
+}
+
+func TestFetchSecretsStopsWhenParentIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	refs := []secretReference{{envVarName: "A", workspace: "default", secretName: "a"}}
+	if _, err := fetchSecretsWithContext(ctx, &recordingSecretClient{}, refs); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
