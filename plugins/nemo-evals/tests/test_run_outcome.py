@@ -301,3 +301,14 @@ async def test_status_writes_land_in_order_and_a_superseded_pending_snapshot_is_
     await asyncio.sleep(0.05)
 
     assert landed == [1, 3]
+
+
+async def test_status_writes_run_on_a_daemon_thread_so_they_never_hold_the_process_at_exit(monkeypatch):
+    threads: list[threading.Thread] = []
+    monkeypatch.setattr(
+        run_outcome, "report_status_details", lambda details, **kwargs: threads.append(threading.current_thread())
+    )
+
+    await run_outcome.status_details_writer(MagicMock(), None)({"n": 1})
+
+    assert [thread.daemon for thread in threads] == [True]
