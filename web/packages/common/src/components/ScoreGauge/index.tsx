@@ -16,7 +16,7 @@ type ScoreGaugeSize = 'lg' | 'sm';
 
 interface ScoreGaugeProps {
   /** Raw score on a 0-10 scale. Falsy / non-finite renders as unavailable. */
-  score?: number;
+  score?: number | null;
   size?: ScoreGaugeSize;
   /** Scales the gauge to fit its parent while keeping a square aspect ratio. */
   scaleToFit?: boolean;

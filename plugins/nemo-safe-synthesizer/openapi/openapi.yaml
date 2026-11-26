@@ -743,10 +743,12 @@ components:
           title: Count
           description: Attack evaluations with this grade, or null if only percentages
             exist.
+          nullable: true
           type: integer
         percentage:
           title: Percentage
           description: Share of attack evaluations with this grade.
+          nullable: true
           type: number
       type: object
       required:
@@ -816,30 +818,37 @@ components:
           - $ref: '#/components/schemas/AutocorrelationEvaluationMode'
           description: '''per_group'' or ''global'', or null when no pair could be
             compared.'
+          nullable: true
         timestamp_column:
           title: Timestamp Column
           description: Column the values are ordered by, or null.
+          nullable: true
           type: string
         group_column:
           title: Group Column
           description: Column that separates sequences, or null.
+          nullable: true
           type: string
         max_lag:
           title: Max Lag
           description: Configured largest lag, or null.
+          nullable: true
           type: integer
         min_points:
           title: Min Points
           description: Configured fewest values a sequence needs, or null.
+          nullable: true
           type: integer
         counts:
           allOf:
           - $ref: '#/components/schemas/AutocorrelationCounts'
           description: Counts, or null.
+          nullable: true
         group_selection:
           allOf:
           - $ref: '#/components/schemas/GroupSelection'
           description: Group selection, or null.
+          nullable: true
         per_group:
           items:
             $ref: '#/components/schemas/GroupSimilarity'
@@ -912,6 +921,7 @@ components:
         group:
           title: Group
           description: Group label, or null for one global sequence.
+          nullable: true
           type: string
         column:
           type: string
@@ -945,15 +955,18 @@ components:
           title: Reason
           description: Why the pair scores 0, such as a constant synthetic sequence,
             or null.
+          nullable: true
           type: string
         training_acf:
           items:
+            nullable: true
             type: number
           type: array
           title: Training Acf
           description: Training autocorrelation per lag, or null where undefined.
         synthetic_acf:
           items:
+            nullable: true
             type: number
           type: array
           title: Synthetic Acf
@@ -1039,6 +1052,7 @@ components:
           title: Distance
           description: Euclidean distance between the windows after standardizing
             each value by the training windows, or null when it overflows.
+          nullable: true
           type: number
         exact_copy:
           type: boolean
@@ -1057,6 +1071,7 @@ components:
           description: Training window values, as `values[column][step]`, only for
             an exact copy so the data holds no training values that the synthetic
             data lacks; null otherwise.
+          nullable: true
           items:
             items:
               type: number
@@ -1075,10 +1090,12 @@ components:
         assigned_type:
           title: Assigned Type
           description: Column type assigned by PII detection.
+          nullable: true
           type: string
         assigned_entity:
           title: Assigned Entity
           description: Entity assigned to the column.
+          nullable: true
           type: string
         detected_entity_counts:
           additionalProperties:
@@ -1123,6 +1140,7 @@ components:
         unique_percent:
           title: Unique Percent
           description: Distinct values as a percentage of non-null values.
+          nullable: true
           type: number
         missing_count:
           type: integer
@@ -1131,6 +1149,7 @@ components:
         missing_percent:
           title: Missing Percent
           description: Null values as a percentage of all values.
+          nullable: true
           type: number
         avg_str_length:
           type: number
@@ -1156,6 +1175,7 @@ components:
         protection:
           title: Protection
           description: Protection from 0 to 10; higher is better.
+          nullable: true
           type: number
         grade:
           type: string
@@ -1185,20 +1205,24 @@ components:
         distribution_distance:
           title: Distribution Distance
           description: Jensen-Shannon distance between the distributions.
+          nullable: true
           type: number
         distribution_stability:
           allOf:
           - $ref: '#/components/schemas/MetricScore'
           description: Distribution stability of the column.
+          nullable: true
         distribution:
           allOf:
           - $ref: '#/components/schemas/Distribution'
           description: Training and synthetic distributions, or null for columns that
             are not charted, such as text.
+          nullable: true
         pii:
           allOf:
           - $ref: '#/components/schemas/ColumnPIIStatistics'
           description: PII statistics, or null without PII detection.
+          nullable: true
       type: object
       required:
       - name
@@ -1266,6 +1290,7 @@ components:
         training:
           items:
             items:
+              nullable: true
               type: number
             type: array
           type: array
@@ -1274,6 +1299,7 @@ components:
         synthetic:
           items:
             items:
+              nullable: true
               type: number
             type: array
           type: array
@@ -1282,6 +1308,7 @@ components:
         difference:
           items:
             items:
+              nullable: true
               type: number
             type: array
           type: array
@@ -1306,6 +1333,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/CorrelationMatrices'
           description: Correlation matrices, or null if not computed.
+          nullable: true
       type: object
       required:
       - score
@@ -1428,6 +1456,7 @@ components:
           - $ref: '#/components/schemas/Projection'
           description: Projected records, sampled to at most 5000 per dataset, or
             null if not computed.
+          nullable: true
       type: object
       required:
       - score
@@ -1485,6 +1514,7 @@ components:
         epsilon:
           title: Epsilon
           description: Privacy budget, or null when disabled.
+          nullable: true
           type: number
         delta:
           anyOf:
@@ -1492,6 +1522,7 @@ components:
           - type: string
           title: Delta
           description: Privacy delta, 'auto', or null when disabled.
+          nullable: true
       type: object
       required:
       - enabled
@@ -1513,17 +1544,20 @@ components:
           title: Bin Edges
           description: For numeric values, the increasing bin edges, one more than
             the labels; null for categories.
+          nullable: true
           items:
             type: number
           type: array
         training_percent:
           items:
+            nullable: true
             type: number
           type: array
           title: Training Percent
           description: Percentage of training values per label, or null where undefined.
         synthetic_percent:
           items:
+            nullable: true
             type: number
           type: array
           title: Synthetic Percent
@@ -1663,6 +1697,7 @@ components:
         job_id:
           title: Job Id
           description: Job ID from the NEMO_JOB_ID environment variable, or null.
+          nullable: true
           type: string
         scores:
           $ref: '#/components/schemas/Scores'
@@ -1674,6 +1709,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/DatasetCounts'
           description: Dataset counts, or null when they were not computed.
+          nullable: true
         columns:
           items:
             $ref: '#/components/schemas/ColumnResult'
@@ -1695,6 +1731,7 @@ components:
           - $ref: '#/components/schemas/PIIReplacement'
           description: PII replacement applied to the training data, or null when
             none was applied or checked.
+          nullable: true
       type: object
       required:
       - schema_version
@@ -2182,6 +2219,7 @@ components:
         group:
           title: Group
           description: Group label, or null for one global sequence.
+          nullable: true
           type: string
         similarity:
           type: number
@@ -2559,10 +2597,12 @@ components:
         raw_score:
           title: Raw Score
           description: Unscaled metric value, or null if it could not be computed.
+          nullable: true
           type: number
         score:
           title: Score
           description: Score from 0 to 10, or null if it could not be computed.
+          nullable: true
           type: number
         grade:
           type: string
@@ -2572,6 +2612,7 @@ components:
         notes:
           title: Notes
           description: Warning or error about the score, or null.
+          nullable: true
           type: string
       type: object
       required:
@@ -2587,43 +2628,53 @@ components:
           allOf:
           - $ref: '#/components/schemas/CorrelationMetric'
           description: Column Correlation Stability.
+          nullable: true
         deep_structure_stability:
           allOf:
           - $ref: '#/components/schemas/DeepStructureMetric'
           description: Deep Structure Stability.
+          nullable: true
         column_distribution_stability:
           allOf:
           - $ref: '#/components/schemas/Metric'
           description: Column Distribution Stability; each column's distributions
             are in `columns`.
+          nullable: true
         text_semantic_similarity:
           allOf:
           - $ref: '#/components/schemas/TextSemanticMetric'
           description: Text Semantic Similarity.
+          nullable: true
         text_structure_similarity:
           allOf:
           - $ref: '#/components/schemas/TextStructureMetric'
           description: Text Structure Similarity.
+          nullable: true
         membership_inference_protection:
           allOf:
           - $ref: '#/components/schemas/MembershipInferenceMetric'
           description: Membership Inference Protection.
+          nullable: true
         attribute_inference_protection:
           allOf:
           - $ref: '#/components/schemas/AttributeInferenceMetric'
           description: Attribute Inference Protection.
+          nullable: true
         pii_replay:
           allOf:
           - $ref: '#/components/schemas/PIIReplayMetric'
           description: PII Replay.
+          nullable: true
         autocorrelation_similarity:
           allOf:
           - $ref: '#/components/schemas/AutocorrelationSimilarityMetric'
           description: Autocorrelation Similarity.
+          nullable: true
         window_membership_inference_protection:
           allOf:
           - $ref: '#/components/schemas/WindowMembershipInferenceMetric'
           description: Window Membership Inference Protection.
+          nullable: true
       type: object
       required:
       - column_correlation_stability
@@ -2650,6 +2701,7 @@ components:
         entity_type:
           title: Entity Type
           description: Entity type of the column, or null.
+          nullable: true
           type: string
       type: object
       required:
@@ -2679,14 +2731,17 @@ components:
         sampler:
           title: Sampler
           description: Sampler that generated replacement values, or null.
+          nullable: true
           type: string
         locale:
           title: Locale
           description: Sampler locale, or null.
+          nullable: true
           type: string
         seed:
           title: Seed
           description: Sampler seed, or null for a random seed.
+          nullable: true
           type: integer
         value_mappings:
           additionalProperties:
@@ -2727,6 +2782,7 @@ components:
         pattern:
           title: Pattern
           description: Replacement pattern, or null.
+          nullable: true
           type: string
         pattern_symbols:
           items:
@@ -2820,6 +2876,7 @@ components:
           title: Enabled
           description: Whether `evaluation.pii_replay_enabled` was on, or null when
             the evaluation had no configuration.
+          nullable: true
           type: boolean
         training_total_records:
           type: integer
@@ -2838,6 +2895,7 @@ components:
         skipped_reason:
           title: Skipped Reason
           description: Why PII replay did not run in full, or null.
+          nullable: true
           type: string
       type: object
       required:
@@ -2961,12 +3019,14 @@ components:
       properties:
         x:
           items:
+            nullable: true
             type: number
           type: array
           title: X
           description: First principal component of each point, or null where undefined.
         y:
           items:
+            nullable: true
             type: number
           type: array
           title: Y
@@ -3277,111 +3337,135 @@ components:
           title: Synthetic Data Quality Score
           description: Weighted composite of the five sub-scores below (SQS). Higher
             is better (0--10 scale).
+          nullable: true
           type: number
         column_correlation_stability_score:
           title: Column Correlation Stability Score
           description: How closely pairwise column correlations in synthetic data
             match the original for numeric and categorical columns.
+          nullable: true
           type: number
         deep_structure_stability_score:
           title: Deep Structure Stability Score
           description: PCA-based comparison of multivariate structure between real
             and synthetic data for numeric and categorical columns.
+          nullable: true
           type: number
         column_distribution_stability_score:
           title: Column Distribution Stability Score
           description: Per-column Jensen-Shannon distance between training and synthetic
             distributions averaged across all numeric and categorical columns.
+          nullable: true
           type: number
         text_semantic_similarity_score:
           title: Text Semantic Similarity Score
           description: Embedding-based semantic closeness between real and synthetic
             free-text columns.
+          nullable: true
           type: number
         text_structure_similarity_score:
           title: Text Structure Similarity Score
           description: Jensen-Shannon divergence over sentence count, words-per-sentence,
             and characters-per-word distributions between real and synthetic free-text
             columns.
+          nullable: true
           type: number
         autocorrelation_similarity_score:
           title: Autocorrelation Similarity Score
           description: How closely lagged self-correlation in synthetic time-series
             sequences matches the training sequences.
+          nullable: true
           type: number
         window_membership_inference_protection_score:
           title: Window Membership Inference Protection Score
           description: Resistance to attacks that use short windows of consecutive
             values to determine whether a time-series sequence was in the training
             set. Reported on its own; not part of the Data Privacy Score.
+          nullable: true
           type: number
         data_privacy_score:
           title: Data Privacy Score
           description: Composite of MIA and AIA protection scores.
+          nullable: true
           type: number
         membership_inference_protection_score:
           title: Membership Inference Protection Score
           description: Resistance to attacks that try to determine whether a record
             was in the training set.
+          nullable: true
           type: number
         attribute_inference_protection_score:
           title: Attribute Inference Protection Score
           description: Resistance to attacks that try to infer sensitive attributes
             from quasi-identifiers.
+          nullable: true
           type: number
         num_valid_records:
           title: Num Valid Records
           description: Count of synthetic records that passed schema and format validation.
+          nullable: true
           type: integer
         num_invalid_records:
           title: Num Invalid Records
           description: Count of synthetic records filtered out during validation.
+          nullable: true
           type: integer
         num_prompts:
           title: Num Prompts
           description: Total LLM generation prompts issued.
+          nullable: true
           type: integer
         valid_record_fraction:
           title: Valid Record Fraction
           description: 'Ratio of valid records: ``num_valid_records / (num_valid_records
             + num_invalid_records)``.'
+          nullable: true
           type: number
         num_completion_tokens:
           title: Num Completion Tokens
           description: Total tokens generated by the LLM across all completions.
+          nullable: true
           type: integer
         num_valid_record_tokens:
           title: Num Valid Record Tokens
           description: Tokens in records that passed validation.
+          nullable: true
           type: integer
         num_invalid_record_tokens:
           title: Num Invalid Record Tokens
           description: Tokens in records that failed validation.
+          nullable: true
           type: integer
         num_non_record_tokens:
           title: Num Non Record Tokens
           description: Tokens not part of any recognized record.
+          nullable: true
           type: integer
         valid_record_token_fraction:
           title: Valid Record Token Fraction
           description: Fraction of total completion tokens in valid records.
+          nullable: true
           type: number
         tokens_per_prompt:
           title: Tokens Per Prompt
           description: 'Average completion tokens per prompt: num_completion_tokens
             / num_prompts.'
+          nullable: true
           type: number
         tokens_per_second:
           title: Tokens Per Second
           description: Total completion tokens divided by generation wall-clock time.
+          nullable: true
           type: number
         valid_tokens_per_second:
           title: Valid Tokens Per Second
           description: Valid record tokens divided by generation wall-clock time.
+          nullable: true
           type: number
         tokenization_overhead_sec:
           title: Tokenization Overhead Sec
           description: Wall-clock seconds spent on tokenization for statistics tracking.
+          nullable: true
           type: number
         timing:
           allOf:
@@ -3403,22 +3487,27 @@ components:
         total_time_sec:
           title: Total Time Sec
           description: Total end-to-end pipeline duration in seconds.
+          nullable: true
           type: number
         pii_replacer_time_sec:
           title: Pii Replacer Time Sec
           description: Time spent on PII replacement.
+          nullable: true
           type: number
         training_time_sec:
           title: Training Time Sec
           description: Time spent on model training.
+          nullable: true
           type: number
         generation_time_sec:
           title: Generation Time Sec
           description: Time spent generating synthetic records.
+          nullable: true
           type: number
         evaluation_time_sec:
           title: Evaluation Time Sec
           description: Time spent evaluating synthetic data quality.
+          nullable: true
           type: number
       type: object
       title: SafeSynthesizerTiming
@@ -3429,10 +3518,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/MetricScore'
           description: Synthetic Quality Score.
+          nullable: true
         data_privacy:
           allOf:
           - $ref: '#/components/schemas/MetricScore'
           description: Data Privacy Score.
+          nullable: true
       type: object
       required:
       - synthetic_quality
@@ -3444,6 +3535,7 @@ components:
         group:
           title: Group
           description: Group label, or null for one global sequence.
+          nullable: true
           type: string
         column:
           type: string
@@ -3566,14 +3658,17 @@ components:
           allOf:
           - $ref: '#/components/schemas/Distribution'
           description: Sentences per record.
+          nullable: true
         words_per_sentence:
           allOf:
           - $ref: '#/components/schemas/Distribution'
           description: Average words per sentence.
+          nullable: true
         characters_per_word:
           allOf:
           - $ref: '#/components/schemas/Distribution'
           description: Average characters per word.
+          nullable: true
       type: object
       required:
       - sentence_count
@@ -3907,6 +4002,7 @@ components:
           title: Threshold
           description: Distance at or below which a window is flagged, or null when
             it overflows.
+          nullable: true
           type: number
         training_flag_rate:
           type: number
@@ -3983,6 +4079,7 @@ components:
       properties:
         training:
           items:
+            nullable: true
             type: number
           type: array
           title: Training
@@ -3991,7 +4088,9 @@ components:
           title: Holdout
           description: Distance of each holdout window, null where undefined, or null
             without the attack.
+          nullable: true
           items:
+            nullable: true
             type: number
           type: array
       type: object
@@ -4065,6 +4164,7 @@ components:
         group:
           title: Group
           description: Group label, or null for one global sequence.
+          nullable: true
           type: string
         windows:
           type: integer
@@ -4077,6 +4177,7 @@ components:
         flag_rate:
           title: Flag Rate
           description: Share of windows flagged, or null without the attack.
+          nullable: true
           type: number
       type: object
       required:
@@ -4109,28 +4210,34 @@ components:
         window_size:
           title: Window Size
           description: Steps per window, or null.
+          nullable: true
           type: integer
         counts:
           allOf:
           - $ref: '#/components/schemas/WindowCounts'
           description: Window counts, or null.
+          nullable: true
         exact_copy_rate:
           title: Exact Copy Rate
           description: Share of training windows with an exact synthetic copy, or
             null.
+          nullable: true
           type: number
         closest_match:
           allOf:
           - $ref: '#/components/schemas/ClosestMatch'
           description: Closest synthetic window, or null.
+          nullable: true
         distances:
           allOf:
           - $ref: '#/components/schemas/WindowDistances'
           description: Window distances, or null.
+          nullable: true
         attack:
           allOf:
           - $ref: '#/components/schemas/WindowAttack'
           description: Attack results, or null without a usable holdout.
+          nullable: true
         training_group_count:
           type: integer
           title: Training Group Count

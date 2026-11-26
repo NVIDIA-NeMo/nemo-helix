@@ -7,7 +7,7 @@ import type { FC } from 'react';
 
 interface TitledDialProps {
   title: string;
-  score?: number;
+  score?: number | null;
   description: string;
   grade: string;
 }
