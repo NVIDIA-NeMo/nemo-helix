@@ -950,9 +950,26 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object],
     return calls
 
 
+@pytest.fixture
+def reaps(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object]]]:
+    """Records the runner's pre-start sweeps instead of reaching a sandbox server."""
+    from sandboxed_gym import job_reaper
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def reap(job_id: str, **kwargs: object) -> tuple[str, ...]:
+        calls.append((job_id, kwargs))
+        return ()
+
+    monkeypatch.setattr(job_reaper, "reap_job_sandboxes", reap)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_session_runner_records_target_provenance_before_and_after_run(
-    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     import sandboxed_gym
     from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
@@ -999,7 +1016,10 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
 
 @pytest.mark.asyncio
 async def test_a_platform_run_scores_each_reward_component_per_trial(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     # The platform hands AgentEvaluator this wrapper, not SandboxedGymAgentTaskRunner, so the wrapper has to
     # carry the scoring hook too; without it the components stay in trial metadata, unscored.
@@ -1338,7 +1358,9 @@ def test_a_disk_request_reaches_the_built_host_spec() -> None:
 
 @pytest.mark.asyncio
 async def test_the_runner_arms_the_job_reaper_on_its_own_thread_before_starting_a_host(
-    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     """Only the main thread can install the reaper's SIGTERM handler, and `start` runs in a worker thread.
 
@@ -1511,3 +1533,45 @@ async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_return
         (4, {"succeeded": 4}),
         (4, {"succeeded": 4}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
+    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]]
+) -> None:
+    """A rerun reuses the job's storage; a host its killed earlier attempt left must not keep writing to it."""
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    order: list[str] = []
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            order.append(f"start:{len(reaps)}")
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    plan = capable_plan()
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1", job_uid="job-1-uid")
+
+    await runner.run_tasks([])
+
+    # One sweep, with this job's unique id and the plan's provider settings, finished before the host was created.
+    assert reaps == [
+        ("job-1-uid", {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options})
+    ]
+    assert order == ["start:1"]

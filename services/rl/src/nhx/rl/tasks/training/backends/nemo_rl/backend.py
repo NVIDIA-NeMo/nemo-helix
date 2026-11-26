@@ -182,6 +182,12 @@ class NemoRLBackend(TrainingBackend):
 
         bootstrap = create_bootstrap_from_env()
         bootstrap.progress = progress
+        if bootstrap.rank == 0:
+            # Sandboxes an earlier run of this job left behind, when its pod was killed before its own
+            # sweep ran: a rerun or a resume reuses the job's storage, and they would keep writing to it.
+            # Only rank 0 runs the driver that creates sandboxes, after every worker has joined, so
+            # nothing from this run exists yet.
+            self._reap_job_sandboxes(customizer_config)
         if customizer_config.parallelism.num_nodes > 1:
             # Each pod has its own RDMA devices, so each node's ray start gets this pod's list.
             bootstrap.node_env = get_nccl_ib_env()
