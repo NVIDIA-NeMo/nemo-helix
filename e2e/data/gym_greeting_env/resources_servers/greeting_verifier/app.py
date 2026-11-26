@@ -165,7 +165,7 @@ services:
       - |
         ready() {
           for _ in $$(seq 30); do
-            wget -qO- "http://$$1" 2>/dev/null | grep -q nginx && { echo "$$1-ok"; return; }
+            wget -q -T 3 -O- "http://$$1" 2>/dev/null | grep -q nginx && { echo "$$1-ok"; return; }
             sleep 1
           done
           echo "$$1-unreachable"
