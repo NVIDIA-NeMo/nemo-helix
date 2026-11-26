@@ -18,6 +18,7 @@ from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError
 
 
 def _project(tmp_path: Path) -> Path:
@@ -28,7 +29,12 @@ def _project(tmp_path: Path) -> Path:
 
 
 def _patch_cli(
-    cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: list[list[str]], created: dict, project: Path
+    cli_main: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    captured: list[list[str]],
+    created: dict,
+    project: Path,
+    **manifests: Any,
 ) -> Any:
     """Neutralize preflight/SDK/upload and capture both the init argv and the create body."""
 
@@ -41,9 +47,14 @@ def _patch_cli(
 
         return inspect_project(project, dockerfile=dockerfile)
 
+    def fake_get(name: str, *, workspace: str = "default"):
+        raise NotFoundError(httpx.Response(404, json={"detail": f"{name} not found"}))
+
     fake_sdk = SimpleNamespace(
         agent_hardener=SimpleNamespace(
-            manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project)
+            manifests=SimpleNamespace(
+                **{"create": fake_create, "get": fake_get, "inspect_project": fake_inspect_project, **manifests}
+            )
         )
     )
     monkeypatch.setattr(_shared, "require_host_preflight", lambda *_args, **_kwargs: None)
@@ -266,3 +277,123 @@ def test_an_unrelated_directory_with_the_victim_name_is_never_deleted(
 
     assert rendered == manifest["manifest_yaml"]
     assert precious.read_text(encoding="utf-8") == "keep me"
+
+
+def _saved_project(name: str) -> dict[str, Any]:
+    """A project manifest an earlier `init` saved, with the answers it was given then."""
+    agent = {"harness": "langgraph", "relay_integration_confirmed": True, "start_command": "/app/run.sh"}
+    return {
+        "name": name,
+        "source_type": "project",
+        "dockerfile": "deploy/Dockerfile",
+        "binaries": ["/usr/local/bin/python3*"],
+        "port": 8000,
+        "egress": ["old.example.com"],
+        "manifest_yaml": yaml.safe_dump({"agent": agent}),
+        "victim_image": "registry/victim:1",
+        "benign_suite": [{"tool": "t"}],
+        "warnings": ["No hosts named in the Dockerfile."],
+    }
+
+
+def test_init_project_dir_twice_updates_without_asking_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A re-init reuses the saved answers, says it updated, and names what changed."""
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    project = _project(tmp_path)
+    saved = _saved_project(project.name)
+    created: dict[str, Any] = {}
+
+    def update(*, workspace: str, **body: Any) -> dict[str, Any]:
+        created.update(body)
+        return {**saved, "egress": ["old.example.com", "new.example.com"], "victim_image": ""}
+
+    app = _patch_cli(cli_main, monkeypatch, [], created, project, get=lambda name, *, workspace: saved, create=update)
+    result = CliRunner().invoke(app, ["init", "--project-dir", str(project), "-o", str(tmp_path / "o.yaml")])
+
+    assert result.exit_code == 0, result.output
+    assert created["name"] == project.name
+    assert created["update_existing"] is True
+    assert "harness" not in created  # the server carries the saved answer over
+    assert f"Updated manifest '{project.name}'" in result.output
+    assert "egress    +new.example.com" in result.output
+    assert "! (new) No credential-shaped env names" in result.output
+    assert "registry/victim:1" in result.output
+    assert f"run --manifest-id {project.name}" in result.output
+
+
+def test_init_agent_on_a_saved_name_stops_before_creating(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    saved = {"name": "clockbot", "source_type": "agent", "agent": "default/clockbot"}
+
+    def must_not_create(**_k: Any) -> dict[str, Any]:  # pragma: no cover - must not run
+        raise AssertionError("a taken name must not be created")
+
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        [],
+        {},
+        _project(tmp_path),
+        get=lambda name, *, workspace: saved,
+        create=must_not_create,
+    )
+    result = CliRunner().invoke(app, ["init", "--agent", "clockbot"])
+
+    assert result.exit_code == 1
+    assert "refresh --manifest-id clockbot" in result.output
+
+
+def test_init_project_dir_on_an_agent_manifest_name_stops_before_uploading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    project = _project(tmp_path)
+    saved = {"name": project.name, "source_type": "agent", "agent": "default/clockbot"}
+    app = _patch_cli(cli_main, monkeypatch, [], {}, project, get=lambda name, *, workspace: saved)
+
+    def must_not_upload(*_a: Any, **_k: Any) -> UploadedFileset:  # pragma: no cover - must not run
+        raise AssertionError("a taken name must not upload the project")
+
+    monkeypatch.setattr(lifecycle, "upload_project_dir", must_not_upload)
+    result = CliRunner().invoke(app, ["init", "--project-dir", str(project)])
+
+    assert result.exit_code == 1
+    assert "created from agent 'default/clockbot'; pass --name" in result.output
+
+
+def test_stored_project_answers_ignore_unreadable_yaml() -> None:
+    answers = lifecycle._stored_project_answers({"manifest_yaml": "agent: [", "dockerfile": "Dockerfile"})
+    assert answers["dockerfile"] == "Dockerfile"
+    assert answers["harness"] is None
+
+
+def test_a_failed_reinit_says_the_saved_manifest_is_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from nemo_helix_plugin.cli_error_handling import REMOTE_ERROR_EXIT_CODE
+    from typer.testing import CliRunner
+
+    project = _project(tmp_path)
+
+    def rejected(**_k: Any) -> dict[str, Any]:
+        raise BadRequestError(httpx.Response(400, json={"detail": "The project does not state binaries."}))
+
+    app = _patch_cli(
+        cli_main,
+        monkeypatch,
+        [],
+        {},
+        project,
+        get=lambda name, *, workspace: _saved_project(project.name),
+        create=rejected,
+    )
+    result = CliRunner().invoke(app, ["init", "--project-dir", str(project)])
+
+    assert result.exit_code == REMOTE_ERROR_EXIT_CODE
+    assert "The project does not state binaries." in result.output
+    assert f"Manifest '{project.name}' was not changed" in result.output

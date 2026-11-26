@@ -26,7 +26,12 @@ from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import manifest as job_manifest
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, InternalServerError, PermissionDeniedError
-from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
+from nemo_helix_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoPaginationInfo,
+    get_entity_client,
+)
 from nemo_helix_plugin.files.client import FilesClient
 
 NOW = datetime.now(timezone.utc)
@@ -54,7 +59,10 @@ def _resolved(
 
 @pytest.fixture
 def mock_entity_client() -> AsyncMock:
-    return AsyncMock()
+    entity_client = AsyncMock()
+    # `init` looks a name up before creating it; by default nothing is saved under it yet.
+    entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+    return entity_client
 
 
 @pytest.fixture
@@ -842,7 +850,7 @@ def test_agent_fileset_cleanup_uses_recorded_or_migrated_id(
         agent_fileset_id=recorded_id,
     )
     existing._id = "manifest-id"
-    mock_entity_client.get.return_value = existing
+    mock_entity_client.get = AsyncMock(return_value=existing)
     mock_entity_client.update.side_effect = lambda entity: entity
     cleanup = MagicMock()
     monkeypatch.setattr(manifests_module, "delete_fileset_by_id", cleanup)
@@ -871,7 +879,7 @@ def test_patch_migrates_schema_and_pins_agent_fileset_once(
     )
     manifest._id = "manifest-id"
     manifest._db_version = 7
-    mock_entity_client.get.return_value = manifest
+    mock_entity_client.get = AsyncMock(return_value=manifest)
     mock_entity_client.update.side_effect = lambda updated: updated
     resolve = MagicMock(return_value=MagicMock(data=lambda: MagicMock(id="captured-id")))
     monkeypatch.setattr(FilesClient, "get_fileset", resolve)
@@ -907,7 +915,7 @@ def test_delete_lookup_failure_preserves_manifest_for_retry(
     manifest = AgentHardenerManifest(name="m1", workspace="default", agent_fileset="default/agent-files")
     manifest._id = "manifest-id"
     manifest._db_version = 7
-    mock_entity_client.get.return_value = manifest
+    mock_entity_client.get = AsyncMock(return_value=manifest)
     lookup = MagicMock(side_effect=failure)
     cleanup = MagicMock()
     monkeypatch.setattr(FilesClient, "get_fileset", lookup)
@@ -930,3 +938,182 @@ def test_delete_lookup_failure_preserves_manifest_for_retry(
     )
     cleanup.assert_called_once()
     assert cleanup.call_args.kwargs == {"workspace": "default", "fileset_id": "captured-id"}
+
+
+# ── init on a name that is already saved (NAIS-820 / NAIS-843) ──────────────
+
+
+def _derived_project(**overrides: object) -> dict[str, object]:
+    """What `inspect_project` reports for a re-uploaded bundle: a new start command and one new host."""
+    return {
+        "dockerfile": "Dockerfile",
+        "start_command": "/app/run-v2",
+        "binaries": ["/app/**"],
+        "port": 8000,
+        "secrets": ["MODEL_KEY"],
+        "egress": ["new.example.com"],
+        "env": {},
+        "warnings": [],
+        **overrides,
+    }
+
+
+def _saved_project_manifest() -> AgentHardenerManifest:
+    manifest_yaml = yaml.safe_dump(
+        {
+            "agent": {
+                "name": "p1",
+                "harness": "langgraph",
+                "relay_integration_confirmed": True,
+                "start_command": "/app/run-v1",
+            },
+            "backends": [REMOTE_MCP],
+        }
+    )
+    return AgentHardenerManifest(
+        name="p1",
+        workspace="default",
+        source_type="project",
+        project_fileset="default/proj-v1",
+        manifest_yaml=manifest_yaml,
+        dockerfile="Dockerfile",
+        binaries=["/app/**"],
+        port=8000,
+        secrets=["MODEL_KEY", "EXTRA_KEY"],
+        secret_refs={"EXTRA_KEY": "default/extra"},
+        egress=["kept.example.com"],
+        env={"MODE": "test"},
+        models={"attack": {"model": "atk/m"}},
+        defenders=["guardrails"],
+        rounds=3,
+        attack_intensity="thorough",
+        benign_suite=[{"tool": "t", "payload": "p", "label": "benign", "rationale": "r", "persona": "x"}],
+        victim_image="registry/victim:old",
+    )
+
+
+def _reinit(client, monkeypatch, **body: object):
+    monkeypatch.setattr(manifests_module, "download_and_extract_project", lambda *_a, **_k: Path("/tmp/p"))
+    monkeypatch.setattr(manifests_module, "inspect_project", lambda *_a, **_k: _derived_project())
+    return client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "p1", "source_type": "project", "project_fileset": "default/proj-v2", "update_existing": True}
+        | body,
+    )
+
+
+def test_init_twice_updates_the_project_manifest_and_keeps_operator_settings(
+    client, mock_entity_client, monkeypatch
+) -> None:
+    mock_entity_client.get = AsyncMock(return_value=_saved_project_manifest())
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = _reinit(client, monkeypatch)
+
+    assert resp.status_code == 200, resp.text
+    mock_entity_client.create.assert_not_awaited()
+    body = resp.json()
+    # Re-derived from the new upload.
+    assert body["project_fileset"] == "default/proj-v2"
+    agent = yaml.safe_load(body["manifest_yaml"])["agent"]
+    assert agent["start_command"] == "/app/run-v2"
+    # Kept from the saved manifest; egress also takes the host the project now names.
+    assert body["egress"] == ["kept.example.com", "new.example.com"]
+    assert body["secrets"] == ["MODEL_KEY", "EXTRA_KEY"]
+    assert body["secret_refs"] == {"EXTRA_KEY": "default/extra"}
+    assert body["env"] == {"MODE": "test"}
+    assert body["models"]["attack"]["model"] == "atk/m"
+    assert (body["defenders"], body["rounds"], body["attack_intensity"]) == (["guardrails"], 3, "thorough")
+    assert len(body["benign_suite"]) == 1
+    assert (agent["harness"], agent["relay_integration_confirmed"]) == ("langgraph", True)
+    assert yaml.safe_load(body["manifest_yaml"])["backends"] == [REMOTE_MCP]
+    # Built from the previous upload, so it no longer describes this one.
+    assert body["victim_image"] == ""
+
+
+def test_init_twice_lets_a_flag_replace_a_kept_setting(client, mock_entity_client, monkeypatch) -> None:
+    mock_entity_client.get = AsyncMock(return_value=_saved_project_manifest())
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = _reinit(client, monkeypatch, egress=["only.example.com"], harness="crewai")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["egress"] == ["only.example.com"]
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["agent"]["harness"] == "crewai"
+
+
+@pytest.mark.parametrize(
+    ("saved_source", "body", "hint"),
+    [
+        ("agent", {"source_type": "agent", "agent": "clockbot"}, "Run `refresh`"),
+        ("agent", {"source_type": "project", "project_fileset": "default/proj"}, "created from agent"),
+        ("project", {"source_type": "agent", "agent": "clockbot"}, "created from an uploaded project"),
+        # Without the opt-in, a create form cannot replace a project manifest by reusing its name.
+        ("project", {"source_type": "project", "project_fileset": "default/proj"}, "set update_existing"),
+    ],
+)
+def test_init_refuses_a_name_held_by_another_source_before_resolving(
+    client, mock_entity_client, monkeypatch, saved_source, body, hint
+) -> None:
+    saved = AgentHardenerManifest(name="m1", workspace="default", source_type=saved_source, agent="default/clockbot")
+    mock_entity_client.get = AsyncMock(return_value=saved)
+
+    def must_not_resolve(*_a: object, **_k: object) -> None:  # pragma: no cover - must not run
+        raise AssertionError("a refused init must not resolve or upload anything")
+
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", must_not_resolve)
+    monkeypatch.setattr(manifests_module, "download_and_extract_project", must_not_resolve)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests", json={"name": "m1", **body})
+
+    assert resp.status_code == 409, resp.text
+    assert hint in resp.json()["detail"]
+    mock_entity_client.create.assert_not_awaited()
+
+
+def test_refresh_points_a_project_manifest_at_init(client, mock_entity_client) -> None:
+    mock_entity_client.get = AsyncMock(return_value=_saved_project_manifest())
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/p1/refresh")
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "Project manifests are updated by re-running `init --project-dir <dir>` with the same name."
+    )
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "says"),
+    [
+        (NemoEntityConflictError("stale db_version"), 409, "this upload was not saved"),
+        (RuntimeError("db down"), 500, "the saved manifest is unchanged"),
+    ],
+)
+def test_init_twice_reports_a_failed_write_and_tolerates_unreadable_yaml(
+    client, mock_entity_client, monkeypatch, failure, status, says
+) -> None:
+    saved = _saved_project_manifest().model_copy(update={"manifest_yaml": "agent: ["})
+    mock_entity_client.get = AsyncMock(return_value=saved)
+    mock_entity_client.update = AsyncMock(side_effect=failure)
+
+    resp = _reinit(client, monkeypatch)
+
+    assert resp.status_code == status
+    assert says in resp.json()["detail"]
+
+
+def test_a_reinit_the_project_cannot_satisfy_never_writes(client, mock_entity_client, monkeypatch) -> None:
+    """A failed update leaves the saved manifest as it was: nothing is written before the build succeeds."""
+    saved = _saved_project_manifest().model_copy(update={"binaries": []})
+    mock_entity_client.get = AsyncMock(return_value=saved)
+    monkeypatch.setattr(manifests_module, "download_and_extract_project", lambda *_a, **_k: Path("/tmp/p"))
+    monkeypatch.setattr(manifests_module, "inspect_project", lambda *_a, **_k: _derived_project(binaries=[]))
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "p1", "source_type": "project", "project_fileset": "default/proj-v2", "update_existing": True},
+    )
+
+    assert resp.status_code == 400
+    assert "binaries" in resp.json()["detail"]
+    mock_entity_client.update.assert_not_awaited()

@@ -252,18 +252,17 @@ run sequence measures the change you just made.
 Refresh works only for a manifest created from a registered agent with
 `init --agent`. A manifest created with `init --project-dir` stores the uploaded
 project rather than a reference to an agent, so `refresh` returns HTTP 422 for it.
-To pick up changes to an unregistered project, create a new manifest from the
-updated directory. Manifest names are unique within a workspace, so give it a new
-`--name`:
+To pick up changes to the project, run the same `init --project-dir` again with
+the same name:
 
 ```bash
-nemo agent-hardener init --project-dir ~/my-agent --name my-agent-v2
+nemo agent-hardener init --project-dir ~/my-agent --name my-agent
 ```
 
-The new manifest keeps none of the earlier manifest's settings. Pass the egress,
-backends, secrets and other `init` flags again. To reuse the old name, delete the
-old manifest first with `client.agent_hardener.delete_manifest` from the
-[Python SDK](/documentation/agents/governance/cli-reference#python-sdk).
+It uploads the project again and keeps the manifest's settings (egress, backends,
+secrets, models, defenders, rounds and the cached benign suite) unless you pass
+them again, and prints what changed. A victim image built with `stage` is cleared,
+because it was built from the previous upload.
 
 ## Run It in Studio
 

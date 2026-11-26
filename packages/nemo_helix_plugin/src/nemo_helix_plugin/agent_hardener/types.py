@@ -427,6 +427,13 @@ class ManifestInit(BaseModel):
         description="Stored default model selection (attack/analysis/agent groups); omit to use agent-hardener's "
         "built-in defaults.",
     )
+    update_existing: bool = Field(
+        default=False,
+        description="When a project manifest is already saved under ``name``, read this upload into it instead of "
+        "failing with 409: what the project states is derived again, and settings not passed here (egress, "
+        "secrets, env, backends, models, harness, defenders, intensity, rounds, benign suite) are kept. Has no "
+        "effect on an agent manifest, which takes its agent's changes through refresh.",
+    )
 
     @model_validator(mode="after")
     def _source_matches_fields(self) -> "ManifestInit":

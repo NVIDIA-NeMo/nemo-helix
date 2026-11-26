@@ -30,7 +30,7 @@ Symptom → cause → fix. Every entry here has actually happened.
 | A run logs `<host> rate limited the request (HTTP 429)` and fails after waiting | **Agent Hardener's own** models hit their rate limit | switch Agent Hardener's models to another provider or key (SKILL.md, "Changing Agent Hardener's models"). When the agent and Agent Hardener share one key, both kinds can appear |
 | `safety model … not applied: no defender selection to attach it to` | `--safety-model` is set but the manifest has no defender selection, so the default judge is used | `manifest set <name> --defender guardrails --defender openshell` |
 | After `manifest set --env`, the agent cannot reach its model | `--env` replaced the whole env map and dropped the values not passed (for example `INFERENCE_BASE_URL`) | pass every `--env KEY=VALUE` again; check with `manifest show` |
-| `init` fails with `HTTP 409: Manifest '…' already exists` | the name is taken; there is no `manifest delete` | change it with `manifest set`, or use a new `--name` and run `synth-benign` for it before `run` |
+| `init` fails with `HTTP 409: Manifest '…' already exists` | the name is held by an agent manifest, or `--agent` reused a name; there is no `manifest delete` (a project manifest's name is updated in place, not refused) | `refresh` an agent manifest; otherwise change it with `manifest set`, or use a new `--name` and run `synth-benign` for it before `run` |
 
 ## Run or job never starts
 

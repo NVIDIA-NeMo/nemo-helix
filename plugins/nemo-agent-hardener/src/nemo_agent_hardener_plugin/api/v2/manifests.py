@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from nemo_agent_hardener_plugin._perms import AgentHardenerManifestPerms
 from nemo_agent_hardener_plugin.agent_resolver import (
     GATEWAY_BACKEND_NAME,
@@ -348,12 +348,26 @@ def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
 async def create_manifest(
     workspace: str,
     body: ManifestInit,
+    response: Response,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentHardenerManifest:
-    """`init`: resolve the named source into a manifest and persist it by ``name``."""
+    """`init`: resolve the named source into a manifest and persist it by ``name``.
+
+    With ``update_existing``, a project upload on a name that already holds a project manifest updates
+    that manifest in place (200, not 201): a project has no registered agent to `refresh` from, so
+    re-uploading it is how it takes changes. The flag is opt-in so a form that means "create" cannot
+    replace someone's manifest by reusing its name. Any other collision is refused before anything is
+    resolved or uploaded, so a refusal leaves no orphaned scaffold behind.
+    """
     # Before resolving: a bad reference should not cost a scaffold upload.
     _, secret_refs = _secrets_or_422(body.secrets)
     await _require_secrets_exist(workspace, {**secret_refs, **model_key_refs(body.models)})
+    existing = await _find_manifest(entity_client, workspace, body.name)
+    if existing is not None:
+        if body.update_existing and body.source_type == "project" and existing.source_type == "project":
+            response.status_code = 200
+            return await _update_project_manifest(entity_client, workspace, body, existing)
+        raise HTTPException(status_code=409, detail=_name_taken_detail(existing, body.source_type, workspace))
     manifest = (
         await _build_project_manifest(workspace, body)
         if body.source_type == "project"
@@ -368,6 +382,88 @@ async def create_manifest(
     except Exception as exc:
         logger.exception("Failed to persist agent-hardener manifest '%s'", sanitize_for_log(body.name))
         raise HTTPException(status_code=500, detail="Failed to create agent-hardener manifest.") from exc
+
+
+async def _find_manifest(entity_client: NemoEntitiesClient, workspace: str, name: str) -> AgentHardenerManifest | None:
+    """The manifest saved under *name*, or None when there is none."""
+    try:
+        return await entity_client.get(AgentHardenerManifest, name=name, workspace=workspace)
+    except NemoEntityNotFoundError:
+        return None
+
+
+def _name_taken_detail(existing: AgentHardenerManifest, source_type: str, workspace: str) -> str:
+    """Why `init` will not reuse *existing*'s name, and what to run instead."""
+    taken = f"Manifest '{existing.name}' already exists in workspace '{workspace}'"
+    if source_type == "agent" and existing.source_type == "agent":
+        return (
+            f"{taken} for agent '{existing.agent}'. Run `refresh` on it to take the agent's latest changes, "
+            "or choose another name."
+        )
+    if source_type == "project" and existing.source_type == "project":
+        return f"{taken}. Choose another name, or set update_existing to read this upload into it."
+    origin = f"agent '{existing.agent}'" if existing.source_type == "agent" else "an uploaded project"
+    return f"{taken} and was created from {origin}; choose another name, or delete it first."
+
+
+async def _update_project_manifest(
+    entity_client: NemoEntitiesClient, workspace: str, body: ManifestInit, existing: AgentHardenerManifest
+) -> AgentHardenerManifest:
+    """Re-inspect a re-uploaded project into the manifest already saved under its name.
+
+    Same derivation as create (see :func:`_build_project_manifest` for what is kept). The run-time
+    choices that never came from the project — defenders, intensity, rounds and the cached benign
+    suite — are kept as they are. The victim image is cleared: it was built from the previous upload,
+    so running it would measure code that is no longer the project's.
+    """
+    rebuilt = await _build_project_manifest(workspace, body, stored=existing)
+    updated = existing.model_copy(
+        update={field: getattr(rebuilt, field) for field in _PROJECT_BUILD_FIELDS} | {"victim_image": ""}
+    )
+    # The only write: everything above can fail and leave the saved manifest exactly as it was.
+    try:
+        return await entity_client.update(updated)
+    except NemoEntityConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Manifest '{body.name}' was modified concurrently; this upload was not saved. Run init again.",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Failed to update agent-hardener manifest '%s'", sanitize_for_log(body.name))
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update manifest '{body.name}'; the saved manifest is unchanged."
+        ) from exc
+
+
+# What `_build_project_manifest` decides; everything else on a stored manifest survives a re-init.
+_PROJECT_BUILD_FIELDS = (
+    "project_fileset",
+    "manifest_yaml",
+    "dockerfile",
+    "binaries",
+    "port",
+    "secrets",
+    "secret_refs",
+    "egress",
+    "env",
+    "warnings",
+    "models",
+)
+
+
+def _stored_agent_block(manifest_yaml: str) -> dict[str, Any]:
+    """The ``agent`` mapping of a saved manifest's YAML, or {} when it has none we can read."""
+    try:
+        data = yaml.safe_load(manifest_yaml) or {}
+    except yaml.YAMLError:
+        return {}
+    agent = data.get("agent") if isinstance(data, dict) else None
+    return agent if isinstance(agent, dict) else {}
+
+
+def _merged(kept: list[str], derived: list[str]) -> list[str]:
+    """*kept* followed by whatever *derived* adds, in order and without repeats."""
+    return list(dict.fromkeys([*kept, *derived]))
 
 
 async def _get_manifest_or_404(entity_client: NemoEntitiesClient, workspace: str, name: str) -> AgentHardenerManifest:
@@ -464,23 +560,38 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
     return manifest
 
 
-async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHardenerManifest:
+async def _build_project_manifest(
+    workspace: str, body: ManifestInit, *, stored: AgentHardenerManifest | None = None
+) -> AgentHardenerManifest:
     """Build a manifest from an uploaded project bundle, deriving everything the project states.
 
     The bundle is already a fileset, so unlike the agent path there is nothing to materialize and
     nothing to freeze — the upload *is* the frozen target. Caller-supplied values win over derived
     ones: they were asked for precisely because the project could not state them.
+
+    *stored* is the manifest a re-init replaces. What the project states (Dockerfile, start command,
+    binaries, port) is derived again, falling back to the stored value only where the project is
+    silent. What the operator chose (egress, secrets, env, backends, models, harness, the Relay
+    confirmation) is kept unless *body* sets it; egress and secrets also take any new entries the
+    project now declares, so a requirement it added is not dropped.
     """
-    backends = _backends_or_422(body.backends)
+    stored_agent = _stored_agent_block(stored.manifest_yaml) if stored else {}
+    if stored is None or body.backends is not None:
+        backends = _backends_or_422(body.backends)
+    else:
+        backends = _stored_user_backends(stored.manifest_yaml)
     secret_names, secret_refs = _secrets_or_422(body.secrets)
+    if stored is not None and body.secrets is None:
+        secret_refs = dict(stored.secret_refs)
+    operator_env = body.env if body.env is not None or stored is None else stored.env
     client = get_nemo_client(as_service="agent-hardener", internal=True)
 
     def _inspect() -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
             return inspect_project(
                 download_and_extract_project(client, body.project_fileset or "", Path(tmp)),
-                dockerfile=body.dockerfile or None,
-                env_overrides=body.env,
+                dockerfile=body.dockerfile or (stored.dockerfile if stored else None) or None,
+                env_overrides=operator_env,
             )
 
     try:
@@ -488,8 +599,20 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Could not read the project bundle: {exc}") from exc
 
-    start_command = body.start_command or derived.get("start_command", "")
-    binaries = body.binaries or derived.get("binaries") or []
+    start_command = body.start_command or derived.get("start_command") or stored_agent.get("start_command") or ""
+    binaries = body.binaries or derived.get("binaries") or (stored.binaries if stored else [])
+    if secret_names is not None:
+        secrets = secret_names
+    elif stored is not None:
+        secrets = _merged(stored.secrets, derived.get("secrets", []))
+    else:
+        secrets = derived.get("secrets", [])
+    if body.egress is not None:
+        egress = body.egress
+    elif stored is not None:
+        egress = _merged(stored.egress, derived.get("egress", []))
+    else:
+        egress = derived.get("egress", [])
     missing = [
         field
         for field, value in (
@@ -509,8 +632,11 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         )
 
     runtime_env = derived.get("env", {})
-    if body.env:
-        runtime_env = {**{key: value for key, value in runtime_env.items() if key in HERMES_RUNTIME_ENV}, **body.env}
+    if operator_env:
+        runtime_env = {
+            **{key: value for key, value in runtime_env.items() if key in HERMES_RUNTIME_ENV},
+            **operator_env,
+        }
 
     manifest_dict = build_project_manifest_dict(
         agent_name=body.name,
@@ -519,11 +645,12 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         start_command=start_command,
         binaries=list(binaries),
         port=body.port or derived.get("port", 8000),
-        secrets=secret_names if secret_names is not None else derived.get("secrets", []),
-        egress=body.egress if body.egress is not None else derived.get("egress", []),
+        secrets=secrets,
+        egress=egress,
         backends=backends,
-        harness=body.harness,
-        relay_integration_confirmed=body.relay_integration_confirmed,
+        harness=body.harness or stored_agent.get("harness"),
+        relay_integration_confirmed=body.relay_integration_confirmed
+        or bool(stored_agent.get("relay_integration_confirmed")),
         env=runtime_env,
     )
     manifest = AgentHardenerManifest.from_project_upload(
@@ -536,9 +663,9 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         port=manifest_dict["agent"]["port"],
         secrets=manifest_dict["agent"]["secrets"],
         egress=manifest_dict["agent"].get("egress", []),
-        env=body.env or {},
+        env=operator_env or {},
         warnings=derived.get("warnings", []),
-        models=body.models or WarGameModels(),
+        models=body.models or (stored.models if stored else None) or WarGameModels(),
         secret_refs=secret_refs,
     )
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
@@ -615,6 +742,11 @@ async def refresh_manifest(
     the cached benign suite. Only the scaffold and its rendered manifest are rebuilt.
     """
     existing = await _get_manifest_or_404(entity_client, workspace, name)
+    if existing.source_type == "project":
+        raise HTTPException(
+            status_code=422,
+            detail="Project manifests are updated by re-running `init --project-dir <dir>` with the same name.",
+        )
     if not existing.agent:
         raise HTTPException(
             status_code=422,

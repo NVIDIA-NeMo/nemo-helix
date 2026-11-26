@@ -2358,6 +2358,12 @@ export function useAgentHardenerListManifestsSuspense<TData = Awaited<ReturnType
 
 /**
  * `init`: resolve the named source into a manifest and persist it by ``name``.
+ *
+ * With ``update_existing``, a project upload on a name that already holds a project manifest updates
+ * that manifest in place (200, not 201): a project has no registered agent to `refresh` from, so
+ * re-uploading it is how it takes changes. The flag is opt-in so a form that means "create" cannot
+ * replace someone's manifest by reusing its name. Any other collision is refused before anything is
+ * resolved or uploaded, so a refusal leaves no orphaned scaffold behind.
  * @summary Create Manifest
  */
 export const agentHardenerCreateManifest = (

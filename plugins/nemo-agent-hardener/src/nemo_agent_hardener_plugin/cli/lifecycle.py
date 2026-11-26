@@ -30,6 +30,7 @@ from nemo_agent_hardener_plugin.cli._shared import (
 )
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
+from nemo_helix_plugin.client.errors import NotFoundError
 
 
 def _with_local_project(ctx: Any, manifest: dict[str, Any], out_path: Path) -> str:
@@ -73,39 +74,50 @@ def _project_init_body(
     binaries: list[str],
     harness: str | None,
     relay_confirmed: bool,
+    stored: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Upload a project bundle, derive what it states, and fail naming whatever is still missing.
 
     The derivation runs server-side — the same endpoint Studio calls — so a CLI user and a Studio user
-    get a manifest from one code path rather than two that drift.
+    get a manifest from one code path rather than two that drift. *stored* is the manifest a re-init
+    updates: whatever it already answered is not asked for again (the server carries it over).
     """
     root = Path(project_dir).expanduser().resolve()
     if not root.is_dir():
         typer.secho(f"Error: --project-dir {project_dir!r} is not a directory.", fg="red")
+        _say_unchanged(stored)
         raise typer.Exit(code=1)
 
+    kept = _stored_project_answers(stored)
     try:
         fileset = upload_project_dir(ctx.sdk, root, workspace=ctx.workspace).ref
     except Exception as exc:
         typer.secho(f"Error: could not upload the project — {exc}", fg="red")
+        _say_unchanged(stored)
         raise typer.Exit(code=1) from exc
     typer.echo(f"  uploaded  {root.name} -> {fileset}")
 
     try:
-        derived = ctx.agent_hardener.manifests.inspect_project(fileset, dockerfile=dockerfile, workspace=ctx.workspace)
+        derived = ctx.agent_hardener.manifests.inspect_project(
+            fileset, dockerfile=dockerfile or kept.get("dockerfile") or None, workspace=ctx.workspace
+        )
     except Exception as exc:
         typer.secho(f"Error: could not read the project — {exc}", fg="red")
+        _say_unchanged(stored)
         raise typer.Exit(code=1) from exc
 
+    # On a re-init, mark what the saved manifest did not already warn about: that is what this upload changed.
+    known = json_string_list(stored.get("warnings")) if stored else None
     for warning in derived.get("warnings", []):
-        typer.secho(f"  ! {warning}", fg="yellow")
+        tag = "(new) " if known is not None and warning not in known else ""
+        typer.secho(f"  ! {tag}{warning}", fg="yellow")
 
     supplied = {
-        "dockerfile": dockerfile,
-        "start_command": start_command,
-        "binaries": binaries,
-        "harness": harness,
-        "relay_integration_confirmed": relay_confirmed or None,
+        "dockerfile": dockerfile or kept.get("dockerfile"),
+        "start_command": start_command or kept.get("start_command"),
+        "binaries": binaries or kept.get("binaries"),
+        "harness": harness or kept.get("harness"),
+        "relay_integration_confirmed": relay_confirmed or kept.get("relay_integration_confirmed") or None,
     }
     # Report every gap at once. Discovering them one flag per run is the slowest possible way to learn
     # what a project could not say about itself.
@@ -123,6 +135,7 @@ def _project_init_body(
             f"Pass {', '.join(flags[field] for field in missing)}.",
             fg="red",
         )
+        _say_unchanged(stored)
         raise typer.Exit(code=1)
 
     for field, value in (("dockerfile", derived.get("dockerfile")), ("start_command", derived.get("start_command"))):
@@ -155,6 +168,75 @@ def _stage_and_build(ctx: CommandContext, manifest_id: str) -> None:
         raise typer.Exit(code=1)
     manifest = ctx.agent_hardener.manifests.get(manifest_id, workspace=ctx.workspace)
     typer.secho(f"Built and recorded the victim image: {manifest.get('victim_image')}", fg="green")
+
+
+def _say_unchanged(stored: dict[str, Any] | None) -> None:
+    """After a failed re-init, say the saved manifest is intact: an update writes only once everything succeeded."""
+    if stored:
+        typer.secho(
+            f"  Manifest '{stored.get('name')}' was not changed; it still holds the previous upload and settings.",
+            fg="yellow",
+        )
+
+
+def _stored_project_answers(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """What a saved project manifest already answered that `init` would otherwise ask for."""
+    if not stored:
+        return {}
+    try:
+        data = yaml.safe_load(str(stored.get("manifest_yaml") or "")) or {}
+    except yaml.YAMLError:
+        data = {}
+    agent = data.get("agent") if isinstance(data, dict) else None
+    agent = agent if isinstance(agent, dict) else {}
+    return {
+        "dockerfile": stored.get("dockerfile") or None,
+        "binaries": json_string_list(stored.get("binaries")) or None,
+        "start_command": agent.get("start_command") or None,
+        "harness": agent.get("harness") or None,
+        "relay_integration_confirmed": bool(agent.get("relay_integration_confirmed")) or None,
+    }
+
+
+def _saved_manifest(ctx: Any, name: str) -> dict[str, Any] | None:
+    """The manifest saved under *name*, or None when there is none."""
+    try:
+        return ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace)
+    except NotFoundError:
+        return None
+
+
+def _name_taken_message(existing: dict[str, Any], *, agent: str | None) -> str:
+    """Why `init` will not reuse *existing*'s name, and what to run instead. Mirrors the server's 409."""
+    name = existing.get("name")
+    if agent and existing.get("source_type") != "project":
+        return (
+            f"Error: manifest '{name}' already exists for agent '{existing.get('agent')}'. To take the agent's "
+            f"latest changes, run `nemo agent-hardener refresh --manifest-id {name}`; to save another, pass --name."
+        )
+    origin = "an uploaded project" if existing.get("source_type") == "project" else f"agent '{existing.get('agent')}'"
+    return f"Error: manifest '{name}' already exists and was created from {origin}; pass --name to save another."
+
+
+def _changes(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """One line per setting a re-init changed, so an update is never silent about what it replaced."""
+    lines: list[str] = []
+    before_answers, after_answers = _stored_project_answers(before), _stored_project_answers(after)
+    for label, old, new in (
+        ("dockerfile", before.get("dockerfile"), after.get("dockerfile")),
+        ("start", before_answers.get("start_command"), after_answers.get("start_command")),
+        ("port", before.get("port"), after.get("port")),
+    ):
+        if old != new:
+            lines.append(f"  {label:<9} {old or '(none)'} -> {new or '(none)'}")
+    for label, key in (("binaries", "binaries"), ("secrets", "secrets"), ("egress", "egress")):
+        old_items, new_items = json_string_list(before.get(key)), json_string_list(after.get(key))
+        added = [item for item in new_items if item not in old_items]
+        removed = [item for item in old_items if item not in new_items]
+        if added or removed:
+            parts = [f"+{item}" for item in added] + [f"-{item}" for item in removed]
+            lines.append(f"  {label:<9} {' '.join(parts)}")
+    return lines
 
 
 def register(app: typer.Typer) -> None:
@@ -308,26 +390,44 @@ def register(app: typer.Typer) -> None:
 
         Resolution happens server-side — the same path Studio takes — so the manifest a CLI user
         gets and the one Studio gets are produced by one code path.
+
+        Re-running with `--project-dir` on an existing project manifest's name updates it in place: the
+        project is re-uploaded and re-read, and your settings are kept. An agent manifest takes its
+        agent's changes through `refresh` instead.
         """
         if bool(agent) == bool(project_dir):
             typer.secho("Error: pass exactly one of --agent or --project-dir.", fg="red")
             raise typer.Exit(code=1)
 
         ctx = command_context(workspace)
+        target = name or (Path(project_dir).expanduser().resolve().name if project_dir else str(agent).split("/")[-1])
+        # Look before uploading: a name that cannot be reused should fail in a second, not after the upload.
+        existing = _saved_manifest(ctx, target)
+        if existing is not None:
+            if not (project_dir and existing.get("source_type") == "project"):
+                typer.secho(_name_taken_message(existing, agent=agent), fg="red")
+                raise typer.Exit(code=1)
+            typer.echo(
+                f"Manifest '{target}' exists; updating it from {project_dir}. Its egress, secrets, env, backends, "
+                "models, defenders, intensity, rounds and benign suite are kept unless you pass them again."
+            )
         body: dict[str, Any]
         if project_dir:
             body = _project_init_body(
                 ctx,
                 project_dir=project_dir,
-                name=name,
+                name=target,
                 dockerfile=dockerfile,
                 start_command=start_command,
                 binaries=list(binary or []),
                 harness=harness,
                 relay_confirmed=relay_confirmed,
+                stored=existing,
             )
+            if existing is not None:
+                body["update_existing"] = True
         else:
-            body = {"name": name or str(agent).split("/")[-1], "agent": agent}
+            body = {"name": target, "agent": agent}
         if port:
             body["port"] = port
         if egress:
@@ -351,9 +451,18 @@ def register(app: typer.Typer) -> None:
             safety_key_secret=safety_key_secret,
         )
         if models:
-            preflight_models(ctx, models)
+            try:
+                preflight_models(ctx, models)
+            except typer.Exit:
+                _say_unchanged(existing)
+                raise
             body["models"] = models
-        manifest = ctx.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
+        try:
+            manifest = ctx.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
+        except Exception:
+            # api_errors prints the backend's reason; on an update, also say the saved manifest is intact.
+            _say_unchanged(existing)
+            raise
 
         # A project manifest already printed these while deriving; repeating them here reads as two
         # separate problems rather than one.
@@ -363,7 +472,18 @@ def register(app: typer.Typer) -> None:
         manifest_name = str(manifest.get("name") or body["name"])
         secrets = json_string_list(manifest.get("secrets"))
         egress = json_string_list(manifest.get("egress"))
-        typer.secho(f"Saved manifest '{manifest_name}'", fg="green")
+        if existing is None:
+            typer.secho(f"Saved manifest '{manifest_name}'", fg="green")
+        else:
+            typer.secho(f"Updated manifest '{manifest_name}'", fg="green")
+            for line in _changes(existing, manifest) or ["  (nothing the project states changed)"]:
+                typer.echo(line)
+            if existing.get("victim_image") and not manifest.get("victim_image"):
+                typer.secho(
+                    f"  ! victim image {existing['victim_image']} was built from the previous upload and is cleared;"
+                    f" rebuild it: nemo agent-hardener stage --manifest-id {manifest_name}",
+                    fg="yellow",
+                )
         source = manifest.get("agent") or manifest.get("project_fileset") or "?"
         image = manifest.get("dockerfile") or "(generic, built from the project)"
         typer.echo(
@@ -387,7 +507,10 @@ def register(app: typer.Typer) -> None:
                 encoding="utf-8",
             )
             typer.echo(f"  rendered  {out_path}")
-        typer.echo(f"\nNext: nemo agent-hardener synth-benign --manifest-id {manifest_name}")
+        if existing is not None and existing.get("benign_suite"):
+            typer.echo(f"\nNext: nemo agent-hardener run --manifest-id {manifest_name} (the benign suite is kept)")
+        else:
+            typer.echo(f"\nNext: nemo agent-hardener synth-benign --manifest-id {manifest_name}")
 
     @app.command()
     @api_errors
@@ -441,7 +564,8 @@ def register(app: typer.Typer) -> None:
 
         A manifest is a frozen target, so editing the agent — new model, new tool, redeploy —
         does not change it on its own. Run this to take those changes deliberately. Your egress,
-        secrets, models, defenders and cached benign suite are kept.
+        secrets, models, defenders and cached benign suite are kept. A project manifest has no agent
+        to refresh from: re-run `init --project-dir <dir>` with the same name instead.
         """
         ctx = command_context(workspace, preflight=False)
         manifest = ctx.agent_hardener.manifests.refresh(manifest_id, workspace=ctx.workspace)

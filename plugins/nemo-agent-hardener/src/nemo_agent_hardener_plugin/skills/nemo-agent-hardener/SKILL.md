@@ -141,11 +141,12 @@ nemo agent-hardener init --project-dir ./my-agent --name my-agent --harness lang
   only).
 - Verify: `init` writes the manifest and echoes the derived facts; read them back to the user and
   confirm they match the agent before continuing.
-- A name is used once: `init` with an existing `--name` fails with `HTTP 409 … already exists`, and
-  there is no `manifest delete`. Change an existing manifest's settings with `manifest set`.
-  `refresh` re-reads a registered agent (Route A) only; it does not upload edited project files. After
-  editing the project, `init` it again under a new `--name`, then run `synth-benign` for it before
-  `run`, since a new name has no benign suite.
+- Names: `init --project-dir` with the name of an existing project manifest updates it in place. It
+  uploads the project again, keeps the manifest's settings and benign suite unless they are passed
+  again, prints what changed, and clears a staged victim image. If the update fails, the manifest is
+  left as it was. Any other reuse of a name (an agent manifest's, or `--agent` on a taken name) fails
+  with `HTTP 409 … already exists`, and there is no `manifest delete`. Change an existing manifest's
+  settings with `manifest set`. `refresh` re-reads a registered agent (Route A) only.
 
 **Worked example — the bundled `langgraph-victim`, with an NVIDIA Build key.** Its Dockerfile states
 none of the secrets, model settings or hosts, so `init` warns "No credential-shaped env names" and
@@ -312,8 +313,8 @@ saw and ask the user.
 - Manifests are **frozen targets**. After a registered agent (Route A) changes, `nemo agent-hardener
   refresh --manifest-id my-agent` re-resolves it (Studio: **Refresh Target**); runs log a warning when
   the agent is newer than the manifest. `refresh` does not apply to a manifest made from a project
-  directory (Route B): after editing the project, `init` it again under a new `--name` and run
-  `synth-benign` for it (see the note on names above).
+  directory (Route B): after editing the project, run the same `init --project-dir` again with the same
+  `--name` (see the note on names above).
 - A host service the victim calls (e.g. a remote MCP server) is declared at init with
   `--backend NAME:PORT[,PORT]` (repeatable) and reached via `host.docker.internal`. The gateway
   backend is added automatically (its name is reserved); declared backends survive `refresh`.
