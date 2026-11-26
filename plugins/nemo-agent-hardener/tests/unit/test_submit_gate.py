@@ -49,6 +49,7 @@ def _host_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(AgentHardenerConfig, "get", lambda: config)
     monkeypatch.delenv(_DECLARED, raising=False)
+    monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
 
 
 async def _compile(
@@ -117,11 +118,17 @@ async def test_declared_secrets_count_every_source_the_job_assembles(tmp_path: P
     )
     models = WarGameModels(attack=ModelChoice(api_key_secret="attack-key"))
 
-    config = await _compile(
-        manifest, SecretsStore({"default/ref", "default/attack-key"}), env_file=str(env_file), models=models
-    )
+    store = SecretsStore({"default/ref", "default/attack-key", "default/agent-hardener-inference-key"})
+
+    config = await _compile(manifest, store, env_file=str(env_file), models=models)
 
     assert config["run_name"] == "run-1"
+
+
+async def test_a_declared_inference_key_needs_the_provisioned_secret_the_job_reads_it_from() -> None:
+    message = await _rejection(_manifest(secrets=["INFERENCE_API_KEY"]))
+
+    assert "missing required secrets for the victim agent: INFERENCE_API_KEY" in message
 
 
 @pytest.mark.parametrize(

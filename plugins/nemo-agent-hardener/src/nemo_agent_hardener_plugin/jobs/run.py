@@ -234,8 +234,13 @@ async def _reject_bad_inputs(
 
     # A container job's environment is the task pod's, which this server cannot see; the job checks it there.
     if manifest is not None and isinstance(executor, SubprocessExecutionProviderSpec):
-        unprovided = _common.unprovided_host_secrets(
-            manifest, AgentHardenerConfig.get(), env_file=war_game.env_file, models=models
+        unprovided = await _common.unprovided_host_secrets(
+            manifest,
+            AgentHardenerConfig.get(),
+            cast(AsyncNemoClient, async_sdk),
+            workspace=workspace,
+            env_file=war_game.env_file,
+            models=models,
         )
         if unprovided:
             raise _compilation_error(_common.missing_victim_secrets_error(unprovided))

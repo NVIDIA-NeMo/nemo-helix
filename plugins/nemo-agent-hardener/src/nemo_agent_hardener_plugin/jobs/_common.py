@@ -450,29 +450,31 @@ def missing_victim_secrets_error(missing: list[str]) -> AgentHardenerRunError:
     )
 
 
-def unprovided_host_secrets(
+async def unprovided_host_secrets(
     manifest: AgentHardenerManifest,
     plugin_config: AgentHardenerConfig,
+    async_client: AsyncNemoClient,
     *,
+    workspace: str,
     env_file: str | None,
     models: WarGameModels | None,
 ) -> list[str]:
     """The manifest's declared victim secrets a host (subprocess) job on this machine would not find.
 
-    Mirrors the sources the job assembles (see :func:`prepare_victim_env`): Secrets-store refs (checked for
-    existence separately), the keys the job derives from the provisioned inference secret and the model
-    choice, this host's environment and operator dotenv, and the run's ``--env-file``. The job's own
-    environment is a subset of this process's, so this never rejects what the job would accept.
+    Counts what the job adds to its environment, by the same rules: the manifest's Secrets-store refs
+    (:func:`prepare_victim_env`; their existence is checked separately), the model keys
+    :func:`build_model_env` binds, and ``INFERENCE_API_KEY`` when :func:`job_runtime_env` finds the
+    provisioned inference secret. The rest must come from this host's environment and operator dotenv, or the
+    run's ``--env-file``. The job's own environment is a subset of this process's, so this never rejects
+    what the job would accept.
     """
-    provided = {
-        *manifest.deployed_secret_refs,
-        *manifest.secret_refs,
-        *model_key_secrets(models),
-        # Set by job_runtime_env from the provisioned inference secret, when one exists.
-        INFERENCE_API_KEY_ENVVAR,
-    }
+    provided = {*manifest.deployed_secret_refs, *manifest.secret_refs, *model_key_secrets(models)}
+    pending = [name for name in manifest.secrets if name not in provided]
+    inference_ref = {INFERENCE_API_KEY_ENVVAR: plugin_config.inference_secret_name}
+    if INFERENCE_API_KEY_ENVVAR in pending and not await missing_secret_refs(async_client, inference_ref, workspace):
+        pending.remove(INFERENCE_API_KEY_ENVVAR)
     return unprovided_secrets(
-        [name for name in manifest.secrets if name not in provided],
+        pending,
         env_files=[Path(env_file)] if env_file else [],
         environ=build_subprocess_env(plugin_config),
     )
