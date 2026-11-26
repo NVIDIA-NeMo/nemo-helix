@@ -134,6 +134,8 @@ data:
     # How the NRI memory-qos plugin refuses a container whose annotation its config doesn't list.
     _REFUSED = "invalid annotation"
     _stock_is_unschedulable_status = kubernetes_service._is_unschedulable_status
+    # Where a fetched workload carries its pod's stopped or refused container, for get_status to read without I/O.
+    _FAILED_CONTAINER_KEY = "nemoFailedContainer"
 
     # Set to "true" only where every sandbox node's NRI memory-qos plugin allows memory.oom.group: a plugin that doesn't
     # rejects the container.
@@ -219,12 +221,34 @@ data:
                     workload_annotations = batchsandbox.setdefault("metadata", {}).setdefault("annotations", {})
                     workload_annotations[EGRESS_API_PORT_ANNOTATION] = str(services.egress_api_port)
 
+        def get_workload(self, sandbox_id: str, namespace: str) -> dict[str, Any] | None:
+            """The stock workload, with its pod's stopped or refused container if it has one."""
+            workload = super().get_workload(sandbox_id, namespace)
+            return self._with_failed_container(workload) if workload else workload
+
+        def list_workloads(self, namespace: str, label_selector: str) -> list[dict[str, Any]]:
+            """The stock workloads, each with its pod's stopped or refused container if it has one."""
+            return [self._with_failed_container(workload) for workload in super().list_workloads(namespace, label_selector)]
+
+        def _with_failed_container(self, workload: dict[str, Any]) -> dict[str, Any]:
+            """``workload``, carrying its pod's stopped or refused container when it has been allocated but isn't ready.
+
+            The pod is read here, not in get_status: the stock create wait fetches the workload in a thread but
+            calls get_status on the server's event loop.
+            """
+            status = workload.get("status") or {}
+            if status.get("allocated", 0) > 0 and not status.get("ready") and status.get("phase") in (None, "", "Pending"):
+                failed = self._failed_container(workload)
+                if failed is not None:
+                    workload[_FAILED_CONTAINER_KEY] = list(failed)
+            return workload
+
         def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
             """The stock status, except where the pod says more than the BatchSandbox does.
 
             A Pending sandbox whose pod has a stopped container, or one the runtime refused to create, is
             ``Failed``, with the container's reason (``OOMKilled``, say) as its message, so a client can
-            tell why its sandbox died.
+            tell why its sandbox died. get_workload and list_workloads read the pod; this does no I/O.
 
             A sandbox with services or a bundle is ``Allocated`` once its pod has an IP. Kubernetes starts
             the sandbox container only after every init container and sidecar is up, and the stock create
@@ -237,7 +261,7 @@ data:
                 return status
 
             # The controller leaves a sandbox whose container stopped in Pending; only the pod says why.
-            failed = self._failed_container(workload) if (workload.get("status") or {}).get("allocated", 0) > 0 else None
+            failed = workload.get(_FAILED_CONTAINER_KEY)
             if failed is not None:
                 reason, message = failed
                 return {**status, "state": "Failed", "reason": reason, "message": message}

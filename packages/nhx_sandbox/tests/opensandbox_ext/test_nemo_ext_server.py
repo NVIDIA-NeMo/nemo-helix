@@ -68,6 +68,15 @@ class FakeK8sClient:
         self.pods: list[V1Pod] = []
         # The namespace of each pod lookup, to see which one a route searched.
         self.listed_namespaces: list[str] = []
+        self.workloads: list[dict[str, Any]] = []
+
+    def get_custom_object(self, group: str, version: str, namespace: str, plural: str, name: str) -> Any:
+        return next((w for w in self.workloads if w["metadata"]["labels"]["opensandbox.io/id"] == name), None)
+
+    def list_custom_objects(
+        self, group: str, version: str, namespace: str, plural: str, label_selector: str
+    ) -> list[dict[str, Any]]:
+        return self.workloads
 
     def create_custom_object(self, group: str, version: str, namespace: str, plural: str, body: dict[str, Any]):
         self.created.append(body)
@@ -250,6 +259,14 @@ def _labelled_workload(annotations: dict[str, str], phase: str, pod_ip: str | No
     return workload
 
 
+def _status(provider: ext.NemoComposeProvider, k8s: FakeK8sClient, workload: dict[str, Any]) -> dict[str, Any]:
+    """The sandbox's status as the server reads it: the BatchSandbox fetched, then its status derived."""
+    k8s.workloads = [workload]
+    fetched = provider.get_workload(SANDBOX_ID, "nemo")
+    assert fetched is not None
+    return provider.get_status(fetched)
+
+
 def _pod(*containers: V1ContainerStatus) -> V1Pod:
     return V1Pod(
         metadata=V1ObjectMeta(name="sbx-1-pod", namespace="nemo"),
@@ -282,7 +299,7 @@ def test_pending_sandbox_whose_container_stopped_is_failed_with_its_reason(
     """
     k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
 
-    status = provider.get_status(_labelled_workload(annotations, "Pending", pod_ip))
+    status = _status(provider, k8s, _labelled_workload(annotations, "Pending", pod_ip))
 
     assert status["state"] == "Failed"
     assert status["reason"] == "CONTAINER_TERMINATED"
@@ -295,8 +312,8 @@ def test_pending_sandbox_whose_containers_run_keeps_the_stock_status(
 ) -> None:
     k8s.pods = [_pod(_container("sandbox", None))]
 
-    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
-    assert provider.get_status(_labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))["state"] == (
+    assert _status(provider, k8s, _labelled_workload({}, "Pending", None))["state"] == "Pending"
+    assert _status(provider, k8s, _labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))["state"] == (
         "Allocated"
     )
 
@@ -312,7 +329,7 @@ def test_pending_sandbox_whose_container_the_runtime_refused_is_failed_with_why(
     waiting = V1ContainerStateWaiting(reason="CreateContainerError", message=REFUSED_MESSAGE)
     k8s.pods = [_pod(_container("sandbox", None, waiting))]
 
-    status = provider.get_status(_labelled_workload(annotations, "Pending", pod_ip))
+    status = _status(provider, k8s, _labelled_workload(annotations, "Pending", pod_ip))
 
     assert status["state"] == "Failed"
     assert status["reason"] == "CONTAINER_REFUSED"
@@ -332,7 +349,7 @@ def test_pending_sandbox_whose_container_waits_otherwise_keeps_the_stock_status(
 ) -> None:
     k8s.pods = [_pod(_container("sandbox", None, waiting))]
 
-    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+    assert _status(provider, k8s, _labelled_workload({}, "Pending", None))["state"] == "Pending"
 
 
 async def test_stock_create_wait_ends_with_the_message_of_a_sandbox_that_cannot_start(
@@ -341,8 +358,7 @@ async def test_stock_create_wait_ends_with_the_message_of_a_sandbox_that_cannot_
     """The create would otherwise wait out the server's create timeout (900 s in our examples) and say only that."""
     waiting = V1ContainerStateWaiting(reason="CreateContainerError", message=REFUSED_MESSAGE)
     k8s.pods = [_pod(_container("sandbox", None, waiting))]
-    workload = _labelled_workload({}, "Pending", None)
-    monkeypatch.setattr(provider, "get_workload", lambda **_: workload)
+    k8s.workloads = [_labelled_workload({}, "Pending", None)]
     monkeypatch.setattr(kubernetes_service, "_is_unschedulable_status", ext.end_create_wait)
     service = types.SimpleNamespace(workload_provider=provider, namespace="nemo")
 
@@ -365,11 +381,30 @@ def test_create_wait_keeps_the_stock_check_for_a_sandbox_that_has_not_failed(rea
     assert ext.end_create_wait({"state": "Pending", "reason": reason, "message": ""}) is unschedulable
 
 
-def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
-    """get_status runs on every status read, so a pod lookup is spent only on a Pending sandbox."""
+def test_status_reads_no_pod_on_the_server_event_loop(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    """The stock create wait calls get_status on the event loop, where a pod read would stall every other request."""
     k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
 
-    assert provider.get_status(_labelled_workload({}, "Running", "10.0.0.5"))["state"] == "Running"
+    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+    assert k8s.listed_namespaces == []
+
+
+def test_listed_sandbox_whose_container_stopped_is_failed_with_its_reason(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+    k8s.workloads = [_labelled_workload({}, "Pending", None)]
+
+    (listed,) = provider.list_workloads("nemo", "opensandbox.io/id")
+
+    assert provider.get_status(listed)["message"] == "container sandbox: OOMKilled (exit 137)"
+
+
+def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    """Every status read fetches the workload, so a pod lookup is spent only on a sandbox that isn't running yet."""
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+
+    assert _status(provider, k8s, _labelled_workload({}, "Running", "10.0.0.5"))["state"] == "Running"
     assert k8s.listed_namespaces == []
 
 
@@ -378,7 +413,7 @@ def test_unscheduled_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider,
     workload = _labelled_workload({}, "Pending", None)
     workload["status"]["allocated"] = 0
 
-    assert provider.get_status(workload)["state"] == "Pending"
+    assert _status(provider, k8s, workload)["state"] == "Pending"
     assert k8s.listed_namespaces == []
 
 
@@ -390,7 +425,7 @@ def test_failed_pod_lookup_keeps_the_stock_status(
 
     monkeypatch.setattr(k8s, "list_pods", fail)
 
-    assert provider.get_status(_labelled_workload({}, "Pending", None))["state"] == "Pending"
+    assert _status(provider, k8s, _labelled_workload({}, "Pending", None))["state"] == "Pending"
 
 
 async def test_stock_create_wait_returns_for_a_pending_bundle_only_sandbox(
