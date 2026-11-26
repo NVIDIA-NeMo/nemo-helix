@@ -15,7 +15,7 @@ export type NodeGroup =
   | 'validator'
   | 'update'
   | 'summary';
-export type NodeStatus = 'pending' | 'running' | 'success' | 'blocked' | 'failed';
+export type NodeStatus = 'pending' | 'running' | 'success' | 'blocked' | 'failed' | 'skipped';
 
 export interface SwarmNode {
   id: string;
@@ -239,7 +239,9 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
       case 'agent_completed': {
         const id = nodeForAgent(payload);
         if (id) {
-          statuses[id] = payload.ok === false ? 'failed' : 'success';
+          // A defender whose remit does not cover the attack abstains; that is not a failure.
+          const notApplicable = asString(payload.not_applicable);
+          statuses[id] = notApplicable ? 'skipped' : payload.ok === false ? 'failed' : 'success';
           const seconds =
             typeof payload.duration_seconds === 'number'
               ? ` (${payload.duration_seconds.toFixed(1)}s)`
@@ -247,7 +249,7 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
           pushLog(id, {
             ts: ev.ts,
             label: `completed${seconds}`,
-            text: asString(payload.summary) ?? '',
+            text: notApplicable ? `did not apply: ${notApplicable}` : (asString(payload.summary) ?? ''),
             level: 'info',
           });
         }

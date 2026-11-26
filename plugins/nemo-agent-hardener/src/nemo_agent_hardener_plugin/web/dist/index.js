@@ -3676,12 +3676,13 @@ var xs = {
 			case "agent_completed": {
 				let e = Us(r);
 				if (e) {
-					t[e] = r.ok === !1 ? "failed" : "success";
-					let i = typeof r.duration_seconds == "number" ? ` (${r.duration_seconds.toFixed(1)}s)` : "";
+					let i = Hs(r.not_applicable);
+					t[e] = i ? "skipped" : r.ok === !1 ? "failed" : "success";
+					let a = typeof r.duration_seconds == "number" ? ` (${r.duration_seconds.toFixed(1)}s)` : "";
 					l(e, {
 						ts: n.ts,
-						label: `completed${i}`,
-						text: Hs(r.summary) ?? "",
+						label: `completed${a}`,
+						text: i ? `did not apply: ${i}` : Hs(r.summary) ?? "",
 						level: "info"
 					});
 				}
@@ -18541,8 +18542,8 @@ var Cx = "mitigations", wx = (e) => {
 		case "agent_started": return `${n} started`;
 		case "agent_progress": return `${n}: ${Yx(t.message) ?? ""}`;
 		case "agent_completed": {
-			let e = Xx(t.duration_seconds);
-			return `${t.ok === !1 ? "✗" : "✓"} ${n}${e === void 0 ? "" : ` (${e.toFixed(1)}s)`}`;
+			let e = Xx(t.duration_seconds), r = e === void 0 ? "" : ` (${e.toFixed(1)}s)`, i = Yx(t.not_applicable);
+			return i ? `○ ${n} did not apply: ${i}${r}` : `${t.ok === !1 ? "✗" : "✓"} ${n}${r}`;
 		}
 		case "agent_failed": return `✗ ${n} failed: ${Yx(t.error) ?? ""}`;
 		case "agent_exchange": return `${n} → victim${Yx(t.label) ? ` [${Yx(t.label)}]` : ""}${t.blocked === !0 ? " (blocked)" : t.blocked === !1 ? " (allowed)" : ""}`;
@@ -18643,7 +18644,8 @@ var Cx = "mitigations", wx = (e) => {
 	running: "Running",
 	success: "Succeeded",
 	blocked: "Blocked",
-	failed: "Failed"
+	failed: "Failed",
+	skipped: "Did not apply"
 }, lS = (e, t) => e === "failed" ? "#ff3855" : e === "blocked" ? "#ffab40" : t, uS = [
 	"defender",
 	"validator",

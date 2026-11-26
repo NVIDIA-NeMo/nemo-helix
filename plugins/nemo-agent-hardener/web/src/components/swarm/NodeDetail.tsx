@@ -32,6 +32,7 @@ const STATUS_LABEL: Record<NodeStatus, string> = {
   success: 'Succeeded',
   blocked: 'Blocked',
   failed: 'Failed',
+  skipped: 'Did not apply',
 };
 
 const statusColorOf = (status: NodeStatus, base: string): string =>
