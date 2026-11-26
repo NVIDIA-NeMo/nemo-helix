@@ -30,7 +30,7 @@ harnesses:
     kind: deepagents
     model:
       provider: nvidia
-      model: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
+      model: nvidia/nvidia/nemotron-3.5-lightning
     settings:
       deepagents: {}
 
