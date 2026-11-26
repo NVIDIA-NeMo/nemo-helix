@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evals.cli as evaluator_cli
 import pytest
-from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.evaluate import (
@@ -49,6 +48,7 @@ from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evals.tasks.evaluate import main as evaluate_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.commands import add_job_commands
@@ -642,7 +642,7 @@ def test_platform_resolved_judge_calls_the_gateway_as_the_job(
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", MagicMock(return_value=StaticToken("job-access-token"))
+        auth_proxy_server, "resolve_workload_exchange_provider", MagicMock(return_value=StaticToken("job-access-token"))
     )
     authorizations: list[str | None] = []
 

@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from nemo_agent_hardener_plugin.api.v2 import events
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import execution
-from nemo_agents_plugin.jobs import gateway_proxy
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.auth import StaticToken
 from pytest_httpserver import HTTPServer
 from starlette.testclient import TestClient
@@ -39,7 +39,7 @@ def test_run_events_use_parent_workload_identity(
     monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/subject-token")
     monkeypatch.setattr(
-        gateway_proxy, "resolve_workload_exchange_provider", lambda **_kwargs: StaticToken("job-access-token")
+        auth_proxy_server, "resolve_workload_exchange_provider", lambda **_kwargs: StaticToken("job-access-token")
     )
     event_path = "/apis/agent-hardener/v2/workspaces/default/runs/run-x/events"
     event_body = {"event": "round_started", "payload": {"round": 1}}
