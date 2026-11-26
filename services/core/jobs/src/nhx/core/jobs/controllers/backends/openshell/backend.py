@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import hashlib
+import importlib.metadata
 import logging
 import os
 import uuid
@@ -114,6 +115,10 @@ _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required for the OpenShell job backend. "
     'Install it with: uv pip install "openshell>=0.1.6" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
+
+# OpenShell 0.1.0 broke the gateway API. An older gateway still accepts the connection but serves none
+# of the sandbox RPCs, so every call fails UNIMPLEMENTED ("Received http2 header with status: 404").
+_MIN_GATEWAY_VERSION = "0.1.0"
 
 # OpenShell rejects a longer sandbox name with INVALID_ARGUMENT (63-char DNS label).
 _MAX_ROUTABLE_NAME_LEN = 19
@@ -244,6 +249,9 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
         self._client = self._create_client()
         self._policy = self._build_executor_policy()
         self._jobs_controller_instance_id = _resolve_jobs_controller_instance_id()
+        # Set while the gateway answers UNIMPLEMENTED, so the cleanup sweep (every few seconds) reports an
+        # unsupported gateway once rather than on every sweep, and reports again when it recovers.
+        self._gateway_unsupported = False
 
     # --- policy ---
 
@@ -492,6 +500,11 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                     status=HelixJobStatus.PENDING,
                     status_details={"message": f"Sandbox {sandbox_name} already exists; awaiting READY"},
                 )
+            if _rpc_code(exc) == grpc.StatusCode.UNIMPLEMENTED:
+                return JobUpdate(
+                    status=HelixJobStatus.ERROR,
+                    status_details={"message": f"CreateSandbox failed: {self._unsupported_gateway_message()}"},
+                )
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": f"CreateSandbox failed: {_rpc_detail(exc)}"},
@@ -665,10 +678,22 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                 logger.warning("Gateway provider cleanup will retry on the next sweep.")
         try:
             sandboxes = self._client.list_all(workspace=self._workspace, label_selector=self._cleanup_label_selector())
-        except (grpc.RpcError, SandboxError):
-            # SandboxError: the SDK pager rejects a repeated or over-budget page token.
+        except grpc.RpcError as exc:
+            if _rpc_code(exc) == grpc.StatusCode.UNIMPLEMENTED:
+                # Not transient: retrying every sweep cannot help until the gateway is upgraded.
+                if not self._gateway_unsupported:
+                    logger.error("Sandbox cleanup is disabled: %s", self._unsupported_gateway_message())
+                self._gateway_unsupported = True
+                return
             logger.warning("Failed to list sandboxes for cleanup", exc_info=True)
             return
+        except SandboxError:
+            # The SDK pager rejects a repeated or over-budget page token.
+            logger.warning("Failed to list sandboxes for cleanup", exc_info=True)
+            return
+        if self._gateway_unsupported:
+            logger.info("OpenShell gateway at %s now serves the sandbox API; cleanup resumed.", self._gateway_target())
+            self._gateway_unsupported = False
 
         for sandbox in sandboxes:
             labels = dict(sandbox.labels)
@@ -837,6 +862,20 @@ class OpenShellJobBackend(JobBackend[OpenShellExecutionProvider, PluginOpenShell
                 # comparisons against datetime.now(timezone.utc) do not raise.
                 return condition.transition_time.ToDatetime(tzinfo=datetime.timezone.utc)
         return None
+
+    def _gateway_target(self) -> str:
+        return self._executor_config.gateway_endpoint
+
+    def _unsupported_gateway_message(self) -> str:
+        """Why every call to this gateway fails UNIMPLEMENTED, and what to do about it."""
+        try:
+            client = f" (this platform's client is openshell {importlib.metadata.version('openshell')})"
+        except importlib.metadata.PackageNotFoundError:
+            client = ""
+        return (
+            f"the OpenShell gateway at {self._gateway_target()} does not implement the sandbox API: it is older "
+            f"than OpenShell {_MIN_GATEWAY_VERSION}{client}. Upgrade the gateway."
+        )
 
     def _delete_sandbox_best_effort(self, sandbox_name: str) -> None:
         try:
