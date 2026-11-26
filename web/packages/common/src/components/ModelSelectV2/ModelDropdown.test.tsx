@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
   MODEL_SIZE_OPTIONS,
   type ModelFilterControls,
 } from '@nemo/common/src/api/models/modelFilters';
@@ -133,7 +135,8 @@ describe('ModelDropdown', () => {
       values: {},
       onChange: vi.fn(),
       providerOptions: [{ value: 'default/nvidia-build', label: 'nvidia-build' }],
-      familyOptions: [{ value: 'llama', label: 'llama' }],
+      capabilityOptions: MODEL_CAPABILITY_OPTIONS,
+      inputModalityOptions: MODEL_INPUT_MODALITY_OPTIONS,
       sizeOptions: MODEL_SIZE_OPTIONS,
       providersLoading: false,
       ...overrides,
@@ -145,28 +148,31 @@ describe('ModelDropdown', () => {
       expect(screen.queryByTestId('model-select-v2-filters')).not.toBeInTheDocument();
     });
 
-    it('renders a provider, family and size filter', () => {
+    it('renders a provider, capability, input and size filter', () => {
       renderOpen({ modelFilters: makeFilters() });
 
       expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Filter by family' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by capability' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by input' })).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Filter by size' })).toBeInTheDocument();
     });
 
     it('reports a picked option merged with the other filters', async () => {
       const onChange = vi.fn();
-      renderOpen({ modelFilters: makeFilters({ values: { family: 'llama' }, onChange }) });
+      renderOpen({
+        modelFilters: makeFilters({ values: { capability: 'tool_calling' }, onChange }),
+      });
 
-      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by size' }));
-      fireEvent.click(await screen.findByRole('option', { name: 'Up to 3B' }));
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by input' }));
+      fireEvent.click(await screen.findByRole('option', { name: 'Image' }));
 
-      expect(onChange).toHaveBeenCalledWith({ family: 'llama', size: 'small' });
+      expect(onChange).toHaveBeenCalledWith({ capability: 'tool_calling', inputModality: 'image' });
     });
 
     it('disables a filter that has nothing to offer', () => {
-      renderOpen({ modelFilters: makeFilters({ familyOptions: [] }) });
+      renderOpen({ modelFilters: makeFilters({ providerOptions: [] }) });
 
-      expect(screen.getByRole('combobox', { name: 'Filter by family' })).toBeDisabled();
+      expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeDisabled();
     });
 
     it('says the filters excluded everything when no models match', () => {

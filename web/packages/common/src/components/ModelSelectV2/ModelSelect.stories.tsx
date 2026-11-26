@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
   MODEL_SIZE_OPTIONS,
   modelSizeFilter,
   type ModelFilterValues,
@@ -13,7 +15,12 @@ import type {
   ModelSelection,
   ModelSelectProps,
 } from '@nemo/common/src/components/ModelSelectV2/types';
-import type { InferenceParams, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type {
+  InferenceParams,
+  ModelCapability,
+  ModelEntity,
+  ModelModality,
+} from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -161,12 +168,27 @@ export const WithModelTypeToggle: Story = {
   render: WithModelTypeToggleRender,
 };
 
-const MOCK_FAMILIES = ['llama', 'mistral', 'nemotron'];
-
-const withParameterCountFromName = (model: ModelEntity): ModelEntity => {
+const withMetadataFromName = (model: ModelEntity): ModelEntity => {
   const billions = /-(\d+)b/.exec(model.name)?.[1];
-  if (!billions) return model;
-  return { ...model, metadata: { parameter_count: Number(billions) * 1e9 } };
+  const isNemotron = model.name.startsWith('nemotron');
+  const capabilities: ModelCapability[] = [];
+  if (isNemotron || model.name.includes('instruct')) {
+    capabilities.push('tool_calling');
+  }
+  if (isNemotron) {
+    capabilities.push('reasoning');
+  }
+  const inputModalities: ModelModality[] = model.name.includes('70b')
+    ? ['text', 'image']
+    : ['text'];
+  return {
+    ...model,
+    metadata: {
+      capabilities,
+      input_modalities: inputModalities,
+      ...(billions ? { parameter_count: Number(billions) * 1e9 } : {}),
+    },
+  };
 };
 
 const isInSizeBucket = (model: ModelEntity, size: ModelSizeBucket): boolean => {
@@ -195,21 +217,23 @@ const EXTRA_NVIDIA_MODELS = [
 const sizedMockGroups = mockGroups.map((group) => ({
   ...group,
   models: [...group.models, ...(group.workspace === 'nvidia' ? EXTRA_NVIDIA_MODELS : [])].map(
-    withParameterCountFromName
+    withMetadataFromName
   ),
 }));
 
 const WithFiltersRender = (args: ModelSelectProps) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [filters, setFilters] = useState<ModelFilterValues>({});
-  const { provider, family, size } = filters;
+  const { provider, capability, inputModality, size } = filters;
   const groups = sizedMockGroups
     .filter((group) => !provider || group.workspace === provider)
     .map((group) => ({
       ...group,
       models: group.models.filter(
         (model) =>
-          (!family || model.name.startsWith(family)) && (!size || isInSizeBucket(model, size))
+          (!capability || !!model.metadata?.capabilities?.includes(capability)) &&
+          (!inputModality || !!model.metadata?.input_modalities?.includes(inputModality)) &&
+          (!size || isInSizeBucket(model, size))
       ),
     }))
     .filter((group) => group.models.length > 0);
@@ -227,7 +251,8 @@ const WithFiltersRender = (args: ModelSelectProps) => {
           value: workspace,
           label: `${workspace}-build`,
         })),
-        familyOptions: MOCK_FAMILIES.map((family) => ({ value: family, label: family })),
+        capabilityOptions: MODEL_CAPABILITY_OPTIONS,
+        inputModalityOptions: MODEL_INPUT_MODALITY_OPTIONS,
         sizeOptions: MODEL_SIZE_OPTIONS,
         providersLoading: false,
       }}

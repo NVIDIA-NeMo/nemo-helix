@@ -146,21 +146,29 @@ describe('useModelSearchCore', () => {
   });
 
   describe('model filters', () => {
-    const withFamily = (name: string, family: string) =>
-      makeModel(name, { spec: { family } as never });
-
-    it('sends the provider and family to the server alongside the search term', async () => {
+    it('sends the provider, capability and input to the server alongside caller filters', async () => {
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
       const { result } = renderSearch({ filter: { lora_enabled: true } });
       await waitFor(() => expect(mockListModels).toHaveBeenCalled());
 
-      act(() => result.current.modelFilters.onChange({ provider: 'ws1/build', family: 'llama' }));
+      act(() =>
+        result.current.modelFilters.onChange({
+          provider: 'ws1/build',
+          capability: 'tool_calling',
+          inputModality: 'image',
+        })
+      );
 
       await waitFor(() =>
         expect(mockListModels).toHaveBeenLastCalledWith(
           'ws1',
           expect.objectContaining({
-            filter: { lora_enabled: true, model_providers: 'ws1/build', family: 'llama' },
+            filter: {
+              lora_enabled: true,
+              model_providers: 'ws1/build',
+              capabilities: 'tool_calling',
+              input_modalities: 'image',
+            },
           })
         )
       );
@@ -203,28 +211,6 @@ describe('useModelSearchCore', () => {
 
       expect(result.current.modelFilters.providerOptions).toEqual([
         { value: 'other/gone', label: 'other/gone' },
-      ]);
-    });
-
-    it('keeps every family it has seen as options after narrowing to one', async () => {
-      mockListModels.mockResolvedValueOnce(
-        makePage([withFamily('a', 'llama'), withFamily('b', 'mixtral')], 1, 1)
-      );
-      const { result } = renderSearch();
-      await waitFor(() =>
-        expect(result.current.modelFilters.familyOptions.map((o) => o.value)).toEqual([
-          'llama',
-          'mixtral',
-        ])
-      );
-
-      mockListModels.mockResolvedValue(makePage([withFamily('a', 'llama')], 1, 1));
-      act(() => result.current.modelFilters.onChange({ family: 'llama' }));
-
-      await waitFor(() => expect(result.current.models.map((m) => m.name)).toEqual(['a']));
-      expect(result.current.modelFilters.familyOptions.map((o) => o.value)).toEqual([
-        'llama',
-        'mixtral',
       ]);
     });
   });

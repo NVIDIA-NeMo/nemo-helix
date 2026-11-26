@@ -3,8 +3,9 @@
 
 import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import {
-  collectModelFamilies,
   EMPTY_MODEL_FILTERS,
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
   MODEL_SIZE_OPTIONS,
   modelSizeFilter,
   withSelectedOption,
@@ -101,7 +102,6 @@ export const useModelSearchCore = ({
 }: UseModelSearchCoreOptions): UseModelSearchResult => {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<ModelFilterValues>(initialFilters);
-  const [knownFamilies, setKnownFamilies] = useState<string[]>([]);
 
   const query = useMemo(() => {
     const trimmed = search.trim();
@@ -110,7 +110,8 @@ export const useModelSearchCore = ({
       ...filter,
       ...(trimmed ? { name: { $like: trimmed } } : {}),
       ...(filters.provider ? { model_providers: filters.provider } : {}),
-      ...(filters.family ? { family: filters.family } : {}),
+      ...(filters.capability ? { capabilities: filters.capability } : {}),
+      ...(filters.inputModality ? { input_modalities: filters.inputModality } : {}),
       ...(parameterCount ? { parameter_count: parameterCount } : {}),
     };
     return {
@@ -118,7 +119,7 @@ export const useModelSearchCore = ({
       sort,
       ...(Object.keys(merged).length > 0 ? { filter: merged as ModelEntityFilter } : {}),
     };
-  }, [filter, filters.family, filters.provider, filters.size, pageSize, search, sort]);
+  }, [filter, filters, pageSize, search, sort]);
 
   const isEnabled = enabled && !!workspace;
   const queryWorkspace = workspace ?? 'default';
@@ -139,15 +140,10 @@ export const useModelSearchCore = ({
     initialPageParam: 1,
   });
 
-  const loadedModels = useMemo(
-    () => data?.pages.flatMap((page) => page.data ?? []) ?? [],
-    [data?.pages]
-  );
-
-  const models = useMemo(
-    () => (include ? loadedModels.filter(include) : loadedModels),
-    [include, loadedModels]
-  );
+  const models = useMemo(() => {
+    const loaded = data?.pages.flatMap((page) => page.data ?? []) ?? [];
+    return include ? loaded.filter(include) : loaded;
+  }, [data?.pages, include]);
 
   const groups = useMemo(() => groupModelsByWorkspace(models, { sort: true }), [models]);
 
@@ -157,15 +153,6 @@ export const useModelSearchCore = ({
     queryFn: listProviders ? () => listProviders(queryWorkspace, providerParams) : skipToken,
     enabled: isEnabled,
   });
-
-  useEffect(() => {
-    const families = collectModelFamilies(loadedModels).map((option) => option.value);
-    if (families.length === 0) return;
-    setKnownFamilies((known) => {
-      const merged = new Set([...known, ...families]);
-      return merged.size === known.length ? known : [...merged];
-    });
-  }, [loadedModels]);
 
   const providerOptions = useMemo<ModelFilterOption[]>(
     () =>
@@ -179,27 +166,17 @@ export const useModelSearchCore = ({
     [filters.provider, providersPage?.data]
   );
 
-  const familyOptions = useMemo(
-    () =>
-      withSelectedOption(
-        [...knownFamilies]
-          .sort((a, b) => a.localeCompare(b))
-          .map((family) => ({ value: family, label: family })),
-        filters.family
-      ),
-    [filters.family, knownFamilies]
-  );
-
   const modelFilters = useMemo<ModelFilterControls>(
     () => ({
       values: filters,
       onChange: setFilters,
       providerOptions,
-      familyOptions,
+      capabilityOptions: MODEL_CAPABILITY_OPTIONS,
+      inputModalityOptions: MODEL_INPUT_MODALITY_OPTIONS,
       sizeOptions: MODEL_SIZE_OPTIONS,
       providersLoading: !!listProviders && providersLoading,
     }),
-    [familyOptions, filters, listProviders, providerOptions, providersLoading]
+    [filters, listProviders, providerOptions, providersLoading]
   );
 
   const hasMore = !!hasNextPage;

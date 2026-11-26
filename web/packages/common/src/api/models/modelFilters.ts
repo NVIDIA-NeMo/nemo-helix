@@ -1,13 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelEntity, NumberFilter } from '@nemo/sdk/generated/platform/schema';
+import type { NumberFilter } from '@nemo/sdk/generated/platform/schema';
+import { ModelCapability } from '@nemo/sdk/generated/platform/schema/ModelCapability';
+import { ModelModality } from '@nemo/sdk/generated/platform/schema/ModelModality';
 
 export type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
 
 export interface ModelFilterValues {
   provider?: string;
-  family?: string;
+  capability?: ModelCapability;
+  inputModality?: ModelModality;
   size?: ModelSizeBucket;
 }
 
@@ -20,7 +23,8 @@ export interface ModelFilterControls {
   values: ModelFilterValues;
   onChange: (values: ModelFilterValues) => void;
   providerOptions: ModelFilterOption[];
-  familyOptions: ModelFilterOption[];
+  capabilityOptions: ModelFilterOption[];
+  inputModalityOptions: ModelFilterOption[];
   sizeOptions: ModelFilterOption[];
   providersLoading: boolean;
 }
@@ -48,13 +52,44 @@ export const MODEL_SIZE_OPTIONS: ModelFilterOption[] = MODEL_SIZE_BUCKETS.map(
 export const toModelSizeBucket = (value?: string): ModelSizeBucket | undefined =>
   MODEL_SIZE_BUCKETS.find((bucket) => bucket.value === value)?.value;
 
+const CAPABILITY_LABELS: Record<ModelCapability, string> = {
+  tool_calling: 'Tool calling',
+  reasoning: 'Reasoning',
+  structured_output: 'Structured output',
+  embedding: 'Embedding',
+  reranking: 'Reranking',
+};
+
+const MODALITY_LABELS: Record<ModelModality, string> = {
+  text: 'Text',
+  image: 'Image',
+  audio: 'Audio',
+  video: 'Video',
+  pdf: 'PDF',
+};
+
+export const MODEL_CAPABILITY_OPTIONS: ModelFilterOption[] = Object.values(ModelCapability).map(
+  (value) => ({ value, label: CAPABILITY_LABELS[value] })
+);
+
+export const MODEL_INPUT_MODALITY_OPTIONS: ModelFilterOption[] = Object.values(ModelModality).map(
+  (value) => ({ value, label: MODALITY_LABELS[value] })
+);
+
+export const toModelCapability = (value?: string): ModelCapability | undefined =>
+  Object.values(ModelCapability).find((capability) => capability === value);
+
+export const toModelModality = (value?: string): ModelModality | undefined =>
+  Object.values(ModelModality).find((modality) => modality === value);
+
 export const EMPTY_MODEL_FILTERS: ModelFilterValues = {};
 
-export const hasActiveModelFilters = (filters: ModelFilterValues): boolean =>
-  Boolean(filters.provider || filters.family || filters.size);
-
 export const countActiveModelFilters = (filters: ModelFilterValues): number =>
-  [filters.provider, filters.family, filters.size].filter(Boolean).length;
+  [filters.provider, filters.capability, filters.inputModality, filters.size].filter(Boolean)
+    .length;
+
+export const hasActiveModelFilters = (filters: ModelFilterValues): boolean =>
+  countActiveModelFilters(filters) > 0;
 
 export const modelSizeFilter = (size: ModelSizeBucket): NumberFilter | undefined => {
   const bucket = MODEL_SIZE_BUCKETS.find((candidate) => candidate.value === size);
@@ -65,17 +100,6 @@ export const modelSizeFilter = (size: ModelSizeBucket): NumberFilter | undefined
     return { $gte: bucket.minParameters };
   }
   return { $gte: bucket.minParameters, $lt: bucket.maxParameters };
-};
-
-export const collectModelFamilies = (models: readonly ModelEntity[]): ModelFilterOption[] => {
-  const families = new Set<string>();
-  models.forEach((model) => {
-    const family = model.spec?.family;
-    if (family) families.add(family);
-  });
-  return [...families]
-    .sort((a, b) => a.localeCompare(b))
-    .map((family) => ({ value: family, label: family }));
 };
 
 export const withSelectedOption = (

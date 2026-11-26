@@ -2,19 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  collectModelFamilies,
   countActiveModelFilters,
   hasActiveModelFilters,
+  MODEL_CAPABILITY_OPTIONS,
+  MODEL_INPUT_MODALITY_OPTIONS,
   modelSizeFilter,
+  toModelCapability,
+  toModelModality,
   toModelSizeBucket,
   withSelectedOption,
 } from '@nemo/common/src/api/models/modelFilters';
-import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { ModelCapability } from '@nemo/sdk/generated/platform/schema/ModelCapability';
+import { ModelModality } from '@nemo/sdk/generated/platform/schema/ModelModality';
 
 const BILLION = 1_000_000_000;
-
-const makeModel = (spec?: { family?: string; base_num_parameters?: number }): ModelEntity =>
-  ({ id: 'm', name: 'm', workspace: 'ws', spec }) as ModelEntity;
 
 describe('modelSizeFilter', () => {
   it.each([
@@ -37,24 +38,29 @@ describe('toModelSizeBucket', () => {
   });
 });
 
-describe('collectModelFamilies', () => {
-  it('returns each family once, sorted', () => {
-    const models = [
-      makeModel({ family: 'mixtral' }),
-      makeModel({ family: 'llama' }),
-      makeModel({ family: 'mixtral' }),
-    ];
-
-    expect(collectModelFamilies(models)).toEqual([
-      { value: 'llama', label: 'llama' },
-      { value: 'mixtral', label: 'mixtral' },
-    ]);
+describe('capability and input options', () => {
+  it('offers every capability and modality the API accepts', () => {
+    expect(MODEL_CAPABILITY_OPTIONS.map((option) => option.value)).toEqual(
+      Object.values(ModelCapability)
+    );
+    expect(MODEL_INPUT_MODALITY_OPTIONS.map((option) => option.value)).toEqual(
+      Object.values(ModelModality)
+    );
   });
 
-  it('skips models without a family', () => {
-    expect(
-      collectModelFamilies([makeModel(), makeModel({ base_num_parameters: BILLION })])
-    ).toEqual([]);
+  it('labels values for people rather than the API', () => {
+    expect(MODEL_CAPABILITY_OPTIONS).toContainEqual({
+      value: 'tool_calling',
+      label: 'Tool calling',
+    });
+    expect(MODEL_INPUT_MODALITY_OPTIONS).toContainEqual({ value: 'pdf', label: 'PDF' });
+  });
+
+  it('passes known values through and drops the rest', () => {
+    expect(toModelCapability('reasoning')).toBe('reasoning');
+    expect(toModelCapability('flying')).toBeUndefined();
+    expect(toModelModality('image')).toBe('image');
+    expect(toModelModality(undefined)).toBeUndefined();
   });
 });
 
@@ -80,8 +86,10 @@ describe('withSelectedOption', () => {
 describe('active filter helpers', () => {
   it('counts only the filters that are set', () => {
     expect(countActiveModelFilters({})).toBe(0);
-    expect(countActiveModelFilters({ provider: 'ws/p', size: 'small' })).toBe(2);
-    expect(hasActiveModelFilters({ family: 'llama' })).toBe(true);
+    expect(
+      countActiveModelFilters({ provider: 'ws/p', inputModality: 'image', size: 'small' })
+    ).toBe(3);
+    expect(hasActiveModelFilters({ capability: 'reasoning' })).toBe(true);
     expect(hasActiveModelFilters({})).toBe(false);
   });
 });

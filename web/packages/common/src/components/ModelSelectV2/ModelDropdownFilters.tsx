@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  toModelCapability,
+  toModelModality,
   toModelSizeBucket,
   type ModelFilterControls,
   type ModelFilterOption,
   type ModelFilterValues,
 } from '@nemo/common/src/api/models/modelFilters';
-import { Flex, Select } from '@nvidia/foundations-react-core';
+import { Grid, Select } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 interface ModelFilterSelectProps {
@@ -30,7 +32,7 @@ const ModelFilterSelect: FC<ModelFilterSelectProps> = ({
   onChange,
 }) => (
   <Select
-    className="min-w-0 flex-1"
+    className="min-w-0"
     size="small"
     placeholder={placeholder}
     value={value ?? ''}
@@ -51,11 +53,17 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
   values,
   onChange,
   providerOptions,
-  familyOptions,
+  capabilityOptions,
+  inputModalityOptions,
   sizeOptions,
   providersLoading,
 }) => (
-  <Flex gap="density-sm" className="px-2 pb-2 w-full" data-testid="model-select-v2-filters">
+  <Grid
+    cols={2}
+    gap="density-sm"
+    className="px-2 pb-2 w-full"
+    data-testid="model-select-v2-filters"
+  >
     <ModelFilterSelect
       name="provider"
       label="Filter by provider"
@@ -66,13 +74,20 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
       onChange={(provider) => onChange({ ...values, provider })}
     />
     <ModelFilterSelect
-      name="family"
-      label="Filter by family"
-      placeholder="Family"
-      value={values.family}
-      options={familyOptions}
-      disabled={!values.family && familyOptions.length === 0}
-      onChange={(family) => onChange({ ...values, family })}
+      name="capability"
+      label="Filter by capability"
+      placeholder="Capability"
+      value={values.capability}
+      options={capabilityOptions}
+      onChange={(capability) => onChange({ ...values, capability: toModelCapability(capability) })}
+    />
+    <ModelFilterSelect
+      name="inputModality"
+      label="Filter by input"
+      placeholder="Input"
+      value={values.inputModality}
+      options={inputModalityOptions}
+      onChange={(modality) => onChange({ ...values, inputModality: toModelModality(modality) })}
     />
     <ModelFilterSelect
       name="size"
@@ -82,5 +97,5 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
       options={sizeOptions}
       onChange={(size) => onChange({ ...values, size: toModelSizeBucket(size) })}
     />
-  </Flex>
+  </Grid>
 );

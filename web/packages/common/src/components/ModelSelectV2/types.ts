@@ -84,7 +84,7 @@ export interface ModelSelectProps extends ModelSelectParamsProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
-  /** Provider, family and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
+  /** Provider, capability, input and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
   modelFilters?: ModelFilterControls;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,

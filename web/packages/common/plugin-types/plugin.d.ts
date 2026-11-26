@@ -6,6 +6,8 @@ import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from
 import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelProvidersPage, ModelsListModelsParams, ModelsListProvidersParams, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
+import { ModelCapability } from "@nemo/sdk/generated/platform/schema/ModelCapability";
+import { ModelModality } from "@nemo/sdk/generated/platform/schema/ModelModality";
 import { ModelEntitySortField } from "@nemo/sdk/generated/platform/schema/ModelEntitySortField";
 import { HelixJobStatus as HelixJobStatus$1 } from "@nemo/sdk/generated/platform/schema/HelixJobStatus";
 //#endregion
@@ -10074,7 +10076,8 @@ export declare const LogViewer: FC<LogViewerProps>;
 type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
 interface ModelFilterValues {
   provider?: string;
-  family?: string;
+  capability?: ModelCapability;
+  inputModality?: ModelModality;
   size?: ModelSizeBucket;
 }
 interface ModelFilterOption {
@@ -10085,7 +10088,8 @@ interface ModelFilterControls {
   values: ModelFilterValues;
   onChange: (values: ModelFilterValues) => void;
   providerOptions: ModelFilterOption[];
-  familyOptions: ModelFilterOption[];
+  capabilityOptions: ModelFilterOption[];
+  inputModalityOptions: ModelFilterOption[];
   sizeOptions: ModelFilterOption[];
   providersLoading: boolean;
 }
@@ -10207,7 +10211,7 @@ interface ModelSelectProps extends ModelSelectParamsProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
-  /** Provider, family and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
+  /** Provider, capability, input and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
   modelFilters?: ModelFilterControls;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,
