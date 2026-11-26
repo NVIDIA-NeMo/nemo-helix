@@ -163,12 +163,25 @@ curl -sS -n -o /dev/null -w '%{http_code}\n' "<index-url>/agent-hardener/"
 brew install colima docker && colima start          # or Docker Desktop
 
 # Use the native installer — `uv tool install openshell` gives you the CLI
-# without the gateway service, and the war-game needs the gateway. Pinned to a
-# release tag so the script can't change under you; Agent Hardener refuses
-# anything older than 0.1.6, the openshell>=0.1.6 the rest of Helix requires.
+# without the gateway service, and the war-game needs the gateway. The script and
+# the release it installs are both pinned; `nemo agent-hardener doctor` fails on a
+# CLI or gateway older than 0.1.6, the openshell>=0.1.6 the rest of Helix requires.
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.6/install.sh | OPENSHELL_VERSION=v0.1.6 sh
-openshell status                                     # expect "Status: Connected"
+openshell status                                     # expect "Status: Connected", "Version: 0.1.6"
 ```
+
+> **Upgrading from OpenShell 0.0.x.** 0.1 is a breaking release, and the installer refuses to upgrade a
+> 0.0.x install in place. On macOS:
+>
+> 1. Delete every 0.0.x sandbox: `openshell sandbox delete --all --gateway <name>` for each registered gateway.
+> 2. Uninstall: `brew services stop nvidia/openshell/openshell && brew uninstall nvidia/openshell/openshell`, and
+>    remove any stray `openshell` / `openshell-gateway` binaries in `/opt/homebrew/bin` or `~/.local/bin`.
+> 3. Remove the old state: `$(brew --prefix)/var/openshell` and `~/.local/state/openshell`. A 0.0.x gateway
+>    database there crashes the 0.1 gateway at startup.
+> 4. Run the installer above, then `nemo agent-hardener setup`.
+>
+> On Linux, use `systemctl --user disable --now openshell-gateway` and your package manager in place of the
+> Homebrew commands.
 
 <details>
 <summary>macOS: point OpenShell at Docker so sandboxes can reach the host</summary>

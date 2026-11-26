@@ -575,6 +575,17 @@ class TestSchedule:
 
         assert update.status == HelixJobStatus.ERROR
 
+    def test_create_on_a_pre_0_1_gateway_names_the_unsupported_gateway(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.create.side_effect = _rpc_error(grpc.StatusCode.UNIMPLEMENTED, "http2 status: 404")
+
+        update = backend.schedule(_no_container_executor(), test_step_pending)
+
+        assert update.status == HelixJobStatus.ERROR
+        assert "older than OpenShell 0.1.0" in update.status_details["message"]
+
 
 def _rpc_error(code, details: str = "") -> Exception:
     class FakeRpcError(grpc.RpcError):
@@ -903,6 +914,25 @@ class TestCleanup:
         backend.cleanup_steps()
 
         assert not backend._client.delete.called
+
+    def test_unimplemented_list_is_reported_once_as_an_unsupported_gateway(
+        self, mock_nemo_client, mock_platform_config, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """NAIS-785: a 0.0.x gateway logged the same warning every sweep (~2s) instead of naming the cause."""
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.list_all.side_effect = _rpc_error(grpc.StatusCode.UNIMPLEMENTED, "http2 status: 404")
+
+        with caplog.at_level(logging.INFO, logger=backend_module.__name__):
+            backend.cleanup_steps()
+            backend.cleanup_steps()
+            backend._client.list_all.side_effect = None
+            backend._client.list_all.return_value = []
+            backend.cleanup_steps()
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1 and "older than OpenShell 0.1.0" in errors[0].getMessage()
+        assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert "cleanup resumed" in caplog.records[-1].getMessage()
 
     def test_terminal_transition_time_is_tz_aware(self, mock_nemo_client, mock_platform_config) -> None:
         """The TTL comparison must not raise on naive vs aware datetimes."""

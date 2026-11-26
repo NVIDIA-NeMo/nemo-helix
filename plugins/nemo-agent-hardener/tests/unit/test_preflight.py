@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for gateway-status parsing and the preflight result cache."""
+"""Unit tests for gateway-status and version parsing and the preflight gate."""
 
 import subprocess
 from collections.abc import Callable
@@ -57,7 +57,11 @@ def test_probes_bound_a_wedged_daemon_to_a_few_seconds() -> None:
 
 @pytest.mark.parametrize(
     ("probe", "binary", "expected"),
-    [(checks.docker_ok, "docker", "docker info"), (checks.openshell_gateway_ok, "openshell", "openshell status")],
+    [
+        (checks.docker_ok, "docker", "docker info"),
+        (checks.openshell_cli_ok, "openshell", "openshell --version"),
+        (checks.openshell_gateway_ok, "openshell", "openshell status"),
+    ],
 )
 def test_a_timed_out_probe_fails_with_a_wedged_message(
     probe: Callable[[], tuple[bool, str]], binary: str, expected: str, monkeypatch: pytest.MonkeyPatch
@@ -107,3 +111,60 @@ def test_host_preflight_runs_only_where_war_games_run_on_this_host(
 
     assert asked == ["ws1"]
     assert bool(ran) is checked
+
+
+def _stub_openshell(monkeypatch: pytest.MonkeyPatch, *, stdout: str, returncode: int = 0) -> None:
+    monkeypatch.setattr(checks, "which", lambda _name: "/usr/bin/openshell")
+    monkeypatch.setattr(
+        checks, "run", lambda args, **_kw: subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr="")
+    )
+
+
+def test_a_connected_but_too_old_gateway_fails_naming_the_required_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NAIS-785: a 0.0.x gateway reports Connected, and doctor used to pass on it."""
+    _stub_openshell(monkeypatch, stdout=CONNECTED)
+    ok, detail = checks.openshell_gateway_ok()
+    assert ok is False
+    assert "0.0.44" in detail and f">= {checks.MIN_OPENSHELL_VERSION_TEXT}" in detail
+
+
+@pytest.mark.parametrize(
+    ("stdout", "ok"),
+    [
+        (CONNECTED.replace("0.0.44", checks.MIN_OPENSHELL_VERSION_TEXT), True),
+        (CONNECTED.replace("0.0.44", "0.10.0"), True),
+        (CONNECTED.replace("  \x1b[2mVersion:\x1b[0m 0.0.44\n", ""), False),
+        (CONNECTED.replace("Connected", "Not Connected").replace("0.0.44", "0.1.4"), False),
+    ],
+)
+def test_gateway_check_needs_connected_and_a_supported_version(
+    stdout: str, ok: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_openshell(monkeypatch, stdout=stdout)
+    assert checks.openshell_gateway_ok()[0] is ok
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "ok"),
+    [
+        ("openshell 0.1.6\n", 0, True),
+        ("openshell 0.1.5\n", 0, False),
+        ("openshell 0.0.43\n", 0, False),
+        ("", 2, False),
+    ],
+)
+def test_cli_check_compares_openshell_version_to_the_minimum(
+    stdout: str, returncode: int, ok: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_openshell(monkeypatch, stdout=stdout, returncode=returncode)
+    result, detail = checks.openshell_cli_ok()
+    assert result is ok
+    if not ok:
+        assert checks.OPENSHELL_INSTALL_COMMAND in detail
+
+
+def test_missing_openshell_cli_points_at_the_pinned_installer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(checks, "which", lambda _name: None)
+    for probe in (checks.openshell_cli_ok, checks.openshell_gateway_ok):
+        ok, detail = probe()
+        assert ok is False and checks.OPENSHELL_INSTALL_COMMAND in detail
