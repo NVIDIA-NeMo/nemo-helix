@@ -6,20 +6,26 @@ import type { JobFailure } from '@agent-hardener/api/jobFailure';
 import { useJobFailure } from '@agent-hardener/components/useJobFailure';
 import {
   agentHardenerDownloadVictimContextJobResult,
+  getAgentHardenerGetManifestQueryKey,
   useAgentHardenerCreateVictimContextJob,
   useAgentHardenerGetVictimContextJob,
 } from '@agent-hardener/generated/api';
 import { useToast } from '@agent-hardener/host';
 import { CJobTerminalStatuses, getJobRefetchInterval, triggerDownload } from '@nemo/common';
-import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 
 /** Job result name the victim-context job saves its archive under (`CONTEXT_RESULT` in the plugin). */
 const CONTEXT_RESULT = 'victim-context';
 
 export interface StageVictimContext {
   start: () => void;
+  /** Stage, then build the image in the cluster and record it on the manifest. */
+  startBuild: () => void;
   /** A staging job is submitted and has not finished. */
   staging: boolean;
+  /** The last staging job also builds the image. */
+  build: boolean;
   /** The archive is ready to download. */
   ready: boolean;
   /** The last staging job. */
@@ -36,11 +42,14 @@ export interface StageVictimContext {
  * Stage a manifest's victim build context on the platform and hand the archive to the browser.
  *
  * A war-game that runs in a container cannot build the victim, so the operator builds it from this
- * archive (`docker build -t <ref> - < archive`) and records the pushed image on the manifest.
+ * archive (`docker build -t <ref> - < archive`) and records the pushed image on the manifest. Or the job
+ * builds it with the builder plugin and records it itself; the manifest is refetched once it has.
  */
 export const useStageVictimContext = (workspace: string, manifestName: string): StageVictimContext => {
   const toast = useToast();
+  const queryClient = useQueryClient();
   const [jobName, setJobName] = useState('');
+  const [build, setBuild] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const archiveName = `${manifestName}-victim-context.tar.gz`;
 
@@ -59,7 +68,27 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
   });
   const status = job?.status;
   const terminal = Boolean(status && CJobTerminalStatuses.includes(status));
-  const failure = useJobFailure('Staging the victim build context', jobName, job);
+  const failure = useJobFailure(
+    build ? 'Building the victim image' : 'Staging the victim build context',
+    jobName,
+    job
+  );
+
+  const recorded = useRef('');
+  useEffect(() => {
+    if (!build || status !== 'completed' || recorded.current === jobName) return;
+    recorded.current = jobName;
+    toast.success('Victim image built and recorded on the manifest.');
+    void queryClient.invalidateQueries({
+      queryKey: getAgentHardenerGetManifestQueryKey(workspace, manifestName),
+    });
+  }, [build, status, jobName, toast, queryClient, workspace, manifestName]);
+
+  const submit = (withBuild: boolean): void => {
+    setBuild(withBuild);
+    create.mutate({ workspace, data: { spec: { manifest_id: manifestName, build: withBuild } } });
+  };
+  const staging = create.isPending || (Boolean(jobName) && !terminal);
 
   const download = async (): Promise<void> => {
     setDownloading(true);
@@ -74,8 +103,10 @@ export const useStageVictimContext = (workspace: string, manifestName: string): 
   };
 
   return {
-    start: () => create.mutate({ workspace, data: { spec: { manifest_id: manifestName } } }),
-    staging: create.isPending || (Boolean(jobName) && !terminal),
+    start: () => submit(false),
+    startBuild: () => submit(true),
+    staging,
+    build,
     ready: status === 'completed',
     jobName,
     failure,

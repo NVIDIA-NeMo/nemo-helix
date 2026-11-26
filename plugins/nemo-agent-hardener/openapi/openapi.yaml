@@ -4311,6 +4311,13 @@ components:
           minLength: 1
           pattern: \S
           title: Manifest Id
+        build:
+          type: boolean
+          title: Build
+          description: Also build the victim image from the staged context with the
+            builder, and record its digest-pinned reference as the manifest's `victim_image`
+            once it is ready.
+          default: false
       type: object
       required:
       - manifest_id

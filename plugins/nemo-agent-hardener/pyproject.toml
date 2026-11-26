@@ -19,6 +19,8 @@ dependencies = [
     # For the Agent entity, so a run's hardened workflow can be adopted into the agent config
     # (POST /runs/{name}/apply-mitigation). Same-process entity-store update — no cross-service call.
     "nemo-agents-plugin",
+    # Builds the victim image in the cluster (victim-context job with `build`).
+    "nemo-builder-plugin",
     "pydantic>=2.10.6",
     "pyyaml>=6.0.2",
     "typer>=0.20.0",

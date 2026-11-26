@@ -18,6 +18,7 @@ import typer
 import yaml
 from nemo_agent_hardener_plugin.cli import checks, credentials, provisioning
 from nemo_agent_hardener_plugin.cli._shared import (
+    CommandContext,
     api_errors,
     command_context,
     json_mapping,
@@ -25,6 +26,7 @@ from nemo_agent_hardener_plugin.cli._shared import (
     models_from_flags,
     parse_env_pairs,
     preflight_models,
+    wait_for_job,
 )
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.filesets import download_and_extract_project, upload_project_dir
@@ -142,6 +144,17 @@ def _project_init_body(
         if value:
             body[key] = value
     return body
+
+
+def _stage_and_build(ctx: CommandContext, manifest_id: str) -> None:
+    """Run the victim-context job with ``build`` on the platform and report the image it recorded."""
+    job = ctx.agent_hardener.submit_victim_context(manifest_id=manifest_id, build=True, workspace=ctx.workspace)
+    job_name = str(job["name"])
+    typer.echo(f"Staging and building the victim image in job {job_name}…")
+    if not wait_for_job(ctx.base_url, ctx.workspace, job_name):
+        raise typer.Exit(code=1)
+    manifest = ctx.agent_hardener.manifests.get(manifest_id, workspace=ctx.workspace)
+    typer.secho(f"Built and recorded the victim image: {manifest.get('victim_image')}", fg="green")
 
 
 def register(app: typer.Typer) -> None:
@@ -377,18 +390,28 @@ def register(app: typer.Typer) -> None:
         typer.echo(f"\nNext: nemo agent-hardener synth-benign --manifest-id {manifest_name}")
 
     @app.command()
+    @api_errors
     def stage(
         manifest_id: str = typer.Option(..., "--manifest-id", help="Saved manifest whose victim to stage."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
+        build: bool = typer.Option(
+            False,
+            "--build",
+            help="Stage and build the victim image in the cluster with the builder, then record it on the manifest.",
+        ),
     ) -> None:
         """Stage a saved manifest's victim build context, to build the victim image yourself.
 
         Needed where war-games run in a container (NeMo Helix on Kubernetes): those jobs cannot build the
         victim, so they run it from a registry image you build from this context. Needs `nemo agent-hardener
-        setup`, not Docker or OpenShell.
+        setup`, not Docker or OpenShell. With `--build`, a platform job stages it and the builder plugin builds
+        and records the image instead; that needs the builder enabled, not this host's setup.
         """
         # No preflight: staging needs the agent-hardener venv only, which the job itself checks.
         ctx = command_context(workspace, preflight=False)
+        if build:
+            _stage_and_build(ctx, manifest_id)
+            return
         result = ctx.agent_hardener.stage_victim_context(manifest_id=manifest_id, workspace=ctx.workspace)
         if result.get("status") != "completed":
             error = json_mapping(result.get("error"))

@@ -242,6 +242,11 @@ class VictimContextSpec(BaseModel):
     """Inputs for staging a saved manifest's victim build context (the shape ``run()``/``compile()`` see)."""
 
     manifest_id: str = Field(min_length=1, pattern=r"\S")
+    build: bool = Field(
+        default=False,
+        description="Also build the victim image from the staged context with the builder, and record its "
+        "digest-pinned reference as the manifest's `victim_image` once it is ready.",
+    )
 
 
 class WarGameJobRequest(BaseModel):
