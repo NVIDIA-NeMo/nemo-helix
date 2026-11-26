@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { formatStorageBackendLabel } from '@nemo/common/src/utils/storageBackend';
 import type { FilesetOutput, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Anchor } from '@nvidia/foundations-react-core';
 import { TagList } from '@studio/routes/FilesetDetailRoute/FilesetMetadataPanel/TagList';
@@ -8,7 +9,6 @@ import { getModelSource } from '@studio/routes/FilesetDetailRoute/utils';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
 import { getFormattedTrainingType } from '@studio/util/customizations';
 import { getHuggingFaceRepoUrl } from '@studio/util/huggingFaceUrl';
-import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ReactNode } from 'react';
 
 interface MetadataRow {

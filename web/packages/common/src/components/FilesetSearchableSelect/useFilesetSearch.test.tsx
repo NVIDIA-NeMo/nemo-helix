@@ -121,6 +121,57 @@ describe('useFilesetSearch', () => {
     );
   });
 
+  it('sends several purposes as one $in filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(
+      () => useFilesetSearch({ workspace: 'ws', purpose: ['generic', 'environment'] }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({
+        filter: withOperators({ purpose: { $in: ['environment', 'generic'] } }),
+      }),
+      expect.anything()
+    );
+  });
+
+  it('sends a one-item purpose list as a plain purpose filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(
+      () => useFilesetSearch({ workspace: 'ws', purpose: ['dataset'] }),
+      {
+        wrapper,
+      }
+    );
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({ filter: withOperators({ purpose: 'dataset' }) }),
+      expect.anything()
+    );
+  });
+
+  it('does not refetch when the purpose list is a new array with the same values', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result, rerender } = renderHook(
+      ({ purpose }: { purpose: ('environment' | 'generic')[] }) =>
+        useFilesetSearch({ workspace: 'ws', purpose }),
+      { wrapper, initialProps: { purpose: ['environment', 'generic'] } }
+    );
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+
+    rerender({ purpose: ['generic', 'environment'] });
+
+    expect(filesListFilesets).toHaveBeenCalledTimes(1);
+  });
+
   it('sends no filter when unfiltered, so every purpose is listed', async () => {
     vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
 

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cloud, Db } from '@nemo/icons/icons';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 
 export type StorageBackend = NonNullable<FilesetOutput['storage']['type']>;
@@ -23,3 +24,7 @@ const REPOSITORY_BACKENDS: ReadonlySet<StorageBackend> = new Set(['github', 'git
 /** Read-only storage pinned to a repository commit, which filesets can share rather than copy. */
 export const isRepositoryBackend = (type: StorageBackend | null | undefined): boolean =>
   type != null && REPOSITORY_BACKENDS.has(type);
+
+/** `Db` for platform-local storage, `Cloud` for every remote backend. */
+export const getStorageBackendIcon = (type: StorageBackend | null | undefined): typeof Db =>
+  type === 'local' ? Db : Cloud;

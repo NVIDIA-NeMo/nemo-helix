@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { isFilesetPurpose } from '@nemo/common/src/utils/filesetPurpose';
 import {
   filesListFilesets,
   getFilesListFilesetsQueryKey,
@@ -19,8 +20,8 @@ export const FILESETS_PAGE_SIZE = 20;
 
 export interface UseFilesetSearchOptions {
   workspace: string;
-  /** Restrict to one fileset `purpose`. Omit to list every purpose. */
-  purpose?: FilesetPurpose;
+  /** Restrict to these fileset purposes. Omit to list every purpose. */
+  purpose?: FilesetPurpose | readonly FilesetPurpose[];
   /** Restrict to filesets carrying this exact `description`, which is how Studio
    *  tags filesets it creates for a specific job. Omit to list every fileset. */
   description?: string;
@@ -58,16 +59,26 @@ export const useFilesetSearch = ({
 }: UseFilesetSearchOptions): UseFilesetSearchResult => {
   const [search, setSearch] = useState('');
 
+  // Sorted so callers passing a fresh array literal each render share one cache entry.
+  const purposeKey = typeof purpose === 'string' ? purpose : [...(purpose ?? [])].sort().join(',');
+
   const filter = useMemo<FilesListFilesetsParams['filter'] | undefined>(() => {
+    const purposes = purposeKey.split(',').filter(isFilesetPurpose);
+    const purposeClause =
+      purposes.length === 1
+        ? { purpose: purposes[0] }
+        : purposes.length > 1
+          ? { purpose: { $in: purposes } }
+          : {};
     const clauses = {
       ...(search ? { name: { $like: `%${search}%` } } : {}),
-      ...(purpose ? { purpose } : {}),
+      ...purposeClause,
       ...(description ? { description: { $eq: description } } : {}),
     };
     return Object.keys(clauses).length
       ? withOperators<FilesListFilesetsParams['filter']>(clauses)
       : undefined;
-  }, [search, purpose, description]);
+  }, [search, purposeKey, description]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error } =
     useInfiniteQuery({
@@ -75,7 +86,7 @@ export const useFilesetSearch = ({
         ...getFilesListFilesetsQueryKey(workspace),
         'infinite',
         'newest',
-        purpose ?? 'all',
+        purposeKey || 'all',
         description ?? 'any',
         search,
         pageSize,
