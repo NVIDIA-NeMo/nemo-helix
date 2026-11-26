@@ -1578,8 +1578,9 @@ async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
 async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
-    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]]
+    monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str | None
 ) -> None:
     """Without a platform job id, the run's sandboxes carry LOCAL_JOB_ID, as do those of any other local run."""
     import sandboxed_gym
@@ -1606,6 +1607,6 @@ async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
     monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
     monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
 
-    await SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id=None).run_tasks([])
+    await SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id=job_id).run_tasks([])
 
     assert reaps == []
