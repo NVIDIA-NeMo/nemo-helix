@@ -130,8 +130,8 @@ export const ModelDropdownFilters: FC<ModelFilterControls> = ({
         ]}
         options={[...prefixedCapabilities, ...prefixedInputs]}
         items={[
-          { kind: 'section', slotHeading: 'Can do', items: toItems(prefixedCapabilities) },
-          { kind: 'section', slotHeading: 'Accepts', items: toItems(prefixedInputs) },
+          { kind: 'section', slotHeading: 'Features', items: toItems(prefixedCapabilities) },
+          { kind: 'section', slotHeading: 'Input', items: toItems(prefixedInputs) },
         ]}
         onChange={(next) =>
           onChange({

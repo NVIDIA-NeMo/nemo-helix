@@ -161,8 +161,8 @@ describe('ModelDropdown', () => {
 
       fireEvent.click(screen.getByRole('combobox', { name: 'Filter by capability' }));
 
-      expect(await screen.findByText('Can do')).toBeInTheDocument();
-      expect(screen.getByText('Accepts')).toBeInTheDocument();
+      expect(await screen.findByText('Features')).toBeInTheDocument();
+      expect(screen.getByText('Input')).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Tool calling' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Image' })).toBeInTheDocument();
     });
