@@ -12,5 +12,4 @@ export const DEFAULT_FILESET_PICKER_NOUN: FilesetPickerNoun = { one: 'fileset', 
 
 export type FilesetPickerPurpose = FilesetPurpose | readonly FilesetPurpose[];
 
-/** Why a selected reference couldn't be shown: it was deleted, or looking it up failed. */
 export type FilesetSelectionError = 'missing' | 'unavailable';

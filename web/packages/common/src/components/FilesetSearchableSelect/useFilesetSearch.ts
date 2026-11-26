@@ -12,6 +12,5 @@ export type { UseFilesetSearchResult } from '@nemo/common/src/api/filesets/useFi
 
 export type UseFilesetSearchOptions = Omit<UseFilesetSearchCoreOptions, 'listFilesets'>;
 
-/** `useFilesetSearchCore` on Studio's SDK client. */
 export const useFilesetSearch = (options: UseFilesetSearchOptions): UseFilesetSearchResult =>
   useFilesetSearchCore({ ...options, listFilesets: filesListFilesets });

@@ -12,23 +12,18 @@ import type {
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 
-/** The v2 API caps `page_size` at 100; 20 keeps the first paint small and pages on scroll. */
 export const FILESETS_PAGE_SIZE = 20;
 
 export interface UseFilesetSearchCoreOptions {
   workspace: string;
   listFilesets: ListFilesets;
-  /** Restrict to these fileset purposes. Omit to list every purpose. */
   purpose?: FilesetPurpose | readonly FilesetPurpose[];
-  /** Restrict to filesets carrying this exact `description`, which is how Studio
-   *  tags filesets it creates for a specific job. Omit to list every fileset. */
   description?: string;
   enabled?: boolean;
   pageSize?: number;
 }
 
 export interface UseFilesetSearchResult {
-  /** Every fileset loaded so far, newest first. */
   filesets: FilesetOutput[];
   search: string;
   setSearch: (value: string) => void;
@@ -36,20 +31,10 @@ export interface UseFilesetSearchResult {
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
-  /** The fileset query failed; the caller should say so rather than show an empty list. */
   isError: boolean;
   error: Error | null;
 }
 
-/**
- * Search + paginate a workspace's filesets.
- *
- * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `useFilesetSearch`.
- *
- * Server-side on both counts: name search goes out as a `$like` filter and results are
- * paged, so this does not silently truncate the way a single capped page does. Sorted
- * newest-first, since a fileset the user just created is the one they are looking for.
- */
 export const useFilesetSearchCore = ({
   workspace,
   listFilesets,

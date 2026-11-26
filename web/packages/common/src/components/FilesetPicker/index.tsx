@@ -10,7 +10,6 @@ import type { FC } from 'react';
 
 export type FilesetPickerProps = Omit<FilesetPickerCoreProps, 'listFilesets' | 'retrieveFileset'>;
 
-/** `FilesetPickerCore` on Studio's SDK client. */
 export const FilesetPicker: FC<FilesetPickerProps> = (props) => (
   <FilesetPickerCore
     {...props}

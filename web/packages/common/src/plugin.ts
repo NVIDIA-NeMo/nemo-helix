@@ -54,8 +54,7 @@ export {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 export * as DataView from '@nemo/common/src/components/DataView/internal';
 
-// Takes its fetchers: pass `host.sdk.platform.filesListFilesets` and `filesRetrieveFileset`.
-// Controlled (value/onChange); bind it to a form with the plugin's own react-hook-form `Controller`.
+// Pass `host.sdk.platform.filesListFilesets` / `filesRetrieveFileset`; bind to forms with a `Controller`.
 export {
   FilesetPickerCore as FilesetPicker,
   type FilesetPickerCoreProps as FilesetPickerProps,

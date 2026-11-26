@@ -25,6 +25,5 @@ const REPOSITORY_BACKENDS: ReadonlySet<StorageBackend> = new Set(['github', 'git
 export const isRepositoryBackend = (type: StorageBackend | null | undefined): boolean =>
   type != null && REPOSITORY_BACKENDS.has(type);
 
-/** `Db` for platform-local storage, `Cloud` for every remote backend. */
 export const getStorageBackendIcon = (type: StorageBackend | null | undefined): typeof Db =>
   type === 'local' ? Db : Cloud;

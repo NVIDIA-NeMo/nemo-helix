@@ -7,26 +7,20 @@ import type {
   FilesListFilesetsParams,
 } from '@nemo/sdk/generated/platform/schema';
 
-/**
- * Lists one page of a workspace's filesets. Studio passes the SDK's `filesListFilesets`; a plugin
- * passes `host.sdk.platform.filesListFilesets` so the request runs on Studio's authenticated client.
- */
 export type ListFilesets = (
   workspace: string,
   params?: FilesListFilesetsParams,
   signal?: AbortSignal
 ) => Promise<FilesetOutputsPage>;
 
-/** Fetches one fileset. Studio passes `filesRetrieveFileset`; a plugin passes `host.sdk.platform.filesRetrieveFileset`. */
 export type RetrieveFileset = (
   workspace: string,
   name: string,
   signal?: AbortSignal
 ) => Promise<FilesetOutput>;
 
-// Same shapes as the SDK's `getFilesListFilesetsQueryKey` / `getFilesRetrieveFilesetQueryKey`, so
-// Studio's invalidations after creating or deleting a fileset also refresh these queries. Built
-// here rather than imported so the plugin bundle doesn't pull in the SDK's fetch client.
+// Mirror the SDK keys so Studio's invalidations reach these queries, without bundling the SDK
+// fetch client into the plugin surface.
 export const getFilesetsQueryKey = (workspace: string) =>
   [`/apis/files/v2/workspaces/${workspace}/filesets`] as const;
 

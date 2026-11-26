@@ -23,7 +23,6 @@ export interface FilesetPickerCoreProps {
   label: ReactNode;
   purpose?: FilesetPickerPurpose;
   noun?: FilesetPickerNoun;
-  /** Adds a pinned "New <noun>" row; the consumer renders its own create flow. */
   onRequestNew?: () => void;
   disabled?: boolean;
   required?: boolean;
@@ -38,9 +37,6 @@ const SELECTION_ERROR_MESSAGES: Record<FilesetSelectionError, (noun: string) => 
   unavailable: (noun) => `Couldn't load the selected ${noun}. Try again later.`,
 };
 
-/**
- * Takes its fetchers so plugins can run it on `host.sdk`; Studio code uses `FilesetPicker`.
- */
 export const FilesetPickerCore: FC<FilesetPickerCoreProps> = ({
   workspace,
   listFilesets,

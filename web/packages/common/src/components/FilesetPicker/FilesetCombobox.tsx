@@ -24,7 +24,6 @@ import { useQuery } from '@tanstack/react-query';
 import { type FC, useEffect, useMemo, useState } from 'react';
 import { useDebounce } from 'use-debounce';
 
-/** Never a fileset reference: those always contain a `/`. */
 const NEW_FILESET_VALUE = '__new_fileset__';
 const EMPTY_MESSAGE_VALUE = '__fileset_empty__';
 const SEARCH_DEBOUNCE_MS = 300;
@@ -41,7 +40,6 @@ export interface FilesetComboboxProps {
   disabled?: boolean;
   status?: 'error' | 'success';
   onBlur?: () => void;
-  /** Reports why `value` couldn't be resolved: deleted (`missing`) or the lookup failed. */
   onSelectionErrorChange?: (error: FilesetSelectionError | null) => void;
   id?: string;
   'aria-label'?: string;
@@ -73,8 +71,7 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   const loaded = value ? filesets.find((fileset) => getEntityReference(fileset) === value) : null;
   const pickedMatches = picked && getEntityReference(picked) === value ? picked : null;
   const { workspace: valueWorkspace, name: valueName } = getPartsFromReference(value ?? '');
-  // Remember the selection once the results include it, so it can still be shown while a
-  // search hides it.
+  // Keep showing the selection while a search hides it.
   if (loaded && loaded !== picked) setPicked(loaded);
 
   // Look the selection up when the results don't contain it. A search hiding an already-known
@@ -161,8 +158,6 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
         ]
       : [];
 
-    // While searching, a selection outside the results gets its own heading so it does not read
-    // as a match. Without a search it simply leads the list.
     const selection: ComboboxEntry[] = !selectionOutsideResults
       ? []
       : search

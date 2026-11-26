@@ -10040,12 +10040,7 @@ interface Props$4<DataType> {
 export declare const StudioDataView: <DataType>({ attributes, children, makeColumns, dataViewState, onRowClick, maxTwoLines, renderBulkActions, scrollContainerRef, searchField, toolbarSlotStart, toolbarSlotEnd }: Props$4<DataType>) => import("react/jsx-runtime").JSX.Element;
 //#endregion
 //#region src/api/filesets/filesetPages.d.ts
-/**
- * Lists one page of a workspace's filesets. Studio passes the SDK's `filesListFilesets`; a plugin
- * passes `host.sdk.platform.filesListFilesets` so the request runs on Studio's authenticated client.
- */
 type ListFilesets = (workspace: string, params?: FilesListFilesetsParams, signal?: AbortSignal) => Promise<FilesetOutputsPage>;
-/** Fetches one fileset. Studio passes `filesRetrieveFileset`; a plugin passes `host.sdk.platform.filesRetrieveFileset`. */
 type RetrieveFileset = (workspace: string, name: string, signal?: AbortSignal) => Promise<FilesetOutput>;
 //#endregion
 //#region src/components/FilesetPicker/types.d.ts
@@ -10066,7 +10061,6 @@ interface FilesetPickerCoreProps {
   label: ReactNode;
   purpose?: FilesetPickerPurpose;
   noun?: FilesetPickerNoun;
-  /** Adds a pinned "New <noun>" row; the consumer renders its own create flow. */
   onRequestNew?: () => void;
   disabled?: boolean;
   required?: boolean;
@@ -10075,25 +10069,18 @@ interface FilesetPickerCoreProps {
   errorText?: string;
   onBlur?: () => void;
 }
-/**
- * Takes its fetchers so plugins can run it on `host.sdk`; Studio code uses `FilesetPicker`.
- */
 declare const FilesetPickerCore: FC<FilesetPickerCoreProps>;
 //#endregion
 //#region src/api/filesets/useFilesetSearchCore.d.ts
 interface UseFilesetSearchCoreOptions {
   workspace: string;
   listFilesets: ListFilesets;
-  /** Restrict to these fileset purposes. Omit to list every purpose. */
   purpose?: FilesetPurpose | readonly FilesetPurpose[];
-  /** Restrict to filesets carrying this exact `description`, which is how Studio
-   *  tags filesets it creates for a specific job. Omit to list every fileset. */
   description?: string;
   enabled?: boolean;
   pageSize?: number;
 }
 interface UseFilesetSearchResult {
-  /** Every fileset loaded so far, newest first. */
   filesets: FilesetOutput[];
   search: string;
   setSearch: (value: string) => void;
@@ -10101,19 +10088,9 @@ interface UseFilesetSearchResult {
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
-  /** The fileset query failed; the caller should say so rather than show an empty list. */
   isError: boolean;
   error: Error | null;
 }
-/**
- * Search + paginate a workspace's filesets.
- *
- * Takes its fetcher so plugins can run it on `host.sdk`; Studio code uses `useFilesetSearch`.
- *
- * Server-side on both counts: name search goes out as a `$like` filter and results are
- * paged, so this does not silently truncate the way a single capped page does. Sorted
- * newest-first, since a fileset the user just created is the one they are looking for.
- */
 declare const useFilesetSearchCore: ({ workspace, listFilesets, purpose, description, enabled, pageSize }: UseFilesetSearchCoreOptions) => UseFilesetSearchResult;
 //#endregion
 //#region src/utils/logs.d.ts
