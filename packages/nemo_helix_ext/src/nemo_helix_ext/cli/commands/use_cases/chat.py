@@ -110,12 +110,12 @@ def _resolve_context_model(
             # is only reached when neither a fast nor a default model is configured.
             raise click.UsageError(
                 "No model specified and no fast or default model is configured. "
-                "Pass --model, run 'nemo setup', or set NEMO_FAST_MODEL "
+                "Pass --model, run 'nemo config set --default-model <workspace/name>', or set NEMO_FAST_MODEL "
                 "(or NEMO_DEFAULT_MODEL, which --fast also falls back to)."
             )
         raise click.UsageError(
             "No model specified and no default model is configured. "
-            "Pass --model, run 'nemo setup', or set NEMO_DEFAULT_MODEL."
+            "Pass --model, run 'nemo config set --default-model <workspace/name>', or set NEMO_DEFAULT_MODEL."
         )
 
     model_workspace, _, model_name = configured.rpartition("/")

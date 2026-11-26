@@ -26,9 +26,10 @@ You need:
   so the platform also needs a working `agents.execute` runtime.
 - Traces for the agent in Intake. Compass can only diagnose what it can
   observe. See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
-- A default and fast model pair. `nemo setup` stores one, or you can pass
-  `--default-model` and `--fast-model` (Model Entity refs such as
-  `default/<model>`) on each command. The fast model reviews traces in each
+- A default and fast model pair. `nemo setup` stores one, and
+  `nemo config set --default-model <workspace/name> --fast-model <workspace/name>`
+  changes it. You can also pass `--default-model` and `--fast-model` (Model
+  Entity refs such as `default/<model>`) on each command. The fast model reviews traces in each
   Compass Signal; the default model compiles the findings into Insights.
 
 <Warning>
@@ -340,8 +341,9 @@ Download the `analysis-report` result and check it:
 
 ### `create` Fails Without a Model Pair
 
-When `nemo setup` has not stored a model pair, pass `--default-model` and
-`--fast-model` explicitly.
+When `nemo setup` has not stored a model pair, store one with
+`nemo config set --default-model <workspace/name> --fast-model <workspace/name>`,
+or pass `--default-model` and `--fast-model` explicitly.
 
 ## Related Topics
 
