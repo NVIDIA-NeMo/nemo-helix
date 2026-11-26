@@ -366,7 +366,7 @@ def test_a_job_stored_with_its_tasks_in_a_file_replies_without_them(harbor_spec:
 
     reply = AgentEvalSpec.model_validate(stored).model_dump(mode="json")
 
-    assert reply["tasks"] is None
+    assert "tasks" not in reply  # omitted, not null
     assert reply["task_count"] == len(harbor_spec.tasks)
     assert FROZEN_TASKS_KEY not in reply  # the service's own pointer never reaches a reply
 

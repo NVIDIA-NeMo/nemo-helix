@@ -1190,6 +1190,8 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] | None = Field(
         default=None,
+        # Omitted, not null, for a job that keeps its tasks in a file: the schema allows only a list.
+        exclude_if=lambda value: value is None,
         description="Resolved task snapshots in execution order. Only archive materialization remains on the worker.",
     )
     task_count: int | None = Field(

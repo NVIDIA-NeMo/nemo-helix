@@ -558,7 +558,7 @@ def test_replies_show_the_task_count_in_place_of_the_tasks(ctx: ClientContext) -
     assert one.status_code == 200, one.text
     assert listed.status_code == 200, listed.text
     for shown in (created.json()["spec"], one.json()["spec"], *(job["spec"] for job in listed.json()["data"])):
-        assert shown.get("tasks") is None
+        assert "tasks" not in shown  # omitted, not null: the schema allows only a list
         assert shown["task_count"] == 2
         assert FROZEN_TASKS_KEY not in shown  # the service's own pointer never reaches a reply
     # The SDK parses replies with the same model.
