@@ -10,11 +10,13 @@ canonical-shape contract that ``train_sft`` and ``compile`` consume.
 
 from __future__ import annotations
 
+import jsonschema
 import pytest
 from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
+    ModuleSelector,
     OutputResponse,
     ScheduleSpec,
     TrainingSpec,
@@ -163,6 +165,20 @@ class TestSubShapesIndependently:
         else:
             with pytest.raises(ValidationError, match=error):
                 TrainingSpec.model_validate(training)
+
+    @pytest.mark.parametrize(
+        ("selector", "valid"),
+        [({"path": "lm_head"}, True), ({"glob": "*.lm_head"}, True), ({}, False), ({"path": "a", "glob": "b"}, False)],
+        ids=["path", "glob", "neither", "both"],
+    )
+    def test_module_selector_json_schema_matches_validator(self, selector: dict[str, str], valid: bool) -> None:
+        """The published schema rejects exactly the selectors the validator rejects."""
+        assert jsonschema.Draft202012Validator(ModuleSelector.model_json_schema()).is_valid(selector) is valid
+        if valid:
+            ModuleSelector.model_validate(selector)
+        else:
+            with pytest.raises(ValidationError, match="exactly one"):
+                ModuleSelector.model_validate(selector)
 
     def test_output_response_extras_forbidden(self) -> None:
         with pytest.raises(ValidationError):

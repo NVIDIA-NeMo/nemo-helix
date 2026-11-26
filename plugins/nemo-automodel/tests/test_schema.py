@@ -4,6 +4,7 @@
 import json
 from typing import Any
 
+import jsonschema
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
 from nemo_automodel_plugin.schema import (
@@ -13,6 +14,7 @@ from nemo_automodel_plugin.schema import (
     BackendSpec,
     DeploymentParams,
     ExportSpec,
+    ModuleSelector,
 )
 from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from pydantic import ValidationError
@@ -554,6 +556,21 @@ def test_module_selectors(training: dict[str, object], error: str | None) -> Non
     else:
         with pytest.raises(ValidationError, match=error):
             AutomodelJobInput.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("selector", "valid"),
+    [({"path": "lm_head"}, True), ({"glob": "*.lm_head"}, True), ({}, False), ({"path": "a", "glob": "b"}, False)],
+    ids=["path", "glob", "neither", "both"],
+)
+def test_module_selector_json_schema_matches_validator(selector: dict[str, str], valid: bool) -> None:
+    """The published schema rejects exactly the selectors the validator rejects."""
+    assert jsonschema.Draft202012Validator(ModuleSelector.model_json_schema()).is_valid(selector) is valid
+    if valid:
+        ModuleSelector.model_validate(selector)
+    else:
+        with pytest.raises(ValidationError, match="exactly one"):
+            ModuleSelector.model_validate(selector)
 
 
 @pytest.mark.parametrize(

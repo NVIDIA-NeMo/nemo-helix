@@ -96,6 +96,9 @@ class LoRAParams(AutomodelSchema):
 class ModuleSelector(AutomodelSchema):
     """One module, and everything under it, picked by exact path or by glob."""
 
+    # Mirrors ``_exactly_one`` into the OpenAPI schema.
+    model_config = ConfigDict(json_schema_extra={"oneOf": [{"required": ["path"]}, {"required": ["glob"]}]})
+
     path: str | None = Field(
         default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
     )

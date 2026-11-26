@@ -3072,6 +3072,11 @@ components:
         setting, and only the fields that are set reach the model. Support differs
         per model.'
     AutomodelModuleSelector:
+      oneOf:
+      - required:
+        - path
+      - required:
+        - glob
       properties:
         path:
           title: Path
@@ -6288,6 +6293,11 @@ components:
 
         to :func:`train_sft`.'
     UnslothModuleSelector:
+      oneOf:
+      - required:
+        - path
+      - required:
+        - glob
       properties:
         path:
           title: Path

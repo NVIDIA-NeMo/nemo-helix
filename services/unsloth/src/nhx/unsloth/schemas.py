@@ -42,7 +42,7 @@ from nhx.customization_common.schema import (
     match_learning_rate_default,
 )
 from nhx.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 
 class UnslothSchema(NamespacedModel):
@@ -156,6 +156,9 @@ class LoRAParams(UnslothSchema):
 
 class ModuleSelector(UnslothSchema):
     """One module, and everything under it, picked by exact path or by glob."""
+
+    # Mirrors ``_exactly_one`` into the OpenAPI schema.
+    model_config = ConfigDict(json_schema_extra={"oneOf": [{"required": ["path"]}, {"required": ["glob"]}]})
 
     path: str | None = Field(default=None, min_length=1, description="Exact module path, e.g. 'model.embed_tokens'.")
     glob: str | None = Field(
