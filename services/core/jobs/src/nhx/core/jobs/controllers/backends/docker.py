@@ -505,7 +505,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             except DockerException:
                 logger.exception("Failed to clean up task storage volume", extra={"volume_name": volume_name})
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+    def reclaim_persistent_storage(self, workspace: str, job: str, *, job_id: str) -> bool:
         if not self.cleanup_job_persistent_storage(workspace, job):
             raise JobStorageError(f"Could not reclaim persistent storage of job {workspace}/{job}")
         return True

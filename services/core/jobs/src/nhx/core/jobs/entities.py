@@ -37,6 +37,17 @@ def is_final_platform_step(platform_spec: HelixJobSpec, step_spec_name: str | No
     return platform_spec.steps[-1].name == step_spec_name
 
 
+class JobStorageTarget(BaseModel):
+    """A backend that holds a job's persistent storage."""
+
+    provider: str = Field(..., description="Execution provider of a step that mounts job storage")
+    profile: str = Field(..., description="Execution profile of a step that mounts job storage")
+
+
+class _StorageDeletionProgress(BaseModel):
+    completed: list[JobStorageTarget] = Field(default_factory=list)
+
+
 class HelixJob(EntityBase):
     """Platform job storage entity.
 
@@ -71,6 +82,19 @@ class HelixJob(EntityBase):
 
     # Auth context from the request that created this job. Used to propagate auth for task execution.
     _auth_context: Optional[AuthContext] = PrivateAttr(default=None)
+
+    _storage_deletion: _StorageDeletionProgress = PrivateAttr(default_factory=_StorageDeletionProgress)
+
+    def storage_deletion_completed(self, target: JobStorageTarget) -> bool:
+        return target in self._storage_deletion.completed
+
+    def with_completed_storage_deletion(self, target: JobStorageTarget) -> Self:
+        self._storage_deletion.completed.append(target)
+        return self
+
+    def with_group_parent(self, group_id: str) -> Self:
+        self._parent = group_id
+        return self
 
     @computed_field
     @property
@@ -209,13 +233,6 @@ class HelixJobResult(EntityBase):
             artifact_url=self.artifact_url,
             artifact_storage_type=self.artifact_storage_type,
         )
-
-
-class JobStorageTarget(BaseModel):
-    """A backend that holds a job's persistent storage."""
-
-    provider: str = Field(..., description="Execution provider of a step that mounts job storage")
-    profile: str = Field(..., description="Execution profile of a step that mounts job storage")
 
 
 class HelixJobStorageReclaim(EntityBase):

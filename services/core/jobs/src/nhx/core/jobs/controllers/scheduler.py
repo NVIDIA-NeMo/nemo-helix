@@ -31,8 +31,14 @@ from nhx.core.jobs.controllers.backends.exceptions import (
     SchedulingDeferred,
 )
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
-from nhx.core.jobs.controllers.concurrency_admission import IN_FLIGHT_STATUSES, principal_of, round_robin_by_user
+from nhx.core.jobs.controllers.concurrency_admission import (
+    IN_FLIGHT_STATUSES,
+    ConcurrencyAdmission,
+    principal_of,
+    round_robin_by_user,
+)
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
+from nhx.core.jobs.controllers.job_group_admission import JobGroupAdmission, JobGroupAdmissionDeferred
 from opentelemetry import metrics, trace
 from opentelemetry.metrics import CallbackOptions, Observation
 
@@ -63,9 +69,11 @@ class JobScheduler(HeartbeatMixin, Controller):
         nemo_client: NemoClient,
         stop_signal: threading.Event | None = None,
         admission: AdmissionController | None = None,
+        group_admission: JobGroupAdmission | None = None,
     ) -> None:
         self._backend_registry = backend_registry
         self._admission = admission or AlwaysAdmit()
+        self._group_admission = group_admission
         self._nemo_client = nemo_client
         # Typed Jobs client sharing the platform client's transport; every call passes
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
@@ -195,7 +203,12 @@ class JobScheduler(HeartbeatMixin, Controller):
                         raise AdmissionDeferred("Admission check failed; will retry")
                     if not decision.admitted:
                         raise AdmissionDeferred(decision.reason or "Waiting for capacity")
-                    update = self.schedule_step(step)
+                    try:
+                        update = self.schedule_step(step)
+                    except JobGroupAdmissionDeferred:
+                        if isinstance(self._admission, ConcurrencyAdmission):
+                            self._admission.release(step)
+                        raise
                     logger.debug(
                         "Scheduled job step",
                         extra={
@@ -415,6 +428,8 @@ class JobScheduler(HeartbeatMixin, Controller):
             raise SchedulingDeferred("Job creation or deletion is pending")
         provider, profile = extract_provider_profile(step)
         backend = self._backend_registry.get_backend(profile=profile, provider=provider)
+        if self._group_admission is not None:
+            self._group_admission.reserve(step, job_id=job.id, current_attempt_id=job.attempt_id)
         self._step_scheduled_total.add(1, attributes={"provider": provider, "profile": profile})
         with start_span_with_ctx(
             tracer,

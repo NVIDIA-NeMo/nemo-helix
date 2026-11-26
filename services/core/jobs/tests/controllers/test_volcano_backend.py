@@ -166,6 +166,8 @@ def volcano_job(
         )
         volcano_job._core_v1 = kubernetes_client_mock["core_v1"]
         volcano_job._custom_v1 = kubernetes_client_mock["custom_v1"]
+        volcano_job._batch_v1 = MagicMock(spec=client.BatchV1Api)
+        volcano_job._batch_v1.list_namespaced_job.return_value = client.V1JobList(items=[])
         yield volcano_job
 
 
@@ -1628,7 +1630,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
     # Mock the cleanup_job_persistent_storage function to track if it's called
     from nhx.core.jobs.controllers.backends.kubernetes import common as k8s_common
 
-    with patch.object(k8s_common, "cleanup_job_persistent_storage") as mock_cleanup_storage:
+    with patch.object(k8s_common, "cleanup_workload_persistent_storage") as mock_cleanup_storage:
         # Run cleanup
         volcano_job.cleanup_steps()
 
@@ -1735,7 +1737,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
     from nhx.core.jobs.controllers.backends.kubernetes import volcano_job as volcano_job_module
 
-    with patch.object(volcano_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
+    with patch.object(volcano_job_module, "cleanup_workload_persistent_storage") as mock_cleanup_storage:
         volcano_job.cleanup_steps()
 
         # Backend job and configmap are deleted

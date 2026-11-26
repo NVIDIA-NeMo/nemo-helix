@@ -1027,9 +1027,9 @@ def test_reclaim_removes_job_storage_and_tolerates_a_missing_directory(
     job_dir = backend._root_dir / "default" / "train-llama"
     (job_dir / "checkpoints").mkdir(parents=True)
 
-    assert backend.reclaim_persistent_storage("default", "train-llama") is True
+    assert backend.reclaim_persistent_storage("default", "train-llama", job_id="platform-job-owner") is True
     assert not job_dir.exists()
-    assert backend.reclaim_persistent_storage("default", "train-llama") is True
+    assert backend.reclaim_persistent_storage("default", "train-llama", job_id="platform-job-owner") is True
 
 
 def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_path, mock_platform_config):
@@ -1039,7 +1039,7 @@ def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_pat
         patch("nhx.core.jobs.controllers.backends.subprocess.rmtree", side_effect=PermissionError),
         pytest.raises(PermissionError),
     ):
-        backend.reclaim_persistent_storage("default", "train-llama")
+        backend.reclaim_persistent_storage("default", "train-llama", job_id="platform-job-owner")
 
 
 def test_cleanup_reads_step_from_registered_attempt(

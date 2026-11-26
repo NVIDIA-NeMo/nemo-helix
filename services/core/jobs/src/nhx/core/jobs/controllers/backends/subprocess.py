@@ -439,7 +439,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         else:
             logger.warning("Subprocess task access token was not refreshed: no token could be minted")
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+    def reclaim_persistent_storage(self, workspace: str, job: str, *, job_id: str) -> bool:
         try:
             rmtree(self._root_dir / workspace / job)
         except FileNotFoundError:

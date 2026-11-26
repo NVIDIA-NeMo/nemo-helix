@@ -68,6 +68,7 @@ from nhx.core.jobs.controllers.backends.kubernetes import (
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     JOB_DSHM_VOLUME_NAME,
     JOB_STORAGE_VOLUME_NAME,
+    OWNER_ID_LABEL,
     UNSTARTED_PAUSE_MESSAGE,
     KubernetesConfigMapVolume,
     KubernetesEmptyDirVolume,
@@ -87,6 +88,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_tolerations,
     classify_task_containers,
     cleanup_job_persistent_storage,
+    cleanup_workload_persistent_storage,
     common_labels_for_step,
     create_configmap,
     create_step_network_policy,
@@ -615,7 +617,8 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
         batch_v1=batch_v1,
         pvc_name="pvc",
         workspace="ws",
-        job_id="jid",
+        storage_key="jid",
+        job_id="platform-job-owner",
         step_name="step",
         permissions_image="perm:img",
         execution_backend="kubernetes_job",
@@ -627,6 +630,10 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     batch_v1.create_namespaced_job.assert_called_once()
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert body.spec.ttl_seconds_after_finished == 300
+    for metadata in (body.metadata, body.spec.template.metadata):
+        assert "nhx.nvidia.com/storage-key" not in metadata.labels
+        assert metadata.labels[OWNER_ID_LABEL] == "platform-job-owner"
+        assert JOB_ID_LABEL not in metadata.labels
     resources = body.spec.template.spec.containers[0].resources
     assert resources.requests == {"cpu": "50m", "memory": "64Mi"}
     assert resources.limits == {"cpu": "500m", "memory": "256Mi"}
@@ -638,14 +645,16 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     assert body.metadata.name == _storage_cleanup_job_name("pvc", "ws", "jid")
 
 
-def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured():
+@pytest.mark.parametrize("workload_labels", [{OWNER_ID_LABEL: "platform-job-owner"}, {JOB_ID_LABEL: "jid"}])
+def test_cleanup_workload_uses_the_owner_id_when_available(workload_labels):
     batch_v1 = MagicMock()
-    cleanup_job_persistent_storage(
+    cleanup_workload_persistent_storage(
         namespace="ns",
         batch_v1=batch_v1,
         pvc_name="pvc",
         workspace="ws",
-        job_id="jid",
+        storage_key="jid",
+        workload_labels=workload_labels,
         step_name="step",
         permissions_image="perm:img",
         execution_backend="kubernetes_job",
@@ -656,14 +665,18 @@ def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert body.spec.template.spec.security_context is None
 
+    assert body.metadata.labels.get(OWNER_ID_LABEL) == workload_labels.get(OWNER_ID_LABEL)
+    assert JOB_ID_LABEL not in body.metadata.labels
 
-def _reclaim_storage(batch_v1: MagicMock) -> bool:
+
+def _reclaim_storage(batch_v1: MagicMock, *, job_id: str = "platform-job-owner") -> bool:
     return reclaim_job_persistent_storage(
         namespace="ns",
         batch_v1=batch_v1,
         pvc_name="pvc",
         workspace="ws",
-        job_id="jid",
+        storage_key="jid",
+        job_id=job_id,
         permissions_image="perm:img",
         execution_backend="kubernetes_job",
         execution_profile="default",
@@ -694,7 +707,53 @@ def _cleanup_job(name: str, finished: str | None = None, *, pvc_name: str = "pvc
 
 
 def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
-    batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
+    current = {
+        job.metadata.name: job
+        for job in jobs
+        if (job.metadata.labels or {}).get(JOB_TYPE_LABEL) == JOB_TYPE_STORAGE_CLEANUP
+    }
+    batch_v1.list_namespaced_job.return_value = SimpleNamespace(
+        items=[job for job in jobs if job.metadata.name not in current]
+    )
+
+    def read(*, name, namespace):
+        if name not in current:
+            raise ApiException(status=404)
+        return current[name]
+
+    batch_v1.read_namespaced_job.side_effect = read
+
+
+def test_retention_labels_cleanup_with_the_immutable_job_id():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    owner = "platform-job-retained"
+
+    assert not _reclaim_storage(batch_v1, job_id=owner)
+    cleanup_job = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert cleanup_job.metadata.labels[OWNER_ID_LABEL] == owner
+    assert "nhx.nvidia.com/storage-key" not in cleanup_job.metadata.labels
+    assert JOB_ID_LABEL not in cleanup_job.metadata.labels
+
+    cleanup_job.status = client.V1JobStatus(conditions=[client.V1JobCondition(type="Complete", status="True")])
+    _cleanup_jobs(batch_v1, cleanup_job)
+
+    assert _reclaim_storage(batch_v1, job_id=owner)
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == cleanup_job.metadata.name
+
+
+def test_storage_deletion_waits_for_legacy_cleanup_and_uses_the_exact_owner():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("legacy-running"))
+    assert not _reclaim_storage(batch_v1, job_id="platform-job-new")
+    batch_v1.create_namespaced_job.assert_not_called()
+
+    previous = _cleanup_job("previous-owner", "Complete")
+    previous.metadata.labels = {OWNER_ID_LABEL: "platform-job-old"}
+    _cleanup_jobs(batch_v1, previous)
+    assert not _reclaim_storage(batch_v1, job_id="platform-job-new")
+    cleanup_job = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert cleanup_job.metadata.labels[OWNER_ID_LABEL] == "platform-job-new"
 
 
 def test_cleanup_does_not_treat_another_pvcs_job_as_this_directory():
@@ -706,7 +765,8 @@ def test_cleanup_does_not_treat_another_pvcs_job_as_this_directory():
         batch_v1=batch_v1,
         pvc_name="pvc",
         workspace="ws",
-        job_id="jid",
+        storage_key="jid",
+        job_id="platform-job-owner",
         step_name="step",
         permissions_image="perm:img",
         execution_backend="kubernetes_job",
@@ -728,7 +788,8 @@ def test_cleanup_keeps_the_job_another_caller_already_created():
         batch_v1=batch_v1,
         pvc_name="pvc",
         workspace="ws",
-        job_id="jid",
+        storage_key="jid",
+        job_id="platform-job-owner",
         step_name="other-step",
         permissions_image="perm:img",
         execution_backend="kubernetes_job",
@@ -776,7 +837,13 @@ def test_reclaim_finds_the_cleanup_job_another_profile_on_the_same_pvc_created()
             raise ApiException(status=409)
         workloads[body.metadata.name] = body
 
+    def read(*, name, namespace):
+        if name not in workloads:
+            raise ApiException(status=404)
+        return workloads[name]
+
     batch_v1.list_namespaced_job.side_effect = listed
+    batch_v1.read_namespaced_job.side_effect = read
     batch_v1.create_namespaced_job.side_effect = created
     batch_v1.delete_namespaced_job.side_effect = lambda *, name, **kwargs: workloads.pop(name)
 
@@ -786,7 +853,8 @@ def test_reclaim_finds_the_cleanup_job_another_profile_on_the_same_pvc_created()
             batch_v1=batch_v1,
             pvc_name="pvc",
             workspace="ws",
-            job_id="jid",
+            storage_key="jid",
+            job_id="platform-job-owner",
             permissions_image="perm:img",
             execution_backend="kubernetes_job",
             execution_profile=profile,
@@ -808,17 +876,18 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
 
     assert _reclaim_storage(batch_v1) is False
 
-    selector = batch_v1.list_namespaced_job.call_args.kwargs["label_selector"].split(",")
-    for label in (
-        f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
-        f"{JOB_WORKSPACE_ID_LABEL}=ws",
-        f"{JOB_ID_LABEL}=jid",
-    ):
-        assert label in selector
+    batch_v1.list_namespaced_job.assert_called_once()
+    selector = dict(
+        item.split("=", 1) for item in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"].split(",")
+    )
+    assert selector[JOB_ID_LABEL] == "jid"
+    assert selector[JOB_TYPE_LABEL] == JOB_TYPE_STORAGE_CLEANUP
+    assert selector[JOB_WORKSPACE_ID_LABEL] == "ws"
     for key in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
-        assert f"{key}=" not in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"]
+        assert key not in selector
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
-    assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    assert body.metadata.labels[OWNER_ID_LABEL] == "platform-job-owner"
+    assert JOB_ID_LABEL not in body.metadata.labels
     assert body.metadata.labels[JOB_EXECUTION_BACKEND_LABEL] == "kubernetes_job"
     assert body.metadata.labels[JOB_EXECUTION_PROFILE_LABEL] == "default"
     # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
@@ -3597,7 +3666,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     # Mock the cleanup_job_persistent_storage function to track if it's called
     from nhx.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
 
-    with patch.object(k8s_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
+    with patch.object(k8s_job_module, "cleanup_workload_persistent_storage") as mock_cleanup_storage:
         # Run cleanup
         kubernetes_job.cleanup_steps()
 
@@ -3703,7 +3772,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
     from nhx.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
 
-    with patch.object(k8s_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
+    with patch.object(k8s_job_module, "cleanup_workload_persistent_storage") as mock_cleanup_storage:
         kubernetes_job.cleanup_steps()
 
         # Backend job and configmap are deleted

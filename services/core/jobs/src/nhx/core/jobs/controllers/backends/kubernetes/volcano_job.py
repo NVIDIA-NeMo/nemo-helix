@@ -46,13 +46,14 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    OWNER_ID_LABEL,
     UNSTARTED_PAUSE_MESSAGE,
     BaseKubernetesExecutionProfileConfig,
     adopt_step_network_policy,
     build_event_field_selector,
     build_metadata,
     classify_task_containers,
-    cleanup_job_persistent_storage,
+    cleanup_workload_persistent_storage,
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
@@ -304,6 +305,9 @@ class VolcanoJobBackend(
             metadata=self._execution_profile_config.job_metadata,
         )
         job_metadata.name = job_name
+        job_metadata.labels.pop(OWNER_ID_LABEL, None)
+        if step.job_id is not None:
+            job_metadata.labels[OWNER_ID_LABEL] = step.job_id
 
         # Volcano job policies. Unless the profile sets max_retry, a failed or deleted pod ends the
         # job, as a Kubernetes Job with no retries does: TerminateJob stops the other pods and keeps
@@ -587,7 +591,7 @@ class VolcanoJobBackend(
             status_details={"message": "Job is being paused", **digest_details},
         )
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+    def reclaim_persistent_storage(self, workspace: str, job: str, *, job_id: str) -> bool:
         storage = self._execution_profile_config.storage
         if storage is None:
             return True
@@ -596,7 +600,8 @@ class VolcanoJobBackend(
             batch_v1=self._batch_v1,
             pvc_name=storage.pvc_name,
             workspace=workspace,
-            job_id=job,
+            storage_key=job,
+            job_id=job_id,
             permissions_image=storage.volume_permissions_image,
             execution_backend=self.BACKEND_NAME,
             execution_profile=self._profile_name,
@@ -670,12 +675,13 @@ class VolcanoJobBackend(
                             "Cleaning up persistent storage for successful job",
                             extra={"workspace_id": workspace_id, "job_id": job_id},
                         )
-                        cleanup_job_persistent_storage(
+                        cleanup_workload_persistent_storage(
                             namespace=self.namespace,
                             batch_v1=self._batch_v1,
                             pvc_name=self._execution_profile_config.storage.pvc_name,
                             workspace=workspace_id,
-                            job_id=job_id,
+                            storage_key=job_id,
+                            workload_labels=job["metadata"]["labels"],
                             step_name=step_name,
                             permissions_image=self._execution_profile_config.storage.volume_permissions_image,
                             execution_backend=self.BACKEND_NAME,
@@ -722,12 +728,13 @@ class VolcanoJobBackend(
                                     "Cleaning up persistent storage for successful volcano job",
                                     extra={"workspace_id": workspace_id, "job_id": job_id},
                                 )
-                                cleanup_job_persistent_storage(
+                                cleanup_workload_persistent_storage(
                                     namespace=self.namespace,
                                     batch_v1=self._batch_v1,
                                     pvc_name=self._execution_profile_config.storage.pvc_name,
                                     workspace=workspace_id,
-                                    job_id=job_id,
+                                    storage_key=job_id,
+                                    workload_labels=job["metadata"]["labels"],
                                     step_name=step_name,
                                     permissions_image=self._execution_profile_config.storage.volume_permissions_image,
                                     execution_backend=self.BACKEND_NAME,

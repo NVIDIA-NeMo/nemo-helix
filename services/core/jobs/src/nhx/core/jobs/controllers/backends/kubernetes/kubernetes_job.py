@@ -44,6 +44,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    OWNER_ID_LABEL,
     UNSTARTED_PAUSE_MESSAGE,
     BaseKubernetesExecutionProfileConfig,
     adopt_step_network_policy,
@@ -51,7 +52,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     build_event_field_selector,
     build_metadata,
     classify_task_containers,
-    cleanup_job_persistent_storage,
+    cleanup_workload_persistent_storage,
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
@@ -300,6 +301,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             metadata=self._execution_profile_config.job_metadata,
         )
         job_metadata.name = job_name
+        job_metadata.labels.pop(OWNER_ID_LABEL, None)
+        if step.job_id is not None:
+            job_metadata.labels[OWNER_ID_LABEL] = step.job_id
 
         # Create job object
         k8s_job = client.V1Job(
@@ -693,7 +697,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return
         delete_step_network_policy(self._networking_v1, self.namespace, name)
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+    def reclaim_persistent_storage(self, workspace: str, job: str, *, job_id: str) -> bool:
         storage = self._execution_profile_config.storage
         if storage is None:
             return True
@@ -702,7 +706,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             batch_v1=self._batch_v1,
             pvc_name=storage.pvc_name,
             workspace=workspace,
-            job_id=job,
+            storage_key=job,
+            job_id=job_id,
             permissions_image=storage.volume_permissions_image,
             execution_backend=self.BACKEND_NAME,
             execution_profile=self._profile_name,
@@ -783,12 +788,13 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                                 "job_id": job_id,
                             },
                         )
-                        cleanup_job_persistent_storage(
+                        cleanup_workload_persistent_storage(
                             namespace=self.namespace,
                             batch_v1=self._batch_v1,
                             pvc_name=self._execution_profile_config.storage.pvc_name,
                             workspace=workspace_id,
-                            job_id=job_id,
+                            storage_key=job_id,
+                            workload_labels=job.metadata.labels,
                             step_name=step_name,
                             permissions_image=self._execution_profile_config.storage.volume_permissions_image,
                             execution_backend=self.BACKEND_NAME,
