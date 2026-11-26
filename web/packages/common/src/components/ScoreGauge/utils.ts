@@ -14,7 +14,7 @@ import {
 } from '@nemo/common/src/components/ScoreGauge/consts';
 
 export function scoreTier(score: number): ScoreTier {
-  if (!Number.isFinite(score) || score <= 0) return 'Unavailable';
+  if (!Number.isFinite(score) || score < 0) return 'Unavailable';
   if (score >= 8) return 'Excellent';
   if (score >= 6) return 'Very Good';
   if (score >= 4) return 'Good';

@@ -23,8 +23,12 @@ describe('gradeForScore', () => {
     expect(gradeForScore(score)).toBe(grade);
   });
 
-  it.each([undefined, null, 0, Number.NaN])('treats %s as Unavailable', (score) => {
+  it.each([undefined, null, -1, Number.NaN])('treats %s as Unavailable', (score) => {
     expect(gradeForScore(score)).toBe('Unavailable');
+  });
+
+  it('grades 0 as Poor', () => {
+    expect(gradeForScore(0)).toBe('Poor');
   });
 });
 

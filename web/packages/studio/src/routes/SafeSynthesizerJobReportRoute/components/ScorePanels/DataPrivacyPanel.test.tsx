@@ -197,9 +197,8 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      expect(screen.getByText('Unavailable')).toBeInTheDocument();
+      expect(screen.getByText('Poor')).toBeInTheDocument();
 
-      // Test undefined report summary
       rerender(
         <DataPrivacyPanel reportSummary={undefined} dpEnabled title="Data Privacy" icon={<svg />} />
       );

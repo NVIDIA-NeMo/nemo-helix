@@ -24,8 +24,11 @@ describe('scoreTier', () => {
     expect(scoreTier(score)).toBe(tier);
   });
 
-  it('treats 0, negative, and non-finite as Unavailable', () => {
-    expect(scoreTier(0)).toBe('Unavailable');
+  it('grades 0 as Poor', () => {
+    expect(scoreTier(0)).toBe('Poor');
+  });
+
+  it('treats negative and non-finite as Unavailable', () => {
     expect(scoreTier(-1)).toBe('Unavailable');
     expect(scoreTier(Number.NaN)).toBe('Unavailable');
   });
@@ -38,7 +41,7 @@ describe('scoreColor', () => {
   });
 
   it('returns a neutral color when unavailable', () => {
-    expect(scoreColor(0)).toBe('#888888');
+    expect(scoreColor(Number.NaN)).toBe('#888888');
   });
 });
 
@@ -56,8 +59,14 @@ describe('ScoreGauge', () => {
     expect(screen.queryByTestId('gauge-marker')).not.toBeInTheDocument();
   });
 
-  it('renders an unavailable state without a marker or progress', () => {
+  it('renders a 0 score as 0.0 rather than unavailable', () => {
     render(<ScoreGauge score={0} size="lg" />);
+    expect(screen.getByTestId('gauge-display')).toHaveTextContent('0.0');
+    expect(screen.getByRole('img', { name: 'Score: 0.0 out of 10' })).toBeInTheDocument();
+  });
+
+  it('renders an unavailable state without a marker or progress', () => {
+    render(<ScoreGauge size="lg" />);
     expect(screen.getByTestId('gauge-display')).toHaveTextContent('—');
     expect(screen.queryByTestId('gauge-gradient-segment')).not.toBeInTheDocument();
     expect(screen.queryByTestId('gauge-marker')).not.toBeInTheDocument();
