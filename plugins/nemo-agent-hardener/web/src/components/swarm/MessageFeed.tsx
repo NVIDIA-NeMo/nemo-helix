@@ -94,7 +94,10 @@ const formatEvent = (evt: SwarmEvent): string => {
       return `${agent}: ${str(p.message) ?? ''}`;
     case 'agent_completed': {
       const seconds = num(p.duration_seconds);
-      return `${p.ok === false ? '✗' : '✓'} ${agent}${seconds !== undefined ? ` (${seconds.toFixed(1)}s)` : ''}`;
+      const elapsed = seconds !== undefined ? ` (${seconds.toFixed(1)}s)` : '';
+      const notApplicable = str(p.not_applicable);
+      if (notApplicable) return `○ ${agent} did not apply: ${notApplicable}${elapsed}`;
+      return `${p.ok === false ? '✗' : '✓'} ${agent}${elapsed}`;
     }
     case 'agent_failed':
       return `✗ ${agent} failed: ${str(p.error) ?? ''}`;
