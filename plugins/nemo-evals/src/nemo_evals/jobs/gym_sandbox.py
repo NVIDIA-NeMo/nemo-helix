@@ -37,6 +37,7 @@ from nemo_evals.jobs.gym_environment_package import (
 )
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
 from nemo_evals.sandbox_quantity import host_disk_request_gib, quantity_bytes
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
@@ -466,6 +467,7 @@ def serve_config(
     plan: SandboxPlan,
     *,
     job_id: str,
+    sandbox_id: str,
     workspace: str = "default",
     persistent_storage_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -474,6 +476,10 @@ def serve_config(
     Job-derived and deployment-derived settings meet here and nowhere else: the target supplies the
     environment selection and its own environment variables, the resolved plan supplies the cluster
     facts, and the broker token and rollout URL are minted by the session itself.
+
+    ``job_id`` is the job's name, which names its storage. ``sandbox_id`` is what its sandboxes are
+    labelled, owned and swept by, so it must be unique across workspaces: the job's entity UUID on the
+    platform. A name would let a job in one workspace sweep another workspace's job of the same name.
     """
     environment_pvc_claim = plan.job_storage_pvc_claim
     host_provider_options = dict(plan.host_provider_options)
@@ -530,7 +536,7 @@ def serve_config(
     env[ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] = "1"
 
     return {
-        "job_id": job_id,
+        "job_id": sandbox_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
         "environment_offline": offline,
@@ -555,7 +561,7 @@ def serve_config(
             "container_storage_discard": plan.container_storage_discard,
         },
         "episode_broker": {
-            "job_id": job_id,
+            "job_id": sandbox_id,
             "backend": plan.episode_backend,
             "allow_insecure_memory_backend": plan.allow_insecure_memory_backend,
             "approved_images": plan.approved_images,
@@ -587,6 +593,7 @@ class SessionBackedGymRunner:
         target: GymRunnerTarget,
         plan: SandboxPlan,
         job_id: str | None,
+        job_uid: str | None = None,
         workspace: str = "default",
         persistent_storage_path: Path | None = None,
     ) -> None:
@@ -594,10 +601,20 @@ class SessionBackedGymRunner:
 
         ``workspace`` and ``persistent_storage_path`` exist so a FileSet-backed host mounts the
         tree the stage step wrote, rather than a shared deployment-wide environment cache.
+
+        A platform job's sandboxes are labelled with ``job_uid``, its entity UUID, not ``job_id``, its
+        name: names are unique only within a workspace, and the job's sandbox sweeps match the label.
         """
+        if job_id and not job_uid:
+            raise SandboxUnavailableError(
+                f"{NEMO_JOB_UID_ENVVAR} is not set for job {job_id!r}. Sandboxed Gym labels a job's sandboxes "
+                "with the job's unique id; the job name is not unique across workspaces. Upgrade the jobs "
+                "controller, which sets it."
+            )
         self._target = target
         self._plan = plan
         self._job_id = job_id or self.LOCAL_JOB_ID
+        self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
         self._delegate: Any | None = None
@@ -654,6 +671,7 @@ class SessionBackedGymRunner:
             self._target,
             self._plan,
             job_id=self._job_id,
+            sandbox_id=self._sandbox_id,
             workspace=self._workspace,
             persistent_storage_path=self._persistent_storage_path,
         )

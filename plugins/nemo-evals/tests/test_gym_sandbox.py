@@ -195,7 +195,7 @@ def test_environment_fileset_rejects_file_fragments() -> None:
 
 
 def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> None:
-    payload = serve_config(target(), capable_plan(), job_id="job-7")
+    payload = serve_config(target(), capable_plan(), job_id="job-7", sandbox_id="job-7")
 
     assert payload["sandbox"]["image"] == "registry.example.com/nhx-gym-runtime:1.0"
     assert payload["sandbox"]["environment_pvc_claim"] == "job-storage"
@@ -210,7 +210,7 @@ def test_serve_config_runs_wheels_v1_servers_on_the_image_gym_install() -> None:
     The host honours this only when the caller says so, because GRPO shares it and still
     documents vendoring the full closure.
     """
-    assert serve_config(target(), capable_plan(), job_id="job-7")["reuse_image_gym_install"] is True
+    assert serve_config(target(), capable_plan(), job_id="job-7", sandbox_id="job-7")["reuse_image_gym_install"] is True
 
 
 def test_unset_runtime_image_uses_the_qualified_gym_host(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -380,7 +380,7 @@ def test_the_same_credential_as_a_secret_ref_is_allowed() -> None:
 
 
 def test_the_model_endpoint_reaches_the_host_as_an_egress_allowance() -> None:
-    payload = serve_config(target(), capable_plan(), job_id="job-1")
+    payload = serve_config(target(), capable_plan(), job_id="job-1", sandbox_id="job-1")
 
     assert payload["policy_base_urls"] == ("https://integrate.api.nvidia.com/v1",)
 
@@ -388,7 +388,9 @@ def test_the_model_endpoint_reaches_the_host_as_an_egress_allowance() -> None:
 def test_extra_destinations_are_parsed_into_host_and_port() -> None:
     plan = capable_plan(sandbox_egress_allow=("cache.internal:6379", "metrics.svc.cluster.local:9090"))
 
-    rules = serve_config(target(), plan, job_id="job-1")["sandbox"]["network_policy"]["egress_allow"]
+    rules = serve_config(target(), plan, job_id="job-1", sandbox_id="job-1")["sandbox"]["network_policy"][
+        "egress_allow"
+    ]
 
     assert rules == [
         {"host": "cache.internal", "port": 6379},
@@ -403,7 +405,7 @@ def test_a_malformed_egress_entry_is_refused_rather_than_skipped(entry: str) -> 
     plan = capable_plan(sandbox_egress_allow=(entry,))
 
     with pytest.raises(SandboxUnavailableError, match="host:port"):
-        serve_config(target(), plan, job_id="job-1")
+        serve_config(target(), plan, job_id="job-1", sandbox_id="job-1")
 
 
 def test_a_deployment_with_no_egress_at_all_is_refused() -> None:
@@ -423,7 +425,7 @@ def test_egress_is_not_something_a_job_can_widen() -> None:
     # trusted-side policy, which is why it is read only from deployment config.
     hostile = target(hydra_params={"policy_base_urls": ["https://exfiltrate.example"]})
 
-    payload = serve_config(hostile, capable_plan(), job_id="job-1")
+    payload = serve_config(hostile, capable_plan(), job_id="job-1", sandbox_id="job-1")
 
     assert payload["policy_base_urls"] == ("https://integrate.api.nvidia.com/v1",)
 
@@ -451,6 +453,7 @@ def built_host_spec(
         gym_target or target(),
         plan,
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent_storage_path,
     )
     broker = BrokerEndpoint(url="http://10.0.0.5:51234", host="10.0.0.5", port=51234, token="tok")
@@ -502,6 +505,7 @@ def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path
         target(environment=FilesetRef(root="default/custom-gym")),
         plan,
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -532,6 +536,7 @@ def test_fileset_backed_docker_requires_the_trusted_persistent_storage_path() ->
             target(environment=FilesetRef(root="default/custom-gym")),
             plan,
             job_id="job-9",
+            sandbox_id="job-9",
         )
 
 
@@ -568,6 +573,7 @@ def test_a_wheels_v1_package_under_strict_egress_runs_the_host_offline(tmp_path:
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(sandbox_egress_allow=()),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -582,6 +588,7 @@ def test_an_allowed_egress_destination_keeps_a_wheels_v1_host_online(tmp_path: P
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(sandbox_egress_allow=("huggingface.co:443",)),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -596,6 +603,7 @@ def test_a_native_v1_package_is_never_offline(tmp_path: Path) -> None:
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(sandbox_egress_allow=()),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -612,6 +620,7 @@ def test_a_docker_host_is_never_offline(tmp_path: Path) -> None:
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(sandbox_host_provider="docker", sandbox_egress_allow=()),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -619,7 +628,12 @@ def test_a_docker_host_is_never_offline(tmp_path: Path) -> None:
 
 
 def test_a_built_in_environment_is_never_offline() -> None:
-    assert serve_config(target(), capable_plan(sandbox_egress_allow=()), job_id="job-9")["environment_offline"] is False
+    assert (
+        serve_config(target(), capable_plan(sandbox_egress_allow=()), job_id="job-9", sandbox_id="job-9")[
+            "environment_offline"
+        ]
+        is False
+    )
 
 
 @pytest.mark.parametrize("manifest", [None, "format: [", "format: wheels-v2\nmetadata: {name: x}"])
@@ -632,6 +646,7 @@ def test_an_unreadable_staged_manifest_leaves_the_host_online(tmp_path: Path, ma
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(sandbox_egress_allow=()),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -648,6 +663,7 @@ def test_a_job_cannot_switch_uv_back_online_under_a_derived_offline_run(tmp_path
             target(environment=FilesetRef(root="default/custom-gym"), env_vars={"UV_OFFLINE": "0"}),
             capable_plan(sandbox_egress_allow=()),
             job_id="job-9",
+            sandbox_id="job-9",
             persistent_storage_path=persistent,
         )
 
@@ -664,7 +680,7 @@ def test_an_evaluation_host_returns_failed_rollouts_instead_of_failing_the_batch
     """Without it, Gym raises on the first failed agent `/run`, and one bad row costs the job every rollout."""
     from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
 
-    payload = serve_config(target(), capable_plan(), job_id="job-1")
+    payload = serve_config(target(), capable_plan(), job_id="job-1", sandbox_id="job-1")
 
     assert payload["host_env"][ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] == "1"
 
@@ -673,7 +689,12 @@ def test_a_job_cannot_set_failure_routing_itself() -> None:
     from nemo_evals.jobs.gym_sandbox import ROUTE_FAILURES_TO_SIDECAR_ENV_KEY
 
     with pytest.raises(SandboxUnavailableError, match=ROUTE_FAILURES_TO_SIDECAR_ENV_KEY):
-        serve_config(target(env_vars={ROUTE_FAILURES_TO_SIDECAR_ENV_KEY: "0"}), capable_plan(), job_id="job-1")
+        serve_config(
+            target(env_vars={ROUTE_FAILURES_TO_SIDECAR_ENV_KEY: "0"}),
+            capable_plan(),
+            job_id="job-1",
+            sandbox_id="job-1",
+        )
 
 
 def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_path: Path) -> None:
@@ -683,6 +704,7 @@ def test_a_job_may_set_uv_offline_when_the_deployment_does_not_derive_it(tmp_pat
         target(environment=FilesetRef(root="default/custom-gym"), env_vars={"UV_OFFLINE": "1"}),
         capable_plan(sandbox_egress_allow=("huggingface.co:443",)),
         job_id="job-9",
+        sandbox_id="job-9",
         persistent_storage_path=persistent,
     )
 
@@ -711,6 +733,7 @@ def test_opensandbox_keeps_pvc_subpaths_when_the_local_storage_path_is_available
         target(environment=FilesetRef(root="default/custom-gym")),
         capable_plan(),
         job_id="job-9",
+        sandbox_id="job-9",
         workspace="dev",
         persistent_storage_path=persistent,
     )
@@ -740,7 +763,7 @@ def test_concurrency_becomes_chunks_whose_product_never_exceeds_it(concurrency: 
 
 
 def test_the_targets_concurrency_sets_the_sessions_chunking() -> None:
-    sandbox = serve_config(target(concurrency=10), capable_plan(), job_id="job-1")["sandbox"]
+    sandbox = serve_config(target(concurrency=10), capable_plan(), job_id="job-1", sandbox_id="job-1")["sandbox"]
 
     assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (2, 5)
 
@@ -749,7 +772,7 @@ def test_the_default_concurrency_survives_the_job_spec_round_trip() -> None:
     """The job reads a target dumped with every default, so the default must map like any value."""
     round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
 
-    sandbox = serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]
+    sandbox = serve_config(round_tripped, capable_plan(), job_id="job-1", sandbox_id="job-1")["sandbox"]
 
     assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (1, 4)
 
@@ -757,7 +780,7 @@ def test_the_default_concurrency_survives_the_job_spec_round_trip() -> None:
 def test_startup_timeout_bounds_the_hosts_bootstrap() -> None:
     from sandboxed_gym import SandboxedGymServeConfig
 
-    payload = serve_config(target(startup_timeout_s=45), capable_plan(), job_id="job-1")
+    payload = serve_config(target(startup_timeout_s=45), capable_plan(), job_id="job-1", sandbox_id="job-1")
 
     assert SandboxedGymServeConfig.model_validate(payload).sandbox.bootstrap_timeout_s == 45
 
@@ -765,7 +788,12 @@ def test_startup_timeout_bounds_the_hosts_bootstrap() -> None:
 def test_the_default_startup_timeout_survives_the_job_spec_round_trip() -> None:
     round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
 
-    assert serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]["bootstrap_timeout_s"] == 240
+    assert (
+        serve_config(round_tripped, capable_plan(), job_id="job-1", sandbox_id="job-1")["sandbox"][
+            "bootstrap_timeout_s"
+        ]
+        == 240
+    )
 
 
 def test_a_finite_collection_timeout_caps_the_hosts_per_chunk_deadline() -> None:
@@ -840,8 +868,8 @@ def test_concurrent_runs_do_not_share_one_writable_workspace() -> None:
     # The configured sub-path is deployment-wide and the workspace mount is read-write, so an
     # unscoped path would let two evaluations running at once overwrite each other's state.
     plan = capable_plan()
-    first = serve_config(target(), plan, job_id="job-a")["sandbox"]["workspace_sub_path"]
-    second = serve_config(target(), plan, job_id="job-b")["sandbox"]["workspace_sub_path"]
+    first = serve_config(target(), plan, job_id="job-a", sandbox_id="job-a")["sandbox"]["workspace_sub_path"]
+    second = serve_config(target(), plan, job_id="job-b", sandbox_id="job-b")["sandbox"]["workspace_sub_path"]
 
     assert first != second
     assert first.endswith("/job-a")
@@ -851,8 +879,8 @@ def test_concurrent_runs_do_not_share_one_writable_workspace() -> None:
 def test_the_environment_mount_stays_shared_across_runs() -> None:
     # Read-only and identical for every run: scoping it per job would defeat the shared cache.
     plan = capable_plan()
-    first = serve_config(target(), plan, job_id="job-a")["sandbox"]["environment_sub_path"]
-    second = serve_config(target(), plan, job_id="job-b")["sandbox"]["environment_sub_path"]
+    first = serve_config(target(), plan, job_id="job-a", sandbox_id="job-a")["sandbox"]["environment_sub_path"]
+    second = serve_config(target(), plan, job_id="job-b", sandbox_id="job-b")["sandbox"]["environment_sub_path"]
 
     assert first == second
 
@@ -861,7 +889,10 @@ def test_env_vars_reach_the_host_rather_than_being_dropped() -> None:
     # `wmt_translation` and friends are configurable only this way, and the host is where the
     # environment actually runs.
     payload = serve_config(
-        target(env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared"}), capable_plan(), job_id="job-1"
+        target(env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared"}),
+        capable_plan(),
+        job_id="job-1",
+        sandbox_id="job-1",
     )
 
     assert payload["host_env"]["WMT_TRANSLATION_COMET_PY_CACHE"] == "/shared"
@@ -871,7 +902,9 @@ def test_a_resolved_env_secret_reaches_the_host(monkeypatch: pytest.MonkeyPatch)
     # The service resolves the reference into this container; its value exists nowhere else, so if
     # it is not forwarded the environment runs inside the sandbox without its credential.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved")
-    payload = serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
+    payload = serve_config(
+        target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1", sandbox_id="job-1"
+    )
 
     assert payload["host_env"]["OPENAI_API_KEY"] == "sk-resolved"
 
@@ -883,13 +916,21 @@ def test_an_unresolved_env_secret_is_named_rather_than_silently_missing(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(SandboxUnavailableError, match=f"nemo secrets get openai --workspace {workspace}"):
-        serve_config(target(env_secrets={"OPENAI_API_KEY": ref}), capable_plan(), job_id="job-1", workspace="team")
+        serve_config(
+            target(env_secrets={"OPENAI_API_KEY": ref}),
+            capable_plan(),
+            job_id="job-1",
+            sandbox_id="job-1",
+            workspace="team",
+        )
 
 
 def test_an_empty_injected_secret_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "")
     with pytest.raises(SandboxUnavailableError, match="nemo secrets get openai --workspace ws"):
-        serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
+        serve_config(
+            target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1", sandbox_id="job-1"
+        )
 
 
 @pytest.fixture
@@ -921,6 +962,7 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
         target=target(env_secrets={"OPENAI_API_KEY": "ws/openai"}, concurrency=10, num_repeats=3),
         plan=capable_plan(),
         job_id="job-1",
+        job_uid="00000000-0000-4000-8000-000000000001",
     )
     expected = {"env_secrets": {"OPENAI_API_KEY": "ws/openai"}, "resources_server": "mcqa", "agent": "simple_agent"}
     for key, value in expected.items():
@@ -1004,7 +1046,9 @@ async def test_a_platform_run_scores_each_reward_component_per_trial(
             return Session()
 
     monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
-    runner = SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id="job-1")
+    runner = SessionBackedGymRunner(
+        target=target(), plan=capable_plan(), job_id="job-1", job_uid="00000000-0000-4000-8000-000000000001"
+    )
 
     result = await AgentEvaluator().run(
         tasks=tasks, target=runner, config=AgentEvalRunConfig(work_dir=tmp_path / "run")
@@ -1112,7 +1156,7 @@ def test_a_registered_agent_is_a_staged_environment_even_without_a_fileset() -> 
     """The staging step writes its package into the environment tree, so the host must mount that tree."""
     assert has_staged_environment(_registered_target())
     assert not has_staged_environment(target())
-    payload = serve_config(_registered_target(), capable_plan(), job_id="job-9")
+    payload = serve_config(_registered_target(), capable_plan(), job_id="job-9", sandbox_id="job-9")
     assert payload["environment_path"] == "/job/environment"
     assert payload["sandbox"]["environment_sub_path"].startswith("jobs/default/job-9/")
     with pytest.raises(SandboxUnavailableError, match="sandboxed execution"):
@@ -1321,15 +1365,74 @@ async def test_the_runner_arms_the_job_reaper_on_its_own_thread_before_starting_
     monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
     monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
     plan = capable_plan()
-    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1")
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id="job-1", job_uid="job-1-uid")
     caller = threading.current_thread().name
 
     await runner.run_tasks([])
 
     assert armed == [
-        ("job-1", {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options}, caller)
+        (
+            "job-1-uid",
+            {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options},
+            caller,
+        )
     ]
     # Armed before the host existed, and `start` itself ran on another thread.
     ((armed_before_start, start_thread),) = started_on
     assert armed_before_start == 1
     assert start_thread != caller
+
+
+def test_sandboxes_are_labelled_by_the_jobs_unique_id_while_storage_keeps_its_name() -> None:
+    """Job names are unique only within a workspace; the label every sandbox sweep matches must not be."""
+    payload = serve_config(
+        target(environment=FilesetRef("ws/env")),
+        capable_plan(),
+        job_id="nightly",
+        sandbox_id="0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d",
+        workspace="team-a",
+    )
+
+    assert payload["job_id"] == "0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d"
+    assert payload["episode_broker"]["job_id"] == "0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d"
+    # The stage step wrote the job's files under its name; the host must mount that tree.
+    assert payload["sandbox"]["workspace_sub_path"].startswith("jobs/team-a/nightly/")
+    assert payload["sandbox"]["environment_sub_path"].startswith("jobs/team-a/nightly/")
+
+
+def test_a_platform_job_without_its_unique_id_is_refused() -> None:
+    """Falling back to the name would let a same-named job in another workspace sweep this one's sandboxes."""
+    with pytest.raises(SandboxUnavailableError, match="NEMO_JOB_UID"):
+        SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id="nightly", job_uid=None)
+
+
+@pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
+def test_a_local_run_labels_its_sandboxes_with_the_local_id(job_id: str | None) -> None:
+    runner = SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id=job_id)
+
+    assert runner._sandbox_id == SessionBackedGymRunner.LOCAL_JOB_ID
+
+
+@pytest.mark.parametrize("job_uid", ["0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d", None], ids=["with-uid", "without-uid"])
+def test_a_platform_job_reaches_the_runner_with_its_unique_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job_uid: str | None
+) -> None:
+    from nemo_evals.jobs import gym_submission
+    from nemo_helix_plugin.job_context import JobContext, StoragePaths
+
+    monkeypatch.setattr(gym_submission, "sandbox_plan_from_environment", capable_plan)
+    ctx = JobContext(
+        workspace="team-a",
+        storage=StoragePaths(ephemeral=tmp_path, persistent=tmp_path),
+        results=SimpleNamespace(),  # ty: ignore[invalid-argument-type]
+        job_id="nightly",
+        job_uid=job_uid,
+    )
+
+    if job_uid is None:
+        with pytest.raises(SandboxUnavailableError, match="NEMO_JOB_UID"):
+            gym_submission.gym_runtime_target(target(), ctx)
+        return
+    runner = gym_submission.gym_runtime_target(target(), ctx)
+    assert isinstance(runner, SessionBackedGymRunner)
+    assert runner._sandbox_id == job_uid
