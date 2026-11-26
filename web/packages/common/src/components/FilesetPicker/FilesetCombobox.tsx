@@ -77,12 +77,12 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   // search hides it.
   if (loaded && loaded !== picked) setPicked(loaded);
 
-  // Look the selection up only when the unfiltered list doesn't contain it. A search hiding it
-  // is not a reason to refetch; a refreshed list that dropped it is.
+  // Look the selection up when the results don't contain it. A search hiding an already-known
+  // selection is not a reason to refetch; a refreshed list that dropped it is.
   const { data: retrieved, error: lookupError } = useQuery({
     queryKey: getFilesetQueryKey(valueWorkspace, valueName),
     queryFn: ({ signal }) => retrieveFileset(valueWorkspace, valueName, signal),
-    enabled: Boolean(value && valueName && !isLoading && !search && !loaded),
+    enabled: Boolean(value && valueName && !isLoading && !loaded && !(search && pickedMatches)),
   });
   // React Query keeps the last good result after a failed refetch; a 404 must still win.
   const notFound = !loaded && isNotFoundError(lookupError);

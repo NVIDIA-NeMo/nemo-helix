@@ -296,4 +296,19 @@ describe('FilesetPicker', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('looks up an unresolved selection even while a search is active', async () => {
+    vi.mocked(filesListFilesets).mockImplementation(async (_workspace, params) =>
+      listResponse(params?.filter ? [] : [fileset('newer')])
+    );
+    vi.mocked(filesRetrieveFileset).mockResolvedValue(fileset('older'));
+    const { input } = renderPicker({ value: 'default/older', purpose: undefined });
+
+    await userEvent.type(input, 'zzz');
+
+    await waitFor(() =>
+      expect(filesRetrieveFileset).toHaveBeenCalledWith('default', 'older', expect.anything())
+    );
+    expect(await screen.findByText('Selected')).toBeInTheDocument();
+  });
 });
