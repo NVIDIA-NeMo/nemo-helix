@@ -90,8 +90,10 @@ def test_build_docker_opaque_workload_delegation_preserves_legacy_job_name() -> 
         auth_context=_auth_context(),
         ttl_seconds_active=900,
         now=now,
+        job_uid="platform-job-123",
     )
 
+    # The lookup name is still built from the job's name: the job's entity ID does not enter it.
     assert delegation.name == docker_delegation_name(
         workload_workspace="default",
         job_id="job-123",
@@ -101,6 +103,8 @@ def test_build_docker_opaque_workload_delegation_preserves_legacy_job_name() -> 
     assert delegation.workspace == SYSTEM_WORKSPACE
     assert delegation.workload_kind == "job"
     assert delegation.workload_id == "job-123"
+    assert delegation.job_id == "job-123"
+    assert delegation.job_uid == "platform-job-123"
     assert delegation.workload_claim_id is None
     assert delegation.workload_generation == "attempt-1/step-a"
     assert delegation.workload_subject == delegation.name
@@ -131,6 +135,7 @@ def test_build_docker_opaque_workload_delegation_supports_deployment_rows_withou
         workload_generation="container-abc",
     )
     assert delegation.job_id is None
+    assert delegation.job_uid is None
     assert delegation.attempt_id is None
     assert delegation.step_id is None
     assert delegation.workload_id == "deployment-123"
@@ -186,4 +191,38 @@ def test_build_kubernetes_pod_uid_workload_delegation_sets_verified_reference_fi
     assert delegation.workload_subject == workload_subject
     assert delegation.workload_id == "deployment-123"
     assert delegation.workload_claim_id == "logical-deployment"
+    assert delegation.job_uid is None
     assert delegation.expires_at == now + datetime.timedelta(seconds=600 + WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS)
+
+
+def test_build_kubernetes_pod_uid_workload_delegation_carries_the_job_entity_id() -> None:
+    delegation = build_kubernetes_pod_uid_workload_delegation(
+        scope=WorkloadDelegationScope(
+            workload_workspace="default",
+            workload_kind="job",
+            workload_instance_id="job-123",
+        ),
+        workload_audience="nemo-helix",
+        workload_generation="attempt-1/step-a/pod-uid-123",
+        namespace="jobs",
+        service_account_name="runner",
+        pod_uid="pod-uid-123",
+        job_id="job-123",
+        attempt_id="attempt-1",
+        step_id="step-a",
+        auth_context=_auth_context(),
+        ttl_seconds_active=600,
+        job_uid="platform-job-123",
+    )
+
+    # The lookup name is still bound to the Pod UID: the job's entity ID does not enter it.
+    assert delegation.name == kubernetes_pod_uid_delegation_name(
+        workload_audience="nemo-helix",
+        workload_subject="system:serviceaccount:jobs:runner",
+        pod_uid="pod-uid-123",
+    )
+    assert delegation.workload_id == "job-123"
+    assert delegation.job_id == "job-123"
+    assert delegation.job_uid == "platform-job-123"
+    assert delegation.attempt_id == "attempt-1"
+    assert delegation.step_id == "step-a"

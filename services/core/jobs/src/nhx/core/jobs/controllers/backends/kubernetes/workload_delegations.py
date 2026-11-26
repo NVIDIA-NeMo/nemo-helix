@@ -232,6 +232,8 @@ class KubernetesPodBoundWorkloadDelegationManager:
             service_account_name=target.service_account_name,
             pod_uid=pod_uid,
             job_id=step.job,
+            # The job's entity ID. None when the Jobs API that listed the step did not send it.
+            job_uid=step.job_id,
             attempt_id=step.attempt_id,
             step_id=step.id,
             auth_context=auth_context,

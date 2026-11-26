@@ -135,8 +135,13 @@ def build_docker_opaque_workload_delegation(
     job_id: str | None = None,
     attempt_id: str | None = None,
     step_id: str | None = None,
+    job_uid: str | None = None,
 ) -> tuple[WorkloadDelegationEntity, str]:
-    """Build a Docker opaque-proof delegation row and the corresponding proof token."""
+    """Build a Docker opaque-proof delegation row and the corresponding proof token.
+
+    ``job_id`` is the job's name: with ``attempt_id`` and ``step_id`` it forms the row's lookup name. ``job_uid``
+    is the job's entity ID and does not enter the name.
+    """
     _validate_optional_job_fields(job_id=job_id, attempt_id=attempt_id, step_id=step_id)
     delegation_name = _docker_delegation_name_for_workload(
         scope=scope,
@@ -158,6 +163,7 @@ def build_docker_opaque_workload_delegation(
             workload_claim_id=scope.workload_claim_id,
             workload_generation=workload_generation,
             job_id=job_id,
+            job_uid=job_uid,
             attempt_id=attempt_id,
             step_id=step_id,
             auth_context=_copy_auth_context(auth_context),
@@ -182,8 +188,12 @@ def build_kubernetes_pod_uid_workload_delegation(
     job_id: str | None = None,
     attempt_id: str | None = None,
     step_id: str | None = None,
+    job_uid: str | None = None,
 ) -> WorkloadDelegationEntity:
-    """Build a Kubernetes Pod UID-bound delegation row."""
+    """Build a Kubernetes Pod UID-bound delegation row.
+
+    ``job_id`` is the job's name. ``job_uid`` is the job's entity ID. Neither enters the row's lookup name.
+    """
     _validate_optional_job_fields(job_id=job_id, attempt_id=attempt_id, step_id=step_id)
     workload_subject = kubernetes_service_account_subject(
         namespace=namespace, service_account_name=service_account_name
@@ -203,6 +213,7 @@ def build_kubernetes_pod_uid_workload_delegation(
         workload_claim_id=scope.workload_claim_id,
         workload_generation=workload_generation,
         job_id=job_id,
+        job_uid=job_uid,
         attempt_id=attempt_id,
         step_id=step_id,
         auth_context=_copy_auth_context(auth_context),

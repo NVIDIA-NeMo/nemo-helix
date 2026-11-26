@@ -4,6 +4,7 @@
 """Auth claim projection from decoded JWT payloads."""
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -12,6 +13,12 @@ from nhx.common.config import AuthConfig
 from .json_payload import JsonObject
 
 logger = logging.getLogger(__name__)
+
+#: Where the auth service's token exchange names the workload delegation a delegated token was minted from.
+WORKLOAD_DELEGATION_ID_CLAIM_PATH: tuple[str, str, str] = ("nhx_service_attributes", "auth", "delegation_id")
+
+#: Clock skew allowed when a workload access token's time claims are checked.
+WORKLOAD_ACCESS_TOKEN_LEEWAY_SECONDS = 30
 
 
 @dataclass
@@ -52,6 +59,17 @@ def scopes_from_claim(value: object) -> list[str]:
     if isinstance(value, list):
         return [item.strip() for item in value if isinstance(item, str) and item.strip()]
     return []
+
+
+def workload_delegation_id_from_claims(claims: Mapping[str, object]) -> str | None:
+    """The delegation ID in ``claims``: None unless each level is a mapping and the leaf a non-empty string.
+
+    Says nothing about who wrote the claims. Callers must have verified the token and its kind first.
+    """
+    found: object = claims
+    for key in WORKLOAD_DELEGATION_ID_CLAIM_PATH:
+        found = found.get(key) if isinstance(found, Mapping) else None
+    return found if isinstance(found, str) and found else None
 
 
 class TokenClaimsExtractor:

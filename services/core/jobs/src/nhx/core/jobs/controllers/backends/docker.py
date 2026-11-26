@@ -317,6 +317,8 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             workload_audience=get_workload_delegation_audience(),
             workload_generation=f"{step.attempt_id}/{step.id}",
             job_id=step.job,
+            # The job's entity ID. None when the Jobs API that listed the step did not send it.
+            job_uid=step.job_id,
             attempt_id=step.attempt_id,
             step_id=step.id,
             auth_context=auth_context,

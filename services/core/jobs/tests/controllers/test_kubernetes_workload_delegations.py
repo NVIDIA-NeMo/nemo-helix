@@ -9,6 +9,7 @@ from kubernetes import client
 from nhx.common.auth import AuthContext
 from nhx.common.auth.workload_delegations import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
+    SyncWorkloadDelegationStore,
     WorkloadDelegationAlreadyActiveError,
     WorkloadDelegationConflictError,
     reference_delegation_name,
@@ -115,12 +116,38 @@ def test_manager_registers_pod_uid_bound_delegation(test_step_pending_with_auth_
     assert delegation.workload_id == "test-job-id"
     assert delegation.workload_generation == "test-job-attempt-id/test-step-id/pod-uid-123"
     assert delegation.job_id == "test-job-id"
+    assert delegation.job_uid == "platform-job-test-uid"
     assert delegation.attempt_id == "test-job-attempt-id"
     assert delegation.step_id == "test-step-id"
     assert delegation.auth_context == AuthContext.model_validate(
         test_step_pending_with_auth_context.auth_context.model_dump(mode="python", exclude_none=True)
     )
     assert delegation.expires_at > datetime.datetime.now(datetime.timezone.utc)
+    # The record the manager builds is one the delegation store accepts.
+    SyncWorkloadDelegationStore(MagicMock()).register(delegation)
+
+
+def test_manager_registers_delegation_without_job_uid_when_step_has_no_job_id(test_step_pending_with_auth_context):
+    """A step listed by a Jobs API that does not send the job's entity ID still gets its delegation."""
+    step = test_step_pending_with_auth_context.model_copy(update={"job_id": None})
+    core_v1 = MagicMock()
+    core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[_pod("pod-uid-123")])
+    register = MagicMock()
+    manager = _manager(core_v1=core_v1, register=register)
+
+    with patch(
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "is_workload_identity_token_exchange_enabled",
+        return_value=True,
+    ):
+        assert manager.ensure_for_target(step, _target()) is True
+
+    register.assert_called_once()
+    delegation = register.call_args.args[0]
+    assert delegation.name == _expected_name()
+    assert delegation.job_id == "test-job-id"
+    assert delegation.job_uid is None
+    SyncWorkloadDelegationStore(MagicMock()).register(delegation)
 
 
 def test_manager_initial_pod_wait_retries_until_pod_delegation_is_registered(test_step_pending_with_auth_context):

@@ -18,6 +18,7 @@ from nhx.common.auth import (
     NHX_PRINCIPAL_ENVVAR,
     AuthContext,
     Principal,
+    SyncWorkloadDelegationStore,
     WorkloadDelegationEntity,
     docker_delegation_name,
     parse_opaque_docker_proof_token,
@@ -1250,6 +1251,9 @@ def test_docker_job_injects_workload_identity_volume_when_token_exchange_enabled
         f"{test_job_step_with_auth_context.attempt_id}/{test_job_step_with_auth_context.id}"
     )
     assert delegation.job_id == test_job_step_with_auth_context.job
+    # This step was listed without the job's entity ID, so the record is written without it.
+    assert test_job_step_with_auth_context.job_id is None
+    assert delegation.job_uid is None
     assert delegation.attempt_id == test_job_step_with_auth_context.attempt_id
     assert delegation.step_id == test_job_step_with_auth_context.id
     assert delegation.auth_context.principal_id == "creator@example.com"
@@ -1333,6 +1337,32 @@ def test_docker_workload_delegation_expiry_covers_the_step_ttl(docker_job, test_
 
     delegation = workload_delegation_store.register.call_args.args[0]
     assert delegation.expires_at >= before + datetime.timedelta(seconds=7200 + WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS)
+
+
+def test_docker_workload_delegation_carries_the_job_entity_id(docker_job, test_job_step_with_auth_context):
+    """The record names the job by its entity ID as well as by its name, which a later job can reuse."""
+    step = test_job_step_with_auth_context.model_copy(update={"job_id": "platform-job-test-uid"})
+    workload_delegation_store = workload_delegation_store_mock()
+    docker_job._workload_delegation_store = workload_delegation_store
+
+    with patch.object(docker_job, "_write_workload_identity_subject_token"):
+        docker_job._prepare_workload_identity_for_step(
+            step=step,
+            workload_identity_volume_name="workload-token-volume",
+        )
+
+    delegation = workload_delegation_store.register.call_args.args[0]
+    assert delegation.job_uid == "platform-job-test-uid"
+    assert delegation.job_id == step.job
+    assert delegation.workload_id == step.job
+    assert delegation.name == docker_delegation_name(
+        workload_workspace=step.workspace,
+        job_id=step.job,
+        attempt_id=step.attempt_id,
+        step_id=step.id,
+    )
+    # The record the backend builds is one the delegation store accepts.
+    SyncWorkloadDelegationStore(MagicMock()).register(delegation, require_opaque_subject_token_hash=True)
 
 
 def test_docker_schedule_cleans_task_volumes_when_workload_identity_proof_token_fails(

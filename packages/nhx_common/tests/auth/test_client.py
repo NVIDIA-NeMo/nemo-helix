@@ -3,6 +3,7 @@
 
 """Unit tests for the AuthClient class."""
 
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,9 +17,15 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.exceptions import InvalidPermissionFormatError
 from nhx.common.auth.models import Principal
+from nhx.common.auth.token_claims import ActorClaims, TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind
 from nhx.common.client_factory import get_nemo_client_on_behalf_of
 from nhx.common.config import AuthConfig
 from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
+
+_DELEGATION_ID = "workload_delegation-abc123"
+_WORKLOAD_ACTOR = ActorClaims(subject="system:serviceaccount:nemo-runs:job-runner", groups=[])
+_DELEGATING_USER = "creator@example.com"
 
 
 def _write_private_key(path: Path) -> None:
@@ -47,6 +54,53 @@ def auth_config_disabled():
     return AuthConfig(
         enabled=False,
         policy_decision_point_base_url="http://localhost:8181",
+    )
+
+
+@pytest.fixture
+def exchange_config(auth_config, tmp_path: Path) -> AuthConfig:
+    """Auth on with workload token exchange configured: the mode in which workload delegations are verified."""
+    return auth_config.model_copy(
+        update={
+            # Token exchange needs a signing key to be named. These tests never sign or verify, so none is written.
+            "token_signing": TokenSigningConfig(
+                key_id="test-workload", private_key_file=str(tmp_path / "workload-private.pem")
+            ),
+            "oidc": OIDCConfig(workload=OIDCWorkloadConfig(client_id="nemo-helix-workload")),
+        }
+    )
+
+
+def _delegation_claims(attributes: object = None, *, exp_offset: float | None = 300) -> dict[str, object]:
+    """Raw claims of a delegated token: by default unexpired and naming ``_DELEGATION_ID`` as the exchange does."""
+    claims: dict[str, object] = {
+        "nhx_service_attributes": {"auth": {"delegation_id": _DELEGATION_ID}} if attributes is None else attributes
+    }
+    if exp_offset is not None:
+        claims["exp"] = time.time() + exp_offset
+    return claims
+
+
+def _client_with_token(
+    config: AuthConfig,
+    raw_claims: dict[str, object],
+    *,
+    token_kind: ResolvedTokenKind = "workload_access_token",
+    actor: ActorClaims | None = _WORKLOAD_ACTOR,
+    verified: bool = True,
+) -> AuthClient:
+    """An AuthClient authenticated with a bearer token that carries ``raw_claims``.
+
+    The principal is always the delegated one the workload resolver builds for such a token, so that a test
+    changes only the one condition it names.
+    """
+    claims = TokenClaims(subject=_DELEGATING_USER, email=None, groups=[], scopes=[], raw_claims=raw_claims, actor=actor)
+    return AuthClient(
+        principal=Principal(
+            id=_WORKLOAD_ACTOR.subject, on_behalf_of=_DELEGATING_USER, verified_workload_delegation=verified
+        ),
+        config=config,
+        resolved_bearer_token=ResolvedBearerToken(claims=claims, token_kind=token_kind),
     )
 
 
@@ -595,6 +649,149 @@ class TestOnBehalfOfHasPermissions:
             call_args = mock_post.call_args
             request_json = call_args[1]["json"]
             assert request_json["input"]["permissions"] == ["secrets.read", "secrets.write"]
+
+
+class TestWorkloadDelegationId:
+    """Only a verified, unexpired delegated token that names a delegation gives a workload delegation ID."""
+
+    def test_token_the_workload_resolver_accepted_gives_the_id(self, exchange_config):
+        claims = TokenClaims(
+            subject=_DELEGATING_USER,
+            email=None,
+            groups=[],
+            scopes=[],
+            raw_claims=_delegation_claims(),
+            actor=_WORKLOAD_ACTOR,
+        )
+        resolved = ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
+
+        auth_client = AuthClient(principal=resolved.principal, config=exchange_config, resolved_bearer_token=resolved)
+
+        assert auth_client.workload_delegation_id == _DELEGATION_ID
+
+    def test_no_bearer_token_gives_none(self, exchange_config):
+        # The flag on a principal is not enough: the request must have been authenticated with a token.
+        principal = Principal(
+            id=_WORKLOAD_ACTOR.subject, on_behalf_of=_DELEGATING_USER, verified_workload_delegation=True
+        )
+
+        assert AuthClient(principal=principal, config=exchange_config).workload_delegation_id is None
+
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            pytest.param({"token_kind": "access_key"}, id="access key carrying the claim"),
+            pytest.param({"token_kind": "oidc_access_token"}, id="OIDC token with an actor and the claim"),
+            pytest.param({"token_kind": "workload_subject_token"}, id="workload subject token"),
+            pytest.param({"actor": None}, id="workload token that acts for nobody"),
+            pytest.param({"verified": False}, id="principal not marked as a verified delegation"),
+        ],
+    )
+    def test_any_other_credential_gives_none(self, exchange_config, changed):
+        auth_client = _client_with_token(exchange_config, _delegation_claims(), **changed)
+
+        assert auth_client.workload_delegation_id is None
+
+    @pytest.mark.parametrize(
+        "attributes",
+        [
+            pytest.param({}, id="no attributes"),
+            pytest.param({"auth": {}}, id="no delegation ID"),
+            pytest.param({"auth": {"delegation_id": ""}}, id="empty delegation ID"),
+            pytest.param({"auth": {"delegation_id": 42}}, id="delegation ID is not a string"),
+            pytest.param({"auth": ["delegation_id"]}, id="auth attributes are a list"),
+            pytest.param(["auth"], id="attributes are a list"),
+            pytest.param({"evals": {"delegation_id": _DELEGATION_ID}}, id="another service's attributes"),
+        ],
+    )
+    def test_token_that_names_no_delegation_gives_none(self, exchange_config, attributes):
+        # A service's own on-behalf-of token is such a token: platform-signed, with an actor, without the claim.
+        auth_client = _client_with_token(exchange_config, _delegation_claims(attributes))
+
+        assert auth_client.workload_delegation_id is None
+
+    def test_token_without_the_attributes_claim_gives_none(self, exchange_config):
+        auth_client = _client_with_token(exchange_config, {"exp": time.time() + 300})
+
+        assert auth_client.workload_delegation_id is None
+
+    @pytest.mark.parametrize("substituted", ["id", "on_behalf_of"])
+    def test_principal_that_differs_from_the_token_gives_none(self, exchange_config, substituted):
+        auth_client = _client_with_token(exchange_config, _delegation_claims())
+        auth_client.principal = auth_client.principal.model_copy(update={substituted: "someone-else"})
+
+        assert auth_client.workload_delegation_id is None
+
+    def test_as_service_gives_none_until_it_exits(self, exchange_config):
+        auth_client = _client_with_token(exchange_config, _delegation_claims())
+
+        with auth_client.as_service():
+            assert auth_client.workload_delegation_id is None
+
+        assert auth_client.workload_delegation_id == _DELEGATION_ID
+
+    def test_token_past_the_validator_leeway_gives_none(self, exchange_config):
+        # A task started by a request keeps that request's auth client, and can outlive the token.
+        auth_client = _client_with_token(exchange_config, _delegation_claims(exp_offset=-31))
+
+        assert auth_client.workload_delegation_id is None
+
+    def test_token_without_an_expiry_gives_none(self, exchange_config):
+        auth_client = _client_with_token(exchange_config, _delegation_claims(exp_offset=None))
+
+        assert auth_client.workload_delegation_id is None
+
+    def test_token_whose_expiry_is_not_a_number_gives_none(self, exchange_config):
+        auth_client = _client_with_token(exchange_config, {**_delegation_claims(), "exp": "9999999999"})
+
+        assert auth_client.workload_delegation_id is None
+
+    def test_token_inside_the_validator_leeway_still_gives_the_id(self, exchange_config):
+        # The token validator accepts a token up to 30 seconds past ``exp``; the accessor agrees with it.
+        auth_client = _client_with_token(exchange_config, _delegation_claims(exp_offset=-10))
+
+        assert auth_client.workload_delegation_id == _DELEGATION_ID
+
+
+class TestWorkloadDelegationVerifiable:
+    """Workload delegations are verifiable only with auth on and workload token exchange configured."""
+
+    def test_true_in_token_exchange_mode(self, exchange_config, principal):
+        assert AuthClient(principal=principal, config=exchange_config).workload_delegation_verifiable is True
+
+    def test_false_without_token_exchange(self, auth_config):
+        auth_client = _client_with_token(auth_config, _delegation_claims())
+
+        assert auth_client.workload_delegation_verifiable is False
+        assert auth_client.workload_delegation_id is None
+
+    def test_false_with_auth_off_even_when_token_exchange_is_configured(self, exchange_config):
+        # No bearer token is verified with auth off, so even a well-formed delegated token names nothing.
+        auth_client = _client_with_token(exchange_config.model_copy(update={"enabled": False}), _delegation_claims())
+
+        assert auth_client.workload_delegation_verifiable is False
+        assert auth_client.workload_delegation_id is None
+
+
+class TestAuthorizeRequestVerifiedWorkloadDelegation:
+    """The expiry check of ``workload_delegation_id`` is not applied to the fact the PDP is sent.
+
+    Which credentials send that fact is pinned in test_verified_workload_delegation.py.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sent_for_a_delegated_token_past_its_expiry(self, auth_config):
+        auth_client = _client_with_token(auth_config, _delegation_claims(exp_offset=-3600))
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            await auth_client.authorize_request("GET", "/x", http_client=mock_http_client)
+
+        assert mock_post.call_args[1]["json"]["input"]["verified_workload_delegation"] is True
 
 
 class TestGetNemoClientOnBehalfOf:

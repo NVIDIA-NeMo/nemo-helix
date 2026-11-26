@@ -15,7 +15,13 @@ from nhx.common.config import AuthConfig, get_platform_config
 
 from .models import Principal
 from .signing_keys import RSASigningKey, RSASigningKeyCache
-from .token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
+from .token_claims import (
+    WORKLOAD_ACCESS_TOKEN_LEEWAY_SECONDS,
+    ActorClaims,
+    TokenClaims,
+    groups_from_claim,
+    scopes_from_claim,
+)
 from .token_resolver import ResolvedBearerToken
 
 WORKLOAD_TOKEN_PATH = "/apis/auth/token"
@@ -319,7 +325,7 @@ async def validate_workload_access_token(
             algorithms=["RS256"],
             audience=list(allowed_audiences(config)),
             options={"require": ["sub", "iat", "nbf", "exp"]},
-            leeway=30,
+            leeway=WORKLOAD_ACCESS_TOKEN_LEEWAY_SECONDS,
         )
         issuer = claims.get("iss")
         if not isinstance(issuer, str) or issuer not in workload_token_issuers(config):
