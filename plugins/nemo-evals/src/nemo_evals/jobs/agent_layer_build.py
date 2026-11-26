@@ -14,9 +14,9 @@ import asyncio
 import os
 from pathlib import Path
 
-from nemo_builder_plugin.builds import HttpImageBuilder
 from nemo_evals.agent_layers.models import AGENT_LAYER_BUILD_JOB_SOURCE
 from nemo_evals.agent_layers.runner import AgentLayerBuildSpec, run_agent_layer_build
+from nemo_evals.image_builds.builder import HttpImageBuilder
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient

@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Generic, Literal, TypeVar, cast
 
 import httpx
 import pytest
@@ -21,9 +21,10 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     CATEGORY_VICTIM_UNAVAILABLE,
     AgentHardenerRunError,
 )
+from nemo_builder_plugin.client import AsyncBuilderClient
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.schema import BuildMount, BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
-from nemo_helix_plugin.client.errors import ConflictError
+from nemo_builder_plugin.schema import BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.entities import EntityClient, EntityConflictError
 from nemo_helix_plugin.job_results import ResultRef
 
@@ -46,8 +47,19 @@ def _image(name: str, status: Literal["pending", "ready", "failed"], detail: str
     )
 
 
+T = TypeVar("T")
+
+
+@dataclass
+class _Response(Generic[T]):
+    body: T
+
+    def data(self) -> T:
+        return self.body
+
+
 class _Builder:
-    """Builder whose one submit settles as *outcome* on the next read; or refuses with *refusal* (a 409)."""
+    """Builder client whose submits settle as *outcome* on the next read; or refuse with *refusal* (a 409)."""
 
     def __init__(self, outcome: Literal["ready", "failed"] = "ready", *, refusal: str | None = None) -> None:
         self.outcome = outcome
@@ -55,36 +67,22 @@ class _Builder:
         self.rows: dict[str, ContainerImage] = {}
         self.sources: list[FileSetSource | ImageSource] = []
 
-    async def get_image(self, name: str) -> ContainerImage | None:
+    async def get_container_image(self, *, workspace: str, name: str) -> _Response[ContainerImage]:
         row = self.rows.get(name)
-        if row is None or row.status != "pending":
-            return row
-        detail = "kaniko: COPY failed: no such file" if self.outcome == "failed" else None
-        self.rows[name] = _image(name, self.outcome, detail)
-        return self.rows[name]
+        if row is None:
+            raise NotFoundError(httpx.Response(404, json={"detail": f"{name} not found"}))
+        if row.status == "pending":
+            detail = "kaniko: COPY failed: no such file" if self.outcome == "failed" else None
+            row = self.rows[name] = _image(name, self.outcome, detail)
+        return _Response(row)
 
-    async def submit(
-        self,
-        *,
-        name: str,
-        revision: int,
-        source: FileSetSource | ImageSource,
-        dockerfile: str | None,
-        platform: str | None,
-        mounts: Sequence[BuildMount] = (),
-    ) -> SubmitBuildResponse:
+    async def submit_build(self, *, workspace: str, body: BuildSet) -> _Response[SubmitBuildResponse]:
         if self.refusal is not None:
             raise ConflictError(httpx.Response(409, json={"detail": self.refusal}))
-        self.sources.append(source)
-        row = _image(f"{name}-{revision}", "pending")
+        self.sources.append(body.build_specs[0].source)
+        row = _image(f"{body.name}-{body.revision}", "pending")
         self.rows[row.name] = row
-        return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[row])
-
-    async def image_platforms(self, image: str) -> list[str]:
-        return []
-
-    async def job_status(self, job: str) -> str | None:
-        return "running"
+        return _Response(SubmitBuildResponse(job=f"builder-{body.name}-{body.revision}", images=[row]))
 
 
 class _Manifests:
@@ -110,7 +108,7 @@ class _ChurningManifests(_Manifests):
 
 async def _build(builder: _Builder, manifests: _Manifests, context_ref: str = _CONTEXT_REF) -> str:
     return await victim_build.build_victim_image(
-        builder,
+        cast(AsyncBuilderClient, builder),
         cast(EntityClient, manifests),
         workspace="default",
         manifest_id="finance",
@@ -142,6 +140,16 @@ async def test_a_failed_build_reports_the_builders_cause_and_leaves_the_manifest
     assert "kaniko: COPY failed: no such file" in str(raised.value)
     assert "builder-ah-victim-finance-1" in str(raised.value)
     assert manifests.updates == []
+
+
+async def test_a_failed_earlier_build_is_retried_at_the_next_revision() -> None:
+    builder = _Builder()
+    builder.rows["ah-victim-finance-1"] = _image("ah-victim-finance-1", "failed", "out of disk")
+
+    image_ref = await _build(builder, _Manifests())
+
+    assert image_ref.endswith(_DIGEST)
+    assert set(builder.rows) == {"ah-victim-finance-1", "ah-victim-finance-2"}
 
 
 async def test_a_manifest_that_keeps_changing_says_how_to_record_the_built_image() -> None:
