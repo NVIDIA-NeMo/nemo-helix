@@ -108,7 +108,7 @@ OpenShell runs the agent in a sandbox. It does not depend on Helix.
 
 ```bash
 which openshell                    # a path that does not contain uv/tools
-openshell --version                # 0.1.6 or newer or later
+openshell --version                # 0.1.6 or later
 openshell status                   # Status: Connected
 ```
 
