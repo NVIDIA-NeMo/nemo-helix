@@ -50,7 +50,7 @@ class SafeSynthesizerJobBuilder:
         self._workspace = workspace
 
         self._hf_token_secret: str | None = None
-        self._classify_model_provider: str | None = None
+        self._pii_model_provider: str | None = None
         self._pretrained_model_job: str | None = None
         self._data_source: pd.DataFrame | str | Path | None = None
         self._data_source_path: str | None = None
@@ -115,17 +115,17 @@ class SafeSynthesizerJobBuilder:
         self._enable_replace_pii = True
         return self
 
-    def with_classify_model_provider(self, provider_name: str) -> Self:
-        """Configure the model provider used by PII replacement column classification.
+    def with_pii_model_provider(self, provider_name: str) -> Self:
+        """Configure the Inference Gateway model provider PII replacement uses to find PII.
 
-        The provider is included in the job spec only when PII replacement is enabled with
-        ``with_replace_pii()``.
+        Set the model it serves with ``with_replace_pii(llm={"model_id": ...})``. The provider is included in
+        the job spec only when PII replacement is enabled with ``with_replace_pii()``.
         """
         if "/" in provider_name:
-            self._classify_model_provider = provider_name
+            self._pii_model_provider = provider_name
         else:
-            self._classify_model_provider = f"{self._workspace}/{provider_name}"
-        logger.info("Configured classify model provider: %s", self._classify_model_provider)
+            self._pii_model_provider = f"{self._workspace}/{provider_name}"
+        logger.info("Configured PII model provider: %s", self._pii_model_provider)
         return self
 
     def with_hf_token_secret(self, secret_name: str) -> Self:
@@ -204,10 +204,6 @@ class SafeSynthesizerJobBuilder:
         pii_config: dict[str, Any] | None = None
         if self._enable_replace_pii:
             pii_config = self._replace_pii_config.copy()
-            if self._classify_model_provider:
-                globals_cfg = pii_config.setdefault("globals", {})
-                classify_cfg = globals_cfg.setdefault("classify", {})
-                classify_cfg["classify_model_provider"] = self._classify_model_provider
 
         nss_config: dict[str, Any] = {
             "enable_synthesis": self._enable_synthesis,
@@ -231,6 +227,8 @@ class SafeSynthesizerJobBuilder:
             spec["hf_token_secret"] = self._hf_token_secret
         if self._pretrained_model_job:
             spec["pretrained_model_job"] = self._pretrained_model_job
+        if self._enable_replace_pii and self._pii_model_provider:
+            spec["pii_model_provider"] = self._pii_model_provider
         return spec
 
     def _upload_to_fileset(self, dataset_path: str | Path, filename: str, fileset_name: str) -> str:

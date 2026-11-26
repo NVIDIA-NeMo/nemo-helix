@@ -112,14 +112,14 @@ print(df.head())
 
 ---
 
-## Step 5: Configure Column Classification
+## Step 5: Configure the PII Model Provider
 
-Before running jobs, set up column classification for accurate PII detection.
+Before running jobs, set up the model provider that PII replacement uses to find PII.
 
 <Tip>
 
-Column classification uses an LLM to automatically detect column types and improve PII detection accuracy.
-Without this setup, you may see classification errors and reduced detection quality.
+PII replacement uses an LLM to find which columns hold PII.
+A job with PII replacement on fails at creation without a provider and model.
 
 </Tip>
 
@@ -129,6 +129,7 @@ import os
 # Use the pre-configured NVIDIA Build model provider
 # This provider is set up during platform deployment
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
+pii_model_id = "nvidia/nemotron-3-ultra-550b-a55b"
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
     client.models.get_provider(name=provider_id, workspace=provider_workspace)
@@ -141,7 +142,7 @@ print(f"✅ Using model provider: {provider_name}")
 <Note>
 
 If you prefer not to send column data to `build.nvidia.com`, you can deploy your own LLM and create a custom model provider.
-Pass the fully-qualified provider name (`workspace/provider-name`) to `.with_classify_model_provider()` instead.
+Pass the fully-qualified provider name (`workspace/provider-name`) to `.with_pii_model_provider()` and the model it serves to `.with_replace_pii(llm={"model_id": ...})` instead.
 
 </Note>
 
@@ -193,8 +194,8 @@ job_name = f"synthesis-test-{pd.Timestamp.now().strftime('%Y%m%d-%H%M%S')}"
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)  # Enable column classification
-    .with_replace_pii()  # Enable PII detection and replacement
+    .with_pii_model_provider(provider_name)  # Set the PII model provider
+    .with_replace_pii(llm={"model_id": pii_model_id})  # Enable PII detection and replacement
     .synthesize()  # Enable synthesis
 )
 
@@ -403,12 +404,12 @@ For a small table that only needs PII replacement, use a **PII-only** job instea
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_classify_model_provider(provider_name)
-    .with_replace_pii()
+    .with_pii_model_provider(provider_name)
+    .with_replace_pii(llm={"model_id": pii_model_id})
     # Do not call .synthesize(), .with_train(), or .with_generate().
 )
 ```
 
 This path skips training and generation and returns the input data with PII replaced, not new
 synthetic records. The plugin disables holdout and the training-size check for PII-only jobs;
-PII classification still requires a configured provider.
+PII replacement still requires a configured provider and model.

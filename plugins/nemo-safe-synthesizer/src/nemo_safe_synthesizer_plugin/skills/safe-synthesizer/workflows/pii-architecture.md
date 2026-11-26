@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# PII classification architecture
+# PII model provider architecture
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 
 ## Provider Resolution
 
-The plugin resolves `config.replace_pii.globals.classify.classify_model_provider` through Inference Gateway during job compilation. It stores only the provider route path in the task environment and lets the task combine that path with the platform Models service URL at runtime.
+The plugin resolves the top-level `pii_model_provider` through Inference Gateway during job compilation. It stores only the provider route path in the task environment and lets the task combine that path with the platform Models service URL at runtime.
 
 ## Next Steps
 

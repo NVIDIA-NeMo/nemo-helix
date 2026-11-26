@@ -19,12 +19,15 @@ import logging
 import sys
 import tempfile
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
 import pandas as pd
 from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
+from nemo_helix_plugin.client.auth_proxy_server import platform_auth_proxy
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.files.client import FilesClient
@@ -58,6 +61,7 @@ from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.adapter_resolution impo
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.jsonl_loader import load_jsonl_file
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.logging_setup import configure_logging
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.model_init import init_models_sync
+from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.pii_inference import PiiInference, with_pii_inference
 
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -305,21 +309,50 @@ def _resolve_pretrained_model(
     return tmp_dir_path, adapter_path
 
 
-def _setup_classify_endpoint():
-    """Set up upstream Safe Synthesizer PII classification env vars from platform env vars."""
+def _pii_model_id(job_config: SafeSynthesizerJobConfig) -> str | None:
+    replace_pii = job_config.config.replace_pii
+    if replace_pii is None:
+        return None
+    return replace_pii.llm.model_id
+
+
+@contextmanager
+def _pii_inference(job_config: SafeSynthesizerJobConfig) -> Generator[PiiInference | None, None, None]:
+    """Route PII inference to the job's model provider as the job's own identity.
+
+    The loopback auth proxy stays up for the whole block, because Safe Synthesizer
+    calls the provider both while processing data and again before evaluation.
+    Without a proxy (no identity to forward) the provider is reached directly.
+    """
     endpoint_path = os.environ.get("CLASSIFY_LLM_ENDPOINT_PATH")
-    if endpoint_path:
-        models_url = os.environ.get("NHX_MODELS_URL")
-        if not models_url:
-            logger.warning(
-                "CLASSIFY_LLM_ENDPOINT_PATH is set but NHX_MODELS_URL is not available. "
-                "Column classification may not work correctly."
-            )
-            return
-        full_url = models_url.rstrip("/") + endpoint_path
-        os.environ["NSS_INFERENCE_ENDPOINT"] = full_url
-        os.environ.setdefault("NSS_INFERENCE_KEY", "not-needed")
-        logger.info("Configured column classification endpoint: %s", full_url)
+    if not endpoint_path:
+        yield None
+        return
+    model_id = _pii_model_id(job_config)
+    if not model_id:
+        logger.warning(
+            "CLASSIFY_LLM_ENDPOINT_PATH is set but config.replace_pii.llm.model_id is not. "
+            "PII inference will not use the model provider."
+        )
+        yield None
+        return
+
+    with platform_auth_proxy() as proxy_origin:
+        if proxy_origin is not None:
+            base_url = proxy_origin
+        else:
+            models_url = os.environ.get("NHX_MODELS_URL")
+            if not models_url:
+                logger.warning(
+                    "CLASSIFY_LLM_ENDPOINT_PATH is set but NHX_MODELS_URL is not available. "
+                    "PII inference may not work correctly."
+                )
+                yield None
+                return
+            base_url = models_url.rstrip("/")
+        endpoint_url = base_url + endpoint_path
+        logger.info("Configured PII inference endpoint: %s", endpoint_url)
+        yield PiiInference(endpoint_url=endpoint_url, model_id=model_id)
 
 
 def _validate_flat_tabular_data(data: pd.DataFrame) -> None:
@@ -351,6 +384,7 @@ def run_config(
     save_path: Path,
     *,
     adapter_location: str | Path | None = None,
+    pii_inference: PiiInference | None = None,
 ) -> tuple[SafeSynthesizerResults, Path | None]:
     """Run NSS against a validated config and already-loaded data source."""
     _validate_flat_tabular_data(data_source)
@@ -375,6 +409,7 @@ def run_config(
                 data_source,
                 save_path,
                 adapter_location=str(location) if location is not None else None,
+                pii_inference=pii_inference,
             )
 
         nss_config = job_config.config
@@ -392,6 +427,7 @@ def run_config(
             )
 
         ss: SafeSynthesizer = SafeSynthesizer(config=nss_config, save_path=save_path).with_data_source(data_source)
+        ss = with_pii_inference(ss, pii_inference)
         if enable_synthesis:
             ss.run()
         else:
@@ -430,8 +466,6 @@ def run_from_env() -> None:
     else:
         logger.info("Successfully initialized %d model(s)", len(results))
 
-    _setup_classify_endpoint()
-
     data_source_url = os.environ.get("DATA_SOURCE")
     if data_source_url is None:
         raise ValueError("DATA_SOURCE is not set")
@@ -447,12 +481,14 @@ def run_from_env() -> None:
     save_path = Path(os.environ.get(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, DEFAULT_TASK_STORAGE_PATH))
     pretrained_model_tmp, adapter_path = _resolve_pretrained_model(job_config, workspace=workspace, client=client)
     try:
-        result, adapter_path = run_config(
-            job_config,
-            data_source,
-            save_path,
-            adapter_location=adapter_path,
-        )
+        with _pii_inference(job_config) as pii_inference:
+            result, adapter_path = run_config(
+                job_config,
+                data_source,
+                save_path,
+                adapter_location=adapter_path,
+                pii_inference=pii_inference,
+            )
         upload_results(result=result, adapter_path=adapter_path)
     finally:
         if pretrained_model_tmp is not None:

@@ -17,7 +17,7 @@ Task router for agents helping a person use the NeMo Safe Synthesizer NHX plugin
 ## Prerequisites
 
 - The NeMo Safe Synthesizer plugin is installed in the active NeMo Helix environment.
-- Platform jobs require workspace access to the input fileset and any `hf_token_secret` or PII classification provider.
+- Platform jobs require workspace access to the input fileset and any `hf_token_secret` or PII model provider.
 - Container jobs require a GPU-capable Jobs backend and access to the configured Safe Synthesizer task image.
 - Fileset references use `<workspace>/<fileset>#<path>` unless a workflow states otherwise.
 
@@ -36,7 +36,7 @@ Task router for agents helping a person use the NeMo Safe Synthesizer NHX plugin
 - Configure released container jobs with `NHX_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-helix`, `NHX_IMAGE_TAG=<tag>`, and `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=nhx-safe-synthesizer-tasks`.
 - Override local task images with `NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE_REF=<image-ref>`; this bypasses platform registry/tag qualification.
 - Treat `data_source` as a fileset URL for platform jobs, usually `<workspace>/<fileset>#<path>`.
-- If the job uses PII classification, `config.replace_pii.globals.classify.classify_model_provider` must be `<workspace>/<provider_name>`.
+- If PII replacement uses the default `auto_discovery` plan, `pii_model_provider` must be `<workspace>/<provider_name>` and `config.replace_pii.llm.model_id` must name the model it serves. An inline `replace_pii.replacement_plan` needs neither.
 - Keep usage guidance separate from plugin source development internals unless the user asks to change the plugin.
 
 ## Answer Contract

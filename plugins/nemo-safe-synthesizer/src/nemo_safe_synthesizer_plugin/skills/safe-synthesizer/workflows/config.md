@@ -28,27 +28,27 @@ See `workflows/config-runs.md` for "How to run PII-only and generation runs".
 - Platform jobs: use fileset URLs, e.g. `default/customer-data#input.csv`.
 - Supported fileset payload forms include CSV, Parquet, JSON, JSONL, and Hugging Face datasets paths.
 
-## PII Classification Provider
+## PII Model Provider
 
-When PII classification uses a model provider, set `classify_model_provider` as `<workspace>/<provider_name>`.
+PII replacement is on by default and discovers its plan with an LLM. Set the top-level `pii_model_provider` as `<workspace>/<provider_name>` and the model it serves in `config.replace_pii.llm.model_id`. The job fails at creation if either is missing.
 
 ```json
 {
   "data_source": "default/my-input#input.csv",
+  "pii_model_provider": "default/my-nim",
   "config": {
     "replace_pii": {
-      "globals": {
-        "classify": {
-          "classify_model_provider": "default/my-nim"
-        }
-      },
-      "steps": [{}]
+      "llm": {
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b"
+      }
     }
   }
 }
 ```
 
-See `workflows/pii-architecture.md` for "PII classification architecture".
+An inline `config.replace_pii.replacement_plan` makes no LLM request and needs neither field. Set `config.enable_replace_pii` to `false` to turn PII replacement off.
+
+See `workflows/pii-architecture.md` for "PII model provider architecture".
 
 ## Secrets
 

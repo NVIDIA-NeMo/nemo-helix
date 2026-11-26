@@ -67,6 +67,7 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
+from nemo_helix_plugin.client import auth_proxy_server
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
@@ -2888,7 +2889,7 @@ def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     token_file.write_text("subject", encoding="utf-8")
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
     monkeypatch.setattr(
-        gateway_proxy,
+        auth_proxy_server,
         "resolve_workload_exchange_provider",
         lambda **_kwargs: SimpleNamespace(get_access_token=lambda: "exchanged-token"),
     )
@@ -2992,7 +2993,7 @@ def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     def explode(**_kwargs: Any) -> Any:
         raise RuntimeError("auth discovery unavailable")
 
-    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", explode)
+    monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", explode)
 
     with caplog.at_level(logging.WARNING):
         with gateway_proxy.optional_platform_auth_proxy() as origin:
@@ -3024,7 +3025,7 @@ def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
     def explode(**_kwargs: Any) -> Any:
         raise RuntimeError("auth discovery unavailable")
 
-    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", explode)
+    monkeypatch.setattr(auth_proxy_server, "resolve_workload_exchange_provider", explode)
     agent = _resolved_agent()
     assert not gateway_proxy.routes_inference_through_gateway(AgentConfig.model_validate(agent.config))
     spec = ExecuteAgentStepConfig(

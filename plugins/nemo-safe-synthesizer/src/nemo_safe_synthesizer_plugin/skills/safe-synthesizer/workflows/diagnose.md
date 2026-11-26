@@ -9,7 +9,7 @@
 - Python dependencies synced into the active virtual environment.
 - A GPU-capable Jobs backend for platform container jobs.
 - Files API URL access when the run uses filesets or model fileset setup.
-- Workspace access to the input fileset, output job, `hf_token_secret`, and any PII classification provider.
+- Workspace access to the input fileset, output job, `hf_token_secret`, and any PII model provider.
 
 ## First Checks
 
@@ -51,9 +51,9 @@ uv run python plugins/nemo-safe-synthesizer/scripts/setup_model_filesets.py --fi
 
 Then confirm the Files API URL is reachable and the target workspace contains the expected filesets.
 
-### PII classification provider fails
+### PII model provider fails
 
-- Check `config.replace_pii.globals.classify.classify_model_provider`.
+- Check the top-level `pii_model_provider` and `config.replace_pii.llm.model_id`. Job creation fails when PII replacement uses `auto_discovery` and either is missing.
 - The plugin requires `<workspace>/<provider_name>`, not just the provider name.
 - Verify the provider exists with `nemo inference providers list --workspace <workspace>`.
 

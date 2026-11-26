@@ -8,7 +8,7 @@
 - The Safe Synthesizer service, Jobs service, and GPU execution backend are available.
 - `data_source` points to a platform fileset path such as `default/my-fileset#input.csv`.
 - If `hf_token_secret` is set, the named platform secret exists in the target workspace.
-- If PII classification is enabled, the model provider exists and is referenced as `<workspace>/<provider_name>`.
+- If PII replacement uses the default `auto_discovery` plan, the PII model provider exists and is referenced as `<workspace>/<provider_name>`.
 - The Jobs backend can pull the configured Safe Synthesizer task image.
 
 For platform jobs, start services first (`nemo setup --start-services` or `nemo services run`), then optionally register model filesets:

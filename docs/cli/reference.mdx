@@ -11085,6 +11085,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.enable-replace-pii`: Whether to run the default PII replacement pipeline before synthesis.
 * `--hf-token-secret`: Name of platform secret containing the HuggingFace token. Must exist in the same workspace as the job.
 * `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '&lt;job>' in the current workspace or '&lt;workspace>/&lt;job>'. The plugin resolves the prior job's 'adapter' result from Files.
+* `--pii-model-provider`: Inference Gateway model provider, as '&lt;workspace>/&lt;provider>', that PII replacement uses to find PII. Required when PII replacement discovers its plan automatically; set the model it serves in config.replace_pii.llm.model_id.
 * `--enable-synthesis`: Whether to run LLM training and generation phases. When False the task only performs PII replacement and returns the processed data.
 
 **Spec Source:**

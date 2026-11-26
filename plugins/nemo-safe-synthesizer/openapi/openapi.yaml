@@ -3248,6 +3248,12 @@ components:
             workspace or '<workspace>/<job>'. The plugin resolves the prior job's
             'adapter' result from Files.
           type: string
+        pii_model_provider:
+          title: Pii Model Provider
+          description: Inference Gateway model provider, as '<workspace>/<provider>',
+            that PII replacement uses to find PII. Required when PII replacement discovers
+            its plan automatically; set the model it serves in config.replace_pii.llm.model_id.
+          type: string
       type: object
       required:
       - data_source

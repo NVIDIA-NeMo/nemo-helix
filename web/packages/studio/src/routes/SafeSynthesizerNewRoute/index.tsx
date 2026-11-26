@@ -16,6 +16,7 @@ import { TrainingData } from '@studio/routes/SafeSynthesizerNewRoute/components/
 import {
   safeSynthesizerJobRequestSchema,
   getSafeSynthesizerFormDefaults,
+  toGenerateJobRequest,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { getGenerateJobRoute, getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { type FC, useState } from 'react';
@@ -74,21 +75,9 @@ export const SafeSynthesizerNewRoute: FC = () => {
 
   const submitForm = () => {
     setErrorMessage(null); // Clear any existing errors
-    const formData = getValues();
-
-    // Remove empty fields for group_training_examples_by and order_training_examples_by
-    if (formData.spec.config.data) {
-      if (!formData.spec.config.data.group_training_examples_by?.trim()) {
-        delete formData.spec.config.data.group_training_examples_by;
-      }
-      if (!formData.spec.config.data.order_training_examples_by?.trim()) {
-        delete formData.spec.config.data.order_training_examples_by;
-      }
-    }
-
     createJobMutation.mutate({
       workspace: workspace,
-      data: formData,
+      data: toGenerateJobRequest(getValues()),
     });
   };
 

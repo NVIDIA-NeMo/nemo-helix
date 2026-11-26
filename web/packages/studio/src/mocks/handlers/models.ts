@@ -11,6 +11,20 @@ import type {
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
+export const listModelProvidersHandler = (providers: ModelProvider[] = []) =>
+  http.get(`${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/providers`, () =>
+    HttpResponse.json({
+      data: providers,
+      pagination: {
+        page: 1,
+        page_size: 100,
+        current_page_size: providers.length,
+        total_pages: 1,
+        total_results: providers.length,
+      },
+    } satisfies ModelProvidersPage)
+  );
+
 /**
  * Mock handlers for platform model endpoints
  */
@@ -125,20 +139,7 @@ export const modelsHandlers = [
     }
   ),
 
-  // List model providers (inference providers)
-  http.get(`${PLATFORM_BASE_URL}/apis/models/v2/workspaces/:workspace/providers`, () => {
-    const providers: ModelProvidersPage['data'] = [];
-    return HttpResponse.json({
-      data: providers,
-      pagination: {
-        page: 1,
-        page_size: 100,
-        current_page_size: 0,
-        total_pages: 1,
-        total_results: 0,
-      },
-    } satisfies ModelProvidersPage);
-  }),
+  listModelProvidersHandler(),
 
   // Create model provider
   http.post(

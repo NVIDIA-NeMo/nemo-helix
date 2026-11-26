@@ -6,9 +6,18 @@ import {
   type SafeSynthesizerFormData,
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
+import { TestQueryClient } from '@studio/tests/util/TestQueryClient';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
+
+vi.mock('@studio/hooks/useWorkspaceFromPath', () => ({
+  useWorkspaceFromPath: () => 'test-workspace',
+}));
+
+const pretrainedModelSelect = () => screen.getByRole('combobox', { name: /gets fine-tuned/ });
 
 const PretrainedModelProbe = () => {
   const value = useWatch<SafeSynthesizerFormData>({
@@ -31,8 +40,13 @@ const TestWrapper = ({
       ...defaultValues,
     },
   });
+  const [queryClient] = useState(() => new TestQueryClient());
 
-  return <FormProvider {...methods}>{children}</FormProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <FormProvider {...methods}>{children}</FormProvider>
+    </QueryClientProvider>
+  );
 };
 
 describe('AdvancedParameters', () => {
@@ -777,7 +791,7 @@ describe('AdvancedParameters', () => {
       );
 
       expect(await screen.findByText('Model')).toBeInTheDocument();
-      expect(screen.getByTestId('nv-select-trigger')).toHaveTextContent('HuggingFaceTB/SmolLM3-3B');
+      expect(pretrainedModelSelect()).toHaveTextContent('HuggingFaceTB/SmolLM3-3B');
     });
 
     it('defaults to SmolLM3 when the user does not interact', async () => {
@@ -803,7 +817,7 @@ describe('AdvancedParameters', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByTestId('nv-select-trigger'));
+      await user.click(pretrainedModelSelect());
 
       await waitFor(() => {
         const options = screen.getAllByRole('option');
@@ -824,7 +838,7 @@ describe('AdvancedParameters', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByTestId('nv-select-trigger'));
+      await user.click(pretrainedModelSelect());
       await user.click(
         await screen.findByRole('option', { name: 'mistralai/Mistral-7B-Instruct-v0.3' })
       );
