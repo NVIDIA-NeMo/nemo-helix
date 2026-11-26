@@ -10,11 +10,13 @@ canonical-shape contract that ``train_sft`` and ``compile`` consume.
 
 from __future__ import annotations
 
+import jsonschema
 import pytest
 from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
+    ModuleSelector,
     OutputResponse,
     ScheduleSpec,
     TrainingSpec,
@@ -140,6 +142,43 @@ class TestSubShapesIndependently:
     def test_all_weights_allows_no_lora(self) -> None:
         t = TrainingSpec(finetuning_type="all_weights")
         assert t.lora is None
+
+    @pytest.mark.parametrize(
+        ("training", "error"),
+        [
+            (
+                {"training_type": "partial_sft", "finetuning_type": "all_weights", "freeze_modules": [{"glob": "*"}]},
+                None,
+            ),
+            ({"training_type": "partial_sft", "unfreeze_modules": [{"path": "lm_head"}]}, None),
+            ({"training_type": "partial_sft"}, "needs freeze_modules or unfreeze_modules"),
+            ({"freeze_modules": [{"glob": "*.layers.0.*"}]}, "need training_type partial_sft"),
+            ({"training_type": "partial_sft", "freeze_modules": [{"path": "lm_head", "glob": "*"}]}, "exactly one"),
+            ({"training_type": "partial_sft", "freeze_modules": [{"path": ""}]}, "at least 1"),
+        ],
+        ids=["full-weights", "lora", "partial-without-selectors", "selectors-on-sft", "path-and-glob", "empty"],
+    )
+    def test_module_selectors(self, training: dict[str, object], error: str | None) -> None:
+        """Selectors belong to partial_sft, which needs at least one."""
+        if error is None:
+            TrainingSpec.model_validate(training)
+        else:
+            with pytest.raises(ValidationError, match=error):
+                TrainingSpec.model_validate(training)
+
+    @pytest.mark.parametrize(
+        ("selector", "valid"),
+        [({"path": "lm_head"}, True), ({"glob": "*.lm_head"}, True), ({}, False), ({"path": "a", "glob": "b"}, False)],
+        ids=["path", "glob", "neither", "both"],
+    )
+    def test_module_selector_json_schema_matches_validator(self, selector: dict[str, str], valid: bool) -> None:
+        """The published schema rejects exactly the selectors the validator rejects."""
+        assert jsonschema.Draft202012Validator(ModuleSelector.model_json_schema()).is_valid(selector) is valid
+        if valid:
+            ModuleSelector.model_validate(selector)
+        else:
+            with pytest.raises(ValidationError, match="exactly one"):
+                ModuleSelector.model_validate(selector)
 
     def test_output_response_extras_forbidden(self) -> None:
         with pytest.raises(ValidationError):

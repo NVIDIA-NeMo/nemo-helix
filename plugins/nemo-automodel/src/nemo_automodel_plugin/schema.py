@@ -14,6 +14,7 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.automodel.entities.values import TrainingType
 from nhx.customization_common.image_size import check_image_size_edges, check_max_pixels_or_image_size
 from nhx.customization_common.schema import (
     LearningRateDefault,
@@ -35,6 +36,7 @@ __all__ = [
     "ImageSize",
     "LoRAParams",
     "MTPSpec",
+    "ModuleSelector",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
@@ -88,6 +90,28 @@ class LoRAParams(AutomodelSchema):
                 "lora.target_modules and lora.exclude_modules are mutually exclusive; "
                 "name the modules to adapt, or the ones to skip, but not both."
             )
+        return self
+
+
+class ModuleSelector(AutomodelSchema):
+    """One module, and everything under it, picked by exact path or by glob."""
+
+    # Mirrors ``_exactly_one`` into the OpenAPI schema.
+    model_config = ConfigDict(json_schema_extra={"oneOf": [{"required": ["path"]}, {"required": ["glob"]}]})
+
+    path: str | None = Field(
+        default=None, min_length=1, description="Exact module path, e.g. 'model.multi_modal_projector'."
+    )
+    glob: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-sensitive shell-style pattern over module paths; '*' also crosses '.', e.g. '*.embed_tokens'.",
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.path is None) == (self.glob is None):
+            raise ValueError("A module selector takes exactly one of 'path' or 'glob'.")
         return self
 
 
@@ -314,7 +338,13 @@ class ImageSize(AutomodelSchema):
 class TrainingSpec(AutomodelSchema):
     model_config = AutomodelSchema.model_config | {"populate_by_name": True}
 
-    training_type: Literal["sft", "distillation"] = "sft"
+    training_type: Literal["sft", "distillation", "partial_sft", "partial_distillation"] = Field(
+        default="sft",
+        description=(
+            "Training algorithm. 'partial_sft' and 'partial_distillation' train like 'sft' and 'distillation', "
+            "but only the modules that freeze_modules and unfreeze_modules leave trainable."
+        ),
+    )
     recipe: Literal["auto", "sft", "bi_encoder", "cross_encoder"] = Field(
         default="auto",
         description=(
@@ -393,15 +423,38 @@ class TrainingSpec(AutomodelSchema):
             "Chat-format (messages) datasets only."
         ),
     )
+    freeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description=(
+            "Modules to freeze, each with everything under it. Partial training types only. A selector that "
+            "matches no module fails the job."
+        ),
+    )
+    unfreeze_modules: list[ModuleSelector] | None = Field(
+        default=None,
+        description=(
+            "Modules to make trainable, each with everything under it. Wins over freeze_modules and over the "
+            "frozen vision tower of vision-language jobs. Partial training types only."
+        ),
+    )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
-        if self.training_type == "distillation" and not self.teacher_model:
-            raise ValueError("teacher_model is required when training_type is distillation")
-        if self.training_type == "distillation" and self.recipe not in ("auto", "sft"):
+        training_type = TrainingType(self.training_type)
+        if training_type.is_distillation and not self.teacher_model:
+            raise ValueError(f"teacher_model is required when training_type is {self.training_type}")
+        if training_type.is_distillation and self.recipe not in ("auto", "sft"):
             raise ValueError("distillation only supports the sft recipe")
         if self.finetuning_type.startswith("lora") and self.lora is None:
             self.lora = LoRAParams()
+        has_selectors = bool(self.freeze_modules or self.unfreeze_modules)
+        if training_type.is_partial and not has_selectors:
+            raise ValueError(f"training_type {self.training_type} needs freeze_modules or unfreeze_modules")
+        if has_selectors and not training_type.is_partial:
+            raise ValueError(
+                "freeze_modules and unfreeze_modules need training_type partial_sft or partial_distillation, "
+                f"not {self.training_type}"
+            )
         check_max_pixels_or_image_size(self.max_pixels, self.image_size is not None)
         return self
 
@@ -578,7 +631,7 @@ class AutomodelJobInput(AutomodelSchema):
         recipe = self.training.recipe
         if recipe == "auto" and checkpoint_head_type in ("embedding", "cross_encoder"):
             recipe = "bi_encoder" if checkpoint_head_type == "embedding" else "cross_encoder"
-        if self.training.training_type == "distillation" and recipe not in ("auto", "sft"):
+        if TrainingType(self.training.training_type).is_distillation and recipe not in ("auto", "sft"):
             raise ValueError("distillation only supports the sft recipe")
 
         training = self.training.model_copy(update={"recipe": recipe})

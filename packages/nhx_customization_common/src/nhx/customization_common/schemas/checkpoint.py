@@ -145,7 +145,7 @@ def reject_incompatible_checkpoint(
 ) -> None:
     """Reject pairings the training image would otherwise discover after download."""
     if traits.has_vision_tower:
-        if training_type == "distillation":
+        if training_type in ("distillation", "partial_distillation"):
             raise ValueError(
                 "Knowledge distillation is not supported for a vision-language checkpoint; "
                 "use the sft recipe without a teacher model."

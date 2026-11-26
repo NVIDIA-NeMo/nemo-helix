@@ -89,10 +89,13 @@ def test_peft_kwargs_emits_optional_fields_when_set() -> None:
         layer_replication=[[0, 16], [8, 24]],
         loftq_config={"loftq_bits": 4},
     )
-    kwargs = build_peft_kwargs(_spec(lora=lora), gradient_checkpointing=True)
+    kwargs = build_peft_kwargs(
+        _spec(lora=lora), gradient_checkpointing=True, unfrozen_modules=["lm_head", "model.norm"]
+    )
     assert kwargs["use_dora"] is True
     assert kwargs["init_lora_weights"] == "pissa"
-    assert kwargs["modules_to_save"] == ["embed_tokens", "lm_head"]
+    # unfreeze_modules join modules_to_save, the only place a LoRA adapter keeps full modules.
+    assert kwargs["modules_to_save"] == ["embed_tokens", "lm_head", "model.norm"]
     assert kwargs["layers_to_transform"] == [0, 1, 2]
     assert kwargs["layer_replication"] == [[0, 16], [8, 24]]
     assert kwargs["loftq_config"] == {"loftq_bits": 4}
