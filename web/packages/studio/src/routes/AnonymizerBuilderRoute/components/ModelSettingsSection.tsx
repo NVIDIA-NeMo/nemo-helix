@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledSearchableSelect } from '@nemo/common/src/components/form/ControlledSearchableSelect';
-import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
+import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
+import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
+import { hasModelProvider } from '@nemo/common/src/utils/models';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
-import { Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Divider, FormField, Stack, Text } from '@nvidia/foundations-react-core';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   activeRolesForStrategy,
   ANONYMIZER_PARAM_METADATA,
@@ -12,25 +15,62 @@ import {
   DETECTOR_MODEL_HINT,
   DETECTOR_ROLE,
   ROLE_LABELS,
-  supportsSamplingParams,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
 import { useAnonymizerModels } from '@studio/routes/AnonymizerBuilderRoute/useAnonymizerModels';
 import { detectorOptions } from '@studio/routes/AnonymizerBuilderRoute/utils';
-import { useMemo, useState, type FC } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useMemo, type FC } from 'react';
+import { useController, useFormContext, useWatch } from 'react-hook-form';
+
+interface RoleModelSelectProps {
+  role: string;
+  applyModel: (role: string, id: string) => void;
+}
+
+const RoleModelSelect: FC<RoleModelSelectProps> = ({ role, applyModel }) => {
+  const { control, setValue } = useFormContext<AnonymizerFormData>();
+  const workspace = useWorkspaceFromPath();
+  const { field, fieldState } = useController({ control, name: `roleModels.${role}.modelId` });
+  const params = useWatch({ control, name: `roleModels.${role}.params` });
+  const value = useMemo(() => (field.value ? { model: field.value } : null), [field.value]);
+  const error = fieldState.error?.message;
+
+  const handleValueChange = (selection: ModelSelection) => {
+    field.onChange(selection.model);
+    applyModel(role, selection.model);
+  };
+
+  return (
+    <FormField slotLabel="Model" required slotError={error} status={error ? 'error' : undefined}>
+      <WorkspaceModelSelect
+        workspace={workspace}
+        value={value}
+        onValueChange={handleValueChange}
+        include={hasModelProvider}
+        hideAdapters
+        placeholder="Select a model"
+        fullWidth
+        dropdownSide="bottom"
+        aria-label={ROLE_LABELS[role] ?? role}
+        showParams
+        paramsFieldMetadata={ANONYMIZER_PARAM_METADATA}
+        inferenceParams={params as Partial<InferenceParams>}
+        onInferenceParamsChange={(next) =>
+          setValue(`roleModels.${role}.params`, next as Record<string, unknown>)
+        }
+      />
+    </FormField>
+  );
+};
 
 /**
- * Sampling roles keep the standalone ParamsDropdown rather than ModelSelectV2's integrated params:
- * their options come from the providers' served models, since the job sends each model's served
- * name, and the shared picker's catalogue search does not carry it. The entity detector also lists
- * a built-in GLiNER2 option that is not a model.
+ * The entity detector keeps a plain select: it lists a built-in GLiNER2 option that is not a model
+ * and groups suggested NER models first. The job sends each model's served name, so every pick
+ * goes through `applyModel`, which resolves it from the providers' served models.
  */
 export const ModelSettingsSection: FC = () => {
-  const { control, setValue } = useFormContext<AnonymizerFormData>();
+  const { control } = useFormContext<AnonymizerFormData>();
   const strategy = useWatch({ control, name: 'strategy' });
-  const roleModelsValue = useWatch({ control, name: 'roleModels' });
-  const [openParamsRole, setOpenParamsRole] = useState<string | null>(null);
 
   const roles = useMemo(() => activeRolesForStrategy(strategy), [strategy]);
   const { models, items, isLoading, applyModel } = useAnonymizerModels();
@@ -41,42 +81,31 @@ export const ModelSettingsSection: FC = () => {
     <Stack gap="density-2xl">
       {roles.map((role, index) => (
         <Stack key={role} gap="density-lg" data-testid={`role-settings-${role}`}>
-          {index > 0 && <Divider orientation="horizontal" width="small" />}
+          {index > 0 ? <Divider orientation="horizontal" width="small" /> : null}
           <Text kind="label/bold/lg">{ROLE_LABELS[role] ?? role}</Text>
-          <Flex gap="density-md" align="end">
-            <div className="grow">
-              <ControlledSearchableSelect
-                aria-label={ROLE_LABELS[role] ?? role}
-                options={role === DETECTOR_ROLE ? detectorItems : items}
-                groupLabels={role === DETECTOR_ROLE ? DETECTOR_GROUP_LABELS : undefined}
-                isLoading={isLoading}
-                triggerPlaceholder="Select a model"
-                searchPlaceholder="Search models..."
-                emptyMessage={isLoading ? 'Loading models...' : 'No models in this workspace.'}
-                onChange={(value) => applyModel(role, value)}
-                useControllerProps={{
-                  name: `roleModels.${role}.modelId`,
-                  control,
-                }}
-                formFieldProps={{
-                  slotLabel: 'Model',
-                  required: true,
-                  ...(role === DETECTOR_ROLE && { slotInfo: DETECTOR_MODEL_HINT }),
-                }}
-              />
-            </div>
-            {supportsSamplingParams(role) && (
-              <ParamsDropdown
-                open={openParamsRole === role}
-                onOpenChange={(next) => setOpenParamsRole(next ? role : null)}
-                inferenceParams={roleModelsValue?.[role]?.params as Partial<InferenceParams>}
-                onInferenceParamsChange={(params) =>
-                  setValue(`roleModels.${role}.params`, params as Record<string, unknown>)
-                }
-                fieldMetadata={ANONYMIZER_PARAM_METADATA}
-              />
-            )}
-          </Flex>
+          {role === DETECTOR_ROLE ? (
+            <ControlledSearchableSelect
+              aria-label={ROLE_LABELS[role] ?? role}
+              options={detectorItems}
+              groupLabels={DETECTOR_GROUP_LABELS}
+              isLoading={isLoading}
+              triggerPlaceholder="Select a model"
+              searchPlaceholder="Search models..."
+              emptyMessage={isLoading ? 'Loading models...' : 'No models in this workspace.'}
+              onChange={(value) => applyModel(role, value)}
+              useControllerProps={{
+                name: `roleModels.${role}.modelId`,
+                control,
+              }}
+              formFieldProps={{
+                slotLabel: 'Model',
+                required: true,
+                slotInfo: DETECTOR_MODEL_HINT,
+              }}
+            />
+          ) : (
+            <RoleModelSelect role={role} applyModel={applyModel} />
+          )}
         </Stack>
       ))}
     </Stack>
