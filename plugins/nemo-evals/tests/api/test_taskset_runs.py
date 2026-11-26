@@ -31,6 +31,7 @@ from nemo_helix_plugin.entities.types import Entity
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 PATH = "/apis/evals/v2/workspaces/default/agent-evaluate/runs"
+DRY_RUN = {"dry_run": "true"}
 
 
 @pytest.fixture
@@ -99,9 +100,10 @@ async def test_taskset_run_timeout_validation_shape_matches_invalid_body(
     authorizer.assert_not_awaited()
 
 
-async def test_taskset_run_source_denied(run_client, request_body, authorizer, files_client, files_service):
+@pytest.mark.parametrize("params", [None, DRY_RUN], ids=["submit", "dry run"])
+async def test_taskset_run_source_denied(run_client, request_body, authorizer, files_client, files_service, params):
     authorizer.side_effect = HTTPException(status_code=403, detail="source denied")
-    response = await run_client.post(PATH, json=request_body)
+    response = await run_client.post(PATH, params=params, json=request_body)
     assert response.status_code == 403 and response.json()["detail"] == "source denied"
     assert not files_service.calls
 
@@ -276,11 +278,12 @@ async def test_taskset_run_lost_create_reply_through_production_store(
                 assert len(files_service.filesets) == 2
 
 
+@pytest.mark.parametrize("params", [None, DRY_RUN], ids=["submit", "dry run"])
 async def test_a_task_without_images_is_422_and_stores_no_run(
-    run_client, published, request_body, run_preparer, entity_store, fake_task_jobs
+    run_client, published, request_body, run_preparer, entity_store, fake_task_jobs, params
 ):
     run_preparer.fail = {"task-1": "image_unavailable"}
-    response = await run_client.post(PATH, json=request_body)
+    response = await run_client.post(PATH, params=params, json=request_body)
     assert response.status_code == 422, response.text
     assert response.json()["detail"].startswith("tasks without images: task-1: image_unavailable")
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
@@ -550,3 +553,60 @@ async def test_archive_read_failure_preserves_denial_or_retryable_unavailability
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
     job_creation.assert_not_awaited()
     assert files_service.calls and all(operation == "download" for operation, _, _ in files_service.calls)
+
+
+# --- Dry runs ----------------------------------------------------------------------------------------------
+
+
+def _writes(files_service) -> list[tuple[str, str, str]]:
+    return [call for call in files_service.calls if call[0] not in {"get", "download"}]
+
+
+async def test_a_dry_run_checks_like_a_submission_and_accepts_nothing(
+    run_client, published, request_body, entity_store, files_service, fake_evaluations
+):
+    body = request_body | {"publication": {"intake": {"experiment": "swe-agent-tuning"}}}
+    _, revision = published
+
+    response = await run_client.post(PATH, params=DRY_RUN, json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"taskset": f"default/suite#{revision.content_hash}", "task_count": 1, "warnings": []}
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert not _writes(files_service)  # no plan
+    assert not fake_evaluations.created
+    assert (await run_client.post(PATH, json=body)).status_code == 201
+
+
+async def test_a_dry_run_copies_no_agent_files(run_client, published, request_body, registered_agent, files_service):
+    response = await run_client.post(PATH, params=DRY_RUN, json=request_body)
+
+    assert response.status_code == 200, response.text
+    assert not _writes(files_service)
+
+
+async def test_a_dry_run_checks_the_caller_may_store_the_plan(run_client, published, request_body, authorizer):
+    async def authorize(method: str, path: str) -> None:
+        if (method, path) == ("POST", "/apis/files/v2/workspaces/default/filesets"):
+            raise HTTPException(status_code=403, detail="may not create filesets")
+
+    authorizer.side_effect = authorize
+
+    response = await run_client.post(PATH, params=DRY_RUN, json=request_body)
+
+    assert (response.status_code, response.json()["detail"]) == (403, "may not create filesets")
+
+
+async def test_a_dry_run_answers_for_its_idempotency_key_as_a_submission_would(run_client, published, request_body):
+    first = (await run_client.post(PATH, json=request_body)).json()
+
+    again = await run_client.post(PATH, params=DRY_RUN, json=request_body)
+    other_key = await run_client.post(PATH, params=DRY_RUN, json=request_body | {"idempotency_key": "ci-run-2"})
+    conflict = await run_client.post(PATH, params=DRY_RUN, json=request_body | {"timeout_seconds": 1})
+
+    assert again.status_code == 200, again.text
+    assert again.json()["warnings"] == [
+        f"submitting returns run {first['run_id']}, which this idempotency_key already accepted"
+    ]
+    assert other_key.json()["warnings"] == [f"{first['run_id']} is already running {first['taskset_ref']}"]
+    assert conflict.status_code == 409, conflict.text

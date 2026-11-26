@@ -413,6 +413,21 @@ class TasksetRunSubmitResponse(TasksetRunStatus):
     )
 
 
+class TasksetRunDryRunResponse(BaseModel):
+    """A submission's dry run that passed: what submitting it would run. Nothing was accepted or written."""
+
+    taskset: str = Field(description="The taskset revision the run would pin, as `workspace/name#digest`.")
+    task_count: int = Field(ge=1, description="The tasks the run would run, one task Job each.")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What submitting would warn about: this caller's active runs on the same taskset revision, a run "
+            "this idempotency_key already accepted, sandbox defaults applied, and what tasks ask for that the run "
+            "does differently."
+        ),
+    )
+
+
 def to_status(run: TasksetRunEntity) -> TasksetRunStatus:
     """Project stored domain fields into the public run status.
 

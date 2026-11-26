@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import typer
 from click import Group
-from nemo_evals.api.taskset_run_schemas import TasksetRunInput
+from nemo_evals.api.taskset_run_schemas import TasksetRunDryRunResponse, TasksetRunInput
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.runs_cli import add_runs_commands, run_request
 from nemo_evals.tasksets_cli import add_tasksets_commands
@@ -42,13 +42,14 @@ def _json_blocks(kind: str) -> list[dict]:
     """The guide's JSON blocks of one kind, told apart by their keys.
 
     ``request``: a whole request file (``"spec"``); ``closed_book``: the closed-book target fragment; ``sizing``: the
-    request fragment that sizes sandboxes and limits concurrency.
+    request fragment that sizes sandboxes and limits concurrency; ``dry_run_reply``: what a passing dry run returns.
     """
     blocks = _blocks(GUIDE, "json")
     kinds = {
         "request": lambda block: '"spec"' in block and '"closed_book"' not in block,
         "closed_book": lambda block: '"closed_book"' in block,
-        "sizing": lambda block: '"spec"' not in block and '"closed_book"' not in block,
+        "sizing": lambda block: '"execution"' in block and '"spec"' not in block,
+        "dry_run_reply": lambda block: '"task_count"' in block,
     }
     return [json.loads(block) for block in blocks if kinds[kind](block)]
 
@@ -113,6 +114,11 @@ def test_guide_sizing_fragment_is_valid_in_a_request() -> None:
     assert request.execution.sandbox is not None
     assert request.execution.max_concurrent_task_jobs == 5
     assert request.timeout_seconds == 7200
+
+
+def test_guide_dry_run_reply_is_what_a_dry_run_returns() -> None:
+    (reply,) = _json_blocks("dry_run_reply")
+    assert TasksetRunDryRunResponse.model_validate(reply).task_count == 20
 
 
 def test_guide_closed_book_fragment_makes_the_openhands_request_closed_book(tmp_path: Path) -> None:

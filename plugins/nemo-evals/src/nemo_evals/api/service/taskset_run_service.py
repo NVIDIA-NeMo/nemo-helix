@@ -18,6 +18,7 @@ from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerable
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
+    TasksetRunDryRunResponse,
     TasksetRunInput,
     TasksetRunStatus,
     TasksetRunSubmitResponse,
@@ -196,6 +197,18 @@ async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspac
     except (NemoEntityNotFoundError, RevisionNotFoundError) as exc:
         raise TasksetRunResolutionError(str(exc)) from exc
     return TasksetRef(f"{source_workspace}/{name}#{revision.content_hash}")
+
+
+def _never_run(write: object) -> None:
+    """Take a deferred write and drop it: a dry run writes nothing."""
+    del write
+
+
+def _spec_notices(spec: AgentEvalSpec, policy: ResolvedHarborSandboxPolicy) -> list[str]:
+    """What the resolved tasks ask for that the run does differently, as submit reports it."""
+    configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+    notices = [defaulted_resources_notice(configs, policy), open_book_notice(spec.target, configs)]
+    return [notice for notice in notices if notice is not None]
 
 
 class TasksetRunService:
@@ -493,6 +506,37 @@ class TasksetRunService:
             ValueError: ``req`` has no idempotency_key.
             Exception: Unexpected storage and integrity failures propagate.
         """
+        outcome = await self._submit(req, workspace=workspace, caller=caller, dry_run=False)
+        assert isinstance(outcome, SubmitOutcome)
+        return outcome
+
+    async def check(self, req: TasksetRunInput, *, workspace: str, caller: str) -> TasksetRunDryRunResponse:
+        """Check a submission as submit does, and stop before each of its writes: a dry run.
+
+        Nothing is written: no agent files snapshot, agent layer, Intake Evaluation, plan or run. Where a write
+        would be refused as the caller, its permission is checked instead. Agent layers can't refuse a submit,
+        so a dry run loses nothing by skipping them. A request this ``idempotency_key`` already accepted isn't
+        returned, as submit would; it's checked again, with a warning that submitting returns that run.
+
+        Args:
+            req: As for :meth:`submit`.
+            workspace: Workspace the run would belong to.
+            caller: Effective principal ID, as for :meth:`submit`.
+
+        Returns:
+            The pinned taskset revision, the task count, and the warnings submitting would give.
+
+        Raises:
+            Exception: Whatever :meth:`submit` raises for the same request, before it would accept the run.
+        """
+        preview = await self._submit(req, workspace=workspace, caller=caller, dry_run=True)
+        assert isinstance(preview, TasksetRunDryRunResponse)
+        return preview
+
+    async def _submit(
+        self, req: TasksetRunInput, *, workspace: str, caller: str, dry_run: bool
+    ) -> SubmitOutcome | TasksetRunDryRunResponse:
+        """Submit, or with ``dry_run`` check: one path, so a dry run checks whatever submit checks."""
         caller = normalize_run_caller(caller)
         # These checks run before the replay lookup on purpose: a lowered timeout maximum, a removed dispatcher
         # or sandbox profile, disabled runs or revoked access refuse a retry as they would a new request.
@@ -508,10 +552,13 @@ class TasksetRunService:
             raise ValueError("submit needs an idempotency_key; the route generates one when the caller omits it")
         run_id = derive_run_id(workspace, caller, req.idempotency_key)
         replay = await self._store.replay(workspace, run_id, digest)
+        notices: list[str] = []
         if replay is not None:
-            return SubmitOutcome(TasksetRunSubmitResponse(**to_status(replay).model_dump()), created=False)
+            if not dry_run:
+                return SubmitOutcome(TasksetRunSubmitResponse(**to_status(replay).model_dump()), created=False)
+            notices.append(f"submitting returns run {replay.name}, which this idempotency_key already accepted")
 
-        pinned, spec = await self._resolve(req, workspace)
+        pinned, spec = await self._resolve(req, workspace, dry_run=dry_run)
         snapshot = registered_agent_files_receipt(spec.target)
         acceptance_started = False
         try:
@@ -521,6 +568,15 @@ class TasksetRunService:
                 raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
+            if dry_run:
+                # Nothing below checks anything a write wouldn't, so a dry run stops here.
+                await self._authorize_plan(workspace, run_id)
+                active = await self._duplicate_warnings(workspace, pinned.root, run_id, caller)
+                return TasksetRunDryRunResponse(
+                    taskset=pinned.root,
+                    task_count=len(spec.tasks),
+                    warnings=[*notices, *active, *task_notices, *_spec_notices(spec, policy)],
+                )
             # The run's members wait in image_preparing for their layers, while the ones not ready yet are built.
             agent_layers = await self._start_agent_layers(spec, harbor, prepared, timeout=timeout)
             plan = TasksetRunPlan(
@@ -539,7 +595,7 @@ class TasksetRunService:
             )
             # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
             # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
-            notices = await self._ensure_run_evaluation(plan) if intake is not None else []
+            notices += await self._ensure_run_evaluation(plan) if intake is not None else []
             notices += task_notices
             # Until its first task gets a slot, the run's deadlines count the queue timeout from acceptance; the
             # run controller restarts them from that slot with the execution budget (TasksetRunStore.start).
@@ -570,13 +626,13 @@ class TasksetRunService:
             # Even a subsequent absent lookup cannot prove a create did not commit.
             raise
 
-        warnings = await self._duplicate_warnings(result.run, caller) if result.created else []
-        configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
-        if (resources := defaulted_resources_notice(configs, policy)) is not None:
-            notices.append(resources)
-        if (open_book := open_book_notice(spec.target, configs)) is not None:
-            notices.append(open_book)
-        status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=[*warnings, *notices])
+        run = result.run
+        warnings = (
+            await self._duplicate_warnings(run.workspace, run.taskset_ref, run.name, caller) if result.created else []
+        )
+        status = TasksetRunSubmitResponse(
+            **to_status(run).model_dump(), warnings=[*warnings, *notices, *_spec_notices(spec, policy)]
+        )
         return SubmitOutcome(status, created=result.created)
 
     def _default_dispatcher_image(self) -> str:
@@ -765,12 +821,15 @@ class TasksetRunService:
             raise RunEvaluationError(plan.run_id, f"creating its Intake Evaluation failed: {exc}") from exc
         return [f"Intake: Evaluation {plan.run_id} in Experiment {plan.intake.experiment}"]
 
-    async def _resolve(self, req: TasksetRunInput, workspace: str) -> tuple[TasksetRef, AgentEvalSpec]:
+    async def _resolve(
+        self, req: TasksetRunInput, workspace: str, *, dry_run: bool = False
+    ) -> tuple[TasksetRef, AgentEvalSpec]:
         """Pin before resolving so a concurrent publication cannot replace task members.
 
         Args:
             req: Request whose logical digest has already been computed.
             workspace: Default workspace for unqualified inputs.
+            dry_run: Defer resolution's writes, a registered agent's files snapshot, and never run them.
 
         Returns:
             Verified taskset digest reference and existing resolved evaluation spec.
@@ -792,6 +851,7 @@ class TasksetRunService:
                 is_local=False,
                 # The resolver reads with service credentials; check each nested source as the caller first.
                 authorize=remember_allowed(self._authorizer),
+                defer=_never_run if dry_run else None,
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -801,11 +861,13 @@ class TasksetRunService:
             raise TypeError("AgentEvalJob.to_spec returned an unexpected spec type")
         return pinned, spec
 
-    async def _duplicate_warnings(self, run: TasksetRunEntity, caller: str) -> list[str]:
+    async def _duplicate_warnings(self, workspace: str, taskset_ref: str, run_id: str, caller: str) -> list[str]:
         """Find advisory overlaps without allowing a lookup failure to undo acceptance.
 
         Args:
-            run: Newly accepted authoritative record, including its pinned revision.
+            workspace: Workspace of the run.
+            taskset_ref: The run's pinned taskset revision.
+            run_id: The run, which isn't reported as overlapping itself.
             caller: Normalized creator identity used by the run store's filter.
 
         Returns:
@@ -813,11 +875,21 @@ class TasksetRunService:
             list when lookup fails. Ordinary failures are logged.
         """
         try:
-            active = await self._store.list_active(run.workspace, caller, run.taskset_ref)
-            return [f"{other.name} is already running {run.taskset_ref}" for other in active if other.name != run.name]
+            active = await self._store.list_active(workspace, caller, taskset_ref)
+            return [f"{other.name} is already running {taskset_ref}" for other in active if other.name != run_id]
         except Exception:
-            logger.warning("Failed to look up overlapping taskset runs for %s", run.name, exc_info=True)
+            logger.warning("Failed to look up overlapping taskset runs for %s", run_id, exc_info=True)
             return []
+
+    async def _authorize_plan(self, workspace: str, run_id: str) -> None:
+        """Check the caller may store the run's plan, as submit does with the caller's client.
+
+        Only a dry run calls this: it stores no plan, so the write's own check never runs.
+        """
+        filesets = f"/apis/files/v2/workspaces/{quote(workspace, safe='')}/filesets"
+        await self._authorizer("POST", filesets)
+        # One representative plan FileSet: the platform authorizes file writes per workspace collection.
+        await self._authorizer("PUT", f"{filesets}/{quote(run_id, safe='')}-plan/-/plan.json")
 
     async def _authorize(self, req: TasksetRunInput, workspace: str) -> None:
         """Check source reads using the caller's grants before service-backed resolution.

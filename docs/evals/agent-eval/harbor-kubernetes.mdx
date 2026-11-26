@@ -630,6 +630,32 @@ nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --agent oracle \
 - You can choose `--idempotency-key` up front on the initial submit and reuse it for recovery.
 - The key doesn't undo task uploads or image builds that ran before the run was accepted.
 
+## Check a run before submitting
+
+A dry run checks a run the way submit does, then stops before accepting it. Send the submit request with
+`?dry_run=true`:
+
+```bash
+curl -X POST "$NHX_BASE_URL/apis/evals/v2/workspaces/$WS/agent-evaluate/runs?dry_run=true" \
+  -H "Content-Type: application/json" -d @openhands-run.json
+```
+
+- **It runs every check submit runs:** your access to the taskset, its tasks and the agent, the
+  execution settings, the agent and model, and that every task's images are built. It also checks that
+  you may store the run's plan in the workspace.
+- **It writes nothing:** no run, no plan, no Intake Evaluation, no agent layer, and no copy of a
+  registered agent's files.
+- **When every check passes,** it returns 200 with the taskset revision the run would pin, its task
+  count, and the warnings submit would give:
+
+  ```json
+  {"taskset": "default/swe-tasks#3f9c…", "task_count": 20, "warnings": []}
+  ```
+
+- **Otherwise it returns the error submit would,** such as 422 for a task whose images aren't built, or
+  409 for an idempotency key used for a different request. A key that already started this same run
+  isn't an error: the dry run checks the request again and warns that submitting returns that run.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

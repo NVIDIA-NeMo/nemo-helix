@@ -8,6 +8,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
@@ -19,6 +20,7 @@ from nemo_evals.api.service.taskset_run_service import (
     utc_now,
 )
 from nemo_evals.api.taskset_run_schemas import (
+    TasksetRunDryRunResponse,
     TasksetRunInput,
     TasksetRunStatus,
     TasksetRunSubmitResponse,
@@ -59,6 +61,13 @@ class TasksetRunPerms(PermissionSet, namespace="evaluator.taskset-runs"):
 
 router = APIRouter()
 
+_DRY_RUN_DESCRIPTION = (
+    "Check the submission without accepting it. Every check submit runs is run, and nothing is written: no run, "
+    "plan, Intake Evaluation, agent layer or copy of a registered agent's files. If every check passes, returns 200 "
+    "with the taskset revision the run would pin, its task count and the warnings submitting would give. Otherwise "
+    "returns the error submit would."
+)
+
 
 @router.post(
     "/agent-evaluate/runs",
@@ -66,7 +75,10 @@ router = APIRouter()
     response_model=TasksetRunSubmitResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        200: {"model": TasksetRunSubmitResponse, "description": "Replay an identical existing run."},
+        200: {
+            "model": TasksetRunSubmitResponse | TasksetRunDryRunResponse,
+            "description": "Replay an identical existing run, or, with dry_run=true, what submitting would run.",
+        },
         201: {"description": "Accept a new run with frozen taskset and agent inputs."},
         403: {"description": "Caller lacks permission to access a source or run resource."},
         409: {
@@ -91,9 +103,10 @@ async def submit_taskset_run(
     workspace: str,
     req: TasksetRunInput,
     response: Response,
+    dry_run: bool = Query(default=False, description=_DRY_RUN_DESCRIPTION),
     caller: str = Depends(get_effective_principal_id),
     service: TasksetRunService = Depends(get_taskset_run_service),
-) -> TasksetRunSubmitResponse:
+) -> TasksetRunSubmitResponse | JSONResponse:
     """Freeze and accept a Harbor run, returning its original status on a keyed retry.
 
     The caller must be able to read every source: the taskset, its member tasks, their metrics and
@@ -105,13 +118,15 @@ async def submit_taskset_run(
         workspace: Workspace that owns the run.
         req: Validated stored Harbor taskset and execution inputs.
         response: HTTP response whose status distinguishes acceptance from replay.
+        dry_run: Check the submission as submit would, and accept and write nothing.
         caller: Effective authenticated principal, supplied by the platform dependency.
         service: Caller-delegated request-scoped acceptance service.
 
     Returns:
         Public run status with advisory notices; 201 for acceptance or 200 for replay. Submission starts
         no task Jobs (the run controller does) and no image builds: a task whose image isn't built yet is
-        rejected (422). A keyed replay returns the stored status.
+        rejected (422). A keyed replay returns the stored status. With ``dry_run``, 200 with what submitting
+        would run (:class:`TasksetRunDryRunResponse`).
 
     Raises:
         RequestValidationError: The execution budget exceeds the operator maximum.
@@ -127,6 +142,10 @@ async def submit_taskset_run(
     key = req.idempotency_key or secrets.token_hex(16)
     req = req.model_copy(update={"idempotency_key": key})
     try:
+        if dry_run:
+            preview = await service.check(req, workspace=workspace, caller=caller)
+            # Not the route's response model: a dry run accepts no run, so it has no run status to return.
+            return JSONResponse(preview.model_dump(mode="json"), status_code=status.HTTP_200_OK)
         outcome = await service.submit(req, workspace=workspace, caller=caller)
     except TimeoutAboveMaximumError as exc:
         raise RequestValidationError(
