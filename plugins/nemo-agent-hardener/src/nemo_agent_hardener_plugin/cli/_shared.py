@@ -242,6 +242,10 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]], sto
             continue
         if verdict.get("ok"):
             continue
+        if verdict.get("reason") == "provider_error":
+            # The key was accepted and the provider is busy (429/5xx); the run waits that out, as submit does.
+            typer.secho(f"  ! the {group} model endpoint is busy ({verdict.get('detail')}); storing it.", fg="yellow")
+            continue
         available = ", ".join(json_string_list(verdict.get("available"))[:10]) or "none"
         typer.secho(
             f"Error: the {group} model {fields.get('model')!r} is not usable at {base_url} "

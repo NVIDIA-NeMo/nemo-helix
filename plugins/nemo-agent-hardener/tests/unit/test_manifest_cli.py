@@ -395,6 +395,20 @@ def test_cli_init_rejects_an_unusable_model(monkeypatch: pytest.MonkeyPatch) -> 
     assert "not usable" in result.output
 
 
+def test_cli_init_stores_a_model_whose_endpoint_is_only_busy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    created: list[dict] = []
+    manifests = _manifests(ok=True, create=lambda **kw: created.append(kw) or {"name": "react-agent"})
+    manifests.validate_model = lambda **_k: {"ok": False, "reason": "provider_error", "detail": "HTTP 429"}
+    app = _patch_cli(cli_main, monkeypatch, manifests)
+    result = CliRunner().invoke(app, ["init", "--agent", "react-agent", "--attack-model", "busy/model"])
+
+    assert result.exit_code == 0, result.output
+    assert "busy" in result.output
+    assert created
+
+
 @pytest.mark.parametrize("image", ["reg.example/victim:1", ""])
 def test_manifest_set_records_or_clears_the_victim_image(monkeypatch: pytest.MonkeyPatch, image: str) -> None:
     from nemo_agent_hardener_plugin.cli import main as cli_main
