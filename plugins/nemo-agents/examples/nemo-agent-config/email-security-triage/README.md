@@ -17,7 +17,19 @@ labeled data.
 
 - NeMo Helix running locally (see [SETUP.md](../../../../../SETUP.md)); `export NHX_BASE_URL=http://localhost:8080`.
 - `export NVIDIA_API_KEY=<your key>`.
-- Dependencies synced from the repo root: `uv sync --all-packages`.
+- The DeepAgents harness installed in the **platform/service Python environment** that runs subprocess deployments, not just the environment running your CLI. The adapter is included in `nemo-helix[all]`, but its third-party harness is optional. For a published tool install, include both extras:
+
+  ```bash
+  uv tool install "nemo-helix[all,nemo-agents-plugin-deepagents]"
+  ```
+
+  For a source checkout, sync from the repo root with the harness extra:
+
+  ```bash
+  uv sync --frozen --all-packages --extra deepagents
+  ```
+
+  Restart running platform services after changing their environment. If the platform is remote, its operator must install the harness there; installing it only on the client is insufficient. A deployment reporting `running` does not verify that the harness can start on invocation.
 
 ## Step 1: Deploy the agent
 
