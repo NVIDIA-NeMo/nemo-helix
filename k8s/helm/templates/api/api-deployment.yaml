@@ -46,6 +46,32 @@ spec:
       serviceAccountName: {{ include "nhx-api.apiServiceAccountName" . }}
       securityContext:
         {{- include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext "globalIds" true) | nindent 8 }}
+      {{- if and .Values.api.fixVolumeOwnership (eq ( include "nhx-core.localStorageEnabled" . ) "true") }}
+      {{- $podSecurityContext := include "nemo-common.podSecurityContext" (dict "global" .Values.podSecurityContext "local" .Values.api.podSecurityContext "globalIds" true) | fromYaml }}
+      initContainers:
+        - name: fix-volume-ownership
+          image: {{ .Values.core.storage.volumePermissionsImage | quote }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command:
+            - chown
+            - -R
+            - {{ printf "%v:%v" (required "api.fixVolumeOwnership needs runAsUser and runAsGroup on the API pod security context" $podSecurityContext.runAsUser) (required "api.fixVolumeOwnership needs runAsUser and runAsGroup on the API pod security context" $podSecurityContext.runAsGroup) | quote }}
+            - {{ include "nhx-core.localStoragePath" . | quote }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: files-storage
+              mountPath: {{ include "nhx-core.localStoragePath" . }}
+      {{- end }}
       containers:
         - name: nhx-api
           securityContext:
