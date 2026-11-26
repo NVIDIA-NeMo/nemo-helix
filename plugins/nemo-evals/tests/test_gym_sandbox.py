@@ -1578,7 +1578,11 @@ async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
+@pytest.mark.parametrize(
+    "job_id",
+    [None, "", SessionBackedGymRunner.LOCAL_JOB_ID],
+    ids=["no-job-id", "empty-job-id", "job-named-like-the-local-label"],
+)
 async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
     monkeypatch: pytest.MonkeyPatch, reaps: list[tuple[str, dict[str, object]]], job_id: str | None
 ) -> None:
