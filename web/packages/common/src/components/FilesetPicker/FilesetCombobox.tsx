@@ -73,16 +73,20 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   const loaded = value ? filesets.find((fileset) => getEntityReference(fileset) === value) : null;
   const pickedMatches = picked && getEntityReference(picked) === value ? picked : null;
   const { workspace: valueWorkspace, name: valueName } = getPartsFromReference(value ?? '');
-  // Remember a preset selection once the results include it, so a later search that hides it
-  // doesn't trigger a lookup.
+  // Remember the selection once the results include it, so it can still be shown while a
+  // search hides it.
   if (loaded && loaded !== picked) setPicked(loaded);
 
+  // Look the selection up only when the unfiltered list doesn't contain it. A search hiding it
+  // is not a reason to refetch; a refreshed list that dropped it is.
   const { data: retrieved, error: lookupError } = useQuery({
     queryKey: getFilesetQueryKey(valueWorkspace, valueName),
     queryFn: ({ signal }) => retrieveFileset(valueWorkspace, valueName, signal),
-    enabled: Boolean(value && valueName && !isLoading && !loaded && !pickedMatches),
+    enabled: Boolean(value && valueName && !isLoading && !search && !loaded),
   });
-  const selected = loaded ?? pickedMatches ?? (retrieved && value ? retrieved : null);
+  // React Query keeps the last good result after a failed refetch; a 404 must still win.
+  const notFound = !loaded && isNotFoundError(lookupError);
+  const selected = loaded ?? (notFound ? null : ((value ? retrieved : null) ?? pickedMatches));
   const selectionError: FilesetSelectionError | null =
     value && !selected && lookupError
       ? isNotFoundError(lookupError)

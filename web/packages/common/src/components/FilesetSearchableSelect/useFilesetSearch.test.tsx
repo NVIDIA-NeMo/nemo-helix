@@ -171,6 +171,21 @@ describe('useFilesetSearch', () => {
     expect(filesListFilesets).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps an explicit empty description as an exact filter', async () => {
+    vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
+
+    const { result } = renderHook(() => useFilesetSearch({ workspace: 'ws', description: '' }), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.filesets).toHaveLength(1));
+    expect(filesListFilesets).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({ filter: withOperators({ description: { $eq: '' } }) }),
+      expect.anything()
+    );
+  });
+
   it('sends no filter when unfiltered, so every purpose is listed', async () => {
     vi.mocked(filesListFilesets).mockResolvedValue(page(['a'], 1, 1));
 

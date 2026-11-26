@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getFilesetQueryKey,
+  getFilesetsQueryKey,
+} from '@nemo/common/src/api/filesets/filesetPages';
 import { FilesetPicker, type FilesetPickerProps } from '@nemo/common/src/components/FilesetPicker';
 import { FilesetPickerCore } from '@nemo/common/src/components/FilesetPicker/FilesetPickerCore';
 import { filesListFilesets, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
@@ -248,5 +252,48 @@ describe('FilesetPicker', () => {
     await screen.findByText('No filesets match "zzz" — try a different name');
 
     expect(filesRetrieveFileset).not.toHaveBeenCalled();
+  });
+
+  describe('when the selected fileset is deleted later', () => {
+    const mountWithClient = (value: string) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <FilesetPicker workspace="default" value={value} onChange={vi.fn()} label="Dataset" />
+        </QueryClientProvider>
+      );
+      return queryClient;
+    };
+
+    it('reports it once a list refresh drops it', async () => {
+      vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('sft')]));
+      const client = mountWithClient('default/sft');
+      await waitFor(() =>
+        expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('sft')
+      );
+
+      vi.mocked(filesListFilesets).mockResolvedValue(listResponse([]));
+      await client.invalidateQueries({ queryKey: getFilesetsQueryKey('default') });
+
+      expect(
+        await screen.findByText('This fileset no longer exists. Select another one.')
+      ).toBeInTheDocument();
+    });
+
+    it('lets a 404 on refetch override the earlier lookup result', async () => {
+      vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('newer')]));
+      vi.mocked(filesRetrieveFileset).mockResolvedValue(fileset('older'));
+      const client = mountWithClient('default/older');
+      await waitFor(() =>
+        expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('older')
+      );
+
+      vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
+      await client.invalidateQueries({ queryKey: getFilesetQueryKey('default', 'older') });
+
+      expect(
+        await screen.findByText('This fileset no longer exists. Select another one.')
+      ).toBeInTheDocument();
+    });
   });
 });

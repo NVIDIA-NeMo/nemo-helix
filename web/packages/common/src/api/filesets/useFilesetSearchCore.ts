@@ -74,7 +74,7 @@ export const useFilesetSearchCore = ({
     const clauses = {
       ...(search ? { name: { $like: `%${search}%` } } : {}),
       ...purposeClause,
-      ...(description ? { description: { $eq: description } } : {}),
+      ...(description !== undefined ? { description: { $eq: description } } : {}),
     };
     return Object.keys(clauses).length
       ? withOperators<FilesListFilesetsParams['filter']>(clauses)
@@ -88,7 +88,7 @@ export const useFilesetSearchCore = ({
         'infinite',
         'newest',
         purposeKey || 'all',
-        description ?? 'any',
+        description ?? null,
         search,
         pageSize,
       ] as const,
