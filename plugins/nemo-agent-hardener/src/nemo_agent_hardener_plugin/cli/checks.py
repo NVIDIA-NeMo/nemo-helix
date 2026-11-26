@@ -18,13 +18,31 @@ from nemo_agent_hardener_plugin.config import INFERENCE_API_KEY_ENVVAR, AgentHar
 # The OpenShell gateway agent-hardener's `scripts/setup.sh` registers for the defender control plane.
 OPENSHELL_GATEWAY = "auto-defender"
 
+# The oldest OpenShell (CLI and gateway) agent-hardener runs against. 0.1.0 broke the gateway API and
+# the CLI: a 0.0.x gateway answers the jobs backend's sandbox calls with UNIMPLEMENTED, and a 0.0.x CLI
+# has no `provider profile update`. Both still report "Connected", so the version is checked explicitly.
+MIN_OPENSHELL_VERSION = (0, 1, 4)
+MIN_OPENSHELL_VERSION_TEXT = ".".join(map(str, MIN_OPENSHELL_VERSION))
+OPENSHELL_INSTALL_COMMAND = (
+    f"curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v{MIN_OPENSHELL_VERSION_TEXT}/install.sh "
+    f"| OPENSHELL_VERSION=v{MIN_OPENSHELL_VERSION_TEXT} sh"
+)
+# 0.1 is a breaking release, and the installer refuses to upgrade a 0.0.x install in place.
+_UPGRADE_HINT = (
+    f"upgrade to >= {MIN_OPENSHELL_VERSION_TEXT} (a 0.0.x install must be removed first, see the "
+    f"nemo-agent-hardener plugin README): {OPENSHELL_INSTALL_COMMAND}"
+)
+
 # Every mutating command gates on these probes, so the timeout is a ceiling for a *wedged* daemon,
 # not a budget for a healthy one — both answer in well under a second when up.
 PROBE_TIMEOUT_SECONDS = 5
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-# `openshell status` prints an aligned "  Status: Connected" row (color-coded, no JSON mode).
+# `openshell status` prints aligned "  Status: Connected" / "  Version: 0.1.4" rows (color-coded).
+# 0.0.x has no JSON mode, and these rows are what a too-old gateway still prints, so they are parsed.
 _STATUS_ROW = re.compile(r"^\s*Status:\s*(?P<value>.+?)\s*$", re.MULTILINE)
+_VERSION_ROW = re.compile(r"^\s*Version:\s*(?P<value>.+?)\s*$", re.MULTILINE)
+_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 # `scheme://user:password@host` in an index URL — the credentials Artifactory embeds in its
 # "Set Me Up" URLs. Group 1 keeps the scheme (and uv's optional `name=` prefix) intact.
 _URL_CREDENTIALS = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@")
@@ -53,13 +71,30 @@ def docker_ok() -> tuple[bool, str]:
     return True, "Docker daemon reachable."
 
 
-def openshell_gateway_ok() -> tuple[bool, str]:
-    """True if the OpenShell CLI reports the auto-defender gateway as Connected."""
+def openshell_cli_ok() -> tuple[bool, str]:
+    """True if the ``openshell`` CLI is at least :data:`MIN_OPENSHELL_VERSION`."""
     if which("openshell") is None:
-        return False, (
-            "openshell CLI not found — install it: "
-            "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
+        return False, f"openshell CLI not found — install it: {OPENSHELL_INSTALL_COMMAND}"
+    try:
+        proc = run(
+            ["openshell", "--version"], capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS, check=False
         )
+    except subprocess.TimeoutExpired:
+        return False, f"`openshell --version` timed out after {PROBE_TIMEOUT_SECONDS}s."
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"could not run `openshell --version`: {exc}"
+    version = parse_version(proc.stdout)
+    if proc.returncode != 0 or version is None:
+        return False, f"could not read the openshell CLI version — {_UPGRADE_HINT}"
+    if version < MIN_OPENSHELL_VERSION:
+        return False, f"openshell CLI is {_text(version)}, too old — {_UPGRADE_HINT}"
+    return True, f"openshell CLI {_text(version)} (>= {MIN_OPENSHELL_VERSION_TEXT})."
+
+
+def openshell_gateway_ok() -> tuple[bool, str]:
+    """True if the auto-defender gateway is Connected and at least :data:`MIN_OPENSHELL_VERSION`."""
+    if which("openshell") is None:
+        return False, f"openshell CLI not found — install it: {OPENSHELL_INSTALL_COMMAND}"
     try:
         proc = run(
             ["openshell", "status", "--gateway", OPENSHELL_GATEWAY],
@@ -73,10 +108,17 @@ def openshell_gateway_ok() -> tuple[bool, str]:
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"could not run `openshell status`: {exc}"
     status = gateway_status(proc.stdout)
-    if proc.returncode == 0 and status.casefold() == "connected":
-        return True, f"OpenShell gateway '{OPENSHELL_GATEWAY}' connected."
-    reported = f" (reported: {status})" if status else ""
-    return False, f"OpenShell gateway '{OPENSHELL_GATEWAY}' not connected{reported} — run `nemo agent-hardener setup`."
+    if proc.returncode != 0 or status.casefold() != "connected":
+        reported = f" (reported: {status})" if status else ""
+        return False, (
+            f"OpenShell gateway '{OPENSHELL_GATEWAY}' not connected{reported} — run `nemo agent-hardener setup`."
+        )
+    version = parse_version(_row(_VERSION_ROW, proc.stdout))
+    if version is None:
+        return False, f"OpenShell gateway '{OPENSHELL_GATEWAY}' connected but reported no version — {_UPGRADE_HINT}"
+    if version < MIN_OPENSHELL_VERSION:
+        return False, f"OpenShell gateway '{OPENSHELL_GATEWAY}' is {_text(version)}, too old — {_UPGRADE_HINT}"
+    return True, f"OpenShell gateway '{OPENSHELL_GATEWAY}' connected, version {_text(version)}."
 
 
 def gateway_status(stdout: str) -> str:
@@ -85,8 +127,25 @@ def gateway_status(stdout: str) -> str:
     Matching the whole field rather than substring-searching for "Connected" — otherwise
     ``Not Connected`` and ``Last Connected: ...`` both read as healthy.
     """
-    match = _STATUS_ROW.search(_ANSI.sub("", stdout))
+    return _row(_STATUS_ROW, stdout)
+
+
+def parse_version(text: str) -> tuple[int, int, int] | None:
+    """The first ``X.Y.Z`` in *text* (e.g. ``openshell 0.1.4``) as a comparable tuple; ``None`` if absent."""
+    match = _VERSION.search(text)
+    if match is None:
+        return None
+    major, minor, patch = (int(part) for part in match.groups())
+    return major, minor, patch
+
+
+def _row(pattern: re.Pattern[str], stdout: str) -> str:
+    match = pattern.search(_ANSI.sub("", stdout))
     return match.group("value").strip() if match else ""
+
+
+def _text(version: tuple[int, ...]) -> str:
+    return ".".join(map(str, version))
 
 
 def redact_index_url(index_url: str) -> str:
@@ -137,6 +196,7 @@ def run_checks(config: AgentHardenerConfig) -> list[CheckResult]:
         CheckResult("garak venv", *garak_venv_ok(config)),
         CheckResult("inference credential", *operator_env_ok(config)),
         CheckResult("docker", *docker_ok()),
+        CheckResult("openshell CLI", *openshell_cli_ok()),
         CheckResult("openshell gateway", *openshell_gateway_ok()),
     ]
 

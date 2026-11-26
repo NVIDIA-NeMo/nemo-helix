@@ -148,7 +148,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command()
     def doctor() -> None:
-        """Read-only preflight: agent-hardener venv, garak venv, Docker daemon, OpenShell gateway."""
+        """Read-only preflight: agent-hardener venv, garak venv, Docker daemon, OpenShell CLI and gateway versions."""
         config = AgentHardenerConfig.get()
         typer.echo("Agent Hardener preflight:")
         results = checks.run_checks(config)
