@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
@@ -16,7 +17,6 @@ from nemo_evals.taskset_runs.trials import (
     TrialCounts,
     TrialPhase,
     TrialProgress,
-    count_trials,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ATTEMPT_INDEX, NG_TASK_INDEX
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import rollout_failure
@@ -40,7 +40,10 @@ class _CountReporter:
         self._publish_timeout = publish_timeout
         self._planned = 0
         self._unfinished = TrialPhase.PENDING
-        self._finished: list[TrialProgress] = []
+        self._phases: Counter[TrialPhase] = Counter()
+        self._errors: Counter[str] = Counter()
+        self._rewarded = 0
+        self._reward_sum = 0.0
         self._settled = 0
         self._reports: list[asyncio.Task[None]] = []
 
@@ -55,17 +58,27 @@ class _CountReporter:
 
     def counts(self) -> TrialCounts:
         """The finished trials counted as recorded; the rest pending, or cancelled once the run stopped."""
-        counts = count_trials(self._finished)
+        phases = dict(self._phases)
         unfinished = self._planned - self._settled
-        if unfinished <= 0:
-            return counts
-        return counts.model_copy(
-            update={"total": counts.total + unfinished, "phases": {**counts.phases, self._unfinished: unfinished}}
+        if unfinished > 0:
+            phases[self._unfinished] = unfinished
+        return TrialCounts(
+            total=sum(phases.values()),
+            phases=phases,
+            rewarded=self._rewarded,
+            reward=self._reward_sum / self._rewarded if self._rewarded else None,
+            errors=dict(self._errors),
         )
 
     def _add(self, trials: Sequence[TrialProgress], *, settled: int) -> None:
         """Record finished ``trials``, of which ``settled`` each settle one planned trial."""
-        self._finished.extend(trials)
+        for trial in trials:
+            self._phases[trial.phase] += 1
+            if trial.phase is TrialPhase.ERRORED:
+                self._errors[trial.error_type or "error"] += 1
+            if trial.reward is not None:
+                self._rewarded += 1
+                self._reward_sum += trial.reward
         self._settled += settled
         self._report()
 

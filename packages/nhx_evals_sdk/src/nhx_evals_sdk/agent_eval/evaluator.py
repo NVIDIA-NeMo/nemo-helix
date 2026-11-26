@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 import nhx_evals_sdk.inference as inference
-from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, tell
+from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, gather_or_cancel, tell
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
 from nhx_evals_sdk.agent_eval.scores import (
     AgentEvalDiagnostic,
@@ -428,7 +428,7 @@ class AgentEvaluator:
 
             if self.progress is not None:
                 await tell(self.progress.planned(len(tasks)))
-            return await asyncio.gather(*(generate_reporting(index, task) for index, task in enumerate(tasks)))
+            return await gather_or_cancel(generate_reporting(index, task) for index, task in enumerate(tasks))
         finally:
             try:
                 if close_client is not None:

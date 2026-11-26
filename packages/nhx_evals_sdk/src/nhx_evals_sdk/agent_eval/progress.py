@@ -10,9 +10,10 @@ finishes, so the caller can show progress meanwhile.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Sequence
-from typing import Protocol
+from collections.abc import Awaitable, Coroutine, Iterable, Sequence
+from typing import Any, Protocol, TypeVar
 
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
 
@@ -41,3 +42,22 @@ async def tell(update: Awaitable[None]) -> None:
         await update
     except Exception:
         logger.warning("Could not report trial progress", exc_info=True)
+
+
+T = TypeVar("T")
+
+
+async def gather_or_cancel(coroutines: Iterable[Coroutine[Any, Any, T]]) -> list[T]:
+    """``asyncio.gather`` that, when one raises, cancels and awaits the rest before re-raising it.
+
+    Plain ``gather`` leaves the others running, so they could report a trial after the run said it stopped
+    and outlive the resources the run tears down.
+    """
+    tasks = [asyncio.ensure_future(coroutine) for coroutine in coroutines]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise

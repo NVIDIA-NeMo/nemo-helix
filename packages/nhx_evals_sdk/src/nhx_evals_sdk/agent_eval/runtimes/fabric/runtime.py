@@ -57,7 +57,7 @@ from time import sleep
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, tell
+from nhx_evals_sdk.agent_eval.progress import TrialProgressListener, gather_or_cancel, tell
 from nhx_evals_sdk.agent_eval.runtimes.fabric import _common
 from nhx_evals_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import (
@@ -334,7 +334,7 @@ class FabricAgentRuntime:
 
             if self._progress is not None:
                 await tell(self._progress.planned(len(tasks)))
-            return await asyncio.gather(*(run_one(index, task) for index, task in enumerate(tasks)))
+            return await gather_or_cancel(run_one(index, task) for index, task in enumerate(tasks))
         finally:
             try:
                 if self._sandbox is not None:
