@@ -15,7 +15,7 @@ import threading
 import time
 import urllib.error
 from atexit import register as register_atexit
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from os import kill
 from signal import signal as set_signal_handler
 from types import FrameType
@@ -417,8 +417,16 @@ class SandboxedGymSession:
         """Blocking form of :meth:`arun_rollouts`."""
         return run_coro_sync(self.arun_rollouts(examples))
 
-    async def arun_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
+    async def arun_rollouts(
+        self,
+        examples: list[dict[str, Any]],
+        *,
+        on_results: Callable[[list[Any]], Awaitable[None]] | None = None,
+    ) -> list[Any]:
         """Run ``examples`` on the host as bounded concurrent chunks.
+
+        ``on_results`` receives each chunk's results as the chunk returns, for progress reporting. A callback
+        that raises is logged and never fails the batch.
 
         Results are not in input order and never have been -- Gym yields through
         ``as_completed``. Attribution travels on each result as ``_ng_task_index`` /
@@ -429,15 +437,17 @@ class SandboxedGymSession:
         """
         if not examples:
             raise ValueError("rollout batch must not be empty")
-        return await self._post_all_chunks(examples)
+        return await self._post_all_chunks(examples, on_results)
 
-    async def _post_all_chunks(self, examples: list[dict[str, Any]]) -> list[Any]:
+    async def _post_all_chunks(
+        self, examples: list[dict[str, Any]], on_results: Callable[[list[Any]], Awaitable[None]] | None = None
+    ) -> list[Any]:
         chunks = [examples[start : start + self._chunk_size] for start in range(0, len(examples), self._chunk_size)]
         semaphore = asyncio.Semaphore(self._max_in_flight)
         # return_exceptions so one chunk failing does not leave the others running detached.
         parts = await asyncio.gather(
             *(
-                self._post_chunk_with_retries(index, chunk, len(chunks), semaphore)
+                self._post_chunk_with_retries(index, chunk, len(chunks), semaphore, on_results)
                 for index, chunk in enumerate(chunks)
             ),
             return_exceptions=True,
@@ -464,7 +474,12 @@ class SandboxedGymSession:
         return [result for part in parts for result in part]  # ty: ignore[not-iterable]
 
     async def _post_chunk_with_retries(
-        self, index: int, chunk: list[dict[str, Any]], total: int, semaphore: asyncio.Semaphore
+        self,
+        index: int,
+        chunk: list[dict[str, Any]],
+        total: int,
+        semaphore: asyncio.Semaphore,
+        on_results: Callable[[list[Any]], Awaitable[None]] | None = None,
     ) -> list[Any]:
         label = f"chunk {index + 1}/{total}"
         for attempt in range(1, self._max_attempts + 1):
@@ -503,6 +518,11 @@ class SandboxedGymSession:
                 await asyncio.sleep(backoff)
                 continue
             LOGGER.info("rollout %s: %d result(s) in %.1fs", label, len(results), time.monotonic() - started)
+            if on_results is not None:
+                try:
+                    await on_results(results)
+                except Exception:
+                    LOGGER.warning("rollout %s: could not report its results' progress", label, exc_info=True)
             return results
         raise AssertionError("unreachable: the loop either returns or raises")
 

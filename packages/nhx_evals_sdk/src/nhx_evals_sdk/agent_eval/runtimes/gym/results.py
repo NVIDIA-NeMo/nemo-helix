@@ -24,6 +24,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
     FABRIC_RESULT_KEY,
     NG_ATTEMPT_INDEX,
+    NG_FAILURE_CLASS,
     NG_ROLLOUT_INDEX,
     NG_TASK_INDEX,
     read_jsonl,
@@ -143,6 +144,14 @@ def _failure_message(record: Mapping[str, Any]) -> str | None:
         if text is not None and text not in parts:
             parts.append(text)
     return "\n".join(parts) or None
+
+
+def rollout_failure(record: Mapping[str, Any]) -> str | None:
+    """The failure a rollout record reports, as its trial will: Gym's failure class, or that the agent never ran."""
+    failure = record.get(NG_FAILURE_CLASS)
+    if failure is not None:
+        return str(failure)
+    return AGENT_NEVER_RAN_ERROR_TYPE if _agent_never_ran(record) else None
 
 
 def _agent_never_ran(record: Mapping[str, Any]) -> bool:

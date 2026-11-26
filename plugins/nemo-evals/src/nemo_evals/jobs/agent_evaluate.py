@@ -40,6 +40,7 @@ from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer, gateway_job_scope
+from nemo_evals.harbor.trial_progress import TrialProgressReporter
 from nemo_evals.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     _secret_refs,
@@ -84,6 +85,7 @@ from nemo_evals.jobs.gateway_models import (
     sandbox_agent_channel,
     trust_the_gateway_ca,
 )
+from nemo_evals.jobs.gym_progress import GymTrialCounter
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
     has_staged_environment,
@@ -108,6 +110,7 @@ from nemo_evals.jobs.run_outcome import (
     agent_eval_outcome,
     report_run_outcome,
     report_status_details,
+    status_details_writer,
 )
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
@@ -149,6 +152,7 @@ from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborJobScope, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
@@ -561,6 +565,7 @@ class _AgentEvalJobBase(NemoJob):
         fabric_gateway_origin: str | None = None,
         trial_issuer: TrialCredentialIssuer | None = None,
         trial_progress: Callable[[HarborRuntimeConfig], HarborJobScope | None] | None = None,
+        gym_progress: RolloutProgress | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -568,7 +573,8 @@ class _AgentEvalJobBase(NemoJob):
         shapes its own request, so it contributes neither a prompt template nor inference params.
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
         sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
-        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run.
+        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run;
+        ``gym_progress`` receives a Gym run's rollouts as they finish.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -591,7 +597,7 @@ class _AgentEvalJobBase(NemoJob):
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
-            return gym_runtime_target(target, ctx), None, None
+            return gym_runtime_target(target, ctx, progress=gym_progress), None, None
         if isinstance(target, HarborRunnerTarget):
             target = upgrade_registered_agent_config(target)
             agent_kwargs = dict(target.agent_kwargs)
@@ -708,6 +714,11 @@ class _AgentEvalJobBase(NemoJob):
                 fabric_gateway_origin=fabric_gateway_origin,
                 trial_issuer=trial_issuer,
                 trial_progress=lambda harbor_config: self._trial_progress_scope(harbor_config, ctx, async_client),
+                gym_progress=(
+                    GymTrialCounter(status_details_writer(ctx, async_client), reward_key=spec.target.reward_key)
+                    if isinstance(spec.target, GymRunnerTarget)
+                    else None
+                ),
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():
@@ -832,8 +843,11 @@ class _AgentEvalJobBase(NemoJob):
     def _trial_progress_scope(
         self, config: HarborRuntimeConfig, ctx: JobContext, async_client: AsyncNemoClient | None
     ) -> HarborJobScope | None:
-        """Hook: a scope that reports the Harbor job's trials as they run. None by default: nothing reads them."""
-        return None
+        """Hook: a scope that reports the Harbor job's trials as they run, counted by phase."""
+        reporter = TrialProgressReporter(
+            status_details_writer(ctx, async_client), reward_key=config.reward_key, report_trials=False
+        )
+        return reporter.job_scope()
 
 
 def _trial_credential_issuer(

@@ -13,12 +13,9 @@ TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
@@ -33,7 +30,7 @@ from nemo_evals.harbor.agent_setup_egress import (
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.spec import compose_services_kwarg
 from nemo_evals.harbor.remote.profile import resource_defaults
-from nemo_evals.harbor.trial_progress import Publish, TrialProgressReporter
+from nemo_evals.harbor.trial_progress import TrialProgressReporter
 from nemo_evals.intake.mapping import session_id_for
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -44,7 +41,7 @@ from nemo_evals.jobs.gateway_models import (
     check_tasks_reach_the_gateway,
 )
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec, PreparedHarborEnvironment
-from nemo_evals.jobs.run_outcome import report_status_details
+from nemo_evals.jobs.run_outcome import status_details_writer
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -192,23 +189,6 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
             session_id=lambda trial: session_id_for(run_id, trial),
         )
         return reporter.job_scope()
-
-
-def status_details_writer(ctx: JobContext, async_client: AsyncNemoClient | None) -> Publish:
-    """Writes the task Job's status details one at a time, in the order they were made.
-
-    Each write replaces the whole trial list. The reporter stops waiting on a slow write but can't stop
-    the write itself, so with more than one thread an older list could land after a newer one. One
-    thread keeps them in order; the write is synchronous, so it stays off Harbor's event loop.
-    """
-    writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="trial-progress")
-
-    async def publish(details: dict[str, Any]) -> None:
-        write = functools.partial(report_status_details, details, ctx=ctx, async_client=async_client)
-        # Shielded: when the reporter stops waiting, the write keeps its place in line rather than being dropped.
-        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write))
-
-    return publish
 
 
 def check_execution_deadline(spec: HarborTaskJobSpec, now: datetime | None = None) -> None:

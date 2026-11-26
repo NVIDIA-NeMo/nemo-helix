@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from pathlib import Path
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from nemo_evals.jobs import run_outcome
 from nemo_evals.jobs.run_outcome import (
     STATUS_DETAILS_KEY,
     RunOutcome,
@@ -263,3 +267,27 @@ class TestReportRunOutcome:
             ctx=_ctx(tmp_path, "job-1", "attempt-1"),
             async_client=_async_client(),
         )
+
+
+async def test_a_status_write_that_outlives_its_timeout_still_lands_before_the_next(monkeypatch):
+    """An older trial list can't overwrite the newer one sent after it, and a write given up on still lands."""
+    first_may_finish = threading.Event()
+    landed: list[int] = []
+
+    def write(details: dict[str, Any], **kwargs: Any) -> None:
+        if details["n"] == 1:
+            first_may_finish.wait(timeout=5)
+        landed.append(details["n"])
+
+    monkeypatch.setattr(run_outcome, "report_status_details", write)
+    publish = run_outcome.status_details_writer(MagicMock(), None)
+
+    for n in (1, 2):
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):  # the reporter gives up waiting, as it does after 15s
+                await publish({"n": n})
+
+    first_may_finish.set()
+    await publish({"n": 3})
+
+    assert landed == [1, 2, 3]

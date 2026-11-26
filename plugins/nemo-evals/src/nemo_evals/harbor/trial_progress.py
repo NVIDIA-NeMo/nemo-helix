@@ -3,9 +3,10 @@
 
 """Report each Harbor trial's progress while a job runs, so a task Job's trials can be watched live.
 
-The reporter follows Harbor's trial lifecycle hooks and, after each event, reports the whole trial list (see
-:mod:`nemo_evals.taskset_runs.trials`) through a ``publish`` callback: the task Job's status details. Reports are
-best effort and never fail or stall the job for long; the trial results Harbor writes stay authoritative.
+The reporter follows Harbor's trial lifecycle hooks and, after each event, reports the trials counted by phase, and
+optionally the whole trial list (see :mod:`nemo_evals.taskset_runs.trials`), through a ``publish`` callback: the
+job's status details. Reports are best effort and never fail or stall the job for long; the trial results Harbor
+writes stay authoritative.
 """
 
 from __future__ import annotations
@@ -23,18 +24,19 @@ from harbor.models.job.config import RetryConfig
 from harbor.models.trial.config import TrialConfig
 from harbor.models.trial.result import ExceptionInfo, TrialResult
 from harbor.trial.hooks import TrialHookEvent
+from nemo_evals.jobs.run_outcome import PUBLISH_TIMEOUT_SEC, publish_best_effort
 from nemo_evals.taskset_runs.trials import (
     SETTLED_TRIAL_PHASES,
+    TRIAL_COUNTS_STATUS_KEY,
     TRIALS_STATUS_KEY,
     TrialPhase,
     TrialProgress,
+    count_trials,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborJobScope
 
 logger = logging.getLogger(__name__)
 
-PUBLISH_TIMEOUT_SEC = 15.0
-"""How long a trial event waits for its report; a slower report keeps going in the background."""
 MAX_ERROR_CHARS = 2000
 """Longest error message kept per trial. Errors are rare and their details are what debugging needs, so it's generous."""
 
@@ -82,7 +84,10 @@ def trial_reward(result: TrialResult, reward_key: str) -> float | None:
 class TrialProgressReporter:
     """Tracks one Harbor job's trials through their lifecycle hooks and reports them after each change.
 
-    ``session_id`` names each trial's Intake session, so readers can link a settled trial to its traces.
+    Every report carries the trials counted by phase. ``report_trials`` adds the full trial list, which a task
+    Job's readers show trial by trial; a job running thousands of trials leaves it off, since each report
+    rewrites it whole. ``session_id`` names each trial's Intake session, so readers can link a settled trial to
+    its traces.
     """
 
     def __init__(
@@ -91,10 +96,12 @@ class TrialProgressReporter:
         *,
         reward_key: str,
         session_id: Callable[[str], str] | None = None,
+        report_trials: bool = True,
         publish_timeout: float = PUBLISH_TIMEOUT_SEC,
     ) -> None:
         self._publish = publish
         self._reward_key = reward_key
+        self._report_trials = report_trials
         self._session_id = session_id
         self._publish_timeout = publish_timeout
         self._trials: dict[str, TrialProgress] = {}
@@ -237,12 +244,8 @@ class TrialProgressReporter:
     async def _report(self) -> None:
         """Report every trial as it stands now; a slow or failed report is logged, never raised."""
         async with self._lock:
-            details = {TRIALS_STATUS_KEY: [trial.model_dump(mode="json") for trial in self._trials.values()]}
-
-            try:
-                async with asyncio.timeout(self._publish_timeout):
-                    await self._publish(details)
-            except TimeoutError:
-                logger.warning("Reporting trial progress took over %ss; continuing", self._publish_timeout)
-            except Exception:
-                logger.warning("Could not report trial progress", exc_info=True)
+            trials = list(self._trials.values())
+            details: dict[str, Any] = {TRIAL_COUNTS_STATUS_KEY: count_trials(trials).model_dump(mode="json")}
+            if self._report_trials:
+                details[TRIALS_STATUS_KEY] = [trial.model_dump(mode="json") for trial in trials]
+            await publish_best_effort(self._publish, details, timeout=self._publish_timeout)

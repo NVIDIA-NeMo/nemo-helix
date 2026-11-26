@@ -10,11 +10,14 @@ job's status details under :data:`STATUS_DETAILS_KEY` and decides the job's fina
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import math
 from collections import Counter
-from collections.abc import Iterable
-from typing import Literal
+from collections.abc import Awaitable, Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Literal
 
 from nemo_evals.jobs.utils import run_with_isolated_async_client
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -32,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 #: Key under which the outcome is merged into the job's ``status_details``.
 STATUS_DETAILS_KEY = "evaluation"
+PUBLISH_TIMEOUT_SEC = 15.0
+"""How long a progress report is waited for; a slower one keeps going in the background."""
 PUBLICATION_STATUS_KEY = "publication"
 """Where an agent evaluation that publishes to Intake records the publish outcome in its status details."""
 
@@ -132,12 +137,47 @@ def report_status_details(details: dict[str, object], *, ctx: JobContext, async_
         logger.warning("Failed to report status details %s for job %r", sorted(details), job_id, exc_info=True)
 
 
+def status_details_writer(
+    ctx: JobContext, async_client: AsyncNemoClient | None
+) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Writes the job's status details one at a time, in the order they were made.
+
+    Each write replaces what the last one reported under the same keys. A caller may stop waiting on a slow
+    write but can't stop the write itself, so with more than one thread an older report could land after a
+    newer one. One thread keeps them in order; the write is synchronous, so it stays off the event loop.
+    """
+    writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="status-details")
+
+    async def publish(details: dict[str, Any]) -> None:
+        write = functools.partial(report_status_details, details, ctx=ctx, async_client=async_client)
+        # Shielded: when the caller stops waiting, the write keeps its place in line rather than being dropped.
+        await asyncio.shield(asyncio.get_running_loop().run_in_executor(writer, write))
+
+    return publish
+
+
+async def publish_best_effort(
+    publish: Callable[[dict[str, Any]], Awaitable[None]], details: dict[str, Any], *, timeout: float
+) -> None:
+    """Publish ``details``, logging rather than raising when the write fails or outlasts ``timeout``."""
+    try:
+        async with asyncio.timeout(timeout):
+            await publish(details)
+    except TimeoutError:
+        logger.warning("Reporting progress took over %ss; continuing", timeout)
+    except Exception:
+        logger.warning("Could not report progress", exc_info=True)
+
+
 __all__ = [
     "PUBLICATION_STATUS_KEY",
+    "PUBLISH_TIMEOUT_SEC",
     "STATUS_DETAILS_KEY",
     "RunOutcome",
     "agent_eval_outcome",
+    "publish_best_effort",
     "report_run_outcome",
     "report_status_details",
     "row_eval_outcome",
+    "status_details_writer",
 ]

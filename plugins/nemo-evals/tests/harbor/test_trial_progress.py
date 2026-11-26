@@ -18,7 +18,7 @@ from harbor.models.trial.result import ExceptionInfo, StepResult, TrialResult
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.hooks import HookCallback, TrialEvent, TrialHookEvent
 from nemo_evals.harbor.trial_progress import TrialProgressReporter, trial_error, trial_reward
-from nemo_evals.taskset_runs.trials import TRIALS_STATUS_KEY, TrialPhase, TrialProgress
+from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY, TRIALS_STATUS_KEY, TrialPhase, TrialProgress
 
 STARTED = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
@@ -284,3 +284,27 @@ def test_reward_and_error_are_read_off_the_attempts_result() -> None:
     multi_step = TrialResult.model_construct(exception_info=None, step_results=[StepResult.model_construct(), step])
 
     assert trial_error(multi_step) == step.exception_info
+
+
+async def test_a_job_with_many_trials_reports_their_counts_without_the_list(job: Job, harbor: Harbor) -> None:
+    """An agent-evaluate job's status shows its trials finished, failed and total as each one moves."""
+    reports = Reports()
+    first, second = job._remaining_trial_configs
+    reporter = TrialProgressReporter(reports, reward_key="reward", report_trials=False)
+
+    async with reporter.job_scope()(job):
+        await harbor.run(first, reward=1.0)
+        await harbor.fire(TrialEvent.START, second)
+
+    published = reports.published
+    assert all(TRIALS_STATUS_KEY not in details for details in published)
+    assert published[0][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"pending": 2}
+    assert published[-2][TRIAL_COUNTS_STATUS_KEY] == {
+        "total": 2,
+        "phases": {"succeeded": 1, "starting": 1},
+        "rewarded": 1,
+        "reward": 1.0,
+        "errors": {},
+    }
+    # The job stopped before the second trial ended.
+    assert published[-1][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"succeeded": 1, "cancelled": 1}
