@@ -52,13 +52,13 @@ export const buildWorkspaceGroup = (
   models: [...models].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
 });
 
-/** Lists one page of a workspace's model providers, on the same client as {@link ListModels}. */
 export type ListProviders = (
   workspace: string,
   params: ModelsListProvidersParams
 ) => Promise<ModelProvidersPage>;
 
-export const getQueryKeyModelProviderOptions = (
-  workspace: string,
-  params: ModelsListProvidersParams
-) => [QUERY_PREFIX_PLATFORM, 'models', 'v2', 'providers', workspace, params];
+// Starts with the generated providers query key so provider create/edit/delete invalidate it.
+export const getQueryKeyModelProviderOptions = (workspace: string) => [
+  `/apis/models/v2/workspaces/${workspace}/providers`,
+  'filter-options',
+];

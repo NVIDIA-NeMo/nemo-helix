@@ -36,6 +36,7 @@ const MODEL_TYPE_ITEMS = [
 const DEFAULT_SEARCH_DEBOUNCE_MS = 300;
 
 const NO_FILTER_MATCHES_MESSAGE = 'No models match these filters';
+const LOAD_FAILED_MESSAGE = "Couldn't load models";
 
 const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
@@ -58,6 +59,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
   isLoadingMore = false,
   doneLoadingMessage,
   emptyMessage,
+  error,
   loading = false,
   disabled = false,
   placeholder = 'Select a model',
@@ -135,6 +137,13 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
     }
   };
 
+  let listEmptyMessage = emptyMessage;
+  if (error) {
+    listEmptyMessage = LOAD_FAILED_MESSAGE;
+  } else if (modelFilters && hasActiveModelFilters(modelFilters.values)) {
+    listEmptyMessage = NO_FILTER_MATCHES_MESSAGE;
+  }
+
   const selectedParts = value?.model ? getPartsFromReference(value.model) : undefined;
   const selectedName = selectedModel?.name ?? (selectedParts?.name || value?.model);
   const selectedWorkspace =
@@ -211,11 +220,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
               hasMore={hasMore}
               isLoadingMore={isLoadingMore}
               doneLoadingMessage={doneLoadingMessage}
-              emptyMessage={
-                modelFilters && hasActiveModelFilters(modelFilters.values)
-                  ? NO_FILTER_MATCHES_MESSAGE
-                  : emptyMessage
-              }
+              emptyMessage={listEmptyMessage}
             />
           </>
         )}

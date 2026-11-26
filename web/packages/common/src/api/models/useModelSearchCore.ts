@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { fetchAllPages } from '@nemo/common/src/api/fetchAllPages';
 import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import {
   EMPTY_MODEL_FILTERS,
@@ -34,9 +35,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
  */
 export const MODEL_SEARCH_PAGE_SIZE = 25;
 
-const PROVIDER_OPTIONS_PAGE_SIZE = 100;
-
 export type ModelSearchFilter = WithFilterOperators<ModelEntityFilter>;
+
+// The API JSON-decodes operands that start with a bracket; a leading % is a no-op in its %term% match.
+const toLikeOperand = (term: string): string => {
+  if (term.startsWith('[') || term.startsWith('{')) {
+    return `%${term}`;
+  }
+  return term;
+};
+
+const providerFilter = (providers: string[]): ModelSearchFilter['model_providers'] => {
+  if (providers.length === 1) {
+    return providers[0];
+  }
+  return { $in: providers };
+};
 
 export interface UseModelSearchCoreOptions {
   /** Workspace to search. The query stays idle while this is null. */
@@ -70,12 +84,12 @@ export interface ModelSearchProps {
   hasMore: boolean;
   isLoadingMore: boolean;
   modelFilters: ModelFilterControls;
+  error: Error | null;
 }
 
 export interface UseModelSearchResult extends ModelSearchProps {
   models: ModelEntity[];
   search: string;
-  error: Error | null;
 }
 
 /**
@@ -102,7 +116,12 @@ export const useModelSearchCore = ({
   initialFilters = EMPTY_MODEL_FILTERS,
 }: UseModelSearchCoreOptions): UseModelSearchResult => {
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState<ModelFilterValues>(initialFilters);
+  const [filterState, setFilterState] = useState({ workspace, values: initialFilters });
+  const filters = filterState.workspace === workspace ? filterState.values : initialFilters;
+  const setFilters = useCallback(
+    (values: ModelFilterValues) => setFilterState({ workspace, values }),
+    [workspace]
+  );
 
   const query = useMemo(() => {
     const trimmed = search.trim();
@@ -112,8 +131,8 @@ export const useModelSearchCore = ({
       parameter_count?: ModelSearchFilter['parameter_count'] | ParameterCountFilter;
     } = {
       ...filter,
-      ...(trimmed ? { name: { $like: trimmed } } : {}),
-      ...(providers?.length ? { model_providers: { $in: providers } } : {}),
+      ...(trimmed ? { name: { $like: toLikeOperand(trimmed) } } : {}),
+      ...(providers?.length ? { model_providers: providerFilter(providers) } : {}),
       ...(capabilities?.length ? { capabilities: { $in: capabilities } } : {}),
       ...(inputModalities?.length ? { input_modalities: { $in: inputModalities } } : {}),
       ...(parameterCount ? { parameter_count: parameterCount } : {}),
@@ -151,23 +170,27 @@ export const useModelSearchCore = ({
 
   const groups = useMemo(() => groupModelsByWorkspace(models, { sort: true }), [models]);
 
-  const providerParams = { page_size: PROVIDER_OPTIONS_PAGE_SIZE, sort: 'name' } as const;
-  const { data: providersPage, isLoading: providersLoading } = useQuery({
-    queryKey: getQueryKeyModelProviderOptions(queryWorkspace, providerParams),
-    queryFn: listProviders ? () => listProviders(queryWorkspace, providerParams) : skipToken,
+  const { data: providers, isLoading: providersLoading } = useQuery({
+    queryKey: getQueryKeyModelProviderOptions(queryWorkspace),
+    queryFn: listProviders
+      ? () =>
+          fetchAllPages((page, page_size) =>
+            listProviders(queryWorkspace, { page, page_size, sort: 'name' })
+          )
+      : skipToken,
     enabled: isEnabled,
   });
 
   const providerOptions = useMemo<ModelFilterOption[]>(
     () =>
       withSelectedOptions(
-        (providersPage?.data ?? []).map((provider) => ({
+        (providers ?? []).map((provider) => ({
           value: `${provider.workspace}/${provider.name}`,
           label: provider.name,
         })),
         filters.providers
       ),
-    [filters.providers, providersPage?.data]
+    [filters.providers, providers]
   );
 
   const modelFilters = useMemo<ModelFilterControls>(
@@ -180,7 +203,7 @@ export const useModelSearchCore = ({
       sizeOptions: MODEL_SIZE_OPTIONS,
       providersLoading: !!listProviders && providersLoading,
     }),
-    [filters, listProviders, providerOptions, providersLoading]
+    [filters, listProviders, providerOptions, providersLoading, setFilters]
   );
 
   const hasMore = !!hasNextPage;

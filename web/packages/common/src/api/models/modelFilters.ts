@@ -5,9 +5,28 @@ import type { NumberFilter } from '@nemo/sdk/generated/platform/schema';
 import { ModelCapability } from '@nemo/sdk/generated/platform/schema/ModelCapability';
 import { ModelModality } from '@nemo/sdk/generated/platform/schema/ModelModality';
 
-export type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
+interface ModelSizeBucketDefinition {
+  value: string;
+  label: string;
+  minParameters: number;
+  maxParameters?: number;
+}
 
-/** Each list matches models with any of its values; the lists combine with AND. */
+const BILLION = 1_000_000_000;
+
+const SIZE_BUCKETS = [
+  { value: 'small', label: 'Under 3B', minParameters: 0, maxParameters: 3 * BILLION },
+  { value: 'medium', label: '3B to 10B', minParameters: 3 * BILLION, maxParameters: 10 * BILLION },
+  { value: 'large', label: '10B to 50B', minParameters: 10 * BILLION, maxParameters: 50 * BILLION },
+  { value: 'xlarge', label: '50B and over', minParameters: 50 * BILLION },
+] as const satisfies readonly ModelSizeBucketDefinition[];
+
+export type ModelSizeBucket = (typeof SIZE_BUCKETS)[number]['value'];
+
+export const MODEL_SIZE_BUCKETS: readonly (ModelSizeBucketDefinition & {
+  value: ModelSizeBucket;
+})[] = SIZE_BUCKETS;
+
 export interface ModelFilterValues {
   providers?: string[];
   capabilities?: ModelCapability[];
@@ -30,24 +49,7 @@ export interface ModelFilterControls {
   providersLoading: boolean;
 }
 
-/** One `parameter_count` range, or several sent as a JSON-encoded `$or`. */
 export type ParameterCountFilter = NumberFilter | { $or: string };
-
-interface ModelSizeBucketDefinition {
-  value: ModelSizeBucket;
-  label: string;
-  minParameters: number;
-  maxParameters?: number;
-}
-
-const BILLION = 1_000_000_000;
-
-export const MODEL_SIZE_BUCKETS: readonly ModelSizeBucketDefinition[] = [
-  { value: 'small', label: 'Up to 3B', minParameters: 0, maxParameters: 3 * BILLION },
-  { value: 'medium', label: '3B to 10B', minParameters: 3 * BILLION, maxParameters: 10 * BILLION },
-  { value: 'large', label: '10B to 50B', minParameters: 10 * BILLION, maxParameters: 50 * BILLION },
-  { value: 'xlarge', label: 'Over 50B', minParameters: 50 * BILLION },
-];
 
 export const MODEL_SIZE_OPTIONS: ModelFilterOption[] = MODEL_SIZE_BUCKETS.map(
   ({ value, label }) => ({ value, label })

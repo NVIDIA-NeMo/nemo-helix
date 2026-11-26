@@ -213,6 +213,17 @@ describe('ModelDropdown', () => {
       expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeDisabled();
     });
 
+    it('reports a failed request instead of blaming the filters', () => {
+      renderOpen({
+        groups: [],
+        error: new Error('boom'),
+        modelFilters: makeFilters({ values: { sizes: ['xlarge'] } }),
+      });
+
+      expect(screen.getByText("Couldn't load models")).toBeInTheDocument();
+      expect(screen.queryByText('No models match these filters')).not.toBeInTheDocument();
+    });
+
     it('says the filters excluded everything when no models match', () => {
       renderOpen({
         groups: [],

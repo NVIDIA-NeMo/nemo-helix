@@ -69,6 +69,8 @@ export interface ModelSelectProps extends ModelSelectParamsProps {
   doneLoadingMessage?: string;
   /** Copy shown when no models match. */
   emptyMessage?: string;
+  /** The failed model request, if any. Shown in place of the empty message. */
+  error?: Error | null;
   /** Whether the first page of models is still loading */
   loading?: boolean;
   /** Whether the component is disabled */

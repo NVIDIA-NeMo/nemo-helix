@@ -10073,8 +10073,27 @@ interface LogViewerProps {
 export declare const LogViewer: FC<LogViewerProps>;
 //#endregion
 //#region src/api/models/modelFilters.d.ts
-type ModelSizeBucket = 'small' | 'medium' | 'large' | 'xlarge';
-/** Each list matches models with any of its values; the lists combine with AND. */
+declare const SIZE_BUCKETS: readonly [{
+  readonly value: 'small';
+  readonly label: 'Under 3B';
+  readonly minParameters: 0;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'medium';
+  readonly label: '3B to 10B';
+  readonly minParameters: number;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'large';
+  readonly label: '10B to 50B';
+  readonly minParameters: number;
+  readonly maxParameters: number;
+}, {
+  readonly value: 'xlarge';
+  readonly label: '50B and over';
+  readonly minParameters: number;
+}];
+type ModelSizeBucket = (typeof SIZE_BUCKETS)[number]['value'];
 interface ModelFilterValues {
   providers?: string[];
   capabilities?: ModelCapability[];
@@ -10105,7 +10124,6 @@ type ModelWorkspaceGroup = {
   workspace: string;
   models: ModelEntity[];
 };
-/** Lists one page of a workspace's model providers, on the same client as {@link ListModels}. */
 type ListProviders = (workspace: string, params: ModelsListProvidersParams) => Promise<ModelProvidersPage>;
 //#endregion
 //#region src/components/TrainingParameterSlider/types.d.ts
@@ -10197,6 +10215,8 @@ interface ModelSelectProps extends ModelSelectParamsProps {
   doneLoadingMessage?: string;
   /** Copy shown when no models match. */
   emptyMessage?: string;
+  /** The failed model request, if any. Shown in place of the empty message. */
+  error?: Error | null;
   /** Whether the first page of models is still loading */
   loading?: boolean;
   /** Whether the component is disabled */
@@ -10318,11 +10338,11 @@ interface ModelSearchProps {
   hasMore: boolean;
   isLoadingMore: boolean;
   modelFilters: ModelFilterControls;
+  error: Error | null;
 }
 interface UseModelSearchResult extends ModelSearchProps {
   models: ModelEntity[];
   search: string;
-  error: Error | null;
 }
 /**
  * Server-side model search with progressive paging — the counterpart to `useAllModels`, which

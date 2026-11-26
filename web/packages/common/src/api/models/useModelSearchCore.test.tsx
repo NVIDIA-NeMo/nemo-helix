@@ -88,6 +88,21 @@ describe('useModelSearchCore', () => {
     );
   });
 
+  it('keeps a search term that starts with a bracket from being read as JSON', async () => {
+    mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+    const { result } = renderSearch();
+    await waitFor(() => expect(mockListModels).toHaveBeenCalled());
+
+    act(() => result.current.onSearchChange('[llama'));
+
+    await waitFor(() =>
+      expect(mockListModels).toHaveBeenLastCalledWith(
+        'ws1',
+        expect.objectContaining({ filter: { name: { $like: '%[llama' } } })
+      )
+    );
+  });
+
   it('merges caller filters with the search term', async () => {
     mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
 
@@ -171,6 +186,61 @@ describe('useModelSearchCore', () => {
             },
           })
         )
+      );
+    });
+
+    it('sends a single provider as a plain equality', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      renderSearch({ initialFilters: { providers: ['ws1/build'] } });
+
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenCalledWith(
+          'ws1',
+          expect.objectContaining({ filter: { model_providers: 'ws1/build' } })
+        )
+      );
+    });
+
+    it('drops the filters when the workspace changes', async () => {
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+      const { result, rerender } = renderHook(
+        ({ workspace }) => useModelSearchCore({ workspace, listModels: mockListModels }),
+        { wrapper: createWrapper(), initialProps: { workspace: 'ws1' } }
+      );
+      act(() => result.current.modelFilters.onChange({ providers: ['ws1/build'] }));
+      await waitFor(() => expect(result.current.modelFilters.values.providers).toHaveLength(1));
+
+      rerender({ workspace: 'ws2' });
+
+      expect(result.current.modelFilters.values).toEqual({});
+      await waitFor(() =>
+        expect(mockListModels).toHaveBeenLastCalledWith(
+          'ws2',
+          expect.not.objectContaining({ filter: expect.anything() })
+        )
+      );
+    });
+
+    it('lists providers from every page', async () => {
+      mockListProviders
+        .mockResolvedValueOnce({
+          data: [{ workspace: 'ws1', name: 'a' }],
+          pagination: { total_pages: 2 },
+        } as unknown as ModelProvidersPage)
+        .mockResolvedValueOnce({
+          data: [{ workspace: 'ws1', name: 'b' }],
+          pagination: { total_pages: 2 },
+        } as unknown as ModelProvidersPage);
+      mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
+
+      const { result } = renderSearch();
+
+      await waitFor(() =>
+        expect(result.current.modelFilters.providerOptions.map((option) => option.value)).toEqual([
+          'ws1/a',
+          'ws1/b',
+        ])
       );
     });
 

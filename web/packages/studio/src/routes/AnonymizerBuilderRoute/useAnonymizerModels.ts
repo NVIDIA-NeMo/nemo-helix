@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
+import type { ModelProvider } from '@nemo/sdk/generated/platform/schema';
 import {
   modelsFromProviders,
   type DataDesignerModelOption,
@@ -16,8 +17,33 @@ interface AnonymizerModels {
   readonly models: DataDesignerModelOption[];
   readonly items: { label: string; value: string }[];
   readonly isLoading: boolean;
-  readonly applyModel: (role: string, id: string) => void;
+  readonly applyModel: (role: string, id: string, preferredProviders?: readonly string[]) => void;
 }
+
+interface ServedModelMatch {
+  readonly provider: string;
+  readonly servedModelName: string;
+}
+
+export const resolveServedModel = (
+  providers: readonly ModelProvider[],
+  id: string,
+  preferredProviders: readonly string[] = []
+): ServedModelMatch | undefined => {
+  const matches = providers.flatMap((provider): ServedModelMatch[] => {
+    const served = provider.served_models?.find((entry) => entry.model_entity_id === id);
+    if (!served) {
+      return [];
+    }
+    return [
+      {
+        provider: `${provider.workspace}/${provider.name}`,
+        servedModelName: served.served_model_name,
+      },
+    ];
+  });
+  return matches.find((match) => preferredProviders.includes(match.provider)) ?? matches[0];
+};
 
 /** Workspace models plus the setter that writes a role's pick into the form. */
 export const useAnonymizerModels = (): AnonymizerModels => {
@@ -40,16 +66,16 @@ export const useAnonymizerModels = (): AnonymizerModels => {
   );
 
   const applyModel = useCallback(
-    (role: string, id: string) => {
-      const selected = models.find((model) => model.id === id);
-      setValue(`roleModels.${role}.model`, selected?.served_model_name ?? '', {
+    (role: string, id: string, preferredProviders?: readonly string[]) => {
+      const match = resolveServedModel(providersPage?.data ?? [], id, preferredProviders);
+      setValue(`roleModels.${role}.model`, match?.servedModelName ?? '', {
         shouldValidate: true,
       });
-      setValue(`roleModels.${role}.provider`, selected?.model_providers?.[0] ?? '', {
+      setValue(`roleModels.${role}.provider`, match?.provider ?? '', {
         shouldValidate: true,
       });
     },
-    [models, setValue]
+    [providersPage?.data, setValue]
   );
 
   return { models, items, isLoading, applyModel };
