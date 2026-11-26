@@ -93,8 +93,8 @@ class JobContext:
             it to the current job attempt.
         job_id: Platform job name, or ``None`` for a local run. Unique only within the
             workspace, and a later job can reuse it.
-        job_uid: Platform job entity UUID, or ``None`` for a local run. Unlike the name, it
-            identifies this job across workspaces and for good.
+        job_uid: Platform job entity UUID, or ``None`` for a local run. Unlike the name, it is
+            unique across workspaces and never reused by a later job.
         attempt_id: Concrete platform attempt UUID, or ``None`` for a local run.
     """
 
