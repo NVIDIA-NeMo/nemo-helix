@@ -111,7 +111,6 @@ class AgentHardenerRun(BaseModel):
     error_message: str = Field(default="", description="Operator-facing failure message when the run failed.")
     error_remediation: str = Field(default="", description="Suggested next step to resolve the failure.")
     hitlog_fileset: str = Field(default="", description="Fileset ref of the garak hitlog this run produced.")
-    events_fileset: str = Field(default="", description="Fileset ref of the run's durable events history.")
     source_run: str = Field(default="", description="Source harden run for a validate-only sanity-check run.")
     id: str | None = None
     created_at: datetime | None = None

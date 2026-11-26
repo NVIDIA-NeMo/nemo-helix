@@ -6,27 +6,19 @@
 Each event is stored as an :class:`AgentHardenerRunEvent` child of its run in the Entity Store, so every
 API replica serves the same history and no volume is shared. The API numbers events in arrival order
 (``seq``, the id Studio polls after); the store's unique child name makes concurrent ingests for one run
-take different numbers. Runs recorded before this kept their events in a fileset (``events_fileset``),
-which is still served for a run that has no event children.
+take different numbers.
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
-import tempfile
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from nemo_agent_hardener_plugin._perms import AgentHardenerRunPerms
 from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.entities import AgentHardenerRun, AgentHardenerRunEvent, event_name
-from nemo_agent_hardener_plugin.filesets import download_fileset
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -35,7 +27,6 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from pydantic import BaseModel, Field
-from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +34,6 @@ _EVENT_PAGE_SIZE = 200
 _SEQ_ATTEMPTS = 5
 _RUN_ID_CACHE_LIMIT = 4096
 _run_ids: dict[tuple[str, str], str] = {}
-
-
-def _get_client() -> NemoClient:
-    from nemo_helix_plugin.client_provider import get_nemo_client
-
-    return get_nemo_client(as_service="agent-hardener", internal=True)
 
 
 class EventIn(BaseModel):
@@ -208,54 +193,9 @@ async def get_events(
     after: int = 0,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> EventsResponse:
-    """Return the run's events with sequence id greater than *after*.
-
-    A run recorded before events moved to the Entity Store is served from its ``events_fileset``.
-    """
+    """Return the run's events with sequence id greater than *after*."""
     run_id = await _run_id(entity_client, workspace, name)
     if run_id is None:
         return EventsResponse(events=[])
     stored = await _events_after(entity_client, workspace, run_id, after)
-    if stored or (after > 0 and await _last_seq(entity_client, workspace, run_id)):
-        return EventsResponse(events=[{"id": e.seq, "event": e.event, "payload": e.payload} for e in stored])
-
-    try:
-        run = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
-    except NemoEntityNotFoundError:
-        return EventsResponse(events=[])
-    if not run.events_fileset:
-        return EventsResponse(events=[])
-    # The download is blocking sync I/O that calls back into this same platform; on the event loop it
-    # would self-deadlock (the server cannot answer its own request), so it runs on a worker thread.
-    return EventsResponse(events=await run_in_threadpool(_legacy_events, name, run.events_fileset, after))
-
-
-def _legacy_events(name: str, fileset_ref: str, after: int) -> list[dict[str, Any]]:
-    """Blocking: the events of a run whose history is an ``events.jsonl`` fileset (id = line number).
-
-    Empty only when the fileset is gone; a failed download is a 502, since an empty list would read as a
-    run that emitted no events.
-    """
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            dest = download_fileset(_get_client(), fileset_ref, Path(tmp))
-            log = next(iter(sorted(dest.rglob("*.jsonl"))), None)
-            return _read_jsonl(log, after) if log else []
-    except NotFoundError:
-        return []
-    except Exception as exc:
-        logger.warning("Fileset fallback failed for run %r events", name, exc_info=True)
-        raise HTTPException(
-            status_code=502, detail=f"Could not load the persisted events for run {name!r}: {exc}"
-        ) from exc
-
-
-def _read_jsonl(path: Path, after: int) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, start=1):
-            if line_no <= after or not line.strip():
-                continue
-            with contextlib.suppress(json.JSONDecodeError):
-                events.append({"id": line_no, **json.loads(line)})
-    return events
+    return EventsResponse(events=[{"id": e.seq, "event": e.event, "payload": e.payload} for e in stored])

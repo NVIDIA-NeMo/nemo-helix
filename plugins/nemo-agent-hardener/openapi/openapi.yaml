@@ -1285,11 +1285,7 @@ paths:
       tags:
       - Agent Hardener Events
       summary: Get Events
-      description: 'Return the run''s events with sequence id greater than *after*.
-
-
-        A run recorded before events moved to the Entity Store is served from its
-        ``events_fileset``.'
+      description: Return the run's events with sequence id greater than *after*.
       operationId: get_events_apis_agent_hardener_v2_workspaces__workspace__runs__name__events_get
       parameters:
       - name: workspace
@@ -2765,13 +2761,6 @@ components:
           title: Hitlog Fileset
           description: Fileset ref of the garak hitlog this run produced, if any;
             replay a later run from it.
-          default: ''
-        events_fileset:
-          type: string
-          title: Events Fileset
-          description: 'Legacy: fileset ref of the run''s events.jsonl, set by releases
-            that kept events in a local file. Newer runs keep their events as AgentHardenerRunEvent
-            children and leave this empty.'
           default: ''
         source_run:
           type: string

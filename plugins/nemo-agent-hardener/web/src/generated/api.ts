@@ -3793,10 +3793,7 @@ export const useAgentHardenerIngestEvent = <TError = ErrorType<HTTPValidationErr
     }
 
 /**
- * Return all persisted run events with sequence id greater than *after*.
- *
- * Falls back to downloading from the run's ``events_fileset`` when the local
- * file is absent (e.g. after a pod restart).
+ * Return the run's events with sequence id greater than *after*.
  * @summary Get Events
  */
 export const agentHardenerGetEvents = (

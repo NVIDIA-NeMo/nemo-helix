@@ -50,11 +50,6 @@ class AgentHardenerRun(NemoEntity, entity_type=AGENT_HARDENER_RUN_TYPE):
         default="",
         description="Fileset ref of the garak hitlog this run produced, if any; replay a later run from it.",
     )
-    events_fileset: str = Field(
-        default="",
-        description="Legacy: fileset ref of the run's events.jsonl, set by releases that kept events in a local "
-        "file. Newer runs keep their events as AgentHardenerRunEvent children and leave this empty.",
-    )
     source_run: str = Field(
         default="",
         description="For a validate-only sanity-check run, the name of the harden run it was launched from; "

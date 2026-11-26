@@ -45,8 +45,6 @@ export interface AgentHardenerRun {
   error_remediation?: string;
   /** Fileset ref of the garak hitlog this run produced, if any; replay a later run from it. */
   hitlog_fileset?: string;
-  /** Legacy: fileset ref of the run's events.jsonl, set by releases that kept events in a local file. Newer runs keep their events as AgentHardenerRunEvent children and leave this empty. */
-  events_fileset?: string;
   /** For a validate-only sanity-check run, the name of the harden run it was launched from; lets the Harden tab re-attach the scorecard on reload. Empty for normal war-game runs. */
   source_run?: string;
   readonly id: string;

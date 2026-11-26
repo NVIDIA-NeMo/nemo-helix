@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -107,33 +106,3 @@ def test_deleting_a_run_deletes_its_events(api: TestClient, platform: ClientCont
     assert _events(api, "run-a") == []
     _post(api, "run-a", "fresh")
     assert [(e["id"], e["event"]) for e in _events(api, "run-a")] == [(1, "fresh")]
-
-
-def test_a_run_without_event_children_is_served_from_its_legacy_fileset(
-    api: TestClient, platform: ClientContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _create_run(platform, "old-run", events_fileset="default/old-events")
-    downloads: list[str] = []
-
-    def fake_download(_client: object, ref: str, dest: Path) -> Path:
-        downloads.append(ref)
-        (dest / "old-run.jsonl").write_text('{"event": "a", "payload": {}}\n\n{"event": "b", "payload": {}}\n')
-        return dest
-
-    monkeypatch.setattr(events, "_get_client", lambda: None)
-    monkeypatch.setattr(events, "download_fileset", fake_download)
-
-    assert [(e["id"], e["event"]) for e in _events(api, "old-run")] == [(1, "a"), (3, "b")]
-    assert [e["id"] for e in _events(api, "old-run", after=1)] == [3]
-    assert downloads == ["default/old-events", "default/old-events"]
-
-
-def test_a_run_with_stored_events_never_falls_back_to_its_fileset(
-    api: TestClient, platform: ClientContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _create_run(platform, "run-a", events_fileset="default/stale")
-    monkeypatch.setattr(events, "download_fileset", lambda *_: pytest.fail("fileset read for a stored run"))
-    _post(api, "run-a", "first")
-
-    assert [e["event"] for e in _events(api, "run-a")] == ["first"]
-    assert _events(api, "run-a", after=1) == []
