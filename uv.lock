@@ -4458,6 +4458,7 @@ version = "0.1.0"
 source = { editable = "plugins/nemo-builder" }
 dependencies = [
     { name = "cryptography" },
+    { name = "filesets" },
     { name = "httpx" },
     { name = "kubernetes" },
     { name = "nemo-helix-plugin" },
@@ -4472,6 +4473,7 @@ service = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=42.0.0" },
+    { name = "filesets", editable = "packages/filesets" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "kubernetes", specifier = ">=29.0.0" },
     { name = "nemo-helix", marker = "extra == 'service'", editable = "packages/nemo_helix" },

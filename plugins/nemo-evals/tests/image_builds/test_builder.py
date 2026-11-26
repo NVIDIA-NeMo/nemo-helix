@@ -13,16 +13,10 @@ from typing import Literal
 
 import httpx
 import pytest
+from nemo_builder_plugin.builds import HttpImageBuilder, adopt_or_build, archive_source, ensure_build
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
-from nemo_evals.image_builds.builder import (
-    HttpImageBuilder,
-    adopt_or_build,
-    archive_source,
-    builder_name,
-    copy_builder_name,
-    ensure_build,
-)
+from nemo_evals.image_builds.builder import builder_name, copy_builder_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
 
