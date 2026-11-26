@@ -52,6 +52,8 @@ class GreetingVerifyResponse(BaseVerifyResponse):
     probe: str = ""
     probe_target: str = ""
     observed_text: str
+    # Why a probe did not hold, when it can say: it lands in the trial's metadata, which outlives the sandbox.
+    probe_detail: str = ""
 
 
 def _assistant_text(response):
@@ -226,10 +228,16 @@ def _compose_project_works():
             )
         finally:
             subprocess.run([*compose, "down"], cwd=work, capture_output=True, timeout=120)
-    said = {
+    client_lines = [
         line.split("|", 1)[1].strip() for line in up.stdout.splitlines() if line.startswith("client") and "|" in line
-    }
-    return up.returncode == 0 and DOCKER_COMPOSE_EXPECTED <= said
+    ]
+    if up.returncode == 0 and DOCKER_COMPOSE_EXPECTED <= set(client_lines):
+        return True, ""
+    # `compose down` has removed the containers, so this is the only record of what the client saw. Compose's own
+    # output, mostly the servers' logs, only matters when the client never ran.
+    if client_lines:
+        return False, f"exit {up.returncode}; client: {client_lines}"
+    return False, f"exit {up.returncode}; the client printed nothing; compose: {up.stderr[-1500:]}"
 
 
 def _compose_works_from_an_empty_environment():
@@ -252,15 +260,20 @@ def _compose_works_from_an_empty_environment():
 
 def _docker_compose(target):
     # Unprivileged, unable to read execd's token anywhere, and still able to run Compose projects.
-    return (
-        _unprivileged()
-        and not _execd_token_readable()
-        and _compose_project_works()
-        and _compose_works_from_an_empty_environment()
-    )
+    if not _unprivileged():
+        return False, "the server holds root, capabilities, or no_new_privs unset"
+    if _execd_token_readable():
+        return False, "a process environment the server can read holds execd's token"
+    works, detail = _compose_project_works()
+    if not works:
+        return False, detail
+    if not _compose_works_from_an_empty_environment():
+        return False, "compose from an empty environment failed"
+    return True, ""
 
 
-# Each takes the probe's target, whether or not it needs one, so all can be called the same way.
+# Each takes the probe's target, whether or not it needs one, so all can be called the same way. A probe returns
+# whether its fact held, or that and why not.
 PROBES = {
     "environment_staged": _environment_staged,
     "environment_read_only": _environment_read_only,
@@ -279,16 +292,20 @@ class GreetingVerifier(SimpleResourcesServer):
         if body.probe == "hang":
             await asyncio.sleep(3600)
         observed = _assistant_text(body.response)
+        detail = ""
         if not body.probe:
             held = normalize(body.expected_greeting) in normalize(observed)
         else:
             try:
                 # Off the event loop: a denied connection takes its whole timeout to fail.
-                held = await asyncio.to_thread(PROBES[body.probe], body.probe_target)
-            except (KeyError, OSError, ValueError):
+                result = await asyncio.to_thread(PROBES[body.probe], body.probe_target)
+                held, detail = result if isinstance(result, tuple) else (result, "")
+            except (KeyError, OSError, ValueError) as error:
                 # An unknown probe, or one that could not run, has not shown its fact.
-                held = False
-        return GreetingVerifyResponse(**body.model_dump(), reward=float(held), observed_text=observed)
+                held, detail = False, f"{type(error).__name__}: {error}"
+        return GreetingVerifyResponse(
+            **body.model_dump(), reward=float(held), observed_text=observed, probe_detail=detail
+        )
 
 
 if __name__ == "__main__":
