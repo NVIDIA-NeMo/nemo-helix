@@ -1400,12 +1400,15 @@ def job_route_factory(
                     platform_spec, job_spec, workspace, async_client, dry_run_checks, full=dry_run.full
                 )
                 response.status_code = status.HTTP_200_OK
+                # Shown as the job's replies would show it once stored: their schema can differ from the
+                # spec compiled (``NemoJob.stored_spec_schema``).
+                preview = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
                 return TypedJobResponse(
                     name=dry_run_name,
                     workspace=workspace,
                     description=request.description,
                     project=request.project,
-                    spec=cast(BaseModel, job_spec),
+                    spec=handle_job_spec_mismatch(job_output, preview),
                     ownership=request.ownership,
                     custom_fields=request.custom_fields,
                     status_details={"checks": [check.model_dump() for check in checks]},
