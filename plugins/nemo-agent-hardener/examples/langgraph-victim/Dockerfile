@@ -19,10 +19,11 @@ WORKDIR /app
 # The agent's own dependencies — no agent-hardener. Pinned to the ranges the repo resolves.
 # nemo-relay carries the [langgraph] extra: that is what pulls the callback-handler integration.
 # Installed with uv rather than pip: a clean build takes about 37s instead of 64s, nearly all of the saving
-# in resolving and installing these packages.
+# in resolving and installing these packages. And when the index cannot serve a package, uv names it
+# ("pydantic-core was not found in the package registry") where pip reports a misleading conflict on langgraph.
 COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
 RUN uv pip install --system --no-cache \
-      "langgraph>=1.2,<2" \
+      "langgraph>=1.2.14,<2" \
       "langchain-core>=1.4,<2" \
       "langchain-openai>=1.1.9,<2.0" \
       "nemo-relay[langgraph]>=0.11.0,<0.12" \
