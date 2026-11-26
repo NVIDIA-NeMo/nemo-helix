@@ -205,6 +205,16 @@ def test_a_persistent_transient_error_fails_with_the_server_message(monkeypatch:
     assert verdict.reason == "provider_error" and "slow down" in verdict.detail
 
 
+def test_a_providers_retry_after_is_honored_up_to_the_interactive_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin import model_preflight
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(model_preflight.time, "sleep", sleeps.append)
+    chat = httpx.Response(429, headers={"Retry-After": "30"})
+    validate_choice("m", "https://x/v1", "k", client=_client(_split_handler(httpx.Response(404), chat)))
+    assert sleeps == [5.0, 5.0]
+
+
 def test_auth_detail_carries_the_server_message() -> None:
     chat = httpx.Response(403, json={"error": {"message": "key lacks access to m"}})
     verdict = validate_choice("m", "https://x/v1", "k", client=_client(_split_handler(httpx.Response(404), chat)))
