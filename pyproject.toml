@@ -445,6 +445,8 @@ explicit = true
 [tool.uv.sources]
 # Pin the official OpenShell release artifact.
 openshell = { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" }
+# Unreleased evaluation_report_data export (Safe-Synthesizer #845); drop once it ships on PyPI.
+nemo-safe-synthesizer = { git = "https://github.com/NVIDIA-NeMo/Safe-Synthesizer", rev = "6ee1bf7627dbd221e3b9ee503219d873773879de" }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }

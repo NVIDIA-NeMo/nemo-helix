@@ -744,97 +744,30 @@ components:
         constant synthetic profile paired with varying training data receives zero
 
         similarity.'
-    ClassifyConfig:
+    ConditioningColumn:
       properties:
-        enable_classify:
-          title: Enable Classify
-          description: Enable column classification.
-          type: boolean
-        entities:
-          title: Entities
-          description: List of entity types to classify.
-          items:
-            type: string
-          type: array
-        num_samples:
-          title: Num Samples
-          description: Number of column values to sample for classification.
-          default: 3
-          type: integer
-        classify_model_provider:
-          title: Classify Model Provider
-          description: Name of the model provider in the Inference Gateway for column
-            classification. The job compiler will resolve this to the appropriate
-            endpoint URL.
+        column_name:
           type: string
+          title: Column Name
+          description: Existing dataframe column that supplies the conditioning value.
+        entity_type:
+          allOf:
+          - $ref: '#/components/schemas/EntityType'
+          description: 'Entity this conditioning column holds. Required for read-only
+            conditioners. Optional when this column_name is also in columns_to_replace:
+            it is filled in from that entry''s entity_type, and an explicit value
+            must match it.'
       type: object
-      title: ClassifyConfig
-      description: Configuration for column classification using an LLM.
-    Column:
-      properties:
-        name:
-          title: Name
-          description: Column name.
-          type: string
-        position:
-          anyOf:
-          - type: integer
-          - items:
-              type: integer
-            type: array
-          title: Position
-          description: Column position.
-        condition:
-          title: Condition
-          description: Column condition.
-          type: string
-        value:
-          title: Value
-          description: Rename to value.
-          type: string
-        entity:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Entity
-          description: Column entity match.
-        type:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Type
-          description: Column type match.
-      type: object
-      title: Column
-      description: Rule matcher for selecting columns by name, position, condition,
-        entity, or type.
-    ColumnActions:
-      properties:
-        add:
-          title: Add
-          description: Columns to add.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
-        drop:
-          title: Drop
-          description: Columns to drop.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
-        rename:
-          title: Rename
-          description: Columns to rename.
-          items:
-            $ref: '#/components/schemas/Column'
-          type: array
-      type: object
-      title: ColumnActions
-      description: Container for column add, drop, and rename operations.
+      required:
+      - column_name
+      title: ConditioningColumn
+      description: "An existing column that conditions the replacement of another\
+        \ column.\n\n``entity_type`` is required for read-only conditioners (``gender``,\n\
+        ``ethnic_background``, ``city``, \u2026) that are not listed under\n``columns_to_replace``.\n\
+        \nWhen the conditioner is itself a replace target (e.g. email depends on\n\
+        ``first_name``), ``entity_type`` may be omitted: the plan fills it in from\
+        \ that\ncolumn's entry, and an explicit value must match it. Downstream nodes\
+        \ see the\ncell after upstream replacements."
     DataParameters:
       properties:
         group_training_examples_by:
@@ -939,6 +872,41 @@ components:
         noise
 
         during training.'
+    EntityType:
+      type: string
+      enum:
+      - first_name
+      - middle_name
+      - last_name
+      - full_name
+      - email
+      - phone_number
+      - date_of_birth
+      - street_address
+      - national_id
+      - credit_debit_card
+      - api_key
+      - ipv4
+      - ipv6
+      - unique_identifier
+      - free_text
+      - date
+      - gender
+      - ethnic_background
+      - city
+      - state
+      - zipcode
+      - country
+      - organization
+      title: EntityType
+      description: 'Closed vocabulary for discovery and plan ``entity_type`` fields.
+
+
+        ``FREE_TEXT`` marks columns whose accepted PII spans are detected by
+
+        GLiNER2 and applicable deterministic regex rules, then replaced without
+
+        changing the surrounding text.'
     EvaluationParameters:
       properties:
         mia_enabled:
@@ -1022,6 +990,105 @@ components:
       enum:
       - fileset
       title: FileStorageType
+    FreeTextDetectionConfig:
+      properties:
+        model_id:
+          type: string
+          minLength: 1
+          title: Model Id
+          description: GLiNER2 model identifier used to detect PII spans in free-text
+            columns. Must be nonempty.
+          default: fastino/gliner2-privacy-filter-PII-multi
+        model_revision:
+          title: Model Revision
+          description: Hugging Face revision (commit, branch, or tag) of model_id
+            to load. Defaults to the commit of the default model that the default
+            thresholds were tuned on. When model_id is changed and model_revision
+            is not set, the latest revision is loaded. Set null to load the latest
+            revision.
+          default: c153999da5f4c509df4322b0c6a1baf3d2c284d7
+          type: string
+          minLength: 1
+        entity_thresholds:
+          additionalProperties:
+            type: number
+            maximum: 1.0
+            minimum: 0.0
+          propertyNames:
+            $ref: '#/components/schemas/EntityType'
+          type: object
+          title: Entity Thresholds
+          description: 'Minimum GLiNER2 confidence score per entity type. Entity types
+            left out use the defaults: 0.944 for first_name; 0.7 for middle_name;
+            0.614 for last_name; 0.963 for full_name; 0.992 for phone_number; 0.9998
+            for date_of_birth; 0.987 for street_address; 0.979 for national_id; 0.991
+            for api_key; and 0.946 for unique_identifier. Email, credit_debit_card,
+            ipv4, and ipv6 are detected by regex and take no threshold.'
+        checked_national_id_threshold:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Checked National Id Threshold
+          description: Minimum GLiNER2 confidence score for a detected national ID
+            that python-stdnum accepts as a personal ID of replace_pii.locale's country,
+            such as a US Social Security number for en_US. It replaces entity_thresholds.national_id
+            for those values, since the check rather than the score tells them apart.
+            Locales without a check, such as en_GB, use only the national_id threshold.
+          default: 0.733
+        name_exclusion_thresholds:
+          additionalProperties:
+            type: number
+            maximum: 1.0
+            minimum: 0.0
+          type: object
+          title: Name Exclusion Thresholds
+          description: Extra GLiNER2 labels, with their minimum confidence, for terms
+            often mistaken for names, such as medical conditions or family relationships.
+            A detected name that overlaps one of these spans is not replaced, and
+            find_and_replace does not replace text inside them. Labels you set are
+            merged into the defaults; set a label to null to drop it, and it stays
+            null in the configuration. Dropping every label turns exclusion off, which
+            finds more real names at the cost of more false names in clinical text.
+        find_and_replace:
+          type: boolean
+          title: Find And Replace
+          description: Search free text for values already known in the same record
+            or group and replace the occurrences the detectors missed. Detected spans
+            reuse a known value's replacement either way; this setting only adds the
+            search. Known values are original values of structured replacement columns,
+            including the words of a plain full name, and values detected elsewhere
+            in free text. Only whole words are matched, ignoring case. Values shorter
+            than three characters, one-word values that are common English words,
+            such as 'Will' or 'Brown', and missing-value placeholders such as 'Unknown'
+            are not searched for, and text inside a name-exclusion span, such as a
+            medical condition, is never replaced this way. Set false to replace only
+            detected spans, for example to measure what the search adds. The search
+            runs only when replace_pii.locale is en_US, because the common-word list
+            is English.
+          default: true
+        batch_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Batch Size
+          description: Number of text chunks processed in one GLiNER2 inference batch.
+            Must be positive.
+          default: 8
+        chunk_length:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Chunk Length
+          description: Maximum length of each GLiNER2 text chunk. Must be positive.
+          default: 384
+        chunk_overlap:
+          type: integer
+          minimum: 0.0
+          title: Chunk Overlap
+          description: Overlap between adjacent GLiNER2 text chunks. Must be nonnegative
+            and smaller than chunk_length.
+          default: 128
+      type: object
+      title: FreeTextDetectionConfig
+      description: GLiNER2 and deterministic regex settings for free-text PII detection.
     GenerateJob:
       properties:
         id:
@@ -1349,81 +1416,6 @@ components:
 
         They affect the quality, diversity, and validity of the generated synthetic
         records.'
-    GlinerConfig:
-      properties:
-        enable_gliner:
-          type: boolean
-          title: Enable Gliner
-          description: Enable GLiNER NER module.
-          default: true
-        enable_batch_mode:
-          type: boolean
-          title: Enable Batch Mode
-          description: Enable GLiNER batch mode.
-          default: true
-        batch_size:
-          type: integer
-          title: Batch Size
-          description: GLiNER batch size.
-          default: 8
-        chunk_length:
-          type: integer
-          title: Chunk Length
-          description: GLiNER batch chunk length in characters.
-          default: 512
-        gliner_model:
-          type: string
-          title: Gliner Model
-          description: GLiNER model name.
-          default: nvidia/gliner-PII
-      type: object
-      title: GlinerConfig
-      description: Configuration for the GLiNER named-entity recognition model.
-    Globals:
-      properties:
-        locales:
-          title: Locales
-          description: List of locales.
-          examples:
-          - en_US
-          items:
-            type: string
-          type: array
-        seed:
-          title: Seed
-          description: Optional random seed.
-          type: integer
-          exclusiveMaximum: 2147483647.0
-          exclusiveMinimum: -2147483647.0
-        classify:
-          allOf:
-          - $ref: '#/components/schemas/ClassifyConfig'
-          description: Column classification configuration.
-          default:
-            num_samples: 3
-        ner:
-          allOf:
-          - $ref: '#/components/schemas/NERConfig'
-          description: Named Entity Recognition configuration.
-          default:
-            ner_threshold: 0.3
-            enable_regexps: false
-            gliner:
-              batch_size: 8
-              chunk_length: 512
-              enable_batch_mode: true
-              enable_gliner: true
-              gliner_model: nvidia/gliner-PII
-        lock_columns:
-          title: Lock Columns
-          description: List of columns to preserve as immutable across all transformations.
-          items:
-            type: string
-          type: array
-      type: object
-      title: Globals
-      description: Global settings for the PII replacer including locales, seed, NER,
-        and classification.
     HTTPValidationError:
       properties:
         detail:
@@ -1713,38 +1705,36 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
-    NERConfig:
+    LLMConfig:
       properties:
-        ner_threshold:
-          type: number
-          title: Ner Threshold
-          description: NER model threshold.
-          default: 0.3
-        enable_regexps:
-          type: boolean
-          title: Enable Regexps
-          description: Enable NER regular expressions (experimental).
-          default: false
-        gliner:
-          allOf:
-          - $ref: '#/components/schemas/GlinerConfig'
-          description: GLiNER NER configuration.
-          default:
-            enable_gliner: true
-            enable_batch_mode: true
-            batch_size: 8
-            chunk_length: 512
-            gliner_model: nvidia/gliner-PII
-        ner_entities:
-          title: Ner Entities
-          description: List of entity types to recognize. If unset, classification
-            entity types are used.
-          items:
-            type: string
-          type: array
+        model_id:
+          title: Model Id
+          description: Model identifier for PII inference. When unset, uses NSS_INFERENCE_MODEL.
+            Without an inference endpoint, selects the bundled local vLLM profile
+            and defaults to nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16; with
+            an endpoint, a model ID is required.
+          type: string
+        max_workers:
+          type: integer
+          minimum: 1.0
+          title: Max Workers
+          description: Maximum concurrent requests for LLM-assisted plan discovery.
+            Must be at least 1.
+          default: 8
       type: object
-      title: NERConfig
-      description: Configuration for Named Entity Recognition.
+      title: LLMConfig
+      description: 'Inference behavior for LLM-assisted PII plan discovery.
+
+
+        Automatic discovery always uses the LLM. Without an endpoint, NSS runs the
+
+        model in a managed local vLLM server. An
+
+        OpenAI-compatible endpoint is supplied at runtime through
+
+        ``NSS_INFERENCE_ENDPOINT`` or ``--inference-endpoint-url`` rather than persisted
+
+        in NSS configuration.'
     PaginationData:
       properties:
         page:
@@ -1775,28 +1765,68 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PiiReplacerConfig:
+    PiiColumnPlan:
       properties:
-        globals:
+        column_name:
+          type: string
+          title: Column Name
+          description: Name of the dataframe column to replace or scan.
+        entity_type:
           allOf:
-          - $ref: '#/components/schemas/Globals'
-          description: Global configuration options.
-        steps:
+          - $ref: '#/components/schemas/EntityType'
+          description: Entity this column holds. Identify-only entity types are not
+            allowed here.
+        pattern:
+          title: Pattern
+          description: Optional whole-value format using the grammar associated with
+            this entity type. Only entity types that define a pattern syntax may set
+            this. When provided, the whole column is replaced with the pattern if
+            it covers at least 99% of non-null values (checked against the dataframe,
+            not here).
+          type: string
+        depends_on:
           items:
-            $ref: '#/components/schemas/StepDefinition'
+            $ref: '#/components/schemas/ConditioningColumn'
           type: array
-          maxItems: 10
-          minItems: 1
-          title: Steps
-          description: List of transformation steps to perform on input data.
+          title: Depends On
+          description: Columns that condition the replacement of this column. Only
+            entity types in ALLOWED_DEPENDS_ON may set this. Can omit ConditioningColumn.entity_type
+            when the conditioner is listed in columns_to_replace. Matrix checks for
+            explicit entity_type run here; omitted types and exclusive-group checks
+            are resolved on PiiReplacementPlan.
       type: object
       required:
-      - steps
-      title: PiiReplacerConfig
-      description: 'Configuration for PII replacer.
-
-
-        Defines how PII data should be detected and replaced in a dataset.'
+      - column_name
+      - entity_type
+      title: PiiColumnPlan
+      description: "Replacement spec for one named column.\n\n``entity_type`` must\
+        \ have action ``REPLACE`` or ``REPLACE_IN_TEXT``, not\n``IDENTIFY_ONLY``.\n\
+        Identify-only types (``date``, ``gender``, ``city``, \u2026) are invalid here.\n\
+        ``depends_on`` is allowed only for types in ``ALLOWED_DEPENDS_ON``."
+    PiiSamplerBackend:
+      type: string
+      enum:
+      - nemotron-personas
+      - faker
+      title: PiiSamplerBackend
+      description: Source of synthetic values for names and related person-like fields.
+    PiiSamplerConfig:
+      properties:
+        backend:
+          allOf:
+          - $ref: '#/components/schemas/PiiSamplerBackend'
+          description: 'Person sampler backend: downloaded Nemotron-Personas assets
+            or Faker.'
+          default: nemotron-personas
+        nemotron_personas_path:
+          title: Nemotron Personas Path
+          description: Root directory containing downloaded Nemotron-Personas files
+            as datasets/{locale}.parquet. Defaults to NSS_NEMOTRON_PERSONAS_PATH or
+            ~/.data-designer/managed-assets.
+          type: string
+      type: object
+      title: PiiSamplerConfig
+      description: Settings for Nemotron-Personas or Faker-backed person sampling.
     PreflightParameters:
       properties:
         disabled_checks:
@@ -1824,79 +1854,143 @@ components:
         \ ``quantization_config`` object; optional ML dependencies stay\nlocally imported\
         \ in that construction path.\n\nSelection guide:\n- ``bnb-4bit`` / ``bnb-8bit``:\
         \ bitsandbytes NF4 / int8. Widest hardware\n  support (Ampere+), works with\
-        \ QLoRA and LoftQ. Default for training.\n- ``fp8``: transformers ``FineGrainedFP8Config``.\
+        \ QLoRA and LoftQ. ``bnb-8bit`` is the default.\n- ``fp8``: transformers ``FineGrainedFP8Config``.\
         \ Float8 with block-wise\n  scaling. Requires Hopper (sm_90+) or Blackwell.\
         \ Inference-leaning.\n- ``nvfp4``: NVIDIA FP4 via ``torchao.prototype.mx_formats.NVFP4WeightOnlyConfig``\n\
         \  wrapped in ``TorchAoConfig``. Requires Blackwell (sm_100+). Weight-only.\n\
         - ``mxfp4``: OCP Microscaling FP4 via transformers ``Mxfp4Config``.\n  Hardware\
         \ support varies by torch/torchao version."
-    Row:
+    ReplacePiiConfigInput:
       properties:
-        name:
+        schema_version:
+          type: integer
+          const: 3
+          title: Schema Version
+          description: Version of this replace_pii configuration schema. Missing versions
+            are treated as version 3; this release accepts only version 3.
+          default: 3
+        locale:
+          type: string
+          title: Locale
+          description: Locale for generated names and addresses, for reading phone
+            numbers written without a country code, and of the Nemotron-Personas dataset
+            (datasets/{locale}.parquet).
+          default: en_US
+        seed:
+          title: Seed
+          description: Seed for synthetic value generation. When unset, each run draws
+            a random seed and saves it in the resolved configuration. Anyone who knows
+            the seed can test guesses for original values in the replaced data, so
+            keep a configuration that contains it as private as the input data.
+          type: integer
+        sampler:
+          allOf:
+          - $ref: '#/components/schemas/PiiSamplerConfig'
+          description: 'Sampler that generates names and addresses: Nemotron-Personas
+            or Faker. When sampler is not set, NSS uses Nemotron-Personas, or Faker
+            with a warning when the Nemotron-Personas data for locale is missing and
+            the plan maps no ethnicity values. A relative nemotron_personas_path is
+            resolved against the directory of the configuration file.'
+        replacement_plan:
           anyOf:
+          - properties:
+              columns_to_replace:
+                items:
+                  $ref: '#/components/schemas/PiiColumnPlan'
+                type: array
+                title: Columns To Replace
+                description: Columns to replace or (for free_text) scan for PII spans
+                  to rewrite.
+              data_to_sampler_value_mapping:
+                additionalProperties:
+                  additionalProperties:
+                    items:
+                      type: string
+                    type: array
+                  type: object
+                type: object
+                title: Data To Sampler Value Mapping
+                description: 'Maps dataset values in depends_on columns to the values
+                  used by replace_pii.sampler. Unlike most NSS settings, all matching
+                  here ignores case: dataset values, mapping keys, and sampler values,
+                  so Female, female, and FEMALE are the same value. For example, {sex:
+                  {Woman: [female], Non-binary: [female, male]}} makes rows where
+                  sex is Woman sample a female persona and rows where sex is Non-binary
+                  sample either. Gender values are female and male for every sampler;
+                  Nemotron-Personas also accepts its locale''s own words, such as
+                  femme in fr_FR. Ethnicity values need Nemotron-Personas in a locale
+                  with ethnicity data. A dataset value without an entry is looked
+                  up in the sampler as is; a value that has no entry and matches no
+                  sampler value is an error. When replace_pii.replacement_plan is
+                  ''auto_discovery'', NSS generates this mapping for you.'
+            type: object
+            title: PiiReplacementPlan
+            description: 'Dataset-specific replacement plan: the part of ``replace_pii``
+              a person reviews.
+
+
+              ``data_to_sampler_value_mapping`` targets the values of ``replace_pii.sampler``
+
+              in ``replace_pii.locale``, so a plan is checked against the sampler
+              of each
+
+              run that uses it. ``columns_to_replace`` is a flat list whose
+
+              cross-column relationships are ``depends_on`` edges (a DAG). Context-free
+
+              dependency and graph checks are enforced here; plan-vs-dataframe checks
+
+              live in ``pii_replacer.planning.validation``.'
           - type: string
-          - items:
-              type: string
-            type: array
-          title: Name
-          description: Row name.
-        condition:
-          title: Condition
-          description: Row condition match.
-          type: string
-        foreach:
-          title: Foreach
-          description: Foreach expression.
-          type: string
-        value:
-          title: Value
-          description: Row value definition.
-          type: string
-        entity:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Entity
-          description: Row entity match.
-        type:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          title: Type
-          description: Row type match.
-        fallback_value:
-          title: Fallback Value
-          description: Row fallback value.
-          type: string
-        description:
-          title: Description
-          description: Rule description for human consumption.
-          type: string
+          title: Replacement Plan
+          description: '''auto_discovery'' to discover the plan from the data; an
+            inline plan; or the path of a YAML plan file. A relative path is resolved
+            against the directory of the configuration file.'
+          default: auto_discovery
+        llm:
+          allOf:
+          - $ref: '#/components/schemas/LLMConfig'
+          description: Inference behavior for LLM-assisted plan discovery; the defaults
+            run a local vLLM server. The endpoint is configured at runtime through
+            NSS_INFERENCE_ENDPOINT or --inference-endpoint-url. An inline plan makes
+            no LLM request.
+        free_text_detection:
+          allOf:
+          - $ref: '#/components/schemas/FreeTextDetectionConfig'
+          description: GLiNER2 and deterministic built-in regex settings for detecting
+            PII spans in free-text columns.
       type: object
-      title: Row
-      description: Rule matcher for selecting rows by name, condition, entity, or
-        type.
-    RowActions:
-      properties:
-        drop:
-          title: Drop
-          description: Rows to drop.
-          items:
-            $ref: '#/components/schemas/Row'
-          type: array
-        update:
-          title: Update
-          description: Rows to update.
-          items:
-            $ref: '#/components/schemas/Row'
-          type: array
-      type: object
-      title: RowActions
-      description: Container for row drop and update operations.
+      title: ReplacePiiConfigInput
+      description: 'Top-level ``replace_pii`` config.
+
+
+        ``replacement_plan`` holds what a person reviews: the columns to replace
+
+        and the value mapping. It is ``"auto_discovery"`` (the default), an inline
+
+        plan, or the path of a YAML plan file, resolved relative to the
+
+        configuration file that names it. ``locale``, ``seed``, and ``sampler``
+
+        configure generation; a plan''s value mapping is checked against the
+
+        ``sampler`` and ``locale`` of each run. ``llm`` and ``free_text_detection``
+
+        configure how NSS finds PII.
+
+
+        Auto-discovery classifies columns with the LLM configured by ``llm``, which
+
+        defaults to the NSS inference defaults. An inline plan bypasses discovery,
+
+        so it makes no LLM request; that is the way to replace PII without an LLM.
+
+        The API key remains a runtime secret supplied through ``NSS_INFERENCE_KEY``
+
+        or the corresponding CLI option; it is never stored in this model.
+
+
+        v2 fields ``globals`` and ``steps`` are rejected with a removal error.'
     SafeSynthesizerJobConfig:
       properties:
         data_source:
@@ -1964,7 +2058,7 @@ components:
             currently experimental.
         replace_pii:
           allOf:
-          - $ref: '#/components/schemas/PiiReplacerConfig'
+          - $ref: '#/components/schemas/ReplacePiiConfigInput'
           description: PII replacement configuration. When ``None``, PII replacement
             is skipped.
         preflight:
@@ -2039,6 +2133,12 @@ components:
           title: Autocorrelation Similarity Score
           description: How closely lagged self-correlation in synthetic time-series
             sequences matches the training sequences.
+          type: number
+        window_membership_inference_protection_score:
+          title: Window Membership Inference Protection Score
+          description: Resistance to attacks that use short windows of consecutive
+            values to determine whether a time-series sequence was in the training
+            set. Reported on its own; not part of the Data Privacy Score.
           type: number
         data_privacy_score:
           title: Data Privacy Score
@@ -2148,31 +2248,6 @@ components:
       type: object
       title: SafeSynthesizerTiming
       description: Wall-clock durations for each pipeline stage.
-    StepDefinition:
-      properties:
-        vars:
-          title: Vars
-          description: Variable names and templates.
-          additionalProperties:
-            anyOf:
-            - type: string
-            - additionalProperties: true
-              type: object
-            - items: {}
-              type: array
-          type: object
-        columns:
-          allOf:
-          - $ref: '#/components/schemas/ColumnActions'
-          description: Columns transform configuration.
-        rows:
-          allOf:
-          - $ref: '#/components/schemas/RowActions'
-          description: Rows transform configurations.
-      type: object
-      title: StepDefinition
-      description: Single transformation step with optional variables, column actions,
-        and row actions.
     StringFilter:
       additionalProperties: false
       properties:
@@ -2266,6 +2341,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/AutocorrelationSimilarityParameters'
           description: Autocorrelation similarity metric parameters.
+        window_group_mia:
+          allOf:
+          - $ref: '#/components/schemas/WindowGroupMIAParameters'
+          description: Window membership inference protection metric parameters.
       type: object
       title: TimeSeriesEvaluationParameters
       description: 'Metric-specific time-series evaluation configuration.
@@ -2366,10 +2445,6 @@ components:
             treated as a ratio of total training steps; 0 disables warmup. Must be
             finite and >= 0, and cannot be fractional at or above 1.
           default: 0.05
-        warmup_ratio:
-          title: warmup_ratio
-          description: Deprecated. Use warmup_steps instead.
-          type: number
         lr_scheduler:
           type: string
           title: lr_scheduler
@@ -2447,25 +2522,14 @@ components:
             memory usage and potentially speed up training, but may also impact model
             accuracy.
           default: false
-        quantization_bits:
-          type: integer
-          enum:
-          - 4
-          - 8
-          title: quantization_bits
-          description: "Deprecated: use ``quantization_scheme`` instead. Bit width\
-            \ for bitsandbytes quantization when ``quantization_scheme`` is not set\
-            \ (back-compat alias: 4 \u2192 bnb-4bit, 8 \u2192 bnb-8bit)."
-          default: 8
-          deprecated: true
         quantization_scheme:
           allOf:
           - $ref: '#/components/schemas/QuantizationScheme'
           title: quantization_scheme
           description: Quantization scheme to use when ``quantize_model=True``. Accepts
-            ``bnb-4bit``, ``bnb-8bit``, ``fp8``, ``nvfp4``, or ``mxfp4``. If unset,
-            falls back to ``quantization_bits`` for backward compatibility. Non-bitsandbytes
+            ``bnb-4bit``, ``bnb-8bit``, ``fp8``, ``nvfp4``, or ``mxfp4``. Non-bitsandbytes
             schemes are incompatible with ``peft_implementation='loftq'``.
+          default: bnb-8bit
         peft_implementation:
           type: string
           title: peft_implementation
@@ -2567,3 +2631,54 @@ components:
         These parameters control the validation and automatic fixes when going
 
         from LLM output to tabular data.'
+    WindowGroupMIAParameters:
+      properties:
+        value_columns:
+          title: Value Columns
+          description: Numeric value columns combined into each window. Defaults to
+            all shared columns inferred as numeric, up to max_columns. Changing this
+            selection changes the meaning of the score.
+          items:
+            type: string
+          type: array
+        window_size:
+          type: integer
+          minimum: 2.0
+          title: Window Size
+          description: Number of consecutive observations compared as one window.
+            Training and holdout windows use a stride of half the window_size, and
+            synthetic windows use a stride of 1. Shorter windows detect partial copies
+            in shorter sequences, and longer windows detect copies blurred by noise.
+            Scores computed with different windows are not directly comparable.
+          default: 10
+        max_windows:
+          type: integer
+          minimum: 20.0
+          title: Max Windows
+          description: Maximum training and holdout windows compared, each, using
+            a reproducible sample across groups to bound runtime. Fewer windows make
+            the score noisier but faster to compute. The score needs at least 20 of
+            each.
+          default: 1000
+        max_columns:
+          type: integer
+          minimum: 1.0
+          title: Max Columns
+          description: Maximum automatically selected numeric columns combined into
+            each window, chosen with a reproducible sample to bound runtime. Explicit
+            value_columns are always used in full.
+          default: 12
+      type: object
+      title: WindowGroupMIAParameters
+      description: 'Control window membership inference protection evaluation.
+
+
+        Timestamp ordering and sequence grouping use the top-level time-series and
+
+        data settings. The score needs grouped data and a holdout of at least two
+
+        whole groups, which the pipeline creates when
+
+        ``data.group_training_examples_by`` is set. Without them, only copy
+
+        diagnostics are reported.'
