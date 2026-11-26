@@ -18,9 +18,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+import httpx
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
@@ -73,8 +75,9 @@ from nemo_agent_hardener_plugin.model_config import (
     WarGameModels,
     effective_safety,
 )
-from nemo_agent_hardener_plugin.model_preflight import validate_choice
+from nemo_agent_hardener_plugin.model_preflight import Validation, validate_choice
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job import NemoJob
@@ -91,6 +94,9 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
+#: The submit-time model probe holds the submit request, so each call gets one short attempt.
+_SUBMIT_PROBE_TIMEOUT_S = 5.0
+_SUBMIT_PROBE_RETRY = RetryPolicy(max_retries=0)
 
 
 def _merge_choice(default: ModelChoice | None, override: ModelChoice | None) -> ModelChoice | None:
@@ -140,7 +146,7 @@ def _merge_models(stored: WarGameModels, override: WarGameModels) -> WarGameMode
 
 
 def _preflight_models(models: WarGameModels | None, *, sdk: Any, workspace: str, default_key: str | None) -> None:
-    """Fail fast (before the sandbox spins up) if a user-chosen model/endpoint/key can't be reached.
+    """Fail fast at submit (before the job queues) if a user-chosen model/endpoint/key can't be reached.
 
     Only groups the user explicitly configured (a model name and/or a custom ``base_url``) are probed —
     the built-in defaults are known-good and left untouched. On a bad credential or a wrong model name we
@@ -150,14 +156,29 @@ def _preflight_models(models: WarGameModels | None, *, sdk: Any, workspace: str,
     The guardrail ("safety") group is probed with the analysis endpoint and key filling whatever it leaves
     unset, as agent-hardener's judge does. Worth probing precisely because its failure is silent: an
     unreachable judge does not error, the guardrail fails open, which reads as "ran, proposed no change".
+
+    This is the early, cheap check and it holds the submit request, so it is bounded: the groups are probed
+    at once, each with one attempt per call under a short timeout. agent-hardener's own preflight inside
+    the job is the authoritative one, which is also why a busy provider here only warns.
     """
-    for label, choice, default_base_url in _probed_groups(models):
-        key = _common._resolve_secret(sdk, choice.api_key_secret, workspace) if choice.api_key_secret else default_key
-        verdict = validate_choice(choice.model, choice.base_url or default_base_url, key)
+    groups = _probed_groups(models)
+    keys = [
+        _common._resolve_secret(sdk, choice.api_key_secret, workspace) if choice.api_key_secret else default_key
+        for _, choice, _ in groups
+    ]
+    with httpx.Client(timeout=_SUBMIT_PROBE_TIMEOUT_S) as client:
+
+        def probe(group: tuple[str, ModelChoice, str], key: str | None) -> Validation:
+            _, choice, default_base_url = group
+            base_url = choice.base_url or default_base_url
+            return validate_choice(choice.model, base_url, key, client=client, retry=_SUBMIT_PROBE_RETRY)
+
+        with ThreadPoolExecutor(max_workers=max(len(groups), 1)) as pool:
+            verdicts = list(pool.map(probe, groups, keys))
+    for (label, choice, _), verdict in zip(groups, verdicts, strict=True):
         if verdict.ok:
             continue
         if verdict.reason == "provider_error":
-            # The key was accepted; a busy provider (429/5xx) is waited out by the run itself, so don't fail here.
             logger.warning("%s model endpoint is busy (%s); submitting anyway", label, verdict.detail or "error")
             continue
         raise AgentHardenerRunError(CATEGORY_MODEL_UNAVAILABLE, _preflight_message(label, choice, verdict))

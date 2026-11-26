@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +15,7 @@ from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_MODEL_UNAVAILABLE, AgentHardenerRunError
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_agent_hardener_plugin.model_preflight import probe_models, validate_choice
+from nemo_helix_plugin.client.types import RetryPolicy
 
 
 def _client(handler: Any) -> httpx.Client:
@@ -226,7 +228,7 @@ def test_preflight_raises_model_unavailable_with_list(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         run_module,
         "validate_choice",
-        lambda model, base_url, key: SimpleNamespace(
+        lambda model, base_url, key, **_kw: SimpleNamespace(
             ok=False, reason="unknown_model", available=["real/a", "real/b"], detail=""
         ),
     )
@@ -235,6 +237,23 @@ def test_preflight_raises_model_unavailable_with_list(monkeypatch: pytest.Monkey
         run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
     assert exc.value.category == CATEGORY_MODEL_UNAVAILABLE
     assert "real/a" in str(exc.value)
+
+
+def test_the_submit_probe_is_bounded_one_attempt_per_group_and_groups_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    both_in_flight = threading.Barrier(2, timeout=5)
+    retries: list[int] = []
+
+    def probe(*_a: object, retry: RetryPolicy, **_k: object) -> SimpleNamespace:
+        retries.append(retry.max_retries)
+        both_in_flight.wait()  # a sequential probe would never get the second group here
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(run_module, "validate_choice", probe)
+    models = WarGameModels(attack=ModelChoice(model="a"), analysis=ModelChoice(model="b"))
+    run_module._preflight_models(models, sdk=None, workspace="default", default_key="k")
+    assert retries == [0, 0]
 
 
 def test_preflight_skips_default_only_groups(monkeypatch: pytest.MonkeyPatch) -> None:

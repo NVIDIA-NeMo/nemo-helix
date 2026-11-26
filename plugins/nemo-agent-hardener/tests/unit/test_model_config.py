@@ -125,7 +125,7 @@ def test_preflight_probes_the_safety_group(monkeypatch: Any) -> None:
 
     probed: list[tuple[str | None, str | None]] = []
 
-    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+    def _validate(model: str | None, base_url: str | None, key: str | None, **_kw: Any) -> Any:
         probed.append((model, base_url))
         return SimpleNamespace(ok=False, reason="auth", detail="key not allowed", available=["good/model"])
 
@@ -142,7 +142,7 @@ def test_preflight_probes_safety_where_the_judge_will_go(monkeypatch: Any) -> No
     """Unset safety fields fall back to the analysis endpoint and key, as agent-hardener's judge does."""
     probed: list[tuple[str | None, str | None, str | None]] = []
 
-    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+    def _validate(model: str | None, base_url: str | None, key: str | None, **_kw: Any) -> Any:
         probed.append((model, base_url, key))
         return SimpleNamespace(ok=True)
 
@@ -164,7 +164,7 @@ def test_preflight_checks_the_built_in_judge_when_only_its_endpoint_is_set(monke
 
     probed: list[tuple[str | None, str | None]] = []
 
-    def _validate(model: str | None, base_url: str | None, key: str | None) -> Any:
+    def _validate(model: str | None, base_url: str | None, key: str | None, **_kw: Any) -> Any:
         probed.append((model, base_url))
         return SimpleNamespace(ok=True)
 
