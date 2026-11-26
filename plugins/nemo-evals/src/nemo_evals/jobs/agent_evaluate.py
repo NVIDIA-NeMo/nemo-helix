@@ -344,7 +344,9 @@ class _AgentEvalJobBase(NemoJob):
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
 
-            if has_pending_files_snapshot(spec.target):
+            # Only a snapshot this resolution named: a stored legacy source also has files and no ID, but its
+            # snapshot exists. Submission refuses a target that carries files, so that's defense in depth.
+            if has_pending_files_snapshot(spec.target) and not has_pending_files_snapshot(submit_spec.target):
 
                 async def snapshot_agent_files(canonical: BaseModel) -> BaseModel:
                     assert isinstance(canonical, AgentEvalSpec)

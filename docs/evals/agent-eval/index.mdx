@@ -130,7 +130,7 @@ A dry run checks an `agent-evaluate` job the way submit does, then stops before 
 create request with `?dry_run=true`:
 
 ```bash
-curl -X POST "$NHX_BASE_URL/apis/evals/v2/workspaces/default/agent-evaluate/jobs?dry_run=true" \
+curl -X POST "${NHX_BASE_URL:-http://localhost:8080}/apis/evals/v2/workspaces/default/agent-evaluate/jobs?dry_run=true" \
   -H "Content-Type: application/json" -d @job.json
 ```
 

@@ -296,6 +296,32 @@ async def test_a_deferred_snapshot_is_named_at_resolution_and_taken_only_by_its_
     assert registered_agent_files_receipt(stored.target) == FilesetReceipt(ref=named.root, fileset_id="snapshot-id")
 
 
+async def test_a_target_that_arrives_with_a_legacy_snapshot_gets_no_second_one(mocker: MockerFixture) -> None:
+    """A legacy source has files and no ID too; only a snapshot this resolution named is taken.
+
+    Submission refuses a target that carries files, so this one is put past that check on purpose.
+    """
+    files = _platform(mocker, _agent(_with_skills()), ethos_fileset=True).files
+    legacy = FabricRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-legacy")),
+        resolved_config={"harness": {"adapter_id": "x"}},
+    )
+    input_spec = _input_spec({"kind": "fabric", "source": {"agent": "calc"}}).model_copy(update={"target": legacy})
+    deferred: list[Any] = []
+
+    await AgentEvalJob.to_spec(
+        input_spec,
+        workspace="dev",
+        entity_client=None,
+        async_sdk=_async_platform(),
+        is_local=False,
+        defer=deferred.append,
+    )
+
+    assert deferred == []
+    files.create_fileset.assert_not_awaited()
+
+
 @pytest.mark.parametrize("deferred", [False, True], ids=["inline", "deferred"])
 async def test_a_caller_who_may_not_snapshot_the_files_is_refused_before_any_is_read_or_written(
     mocker: MockerFixture, deferred: bool
