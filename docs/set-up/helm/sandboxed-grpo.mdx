@@ -194,24 +194,24 @@ Before a job, confirm the admission policy is installed:
 kubectl get validatingadmissionpolicy | grep job-step-networkpolicies
 ```
 
-Submit a short GRPO job, as described in [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments). While it runs, set `JOB_ID` to the platform job name, inspect the step policy, and read the job's uid from it:
+Submit a short GRPO job, as described in [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments). While it runs, read the job's uid from the platform and inspect its step policy. Select the job by its workspace as well as its name: a job in another workspace can have the same name.
 
 ```sh
-export JOB_ID=<platform-job-name>
+export WORKSPACE=<workspace>
+export JOB_NAME=<platform-job-name>
+
+export JOB_UID=$(nemo jobs get "$JOB_NAME" --workspace "$WORKSPACE" -f json | jq -r .id)
 
 kubectl -n "$KUBE_NAMESPACE" get networkpolicy \
-  -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_id="$JOB_ID" -o yaml
-
-export JOB_UID=$(kubectl -n "$KUBE_NAMESPACE" get networkpolicy \
-  -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_id="$JOB_ID" \
-  -o jsonpath='{.items[0].spec.podSelector.matchLabels.nhx\.nvidia\.com/job_uid}')
+  -l nhx.nvidia.com/managed_by=jobs-controller,nhx.nvidia.com/job_workspace_id="$WORKSPACE",nhx.nvidia.com/job_id="$JOB_NAME" \
+  -o yaml
 ```
 
 Expect:
 
-- `spec.podSelector` selects one job step, and `policyTypes` is `[Ingress]`.
-- One ingress rule allows pods with `nhx.nvidia.com/managed_by: jobs-controller` and `nhx.nvidia.com/job_uid: <job uid>` on all ports.
-- One ingress rule allows pods with `nemo-rl-job-id: <job uid>` on TCP 51234 and TCP 3000–4998, and no other ports.
+- `spec.podSelector` selects one job step, including `nhx.nvidia.com/job_uid: $JOB_UID`, and `policyTypes` is `[Ingress]`.
+- One ingress rule allows pods with `nhx.nvidia.com/managed_by: jobs-controller` and `nhx.nvidia.com/job_uid: $JOB_UID` on all ports.
+- One ingress rule allows pods with `nemo-rl-job-id: $JOB_UID` on TCP 51234 and TCP 3000–4998, and no other ports.
 
 Confirm the Gym sandbox pod carries the job uid:
 
