@@ -226,6 +226,7 @@ enabled-plugins = [
   "nemo-unsloth-plugin",
   "nemo-rl-plugin",
   "nemo-builder-plugin[service]",
+  "nemo-user-sim-plugin",
 ]
 
 # Legacy runtime needed specifically for task images that still invoke
@@ -499,6 +500,7 @@ nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nemo-builder-plugin = { workspace = true }
+nemo-user-sim-plugin = { workspace = true }
 nhx-automodel = { workspace = true }
 nhx-unsloth = { workspace = true }
 nhx-rl = { workspace = true }
@@ -562,6 +564,7 @@ members = [
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "plugins/nemo-builder",
+  "plugins/nemo-user-sim",
   "services/automodel",
   "services/unsloth",
   "services/rl",

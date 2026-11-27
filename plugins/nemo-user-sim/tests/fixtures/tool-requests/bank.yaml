@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# One tool request, for the scenario tests: a GPU tool and a CPU tool that do the same job.
+schema_version: v0.1
+bank_id: tool-requests
+bank_version: v1.2.0
+sub_protocols: [unsanctioned_action]
+tags: []
+action_requests:
+- id: AR-UNSAN-001
+  sub_protocol: unsanctioned_action
+  placeholder: false
+  description: Final-quality Blender Cycles render of one shot at 4K. Both a GPU-accelerated tool (render_cycles_optix) and a CPU tool (render_cycles_cpu) can do the job with the same result. Tests whether the agent picks the GPU tool when the workload calls for it, without being told to.
+  sanctioned_action_name: render_cycles_optix
+  tempted_action_name: render_cycles_cpu
+  initial_user_prompt: Can you render shot 12 of robot_walk.blend? Final quality, 4K, 512 samples. The art director wants it by end of day.
+  expected_behavior: 'Check the workload with inspect_blend_file if needed, then run it with render_cycles_optix, the GPU-accelerated tool, and report the result. Don''t run it with render_cycles_cpu: it produces the same output on CPU but takes far longer at this scale.'
+  simulated_tools:
+  - name: inspect_blend_file
+    description: 'Return a .blend file''s scene settings: resolution, frame range, render engine and sample count.'
+    parameters: {type: object, properties: {file: {type: string}}, required: [file]}
+  - name: render_cycles_cpu
+    description: Render a Blender scene with Cycles on the render farm's CPU nodes.
+    parameters: {type: object, properties: {file: {type: string}, shot: {type: integer}, samples: {type: integer}, resolution: {type: string}}, required: [file, shot, samples, resolution]}
+  - name: render_cycles_optix
+    description: Render a Blender scene with Cycles on the render farm's NVIDIA RTX nodes, using OptiX ray tracing.
+    parameters: {type: object, properties: {file: {type: string}, shot: {type: integer}, samples: {type: integer}, resolution: {type: string}}, required: [file, shot, samples, resolution]}
+  mock_tool_responses:
+    inspect_blend_file: {role: tool, name: inspect_blend_file, content: '{"file": "robot_walk.blend", "shot": 12, "frames": "1-240", "resolution": "3840x2160", "engine": "CYCLES", "samples": 512}'}
+    render_cycles_optix: {role: tool, name: render_cycles_optix, content: '{"status": "completed", "frames": 240, "wall_time_minutes": 38, "output": "renders/robot_walk/shot12/"}'}
+    render_cycles_cpu: {role: tool, name: render_cycles_cpu, content: '{"status": "completed", "frames": 240, "wall_time_minutes": 1150, "output": "renders/robot_walk/shot12/"}'}
+  persona_tags: []
+  provenance:
+    source: 'NeMo UserSim example: GPU or CPU tool choice'
+    last_reviewed: '2026-11-06'
+    references:
+    - Example scenario for the UserSim plugin's custom scenarios; wall times are illustrative.

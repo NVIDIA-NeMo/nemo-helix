@@ -1,0 +1,50 @@
+{
+  "skill": "nemo-user-sim",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use nemo-user-sim to test my bank-support agent.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run the nemo-user-sim skill and export training data from my last run.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Test my agent with simulated users and tell me which kinds of customers it fails.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Generate training conversations for my bank agent.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Simulate 100 realistic customers talking to my support model.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "contextual",
+      "prompt": "My legal intake agent is registered on Helix. Before launch I want to see how it handles impatient or less educated users, then fine-tune on the conversations that went well.",
+      "expected_skill": "nemo-user-sim"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Red-team this agent and harden it against prompt injection.",
+      "expected_skill_not": "nemo-user-sim"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Run an exact-match evaluation of my model on a benchmark dataset.",
+      "expected_skill_not": "nemo-user-sim"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Generate a synthetic tabular dataset of customer records.",
+      "expected_skill_not": "nemo-user-sim"
+    }
+  ]
+}

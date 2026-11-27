@@ -210,6 +210,7 @@
 {"name": "langgraph-sdk", "license": "MIT", "compatible": true}
 {"name": "langsmith", "license": "MIT", "compatible": true}
 {"name": "lark", "license": "MIT", "compatible": true}
+{"name": "lingua-language-detector", "license": "APACHE-2.0", "compatible": true}
 {"name": "litellm", "license": "MIT", "compatible": true}
 {"name": "loguru", "license": "MIT", "compatible": true}
 {"name": "lxml", "license": "BSD-3-CLAUSE", "compatible": true}
@@ -448,6 +449,7 @@
 {"name": "unsloth", "license": "APACHE-2.0", "compatible": true}
 {"name": "unsloth-zoo", "license": "LGPL-3.0-OR-LATER", "compatible": true}
 {"name": "urllib3", "license": "MIT", "compatible": true}
+{"name": "usersim", "license": "APACHE-2.0", "compatible": true}
 {"name": "uuid-utils", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "uvicorn", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "uvloop", "license": "MIT", "compatible": true}

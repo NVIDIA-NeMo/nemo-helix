@@ -51,6 +51,7 @@ members = [
     "nemo-sandboxed-gym",
     "nemo-switchyard-plugin",
     "nemo-unsloth-plugin",
+    "nemo-user-sim-plugin",
     "nemohelix",
     "nhx-auth",
     "nhx-automodel",
@@ -3527,6 +3528,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/30/75/456da2da05f6380ea96e6ea804ab2c03e41fc3ed80052307fe8efe6ea20e/latex2sympy2_extended-1.11.0.tar.gz", hash = "sha256:9695657c81b50abba2636638638618db59f4663ed2a4a12d62cef74a40e28fec", size = 207023, upload-time = "2026-01-10T01:43:21.319Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/61/f75cd1fa54d8434276126034aed54dd120747de9a8fa013cdd79545ccbeb/latex2sympy2_extended-1.11.0-py3-none-any.whl", hash = "sha256:aebb77d52ce269e25028e4bea89ddb14d242ba36bcf7b636496fb5fd9728d234", size = 209050, upload-time = "2026-01-10T01:43:19.458Z" },
+]
+
+[[package]]
+name = "lingua-language-detector"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/05/32568a1afe29e8d2060e4ffefd9d1a67aa2e423db3ab4abbf4f604c81b39/lingua_language_detector-2.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:2fe367f7c112a0445218407e259338a88af770d5c84a550c20ebe11d5053f03d", size = 172495668, upload-time = "2026-03-09T14:24:18.193Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/64/b6212bc0eff72d76dd04649c13452318eb2abeafc397ac597242e47e3e07/lingua_language_detector-2.2.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9ac7453c08ab9699706a92f15480ae3d4b66761c15e1577a1ba31d1635780f3a", size = 170325432, upload-time = "2026-03-09T14:24:29.41Z" },
+    { url = "https://files.pythonhosted.org/packages/44/a0/7322a0c50db8f82836ef40b14986dfcfad17bd837bfa5782562fec143bf0/lingua_language_detector-2.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:63d99c7570ba09525f1702e4e4b2362f8f1f7e0a0fba93a3a53d3f322e00659d", size = 170332900, upload-time = "2026-03-09T14:24:40.088Z" },
+    { url = "https://files.pythonhosted.org/packages/47/b5/e6d09c3cf08580088cc85807b1b28ef8b77d8c62d50ed56144a565205787/lingua_language_detector-2.2.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:cd54fe6505b671c0d1e33bf0436e8e9308e8802112eb5ba6fb37d2c5459ab685", size = 170500781, upload-time = "2026-03-09T14:24:51.478Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/f2/ef84cc7f57854838f9b64f1b8aae07ee56827b5538b9609acb72aa6832e5/lingua_language_detector-2.2.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:362fbbc21da68c778f3521f42309d1ed6f54d4bd554a5701bf165419be9cc64b", size = 170586077, upload-time = "2026-03-09T14:25:04.48Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/cd/248053f61de66faa866bb4eb7190af1c2e67fa363f8193444a5aee5c1706/lingua_language_detector-2.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:0bb20bfe60b64012cd71f85bfdf5c79fc2e916590a9f69c3a9b01a44fbfd2244", size = 172495363, upload-time = "2026-03-09T14:25:53.585Z" },
+    { url = "https://files.pythonhosted.org/packages/25/88/ad5e9b8b21f4c5eeecd5d08539bf6ec869df87a491d779b8756501db6a71/lingua_language_detector-2.2.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4ed86c6e803a585853298623d9ee683bd08bcd15c2543c045ef059a090823fc8", size = 170326018, upload-time = "2026-03-09T14:26:04.612Z" },
+    { url = "https://files.pythonhosted.org/packages/53/a5/b93c76728294e4eaf01f442fa7e9da913963d638915ce0aafd0220bc9902/lingua_language_detector-2.2.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4fbf936b47ef4fdd7043ebb4159d4a5f1c3648028e19d6e3c60464abc5f5e195", size = 170332278, upload-time = "2026-03-09T14:26:14.118Z" },
+    { url = "https://files.pythonhosted.org/packages/21/90/7f0f4c131cd0686c0f77157545b599b5023b00fa44ffb4a1c24a4c861cb3/lingua_language_detector-2.2.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:126899985870ada7f9630fb984a0763741bb7fde42adfc077e6f415e49e407b5", size = 170500970, upload-time = "2026-03-09T14:26:28.07Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/71/24d9d151ccf35cd001d8570d22dc1d305e632eee7ff1252764be8fb081f3/lingua_language_detector-2.2.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:c0961ec8f616897f5e91c7c3a5422d2d3aa48493954f2c425f2fca522a253916", size = 170585841, upload-time = "2026-03-09T14:26:39.904Z" },
+    { url = "https://files.pythonhosted.org/packages/28/0b/3dd8a1eba4ac0da9987542849bae25344bb107e5b4a153ebe09e0c8feba3/lingua_language_detector-2.2.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:066b56ca4e3bd324b4c76a861ab2b747d2d8d4e6eda0a4cf06291c6c039b90f4", size = 172494828, upload-time = "2026-03-09T14:27:27.087Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/89/7367d0f7d3b5bcc89f47e223580ec57032dfc642f27cd2a0d06f40bda147/lingua_language_detector-2.2.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b883aa34f03cd5cde7ee606bd2c18496f15b6cbd775be0dfd38311d47d6cf551", size = 170323577, upload-time = "2026-03-09T14:27:38.702Z" },
+    { url = "https://files.pythonhosted.org/packages/58/0f/6dcd9de6f5257ea736693ea92b354dac0073466a1ed32ef1f9873cc4cafe/lingua_language_detector-2.2.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:83badc377b0d07f349753ec3d35cf1ad74afb3ad0dce3ee672240d437705872b", size = 170331791, upload-time = "2026-03-09T14:27:49.366Z" },
+    { url = "https://files.pythonhosted.org/packages/28/42/efb8119a778f0b8df175f5f79a04a21b019c7b38058042866519953c5be1/lingua_language_detector-2.2.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:b7ef23811c8ceacbc10a08dd2f56d71590e7ca6c50e19dfd11a1e142d101199d", size = 170499780, upload-time = "2026-03-09T14:28:04.197Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/89/69ea8b9de230b322ce8b60e9b95463cc4cbeed73476abd9214ab699ade73/lingua_language_detector-2.2.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:145a11d7b7f0c8bf666de411585f53011d530c541a2cd55c2f86b3cff499f77e", size = 170584476, upload-time = "2026-03-09T14:28:18.833Z" },
 ]
 
 [[package]]
@@ -7795,6 +7818,37 @@ dev = [
 ]
 
 [[package]]
+name = "nemo-user-sim-plugin"
+version = "0.1.0"
+source = { editable = "plugins/nemo-user-sim" }
+dependencies = [
+    { name = "mcp" },
+    { name = "nemo-agents-plugin", extra = ["deepagents"] },
+    { name = "nemo-fabric" },
+    { name = "nemo-helix" },
+    { name = "nemo-helix-plugin" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "typer" },
+    { name = "usersim" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.28.1,<2" },
+    { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
+    { name = "nemo-fabric", specifier = ">=0.6.0,<0.7.0" },
+    { name = "nemo-helix", editable = "packages/nemo_helix" },
+    { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "pydantic", specifier = ">=2.10.6" },
+    { name = "typer", specifier = ">=0.20.0" },
+    { name = "usersim", specifier = "==0.2.0" },
+    { name = "uvicorn" },
+]
+
+[[package]]
 name = "nemoguardrails"
 version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
@@ -7894,6 +7948,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
     { name = "nemo-unsloth-plugin" },
+    { name = "nemo-user-sim-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
     { name = "nhx-entities" },
@@ -7948,6 +8003,7 @@ core-services = [
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
     { name = "nemo-unsloth-plugin" },
+    { name = "nemo-user-sim-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
     { name = "nhx-entities" },
@@ -8061,6 +8117,7 @@ enabled-plugins = [
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
     { name = "nemo-unsloth-plugin" },
+    { name = "nemo-user-sim-plugin" },
     { name = "nhx-jobs", extra = ["openshell"] },
 ]
 functional-services = [
@@ -8086,6 +8143,7 @@ functional-services = [
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
     { name = "nemo-unsloth-plugin" },
+    { name = "nemo-user-sim-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
     { name = "nhx-entities" },
@@ -8197,6 +8255,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
+    { name = "nemo-user-sim-plugin", editable = "plugins/nemo-user-sim" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
@@ -8247,6 +8306,7 @@ core-services = [
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
+    { name = "nemo-user-sim-plugin", editable = "plugins/nemo-user-sim" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
@@ -8363,6 +8423,7 @@ enabled-plugins = [
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
+    { name = "nemo-user-sim-plugin", editable = "plugins/nemo-user-sim" },
     { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
 ]
 functional-services = [
@@ -8389,6 +8450,7 @@ functional-services = [
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
+    { name = "nemo-user-sim-plugin", editable = "plugins/nemo-user-sim" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
@@ -13675,6 +13737,30 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
+]
+
+[[package]]
+name = "usersim"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "data-designer" },
+    { name = "filelock" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "lingua-language-detector" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/79/6e/31acb9f489fa16181719897f71fe80e5ec5b9af5584185dc9c690d43c9c3/usersim-0.2.0.tar.gz", hash = "sha256:4526553b54f23ebd7250bfb4d9703de7186f502518e31d5186b4c9049dcbc456", size = 5552976, upload-time = "2026-10-22T08:01:30.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/7c/596d3c98196aab560125a794d6ec7523f25321125c3c88d313eac07766f5/usersim-0.2.0-py3-none-any.whl", hash = "sha256:a7b34e9a8d7f3bc5219dc70a80cae0af53b3d4df22613c043afedb9ffac28a8a", size = 5797801, upload-time = "2026-10-22T08:01:10.195Z" },
 ]
 
 [[package]]
