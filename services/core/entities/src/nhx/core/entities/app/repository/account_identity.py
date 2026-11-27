@@ -5,16 +5,80 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Literal
+from weakref import WeakKeyDictionary
 
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
+from nhx.core.entities.cache import TTLCache
+from nhx.core.entities.config import EntitiesConfig
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
+
+
+class _IdentityCache(TTLCache):
+    """TTL cache that counts evictions, so a fill that began before one can tell and skip caching."""
+
+    evictions: int = 0
+
+
+# Stores are built per request, so the cache is keyed by session maker. Each event loop owns one session
+# maker and engine, so a cache never serves identities read from a different database.
+_identity_caches: WeakKeyDictionary[async_sessionmaker[AsyncSession], _IdentityCache] = WeakKeyDictionary()
+_identity_caches_lock = threading.Lock()
+
+
+def _identity_cache(session_maker: async_sessionmaker[AsyncSession]) -> _IdentityCache | None:
+    """Return the cache for ``session_maker``, or ``None`` if caching is disabled.
+
+    TTL and size are fixed when a session maker's cache is created; only the enabled flag is re-read per call.
+    """
+    config = EntitiesConfig.get()
+    if not config.account_identity_cache_enabled:
+        return None
+    with _identity_caches_lock:
+        cache = _identity_caches.get(session_maker)
+        if cache is None:
+            cache = _IdentityCache(
+                maxsize=config.account_identity_cache_max_size,
+                ttl=config.account_identity_cache_ttl_sec,
+            )
+            _identity_caches[session_maker] = cache
+        return cache
+
+
+def _remember(
+    cache: _IdentityCache | None, evictions_seen: int, issuer: str, subject: str, record: AccountIdentityRecord
+) -> AccountIdentityRecord:
+    """Cache ``record`` unless an eviction ran since the caller's lookup began.
+
+    A lookup that read the database before an eviction may hold the pre-eviction row, so publishing it would
+    undo the eviction. That lookup still returns its record; only the caching is skipped.
+    """
+    if cache is not None:
+        with _identity_caches_lock:
+            if cache.evictions == evictions_seen:
+                cache[(issuer, subject)] = record
+    return record
+
+
+def evict_account_identity(session_maker: async_sessionmaker[AsyncSession], *, issuer: str, subject: str) -> None:
+    """Drop one cached identity so its next resolution reads the database.
+
+    Call after deactivating or relinking the identity. Lookups already reading the database when this runs
+    skip caching their result. This only clears the cache behind ``session_maker``; other event loops and
+    replicas keep serving the old record until it expires.
+    """
+    with _identity_caches_lock:
+        cache = _identity_caches.get(session_maker)
+        if cache is not None:
+            cache.evictions += 1
+            cache.pop((issuer, subject), None)
 
 
 class AccountIdentityUnavailableError(RuntimeError):
@@ -63,9 +127,16 @@ class AccountIdentityStore:
         linked_by: str | None = None,
     ) -> AccountIdentityRecord:
         """Resolve an identity, materializing account and identity rows on miss."""
+        cache = _identity_cache(self.session_maker)
+        evictions_seen = cache.evictions if cache is not None else 0
+        if cache is not None:
+            cached = cache.get((issuer, subject))
+            if cached is not None:
+                return cached
+
         existing = await self.get_active_identity(issuer=issuer, subject=subject)
         if existing is not None:
-            return existing
+            return _remember(cache, evictions_seen, issuer, subject, existing)
 
         account_id = generate_entity_id("account")
         identity_id = generate_entity_id("account_identity")
@@ -101,7 +172,7 @@ class AccountIdentityStore:
         except IntegrityError as exc:
             existing_after_conflict = await self.get_active_identity(issuer=issuer, subject=subject)
             if existing_after_conflict is not None:
-                return existing_after_conflict
+                return _remember(cache, evictions_seen, issuer, subject, existing_after_conflict)
             if link_key is not None:
                 linked_after_conflict = await self._link_identity_to_active_account_by_link_key(
                     issuer=issuer,
@@ -114,7 +185,7 @@ class AccountIdentityStore:
                     linked_by=linked_by,
                 )
                 if linked_after_conflict is not None:
-                    return linked_after_conflict
+                    return _remember(cache, evictions_seen, issuer, subject, linked_after_conflict)
             raise AccountIdentityConflictError(
                 f"Account identity conflict for issuer={issuer!r}, subject={subject!r}"
             ) from exc
@@ -124,7 +195,7 @@ class AccountIdentityStore:
             raise AccountIdentityConflictError(
                 f"Account identity was not readable after materialization for issuer={issuer!r}, subject={subject!r}"
             )
-        return created
+        return _remember(cache, evictions_seen, issuer, subject, created)
 
     async def _link_identity_to_active_account_by_link_key(
         self,
