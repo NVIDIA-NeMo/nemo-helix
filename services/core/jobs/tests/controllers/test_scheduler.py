@@ -1,19 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
 import pytest
+import time_machine
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError
 from nemo_helix_plugin.jobs.types import AuthContext
+from nemo_helix_plugin.jobs.types import HelixJobStepWithContext as SDKJobStepWithContext
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import RESUMED_AT
+from nhx.core.jobs.controllers import scheduler as scheduler_module
 from nhx.core.jobs.controllers.admission import AdmissionDecision
 from nhx.core.jobs.controllers.backends.exceptions import ResourceAllocationError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.scheduler import JobScheduler
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import Gauge, InMemoryMetricReader
 from pytest import fixture
 
 from services.core.jobs.tests.controllers.client_mocks import data_response, paginated_response
@@ -289,7 +297,7 @@ class _DeferringAdmission:
         self._deferred_names = deferred_names
         self.checked: list[str] = []
 
-    def check(self, step: HelixJobStepWithContext) -> AdmissionDecision:
+    def check(self, step: SDKJobStepWithContext) -> AdmissionDecision:
         self.checked.append(step.name)
         if step.name in self._deferred_names:
             return AdmissionDecision.defer("waiting for capacity")
@@ -446,6 +454,8 @@ def _gauge_points(reader) -> dict[str, dict[tuple[str, str], int]]:
     for rm in data.resource_metrics if data else []:
         for sm in rm.scope_metrics:
             for metric in sm.metrics:
+                if metric.name not in {"nhx.jobs.scheduler.queued", "nhx.jobs.scheduler.running"}:
+                    continue
                 points[metric.name] = {
                     (p.attributes["workspace"], p.attributes["user"]): p.value for p in metric.data.data_points
                 }
@@ -458,10 +468,6 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
-    from nhx.core.jobs.controllers import scheduler as scheduler_module
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
     reader = InMemoryMetricReader()
     provider = MeterProvider(metric_readers=[reader])
     with patch.object(scheduler_module, "meter", provider.get_meter("test")):
@@ -502,6 +508,164 @@ def test_queued_and_running_gauges_report_counts_by_workspace_and_user(
         ("ws-a", "bob"): 1,
         ("ws-b", "unknown"): 1,
     }
+
+
+_BACKLOG_OLDEST_AGE = "nhx.jobs.scheduler.backlog.oldest_age"
+_BACKLOG_SNAPSHOT_TIMESTAMP = "nhx.jobs.scheduler.backlog.snapshot_timestamp"
+_BACKLOG_TEST_TIME = datetime(2026, 8, 15, 12, tzinfo=timezone.utc)
+
+
+@fixture
+def scheduler_with_backlog_metrics(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    test_step_created: HelixJobStepWithContext,
+) -> Iterator[tuple[JobScheduler, InMemoryMetricReader]]:
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader], shutdown_on_exit=False)
+    try:
+        with patch.object(scheduler_module, "meter", provider.get_meter("test")):
+            scheduler = JobScheduler(
+                backend_registry,
+                mock_nemo_client,
+                admission=_DeferringAdmission({test_step_created.name, "resumed-step", "unknown-step"}),
+            )
+            yield scheduler, reader
+    finally:
+        provider.shutdown()
+
+
+def _backlog_points(reader: InMemoryMetricReader) -> dict[str, float]:
+    points: dict[str, float] = {}
+    data = reader.get_metrics_data()
+    for resource in data.resource_metrics if data else []:
+        for scope in resource.scope_metrics:
+            for metric in scope.metrics:
+                if metric.name not in {_BACKLOG_OLDEST_AGE, _BACKLOG_SNAPSHOT_TIMESTAMP}:
+                    continue
+                assert metric.unit == "s"
+                assert isinstance(metric.data, Gauge)
+                (point,) = metric.data.data_points
+                assert not point.attributes
+                points[metric.name] = point.value
+    return points
+
+
+@pytest.mark.parametrize(
+    ("waiting_status", "waiting_age", "oldest_age"),
+    [(HelixJobStatus.CREATED, 45, 45), (HelixJobStatus.QUEUED, 20, 30)],
+)
+def test_backlog_age_uses_creation_or_latest_resume(
+    scheduler_with_backlog_metrics: tuple[JobScheduler, InMemoryMetricReader],
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+    waiting_status: HelixJobStatus,
+    waiting_age: int,
+    oldest_age: int,
+):
+    scheduler, reader = scheduler_with_backlog_metrics
+    now = _BACKLOG_TEST_TIME
+    waiting = test_step_created.model_copy(
+        update={
+            "status": waiting_status,
+            "created_at": now - timedelta(seconds=waiting_age),
+            "updated_at": now - timedelta(seconds=1),
+            "workspace": "workspace-one",
+            "auth_context": AuthContext(principal_id="user-one"),
+        }
+    )
+    resumed = test_step_created.model_copy(
+        update={
+            "id": "resumed-step",
+            "name": "resumed-step",
+            "status": HelixJobStatus.RESUMING,
+            "created_at": now - timedelta(hours=1),
+            "updated_at": now - timedelta(seconds=2),
+            "status_details": {RESUMED_AT: (now - timedelta(seconds=30)).isoformat()},
+            "workspace": "workspace-two",
+            "auth_context": AuthContext(principal_id="user-two"),
+        }
+    )
+    mock_jobs_client.list_steps.side_effect = [paginated_response([waiting, resumed]), paginated_response([])]
+
+    with time_machine.travel(now, tick=False):
+        scheduler.step()
+        calls = mock_jobs_client.mock_calls.copy()
+        assert _backlog_points(reader) == {
+            _BACKLOG_OLDEST_AGE: oldest_age,
+            _BACKLOG_SNAPSHOT_TIMESTAMP: now.timestamp(),
+        }
+        assert mock_jobs_client.mock_calls == calls
+
+
+def test_empty_backlog_reports_zero_but_failed_scan_retains_previous_snapshot(
+    scheduler_with_backlog_metrics: tuple[JobScheduler, InMemoryMetricReader],
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    scheduler, reader = scheduler_with_backlog_metrics
+    now = _BACKLOG_TEST_TIME
+    request = httpx.Request("GET", "http://localhost/apis/jobs/v2/workspaces/-/jobs/-/steps")
+    failed_scan = NemoTransportError(httpx.ConnectError("Connection refused", request=request))
+    backlog = test_step_created.model_copy(update={"created_at": now - timedelta(seconds=35)})
+    empty_scan = paginated_response([])
+    mock_jobs_client.list_steps.side_effect = [
+        failed_scan,
+        paginated_response([backlog]),
+        empty_scan,
+        failed_scan,
+        empty_scan,
+        empty_scan,
+    ]
+
+    with time_machine.travel(now, tick=False) as clock:
+        assert _backlog_points(reader) == {}
+        mock_jobs_client.list_steps.assert_not_called()
+        scheduler.step()
+        assert _backlog_points(reader) == {}
+        clock.shift(timedelta(seconds=10))
+        scheduler.step()
+        points = {_BACKLOG_OLDEST_AGE: 45, _BACKLOG_SNAPSHOT_TIMESTAMP: now.timestamp() + 10}
+        assert _backlog_points(reader) == points
+        clock.shift(timedelta(seconds=10))
+        scheduler.step()
+        assert _backlog_points(reader) == points
+        clock.shift(timedelta(seconds=10))
+        scheduler.step()
+        assert _backlog_points(reader) == {_BACKLOG_OLDEST_AGE: 0, _BACKLOG_SNAPSHOT_TIMESTAMP: now.timestamp() + 30}
+        assert mock_jobs_client.list_steps.call_count == 6
+
+
+def test_backlog_reports_snapshot_without_age_if_a_candidate_has_no_anchor(
+    scheduler_with_backlog_metrics: tuple[JobScheduler, InMemoryMetricReader],
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    scheduler, reader = scheduler_with_backlog_metrics
+    now = _BACKLOG_TEST_TIME
+    waiting = test_step_created.model_copy(update={"created_at": now - timedelta(seconds=30)})
+    unknown = test_step_created.model_copy(
+        update={
+            "id": "unknown-step",
+            "name": "unknown-step",
+            "created_at": None,
+            "updated_at": now,
+            "status_details": {},
+        }
+    )
+    mock_jobs_client.list_steps.side_effect = [
+        paginated_response([waiting]),
+        paginated_response([]),
+        paginated_response([waiting, unknown]),
+        paginated_response([]),
+    ]
+
+    with time_machine.travel(now, tick=False) as clock:
+        scheduler.step()
+        assert _backlog_points(reader) == {_BACKLOG_OLDEST_AGE: 30, _BACKLOG_SNAPSHOT_TIMESTAMP: now.timestamp()}
+        clock.shift(timedelta(seconds=10))
+        scheduler.step()
+        assert _backlog_points(reader) == {_BACKLOG_SNAPSHOT_TIMESTAMP: now.timestamp() + 10}
 
 
 @pytest.mark.parametrize("pending_status", HelixJobStatus.lifecycle_pending())
