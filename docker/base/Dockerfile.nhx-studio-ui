@@ -69,10 +69,10 @@ COPY plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/referenc
 # --------------- BUILD --------------- #
 FROM base AS build
 
-# Uses a single env file across all envs. FastAPI handles find/replace for values.
+# Uses a single env file across all envs. FastAPI handles find/replace for values,
+# including the version (STUDIO_UI_VITE_VERSION_SHA), so the build is independent of the commit.
 ARG ENV_FILE=".env.fastapi"
 ARG NODE_ENV=production
-ARG VITE_VERSION_SHA=""
 RUN echo "Building Studio using env file ${ENV_FILE}"
 COPY web/packages/studio/env/${ENV_FILE} packages/studio/env/.env
 
@@ -82,7 +82,7 @@ COPY web/packages/studio/env/${ENV_FILE} packages/studio/env/.env
 RUN set -eu; \
   for attempt in 1 2 3; do \
     status=0; \
-    VITE_VERSION_SHA="${VITE_VERSION_SHA}" NODE_ENV="${NODE_ENV}" \
+    NODE_ENV="${NODE_ENV}" \
       timeout --kill-after=30s 15m \
       pnpm --filter nemo-studio-ui --fail-if-no-match build:fastapi || status="$?"; \
     if [ "${status}" = "0" ]; then \
