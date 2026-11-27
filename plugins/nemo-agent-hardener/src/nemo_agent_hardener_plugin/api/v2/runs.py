@@ -11,6 +11,7 @@ on the wire as at rest, so it is returned directly.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tomllib
 from typing import Any
@@ -33,12 +34,14 @@ from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agents_plugin.entities import Agent
 from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 
@@ -51,6 +54,32 @@ _PLUGIN_KIND = "agent_hardener.pre_tool_verifier"
 router = APIRouter()
 
 _run_filter_dep = make_filter_dep(RunFilter)
+
+
+async def _reconcile_run(run: AgentHardenerRun, entity_client: NemoEntitiesClient) -> AgentHardenerRun:
+    """Repair cancelled runs even when the worker never started or was killed.
+
+    Cancellation uses the existing failed terminal state. Never replace a real
+    worker outcome; optimistic locking also protects concurrent finalization.
+    """
+    if run.status != "running" or not run.job_id:
+        return run
+    try:
+        async with get_async_nemo_client(as_service="agent-hardener", internal=True) as async_client:
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            response = await jobs_client.get_job_status(name=run.job_id, workspace=run.workspace)
+        if response.data().status != "cancelled":
+            return run
+        updated = run.model_copy(
+            update={"status": "failed", "error_message": "Run job cancelled.", "summary": "Run job cancelled."}
+        )
+        return await entity_client.update(updated)
+    except NemoEntityConflictError:
+        return await entity_client.get(AgentHardenerRun, name=run.name, workspace=run.workspace)
+    except Exception:
+        # A transient Jobs outage must not make existing run results unreadable.
+        logger.warning("Failed to reconcile agent-hardener run '%s'", sanitize_for_log(run.name), exc_info=True)
+        return run
 
 
 @router.get(
@@ -81,8 +110,18 @@ async def list_runs(
     except Exception as exc:
         logger.exception("Failed to list agent-hardener runs in workspace '%s'", sanitize_for_log(workspace))
         raise HTTPException(status_code=500, detail="Failed to list agent-hardener runs.") from exc
+    # Bound Jobs traffic while avoiding one network round trip at a time for
+    # pages with many active runs. Filtering/pagination describe the store
+    # snapshot selected above; a repaired row can leave that filter on the next poll.
+    semaphore = asyncio.Semaphore(5)
+
+    async def reconcile(run: AgentHardenerRun) -> AgentHardenerRun:
+        async with semaphore:
+            return await _reconcile_run(run, entity_client)
+
+    reconciled = await asyncio.gather(*(reconcile(run) for run in result.data))
     return {
-        "data": [run.model_dump(mode="json") for run in result.data],
+        "data": [run.model_dump(mode="json") for run in reconciled],
         "pagination": result.pagination.model_dump() if result.pagination else None,
         "sort": sort,
         "filter": filter or None,
@@ -99,7 +138,8 @@ async def get_run(
 ) -> AgentHardenerRun:
     """Get a single war-game run by name."""
     try:
-        return await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        run = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        return await _reconcile_run(run, entity_client)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
