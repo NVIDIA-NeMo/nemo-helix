@@ -2009,14 +2009,16 @@ jobs:
           enable-cache: false
       - name: Combine unit coverage
         # Never report one group's coverage as coverage of the whole suite.
+        # Report on the interpreter that measured: 3.14 compiles no code for bare class-body
+        # annotations (PEP 649), so an older parser counts them as statements that never ran.
         continue-on-error: true
         shell: bash
         run: |
           for group in core plugins misc; do
             test -s "unit-coverage/groups/python-unit-test-results-py3.14-${group}/.coverage"
           done
-          uvx --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
-          uvx --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
+          uvx --python 3.14 --from coverage==7.15.3 coverage combine --keep unit-coverage/groups/*/.coverage
+          uvx --python 3.14 --from coverage==7.15.3 coverage xml -o unit-coverage/coverage.xml
       - name: Combine integration coverage
         # Never report one group's coverage as coverage of the whole suite.
         continue-on-error: true
