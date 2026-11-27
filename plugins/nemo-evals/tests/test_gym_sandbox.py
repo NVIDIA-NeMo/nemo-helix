@@ -1468,7 +1468,10 @@ def test_a_platform_job_reaches_the_runner_with_its_unique_id(
 
 @pytest.mark.asyncio
 async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_returns(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     import json
 
