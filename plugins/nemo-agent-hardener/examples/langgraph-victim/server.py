@@ -27,9 +27,10 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import nemo_relay
+import openai
 import uvicorn
 from agent import build_agent
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from nemo_relay.integrations.langgraph import NemoRelayCallbackHandler
 from nemo_relay.plugin import PluginConfig
 from pydantic import BaseModel
@@ -78,13 +79,19 @@ def create_app() -> FastAPI:
     @app.post("/v1/chat/completions")
     async def chat_completions(body: ChatRequest) -> dict[str, Any]:
         # One Relay agent scope per request, with the LangGraph callback handler on the invoke:
-        # the handler records the graph/LLM runs, and the tools node (see agent.create_tool_node)
-        # records the tool calls. Everything the request does hangs off this scope.
+        # the handler records the graph's runs, the model node (nemo_relay.llm.execute) records the
+        # LLM calls, and the tools node (awrap_tool_call) records the tool calls. Everything the
+        # request does hangs off this scope.
         with nemo_relay.scope.scope("langgraph-victim", nemo_relay.ScopeType.Agent):
-            result = await agent.ainvoke(
-                {"messages": [(m.role, m.content) for m in body.messages]},
-                config={"callbacks": [NemoRelayCallbackHandler()]},
-            )
+            try:
+                result = await agent.ainvoke(
+                    {"messages": [(m.role, m.content) for m in body.messages]},
+                    config={"callbacks": [NemoRelayCallbackHandler()]},
+                )
+            except openai.RateLimitError as exc:
+                # Pass the model's 429 through: garak backs off and resends on 429, where a 200
+                # carrying the error would be scored as the victim's reply (and likely as blocked).
+                raise HTTPException(status_code=429, detail=str(exc)) from exc
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",

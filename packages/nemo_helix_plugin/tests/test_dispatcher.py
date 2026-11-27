@@ -342,6 +342,26 @@ class TestBuildCtxFromEnv:
         assert ctx.job_id == "submitted-job-name"
         assert ctx.attempt_id == "attempt-a"
 
+    @pytest.mark.parametrize("value", ["0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d", None], ids=["set", "unset"])
+    def test_job_uid_is_the_jobs_entity_id_when_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str | None
+    ) -> None:
+        """The name is unique only within a workspace and can be reused; the entity id is neither."""
+        self._patch_results(monkeypatch)
+        monkeypatch.setenv("NEMO_JOB_WORKSPACE", "platform-ws")
+        monkeypatch.setenv("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH", str(tmp_path / "ephemeral"))
+        monkeypatch.setenv("NEMO_JOB_ID", "nightly")
+        if value is None:
+            monkeypatch.delenv("NEMO_JOB_UID", raising=False)
+        else:
+            monkeypatch.setenv("NEMO_JOB_UID", value)
+
+        ctx = build_ctx_from_env(_sync_client())
+
+        assert ctx.job_id == "nightly"
+        # Optional for the context: only work that must identify the job across workspaces requires it.
+        assert ctx.job_uid == value
+
     def test_results_use_submitted_job_id_not_class_name(
         self,
         tmp_path: Path,

@@ -35,6 +35,22 @@ spec:
       expression: object.spec.podSelector.matchLabels
     - name: jobId
       expression: string(variables.sel['nhx.nvidia.com/job_id'])
+    {{- /*
+    Peers are admitted by the job entity's UUID, which the controller puts on the policy's pod selector: the job name
+    is unique only within a workspace, so a same-named job's pods in another workspace sharing the namespace would
+    match it. A policy without the UUID is the shape controllers wrote before it, admitted for one release so a
+    rolling upgrade cannot fail step scheduling. TODO(next release): require job_uid and drop the name shape.
+    */}}
+    - name: jobUid
+      expression: >-
+        'nhx.nvidia.com/job_uid' in variables.sel ? string(variables.sel['nhx.nvidia.com/job_uid']) : ''
+    - name: peerId
+      expression: "variables.jobUid != '' ? variables.jobUid : variables.jobId"
+    - name: sameJobPeer
+      expression: >-
+        variables.jobUid != '' ?
+        {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_uid': variables.jobUid} :
+        {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId}
   validations:
     - expression: >-
         request.operation == 'CREATE' ||
@@ -54,9 +70,9 @@ spec:
         request.operation == 'DELETE' || !has(object.spec.ingress) ||
         object.spec.ingress.all(rule, rule.from.size() > 0 && rule.from.all(peer,
         !has(peer.ipBlock) && !has(peer.namespaceSelector) && !has(peer.podSelector.matchExpressions) &&
-        (peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId} ||
-        (peer.podSelector.matchLabels.size() == 1 && peer.podSelector.matchLabels.all(k, peer.podSelector.matchLabels[k] == variables.jobId)))))
-      message: Ingress peers may only be same-namespace pods labelled with the target job's id.
+        (peer.podSelector.matchLabels == variables.sameJobPeer ||
+        (peer.podSelector.matchLabels.size() == 1 && peer.podSelector.matchLabels.all(k, peer.podSelector.matchLabels[k] == variables.peerId)))))
+      message: Ingress peers may only be same-namespace pods labelled with the target job's unique id.
     {{- $jobSteps := .Values.networkPolicies.jobSteps | default dict }}
     {{- $ports := dig "allowedIngressTcpPorts" (list 51234) $jobSteps }}
     {{- $ranges := dig "allowedIngressTcpPortRanges" (list (dict "low" 3000 "high" 4999)) $jobSteps }}
@@ -66,7 +82,7 @@ spec:
         rule.ports.all(p, (!has(p.protocol) || p.protocol == 'TCP') && (
         (!has(p.endPort) && p.port in {{ $ports | toJson }}) ||
         {{ $ranges | toJson }}.exists(r, p.port >= r.low && (has(p.endPort) ? p.endPort >= p.port && p.endPort < r.high : p.port < r.high)))) :
-        rule.from.all(peer, peer.podSelector.matchLabels == {'nhx.nvidia.com/managed_by': 'jobs-controller', 'nhx.nvidia.com/job_id': variables.jobId}))
+        rule.from.all(peer, peer.podSelector.matchLabels == variables.sameJobPeer))
       message: Only the job's own pods may reach every port; other workloads may reach only the allowed TCP ports.
 ---
 apiVersion: {{ $apiVersion }}

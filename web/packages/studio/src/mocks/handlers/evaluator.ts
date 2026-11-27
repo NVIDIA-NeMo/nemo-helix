@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Revision, Task, Taskset } from '@nemo/sdk/generated/evals/schema';
+import type { Revision, Task, Taskset, TasksetInput } from '@nemo/sdk/generated/evals/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
@@ -178,6 +178,21 @@ const findTaskset = (workspace: unknown, name: unknown) =>
 const findTask = (workspace: unknown, name: unknown) =>
   mockTasks.find((t) => t.workspace === workspace && t.name === name);
 
+/** The revision a tag or content digest points at. */
+const resolveRevision = (task: Task, key: string) =>
+  (task.tags && Object.hasOwn(task.tags, key) ? task.tags[key] : undefined) ??
+  revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision;
+
+/** Pins a member ref to a content hash (latest when unversioned), as the server does on write;
+ *  undefined when the task or the requested revision doesn't exist. */
+const resolveTaskRef = (workspace: string, ref: string): string | undefined => {
+  const [path, version] = ref.split('#');
+  const [ws, name] = path.includes('/') ? path.split('/') : [workspace, path];
+  const task = findTask(ws, name);
+  const revision = task && (version ? resolveRevision(task, version) : task.revision);
+  return revision ? `${ws}/${name}#${contentHash(revision)}` : undefined;
+};
+
 export const evaluatorHandlers = [
   // nemo-evals agent-evaluate jobs — Studio's agent-evaluation feature runs
   // here. Default to an empty list / 404 so the list + detail routes render
@@ -191,7 +206,7 @@ export const evaluatorHandlers = [
   ),
   http.get(`${EVALS_URL}/agent-eval-results/:name`, () => notFound('Result')),
 
-  // Tasks and tasksets — read-only, as the Studio library is.
+  // Tasks and tasksets.
   http.get(`${EVALS_URL}/tasks`, ({ request, params }) => {
     const matches = recordMatcher(request);
     return paginate(
@@ -213,10 +228,7 @@ export const evaluatorHandlers = [
   // Resolves a tag or a content digest; the content itself is the current task's.
   http.get(`${EVALS_URL}/tasks/:name/revisions/:revision`, ({ params }) => {
     const task = findTask(params.workspace, params.name);
-    const key = String(params.revision);
-    const revision =
-      task?.tags?.[key] ??
-      (task && revisionsOf(task).find(({ content_hash }) => content_hash === key)?.revision);
+    const revision = task && resolveRevision(task, String(params.revision));
     return task && revision ? HttpResponse.json({ ...task, revision }) : notFound('Revision');
   }),
 
@@ -229,6 +241,34 @@ export const evaluatorHandlers = [
         mockTasksets.filter((t) => t.workspace === params.workspace && matches(t))
       )
     );
+  }),
+  http.post(TASKSET_URL, async ({ request, params }) => {
+    const workspace = String(params.workspace);
+    const name = String(params.name);
+    const { tasks = [], description, files_ref, metadata } = (await request.json()) as TasksetInput;
+    if (findTaskset(workspace, name)) {
+      return HttpResponse.json({ detail: `Taskset ${name} already exists` }, { status: 409 });
+    }
+    const resolved = tasks.map((ref) => resolveTaskRef(workspace, ref));
+    if (resolved.some((ref) => !ref)) {
+      return HttpResponse.json({ detail: 'Unknown task reference' }, { status: 422 });
+    }
+    const now = new Date().toISOString();
+    const taskset: Taskset = {
+      id: `taskset-${name}`,
+      name,
+      workspace,
+      description,
+      files_ref,
+      metadata,
+      tasks: resolved as string[],
+      revision: 1,
+      tags: { latest: 1 },
+      created_at: now,
+      updated_at: now,
+    };
+    mockTasksets.push(taskset);
+    return HttpResponse.json(taskset, { status: 201 });
   }),
   http.get(TASKSET_URL, ({ params }) => {
     const taskset = findTaskset(params.workspace, params.name);

@@ -1118,6 +1118,7 @@ def _greeting_target(
     api_key_secret: str,
     *,
     collection_timeout_s: float | None = None,
+    docker: bool = False,
 ) -> GymRunnerTarget:
     policy_route, policy_model = policy
     # As it starts, the Gym host calls the policy endpoint with this key and refuses to start on a
@@ -1134,6 +1135,7 @@ def _greeting_target(
         concurrency=2,
         startup_timeout_s=GYM_HOST_STARTUP_TIMEOUT_SECONDS,
         collection_timeout_s=collection_timeout_s,
+        docker=docker,
         env_secrets={GYM_POLICY_API_KEY_ENV: SecretRef(root=api_key_secret)},
         hydra_params={
             "policy_base_url": policy_route,
@@ -1268,8 +1270,9 @@ def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
     The job must complete and score with the package's one vendored wheel and no package index, on a
     deployment whose sandbox egress allows only the policy endpoint. Its verifier reports from inside
     the Gym host: the staged package is mounted read-only from the Jobs PVC, the workspace is
-    writable, the policy endpoint is reachable, and the Kubernetes API, a public address and a public
-    name are not. The host must be gone once the job has ended. Set NHX_E2E_GYM_POLICY_ROUTE and
+    writable, the policy endpoint is reachable, the Kubernetes API, a public address and a public name
+    are not, and execd, OpenSandbox's command server in the host, refuses a command sent without its
+    token, which the verifier does not hold. The host must be gone once the job has ended. Set NHX_E2E_GYM_POLICY_ROUTE and
     NHX_E2E_GYM_POLICY_MODEL to use a real model instead of the mock.
     """
     greeting = "hello there"
@@ -1295,6 +1298,7 @@ def test_gym_wheels_v1_environment_runs_with_only_its_extras_vendored(
         _greeting_row(greeting, "egress_denied", sandbox_cluster.api_server_address()),
         _greeting_row(greeting, "egress_denied", UNLISTED_PUBLIC_ADDRESS),
         _greeting_row(greeting, "egress_denied", UNLISTED_PUBLIC_NAME),
+        _greeting_row(greeting, "execd_refuses"),
     ]
     payloads, labels = _greeting_task_payloads(rows, tmp_path / "greeting-rows.jsonl")
     target = _greeting_target(evaluator_workspace, fileset_name, policy, gym_policy_api_key_secret)
@@ -1380,6 +1384,59 @@ def test_gym_host_is_removed_when_a_sandboxed_evaluation_fails_after_provisionin
 
         _assert_gym_host_removed(sandbox_cluster, watch, job_name)
         _assert_job_logged(evaluator_client, evaluator_workspace, job_name, COLLECTION_TIMEOUT_LOG_TEXT)
+    finally:
+        _cleanup_evaluator_job(evaluator_client, job_name)
+
+
+@pytest.mark.gym_e2e
+@pytest.mark.gym_sandbox_e2e
+@pytest.mark.gym_docker_e2e
+@pytest.mark.timeout(SANDBOXED_GYM_TEST_TIMEOUT_SECONDS)
+@pytest.mark.skipif(
+    os.environ.get("NHX_E2E_SANDBOXED_GYM") != "1" or os.environ.get("NHX_E2E_GYM_DOCKER") != "1",
+    reason=(
+        "needs a deployment running the Docker-enabled Gym host image on Kata, with egress to Docker Hub; "
+        "set NHX_E2E_SANDBOXED_GYM=1 and NHX_E2E_GYM_DOCKER=1"
+    ),
+)
+def test_gym_servers_run_docker_compose_in_the_sandbox(
+    client: NemoClient,
+    evaluator_client: NemoClient,
+    evaluator_workspace: str,
+    gym_policy_api_key_secret: str,
+    tmp_path: Path,
+) -> None:
+    """Gym servers on the Docker-enabled Gym host run containers, unprivileged and inside egress.
+
+    The ``docker_compose`` probe holds only if the verifier runs with no capabilities, an empty bounding
+    set and no_new_privs, no process environment it can read holds execd's token, two nginx services
+    answer a third container by service name, that container gets an HTTP answer from Docker Hub's
+    registry but none from example.com or from 1.1.1.1 by address, and a shell started with an empty
+    environment, as an agent's shell tool may start one, brings up a project with both ``docker
+    compose`` and ``docker-compose``. The job sets ``docker: true``, so the deployment's
+    ``sandbox_docker_profile`` must name the Docker-enabled image and allow Docker Hub but not
+    example.com or 1.1.1.1. Not run by CI, which has neither Kata nor that image: e2e/README.md has
+    the settings.
+    """
+    greeting = "hello there"
+    fileset_name = _upload_greeting_environment(evaluator_client, evaluator_workspace)
+    policy = _greeting_policy(client, evaluator_workspace, greeting)
+    rows = [_greeting_row(greeting, "docker_compose"), _greeting_row(greeting, "execd_refuses")]
+    payloads, labels = _greeting_task_payloads(rows, tmp_path / "greeting-rows.jsonl")
+    target = _greeting_target(evaluator_workspace, fileset_name, policy, gym_policy_api_key_secret, docker=True)
+    job_name = _submit_agent_eval_job(
+        evaluator_client, evaluator_workspace, {"tasks": payloads, "target": target.model_dump(mode="json")}
+    )
+    try:
+        job = wait_for_platform_job(
+            evaluator_client, job_name, evaluator_workspace, timeout=SANDBOXED_GYM_JOB_TIMEOUT_SECONDS
+        )
+        _, report = _job_steps_and_report(evaluator_client, evaluator_workspace, job_name)
+        assert job.status.lower() == "completed", f"job {job_name!r} ended {job.status!r}: {report}"
+        trials = _bundle_trials(_download_agent_eval_bundle(evaluator_client, evaluator_workspace, job_name, tmp_path))
+        assert {trial.get("status") for trial in trials} == {"completed"}, trials
+        rewards = {labels[trial["task_id"]]: trial["metadata"]["reward"] for trial in trials}
+        assert rewards == dict.fromkeys(labels.values(), 1.0), trials
     finally:
         _cleanup_evaluator_job(evaluator_client, job_name)
 

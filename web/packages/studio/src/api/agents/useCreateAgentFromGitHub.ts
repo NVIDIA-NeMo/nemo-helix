@@ -15,6 +15,7 @@ import {
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
 import {
   agentSpecFilesetName,
+  bindDefaultModel,
   parseAgentConfig,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
@@ -26,6 +27,7 @@ export interface CreateAgentFromGitHubParams {
   source: GitHubAgentSource;
   /** Workspace secret holding a personal access token. Omit for a public repository. */
   secretName?: string;
+  defaultModel?: string;
   replaceOrphanedFileset?: boolean;
 }
 
@@ -38,6 +40,7 @@ export const createAgentFromGitHub = async ({
   name,
   source,
   secretName,
+  defaultModel,
   replaceOrphanedFileset = false,
 }: CreateAgentFromGitHubParams): Promise<Agent> => {
   const filesetName = agentSpecFilesetName(name);
@@ -60,7 +63,10 @@ export const createAgentFromGitHub = async ({
   }
 
   try {
-    const config = parseAgentConfig(await readAgentConfig(workspace, filesetName, source));
+    const config = bindDefaultModel(
+      parseAgentConfig(await readAgentConfig(workspace, filesetName, source)),
+      defaultModel
+    );
 
     return await agentsRegisterAgent(workspace, {
       name,

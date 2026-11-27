@@ -10,13 +10,13 @@ Dockerfile builds. A hand-built LangGraph `StateGraph` with two tools worth atta
 (`bash_executor`, `python_executor`), served over `/v1/chat/completions`.
 
 ```
-agent.py         the graph — Relay's wrapper on the ToolNode is THE interception line
+agent.py         the graph — Relay wraps both the model node (llm.execute) and the ToolNode
 server.py        FastAPI serving loop — starts Relay, opens a scope per request
 Dockerfile       your image; everything Agent Hardener derives, it derives from here
 agent-hardener.yaml  only for running standalone; `init --project-dir` derives this
 ```
 
-Unlike the Fabric example, the Relay wiring here is the author's job — both obligations are marked
+Unlike the Fabric example, the Relay wiring here is the author's job — the obligations are marked
 in the source, and the skill's `relay-attachment.md` reference explains each.
 
 ## Running it

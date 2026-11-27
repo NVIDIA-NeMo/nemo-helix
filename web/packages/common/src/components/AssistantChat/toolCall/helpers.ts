@@ -9,6 +9,12 @@ import {
   TOOL_NAME_ALIASES,
   TOOL_RUNNING_ACTIONS,
 } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
+import {
+  FILE_CONTENT_ARG_KEYS,
+  inferFileChangeFromArgs,
+  NEW_STRING_ARG_KEYS,
+  OLD_STRING_ARG_KEYS,
+} from '@nemo/common/src/components/AssistantChat/toolCall/fileChangeShape';
 import type {
   FileChangeSummary,
   SubtleToolAction,
@@ -59,7 +65,10 @@ const getStringArg = (args: AssistantToolArgs, keys: string[]): string | undefin
   return undefined;
 };
 
-const getRawStringArg = (args: Record<string, unknown>, keys: string[]): string | undefined => {
+const getRawStringArg = (
+  args: Record<string, unknown>,
+  keys: readonly string[]
+): string | undefined => {
   for (const key of keys) {
     const value = args[key];
     if (typeof value === 'string') return value;
@@ -167,8 +176,8 @@ const getLineCount = (content: string): number => {
 };
 
 const getEditStats = (args: Record<string, unknown>): { additions: number; deletions: number } => ({
-  additions: getLineCount(getRawStringArg(args, ['new_string']) ?? ''),
-  deletions: getLineCount(getRawStringArg(args, ['old_string']) ?? ''),
+  additions: getLineCount(getRawStringArg(args, NEW_STRING_ARG_KEYS) ?? ''),
+  deletions: getLineCount(getRawStringArg(args, OLD_STRING_ARG_KEYS) ?? ''),
 });
 
 const getAskUserQuestionSummary = (args: AssistantToolArgs): string | undefined => {
@@ -188,11 +197,36 @@ const formatArgs = (args: AssistantToolArgs, argsText: string): string => {
   return JSON.stringify(args, null, 2);
 };
 
+/** `rawToolName` is the name as the agent emitted it; it may be an alias of a built-in tool. */
 export const getFileChangeSummary = (
-  toolName: string,
+  rawToolName: string,
   args: AssistantToolArgs,
   argsText: string
 ): FileChangeSummary | undefined => {
+  const toolName = resolveToolName(rawToolName);
+  const inferred = inferFileChangeFromArgs(rawToolName, args, toolName);
+  if (inferred) {
+    if (inferred.kind === 'write') {
+      const content = getRawStringArg(args, FILE_CONTENT_ARG_KEYS) ?? '';
+      return {
+        action: 'Wrote',
+        additions: getLineCount(content),
+        deletions: 0,
+        inferred: true,
+        path: inferred.path,
+        reviewContent: content,
+      };
+    }
+
+    return {
+      action: 'Edited',
+      ...getEditStats(args),
+      inferred: true,
+      path: inferred.path,
+      reviewContent: formatArgs(args, argsText),
+    };
+  }
+
   const path = getStringArg(args, ['file_path', 'path']);
   if (!path) return undefined;
 

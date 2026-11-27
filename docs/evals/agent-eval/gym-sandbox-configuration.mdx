@@ -19,7 +19,9 @@ PVC, or egress policy.
   It configures the server connection, credentials, and top-level platform sandbox capability.
 - A Kubernetes or Volcano Jobs execution profile with a shared job-storage PVC. The claim should
   support `ReadWriteMany` when Jobs and OpenSandbox pods can run on different nodes.
-- Published `nhx-tasks` and `nhx-gym-host` images for the platform release.
+- Published `nhx-tasks` and `nhx-gym-host` images for the platform release. Upgrade them together: a
+  Gym host image from an earlier release ignores the job's `env_vars` and `env_secrets`, so its Gym
+  servers start without them.
 - An allowlisted model endpoint reachable from the Gym host.
 
 ## Execution topology
@@ -89,12 +91,13 @@ another.
 | `sandbox_host_provider_options` | `{}` | Provider-specific connection options. Helm supplies the OpenSandbox protocol separately. |
 | `sandbox_environment_sub_path` | `environment` | Read-only environment location within job storage. |
 | `sandbox_workspace_sub_path` | `workspace` | Read-write Gym workspace location within job storage. |
-| `sandbox_resources` | unset | CPU and memory requests for each Gym host. Set these on shared clusters. |
+| `sandbox_resources` | unset | CPU, memory and `ephemeral-storage` requests for each Gym host. Set these on shared clusters. |
 | `sandbox_policy_base_urls` | `[]` | Model or inference base URLs the Gym host may reach. |
 | `sandbox_egress_allow` | `[]` | Additional allowed destinations in `host:port` form. |
 | `sandbox_episode_backend` | `opensandbox` | Provider for nested episode sandboxes requested by an environment. |
 | `sandbox_allow_insecure_memory_backend` | `false` | Second opt-in required for the non-isolating local memory backend. |
 | `sandbox_approved_images` | `[]` | Images allowed for nested episode sandboxes. Empty rejects every episode request. |
+| `sandbox_docker_profile` | unset | Image, settings and extra egress for Gym jobs that set `docker: true`. Unset refuses those jobs. See [Run Docker in Gym servers](#run-docker-in-gym-servers). |
 
 Evaluator requires at least one entry across `sandbox_policy_base_urls` and
 `sandbox_egress_allow`. The OpenSandbox provider applies a deny-by-default policy and adds the
@@ -130,8 +133,8 @@ add. Only `native-v1` custom environments install from an index at job start; fo
 When `sandbox_egress_allow` is empty and the job runs a `wheels-v1` environment on the OpenSandbox
 provider, Evaluator starts the host in offline mode: `uv` never consults an index and the Hugging Face libraries read only
 from the cache the package vendored. A dependency or dataset the package forgot then fails with a
-named error at startup instead of a blocked connection later. Any entry in `sandbox_egress_allow`
-leaves the host online. The run records the decision as `environment_offline` in its runner
+named error at startup instead of a blocked connection later. Any entry in `sandbox_egress_allow`,
+or for a `docker: true` job in the Docker profile's `egress_allow`, leaves the host online. The run records the decision as `environment_offline` in its runner
 provenance.
 
 Submitters cannot extend these lists from `GymRunnerTarget`. This prevents an environment from
@@ -141,6 +144,18 @@ widening its own network access.
 
 OpenSandbox credentials remain in the trusted Evaluator task. The Gym host receives only per-run
 tokens and the environment variables required by its selected Gym components.
+
+Each Gym host and episode sandbox also gets its own execd access token. execd, the command server in
+every OpenSandbox sandbox, then refuses any request without it (execd v1.0.15 or later; an older execd
+ignores the token), including requests through the
+OpenSandbox server proxy from a pod that holds the server's API key. Outside the sandbox, the
+Evaluator task that created it holds the token, and like the job's `env_secrets` values it appears in
+the sandbox's pod spec, so anyone allowed to read pods in the sandbox namespace can read it. The Gym
+host also removes the token from its own
+environment before it starts anything, so nothing it starts inherits it. On the image that runs
+Docker (see below), the Gym servers can't read it at all. On the default image they run as the same
+user as execd, so they could read it from the process table, but it gives them nothing they can't
+already do.
 
 For a job-specific model credential, create a NeMo Helix secret and reference it through
 `GymRunnerTarget.env_secrets`:
@@ -152,6 +167,9 @@ target:
   env_secrets:
     EXTERNAL_MODEL_API_KEY: default/my-model-api-key
 ```
+
+A job's `env_vars` and resolved `env_secrets` travel to the Gym host together and may total about
+90 KiB; Evaluator refuses a job over that limit.
 
 Do not use `env_vars` for API keys, tokens, passwords, or other secrets. Evaluator rejects
 credential-shaped `env_vars` for sandboxed jobs because environment code can read them.
@@ -209,13 +227,166 @@ platformConfig:
 
 The OpenSandbox server's `nemo-agent-bundle` extension runs `installer /installed-agent` from
 `image` in an init container and mounts the result read-only into the host. The host puts the
-directory containing `entrypoint` first on `PATH` and runs `entrypoint --version` before starting.
-If that fails, the host never becomes ready and the job fails at its startup timeout.
+directory containing `entrypoint` first on `PATH` and runs `entrypoint --version` before starting
+Gym. On the `nhx-gym-host-podman` image, it does both only after dropping root and every capability.
+If the check fails or takes over two minutes, the host reports a bootstrap failure and the job
+fails. `gym_host.sh` runs the check itself before the host's server starts, and needs coreutils
+`timeout` to bound it; when its check fails, the host exits and the job fails at its startup
+timeout. `gym_host.sh` refuses the `nhx-gym-host-podman` image, which must start with its default
+command. The Gym host has to start with its image's default command or with `gym_host.sh`, which do
+this; a host image that starts its own server instead gets neither the check nor the `PATH` change.
+A host image from before agent bundle support ignores the bundle, and its Gym would install its own
+agent CLI at the first rollout. The provider refuses such a host as soon as it reports ready, and the
+job fails with a bootstrap error that names the bundle.
 
 The bundle is a deployment setting: every Gym job on the deployment gets the same CLI. It requires
 the OpenSandbox provider with the NeMo extension installed, and a bundle built for the
 `nhx-gym-host` image's architecture and C library. Evaluator rejects `agent_bundle` with the
 `docker` provider.
+
+## Run Docker in Gym servers
+
+Some environments start containers from a resource server, for example with `docker compose up`, and
+some agents run `docker` themselves. The `nhx-gym-host-podman` image supports both with rootless Podman
+behind the Docker CLI. Each compose project gets its own network with service-name DNS, and the Gym
+host's egress policy still applies to every container.
+
+A job asks for Docker with `docker: true` on its Gym target. Only those jobs get the Docker-enabled
+image, its privileged setup, its container storage and the extra egress, all from the deployment's
+`sandbox_docker_profile`. Every other Gym job keeps the plain `nhx-gym-host` image. A job that sets
+`docker: true` is refused at submit when the deployment has no `sandbox_docker_profile`, runs Gym in
+the job container, or uses the local `docker` host provider.
+
+The image's setup needs `SYS_ADMIN`, which only a Kata VM contains. Point the platform at an
+OpenSandbox server that creates every sandbox with a Kata runtime class: the `bootstrap.execd.isolation`
+extension grants `SYS_ADMIN` when the sandbox is created, before anything in it runs. The Gym host also
+checks for a Kata VM and fails the job instead of running the setup anywhere else. The server's
+execd image must be v1.0.15 or later: execd keeps root, and only from that release does it require
+the per-sandbox token described under credentials.
+
+Agent servers and resource servers run in the same Gym host, so they share one Podman service: a
+resource server can inspect the containers an agent started. The `docker` CLI finds the service through
+the image's `DOCKER_HOST` and also at its default socket, so it works from an agent's shell tool that
+starts commands with only the agent's own variables, such as a registered Deep Agents agent with a local
+shell backend. Rollouts that run concurrently share the service too, so give each rollout's compose
+project its own name, for example with `docker compose -p` or `COMPOSE_PROJECT_NAME`.
+
+After setup, the Gym servers run as an unprivileged user with no capabilities, an empty capability
+bounding set and `no_new_privs`, so no setuid program in the image can give capabilities back. The
+job's `env_vars` and `env_secrets` reach Gym only after that, never the root setup. `NET_ADMIN` is
+never granted, so nothing in the host can change its network or egress rules. Gym servers use the
+`docker` CLI, which only talks to the Podman service's socket.
+
+The image isn't published yet. Build it from the repository with the `nhx-gym-host-podman-docker`
+bake target and push it to a registry your cluster can pull from:
+
+```bash
+IMAGE_REGISTRY=<your-registry> BAKE_TAG=<tag> docker buildx bake nhx-gym-host-podman-docker \
+  --set 'nhx-gym-host-podman-docker.output=type=registry'
+```
+
+```yaml
+platformConfig:
+  evals:
+    sandbox_docker_profile:
+      runtime_image: <your-registry>/nhx-gym-host-podman:<tag>
+      # Merged over sandbox_host_provider_options, nested keys included.
+      host_provider_options:
+        create:
+          extensions:
+            bootstrap.execd.isolation: enable
+      # Added to sandbox_egress_allow: every registry the environment's images come from,
+      # including its blob storage hosts.
+      egress_allow:
+        - registry-1.docker.io:443
+        - auth.docker.io:443
+        - production.cloudflare.docker.com:443
+        - production.cloudfront.docker.com:443
+```
+
+```yaml
+target:
+  kind: gym
+  docker: true
+  # ...
+```
+
+GPU access is not supported yet.
+
+### Container storage
+
+Images, containers and volumes live in one ext4 filesystem inside a sparse file in the Gym host's
+ephemeral storage. Its size is a ceiling for everything the job's rollouts pull and write together, not
+an allocation: the file takes node disk only as data is written. The exception is the filesystem's
+journal, written when the file is formatted, whose size steps up with the configured size and stops at
+1 GiB:
+
+| Configured size | Journal | Node disk used before anything is written |
+|---|---|---|
+| 16–32 GiB (the default 30Gi) | 128 MiB | 134 MiB at 30Gi |
+| 32–64 GiB | 256 MiB | 262 MiB at 40Gi |
+| 64–128 GiB | 512 MiB | 519 MiB at 100Gi |
+| 128 GiB and larger | 1 GiB | about 1 GiB |
+
+The first three rows were measured in a Kata sandbox; the last follows from the journal size. The file
+holds slightly less than its size, since ext4 keeps some for itself. It lasts as long as the Gym host,
+so every job starts empty.
+
+```yaml
+platformConfig:
+  evals:
+    sandbox_docker_profile:
+      # ...
+      # The ceiling, as a Kubernetes quantity. Unset means 30Gi; the minimum is 1Gi.
+      container_storage_size: 100Gi
+      # Give space freed by deleted images and containers back to the node during the job.
+      container_storage_discard: true
+      # Merged over sandbox_resources. Reserve node disk for the host: the storage plus what the
+      # host writes outside it.
+      resources:
+        ephemeral-storage: 110Gi
+```
+
+- **Discard.** Without it, space freed inside the file stays allocated on the node until the Gym host
+  ends. With it, every delete also frees the space on the node, which costs some extra I/O.
+- **Reserving disk.** The size reserves nothing. Without an `ephemeral-storage` request, the scheduler
+  doesn't account for the host's disk use, and hosts that fill their storage can put a node under disk
+  pressure, where Kubernetes evicts pods. A request makes the scheduler place each host only where that
+  much disk is free, so it also limits how many hosts fit on a node. Setting it in the profile's
+  `resources` reserves disk for `docker: true` jobs only. Requests are sent in whole GiB, rounded up,
+  and must not exceed an `ephemeral-storage` limit set in `create.resource` of the merged host provider
+  options.
+- **Upgrades.** Upgrade the Evaluator and the Gym host image together before setting these: an older
+  Docker-enabled image ignores `discard`.
+
+To pull private images, create a NeMo Helix secret holding the registry token and pass it to the job
+through `env_secrets`, like any other job credential. Add the registry, and the host it redirects
+image layers to, to the profile's `egress_allow`. For `nvcr.io`, that's `nvcr.io:443` and
+`layers.nvcr.io:443`.
+
+```yaml
+target:
+  kind: gym
+  docker: true
+  # ...
+  env_vars:
+    REGISTRY_USER: $oauthtoken
+  env_secrets:
+    REGISTRY_PASSWORD: default/ngc-registry-token
+```
+
+The resource server logs in before it pulls:
+
+```python
+subprocess.run(
+    ["docker", "login", "nvcr.io", "-u", os.environ["REGISTRY_USER"], "--password-stdin"],
+    input=os.environ["REGISTRY_PASSWORD"].encode(),
+    check=True,
+)
+```
+
+The login is stored for the Gym host's container user, so every Gym server in the host can pull
+with it.
 
 ## Local Docker provider
 

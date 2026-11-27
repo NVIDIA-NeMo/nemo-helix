@@ -5,6 +5,10 @@
 JOB_TASK_CLEANUP_PENDING_KEY = "task_cleanup_pending"
 JOB_WORKSPACE_ID_LABEL = "nhx.nvidia.com/job_workspace_id"
 JOB_ID_LABEL = "nhx.nvidia.com/job_id"
+# The job entity's UUID. JOB_ID_LABEL holds the job name, which is unique only within a workspace and can be
+# reused, so anything that admits or removes pods by job matches this instead. On step pods only: it is not one
+# of the labels the controller finds a step's pods by, so pods an older controller created stay found.
+JOB_UID_LABEL = "nhx.nvidia.com/job_uid"
 JOB_ATTEMPT_ID_LABEL = "nhx.nvidia.com/job_attempt_id"
 JOB_STEP_NAME_LABEL = "nhx.nvidia.com/job_step_name"
 JOB_STEP_ID_LABEL = "nhx.nvidia.com/job_step_id"

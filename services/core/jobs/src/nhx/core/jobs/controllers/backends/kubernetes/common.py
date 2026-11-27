@@ -86,6 +86,7 @@ from nhx.core.jobs.app.constants import (
     JOB_TYPE_JOB,
     JOB_TYPE_LABEL,
     JOB_TYPE_STORAGE_CLEANUP,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -857,18 +858,28 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
     allows are additive across policies, so this only isolates the step when no other policy in the
     namespace selects its pods with a broader allow.
 
+    Peers are matched by the job's entity UUID (``JOB_UID_LABEL``, and each rule's ``job_id_label``), never its
+    name: names are unique only within a workspace, so a same-named job's pods in another workspace sharing the
+    namespace would otherwise be admitted, on every port in the case of the same-job rule.
+
     The Helm chart's ValidatingAdmissionPolicy (``job-step-networkpolicy-vap.yaml``) only admits this exact
     shape from the controller; keep the two in sync.
     """
     network = step.step_spec.network if step.step_spec else None
     if network is None:
         return None
+    job_uid = step.job_id
+    if not job_uid:
+        # Without the job's UUID there is nothing safe to match peers by: fail closed rather than admit by name.
+        raise FailedToScheduleError(
+            f"Cannot create a NetworkPolicy for job step {step.job}/{step.name}: the step has no job ID"
+        )
     managed = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
     ingress = [
         client.V1NetworkPolicyIngressRule(
             _from=[
                 client.V1NetworkPolicyPeer(
-                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_ID_LABEL: step.job})
+                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_UID_LABEL: job_uid})
                 )
             ]
         )
@@ -878,7 +889,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
             client.V1NetworkPolicyIngressRule(
                 _from=[
                     client.V1NetworkPolicyPeer(
-                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
+                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: job_uid})
                     )
                 ],
                 ports=_network_policy_ports(rule),
@@ -890,7 +901,7 @@ def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1Network
         metadata=client.V1ObjectMeta(name=name_for_step(step), labels=common_labels_for_step(step)),
         spec=client.V1NetworkPolicySpec(
             pod_selector=client.V1LabelSelector(
-                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_STEP_ID_LABEL: step.id}
+                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_UID_LABEL: job_uid, JOB_STEP_ID_LABEL: step.id}
             ),
             policy_types=["Ingress"],
             ingress=ingress,
@@ -1133,6 +1144,21 @@ def build_launcher_init_container(launcher_image: str, launcher_tool_path: str) 
     )
 
 
+#: Creates the job directory given as ``$1`` and opens it up. Something still running for the job,
+#: such as a sandbox from an earlier attempt, can delete entries while ``chmod -R`` walks the tree;
+#: one that vanished has nothing left to change, so those errors pass. Any other error fails the
+#: container. Both busybox and GNU chmod end such a line with the ENOENT message. Only grep's
+#: "no line selected" (1) passes: a line that isn't ENOENT (0) or grep failing to run fails closed.
+PERMISSIONS_INIT_SCRIPT = """\
+mkdir -p "$1" || exit 1
+out=$(chmod -R 777 "$1" 2>&1) && exit 0
+printf '%s\\n' "$out" >&2
+printf '%s\\n' "$out" | grep -qv ': No such file or directory$'
+[ $? -eq 1 ] || exit 1
+exit 0
+"""
+
+
 def build_permissions_init_container(
     volume_name: str, workspace: str, job_id: str, permissions_image: str
 ) -> client.V1Container:
@@ -1148,7 +1174,7 @@ def build_permissions_init_container(
     return client.V1Container(
         name="fix-permissions",
         image=permissions_image,
-        command=["sh", "-c", f"mkdir -p /vol/{volume_subpath} && chmod -R 777 /vol/{volume_subpath}"],
+        command=["sh", "-c", PERMISSIONS_INIT_SCRIPT, "fix-permissions", f"/vol/{volume_subpath}"],
         volume_mounts=[client.V1VolumeMount(name=volume_name, mount_path="/vol")],
     )
 

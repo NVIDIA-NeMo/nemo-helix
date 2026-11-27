@@ -37,7 +37,10 @@ export {
   guardrailsRoutes,
   getGuardrailsSideNavItems,
 } from '@studio/routes/groups/guardrailsRoutes';
-export { inferenceProviderRoutes } from '@studio/routes/groups/inferenceProviderRoutes';
+export {
+  inferenceProviderRoutes,
+  getInferenceProviderSideNavItems,
+} from '@studio/routes/groups/inferenceProviderRoutes';
 export { intakeRoutes, getIntakeSideNavItems } from '@studio/routes/groups/intakeRoutes';
 export { jobRoutes, getJobSideNavItems } from '@studio/routes/groups/jobRoutes';
 export { memberRoutes } from '@studio/routes/groups/memberRoutes';

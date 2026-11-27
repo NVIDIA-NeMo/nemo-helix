@@ -580,6 +580,12 @@ class GymRunnerTarget(_EvalTarget):
         description="Auto-bind the agent's `resources_server.name` via a Hydra override. Set False for "
         "self-contained agents that already bind their own resources-server.",
     )
+    docker: bool = Field(
+        default=False,
+        description="Let the environment's resources servers and agents run `docker` and `docker compose`. "
+        "Requires sandboxed Gym and the deployment's `sandbox_docker_profile`; a deployment without them "
+        "refuses the job at submit.",
+    )
     hydra_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameters merged into Gym's Hydra config, as nested data — {'model': {'temperature': 0.7}} "

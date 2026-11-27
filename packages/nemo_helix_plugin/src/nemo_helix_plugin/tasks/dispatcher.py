@@ -56,6 +56,7 @@ from nemo_helix_plugin.jobs.constants import (
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
@@ -238,6 +239,8 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
         ),
         job_id=job_id,
         attempt_id=attempt_id,
+        # Optional here: only work that must identify the job across workspaces needs it, and checks it.
+        job_uid=os.environ.get(NEMO_JOB_UID_ENVVAR, "").strip() or None,
     )
 
 

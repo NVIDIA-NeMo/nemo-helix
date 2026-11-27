@@ -33,6 +33,7 @@ from sandboxed_gym.environment_package import (
     WheelsV1Package,
 )
 from sandboxed_gym.runtime import gym_host_runtime as runtime
+from sandboxed_gym.runtime.agent_bundle import AGENT_BUNDLE_FEATURE
 
 
 class _FakeRolloutHelper:
@@ -172,7 +173,7 @@ def test_health_ready(ready_server):
 
     with urllib.request.urlopen(f"{ready_server}/health", timeout=5) as resp:
         assert resp.status == 200
-        assert json.loads(resp.read().decode()) == {"status": "ready"}
+        assert json.loads(resp.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
 
 
 def test_rollouts_run_returns_results(ready_server):
@@ -1322,7 +1323,7 @@ def test_health_stays_answerable_during_a_rollout(slow_server):
     try:
         time.sleep(0.2)
         with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
-            assert json.loads(health.read().decode()) == {"status": "ready"}
+            assert json.loads(health.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
     finally:
         release.set()
         rollout.join(timeout=10)
@@ -1352,7 +1353,7 @@ def test_a_disconnected_caller_cancels_the_batch(slow_server):
     release.set()
     # And the server stays healthy for the next caller rather than wedging on the broken one.
     with urllib.request.urlopen(f"{base_url}/health", timeout=5) as health:
-        assert json.loads(health.read().decode()) == {"status": "ready"}
+        assert json.loads(health.read().decode()) == {"status": "ready", "features": [AGENT_BUNDLE_FEATURE]}
 
 
 def test_rollouts_reuse_one_live_event_loop():
@@ -2147,6 +2148,8 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
         raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
 
     monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
+    # The default image has no container engine; the check behind that reads this host's /proc.
+    monkeypatch.setattr(runtime, "prepare_container_engine", lambda: False)
     # Port 0 asks the kernel for a free port. main() otherwise binds 8080 and
     # serve_forever never returns, so the test process stays on that socket.
     monkeypatch.setenv("NHX_RUNTIME_HTTP_PORT", "0")
@@ -2194,6 +2197,168 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
     assert runtime._READY is False
     assert runtime._BOOTSTRAP_ERROR is not None
     assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
+def test_the_execd_token_is_gone_before_the_host_starts_anything(monkeypatch):
+    """Whatever the host starts -- the container engine, then the Gym servers -- inherits its environment.
+
+    Environment code holding the token could run commands through execd, which keeps root after the host
+    becomes the unprivileged container user.
+    """
+    monkeypatch.setenv("EXECD_ACCESS_TOKEN", "sandbox-token")
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+    seen_by_setup: list[str | None] = []
+
+    def _record_setup() -> bool:
+        seen_by_setup.append(os.environ.get("EXECD_ACCESS_TOKEN"))
+        raise RuntimeError("stop after setup")
+
+    class _NoServer:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            return None
+
+    monkeypatch.setattr(runtime, "prepare_container_engine", _record_setup)
+    monkeypatch.setattr(runtime, "_Server", _NoServer)
+
+    runtime.main()
+
+    assert seen_by_setup == [None]
+    assert "EXECD_ACCESS_TOKEN" not in os.environ
+
+
+def _run_main_recording(monkeypatch, *, setup) -> list[tuple[str, str | None]]:
+    """Run main() with the setup and Gym bootstrap replaced by recorders; no server is started."""
+    seen: list[tuple[str, str | None]] = []
+
+    def _setup() -> bool:
+        seen.append(("setup", os.environ.get("PATH")))
+        return setup()
+
+    def _bootstrap():
+        seen.append(("bootstrap", os.environ.get("PATH")))
+        raise RuntimeError("stop before Gym")
+
+    class _NoServer:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            return None
+
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: seen.append(("tail", os.environ.get("PATH"))))
+    monkeypatch.setattr(runtime, "prepare_container_engine", _setup)
+    monkeypatch.setattr(runtime, "bootstrap_gym_host", _bootstrap)
+    monkeypatch.setattr(runtime, "_Server", _NoServer)
+    runtime.main()
+    return seen
+
+
+def test_the_jobs_variables_apply_only_after_the_privileged_setup(monkeypatch):
+    """A job's PATH must not choose what the root-only setup runs; Gym and its servers still get it.
+
+    Output capture starts after the job's variables are applied, since it masks the secret values it finds then.
+    """
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, runtime.encode_job_env({"PATH": "/job/environment/bin"}))
+
+    seen = _run_main_recording(monkeypatch, setup=lambda: True)
+
+    assert seen == [
+        ("setup", "/usr/bin:/bin"),
+        ("tail", "/job/environment/bin"),
+        ("bootstrap", "/job/environment/bin"),
+    ]
+    assert runtime.JOB_ENV_ENV_KEY not in os.environ
+
+
+def test_the_agent_bundle_runs_only_after_the_privileged_setup(monkeypatch):
+    """On the Docker-enabled image the setup runs as root with SYS_ADMIN; the agent CLI must not.
+
+    Its directory still reaches Gym first on PATH, and a job's own PATH still overrides it as before.
+    """
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.AGENT_EXECUTABLE_ENV_KEY, "/installed-agent/bin/codex")
+    agent_seen_by_setup: list[str | None] = []
+    checked: list[str | None] = []
+
+    def _setup() -> bool:
+        agent_seen_by_setup.append(os.environ.get(runtime.AGENT_EXECUTABLE_ENV_KEY))
+        assert checked == [], "the agent ran before the privilege drop"
+        return True
+
+    def _check(executable: str | None) -> None:
+        checked.append(executable)
+        os.environ["PATH"] = f"/installed-agent/bin:{os.environ['PATH']}"
+
+    monkeypatch.setattr(runtime, "activate_agent_executable", _check)
+
+    seen = _run_main_recording(monkeypatch, setup=_setup)
+
+    assert agent_seen_by_setup == [None]
+    assert checked == ["/installed-agent/bin/codex"]
+    assert seen[-1] == ("bootstrap", "/installed-agent/bin:/usr/bin:/bin")
+    assert runtime.AGENT_EXECUTABLE_ENV_KEY not in os.environ
+
+
+def test_a_failed_setup_never_runs_the_agent_bundle(monkeypatch):
+    monkeypatch.setenv(runtime.AGENT_EXECUTABLE_ENV_KEY, "/installed-agent/bin/codex")
+    checked: list[str | None] = []
+    monkeypatch.setattr(runtime, "activate_agent_executable", checked.append)
+
+    def _fail() -> bool:
+        raise RuntimeError("needs a Kata sandbox")
+
+    _run_main_recording(monkeypatch, setup=_fail)
+
+    assert checked == []
+    assert runtime._BOOTSTRAP_ERROR is not None
+    assert "needs a Kata sandbox" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
+def test_a_failed_setup_never_applies_the_jobs_variables(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(runtime.JOB_ENV_ENV_KEY, runtime.encode_job_env({"PATH": "/job/environment/bin"}))
+
+    def _fail() -> bool:
+        raise RuntimeError("needs a Kata sandbox")
+
+    seen = _run_main_recording(monkeypatch, setup=_fail)
+
+    assert seen == [("setup", "/usr/bin:/bin"), ("tail", "/usr/bin:/bin")]
+    assert os.environ["PATH"] == "/usr/bin:/bin"
+    error = runtime._BOOTSTRAP_ERROR
+    assert error is not None
+    assert "needs a Kata sandbox" in error["error"]["message"]
+
+
+@pytest.mark.parametrize("payload", ["[1]", '{"A": 1}', "not json"])
+def test_a_malformed_job_environment_fails_the_bootstrap(payload):
+    import base64
+
+    with pytest.raises(ValueError):
+        runtime._apply_job_env(base64.b64encode(payload.encode()).decode(), {}, [])
+    with pytest.raises(ValueError):
+        runtime._apply_job_env("not base64 !", {}, [])
+
+
+def test_a_jobs_pythonpath_reaches_the_isolated_hosts_import_path():
+    """The host starts with python -I, which ignores PYTHONPATH; the job's entries are added when applied."""
+    environ: dict[str, str] = {}
+    import_path = ["/opt/gym-host-venv/lib"]
+
+    runtime._apply_job_env(runtime.encode_job_env({"PYTHONPATH": f"/job/a{os.pathsep}/job/b"}), environ, import_path)
+
+    assert environ["PYTHONPATH"] == f"/job/a{os.pathsep}/job/b"
+    assert import_path == ["/job/a", "/job/b", "/opt/gym-host-venv/lib"]
 
 
 def test_captured_output_masks_secret_env_values(monkeypatch):

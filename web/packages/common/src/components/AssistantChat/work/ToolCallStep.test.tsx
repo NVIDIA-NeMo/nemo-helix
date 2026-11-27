@@ -209,14 +209,97 @@ describe('ToolCallStep', () => {
     expect(screen.getByTestId('assistant-work-file-edit')).toHaveTextContent('Writing NewFile.tsx');
   });
 
-  it('renders an unknown tool with file-like arguments as a plain Used step', async () => {
+  it('renders an unknown tool with a path and content as a file write', async () => {
+    await renderStep({
+      args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk\nand eggs\n' },
+      toolName: 'save_note',
+    });
+
+    const step = screen.getByTestId('assistant-work-file-edit');
+    expect(step).toHaveTextContent('Wrote MEMORY.md');
+    expect(within(step).getByTestId('assistant-work-edit-stats')).toHaveTextContent('+2 −0');
+    expect(step).toHaveTextContent('and eggs');
+    expect(screen.queryByTestId('assistant-work-tool-call')).not.toBeInTheDocument();
+  });
+
+  it.each(['filePath', 'path', 'filename', 'file_name', 'file'])(
+    'detects a write by its %s path argument',
+    async (pathKey) => {
+      await renderStep({
+        args: { [pathKey]: 'notes/todo.md', contents: 'one\ntwo\nthree' },
+        toolName: 'write_file',
+      });
+
+      const step = screen.getByTestId('assistant-work-file-edit');
+      expect(step).toHaveTextContent('Wrote todo.md');
+      expect(within(step).getByTestId('assistant-work-edit-stats')).toHaveTextContent('+3 −0');
+    }
+  );
+
+  it('renders an unknown tool with a path and old/new strings as a file edit', async () => {
+    await renderStep({
+      args: {
+        filePath: 'src/App.tsx',
+        newString: 'const a = 1;\n',
+        oldString: 'const a = 0;\nconst b = 0;\n',
+      },
+      toolName: 'apply_patch',
+    });
+
+    const step = screen.getByTestId('assistant-work-file-edit');
+    expect(step).toHaveTextContent('Edited App.tsx');
+    expect(within(step).getByTestId('assistant-work-edit-stats')).toHaveTextContent('+1 −2');
+  });
+
+  it('keeps the Result reachable on a call matched only by its argument shape', async () => {
     await renderStep({
       args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
+      result: 'saved 12 bytes',
+      toolName: 'save_note',
+    });
+
+    const step = screen.getByTestId('assistant-work-file-edit');
+    expect(within(step).getByText('Result')).toBeInTheDocument();
+    expect(step).toHaveTextContent('saved 12 bytes');
+  });
+
+  it('does not show a Result on built-in Write, which already renders its own content', async () => {
+    await renderStep({
+      args: { file_path: 'src/NewFile.tsx', content: 'export {};' },
+      result: 'File created successfully',
+      toolName: 'Write',
+    });
+
+    expect(within(screen.getByTestId('assistant-work-file-edit')).queryByText('Result')).toBeNull();
+  });
+
+  it('keeps a failed shape-matched write as a tool call so its error shows', async () => {
+    await renderStep({
+      args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
+      isError: true,
+      result: 'EACCES: permission denied',
       toolName: 'save_note',
     });
 
     expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
-    expect(screen.getByTestId('assistant-work-tool-call')).toHaveTextContent('Used save_note');
+    expect(
+      within(screen.getByTestId('assistant-work-tool-call')).getByText('Error')
+    ).toBeInTheDocument();
+  });
+
+  it('does not treat a path or text argument on a known read-only tool as a file change', async () => {
+    await renderStep({ args: { path: 'src/App.tsx', text: 'hello' }, toolName: 'Read' });
+
+    expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
+  });
+
+  it('keeps an unknown tool without a file-change shape as a plain Used step', async () => {
+    await renderStep({ args: { query: 'symbols' }, toolName: 'InspectWorkspace' });
+
+    expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-work-tool-call')).toHaveTextContent(
+      'Used InspectWorkspace'
+    );
   });
 
   it('shows a finished failed call as Failed in its collapsed title', async () => {

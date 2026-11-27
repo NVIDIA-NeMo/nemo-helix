@@ -19,6 +19,7 @@ import {
   getIntakeTracesRoute,
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
+  getBaseModelDetailRoute,
   getModelDetailRoute,
   getNewFilesetRoute,
 } from '@studio/routes/utils';
@@ -276,9 +277,24 @@ describe('getModelDetailRoute', () => {
     );
   });
 
-  it('adds the tab as a query parameter', () => {
+  it('adds the tab as a path segment, except for the default Details tab', () => {
     expect(getModelDetailRoute('ws', 'my-model', { tab: ModelDetailTab.Training })).toBe(
-      '/workspaces/ws/fine-tune/models/my-model?tab=training'
+      '/workspaces/ws/fine-tune/models/my-model/training'
     );
+    expect(
+      getModelDetailRoute('ws', 'my-model', { adapterName: 'my-adapter', tab: ModelDetailTab.Chat })
+    ).toBe('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter/chat');
+    expect(getModelDetailRoute('ws', 'my-model', { tab: ModelDetailTab.Details })).toBe(
+      '/workspaces/ws/fine-tune/models/my-model'
+    );
+  });
+});
+
+describe('getBaseModelDetailRoute', () => {
+  it('puts the tab in the catalog URL', () => {
+    expect(getBaseModelDetailRoute('ws', 'my-model', ModelDetailTab.Deployment)).toBe(
+      '/workspaces/ws/base-models/my-model/deployment'
+    );
+    expect(getBaseModelDetailRoute('ws', 'my-model')).toBe('/workspaces/ws/base-models/my-model');
   });
 });

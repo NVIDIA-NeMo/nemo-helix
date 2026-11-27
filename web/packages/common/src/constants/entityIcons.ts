@@ -18,7 +18,7 @@ import {
   ChartTree,
   LockClosed,
   ListBullet,
-  Radar,
+  NeuralNetwork,
   Rocket,
   Secure,
   Sliders,
@@ -67,7 +67,7 @@ export const ENTITY_ICONS = {
   customModels: Faders,
   deployments: Rocket,
   virtualModels: Route,
-  inferenceProviders: Radar,
+  inferenceProviders: NeuralNetwork,
 
   // Data
   datasets: Db,

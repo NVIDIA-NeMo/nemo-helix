@@ -11,12 +11,8 @@
  */
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import {
-  useBaseModels,
-  type ModelEntityFilterInput,
-} from '@nemo/common/src/api/entity-store/useBaseModels';
+import { useBaseModels } from '@nemo/common/src/api/entity-store/useBaseModels';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
@@ -47,8 +43,15 @@ import { CUSTOMIZER_ENABLED, MODEL_DETAILS_ENABLED } from '@studio/constants/env
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
+import {
+  CUSTOMIZABLE_FILTER_ID,
+  FINE_TUNABLE_KEY,
+  isSupportedFilter,
+  makeFilterColumns,
+  toModelEntityFilter,
+} from '@studio/routes/WorkspaceBaseModelsRoute/filterColumns';
 import { tooltipClassName } from '@studio/styles/common';
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type FC } from 'react';
+import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 const SORT_OPTIONS = [
@@ -60,50 +63,11 @@ const SORT_OPTIONS = [
 
 const TAB_SEARCH_PARAM = 'tab';
 
-const CUSTOMIZABLE_FILTER_ID = 'customizable';
-const FINE_TUNABLE_KEY = 'fine_tunable';
-
-type CustomizableFilterState = Partial<Record<typeof FINE_TUNABLE_KEY, true>>;
-
-/**
- * Column definitions used solely for filter metadata. The columns are never rendered as a table;
- * they only provide `meta.filter` config so that DataView's ColumnFilterPanel and
- * StudioAppliedFilters components can render and manage the filter UI.
- */
-const makeFilterColumns: ComponentProps<typeof DataView.Root<ModelEntity>>['makeColumns'] = ({
-  accessor,
-}) => [
-  // Fine-tunable filtering depends on Customizer capabilities, so hide both the
-  // column filter and toolbar checkbox while Customizer is launch-disabled.
-  ...(CUSTOMIZER_ENABLED
-    ? [
-        accessor(() => '', {
-          id: CUSTOMIZABLE_FILTER_ID,
-          header: 'Fine-tunable',
-          enableSorting: false,
-          meta: {
-            filter: {
-              type: 'multi-select',
-              label: 'Fine-tunable',
-              options: [{ value: FINE_TUNABLE_KEY, label: 'Fine-tunable' }],
-            },
-          },
-        }),
-      ]
-    : []),
-  accessor('created_at', {
-    id: 'created_at',
-    header: 'Created',
-    enableSorting: false,
-    meta: { filter: dateTimeFilter('Created At') },
-  }),
-  accessor('updated_at', {
-    id: 'updated_at',
-    header: 'Updated',
-    enableSorting: false,
-    meta: { filter: dateTimeFilter('Updated At') },
-  }),
-];
+const getRequestStatus = (isLoading: boolean, isError: boolean) => {
+  if (isLoading) return 'loading';
+  if (isError) return 'error';
+  return 'success';
+};
 
 export const WorkspaceBaseModelsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -116,11 +80,16 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     items: [{ slotLabel: 'Model Catalog' }],
   });
 
-  const dataViewState = useStudioDataViewState<
-    Partial<ModelEntityFilterInput> & { [CUSTOMIZABLE_FILTER_ID]?: CustomizableFilterState }
-  >({
+  // Column filter ids aren't all API fields (e.g. `customizable`, `lora`); toModelEntityFilter maps them.
+  const dataViewState = useStudioDataViewState<Record<string, unknown>>({
     defaultSort: [{ id: 'name', desc: false }],
   });
+
+  const { set: setColumnFilters, state: columnFilters } = dataViewState.columnFiltering;
+  useEffect(() => {
+    if (columnFilters.every(isSupportedFilter)) return;
+    setColumnFilters(columnFilters.filter(isSupportedFilter));
+  }, [columnFilters, setColumnFilters]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [selectedModel, setSelectedModel] = useState<ModelEntity | null>(null);
@@ -130,31 +99,28 @@ export const WorkspaceBaseModelsRoute: FC = () => {
 
   const nameSearch = dataViewState.apiFilter.searchText;
   const allColumnFilters = dataViewState.apiFilter.filter;
-  const customizableFilter = CUSTOMIZER_ENABLED
-    ? allColumnFilters?.[CUSTOMIZABLE_FILTER_ID]
-    : undefined;
-
-  // Strip the synthetic `customizable` filter from the API filter — the backend doesn't know about it.
-  const apiColumnFilters = useMemo(() => {
-    if (!allColumnFilters) return undefined;
-    const rest = { ...allColumnFilters };
-    delete rest[CUSTOMIZABLE_FILTER_ID];
-    return Object.keys(rest).length > 0 ? (rest as Partial<ModelEntityFilterInput>) : undefined;
-  }, [allColumnFilters]);
-
-  const customizableFilterActive = !!(
-    customizableFilter && Object.keys(customizableFilter).length > 0
+  const filter = useMemo(
+    () => toModelEntityFilter(allColumnFilters, nameSearch),
+    [allColumnFilters, nameSearch]
   );
+  const makeColumns = useMemo(() => makeFilterColumns(workspace), [workspace]);
+  const hasActiveFilters = !!filter;
 
-  const hasActiveFilters = !!nameSearch || !!apiColumnFilters || customizableFilterActive;
+  const customizableChecked = CUSTOMIZER_ENABLED
+    ? !!(
+        dataViewState.columnFiltering.state.find((f) => f.id === CUSTOMIZABLE_FILTER_ID)?.value as
+          | Partial<Record<typeof FINE_TUNABLE_KEY, true>>
+          | undefined
+      )?.[FINE_TUNABLE_KEY]
+    : false;
 
-  const filter = useMemo<ModelEntityFilterInput | undefined>(() => {
-    if (!nameSearch && !apiColumnFilters) return undefined;
-    return {
-      ...apiColumnFilters,
-      ...(nameSearch ? { name: { $like: nameSearch } } : {}),
-    };
-  }, [apiColumnFilters, nameSearch]);
+  const handleCustomizableToggle = (checked: boolean) => {
+    dataViewState.columnFiltering.set((prev) => {
+      const others = prev.filter((f) => f.id !== CUSTOMIZABLE_FILTER_ID);
+      if (!checked) return others;
+      return [...others, { id: CUSTOMIZABLE_FILTER_ID, value: { [FINE_TUNABLE_KEY]: true } }];
+    });
+  };
 
   const sort = getSortParam(dataViewState.sorting.state) as ModelEntitySortField;
 
@@ -165,7 +131,6 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     error,
     hasNextPage,
     fetchNextPage,
-    isFetchingNextPage,
     isFetchNextPageError,
     refetch,
   } = useBaseModels({
@@ -173,43 +138,6 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     filter,
     sort,
   });
-
-  const visibleModels = useMemo(() => {
-    if (!customizableFilter?.[FINE_TUNABLE_KEY]) return models;
-    return models.filter((model) => Boolean(model.fileset));
-  }, [models, customizableFilter]);
-
-  const liveCustomizableFilter = CUSTOMIZER_ENABLED
-    ? (dataViewState.columnFiltering.state.find((f) => f.id === CUSTOMIZABLE_FILTER_ID)?.value as
-        | CustomizableFilterState
-        | undefined)
-    : undefined;
-  const customizableChecked = !!liveCustomizableFilter?.[FINE_TUNABLE_KEY];
-
-  const handleCustomizableToggle = (checked: boolean) => {
-    dataViewState.columnFiltering.set((prev) => {
-      const others = prev.filter((f) => f.id !== CUSTOMIZABLE_FILTER_ID);
-      if (!checked) return others;
-      return [
-        ...others,
-        {
-          id: CUSTOMIZABLE_FILTER_ID,
-          value: { [FINE_TUNABLE_KEY]: true },
-        },
-      ];
-    });
-  };
-
-  const isSweepingForCustomizable =
-    customizableChecked && visibleModels.length === 0 && hasNextPage && !isFetchNextPageError;
-
-  // In the rare case where the user is filtering for customizable models and there are no visible models on the first page,
-  // fetch the next page here because the table won't render the virutalized cards, preventing a refetch from happening.
-  useEffect(() => {
-    if (isSweepingForCustomizable && !isFetchingNextPage) {
-      void fetchNextPage();
-    }
-  }, [fetchNextPage, isSweepingForCustomizable, isFetchingNextPage]);
 
   const modelInList = useMemo(
     () => !!modelNameFromPath && models.some((m) => m.name === modelNameFromPath),
@@ -310,7 +238,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
         <PageHeader className="p-0 shrink-0" slotHeading="Model Catalog" />
         <StudioDataView<ModelEntity>
           dataViewState={dataViewState}
-          makeColumns={makeFilterColumns}
+          makeColumns={makeColumns}
           searchField="name"
           scrollContainerRef={scrollContainerRef}
           toolbarSlotEnd={
@@ -360,14 +288,9 @@ export const WorkspaceBaseModelsRoute: FC = () => {
           }
           attributes={{
             DataViewRoot: {
-              data: visibleModels,
-              totalCount: visibleModels.length,
-              requestStatus:
-                isLoading || isSweepingForCustomizable
-                  ? 'loading'
-                  : isError || isFetchNextPageError
-                    ? 'error'
-                    : 'success',
+              data: models,
+              totalCount: models.length,
+              requestStatus: getRequestStatus(isLoading, isError || isFetchNextPageError),
             },
             DataViewSearchBar: { placeholder: 'Search Models...' },
           }}

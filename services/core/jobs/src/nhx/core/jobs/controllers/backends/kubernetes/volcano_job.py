@@ -25,6 +25,7 @@ from nhx.core.jobs.app.constants import (
     JOB_STEP_NAME_LABEL,
     JOB_TYPE_JOB,
     JOB_TYPE_LABEL,
+    JOB_UID_LABEL,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -80,6 +81,9 @@ from nhx.core.jobs.controllers.backends.workload_tokens import create_authentica
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
+
+# Phases after which Volcano has stopped the Job, so a TTL timeout would only replace its real outcome.
+VOLCANO_FINISHED_PHASES = ("Completed", "Failed", "Terminated")
 
 
 class VolcanoJobExecutionProfileConfig(BaseKubernetesExecutionProfileConfig):
@@ -263,6 +267,9 @@ class VolcanoJobBackend(
         common_labels = common_labels_for_step(step)
         common_labels[JOB_EXECUTION_BACKEND_LABEL] = self.BACKEND_NAME
         common_labels[JOB_EXECUTION_PROFILE_LABEL] = self._profile_name
+        # Peers are admitted by this, not the job name (see build_step_network_policy).
+        if step.job_id:
+            common_labels[JOB_UID_LABEL] = step.job_id
 
         if executor_config.resources is not None and executor_config.resources.num_gpus is not None:
             num_gpus = executor_config.resources.num_gpus
@@ -486,7 +493,11 @@ class VolcanoJobBackend(
                 )
             ):
                 return result
-            if volcano_job is not None and self.check_step_is_stale(step):
+            if (
+                volcano_job is not None
+                and _volcano_job_phase(volcano_job) not in VOLCANO_FINISHED_PHASES
+                and self.check_step_is_stale(step)
+            ):
                 message = staleness_error_message(require_staleness_timeout_seconds(step))
                 return self.sync_remove_job_with_status(
                     step,
@@ -535,11 +546,11 @@ class VolcanoJobBackend(
             return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
 
         job_status = volcano_job.get("status") or {}
-        phase = job_status.get("state", {}).get("phase")
+        phase = _volcano_job_phase(volcano_job)
         pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
         digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
         running, exit_code = classify_task_containers(pods)
-        if not running and exit_code is None and phase in ("Completed", "Failed", "Terminated"):
+        if not running and exit_code is None and phase in VOLCANO_FINISHED_PHASES:
             exit_code = 0 if phase == "Completed" else 1
         live_pods = phase == "Running" or bool(job_status.get("running"))
         if exit_code is None and task_never_started(pods, workload_has_live_pods=live_pods):
@@ -827,9 +838,8 @@ class VolcanoJobBackend(
                     self._workload_delegations.revoke_for_target(target)
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
-        phase = (job.get("status") or {}).get("state", {}).get("phase")
         # A failed job ends Terminated: a pod failure or eviction terminates it rather than failing it.
-        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed", "Terminated"):
+        if status in HelixJobStatus.terminals() and _volcano_job_phase(job) in VOLCANO_FINISHED_PHASES:
             self._delete_step_network_policy(job.get("metadata", {}).get("name"))
         error_details = {"message": status_details["message"]} if status == HelixJobStatus.ERROR else {}
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
@@ -874,6 +884,16 @@ class VolcanoJobBackend(
             else self.check_step_ttl(step, ttl_seconds)
         )
         if not ttl_exceeded:
+            return None
+        phase = _volcano_job_phase(volcano_job)
+        if phase in VOLCANO_FINISHED_PHASES:
+            # The reconciler can reach a step long after Volcano finished its Job. Timing it out now
+            # would delete the Job and replace its real outcome with a false timeout, so let the normal
+            # sync record whether it completed or failed.
+            logger.info(
+                "Skipping TTL timeout for a Volcano Job that already finished",
+                extra={"job_name": name_for_step(step), "namespace": self.namespace, "phase": phase},
+            )
             return None
         return self.sync_remove_job_with_status(
             step,
@@ -981,6 +1001,10 @@ class VolcanoJobBackend(
         if not name or not self._execution_profile_config.step_network_policies_enabled:
             return
         delete_step_network_policy(self._networking_v1, self.namespace, name)
+
+
+def _volcano_job_phase(job: dict) -> str | None:
+    return (job.get("status") or {}).get("state", {}).get("phase")
 
 
 def map_volcano_job_status_to_platform_status(status: dict) -> tuple[HelixJobStatus, dict]:

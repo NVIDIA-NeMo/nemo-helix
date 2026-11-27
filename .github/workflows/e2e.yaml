@@ -122,30 +122,56 @@ jobs:
             coverage.xml
             coverage.json
 
-  build-cpu-smoke-images:
-    name: Build CPU smoke images
+  build-api-images:
+    name: Build API images
     needs: [eligibility]
-    permissions:
+    permissions: &cpu-image-permissions
       contents: read
       packages: write
-    # Shared with ci.yaml and nightly-taskset-runs-e2e.yaml.
     uses: ./.github/workflows/build-cpu-smoke-images.yaml
     with:
+      family: api
       source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
-      # Publish on a push to main, a same-repo PR, the merge queue, or a dispatch that asks to.
-      publish: >-
-        ${{
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-          github.event_name == 'merge_group' ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish)
-        }}
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-task-images:
+    name: Build task images
+    needs: [eligibility]
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: tasks
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-tooling-images:
+    name: Build tooling images
+    needs: [eligibility]
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: build-tools
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
+  build-gym-host-image:
+    name: Build Gym host image
+    needs: [eligibility]
+    permissions: *cpu-image-permissions
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: gym-host
+      source_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      image_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
+      publish: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
 
   kind-cpu-e2e:
     name: Kind CPU e2e
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images, build-tooling-images, build-gym-host-image]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -163,8 +189,8 @@ jobs:
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
 
@@ -173,8 +199,8 @@ jobs:
         env:
           KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
           KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
         run: |
           e2e/k8s/scripts/prepull_kind_images.sh \
             "${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
@@ -192,8 +218,8 @@ jobs:
           # deployments executor (e2e/k8s/values/kind.yaml) and this same
           # nhx-agents-deepagents-e2e image is pre-pulled into the kind nodes, so the agent pod
           # resolves it node-locally under IfNotPresent.
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
         run: |
           test -n "${NHX_E2E_CLUSTER_URL}"
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
@@ -216,8 +242,8 @@ jobs:
 
   kind-gym-e2e:
     name: Kind Gym agent-evaluate e2e
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images, build-gym-host-image]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -235,8 +261,8 @@ jobs:
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
 
@@ -245,8 +271,8 @@ jobs:
         env:
           KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
           KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
         run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-tasks:${IMAGE_TAG}"
 
       - name: Run GRPO sandbox workspace permissions regression
@@ -296,8 +322,8 @@ jobs:
   # tests in kind-gym-e2e cannot share it.
   kind-gym-sandbox-e2e:
     name: Kind sandboxed Gym agent-evaluate e2e
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images, build-gym-host-image]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     # Each of its two tests may take up to 35 minutes. This covers cluster setup and one test
     # running to its own timeout, so a single hung test ends with pytest's diagnostics and not on
@@ -322,8 +348,8 @@ jobs:
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           kube-namespace: ${{ env.RELEASE_NAMESPACE }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
           install-opensandbox: "true"
@@ -336,8 +362,8 @@ jobs:
         env:
           KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
           KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          IMAGE_REGISTRY: ${{ needs.build-gym-host-image.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.build-gym-host-image.outputs.image_tag }}
         run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-gym-host:${IMAGE_TAG}"
 
       - name: Run sandboxed Gym agent-evaluate e2e tests
@@ -357,7 +383,7 @@ jobs:
           uv run --frozen pytest \
             e2e/test_evaluator_plugin.py \
             -v -rs \
-            -m gym_sandbox_e2e \
+            -m "gym_sandbox_e2e and not gym_docker_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-gym-sandbox-e2e.xml
@@ -379,8 +405,8 @@ jobs:
 
   kind-customizer-auth-e2e:
     name: Kind customizer auth e2e
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -398,8 +424,8 @@ jobs:
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
           helm-extra-args: -f e2e/k8s/values/auth-overlay.yaml
@@ -431,8 +457,8 @@ jobs:
 
   kind-builder-e2e:
     name: Kind builder e2e (auth ${{ matrix.auth }})
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images, build-tooling-images]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -462,8 +488,8 @@ jobs:
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
           helm-extra-args: >-
@@ -476,8 +502,8 @@ jobs:
         env:
           KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
           KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
         run: |
           e2e/k8s/scripts/prepull_kind_images.sh \
             "${NHX_E2E_IMAGE_REGISTRY}/nhx-builder-tasks:${NHX_E2E_IMAGE_TAG}" \
@@ -491,8 +517,8 @@ jobs:
           AUTH: ${{ matrix.auth }}
           NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
           NHX_E2E_KUBE_NAMESPACE: nemo-helix
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
         run: |
           set -euo pipefail
           test -n "${NHX_E2E_CLUSTER_URL}"
@@ -531,8 +557,8 @@ jobs:
 
   kind-network-policy-smoke:
     name: Kind NetworkPolicy smoke
-    needs: [eligibility, build-cpu-smoke-images]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -550,8 +576,8 @@ jobs:
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
           kind-enable-gateway: "false"
@@ -596,8 +622,8 @@ jobs:
 
   python-auth-idp-e2e-test:
     name: Python auth-idp ${{ matrix.runtime }} tests
-    needs: [eligibility, build-cpu-smoke-images, policy-wasm, python-auth-idp-static-test]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, build-task-images, policy-wasm, python-auth-idp-static-test]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -660,12 +686,12 @@ jobs:
           kind-cluster-name: ${{ env.AUTH_IDP_K8S_CLUSTER_NAME }}
           install-nemo-helix: "false"
           kube-namespace: ${{ env.AUTH_IDP_K8S_NAMESPACE }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          image-registry: ${{ needs.build-api-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-api-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
       - name: Log in to GHCR
-        if: matrix.backend == 'compose' && needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+        if: matrix.backend == 'compose' && needs.build-api-images.outputs.publish_images == 'true'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
@@ -713,14 +739,14 @@ jobs:
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          BAKE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+          BAKE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
           NHX_AUTHENTIK_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET }}
-          NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
+          NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-api-images.outputs.publish_images == 'true' && '1' || '0' }}
           NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
-          NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
+          NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-api-images.outputs.publish_images == 'true' && '1' || '0' }}
       # run.sh writes cluster diagnostics into E2E_SERVICES_LOG_DIR before it deletes the cluster.
       - name: Upload test artifacts
         if: always()
@@ -800,16 +826,16 @@ jobs:
   # NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG are unset there.
   python-e2e-image-test:
     name: Python e2e tests (prebuilt image)
-    needs: [eligibility, build-cpu-smoke-images, policy-wasm]
-    if: needs.build-cpu-smoke-images.outputs.publish_images == 'true'
+    needs: [eligibility, build-api-images, policy-wasm]
+    if: needs.build-api-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       packages: read
     env:
-      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-      NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+      NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-api-images.outputs.image_registry }}
+      NHX_E2E_IMAGE_TAG: ${{ needs.build-api-images.outputs.image_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -869,7 +895,10 @@ jobs:
       - eligibility
       - policy-wasm
       - python-auth-idp-static-test
-      - build-cpu-smoke-images
+      - build-api-images
+      - build-task-images
+      - build-tooling-images
+      - build-gym-host-image
       - kind-cpu-e2e
       - kind-gym-e2e
       - kind-gym-sandbox-e2e

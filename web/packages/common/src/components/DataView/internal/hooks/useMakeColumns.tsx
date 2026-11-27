@@ -168,7 +168,8 @@ export function useMakeColumns<TData>({
         col.cell = LoadingCell;
       }
       if (!overrideToLoadingCells && col.meta?.filter) {
-        col.enableColumnFilter = true;
+        // An explicit `false` keeps a column out of the filter panel; its chip still renders.
+        col.enableColumnFilter ??= true;
         if (col.meta.filter.type === 'text' && !col.filterFn) {
           col.filterFn = 'fuzzy' as unknown as FilterFn<TData>;
         }

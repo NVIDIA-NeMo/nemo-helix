@@ -508,7 +508,7 @@
         {
           "package": {
             "name": "cwevals",
-            "version": "0.0.1b1",
+            "version": "0.0.1b3",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -4018,7 +4018,7 @@
         {
           "package": {
             "name": "wandb",
-            "version": "0.31.0",
+            "version": "0.31.2",
             "ecosystem": "PyPI"
           },
           "licenses": [

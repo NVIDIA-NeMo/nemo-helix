@@ -54,6 +54,22 @@ export {
 } from '@nemo/common/src/components/DataView/StudioDataView';
 export * as DataView from '@nemo/common/src/components/DataView/internal';
 
+// Pass `host.sdk.platform.filesListFilesets` / `filesRetrieveFileset`; bind to forms with a `Controller`.
+export {
+  FilesetPickerCore as FilesetPicker,
+  type FilesetPickerCoreProps as FilesetPickerProps,
+} from '@nemo/common/src/components/FilesetPicker/FilesetPickerCore';
+export type {
+  FilesetPickerNoun,
+  FilesetPickerPurpose,
+} from '@nemo/common/src/components/FilesetPicker/types';
+export {
+  useFilesetSearchCore as useFilesetSearch,
+  type UseFilesetSearchCoreOptions as UseFilesetSearchOptions,
+  type UseFilesetSearchResult,
+} from '@nemo/common/src/api/filesets/useFilesetSearchCore';
+export type { ListFilesets, RetrieveFileset } from '@nemo/common/src/api/filesets/filesetPages';
+
 export { FormModal } from '@nemo/common/src/components/FormModal';
 export type { FormModalProps } from '@nemo/common/src/components/FormModal';
 export { LoadingButton } from '@nemo/common/src/components/LoadingButton';

@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from sandboxed_gym.backends.base import EpisodeBackendError, UnsupportedEpisodeOperationError
+from sandboxed_gym.execd import EXECD_ACCESS_TOKEN_ENV, EXECD_ACCESS_TOKEN_HEADER
 from sandboxed_gym.sandbox_types import (
     SandboxExecResult,
     SandboxHandle,
@@ -114,12 +116,30 @@ def _resource_limits(create_options: Mapping[str, Any]) -> dict[str, str] | None
 
 def _network_policy(create_options: Mapping[str, Any]) -> Any:
     """Lift the egress policy dict `create_options_with_policy` produced into the SDK's model."""
+    policy = create_options.get("network_policy")
+    if policy is None:
+        return None
+
     from opensandbox.models.sandboxes import NetworkPolicy
 
-    policy = create_options.get("network_policy")
-    if policy is None or isinstance(policy, NetworkPolicy):
+    if isinstance(policy, NetworkPolicy):
         return policy
     return NetworkPolicy.model_validate(policy)
+
+
+def _extensions(create_options: Mapping[str, Any], spec: SandboxSpec) -> dict[str, str] | None:
+    """OpenSandbox server extensions: the operator's, such as ``bootstrap.execd.isolation``, and the host's.
+
+    The deployment's create options carry the operator's. The job-host provider adds its own, such as the
+    agent bundle, through ``provider_options``; the broker refuses provider_options on episode requests, so
+    neither a job nor an episode can set any. The server receives them as strings. A name both set is refused
+    rather than letting one silently replace the other.
+    """
+    operator = {str(k): str(v) for k, v in (create_options.get("extensions") or {}).items()}
+    host = {str(k): str(v) for k, v in (spec.provider_options.get("extensions") or {}).items()}
+    if both := sorted(operator.keys() & host.keys()):
+        raise ValueError(f"sandbox create options must not set the extensions the Gym host sets: {', '.join(both)}")
+    return {**operator, **host} or None
 
 
 def _volumes(spec: SandboxSpec) -> list[Any]:
@@ -129,9 +149,12 @@ def _volumes(spec: SandboxSpec) -> list[Any]:
     both camelCase and snake_case keys, so the mapping the host provider already builds passes
     through unchanged.
     """
+    volumes = spec.provider_options.get("volumes") or []
+    if not volumes:
+        return []
+
     from opensandbox.models.sandboxes import Volume
 
-    volumes = spec.provider_options.get("volumes") or []
     return [volume if isinstance(volume, Volume) else Volume.model_validate(volume) for volume in volumes]
 
 
@@ -150,14 +173,27 @@ def _joined_output(messages: list[OutputMessage] | None) -> str | None:
 CREATE_REQUEST_HEADROOM_S = 30.0
 
 
-def connection_config(connection: Mapping[str, Any] | None) -> Any:
+def connection_config(
+    connection: Mapping[str, Any] | None,
+    *,
+    execd_access_token: str | None = None,
+    config_class: Any = None,
+) -> Any:
     """Build an SDK ``ConnectionConfig`` from this package's own connection mapping.
 
     Shared so every call site -- the episode backend, its sandbox listing, and the job host
     provider -- reads the same keys the same way. Only keys that are set are forwarded, so the
     SDK's own defaults still apply to the rest.
+
+    Args:
+        connection: This package's connection mapping.
+        execd_access_token: One sandbox's execd token. The SDK sends a config's headers on every call made
+            with it, and a sandbox keeps the config it was created or connected with, so every execd call
+            on that sandbox carries the token. Leave it out for server-only calls such as listing and killing.
+        config_class: The SDK's ``ConnectionConfig``, for a caller that holds its own copy of the SDK.
     """
-    from opensandbox.config import ConnectionConfig
+    if config_class is None:
+        from opensandbox.config import ConnectionConfig as config_class
 
     connection = connection or {}
     kwargs: dict[str, Any] = {}
@@ -168,7 +204,22 @@ def connection_config(connection: Mapping[str, Any] | None) -> Any:
         kwargs["request_timeout"] = timedelta(seconds=connection["request_timeout_s"])
     if connection.get("use_server_proxy"):
         kwargs["use_server_proxy"] = True
-    return ConnectionConfig(**kwargs)
+    if execd_access_token is not None:
+        kwargs["headers"] = {EXECD_ACCESS_TOKEN_HEADER: execd_access_token}
+    return config_class(**kwargs)
+
+
+def load_sdk() -> dict[str, Any]:
+    """The OpenSandbox SDK classes the driver calls, imported on first use."""
+    from opensandbox import Sandbox
+    from opensandbox.config import ConnectionConfig
+    from opensandbox.exceptions import SandboxTimeoutException
+
+    return {
+        "Sandbox": Sandbox,
+        "ConnectionConfig": ConnectionConfig,
+        "SandboxTimeoutException": SandboxTimeoutException,
+    }
 
 
 class OpenSandboxDriver:
@@ -187,9 +238,14 @@ class OpenSandboxDriver:
         create: Mapping[str, Any] | None = None,
         probe: Mapping[str, Any] | None = None,
         operations: Mapping[str, Any] | None = None,
+        sdk: Mapping[str, Any] | None = None,
     ) -> None:
+        self._sdk = dict(sdk) if sdk is not None else None
         self._connection = dict(connection) if connection else {}
-        self._connection_config = connection_config(self._connection)
+        # Listing and orphan cleanup use this one, so it carries no sandbox's execd token. Every call made through a
+        # sandbox's own SDK object -- execd, its egress API, its lifecycle calls including the kill -- sends that
+        # sandbox's token, as Harbor's driver does; all of those go to the sandbox or to the OpenSandbox server.
+        self._connection_config = connection_config(self._connection, config_class=self.sdk["ConnectionConfig"])
         self._create_options = dict(create) if create else {}
         # `probe` configured NeMo-Gym's create-time health probe. This driver exposes the SDK's own
         # switch instead (`skip_health_check`), so the mapping is accepted and ignored rather than
@@ -202,45 +258,72 @@ class OpenSandboxDriver:
         # Kept off `SandboxHandle`, which mirrors NeMo-Gym's type field for field.
         self._workdirs: dict[str, str] = {}
 
-    def _create_connection_config(self, spec: SandboxSpec) -> Any:
-        """The create POST stays open until the pod is Running, so its timeout must cover the ready wait."""
+    @property
+    def sdk(self) -> dict[str, Any]:
+        """The SDK classes, imported on first use."""
+        if self._sdk is None:
+            self._sdk = load_sdk()
+        return self._sdk
+
+    def _create_request_timeout_s(self, spec: SandboxSpec) -> float | None:
+        """The create POST stays open until the pod is Running, so its timeout must cover the ready wait.
+
+        None when the configured timeout applies as is: the operator set one, or there is no ready wait.
+        """
         if self._connection.get("request_timeout_s") is not None or spec.ready_timeout_s is None:
-            return self._connection_config
-        request_timeout_s = spec.ready_timeout_s + CREATE_REQUEST_HEADROOM_S
-        return connection_config({**self._connection, "request_timeout_s": request_timeout_s})
+            return None
+        return spec.ready_timeout_s + CREATE_REQUEST_HEADROOM_S
+
+    def _sandbox_connection_config(self, execd_access_token: str, request_timeout_s: float | None = None) -> Any:
+        """One sandbox's connection: the configured one, plus its execd token and any longer timeout."""
+        connection = dict(self._connection)
+        if request_timeout_s is not None:
+            connection["request_timeout_s"] = request_timeout_s
+        return connection_config(
+            connection, execd_access_token=execd_access_token, config_class=self.sdk["ConnectionConfig"]
+        )
 
     async def create(self, spec: SandboxSpec) -> SandboxHandle:
-        from opensandbox import Sandbox
-        from opensandbox.exceptions import SandboxTimeoutException
+        """Create a sandbox whose execd answers only this driver.
+
+        Each call generates a fresh execd token, set as ``EXECD_ACCESS_TOKEN`` in the sandbox's environment
+        (overriding any value in ``spec.env``) and held only by the returned SDK object, which sends it on
+        every call. It never reaches the spec, the handle's metadata or the logs.
+        """
+        Sandbox = self.sdk["Sandbox"]
+        SandboxTimeoutException = self.sdk["SandboxTimeoutException"]
 
         if spec.image is None:
             raise EpisodeBackendError("an episode image is required")
 
         create_attempt_id = uuid4().hex
         metadata = {**spec.metadata, _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
-        create_connection_config = self._create_connection_config(spec)
+        execd_access_token = secrets.token_urlsafe(32)
+        create_request_timeout_s = self._create_request_timeout_s(spec)
+        create_connection_config = self._sandbox_connection_config(execd_access_token, create_request_timeout_s)
         try:
             sandbox = await Sandbox.create(
                 spec.image,
                 timeout=timedelta(seconds=spec.ttl_s) if spec.ttl_s is not None else None,
                 ready_timeout=timedelta(seconds=spec.ready_timeout_s or 30.0),
-                env=dict(spec.env) or None,
+                env={**spec.env, EXECD_ACCESS_TOKEN_ENV: execd_access_token},
                 metadata=metadata,
                 resource=_resource_limits(self._create_options),
                 resource_requests=_resource_requests(spec) or None,
                 network_policy=_network_policy(self._create_options),
+                extensions=_extensions(self._create_options, spec),
                 entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
                 volumes=_volumes(spec) or None,
-                # Set only by the job-host provider; the broker refuses provider_options on episode requests.
-                extensions=dict(spec.provider_options.get("extensions") or {}) or None,
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
                 connection_config=create_connection_config,
             )
             sandbox_id = getattr(sandbox, "id", None) or (await sandbox.get_info()).id
-            if create_connection_config is not self._connection_config:
-                sandbox = await self._reattach_under_base_connection(sandbox, sandbox_id)
+            if create_request_timeout_s is not None:
+                sandbox = await self._reattach_under_base_connection(
+                    sandbox, sandbox_id, self._sandbox_connection_config(execd_access_token)
+                )
             if spec.workdir:
                 self._workdirs[sandbox_id] = spec.workdir
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
@@ -268,13 +351,13 @@ class OpenSandboxDriver:
                 ) from exc
             raise
 
-    async def _reattach_under_base_connection(self, created: Sandbox, sandbox_id: str) -> Sandbox:
-        """Swap the create-time connection for the configured one once the sandbox exists."""
-        from opensandbox import Sandbox
-
+    async def _reattach_under_base_connection(
+        self, created: Sandbox, sandbox_id: str, sandbox_connection: Any
+    ) -> Sandbox:
+        """Swap the create-time connection for the configured one, keeping the sandbox's execd token."""
         try:
-            reattached = await Sandbox.connect(
-                sandbox_id, connection_config=self._connection_config, skip_health_check=True
+            reattached = await self.sdk["Sandbox"].connect(
+                sandbox_id, connection_config=sandbox_connection, skip_health_check=True
             )
         except Exception:
             LOGGER.warning(

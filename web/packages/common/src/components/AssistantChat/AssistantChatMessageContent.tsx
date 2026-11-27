@@ -3,6 +3,7 @@
 
 import { MessagePrimitive } from '@assistant-ui/react';
 import { ChatErrorBanner } from '@nemo/common/src/components/AssistantChat/ChatErrorBanner';
+import { StoppedEarlyBanner } from '@nemo/common/src/components/AssistantChat/StoppedEarlyBanner';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useIsFailedReplyExplanationPart } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/work/ThoughtStep';
@@ -124,6 +125,7 @@ export const AssistantChatMessageContent = ({
       <MessagePrimitive.Error>
         <ChatErrorBanner />
       </MessagePrimitive.Error>
+      <StoppedEarlyBanner />
     </>
   );
 };

@@ -4,10 +4,11 @@
 import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
 import type { ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema/ModelDeploymentStatus';
+import { ROUTES } from '@studio/constants/routes';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import { useDeleteDeploymentAndConfig } from '@studio/routes/DeploymentsListRoute/useDeleteDeploymentAndConfig';
 import { DeploymentActions } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions';
-import { render, screen, within } from '@studio/tests/util/render';
+import { renderRoute, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@nemo/sdk/generated/platform/model-deployments');
@@ -21,7 +22,15 @@ const deployment = {
 } as ModelDeployment;
 
 const renderActions = (state: DeploymentIndicatorState) =>
-  render(<DeploymentActions model={model} adapter={null} deployment={state} />);
+  renderRoute(undefined, {
+    history: '/workspaces/ws/base-models/my-model/deployment',
+    routes: [
+      {
+        path: ROUTES.workspace.baseModelsModel,
+        element: <DeploymentActions model={model} adapter={null} deployment={state} />,
+      },
+    ],
+  });
 
 describe('DeploymentActions', () => {
   const deleteDeploymentAndConfig = vi.fn().mockResolvedValue(undefined);
@@ -39,9 +48,9 @@ describe('DeploymentActions', () => {
   it('offers chat and delete for a served model', async () => {
     renderActions({ kind: 'served', hasDeployment: true, deploymentRef: 'ws/my-deployment' });
 
-    expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Chat' })).toHaveAttribute(
       'href',
-      expect.stringContaining('tab=chat')
+      '/workspaces/ws/base-models/my-model/chat'
     );
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }));

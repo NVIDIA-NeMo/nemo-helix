@@ -101,13 +101,14 @@ def test_step_model_fields_round_trip() -> None:
     )
 
 
-def test_distillation_and_packing_are_rejected_for_a_vision_checkpoint() -> None:
+@pytest.mark.parametrize("training_type", ["distillation", "partial_distillation"])
+def test_distillation_and_packing_are_rejected_for_a_vision_checkpoint(training_type: str) -> None:
     traits = CheckpointTraits(has_vision_tower=True)
 
     with pytest.raises(ValueError, match="distillation"):
         reject_incompatible_checkpoint(
             traits,
-            training_type="distillation",
+            training_type=training_type,
             recipe="sft",
             sequence_packing=False,
             expert_parallel_size=1,

@@ -176,7 +176,7 @@ ARG PACKAGE_FLOORS='{ \
     "virtualenv": "virtualenv>=21.14.9", \
     "hydra-core": "hydra-core>=1.3.7,<1.4", \
     "gitpython": "gitpython>=3.2.1", \
-    "wandb": "wandb>=0.31.0" \
+    "wandb": "wandb>=0.31.2" \
     }'
 
 # Packages left out of every uv sync, as a JSON array. Mooncake is unused by RL; its wheel bundles
@@ -198,16 +198,32 @@ ARG NO_INSTALL_PACKAGES='[ \
 
 # The pinned RL fork still declares vLLM 0.29.0, affected by CVE-2026-105759.
 # vLLM 0.32.0 (pulse-20261123) is paired with FlashInfer 0.7.0.post1, as in safe-synthesizer
-# plus CUTLASS DSL 4.7.1; update those coordinated generation pins together.
+# plus CUTLASS DSL 4.8.0; update those coordinated generation pins together.
+# Transformers 5.16.1 satisfies both vLLM's minimum and RL's base ceiling.
+# The runtime HF stack is upgraded separately via hf-stack-overrides.txt.
+# FlashInfer 0.7's split JIT cache packages also need the CUDA 13 index mapping.
+# Add them as direct dependencies so uv applies their explicit index sources.
 # Update the actual vllm extra and lock together before any frozen sync, so
 # prefetched workers and later uv invocations cannot restore the vulnerable pin.
 # Remove this adaptation when the upstream RL source pin carries these versions.
-RUN uv add --optional vllm --no-sync \
+RUN --mount=type=bind,source=docker/rl/patches/flashinfer-jit-cache-metadata.patch,target=/tmp/flashinfer-jit-cache-metadata.patch,readonly \
+    git apply /tmp/flashinfer-jit-cache-metadata.patch && \
+    uv add --optional vllm --frozen --index flashinfer-cu130=https://flashinfer.ai/whl/cu130 \
+        'flashinfer-jit-cache-sm100a==0.7.0.post1' \
+        'flashinfer-jit-cache-sm103a==0.7.0.post1' \
+        'flashinfer-jit-cache-sm110a==0.7.0.post1; platform_machine == "aarch64"' \
+        'flashinfer-jit-cache-sm120f==0.7.0.post1' \
+        'flashinfer-jit-cache-sm121a==0.7.0.post1; platform_machine == "aarch64"' \
+        'flashinfer-jit-cache-sm80==0.7.0.post1' \
+        'flashinfer-jit-cache-sm89==0.7.0.post1' \
+        'flashinfer-jit-cache-sm90a==0.7.0.post1' && \
+    uv add --optional vllm --no-sync \
         'vllm==0.32.0' \
+        'transformers==5.16.1' \
         'flashinfer-python==0.7.0.post1' \
         'flashinfer-cubin==0.7.0.post1' \
         'flashinfer-jit-cache==0.7.0.post1' \
-        'nvidia-cutlass-dsl[cu13]==4.7.1' && \
+        'nvidia-cutlass-dsl[cu13]==4.8.0' && \
     mkdir -p /tmp/nhx-nemo-rl-lock && \
     cp pyproject.toml uv.lock /tmp/nhx-nemo-rl-lock/
 

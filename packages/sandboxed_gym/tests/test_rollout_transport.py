@@ -19,11 +19,12 @@ import time
 import urllib.error
 import urllib.request
 from email.message import Message
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-import sandboxed_gym.orchestrator as orchestrator_module
+import sandboxed_gym.host.models as host_models
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import GymHostHandle
 from sandboxed_gym.orchestrator import RolloutTransportError, SandboxedGymSession
@@ -53,6 +54,11 @@ def _session(**sandbox_overrides: Any) -> SandboxedGymSession:
         host_provider=MagicMock(),
         host=GymHostHandle(host_id="h1", health_url="http://host/health", rollout_url=ROLLOUT_URL, headers={}),
     )
+
+
+def _answer_with(monkeypatch: pytest.MonkeyPatch, open_fn: Any) -> None:
+    """Send what ``open_host`` would put on the wire to ``open_fn(request, timeout=...)`` instead."""
+    monkeypatch.setattr(host_models, "build_opener", lambda *handlers: SimpleNamespace(open=open_fn))
 
 
 def _http_error(status: int, body: dict[str, Any]) -> urllib.error.HTTPError:
@@ -96,7 +102,7 @@ def test_list_entries_reads_the_host_entries_route(monkeypatch: pytest.MonkeyPat
         captured["timeout"] = timeout
         return _Response()
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _open)
+    _answer_with(monkeypatch, _open)
 
     entries = _session().list_entries()
 
@@ -122,7 +128,7 @@ def test_list_entries_keeps_a_proxy_path_prefix(monkeypatch: pytest.MonkeyPatch)
         del timeout
         return _Response()
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _open)
+    _answer_with(monkeypatch, _open)
     session = _session()
     session.host = GymHostHandle(
         host_id="h1",
@@ -254,7 +260,7 @@ def test_a_host_error_is_attributed_to_the_sandbox_and_not_retried(
         attempts += 1
         raise _http_error(500, {"error": {"code": "internal", "message": "env exploded"}})
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
+    _answer_with(monkeypatch, _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session().run_rollouts([{"id": 1}])
@@ -273,7 +279,7 @@ def test_a_transport_failure_reaching_no_host_is_retried(monkeypatch: pytest.Mon
         attempts += 1
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
+    _answer_with(monkeypatch, _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session(rollout_max_attempts=2).run_rollouts([{"id": 1}])
@@ -427,7 +433,7 @@ def test_a_body_that_dies_mid_read_is_not_retried(monkeypatch: pytest.MonkeyPatc
         attempts += 1
         return _DyingResponse()
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
+    _answer_with(monkeypatch, _urlopen)
 
     with pytest.raises(RolloutTransportError) as excinfo:
         _session(rollout_max_attempts=3).run_rollouts([{"id": 1}])
@@ -450,7 +456,7 @@ def test_a_connection_that_never_landed_is_still_retried(monkeypatch: pytest.Mon
         attempts += 1
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(orchestrator_module, "urlopen", _urlopen)
+    _answer_with(monkeypatch, _urlopen)
 
     with pytest.raises(RolloutTransportError):
         _session(rollout_max_attempts=2).run_rollouts([{"id": 1}])

@@ -35,6 +35,7 @@ from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
@@ -2344,7 +2345,18 @@ def _auto_setup(clients: SetupClients, workspace: str, inference_base_url: str |
                 provider_name = known.name
             else:
                 hostname = urlparse(base_url).hostname or "custom"
-                provider_name = hostname.replace(".", "-")
+                provider_name = re.sub(r"[^a-z0-9@+_]+", "-", hostname).strip("-")
+                if not provider_name or not ("a" <= provider_name[0] <= "z") or len(provider_name) < 2:
+                    provider_name = f"provider-{provider_name}".rstrip("-")
+                # Reject rather than truncate: a collision could overwrite an existing secret.
+                max_provider_length = NAME_MAX_LENGTH - len("-api-key")
+                if len(provider_name) > max_provider_length:
+                    raise typer.BadParameter(
+                        f"The inference URL derives a provider name longer than {max_provider_length} characters "
+                        "(including room for the '-api-key' secret suffix). Use a shorter hostname or "
+                        "configure the provider interactively with 'nemo setup'.",
+                        param_hint="inference base URL",
+                    )
             host_url = base_url
             auth_provider = known or env_provider
             auth_header_format = auth_provider.auth_header_format if auth_provider else None

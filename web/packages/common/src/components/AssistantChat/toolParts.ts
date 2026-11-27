@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadAssistantMessagePart, ThreadMessageLike } from '@assistant-ui/react';
+import { inferFileChangeFromArgs } from '@nemo/common/src/components/AssistantChat/toolCall/fileChangeShape';
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 
 type AssistantToolCallPart = Extract<ThreadAssistantMessagePart, { type: 'tool-call' }>;
@@ -31,6 +32,14 @@ export const isAssistantSubtleToolCallName = (toolName: string): boolean =>
   toolName !== ASSISTANT_SUBTLE_TOOL_GROUP_NAME &&
   !FILE_CHANGE_TOOL_CALL_NAMES.has(toolName) &&
   !isAssistantJobProgressToolName(toolName);
+
+/**
+ * Like `isAssistantSubtleToolCallName`, but also excludes calls whose arguments look like a file
+ * change (e.g. a custom `save_note` tool with a path and content), so they render as file changes
+ * instead of folding into a subtle group.
+ */
+export const isAssistantSubtleToolCall = (toolName: string, args: AssistantToolArgs): boolean =>
+  isAssistantSubtleToolCallName(toolName) && inferFileChangeFromArgs(toolName, args) === undefined;
 
 const toAssistantToolArgValue = (value: unknown): AssistantToolArgValue | undefined => {
   if (value === null) return value;
@@ -215,10 +224,13 @@ const getGroupedSubtleToolActions = (
     .map((action): AssistantSubtleToolAction | undefined => {
       const toolCallId = typeof action.toolCallId === 'string' ? action.toolCallId : undefined;
       const toolName = typeof action.toolName === 'string' ? action.toolName : undefined;
-      if (!toolCallId || !toolName || !isAssistantSubtleToolCallName(toolName)) return undefined;
+      if (!toolCallId || !toolName) return undefined;
+
+      const args = isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {};
+      if (!isAssistantSubtleToolCall(toolName, args)) return undefined;
 
       return {
-        args: isPlainObject(action.args) ? toAssistantToolArgs(action.args) : {},
+        args,
         toolCallId,
         toolName,
       };
@@ -236,7 +248,7 @@ const getSubtleToolActions = (
     return actions.length ? actions : undefined;
   }
 
-  if (!isAssistantSubtleToolCallName(part.toolName)) return undefined;
+  if (!isAssistantSubtleToolCall(part.toolName, part.args)) return undefined;
 
   return [
     {

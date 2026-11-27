@@ -10,6 +10,64 @@
 # Defaults match sandboxed_gym.host.entrypoint.
 set -eu
 
+# An image with a container engine starts as root for its setup, which the runtime runs and then drops
+# privileges. This script would unpack the job's variables and run programs as root before that, so a job's
+# PATH could choose them. That image starts the runtime directly; refuse it here.
+if [ -n "${NHX_GYM_HOST_CONTAINER_ENGINE:-}" ]; then
+    echo "gym-host: gym_host.sh does not support an image with a container engine" \
+        "(NHX_GYM_HOST_CONTAINER_ENGINE is set); start the image's default command instead" >&2
+    exit 1
+fi
+
+# Nothing this launcher starts needs execd's token, so it goes before the job's variables can change
+# which programs run here. Unsetting it would leave it in /proc/<pid>/environ for a child to read, so
+# the launcher starts again without it.
+if [ -n "${EXECD_ACCESS_TOKEN+set}" ]; then
+    exec /usr/bin/env -u EXECD_ACCESS_TOKEN /bin/sh "$0" "$@"
+fi
+
+# The agent bundle's CLI, named by the host provider: its directory goes first on PATH and it is checked
+# here, before the job's variables arrive, as the launcher that ran this script used to. This script has
+# no privileged setup to wait for. Unset, so the runtime doesn't repeat the check with the job's variables.
+# A failing or hanging agent stops the script: the runtime's 120 s limit, then a kill for an agent that
+# ignores SIGTERM. Without coreutils `timeout` there is no limit, so the script refuses to run the check.
+if [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
+    # Found before the bundle's directory goes on PATH, so a `timeout` the bundle ships can't stand in for it.
+    if ! timeout_command=$(command -v timeout 2>/dev/null); then
+        echo "gym-host: checking the agent bundle needs coreutils timeout, which this image lacks" >&2
+        exit 1
+    fi
+    PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
+    export PATH
+    "$timeout_command" -k 10 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    unset NHX_GYM_AGENT_EXECUTABLE
+fi
+
+# This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
+# NHX_GYM_JOB_ENV, are unpacked first, as if they had arrived in the environment: before the launcher's
+# own parameters and exports below, which keep their precedence over them, and before Ray starts. Names
+# a shell can't export stay packed for the runtime, and so does anything this can't decode, which the
+# runtime then reports as a bootstrap failure.
+if [ -n "${NHX_GYM_JOB_ENV:-}" ]; then
+    if job_env_exports=$(python3 -c '
+import base64, json, os, re, shlex
+job = json.loads(base64.b64decode(os.environ["NHX_GYM_JOB_ENV"], validate=True))
+rest = {}
+for name, value in job.items():
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        print(f"export {name}={shlex.quote(value)}")
+    else:
+        rest[name] = value
+packed = base64.b64encode(json.dumps(rest, sort_keys=True).encode()).decode() if rest else ""
+print(f"NHX_GYM_JOB_ENV={packed}")
+'); then
+        eval "$job_env_exports"
+    fi
+fi
+if [ -z "${NHX_GYM_JOB_ENV:-}" ]; then
+    unset NHX_GYM_JOB_ENV
+fi
+
 venv=${1:-/opt/ray_venvs/sandboxed_gym.ray.gym_actor.SandboxedGymActor}
 root=${2:-/opt/nemo-rl}
 gym_rw=${3:-/tmp/gym-src/Gym}
@@ -33,6 +91,9 @@ if [ ! -d "$gym_rw/nemo_gym" ]; then
     cp -a "$gym_tree" "$gym_rw.tmp"
     mv "$gym_rw.tmp" "$gym_rw"
 fi
+
+# Again, in case the job's variables named it.
+unset EXECD_ACCESS_TOKEN
 
 # Pin the single-node in-sandbox Ray to loopback; the routable node IP it picks is dropped by the deny-default sandbox egress.
 export RAY_ENABLE_WINDOWS_OR_OSX_CLUSTER=0

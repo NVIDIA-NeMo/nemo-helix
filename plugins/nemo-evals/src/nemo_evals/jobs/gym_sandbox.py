@@ -22,11 +22,11 @@ import functools
 import math
 import os
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from nemo_evals.config import EvaluatorConfig
+from nemo_evals.config import EvaluatorConfig, SandboxDockerProfile
 from nemo_evals.jobs.agent_spec import GymRunnerTarget, RegisteredAgentSource
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gym_environment_package import (
@@ -36,6 +36,8 @@ from nemo_evals.jobs.gym_environment_package import (
     parse_environment_manifest,
 )
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, JobEnvSecretSource
+from nemo_evals.sandbox_quantity import host_disk_request_gib, quantity_bytes
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_UID_ENVVAR
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
@@ -147,11 +149,12 @@ def credential_shaped_env_vars(target: GymRunnerTarget) -> list[str]:
     return sorted(name for name in target.env_vars if _CREDENTIAL_PATTERN.search(name))
 
 
-def require_sandbox_available(config: EvaluatorConfig) -> None:
+def require_sandbox_available(config: EvaluatorConfig, target: GymRunnerTarget | None = None) -> None:
     """Raise unless this deployment can actually provision a sandboxed Gym host.
 
     Checked before anything is provisioned, so a misconfigured deployment fails at compile time with
-    a message naming the setting rather than after the cost of a partial run.
+    a message naming the setting rather than after the cost of a partial run. With ``target``, the
+    egress check counts what that job's host gets, including a Docker profile's ``egress_allow``.
     """
     if not config.sandbox_cluster_capable:
         raise SandboxUnavailableError(
@@ -166,7 +169,7 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
         raise SandboxUnavailableError(
             f"sandboxed Gym execution needs {', '.join(missing)} configured; a host cannot be provisioned without them."
         )
-    if not config.sandbox_policy_base_urls and not config.sandbox_egress_allow:
+    if not config.sandbox_policy_base_urls and not _job_egress_allow(config, target):
         # A sandboxed host denies all egress except the broker. With no model endpoint allowed it
         # comes up healthy and fails at the first rollout, far from the setting that caused it --
         # so refuse here, where the message can name it.
@@ -175,6 +178,12 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
             "`sandbox_egress_allow`; a sandboxed host denies all egress except the episode broker, "
             "so an environment would have no route to a model."
         )
+
+
+def _job_egress_allow(config: EvaluatorConfig, target: GymRunnerTarget | None) -> tuple[str, ...]:
+    """The deployment's egress allowances for this job, with the Docker profile's when it sets ``docker: true``."""
+    profile = config.sandbox_docker_profile if target is not None and target.docker else None
+    return tuple(dict.fromkeys((*config.sandbox_egress_allow, *(profile.egress_allow if profile else ()))))
 
 
 def require_no_plaintext_credentials(target: GymRunnerTarget) -> None:
@@ -215,6 +224,22 @@ class SandboxPlan(BaseModel):
     episode_backend: str
     allow_insecure_memory_backend: bool = False
     approved_images: tuple[str, ...] = ()
+    # Left out of the serialized plan while unset (see `serialized`), so a worker from before they existed
+    # still accepts a plan that does not use them.
+    container_storage_bytes: int | None = Field(default=None, gt=0)
+    container_storage_discard: bool = False
+
+    def serialized(self) -> str:
+        """The plan as JSON for the job step, without the container storage settings when they are unset."""
+        unset = {
+            name
+            for name, value in (
+                ("container_storage_bytes", self.container_storage_bytes),
+                ("container_storage_discard", self.container_storage_discard),
+            )
+            if not value
+        }
+        return self.model_dump_json(exclude=unset)
 
 
 def resolve_sandbox_plan(
@@ -232,13 +257,31 @@ def resolve_sandbox_plan(
     if has_staged_environment(target):
         require_fileset_environment_sandboxed(target, config)
     if not config.sandboxed_gym_default:
+        if target.docker:
+            raise SandboxUnavailableError(
+                "`docker: true` needs sandboxed Gym execution, but this deployment runs Gym in the job container "
+                "(`sandboxed_gym_default` is off)"
+            )
         return None
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
-    runtime_image = config.sandbox_runtime_image or get_qualified_image(GYM_HOST_IMAGE)
+    docker = _docker_profile(config) if target.docker else None
+    if docker is None:
+        runtime_image = config.sandbox_runtime_image or get_qualified_image(GYM_HOST_IMAGE)
+        host_provider_options = dict(config.sandbox_host_provider_options)
+        resources = config.sandbox_resources
+        egress_allow = tuple(config.sandbox_egress_allow)
+        container_storage_bytes = None
+    else:
+        runtime_image = docker.runtime_image
+        host_provider_options = _merged(config.sandbox_host_provider_options, docker.host_provider_options)
+        resources = {**(config.sandbox_resources or {}), **(docker.resources or {})} or None
+        egress_allow = _job_egress_allow(config, target)
+        container_storage_bytes = (
+            quantity_bytes(docker.container_storage_size) if docker.container_storage_size is not None else None
+        )
     # `require_sandbox_available` has just established that this is not empty.
     assert config.sandbox_job_storage_pvc_claim is not None
-    host_provider_options = dict(config.sandbox_host_provider_options)
     # In-cluster OpenSandbox speaks http. If we leave this unset, the host probes the
     # sandbox over https and the readiness wait times out.
     if config.sandbox_host_provider == "opensandbox" and sandbox_server_protocol:
@@ -253,20 +296,51 @@ def resolve_sandbox_plan(
             )
         bundle = SandboxAgentBundle.model_validate(host_provider_options["agent_bundle"])
         host_provider_options["agent_bundle"] = bundle.model_dump(mode="json")
+    if config.sandbox_host_provider == "opensandbox":
+        try:
+            host_disk_request_gib(resources, host_provider_options.get("create") or {})
+        except ValueError as exc:
+            setting = "`sandbox_docker_profile.resources`" if docker else "`sandbox_resources`"
+            raise SandboxUnavailableError(f"{setting}: {exc}") from None
     return SandboxPlan(
         host_provider=config.sandbox_host_provider,
         runtime_image=runtime_image,
         job_storage_pvc_claim=config.sandbox_job_storage_pvc_claim,
         environment_sub_path=config.sandbox_environment_sub_path,
         workspace_sub_path=config.sandbox_workspace_sub_path,
-        resources=config.sandbox_resources,
+        resources=resources,
         host_provider_options=host_provider_options,
-        egress_allow=tuple(config.sandbox_egress_allow),
+        egress_allow=egress_allow,
         policy_base_urls=tuple(config.sandbox_policy_base_urls),
         episode_backend=config.sandbox_episode_backend,
         allow_insecure_memory_backend=config.sandbox_allow_insecure_memory_backend,
         approved_images=tuple(config.sandbox_approved_images),
+        container_storage_bytes=container_storage_bytes,
+        container_storage_discard=docker is not None and docker.container_storage_discard,
     )
+
+
+def _docker_profile(config: EvaluatorConfig) -> SandboxDockerProfile:
+    """The deployment's Docker profile for a job that sets ``docker: true``, refused where it can't apply."""
+    if config.sandbox_docker_profile is None:
+        raise SandboxUnavailableError(
+            "`docker: true` needs the deployment's `sandbox_docker_profile`, which this deployment does not set"
+        )
+    if config.sandbox_host_provider != "opensandbox":
+        raise SandboxUnavailableError(
+            f"`docker: true` needs the `opensandbox` host provider with a Kata runtime class; the "
+            f"`{config.sandbox_host_provider}` host provider can't run the Docker-enabled Gym host"
+        )
+    return config.sandbox_docker_profile
+
+
+def _merged(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    """``override`` over ``base``: nested mappings merge key by key, and any other value replaces."""
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        merged[key] = _merged(current, value) if isinstance(current, Mapping) and isinstance(value, Mapping) else value
+    return merged
 
 
 def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: EvaluatorConfig) -> None:
@@ -283,7 +357,7 @@ def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: Evalu
             f"{what} require sandboxed execution. Enable `sandboxed_gym_default`, or select a Gym agent by "
             "`component` without `target.environment`, so colocated GymAgentTaskRunner cannot ignore the staged package."
         )
-    require_sandbox_available(config)
+    require_sandbox_available(config, target)
     require_no_plaintext_credentials(target)
 
 
@@ -393,6 +467,7 @@ def serve_config(
     plan: SandboxPlan,
     *,
     job_id: str,
+    sandbox_id: str,
     workspace: str = "default",
     persistent_storage_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -401,6 +476,10 @@ def serve_config(
     Job-derived and deployment-derived settings meet here and nowhere else: the target supplies the
     environment selection and its own environment variables, the resolved plan supplies the cluster
     facts, and the broker token and rollout URL are minted by the session itself.
+
+    ``job_id`` is the job's name, which names its storage. ``sandbox_id`` is what its sandboxes are
+    labelled, owned and swept by, so it must be unique across workspaces: the job's entity UUID on the
+    platform. A name would let a job in one workspace sweep another workspace's job of the same name.
     """
     environment_pvc_claim = plan.job_storage_pvc_claim
     host_provider_options = dict(plan.host_provider_options)
@@ -457,7 +536,7 @@ def serve_config(
     env[ROUTE_FAILURES_TO_SIDECAR_ENV_KEY] = "1"
 
     return {
-        "job_id": job_id,
+        "job_id": sandbox_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
         "environment_offline": offline,
@@ -478,9 +557,11 @@ def serve_config(
             "rollout_timeout_s": chunk_deadline_s,
             "host_provider_options": host_provider_options,
             "network_policy": {"egress_allow": _egress_rules(plan)},
+            "container_storage_bytes": plan.container_storage_bytes,
+            "container_storage_discard": plan.container_storage_discard,
         },
         "episode_broker": {
-            "job_id": job_id,
+            "job_id": sandbox_id,
             "backend": plan.episode_backend,
             "allow_insecure_memory_backend": plan.allow_insecure_memory_backend,
             "approved_images": plan.approved_images,
@@ -512,6 +593,7 @@ class SessionBackedGymRunner:
         target: GymRunnerTarget,
         plan: SandboxPlan,
         job_id: str | None,
+        job_uid: str | None = None,
         workspace: str = "default",
         persistent_storage_path: Path | None = None,
     ) -> None:
@@ -519,10 +601,20 @@ class SessionBackedGymRunner:
 
         ``workspace`` and ``persistent_storage_path`` exist so a FileSet-backed host mounts the
         tree the stage step wrote, rather than a shared deployment-wide environment cache.
+
+        A platform job's sandboxes are labelled with ``job_uid``, its entity UUID, not ``job_id``, its
+        name: names are unique only within a workspace, and the job's sandbox sweeps match the label.
         """
+        if job_id and not job_uid:
+            raise SandboxUnavailableError(
+                f"{NEMO_JOB_UID_ENVVAR} is not set for job {job_id!r}. Sandboxed Gym labels a job's sandboxes "
+                "with the job's unique id; the job name is not unique across workspaces. Upgrade the jobs "
+                "controller, which sets it."
+            )
         self._target = target
         self._plan = plan
         self._job_id = job_id or self.LOCAL_JOB_ID
+        self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
         self._delegate: Any | None = None
@@ -568,6 +660,7 @@ class SessionBackedGymRunner:
         return gym_scoring_metrics(task, trials)
 
     async def run_tasks(self, tasks: Any, config: Any = None) -> Any:
+        import sandboxed_gym.orchestrator as gym_orchestrator
         from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
             SandboxedGymAgentTaskRunner,
             SandboxedGymRuntimeConfig,
@@ -578,6 +671,7 @@ class SessionBackedGymRunner:
             self._target,
             self._plan,
             job_id=self._job_id,
+            sandbox_id=self._sandbox_id,
             workspace=self._workspace,
             persistent_storage_path=self._persistent_storage_path,
         )
@@ -590,6 +684,16 @@ class SessionBackedGymRunner:
             "collection_timeout_s": self._target.collection_timeout_s,
             "environment_offline": serve.environment_offline,
         }
+        # Armed here, on the event loop's thread, because only the main thread can install a signal
+        # handler: `start` arms the same reaper, but in a worker thread it gets only `atexit`. A cancel
+        # (SIGTERM) then can't unwind past `start` blocked on the host's readiness, or past a blocked
+        # rollout, before the kubelet's SIGKILL, so `atexit` never runs and the host outlives the job.
+        # With the handler, SIGTERM destroys every sandbox labelled with this job, then exits by the signal.
+        gym_orchestrator.install_job_sandbox_reaper(
+            serve.job_id,
+            host_provider=serve.host_provider,
+            host_provider_options=serve.sandbox.host_provider_options,
+        )
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
         session = await asyncio.to_thread(orchestrator.start, serve)

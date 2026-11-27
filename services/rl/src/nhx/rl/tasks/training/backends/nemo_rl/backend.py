@@ -256,6 +256,11 @@ class NemoRLBackend(TrainingBackend):
         gym = getattr(config, "gym", None)
         if gym is None or not getattr(gym, "sandboxed", False):
             return
+        # The sandboxes carry the job's unique id, not its name (see the sandboxed GRPO config).
+        job_uid = self._job_ctx.job_uid
+        if not job_uid:
+            logger.error(f"No unique id for job {self._job_ctx.job_id}; not sweeping its sandboxes")
+            return
         timeout_s = SANDBOX_REAP_TIMEOUT_S
         if deadline is not None:
             remaining = deadline - time.monotonic()
@@ -267,7 +272,7 @@ class NemoRLBackend(TrainingBackend):
             from sandboxed_gym.job_reaper import reap_job_sandboxes
 
             reap_job_sandboxes(
-                self._job_ctx.job_id,
+                job_uid,
                 host_provider="opensandbox",
                 host_provider_options=sandbox_host_provider_options(gym),
                 timeout_s=timeout_s,

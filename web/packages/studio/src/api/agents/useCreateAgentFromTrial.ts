@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
+import { isRepositoryBackend } from '@nemo/common/src/utils/storageBackend';
 import { agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { filesCreateFileset, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
@@ -13,7 +14,6 @@ import type {
 } from '@studio/api/agents/types';
 import { copyFilesetFiles } from '@studio/api/files/uploadFilesetEntries';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
-import { isRepositoryBackend } from '@studio/util/storageBackend';
 import { useMutation } from '@tanstack/react-query';
 
 const retrieveFileset = async (

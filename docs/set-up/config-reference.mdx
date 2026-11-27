@@ -127,6 +127,8 @@ auth:
     subject_claim: sub
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300
+    # Seconds of clock difference allowed when checking a token's iat, nbf and exp claims. Without it, a token issued a moment ago by an identity provider whose clock is slightly ahead is rejected as not yet valid. Workload tokens and access keys use the same allowance. | default: 30
+    clock_skew_leeway_seconds: 30
   # Shared token signing configuration for NeMo Helix-minted JWTs.
   token_signing:
     # Shared issuer for NeMo Helix-minted JWTs. Defaults to <platform.base_url>/apis/auth.
@@ -924,10 +926,14 @@ safe_synthesizer:
 
 ### `builder`
 
-Configuration for in-cluster container image builds.
+Configuration for container image builds, in this cluster or by a remote build service.
 
 ```yaml wordWrap
 builder:
+  # Where images are built: `in-cluster`, in sandboxes in this cluster; or `remote`, by the build service that `builder.remote` names. | default: 'in-cluster' | values: 'in-cluster' | 'remote'
+  backend: in-cluster
+  # The build service `backend: remote` uses. Unset refuses every remote submit.
+  remote:
   sandbox:
     # The kaniko image the sandbox runs. Unset, the release's own `nhx-kaniko`, from `platform.image_registry` at `platform.image_tag`. Another needs `/kaniko/executor` and a shell at `/busybox/sh`, and must take the osscontainertools fork's `--credential-helpers` flag, which Chainguard's fork doesn't have.
     image:
@@ -981,6 +987,8 @@ studio:
   platform_base_url: ''
   # Enable Studio UI browser telemetry export. | default: False
   telemetry_enabled: false
+  # Model Studio preselects when a registered agent config uses ${NEMO_DEFAULT_MODEL}, as a `workspace/name` model reference. Defaults to the NEMO_DEFAULT_MODEL environment variable.
+  default_model: ''
   # Studio UI OpenTelemetry settings.
   otel:
     # Internal OTLP/HTTP collector base URL used by the Studio telemetry proxy. | default: ''
