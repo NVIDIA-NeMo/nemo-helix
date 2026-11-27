@@ -76,15 +76,22 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.checkout_ref }}
 
+      - name: Resolve bake cache branch
+        id: cache-branch
+        uses: ./.github/actions/bake-cache-branch
+        with:
+          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
+          event-name: ${{ github.event_name }}
+
       - name: Choose free disk space threshold
         id: disk-threshold
         shell: bash
         env:
           FAMILY: ${{ inputs.family }}
-          MAY_WRITE_CACHE: ${{ inputs.write_cache && github.event_name != 'pull_request' }}
+          MAY_WRITE_CACHE: ${{ inputs.write_cache && steps.cache-branch.outputs.target-branch != '' }}
         run: |
-          # Each family's peak disk use, measured in PR #4352, plus 20 GiB. Runs that may write the registry
-          # cache (push, merge queue, manual) also hold the max-mode cache export, so they need more room.
+          # Each family's peak disk use, measured in PR #4352, plus 20 GiB. Runs that write the registry cache
+          # (push and manual runs on main or release/*) also hold the max-mode cache export, so they need more room.
           # A runner has about 86 GiB free before the purge and 110-115 GiB after it.
           case "$FAMILY:$MAY_WRITE_CACHE" in
             api:false) min_free_gb=40 ;;
@@ -116,13 +123,6 @@ jobs:
           name: nhx-builder
           driver: docker-container
           cleanup: false
-
-      - name: Resolve bake cache branch
-        id: cache-branch
-        uses: ./.github/actions/bake-cache-branch
-        with:
-          base-ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref || github.ref_name }}
-          event-name: ${{ github.event_name }}
 
       - name: Configure bake variables
         id: bake-vars
