@@ -33,6 +33,7 @@ from nemo_guardrails_plugin.benchmarks.aiperf_runner import (
     collect_sweep_results,
     prepare_runtime_aiperf_config,
     run_aiperf_sweep,
+    validate_concurrencies,
 )
 from nemo_guardrails_plugin.benchmarks.analyze import analyze_run
 from nemo_guardrails_plugin.benchmarks.bootstrap import ensure_aiperf_venv
@@ -265,18 +266,28 @@ def _run_benchmark(
     paths: RunPaths,
     seeded: SeededResources,
     aiperf_python: Path,
+    concurrencies: tuple[int, ...] | None = None,
 ) -> BenchmarkOutcome:
-    """Materialize a per-variant AIPerf config, run the sweep, collect results."""
+    """Materialize a per-variant AIPerf config, run the sweep, collect results.
+
+    ``concurrencies`` runs a subset of the template's levels (one CI shard);
+    ``None`` runs them all.
+    """
     vm_ref = _vm_ref_for_variant(variant, seeded)
-    runtime_config = paths.runtime_config_for(variant)
+    # AIPerf results stay under the variant's directory so shards of one
+    # variant merge into one tree; the config and log names carry the levels
+    # so shards don't overwrite each other's when artifacts merge.
+    file_label = _file_label(variant, concurrencies)
+    runtime_config = paths.runtime_config_for(file_label)
     aiperf_output_dir = paths.aiperf_output_dir_for(variant)
-    aiperf_log = paths.aiperf_log_for(variant)
+    aiperf_log = paths.aiperf_log_for(file_label)
 
     sweep_config = prepare_runtime_aiperf_config(
         template_path=paths.config_template,
         runtime_config_path=runtime_config,
         aiperf_output_dir=aiperf_output_dir,
         model_ref=vm_ref,
+        concurrencies=concurrencies,
     )
     log.info(
         "Benchmark %s: targeting %s; concurrency=%s, duration=%ss",
@@ -308,6 +319,24 @@ def _run_benchmark(
         output_dir=aiperf_output_dir,
         sweep_results=sweep_results,
     )
+
+
+def _file_label(variant: str, concurrencies: tuple[int, ...] | None) -> str:
+    """Name per-variant files, adding the levels when only some of them run."""
+    if concurrencies is None:
+        return variant
+    return f"{variant}_c{'-'.join(str(c) for c in concurrencies)}"
+
+
+def _parse_concurrencies(value: str) -> tuple[int, ...]:
+    """Parse ``--concurrency 1,2`` into sorted, unique, positive levels."""
+    try:
+        levels = {int(part) for part in value.split(",") if part.strip()}
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected comma-separated integers, got {value!r}") from exc
+    if not levels or min(levels) < 1:
+        raise argparse.ArgumentTypeError(f"expected one or more positive integers, got {value!r}")
+    return tuple(sorted(levels))
 
 
 def _summarize_benchmark_results(outcomes: list[BenchmarkOutcome]) -> int:
@@ -385,6 +414,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "separate NHX instances."
         ),
     )
+    parser.add_argument(
+        "--concurrency",
+        type=_parse_concurrencies,
+        default=None,
+        metavar="LEVELS",
+        help=(
+            "Comma-separated concurrency levels to run, e.g. '1,2' (default: every level "
+            "in the sweep config). Each level must be in the config's `sweeps.concurrency`. "
+            "CI uses this to split the sweep across parallel jobs."
+        ),
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser.parse_args(argv)
 
@@ -415,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     paths.ensure_directories()
     _validate_in_repo_mock_configs(paths)
+    if args.concurrency is not None:
+        validate_concurrencies(paths.config_template, args.concurrency)
+        log.info("Running concurrency levels %s only", ", ".join(str(c) for c in args.concurrency))
 
     log.info("Created directory for benchmark results at: %s", paths.run_dir)
     log.info(
@@ -474,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
                     paths=paths,
                     seeded=seeded,
                     aiperf_python=aiperf_python,
+                    concurrencies=args.concurrency,
                 )
             )
 

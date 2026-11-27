@@ -78,10 +78,19 @@ make benchmark-guardrails BENCHMARK_ARGS="--verbose --reuse-services"
 The default sweep runs concurrency levels:
 
 ```text
-1, 2, 4, 8, 16, 32, 64
+1, 2, 4, 8, 16, 32
 ```
 
-With the default 60-second benchmark duration, expect the benchmark to run for ~10 minutes after service bootstrap.
+Each level takes about 90 seconds (the 60-second benchmark duration, 10
+warm-up requests and AIPerf start-up), so expect about 9 minutes per variant
+after service bootstrap, or about 18 minutes for the default `--variant all`.
+
+To run only some levels, pass `--concurrency` with a comma-separated subset of
+the config's levels:
+
+```bash
+make benchmark-guardrails BENCHMARK_ARGS="--variant with-guardrails --concurrency 1,2"
+```
 
 ### Monitoring progress
 
@@ -91,7 +100,7 @@ harness terminal. When the run finishes successfully, the last harness line look
 like:
 
 ```text
-Sweep summary: 7 run(s), 0 failure(s); per-sweep outputs under ...
+Benchmark with-guardrails: 6 run(s), 0 failure(s); per-sweep outputs under ...
 ```
 
 **Tail the sweep log** (replace `<run-id>` with your `--run-id` or timestamp
@@ -101,7 +110,7 @@ directory name):
 tail -f plugins/nemo-guardrails/benchmarks/artifacts/runs/<run-id>/logs/aiperf.log
 ```
 
-Look for lines like `Run 3/7` and `Run 3 completed successfully`.
+Look for lines like `Run 3/6` and `Run 3 completed successfully`.
 
 **Watch completed sweep directories**:
 
@@ -157,6 +166,8 @@ The harness accepts both CLI flags and environment variables:
 | `--keep-running`                  | `NHX_BENCHMARK_KEEP_RUNNING=1`   | tear down on exit      |
 | `--mock-workers`                  | `NHX_BENCHMARK_MOCK_WORKERS`     | `4`                    |
 | `--run-id`                        | _n/a_                            | current timestamp      |
+| `--variant`                       | _n/a_                            | `all`                  |
+| `--concurrency`                   | _n/a_                            | every level in the config |
 
 `--keep-running` leaves child processes alive for post-mortem inspection; the
 harness logs each child's PID as it starts.
@@ -188,15 +199,20 @@ plugins/nemo-guardrails/benchmarks/artifacts/runs/<timestamp>/
 
 Two jobs in `.github/workflows/ci.yaml`:
 
-- `guardrails-benchmark` — matrix of two parallel jobs, one per variant
-  (`with-guardrails`, `without-guardrails`), each on its own NHX instance.
-  Uploads per-variant artifacts (`logs/`, `generated/`, `aiperf_results/`).
-- `guardrails-benchmark-analyze` — joins the two matrix jobs, downloads both
-  artifacts, prints a side-by-side comparison via
-  `nemo_guardrails_plugin.benchmarks.analyze`, and runs the baseline check
-  (see below). Fails the build on a latency regression beyond tolerance. The
-  analyzer is stdlib-only by design, so this job runs on the runner's stock
-  `python3` without bootstrapping the uv workspace.
+- `guardrails-benchmark` — matrix of six parallel jobs: each variant
+  (`with-guardrails`, `without-guardrails`) × each level group (`1,2`,
+  `4,8`, `16,32`), each on its own NHX instance and passing its group with
+  `--concurrency`. Both variants run the same groups, so each level's
+  with/without pair is measured the same way. All shards share one
+  `--run-id` and upload per-shard artifacts (`logs/`, `generated/`,
+  `aiperf_results/`).
+- `guardrails-benchmark-analyze` — joins the matrix jobs, merges every
+  shard's artifact into one run directory, prints a side-by-side comparison
+  via `nemo_guardrails_plugin.benchmarks.analyze`, and runs the baseline
+  check (see below). Fails the build on a latency regression beyond
+  tolerance, or when any checked level is missing for either variant (a lost
+  shard). The analyzer is stdlib-only by design, so this job runs on the
+  runner's stock `python3` without bootstrapping the uv workspace.
 
 ### Baseline and gating
 
@@ -218,7 +234,9 @@ the tolerances also account for inter-runner variance.
 
 - `CONCURRENCIES_TO_VALIDATE: list[int]` — concurrency levels to gate on.
   Other levels still appear in the analyzer's output tables, but pass/fail
-  is decided only by these.
+  is decided only by these. With `--strict`, a level here with no result
+  for either variant fails the check. The CI matrix's level groups must
+  cover this list.
 - `DEFAULT_DELTA_P50_TOLERANCE_MS: int` — default tolerance (in ms) applied
   to every validated concurrency. A check fails only on a regression, when
   `observed - baseline > tolerance`. Faster results pass regardless of how

@@ -277,14 +277,27 @@ def analyze_run(run_dir: Path) -> str:
     return f"{format_table(rows)}\n\n{format_platform_overhead_table(rows)}"
 
 
-def _load_comparison_rows(run_dir: Path) -> list[ComparisonRow]:
-    """Reload comparison rows from a run dir; returns ``[]`` if either variant is absent."""
+def _load_variants(run_dir: Path) -> dict[str, dict[int, LatencyRow]]:
+    """Load both variants' per-concurrency results from a run dir."""
     aiperf_dir = run_dir / "aiperf_results"
-    with_guardrails = load_variant_results(aiperf_dir / VARIANT_WITH_GUARDRAILS)
-    without_guardrails = load_variant_results(aiperf_dir / VARIANT_WITHOUT_GUARDRAILS)
-    if not with_guardrails or not without_guardrails:
-        return []
-    return compare(with_guardrails, without_guardrails)
+    return {
+        VARIANT_WITH_GUARDRAILS: load_variant_results(aiperf_dir / VARIANT_WITH_GUARDRAILS),
+        VARIANT_WITHOUT_GUARDRAILS: load_variant_results(aiperf_dir / VARIANT_WITHOUT_GUARDRAILS),
+    }
+
+
+def find_missing_levels(latency_by_variant: dict[str, dict[int, LatencyRow]]) -> dict[str, list[int]]:
+    """Return the checked concurrency levels each variant has no result for.
+
+    CI runs each variant's levels in separate jobs, so a lost job or artifact
+    shows up here as missing levels. Variants with every level are omitted.
+    """
+    missing: dict[str, list[int]] = {}
+    for variant, latency_by_concurrency in latency_by_variant.items():
+        levels = [c for c in sorted(CONCURRENCIES_TO_VALIDATE) if c not in latency_by_concurrency]
+        if levels:
+            missing[variant] = levels
+    return missing
 
 
 @dataclass(frozen=True)
@@ -317,17 +330,23 @@ class LatencyReport:
 def check_against_baseline(rows: list[ComparisonRow]) -> tuple[str, int]:
     """Compare the delta_p50 for each concurrency level against the baseline latencies.
 
-    Returns ``(report_text, failed_count)``. Concurrencies missing from
-    either the run or the baseline are skipped with a note.
+    Returns ``(report_text, failed_count)``. A checked concurrency with no
+    comparison row (a level missing from either variant) or no baseline
+    counts as a failure: in CI a missing level means a lost shard, which must
+    not pass silently.
     """
     rows_by_concurrency = {r.concurrency: r for r in rows}
 
     latency_reports: list[LatencyReport] = []
-    skipped_concurrencies: list[int] = []
+    missing_from_results: list[int] = []
+    missing_from_baseline: list[int] = []
 
     for concurrency in sorted(CONCURRENCIES_TO_VALIDATE):
-        if concurrency not in rows_by_concurrency or concurrency not in DELTA_P50_BASELINE_BY_CONCURRENCY:
-            skipped_concurrencies.append(concurrency)
+        if concurrency not in DELTA_P50_BASELINE_BY_CONCURRENCY:
+            missing_from_baseline.append(concurrency)
+            continue
+        if concurrency not in rows_by_concurrency:
+            missing_from_results.append(concurrency)
             continue
         latency_reports.append(
             LatencyReport(
@@ -362,12 +381,20 @@ def check_against_baseline(rows: list[ComparisonRow]) -> tuple[str, int]:
                 status,
             )
         )
-    if skipped_concurrencies:
+    for concurrency in missing_from_results:
+        lines.append(fmt.format("delta_p50", concurrency, "", "", "", "", "MISSING"))
+    for concurrency in missing_from_baseline:
+        lines.append(fmt.format("delta_p50", concurrency, "", "", "", "", "NO BASELINE"))
+    failed_count += len(missing_from_results) + len(missing_from_baseline)
+    if missing_from_results:
         lines.append("")
-        lines.append(f"Skipped (missing from results or baseline): {skipped_concurrencies}")
+        lines.append(f"FAIL: concurrency {missing_from_results} missing from one or both variants.")
+    if missing_from_baseline:
+        lines.append("")
+        lines.append(f"FAIL: no baseline in DELTA_P50_BASELINE_BY_CONCURRENCY for concurrency {missing_from_baseline}.")
     if failed_count:
         lines.append("")
-        lines.append(f"FAIL: {failed_count} of {len(latency_reports)} check(s) exceeded regression tolerance.")
+        lines.append(f"FAIL: {failed_count} of {len(CONCURRENCIES_TO_VALIDATE)} check(s) failed.")
 
     return "\n".join(lines), failed_count
 
@@ -468,7 +495,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(analyze_run(run_dir))
 
-    rows = _load_comparison_rows(run_dir)
+    latency_by_variant = _load_variants(run_dir)
+    for variant, levels in find_missing_levels(latency_by_variant).items():
+        print(f"Missing results for {variant} at concurrency {levels}.", file=sys.stderr)
+
+    with_guardrails = latency_by_variant[VARIANT_WITH_GUARDRAILS]
+    without_guardrails = latency_by_variant[VARIANT_WITHOUT_GUARDRAILS]
+    rows = compare(with_guardrails, without_guardrails) if with_guardrails and without_guardrails else []
     if not rows:
         print("Skipping baseline check: no comparable rows from this run.", file=sys.stderr)
         return 0 if not args.strict else 2
