@@ -143,6 +143,21 @@ def attach_egress_auth_headers(endpoint: Any, workload: Any, port: int) -> None:
         endpoint.headers = merge_endpoint_headers(endpoint.headers, build_egress_auth_headers(token))
 
 
+def _stopped_or_refused(container: k8s.V1ContainerStatus) -> tuple[str, str] | None:
+    """The status reason and message for ``container`` if it stopped or the runtime refused to create it, else None."""
+    terminated = container.state.terminated if container.state is not None else None
+    # A service container that finished its work exits 0; the sandbox container never stops on its own.
+    if terminated is not None and (container.name == SANDBOX_CONTAINER or terminated.exit_code != 0):
+        return (
+            "CONTAINER_TERMINATED",
+            f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})",
+        )
+    waiting = container.state.waiting if container.state is not None else None
+    if waiting is not None and waiting.reason == "CreateContainerError" and _REFUSED in (waiting.message or ""):
+        return "CONTAINER_REFUSED", f"container {container.name}: CreateContainerError: {waiting.message}"
+    return None
+
+
 class NemoComposeProvider(BatchSandboxProvider):
     """The stock BatchSandbox provider, plus the Compose services of a create request that carries them."""
 
@@ -200,13 +215,14 @@ class NemoComposeProvider(BatchSandboxProvider):
         """``workload``, carrying its pod's stopped or refused container when it has been allocated but isn't ready.
 
         The pod is read here, not in get_status: the stock create wait fetches the workload in a thread but
-        calls get_status on the server's event loop.
+        calls get_status on the server's event loop. The container goes on a copy: with the server's informer on,
+        ``workload`` is its cached object, which every later read shares.
         """
         status = workload.get("status") or {}
         if status.get("allocated", 0) > 0 and not status.get("ready") and status.get("phase") in (None, "", "Pending"):
             failed = self._failed_container(workload)
             if failed is not None:
-                workload[_FAILED_CONTAINER_KEY] = list(failed)
+                return {**workload, _FAILED_CONTAINER_KEY: list(failed)}
         return workload
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
@@ -252,7 +268,10 @@ class NemoComposeProvider(BatchSandboxProvider):
         return status
 
     def _failed_container(self, workload: dict[str, Any]) -> tuple[str, str] | None:
-        """The status reason and message for the sandbox pod's first stopped or refused container, else None.
+        """The status reason and message for the sandbox pod's stopped or refused container, else None.
+
+        The sandbox container comes first: a service that stopped along with it most likely stopped because of it,
+        and the kubelet lists containers by name, so a service such as ``api`` comes before it.
 
         Never raises: a failed lookup leaves the stock status as it was.
         """
@@ -267,23 +286,14 @@ class NemoComposeProvider(BatchSandboxProvider):
         except Exception:
             logger.warning("Could not read sandbox %s's pod to tell why it stopped", sandbox_id, exc_info=True)
             return None
+        service_failure = None
         for pod in pods:
             for container in (pod.status.container_statuses if pod.status is not None else None) or []:
-                terminated = container.state.terminated if container.state is not None else None
-                # A service container that finished its work exits 0; the sandbox container never stops on its own.
-                if terminated is not None and (container.name == SANDBOX_CONTAINER or terminated.exit_code != 0):
-                    return (
-                        "CONTAINER_TERMINATED",
-                        f"container {container.name}: {terminated.reason or 'Terminated'} (exit {terminated.exit_code})",
-                    )
-                waiting = container.state.waiting if container.state is not None else None
-                if (
-                    waiting is not None
-                    and waiting.reason == "CreateContainerError"
-                    and _REFUSED in (waiting.message or "")
-                ):
-                    return "CONTAINER_REFUSED", f"container {container.name}: CreateContainerError: {waiting.message}"
-        return None
+                failure = _stopped_or_refused(container)
+                if failure is not None and container.name == SANDBOX_CONTAINER:
+                    return failure
+                service_failure = service_failure or failure
+        return service_failure
 
     def _create_workload_from_pool(self, *args: Any, **kwargs: Any) -> Any:
         """The stock pooled create, refused for a request with services.

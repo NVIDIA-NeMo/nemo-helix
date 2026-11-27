@@ -334,6 +334,26 @@ def test_a_service_containers_oom_kill_is_reported_under_its_own_name(
     assert (status["state"], status["message"]) == ("Failed", "container db: OOMKilled (exit 137)")
 
 
+def test_the_sandbox_containers_stop_is_reported_before_a_service_that_stopped_with_it(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    """An ``after_main`` service that talks to the agent stops when the agent's container does.
+
+    The kubelet lists containers by name, so ``api`` comes before ``sandbox``; reporting it first would hide the
+    sandbox's OOM kill behind the service's follow-on failure.
+    """
+    k8s.pods = [
+        _pod(
+            _container("api", V1ContainerStateTerminated(exit_code=1, reason="Error")),
+            _container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")),
+        )
+    ]
+
+    status = _status(provider, k8s, _labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))
+
+    assert (status["state"], status["message"]) == ("Failed", "container sandbox: OOMKilled (exit 137)")
+
+
 @pytest.mark.parametrize(("name", "state"), [("db-init", "Allocated"), ("sandbox", "Failed")])
 def test_only_the_sandbox_container_has_failed_when_it_exits_0(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient, name: str, state: str
@@ -444,6 +464,28 @@ def test_listed_sandbox_whose_container_stopped_is_failed_with_its_reason(
     (listed,) = provider.list_workloads("nemo", "opensandbox.io/id")
 
     assert provider.get_status(listed)["message"] == "container sandbox: OOMKilled (exit 137)"
+
+
+def test_a_failed_sandbox_leaves_the_fetched_workload_as_it_was(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    """With the server's informer on, a fetched workload is its cached object, which every later read shares.
+
+    The fake client hands back the workloads it stores, as the informer does.
+    """
+    k8s.pods = [_pod(_container("sandbox", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")))]
+    workload = _labelled_workload({}, "Pending", None)
+    k8s.workloads = [workload]
+
+    fetched = provider.get_workload(SANDBOX_ID, "nemo")
+    (listed,) = provider.list_workloads("nemo", "opensandbox.io/id")
+
+    assert fetched is not None
+    assert provider.get_status(fetched)["state"] == provider.get_status(listed)["state"] == "Failed"
+    assert workload == _labelled_workload({}, "Pending", None)
+    # A later read reports the pod as it is then, not as an earlier read found it.
+    k8s.pods = [_pod(_container("sandbox", None))]
+    assert _status(provider, k8s, workload)["state"] == "Pending"
 
 
 def test_running_sandbox_is_not_looked_up(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
