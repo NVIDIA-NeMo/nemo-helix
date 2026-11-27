@@ -7,7 +7,7 @@ import type { FilesetPickerNoun } from '@nemo/common/src/components/FilesetPicke
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { CreateDatasetPanel } from '@studio/components/CreateDatasetPanel';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 
 const DATASET_NOUN: FilesetPickerNoun = { one: 'dataset', many: 'datasets' };
 
@@ -17,6 +17,8 @@ export type DatasetPickerProps = Omit<FilesetPickerProps, 'purpose' | 'noun' | '
 export const DatasetPicker: FC<DatasetPickerProps> = ({ workspace, onChange, ...props }) => {
   const queryClient = useQueryClient();
   const [panelOpen, setPanelOpen] = useState(false);
+  // The picker memoizes its rows on this callback, so keep it stable.
+  const openPanel = useCallback(() => setPanelOpen(true), []);
 
   return (
     <>
@@ -26,7 +28,7 @@ export const DatasetPicker: FC<DatasetPickerProps> = ({ workspace, onChange, ...
         onChange={onChange}
         purpose="dataset"
         noun={DATASET_NOUN}
-        onRequestNew={() => setPanelOpen(true)}
+        onRequestNew={openPanel}
       />
       <CreateDatasetPanel
         open={panelOpen}
