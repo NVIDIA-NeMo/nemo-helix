@@ -836,7 +836,6 @@ jobs:
 
   python-unit-test:
     name: Python unit tests (py${{ matrix.python-version }}, ${{ matrix.group }})
-    needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -855,11 +854,26 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      # Each leg gets its own WASM instead of waiting for the policy-wasm job's artifact.
+      # The key covers every input of build_policy_wasm.sh (Rego sources, the script that pins
+      # OPA_VERSION, the OPA Flox env), and there are no restore-keys, so a hit is always a WASM
+      # built from this commit's policies.
+      - name: Restore policy WASM
+        id: policy-wasm-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: policy-wasm-${{ hashFiles('services/core/auth/src/nhx/core/auth/app/policies/**', 'script/build_policy_wasm.sh', 'tools/open-policy-agent/.flox/env/manifest.lock') }}
+      - name: Build policy WASM
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/build-policy-wasm
+      - name: Save policy WASM
+        # One leg saves; the others would only race it for the same key.
+        if: steps.policy-wasm-cache.outputs.cache-hit != 'true' && strategy.job-index == 0
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          key: ${{ steps.policy-wasm-cache.outputs.cache-primary-key }}
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
