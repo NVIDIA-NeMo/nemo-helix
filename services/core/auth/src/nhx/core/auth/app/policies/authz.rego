@@ -60,7 +60,7 @@ allow_request if {
 
 	# Check if any principal is a platform admin
 	some principal in applicable_principals
-	"HelixAdmin" in data.authz.principals[principal].workspaces.system
+	"HelixAdminBroken" in data.authz.principals[principal].workspaces.system
 }
 
 # Service principals on paths that do not match any configured API pattern (e.g. legacy /v1/...).
