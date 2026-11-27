@@ -7099,6 +7099,313 @@ paths:
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
+  /apis/jobs/v2/workspaces/{workspace}/job-groups:
+    post:
+      tags:
+      - JobGroups
+      summary: Create Job Group
+      description: Save a JobGroup submission for the controller.
+      operationId: create_job_group_apis_jobs_v2_workspaces__workspace__job_groups_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobGroupRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - JobGroups
+      summary: List Job Groups
+      description: List JobGroups and their current progress.
+      operationId: list_job_groups_apis_jobs_v2_workspaces__workspace__job_groups_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobListSortField'
+          default: -created_at
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}:
+    get:
+      tags:
+      - JobGroups
+      summary: Get Job Group
+      description: Get a JobGroup by name or ID.
+      operationId: get_job_group_apis_jobs_v2_workspaces__workspace__job_groups__identifier__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - JobGroups
+      summary: Update Job Group
+      description: Update JobGroup metadata.
+      operationId: update_job_group_apis_jobs_v2_workspaces__workspace__job_groups__identifier__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateJobGroupRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - JobGroups
+      summary: Delete Job Group
+      description: Request deletion of a settled JobGroup and its owned Jobs.
+      operationId: delete_job_group_apis_jobs_v2_workspaces__workspace__job_groups__identifier__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/cancel:
+    post:
+      tags:
+      - JobGroups
+      summary: Cancel Job Group
+      description: Request cancellation of outstanding JobGroup work.
+      operationId: cancel_job_group_apis_jobs_v2_workspaces__workspace__job_groups__identifier__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/members:
+    get:
+      tags:
+      - JobGroups
+      summary: List Job Group Members
+      description: 'List submitted members and their recorded group outcomes.
+
+
+        Status stays pending until the group records an outcome. Fetch the member''s
+
+        Attempt for live execution status when an Attempt ID is available.'
+      operationId: list_job_group_members_apis_jobs_v2_workspaces__workspace__job_groups__identifier__members_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+          title: Page Size
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupMemberResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/retry:
+    post:
+      tags:
+      - JobGroups
+      summary: Retry Job Group
+      description: Request new work for unsuccessful members of a settled JobGroup.
+      operationId: retry_job_group_apis_jobs_v2_workspaces__workspace__job_groups__identifier__retry_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: identifier
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Identifier
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -13703,6 +14010,79 @@ components:
             name: run
         source: api-reference
         spec: {}
+    CreateJobGroupRequest:
+      properties:
+        source:
+          type: string
+          title: Source
+        template:
+          $ref: '#/components/schemas/HelixJobSpec'
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+          description: Plugin payload copied into every member Job.
+        members:
+          items:
+            $ref: '#/components/schemas/JobGroupMember'
+          type: array
+          minItems: 1
+          title: Members
+        max_concurrent_jobs:
+          type:
+          - integer
+          - 'null'
+          minimum: 1.0
+          title: Max Concurrent Jobs
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+          default: false
+        default_timeout_seconds:
+          type:
+          - integer
+          - 'null'
+          minimum: 0.0
+          title: Default Timeout Seconds
+        name:
+          type:
+          - string
+          - 'null'
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
+        description:
+          type:
+          - string
+          - 'null'
+          title: Description
+        project:
+          type:
+          - string
+          - 'null'
+          title: Project
+        custom_fields:
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+          title: Custom Fields
+        ownership:
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+          title: Ownership
+      additionalProperties: false
+      type: object
+      required:
+      - source
+      - template
+      - members
+      title: CreateJobGroupRequest
     CreateModelAdapterRequest:
       properties:
         name:
@@ -18962,6 +19342,195 @@ components:
             these variables.
       type: object
       title: JobExecutionProfileConfig
+    JobGroupMember:
+      properties:
+        config_patch:
+          additionalProperties: true
+          type: object
+          title: Config Patch
+          description: Overrides merged recursively into each template step's config.
+        timeout_seconds:
+          type:
+          - integer
+          - 'null'
+          minimum: 0.0
+          title: Timeout Seconds
+          description: Overrides the group step timeout.
+      additionalProperties: false
+      type: object
+      title: JobGroupMember
+    JobGroupMemberResponse:
+      properties:
+        index:
+          type: integer
+          minimum: 0.0
+          title: Index
+          description: Zero-based position in the submitted members array.
+        job_id:
+          type:
+          - string
+          - 'null'
+          title: Job Id
+        attempt_id:
+          type:
+          - string
+          - 'null'
+          title: Attempt Id
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          default: pending
+        reason:
+          type:
+          - string
+          - 'null'
+          title: Reason
+      type: object
+      required:
+      - index
+      title: JobGroupMemberResponse
+    JobGroupMemberResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/JobGroupMemberResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: JobGroupMemberResponsesPage
+    JobGroupResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          type:
+          - string
+          - 'null'
+          title: Project
+        description:
+          type:
+          - string
+          - 'null'
+          title: Description
+        source:
+          type: string
+          title: Source
+        custom_fields:
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+          title: Custom Fields
+        ownership:
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+          title: Ownership
+        max_concurrent_jobs:
+          type:
+          - integer
+          - 'null'
+          title: Max Concurrent Jobs
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+        default_timeout_seconds:
+          type:
+          - integer
+          - 'null'
+          title: Default Timeout Seconds
+        status:
+          $ref: '#/components/schemas/JobGroupStatus'
+        member_count:
+          type: integer
+          title: Member Count
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          title: Created At
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - workspace
+      - project
+      - description
+      - source
+      - custom_fields
+      - ownership
+      - max_concurrent_jobs
+      - fail_fast
+      - default_timeout_seconds
+      - status
+      - member_count
+      - created_at
+      - updated_at
+      title: JobGroupResponse
+    JobGroupResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/JobGroupResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: JobGroupResponsesPage
+    JobGroupStatus:
+      type: string
+      enum:
+      - pending
+      - active
+      - cancelling
+      - complete
+      - incomplete
+      - deletion_pending
+      title: JobGroupStatus
     JsonValue:
       title: JsonValue
     JsonWebKey:
@@ -24388,6 +24957,22 @@ components:
       type: object
       title: UpdateHelixJobRequest
       description: Validated partial update for a job description or definition.
+    UpdateJobGroupRequest:
+      properties:
+        description:
+          type:
+          - string
+          - 'null'
+          title: Description
+        custom_fields:
+          additionalProperties: true
+          type:
+          - object
+          - 'null'
+          title: Custom Fields
+      additionalProperties: false
+      type: object
+      title: UpdateJobGroupRequest
     UpdateModelDeploymentConfigRequest:
       properties:
         description:

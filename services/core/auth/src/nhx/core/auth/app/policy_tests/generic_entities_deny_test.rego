@@ -82,6 +82,7 @@ test_editor_denied_create_entities if {
 			"principal_id": "editor@test.com",
 			"method": "POST",
 			"path": "/apis/entities/v2/workspaces/test-ws/entities/evaluation_config",
+			"target": {"service": "entities", "entity_type": "evaluation_config"},
 		}
 		with data.authz.roles as entities_deny_test_data.roles
 		with data.authz.endpoints as entities_deny_test_data.endpoints
@@ -114,6 +115,7 @@ test_editor_denied_update_entity if {
 			"principal_id": "editor@test.com",
 			"method": "PUT",
 			"path": "/apis/entities/v2/workspaces/test-ws/entities/role_binding/rb-1",
+			"target": {"service": "entities", "entity_type": "role_binding"},
 		}
 		with data.authz.roles as entities_deny_test_data.roles
 		with data.authz.endpoints as entities_deny_test_data.endpoints
@@ -130,6 +132,7 @@ test_editor_denied_delete_entity if {
 			"principal_id": "editor@test.com",
 			"method": "DELETE",
 			"path": "/apis/entities/v2/workspaces/test-ws/entities/evaluation_config/eval-1",
+			"target": {"service": "entities", "entity_type": "evaluation_config"},
 		}
 		with data.authz.roles as entities_deny_test_data.roles
 		with data.authz.endpoints as entities_deny_test_data.endpoints
@@ -166,6 +169,7 @@ test_service_principal_allowed_entities if {
 			"principal_id": "service:evaluator",
 			"method": "POST",
 			"path": "/apis/entities/v2/workspaces/test-ws/entities/evaluation_config",
+			"target": {"service": "entities", "entity_type": "evaluation_config"},
 		}
 		with data.authz.roles as entities_deny_test_data.roles
 		with data.authz.endpoints as entities_deny_test_data.endpoints

@@ -4,6 +4,9 @@
 # Static authorization data - roles, permissions, and endpoint definitions
 # This is bundled with the policy and served by Entity Store
 authz:
+  entity_mutation_owners:
+    platform_job_group: "service:jobs"
+
   # Permission registry — single source of truth for all permissions
   # Each permission has has_endpoint: true by default. Set to false for permissions
   # checked in policy/code that are not mapped to any API endpoint.
@@ -1896,6 +1899,99 @@ authz:
         scopes:
         - jobs:read
         - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/job-groups:
+      get:
+        direct:
+          actor_perms:
+          - jobs.list
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.list
+        scopes:
+        - jobs:read
+        - platform:read
+      post:
+        direct:
+          actor_perms:
+          - jobs.create
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.create
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}:
+      delete:
+        direct:
+          actor_perms:
+          - jobs.delete
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.delete
+        scopes:
+        - jobs:write
+        - platform:write
+      get:
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+      patch:
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/cancel:
+      post:
+        direct:
+          actor_perms:
+          - jobs.cancel
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.cancel
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/members:
+      get:
+        direct:
+          actor_perms:
+          - jobs.read
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/job-groups/{identifier}/retry:
+      post:
+        direct:
+          actor_perms:
+          - jobs.update
+        delegated:
+          actor_perms: []
+          subject_perms:
+          - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs:
       get:
         direct:

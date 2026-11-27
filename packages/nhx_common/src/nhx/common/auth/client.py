@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from .authz_format import validate_permission_strings
 from .exceptions import InvalidPermissionFormatError
 from .models import Principal
+from .target import AuthorizationTarget
 from .token_resolver import ResolvedBearerToken
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,8 @@ class AuthClient(BaseModel):
         path: str,
         scopes: Optional[List[str]] = None,
         http_client: Optional[httpx.AsyncClient] = None,
+        *,
+        target: AuthorizationTarget | None = None,
     ) -> AuthorizationResult:
         """Check if the current principal is authorized to make a request.
 
@@ -180,9 +183,10 @@ class AuthClient(BaseModel):
 
         Args:
             method: HTTP method (GET, POST, PUT, DELETE, etc.)
-            path: Request path (e.g., "/v2/workspaces/my-ws/models")
+            path: Decoded route path (e.g., "/v2/workspaces/my-ws/models")
             scopes: Optional OAuth2 scopes from the token
             http_client: Optional pre-configured HTTP client (for connection reuse)
+            target: Authorization metadata supplied by the matched route
 
         Returns:
             AuthorizationResult with allowed=True/False and optional reason
@@ -212,6 +216,8 @@ class AuthClient(BaseModel):
             "method": method,
             "path": path,
         }
+        if target is not None:
+            auth_input["target"] = target
         if self.principal.effective_email:
             auth_input["principal_email"] = self.principal.effective_email
         if self.principal.effective_groups:

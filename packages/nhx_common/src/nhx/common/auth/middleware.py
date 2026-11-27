@@ -29,6 +29,7 @@ from .headers import TRUSTED_IDENTITY_HEADERS
 from .models import Principal
 from .permissions import ALL_WORKSPACES
 from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
+from .target import match_authorization_target
 from .token_resolver import ExtraBearerTokenResolver, ResolvedBearerToken, resolve_bearer_token
 from .workload_tokens import resolve_workload_access_token, resolve_workload_subject_token
 
@@ -433,11 +434,15 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
     ) -> Response | None:
         """Call PDP and return an error response, or None when authorized."""
         try:
+            target = (
+                match_authorization_target(request) if request.method in {"POST", "PUT", "PATCH", "DELETE"} else None
+            )
             result = await auth_client.authorize_request(
                 method=request.method,
-                path=request.url.path,
+                path=request.scope["path"],
                 scopes=scopes,
                 http_client=auth_client.http_client,
+                target=target,
             )
         except httpx.ConnectError as e:
             logger.error(

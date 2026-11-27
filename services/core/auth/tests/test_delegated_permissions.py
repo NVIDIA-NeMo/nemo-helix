@@ -844,6 +844,7 @@ def test_by_id_entity_mutations_require_actor_storage_grants(
             "on_behalf_of_principal_id": subject or "",
             "method": method,
             "path": "/apis/entities/v2/workspaces/private/entities/default/by-id/default-id",
+            "target": {"service": "entities", "entity_type": "default"},
         },
         entrypoint=0,
     )

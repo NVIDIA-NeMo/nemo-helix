@@ -63,6 +63,8 @@ _INTENTIONAL_OMISSIONS = {
     # and an exact-match shorthand kept for older callers.
     ("list", "filter_str"),
     ("list", "filter_obj"),
+    # Model-level stores do not expose raw records or perform client-side decoding.
+    ("list", "on_decode_error"),
 }
 
 

@@ -345,6 +345,25 @@ deny_request if {
 	not platform_admin_in_system
 }
 
+entity_target_present if {
+	input.target.service == "entities"
+	is_string(input.target.entity_type)
+	input.target.entity_type != ""
+}
+
+deny_request if {
+	some permission in req_permissions
+	permission in {"entities.create", "entities.update", "entities.delete"}
+	not entity_target_present
+}
+
+deny_request if {
+	extract_method in ["POST", "PUT", "PATCH", "DELETE"]
+	input.target.service == "entities"
+	owner := data.authz.entity_mutation_owners[input.target.entity_type]
+	extract_principal_id != owner
+}
+
 # Caller-kind enforcement for service-only routes.
 #
 # A route declares allowed caller kinds via the optional `callers` list on its

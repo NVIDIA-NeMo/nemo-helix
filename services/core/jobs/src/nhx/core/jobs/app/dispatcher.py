@@ -131,6 +131,19 @@ class JobEnvironmentValidationError(JobSecretValidationError):
     """Exception raised when a job step's environment names are reserved or malformed."""
 
 
+def validate_job_environment(job_spec: HelixJobSpec, workspace: str) -> None:
+    for step in job_spec.steps:
+        try:
+            validate_step_environment(step.environment or [], source="Job step environment keys")
+            for env_var in step.environment or []:
+                if env_var.from_secret:
+                    parse_entity_ref(env_var.from_secret.name, default_workspace=workspace)
+            for ref in step.gateway_read_filesets:
+                parse_entity_ref(ref, default_workspace=workspace)
+        except ValueError as exc:
+            raise JobEnvironmentValidationError(str(exc)) from exc
+
+
 class JobOutputLocationError(ValueError):
     """Exception raised when a job's output_location references a fileset that does not exist."""
 
@@ -301,12 +314,7 @@ class JobDispatcher:
     # =========================================================================
 
     async def validate_job_secrets(self, job_spec: HelixJobSpec, job_workspace: str) -> None:
-        # Reject reserved or malformed env names at submit time rather than at schedule time.
-        for step in job_spec.steps:
-            try:
-                validate_step_environment(step.environment or [], source="Job step environment keys")
-            except ValueError as exc:
-                raise JobEnvironmentValidationError(str(exc)) from exc
+        validate_job_environment(job_spec, job_workspace)
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if step.gateway_providers:

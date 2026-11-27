@@ -31,10 +31,12 @@ class JobsService(Service[JobsServiceConfig]):
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the jobs service."""
+        from nhx.core.jobs.api.v2.job_groups.endpoints import router as job_groups_router
         from nhx.core.jobs.api.v2.jobs import endpoints
         from nhx.core.jobs.api.v2.jobs.rerun import router as rerun_router
 
         return [
+            RouterConfig(job_groups_router, tag="JobGroups", description="Template-based JobGroup management"),
             RouterConfig(
                 endpoints.router,
                 tag="Jobs",
