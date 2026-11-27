@@ -43,9 +43,12 @@ nemo config set --base-url https://nhx.example.com
 nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
 nemo config set --workspace my-workspace
 nemo config set --access-token -
+nemo config set --default-model default/nvidia-nemotron-3-5-super-vl-120b-a12b
 ```
 
 The saved cluster entry uses the `certificate_authority` key.
+
+`--default-model` and `--fast-model` change the models that `nemo setup` picked, without rerunning setup. Both take a `workspace/name` Model Entity reference and write the same context fields that setup writes. `nemo chat`, `nemo agents`, and `${NEMO_DEFAULT_MODEL}` placeholders in `agent.yaml` use the new value. The CLI saves the value as given and does not check that the model exists, so run `nemo models list` to find one. When no fast model is set, the fast model falls back to the default model. The `NEMO_DEFAULT_MODEL` and `NEMO_FAST_MODEL` environment variables still override the saved values.
 
 When setting an access token, you'll be prompted to enter it securely (input is hidden).
 
