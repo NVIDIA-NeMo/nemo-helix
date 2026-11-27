@@ -267,7 +267,9 @@ class StoredJobSpec:
     """The spec a new job stores in place of its canonical spec (see ``NemoJob.store_spec``).
 
     Attributes:
-        spec: The JSON spec the job record stores. It must validate against the job's stored spec schema.
+        spec: The JSON spec the job record stores. It must validate against the job's stored spec schema. When
+            storing wrote something outside the record, ``spec`` should bind it with a digest that the job's
+            reader checks before using it, as agent-evaluate's ``frozen_tasks.plan_digest`` does.
         discard: Undoes what storing the spec wrote outside the record. The job route calls it when no job will
             own those writes: the spec doesn't match the stored spec schema, or the Jobs service refuses the job
             with a 4xx. A 5xx or a lost reply leaves the job's existence unknown, so the route doesn't call it.
