@@ -8,6 +8,21 @@ ARG NHX_PYTHON_BASE=nhx-python-base
 ARG NHX_CPU_TASKS_RUNTIME_BASE=nhx-python-base
 
 FROM ${NHX_PYTHON_BASE} AS builder
+# Install third-party packages from the lock and the workspace members'
+# pyproject.toml files only. BuildKit keys this COPY on the matched files'
+# content, so the layer stays cached until uv.lock or a member's metadata
+# changes. A new member outside these globs fails the sync below.
+COPY --from=nhx-workspace --parents \
+    pyproject.toml uv.lock \
+    packages/*/pyproject.toml \
+    plugins/*/pyproject.toml \
+    plugins/*/examples/*/*/pyproject.toml \
+    services/*/pyproject.toml \
+    services/*/*/pyproject.toml \
+    tools/*/pyproject.toml \
+    ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --only-group cpu-tasks --no-editable --no-install-workspace
 COPY --from=nhx-workspace . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable

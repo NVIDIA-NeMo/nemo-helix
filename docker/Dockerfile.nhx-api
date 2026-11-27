@@ -9,12 +9,19 @@ ARG NHX_API_RUNTIME_BASE=nhx-python-base
 
 FROM ${NHX_PYTHON_BASE} AS builder
 ARG NHX_API_DEPENDENCY_GROUP=functional-services
-COPY --from=nhx-workspace . .
-# Put the generated authorization policy into the source package before uv
-# installs it. This keeps the artifact aligned with the venv's actual Python
-# version instead of assuming a hard-coded site-packages path.
-COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
-
+# Install third-party packages from the lock and the workspace members'
+# pyproject.toml files only. BuildKit keys this COPY on the matched files'
+# content, so the layer stays cached until uv.lock or a member's metadata
+# changes. A new member outside these globs fails the sync below.
+COPY --from=nhx-workspace --parents \
+    pyproject.toml uv.lock \
+    packages/*/pyproject.toml \
+    plugins/*/pyproject.toml \
+    plugins/*/examples/*/*/pyproject.toml \
+    services/*/pyproject.toml \
+    services/*/*/pyproject.toml \
+    tools/*/pyproject.toml \
+    ./
 # --reinstall-package pip forces uv to uninstall the seed pip (planted by
 # `uv venv --seed` in the base image) via its RECORD before installing the
 # locked pip, so exactly one pip remains. Without it, uv copies the locked pip
@@ -22,7 +29,17 @@ COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth
 # dirs and a mixed file tree whose `pip` import is broken.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
-    --reinstall-package pip
+    --no-install-workspace --reinstall-package pip
+
+COPY --from=nhx-workspace . .
+# Put the generated authorization policy into the source package before uv
+# installs it. This keeps the artifact aligned with the venv's actual Python
+# version instead of assuming a hard-coded site-packages path.
+COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
+
+# Install the workspace members on top; the third-party packages are already in place.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable
 
 # The release workspace relock is blocked by the DataDesignerPlugins index.
 # Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
