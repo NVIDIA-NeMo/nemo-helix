@@ -68,14 +68,14 @@ class TestTokenClaims:
             email="user@example.com",
             groups=["admin", "users"],
             scopes=["openid", "profile"],
-            raw_claims={"sub": "user123", "email": "user@example.com"},
+            raw_claims={"sub": "user123", "email": "user@example.com", "email_verified": True},
         )
 
         assert claims.subject == "user123"
         assert claims.email == "user@example.com"
         assert claims.groups == ["admin", "users"]
         assert claims.scopes == ["openid", "profile"]
-        assert claims.raw_claims == {"sub": "user123", "email": "user@example.com"}
+        assert claims.raw_claims == {"sub": "user123", "email": "user@example.com", "email_verified": True}
 
     def test_token_claims_with_none_email(self):
         """Test TokenClaims with no email."""
@@ -358,6 +358,7 @@ class TestJWTValidator:
             {
                 "sub": "user123",
                 "email": "user@example.com",
+                "email_verified": True,
                 "groups": ["admin"],
                 "scope": "openid profile",
                 "iat": now,
@@ -489,6 +490,7 @@ class TestJWTValidator:
         valid_claims = {
             "sub": "user123",
             "email": "user@example.com",
+            "email_verified": True,
             "groups": ["admin", "users"],
             "scope": "openid profile email",
             "exp": int(time.time()) + 3600,
@@ -519,6 +521,7 @@ class TestJWTValidator:
         valid_claims = {
             "sub": "creator@example.com",
             "email": "creator@example.com",
+            "email_verified": True,
             "groups": "workspace-editors",
             "act": {
                 "sub": "system:serviceaccount:nemo-runs:job-runner",
@@ -932,6 +935,7 @@ class TestOpaqueTokenIntrospection:
             "aud": "test-audience",
             "sub": "user123",
             "email": "user@example.com",
+            "email_verified": True,
             "groups": ["admin"],
             "scope": "openid profile",
         }

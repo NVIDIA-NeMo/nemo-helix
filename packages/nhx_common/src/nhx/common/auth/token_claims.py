@@ -54,6 +54,26 @@ def scopes_from_claim(value: object) -> list[str]:
     return []
 
 
+def email_verified_from_claim(value: object) -> bool:
+    """Interpret an `email_verified` claim; IdPs send a bool or the strings "true"/"false"."""
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value.strip().lower() == "true"
+
+
+def trusted_email_from_claims(config: AuthConfig, claims: JsonObject) -> str | None:
+    """Return the email claim only if it may be used as an identity.
+
+    Email is a role-binding alias, so an unverified (user-editable) value must not become one.
+    """
+    email_value = claims.get(config.oidc.email_claim)
+    if not isinstance(email_value, str):
+        return None
+    if config.oidc.require_verified_email and not email_verified_from_claim(claims.get("email_verified")):
+        return None
+    return email_value
+
+
 class TokenClaimsExtractor:
     """Project decoded JWT claim objects into explicit auth claim types."""
 
@@ -67,8 +87,14 @@ class TokenClaimsExtractor:
             logger.warning("Token is missing a valid subject claim")
             return None
 
-        email_value = claims.get(self.config.oidc.email_claim)
-        email = email_value if isinstance(email_value, str) else None
+        email = trusted_email_from_claims(self.config, claims)
+        if (
+            email is None
+            and self.config.oidc.subject_claim == self.config.oidc.email_claim
+            and self.config.oidc.require_verified_email
+        ):
+            logger.warning("Token subject is an unverified email claim; rejecting")
+            return None
 
         scopes = scopes_from_claim(claims.get("scope") or claims.get("scp"))
         prefix = self.config.oidc.effective_scope_prefix
