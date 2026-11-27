@@ -31,6 +31,7 @@ from functools import partial
 from typing import Final
 
 from filesets import parse_fileset_ref
+from nemo_evals.jobs.agent_spec import FrozenTasks
 from nemo_evals.taskset_runs.plan_storage import (
     PlanDigestMismatchError,
     delete_fileset_ref,
@@ -45,6 +46,7 @@ from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import StoredJobSpec
 from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
+from pydantic import ValidationError
 
 TASKS_FROM_KEY: Final = "tasks_from"
 TASKS_DIGEST_KEY: Final = "tasks_digest"
@@ -134,12 +136,12 @@ async def freeze_tasks_in_file(
         what="frozen tasks",
     )
     trials = spec.get("trials")
-    pointer: dict = {"plan_ref": stored.ref, "plan_digest": stored.digest}
-    if trials is not None:
-        pointer["trial_count"] = len(trials)
+    pointer = FrozenTasks(
+        plan_ref=stored.ref, plan_digest=stored.digest, trial_count=None if trials is None else len(trials)
+    )
     compact = {key: value for key, value in spec.items() if key not in _FROZEN_KEYS}
     compact[TASK_COUNT_KEY] = len(spec["tasks"])
-    compact[FROZEN_TASKS_KEY] = pointer
+    compact[FROZEN_TASKS_KEY] = pointer.model_dump(mode="json", exclude_none=True)
     return StoredJobSpec(
         spec=compact, discard=partial(delete_fileset_ref, files_client, stored.ref, fileset_id=stored.fileset_id)
     )
@@ -217,11 +219,13 @@ def _read_frozen_tasks_file(client: NemoClient, pointer: object, *, workspace: s
 
     The file is stored and read the way a taskset run's plan is (:mod:`nemo_evals.taskset_runs.plan_storage`).
     """
-    if not isinstance(pointer, dict) or not isinstance(pointer.get("plan_ref"), str):
-        raise AttemptTasksError(f"the attempt's {FROZEN_TASKS_KEY} names no file")
-    plan_ref = pointer["plan_ref"]
-    plan_digest = pointer.get("plan_digest")
-    if not isinstance(plan_digest, str) or _DIGEST_PREFIX + plan_digest != expected:
+    try:
+        frozen_tasks = FrozenTasks.model_validate(pointer)
+    except ValidationError as exc:
+        raise AttemptTasksError(f"the attempt's {FROZEN_TASKS_KEY} doesn't name a file and its digest") from exc
+    plan_ref = frozen_tasks.plan_ref
+    plan_digest = frozen_tasks.plan_digest
+    if _DIGEST_PREFIX + plan_digest != expected:
         raise AttemptTasksError(
             f"the attempt's {FROZEN_TASKS_KEY} digest {plan_digest!r} doesn't match its step config "
             f"({expected}); refusing to run it"

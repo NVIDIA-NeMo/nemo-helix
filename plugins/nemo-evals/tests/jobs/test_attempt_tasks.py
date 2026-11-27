@@ -487,6 +487,27 @@ def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spe
     assert FILE_PATH not in platform.paths
 
 
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        {"plan_digest": "f" * 64},
+        {"plan_ref": f"default/{FILESET}#{FROZEN_TASKS_PATH}", "plan_digest": "not-a-digest"},
+        f"default/{FILESET}#{FROZEN_TASKS_PATH}",
+    ],
+    ids=["no file", "malformed digest", "not an object"],
+)
+def test_a_frozen_tasks_pointer_without_a_file_and_digest_is_refused(
+    harbor_spec: ResolvedAgentEvalSpec, pointer: object
+) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+    stored[FROZEN_TASKS_KEY] = pointer
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="doesn't name a file and its digest"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+    assert FILE_PATH not in platform.paths
+
+
 def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: ResolvedAgentEvalSpec) -> None:
     spec = harbor_spec.model_dump(mode="json")
     assert "sha256-v1:" + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest() == frozen_tasks_digest(spec)
