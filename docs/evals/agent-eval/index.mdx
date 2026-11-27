@@ -124,6 +124,30 @@ An evaluation target is what performs the tasks:
 See [Evaluate a Deployed Agent over HTTP](/documentation/evaluate-models/agent-eval/evaluate-deployed-agent)
 for how to describe an HTTP agent target.
 
+## Check a job before submitting
+
+A dry run checks an `agent-evaluate` job the way submit does, then stops before creating it. Send the
+create request with `?dry_run=true`:
+
+```bash
+curl -X POST "${NHX_BASE_URL:-http://localhost:8080}/apis/evals/v2/workspaces/default/agent-evaluate/jobs?dry_run=true" \
+  -H "Content-Type: application/json" -d @job.json
+```
+
+- **It runs every check submit runs.** It reads and resolves the tasks, metrics, models and
+  registered agent as you, compiles the job, and checks its execution profile. It also checks that
+  you may make the writes submit makes, such as publishing a dataset file's rows as tasks, or copying
+  a registered agent's files.
+- **It writes nothing:** no job, no tasks or taskset revision, and no copy of an agent's files.
+- **When every check passes,** it returns 200 with the job it would create, unsaved: it has no `id`
+  or `status`, and is named as you named it, or `dry-run-job`. Its checks are in
+  `status_details.checks`.
+- **When a check fails,** it returns 422 listing every check. Any other refusal is the error submit
+  returns, such as 403 for a task you may not read, or 422 for a bad dataset row.
+
+Neither a dry run nor submit checks that the secrets a job names exist, or that a built-in Harbor
+agent's name exists unless the agent uses a gateway model. The job reports those when it runs.
+
 ## In this section
 
 - [Quickstart](/documentation/evaluate-models/agent-eval/quickstart) — evaluate an agent end to end in

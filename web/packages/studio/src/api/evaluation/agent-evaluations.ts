@@ -87,7 +87,7 @@ export const submitAgentEvalJob = async (
   workspace: string,
   request: AgentEvaluateJobRequest,
   signal?: AbortSignal
-): Promise<AgentEvaluateJob> => evalsCreateAgentEvaluateJob(workspace, request, signal);
+): Promise<AgentEvaluateJob> => evalsCreateAgentEvaluateJob(workspace, request, undefined, signal);
 
 // ---------------------------------------------------------------------------
 // Structured results (agent-eval-results record)

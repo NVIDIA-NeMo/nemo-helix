@@ -22,6 +22,7 @@ from nemo_evals.jobs.evaluate import EvaluateJob
 from nemo_evals.jobs.retrieve_eval import RetrieveEvalJob
 from nemo_evals.schema import HelloResponse
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.jobs.api_factory import JobRouteOption
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from nemo_helix_plugin.service import NemoService, RouterSpec
 
@@ -60,7 +61,13 @@ class EvaluatorPluginService(NemoService):
         # A distinct ``service_name`` gives agent-evaluate jobs their own ``source`` tag so this
         # collection's list endpoint doesn't return (and 500 rendering) row EvaluateJob specs, and
         # vice versa. EvaluateJob keeps its derived ``nemo-evals`` source. See AGENT_EVAL_JOB_SOURCE.
-        agent_jobs_router = add_job_routes(AgentEvalJob, service_name=AGENT_EVAL_JOB_SOURCE, authz=scope)
+        # ``?dry_run=true`` runs every check a create does, and none of its writes: the job's are deferred.
+        agent_jobs_router = add_job_routes(
+            AgentEvalJob,
+            service_name=AGENT_EVAL_JOB_SOURCE,
+            authz=scope,
+            route_options=[JobRouteOption.CORE, JobRouteOption.DRY_RUN],
+        )
         retrieve_jobs_router = add_job_routes(
             RetrieveEvalJob,
             service_name=RETRIEVE_EVAL_JOB_SOURCE,
