@@ -161,6 +161,18 @@ describe('FilesetFilePicker', () => {
     expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue('gone.csv');
   });
 
+  it('reports a failed file listing on the field even with a saved file', async () => {
+    vi.mocked(filesListFilesetFiles).mockRejectedValue(new Error('boom'));
+    render(
+      withQueryClient(<Harness initial={{ filesetRef: 'default/eval-a', filePath: 'a.csv' }} />)
+    );
+
+    expect(
+      await screen.findByText("Couldn't load the files in this dataset. Try again later.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue('a.csv');
+  });
+
   it('clears the file when the fileset changes', async () => {
     const onValue = vi.fn();
     render(
@@ -186,7 +198,7 @@ interface ControlledHarnessProps {
 }
 
 const ControlledHarness = ({ defaultSource = null, onValue, required }: ControlledHarnessProps) => {
-  const { control, watch, reset } = useForm<Form>({
+  const { control, watch, reset, setValue } = useForm<Form>({
     defaultValues: { source: defaultSource },
     mode: 'onTouched',
   });
@@ -205,6 +217,12 @@ const ControlledHarness = ({ defaultSource = null, onValue, required }: Controll
       <button type="button" onClick={() => reset({ source: null })}>
         Reset
       </button>
+      <button type="button" onClick={() => setValue('source', 'default/eval-b#a.csv')}>
+        Set eval-b
+      </button>
+      <button type="button" onClick={() => setValue('source', null)}>
+        Set null
+      </button>
     </>
   );
 };
@@ -213,7 +231,9 @@ describe('ControlledFilesetFilePicker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(filesRetrieveFileset).mockImplementation(async (_workspace, name) => fileset(name));
-    vi.mocked(filesListFilesets).mockResolvedValue(filesetsPage([fileset('eval-a')]));
+    vi.mocked(filesListFilesets).mockResolvedValue(
+      filesetsPage([fileset('eval-a'), fileset('eval-b')])
+    );
     mockFiles([file('a.csv')]);
   });
 
@@ -276,5 +296,52 @@ describe('ControlledFilesetFilePicker', () => {
       expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('eval-a')
     );
     expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue('a.csv');
+  });
+
+  it('drops a fileset picked without a file when the form resets', async () => {
+    render(withQueryClient(<ControlledHarness onValue={() => {}} />));
+    await pickFileset('eval-a');
+    expect(await screen.findByRole('combobox', { name: 'File' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('combobox', { name: 'File' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('');
+  });
+
+  it('does not bring back an earlier fileset after outside writes', async () => {
+    render(withQueryClient(<ControlledHarness onValue={() => {}} />));
+    await pickFileset('eval-a');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set eval-b' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Set null' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('combobox', { name: 'File' })).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('');
+  });
+
+  it('keeps a newly picked fileset when switching away from a picked file', async () => {
+    let latest: Form = { source: null };
+    render(
+      withQueryClient(
+        <ControlledHarness
+          defaultSource="default/eval-a#a.csv"
+          onValue={(value) => (latest = value)}
+        />
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue('a.csv')
+    );
+
+    await pickFileset('eval-b');
+
+    await waitFor(() => expect(latest.source).toBeNull());
+    expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveValue('eval-b');
+    expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue('');
   });
 });

@@ -26,6 +26,12 @@ const toValue = (ref: unknown, workspace: string): FilesetFileValue | null => {
   return { filesetRef: `${parsed.workspace}/${parsed.name}`, filePath: parsed.objectPath || null };
 };
 
+interface PendingFileset {
+  filesetRef: string;
+  fieldValue: unknown;
+  defaultValues: unknown;
+}
+
 /**
  * Binds {@link FilesetFilePicker} to a field holding `workspace/name#path`. The field stays null
  * until a file is picked, so a fileset without a file never passes a non-empty check.
@@ -38,16 +44,20 @@ export function ControlledFilesetFilePicker<T extends FieldValues>({
   const {
     field,
     fieldState: { error },
+    formState: { defaultValues },
   } = useController(useControllerProps);
-  // A fileset picked without a file isn't in the field yet. It is kept with the field value it was
-  // written beside, so a reset or any other outside write drops it.
-  const [pending, setPending] = useState<{ filesetRef: string | null; fieldValue: unknown }>({
-    filesetRef: null,
-    fieldValue: null,
-  });
+  // A fileset picked without a file isn't in the field yet, so it is held here, tagged with the
+  // field value it was written beside and the form's defaults at the time. Any other field value
+  // (an outside write) or new defaults (`reset(values)`) drop it for good; adjusting state during
+  // render keeps that free of an effect. A bare `reset()` to unchanged defaults leaves no trace in
+  // public form state, so it can't be told apart from no change.
+  const [pending, setPending] = useState<PendingFileset | null>(null);
+  if (pending && (pending.fieldValue !== field.value || pending.defaultValues !== defaultValues)) {
+    setPending(null);
+  }
 
   const value = toValue(field.value, pickerProps.workspace) ?? {
-    filesetRef: pending.fieldValue === field.value ? pending.filesetRef : null,
+    filesetRef: pending?.filesetRef ?? null,
     filePath: null,
   };
 
@@ -58,7 +68,9 @@ export function ControlledFilesetFilePicker<T extends FieldValues>({
       onChange={(next, selection) => {
         const fieldValue =
           next.filesetRef && next.filePath ? `${next.filesetRef}#${next.filePath}` : null;
-        setPending({ filesetRef: next.filesetRef, fieldValue });
+        setPending(
+          next.filesetRef ? { filesetRef: next.filesetRef, fieldValue, defaultValues } : null
+        );
         field.onChange(fieldValue);
         onChange?.(next, selection);
       }}

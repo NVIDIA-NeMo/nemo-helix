@@ -65,9 +65,15 @@ export const FilesetFilePicker: FC<FilesetFilePickerProps> = ({
   const fileMissing = Boolean(
     value.filePath && data && !files.some((file) => file.path === value.filePath)
   );
+  // The listbox's own empty-state message is hidden whenever a saved path fills the list, so a
+  // failed listing is reported on the field.
   const fileError =
     errorText ??
-    (fileMissing ? `This file is no longer in this ${noun.one}. Select another one.` : undefined);
+    (fileMissing
+      ? `This file is no longer in this ${noun.one}. Select another one.`
+      : isError
+        ? `Couldn't load the files in this ${noun.one}. Try again later.`
+        : undefined);
 
   const extensions = acceptedFileExtensions?.join(' or ');
   const eligibleCount = files.filter((file) =>

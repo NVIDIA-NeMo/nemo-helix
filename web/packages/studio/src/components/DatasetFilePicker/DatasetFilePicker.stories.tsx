@@ -9,7 +9,7 @@ import {
   STORY_FILESETS,
 } from '@nemo/common/src/components/FilesetPicker/storyData';
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput, FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Panel, Text } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DatasetFilePicker } from '@studio/components/DatasetFilePicker';
@@ -18,8 +18,10 @@ import { type ReactElement, useState } from 'react';
 
 const FILESETS_URL = '*/apis/files/v2/workspaces/:workspace/filesets';
 
-// In memory, so a dataset created from the New row is listed and can be looked up afterwards.
+// In memory, so a dataset created from the New row is listed and can be looked up afterwards, and
+// the files uploaded into it from the panel's Upload tab can be picked.
 const datasets: FilesetOutput[] = [...STORY_FILESETS];
+const filesByDataset: Record<string, FilesetFileOutput[]> = { ...STORY_FILES };
 
 const created = (name: string): FilesetOutput => ({
   id: `default/${name}`,
@@ -36,7 +38,7 @@ const created = (name: string): FilesetOutput => ({
 });
 
 const handlers = [
-  listFilesetFilesHandler(STORY_FILES),
+  listFilesetFilesHandler(filesByDataset),
   listFilesetsHandler(datasets),
   http.get(`${FILESETS_URL}/:name`, ({ params }) => {
     const found = datasets.find((fileset) => fileset.name === params.name);
@@ -54,7 +56,16 @@ const handlers = [
     datasets.unshift(fileset);
     return HttpResponse.json(fileset);
   }),
-  http.put(`${FILESETS_URL}/:name/-/*`, () => new HttpResponse(null, { status: 200 })),
+  http.put(`${FILESETS_URL}/:name/-/*`, async ({ request, params }) => {
+    const name = String(params.name);
+    const path = decodeURIComponent(new URL(request.url).pathname.split('/-/')[1] ?? '');
+    const size = (await request.blob()).size;
+    filesByDataset[name] = [
+      ...(filesByDataset[name] ?? []).filter((file) => file.path !== path),
+      { path, size, file_ref: path, file_url: path },
+    ];
+    return new HttpResponse(null, { status: 200 });
+  }),
   http.get('*/apis/secrets/v2/workspaces/:workspace/secrets', () =>
     HttpResponse.json({ data: [] })
   ),
@@ -90,5 +101,5 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Pick `sft-chat-v3` and a file, or "New dataset" to create one and then pick its file. */
+/** Pick `sft-chat-v3` and a file, or "New dataset" and upload files to create one, then pick its file. */
 export const PickADatasetFile: Story = {};
