@@ -157,12 +157,14 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
         replacements: dict[str, str] = {}
 
         for mapping in ENV_MAPPINGS:
-            value = self._resolve_config_path(mapping.config_path)
+            value = self._resolve_config_path(mapping.config_path) if mapping.config_path else None
 
-            # studio.platform_base_url is browser-facing. An explicit empty string
-            # means "same origin" and must not fall back to the in-cluster
-            # platform.base_url, which browsers outside Kubernetes cannot resolve.
-            if mapping.config_path == "studio.platform_base_url":
+            if mapping.env_var:
+                value = os.environ.get(mapping.env_var, "").strip() or None
+            elif mapping.config_path == "studio.platform_base_url":
+                # studio.platform_base_url is browser-facing. An explicit empty string
+                # means "same origin" and must not fall back to the in-cluster
+                # platform.base_url, which browsers outside Kubernetes cannot resolve.
                 field_value = self._resolve_field_path("platform_base_url")
                 if field_value not in (None, ""):
                     value = field_value

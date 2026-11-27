@@ -669,7 +669,6 @@ target "nhx-studio-ui" {
   dockerfile = "docker/base/Dockerfile.nhx-studio-ui"
   platforms  = get_platforms()
   args = {
-    VITE_VERSION_SHA = CI_COMMIT_SHA
     DOCKERHUB_MIRROR = DOCKERHUB_MIRROR
   }
   cache-to   = maybe_registry_cache_to("nhx-studio-ui")

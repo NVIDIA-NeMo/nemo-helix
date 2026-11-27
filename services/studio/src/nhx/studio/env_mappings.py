@@ -10,6 +10,10 @@ To add a new environment variable:
 1. Add the marker to `.env.fastapi` in web/packages/studio/env/
 2. Add the mapping entry below with the marker name and config path
 
+A mapping can name a process environment variable (`env_var`) instead of a
+config path, for values the platform sets outside its configuration, such as
+the code revision.
+
 The config_path uses dot notation to traverse nested config objects:
 - "studio.platform_base_url" -> global_settings.studio.platform_base_url
 """
@@ -24,11 +28,18 @@ class EnvMapping:
     marker: str
     """The marker string to replace (e.g., 'STUDIO_UI_VITE_PLATFORM_BASE_URL')"""
 
-    config_path: str
+    config_path: str = ""
     """Dot-notation path to the value in global_settings (e.g., 'studio.platform_base_url')"""
 
     default: str = ""
     """Default value if the config path cannot be resolved"""
+
+    env_var: str = ""
+    """Process environment variable to read instead of global_settings (e.g., 'NHX_CODE_REVISION')"""
+
+    def __post_init__(self) -> None:
+        if bool(self.config_path) == bool(self.env_var):
+            raise ValueError(f"{self.marker}: set exactly one of config_path and env_var")
 
 
 # Define all environment variable mappings here
@@ -61,6 +72,10 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(marker="STUDIO_UI_VITE_SANDBOX_ENABLED", config_path="studio.sandbox_enabled"),
     EnvMapping(marker="STUDIO_UI_VITE_STUDIO_FLYWHEEL_ENABLED", config_path="studio.flywheel_enabled"),
     EnvMapping(marker="STUDIO_UI_VITE_TELEMETRY_ENABLED", config_path="studio.telemetry_enabled", default="false"),
+    # The platform's code revision, which the API image sets at runtime (see
+    # nhx.platform_runner.version.get_revision). Injecting it here instead of at
+    # build time keeps the Studio UI build independent of the commit, so it caches.
+    EnvMapping(marker="STUDIO_UI_VITE_VERSION_SHA", env_var="NHX_CODE_REVISION"),
     # Feature Flags (VITE_FF_* prefix)
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED",

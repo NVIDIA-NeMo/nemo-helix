@@ -484,6 +484,44 @@ class TestStudioConfigEnvReplacements:
 
         assert StudioConfig().env_replacements["STUDIO_UI_VITE_DEFAULT_MODEL"] == ""
 
+    def test_code_revision_reaches_the_version_marker(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: {})
+        monkeypatch.setenv("NHX_CODE_REVISION", " 0123abcd \n")
+
+        assert StudioConfig().env_replacements["STUDIO_UI_VITE_VERSION_SHA"] == "0123abcd"
+
+    def test_version_marker_is_empty_without_a_code_revision(self, monkeypatch: pytest.MonkeyPatch):
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(common_config.Configuration, "get_global_settings_from_env", lambda: {})
+        monkeypatch.delenv("NHX_CODE_REVISION", raising=False)
+
+        assert StudioConfig().env_replacements["STUDIO_UI_VITE_VERSION_SHA"] == ""
+
+    def test_version_marker_ignores_a_same_named_global_setting(self, monkeypatch: pytest.MonkeyPatch):
+        """An env_var mapping reads only the process environment, never global settings."""
+        from nhx.common import config as common_config
+
+        monkeypatch.setattr(
+            common_config.Configuration, "get_global_settings_from_env", lambda: {"NHX_CODE_REVISION": "from-config"}
+        )
+        monkeypatch.delenv("NHX_CODE_REVISION", raising=False)
+
+        assert StudioConfig().env_replacements["STUDIO_UI_VITE_VERSION_SHA"] == ""
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"config_path": "studio.default_model", "env_var": "NEMO_DEFAULT_MODEL"}],
+        ids=["neither", "both"],
+    )
+    def test_env_mapping_needs_exactly_one_source(self, kwargs: dict[str, str]):
+        from nhx.studio.env_mappings import EnvMapping
+
+        with pytest.raises(ValueError, match="exactly one of config_path and env_var"):
+            EnvMapping(marker="STUDIO_UI_VITE_EXAMPLE", **kwargs)
+
     def test_env_replacements_returns_dict(self):
         """Test that env_replacements returns a dict."""
         config = StudioConfig()
