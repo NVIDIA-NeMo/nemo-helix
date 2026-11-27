@@ -125,13 +125,15 @@ async def test_a_task_job_reports_its_trials_in_its_own_status_details(task_spec
     async with scope(harbor_job):
         pass
 
-    trials = reported[0][TRIALS_STATUS_KEY]
+    # The writer keeps only the newest pending snapshot, so the last one, written before the scope exits, is
+    # the trial the job never ran.
+    trials = reported[-1][TRIALS_STATUS_KEY]
     assert [(t["trial"], t["phase"], t["session_id"]) for t in trials] == [
-        ("hello__a", "pending", f"{task_spec.run_id}-task-1:hello__a")
+        ("hello__a", "cancelled", f"{task_spec.run_id}-task-1:hello__a")
     ]
-    assert reported[0][TRIAL_COUNTS_STATUS_KEY] == {
+    assert reported[-1][TRIAL_COUNTS_STATUS_KEY] == {
         "total": 1,
-        "phases": {"pending": 1},
+        "phases": {"cancelled": 1},
         "rewarded": 0,
         "reward": None,
         "errors": {},

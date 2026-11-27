@@ -67,6 +67,7 @@ class Harbor:
         )
         for hook in self.hooks.get(event, []):
             await hook(hook_event)
+        await _reported()
 
     async def run(self, config: TrialConfig, *, error: str | None = None, reward: float | None = 1.0) -> None:
         """One attempt: started, agent, verifier, ended."""
@@ -89,6 +90,11 @@ def _error(kind: str) -> ExceptionInfo:
     return ExceptionInfo(
         exception_type=kind, exception_message=f"{kind}: boom", exception_traceback="", occurred_at=STARTED
     )
+
+
+async def _reported() -> None:
+    """Let the reports the hooks scheduled in the background reach ``publish``."""
+    await asyncio.sleep(0)
 
 
 class Reports:
@@ -121,6 +127,7 @@ async def test_every_planned_trial_is_reported_pending_with_its_session(job: Job
     configs = job._remaining_trial_configs
 
     async with _reporter(reports).job_scope()(job):
+        await _reported()
         trials = reports.last()
 
     assert [trial.trial for trial in trials] == [config.trial_name for config in configs]
@@ -308,3 +315,41 @@ async def test_a_job_with_many_trials_reports_their_counts_without_the_list(job:
     }
     # The job stopped before the second trial ended.
     assert published[-1][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"succeeded": 1, "cancelled": 1}
+
+
+async def test_a_hook_returns_before_a_slow_report_is_written(job: Job, harbor: Harbor) -> None:
+    """Harbor waits for each hook before the trial moves on, so a slow status write never holds up the trials."""
+    first, _ = job._remaining_trial_configs
+    release = asyncio.Event()
+    written: list[dict[str, Any]] = []
+
+    async def slow(details: dict[str, Any]) -> None:
+        await release.wait()
+        written.append(details)
+
+    reporter = TrialProgressReporter(slow, reward_key="reward", report_trials=False)
+    scope = reporter.job_scope()(job)
+    await scope.__aenter__()
+
+    await asyncio.wait_for(harbor.run(first), timeout=1)  # every hook returned while no write had finished
+
+    assert written == []
+    release.set()
+    await scope.__aexit__(None, None, None)
+    assert len(written) == 6  # planned, started, agent, verifying, ended, then the unrun trial cancelled at exit
+
+
+async def test_the_last_report_is_written_before_the_scope_exits(job: Job, harbor: Harbor) -> None:
+    """The job's final counts reach its status details even when every write is slow."""
+    first, second = job._remaining_trial_configs
+    written: list[dict[str, Any]] = []
+
+    async def slow(details: dict[str, Any]) -> None:
+        await asyncio.sleep(0.01)
+        written.append(details)
+
+    async with TrialProgressReporter(slow, reward_key="reward", report_trials=False).job_scope()(job):
+        await harbor.run(first)
+        await harbor.run(second, reward=0.0)
+
+    assert written[-1][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"succeeded": 2}

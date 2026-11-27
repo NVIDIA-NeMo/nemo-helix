@@ -5,8 +5,8 @@
 
 The reporter follows Harbor's trial lifecycle hooks and, after each event, reports the trials counted by phase, and
 optionally the whole trial list (see :mod:`nemo_evals.taskset_runs.trials`), through a ``publish`` callback: the
-job's status details. Reports are best effort and never fail or stall the job for long; the trial results Harbor
-writes stay authoritative.
+job's status details. Reports go out in the background, so a slow status write never holds up a trial; they are best
+effort and never fail the job. The trial results Harbor writes stay authoritative.
 """
 
 from __future__ import annotations
@@ -88,6 +88,10 @@ class TrialProgressReporter:
     Job's readers show trial by trial; a job running thousands of trials leaves it off, since each report
     rewrites it whole. ``session_id`` names each trial's Intake session, so readers can link a settled trial to
     its traces.
+
+    Harbor waits for each hook before the trial moves on, so a hook only records the change and schedules its
+    report; reports start in the order they were made. The job's scope waits for them when it exits, so the last
+    counts are written before the job ends.
     """
 
     def __init__(
@@ -107,7 +111,7 @@ class TrialProgressReporter:
         self._trials: dict[str, TrialProgress] = {}
         self._ended: dict[str, int] = {}
         self._retry = RetryConfig()
-        self._lock = asyncio.Lock()
+        self._reports: list[asyncio.Task[None]] = []
 
     def job_scope(self) -> HarborJobScope:
         """The scope a Harbor runner enters around each job's ``run()``."""
@@ -134,7 +138,7 @@ class TrialProgressReporter:
         job.on_verification_started(self._on(TrialPhase.VERIFYING))
         job.on_trial_ended(self._ended_attempt)
         job.on_trial_cancelled(self._cancelled)
-        await self._report()
+        self._report()
 
         try:
             yield
@@ -149,12 +153,14 @@ class TrialProgressReporter:
 
             if stopped:
                 self._trials.update(stopped)
-                report = asyncio.ensure_future(self._report())
-                try:
-                    await asyncio.shield(report)
-                except asyncio.CancelledError:
-                    await report
-                    raise
+                self._report()
+
+            reported = asyncio.gather(*self._reports)
+            try:
+                await asyncio.shield(reported)
+            except asyncio.CancelledError:
+                await reported
+                raise
 
     def _plan(self, config: TrialConfig) -> None:
         name = config.trial_name
@@ -198,7 +204,7 @@ class TrialProgressReporter:
                 update["started_at"] = trial.started_at or event.result.started_at or event.timestamp
 
             self._trials[trial.trial] = trial.model_copy(update=update)
-            await self._report()
+            self._report()
 
         return hook
 
@@ -227,25 +233,27 @@ class TrialProgressReporter:
             }
         )
 
-        await self._report()
+        self._report()
 
     async def _cancelled(self, event: TrialHookEvent) -> None:
         trial = self._trial(event)
         self._trials[trial.trial] = trial.model_copy(
             update={"phase": TrialPhase.CANCELLED, "finished_at": event.timestamp}
         )
-        await self._report()
+        self._report()
 
     def _trial(self, event: TrialHookEvent) -> TrialProgress:
         """The tracked trial of ``event``, planning it first if Harbor runs a trial it didn't plan."""
         self._plan(event.config)
         return self._trials[event.config.trial_name]
 
-    async def _report(self) -> None:
-        """Report every trial as it stands now; a slow or failed report is logged, never raised."""
-        async with self._lock:
-            trials = list(self._trials.values())
-            details: dict[str, Any] = {TRIAL_COUNTS_STATUS_KEY: count_trials(trials).model_dump(mode="json")}
-            if self._report_trials:
-                details[TRIALS_STATUS_KEY] = [trial.model_dump(mode="json") for trial in trials]
-            await publish_best_effort(self._publish, details, timeout=self._publish_timeout)
+    def _report(self) -> None:
+        """Report every trial as it stands now, in the background; a slow or failed report is logged, never raised."""
+        trials = list(self._trials.values())
+        details: dict[str, Any] = {TRIAL_COUNTS_STATUS_KEY: count_trials(trials).model_dump(mode="json")}
+        if self._report_trials:
+            details[TRIALS_STATUS_KEY] = [trial.model_dump(mode="json") for trial in trials]
+        self._reports = [report for report in self._reports if not report.done()]
+        self._reports.append(
+            asyncio.ensure_future(publish_best_effort(self._publish, details, timeout=self._publish_timeout))
+        )

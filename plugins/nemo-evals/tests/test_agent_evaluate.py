@@ -667,8 +667,9 @@ async def test_an_agent_eval_job_counts_its_harbor_trials_without_listing_them(
     async with scope(harbor_job):
         pass
 
-    assert reported[0] == {
-        TRIAL_COUNTS_STATUS_KEY: {"total": 1, "phases": {"pending": 1}, "rewarded": 0, "reward": None, "errors": {}}
+    # The writer keeps only the newest pending snapshot; the last, written before the scope exits, is the final count.
+    assert reported[-1] == {
+        TRIAL_COUNTS_STATUS_KEY: {"total": 1, "phases": {"cancelled": 1}, "rewarded": 0, "reward": None, "errors": {}}
     }
 
 
