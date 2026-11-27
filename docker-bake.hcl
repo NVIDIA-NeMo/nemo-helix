@@ -615,6 +615,18 @@ target "nhx-python-base" {
   platforms  = get_platforms()
 }
 
+# Python, OS packages, uv and the base image's venv, with no input from the build context. The tasks
+# and API images install locked third-party packages on it so a registry-cache read can reuse them.
+target "nhx-python-deps-base" {
+  target     = "nhx-python-deps-base"
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.nhx-python-base"
+  args = {
+    NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
+  }
+  platforms  = get_platforms()
+}
+
 target "nhx-python-base-builder" {
   target     = "nhx-python-base-builder"
   context    = "."
@@ -740,6 +752,7 @@ target "nhx-api-docker" {
   dockerfile = "docker/Dockerfile.nhx-api"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
+    nhx-python-deps-base      = "target:nhx-python-deps-base"
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
@@ -767,6 +780,7 @@ target "nhx-agents-deepagents-e2e-docker" {
   dockerfile = "docker/Dockerfile.nhx-api"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
+    nhx-python-deps-base      = "target:nhx-python-deps-base"
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
@@ -818,6 +832,7 @@ target "nhx-tasks-docker" {
   dockerfile = "docker/Dockerfile.nhx-tasks"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
+    nhx-python-deps-base      = "target:nhx-python-deps-base"
     nhx-workspace             = "target:nhx-workspace"
     root-busybox              = "target:root-busybox"
   }
@@ -839,6 +854,7 @@ target "nhx-tasks-smoke-test" {
   dockerfile = "docker/Dockerfile.nhx-tasks"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
+    nhx-python-deps-base      = "target:nhx-python-deps-base"
     nhx-workspace             = "target:nhx-workspace"
     root-busybox              = "target:root-busybox"
   }
@@ -861,6 +877,7 @@ target "nhx-tasks-openshell-docker" {
   dockerfile = "docker/Dockerfile.nhx-tasks"
   contexts = {
     nhx-python-base           = "target:nhx-python-base"
+    nhx-python-deps-base      = "target:nhx-python-deps-base"
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     root-busybox              = "target:root-busybox"

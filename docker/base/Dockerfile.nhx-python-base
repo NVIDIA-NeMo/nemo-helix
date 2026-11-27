@@ -5,23 +5,18 @@
 #######
 # NHX Python Base Images
 #
-# Two builder stages:
-#
+# nhx-python-toolchain        - OS packages and uv, with no input from the build context
 # nhx-python-base-builder     - minimal runtime base (API, CPU tasks)
+# nhx-python-deps-base        - the same venv and settings as the runtime base, for installing
+#                               locked third-party packages (see Dockerfile.nhx-tasks)
 # nhx-python-dev-base-builder - runtime base + dev tools for building native extensions
 #######
 
 ARG NHX_PYTHON_IMAGE=python:3.13.16-slim-trixie
-FROM ${NHX_PYTHON_IMAGE} AS nhx-python-base-builder
-
-COPY docker/scripts/collect-apt-sources.sh \
-    docker/scripts/collect-cargo-crate-sources.py \
-    docker/scripts/collect-cpython-source.py \
-    docker/scripts/collect-go-module-sources.py \
-    docker/scripts/collect-pinned-sources.py \
-    docker/scripts/collect-python-sdists.py \
-    docker/scripts/collect-workspace-sdists.py \
-    /usr/local/bin/
+# Nothing in this stage may come from the build context. A registry-cache read can match a RUN
+# that follows a COPY of changed files only when no earlier step took build-context input, and
+# nhx-python-deps-base relies on that to keep its third-party install cached.
+FROM ${NHX_PYTHON_IMAGE} AS nhx-python-toolchain
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     build-essential \
@@ -47,12 +42,36 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 
 WORKDIR /app
 
+FROM nhx-python-toolchain AS nhx-python-base-builder
+
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cargo-crate-sources.py \
+    docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-go-module-sources.py \
+    docker/scripts/collect-pinned-sources.py \
+    docker/scripts/collect-python-sdists.py \
+    docker/scripts/collect-workspace-sdists.py \
+    /usr/local/bin/
+
 # Update each installed Python environment and rebuild embedded Go TLS clients.
 RUN --mount=from=golang:1.27.4,source=/usr/local/go,target=/usr/local/go,readonly \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
     GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
+RUN uv venv --seed --python=3.13 /app/.venv
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/app/.venv \
+    PATH=/app/.venv/bin:$PATH
+
+# Keep the venv and ENV identical to nhx-python-base-builder's, so packages installed here match
+# what the same `uv sync` installs there.
+FROM nhx-python-toolchain AS nhx-python-deps-base
 
 RUN uv venv --seed --python=3.13 /app/.venv
 

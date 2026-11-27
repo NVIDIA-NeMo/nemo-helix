@@ -4,17 +4,26 @@
 
 # NHX API - All Python services (core + application)
 
-ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_DEPS_BASE=nhx-python-deps-base
 ARG NHX_API_RUNTIME_BASE=nhx-python-base
 
-FROM ${NHX_PYTHON_BASE} AS builder
+# Third-party packages, installed from the lock and the workspace members'
+# pyproject.toml files only, so this stage stays cached until uv.lock or a
+# member's metadata changes. It builds on nhx-python-deps-base, which takes
+# nothing from the build context: on top of nhx-python-base, a registry-cache
+# read re-runs this sync even when the files it copies are unchanged.
+# A new member outside these globs fails the sync.
+FROM ${NHX_PYTHON_DEPS_BASE} AS third-party
 ARG NHX_API_DEPENDENCY_GROUP=functional-services
-COPY --from=nhx-workspace . .
-# Put the generated authorization policy into the source package before uv
-# installs it. This keeps the artifact aligned with the venv's actual Python
-# version instead of assuming a hard-coded site-packages path.
-COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
-
+COPY --parents \
+    pyproject.toml uv.lock \
+    packages/*/pyproject.toml \
+    plugins/*/pyproject.toml \
+    plugins/*/examples/*/*/pyproject.toml \
+    services/*/pyproject.toml \
+    services/*/*/pyproject.toml \
+    tools/*/pyproject.toml \
+    ./
 # --reinstall-package pip forces uv to uninstall the seed pip (planted by
 # `uv venv --seed` in the base image) via its RECORD before installing the
 # locked pip, so exactly one pip remains. Without it, uv copies the locked pip
@@ -22,7 +31,31 @@ COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth
 # dirs and a mixed file tree whose `pip` import is broken.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable \
-    --reinstall-package pip
+    --no-install-workspace --reinstall-package pip
+
+# Build on the third-party stage rather than copying its venv: a multi-GB COPY
+# re-runs on every build. The source collectors are the ones nhx-python-base
+# installs, and the trust step below updates this stage's system Python as
+# nhx-python-base's does.
+FROM third-party AS builder
+ARG NHX_API_DEPENDENCY_GROUP=functional-services
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-cargo-crate-sources.py \
+    docker/scripts/collect-cpython-source.py \
+    docker/scripts/collect-go-module-sources.py \
+    docker/scripts/collect-pinned-sources.py \
+    docker/scripts/collect-python-sdists.py \
+    docker/scripts/collect-workspace-sdists.py \
+    /usr/local/bin/
+COPY --from=nhx-workspace . .
+# Put the generated authorization policy into the source package before uv
+# installs it. This keeps the artifact aligned with the venv's actual Python
+# version instead of assuming a hard-coded site-packages path.
+COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
+
+# Install the workspace members on top; the third-party packages are already in place.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --only-group "${NHX_API_DEPENDENCY_GROUP}" --no-editable
 
 # The release workspace relock is blocked by the DataDesignerPlugins index.
 # Apply the same narrow post-sync fix as nhx-tasks until it can be relocked.
@@ -85,6 +118,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # only sets ownership on directories it creates, so seed them from here.
 RUN mkdir -p /nvs-skel/home/nvs/.cache /nvs-skel/app/.anonymizer-artifacts && \
     chmod -R g=u /nvs-skel/home/nvs /nvs-skel/app/.anonymizer-artifacts
+# The runtime image copies the third-party venv as its own layer, which stays
+# the same blob while uv.lock is unchanged, then the overlay of what this stage
+# added or changed, then removes what it removed.
+RUN --mount=type=bind,from=third-party,source=/app/.venv,target=/third-party-venv,readonly \
+    --mount=type=bind,source=docker/scripts/split-venv-layers.py,target=/tmp/split-venv-layers.py,readonly \
+    python3 /tmp/split-venv-layers.py split \
+        --base /third-party-venv --venv /app/.venv \
+        --overlay /app/.venv-overlay --removed /app/.venv-removed.txt
 
 FROM ${NHX_API_RUNTIME_BASE} AS runtime
 WORKDIR /app
@@ -122,7 +163,8 @@ COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 # COPY merges directories: do not retain the runtime base's seeded pip metadata.
 RUN rm -rf /app/.venv
-COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
+COPY --chown=1000:1000 --from=third-party /app/.venv /app/.venv
+COPY --chown=1000:1000 --from=builder /app/.venv-overlay/ /app/.venv/
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-api/ /usr/share/nemo-helix/source-distributions/nhx-api/
 ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
@@ -134,6 +176,9 @@ COPY --chown=1000:1000 --from=builder /tmp/fastembed_cache /tmp/fastembed_cache
 COPY docker/scripts/cve-cleanup.sh /bin/
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
+    --mount=type=bind,source=docker/scripts/split-venv-layers.py,target=/tmp/split-venv-layers.py,readonly \
+    --mount=type=bind,from=builder,source=/app/.venv-removed.txt,target=/tmp/venv-removed.txt,readonly \
+    python /tmp/split-venv-layers.py remove /tmp/venv-removed.txt && \
     sh /bin/cve-cleanup.sh && \
     python /tmp/remove-listed-files.py /tmp/file-removals.txt
 ARG NHX_PLATFORM_VERSION=dev
