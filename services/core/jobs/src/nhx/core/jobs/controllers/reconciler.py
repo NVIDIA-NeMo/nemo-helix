@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import datetime
 import logging
 import threading
@@ -20,6 +21,7 @@ from nemo_helix_plugin.jobs.types import (
     JobStatusDetailsUpdate,
     ListStepsQueryParams,
 )
+from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, EntityNotFoundError, SyncEntityClient
 from nhx.common.jobs.schemas import HelixJobStatus
@@ -43,6 +45,7 @@ from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.delegation_cleanup import JobDelegationCleanup
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
+from nhx.core.jobs.controllers.job_groups import JobGroupReconciler
 from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
     HelixJob,
@@ -51,6 +54,7 @@ from nhx.core.jobs.entities import (
     HelixJobStorageReclaim,
     JobStorageTarget,
 )
+from nhx.core.jobs.job_groups import HelixJobGroup
 from opentelemetry import metrics, trace
 
 tracer = trace.get_tracer(__name__)
@@ -66,6 +70,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         stop_signal: threading.Event | None = None,
         storage_config: JobsStorageConfig | None = None,
         system_entity_client: SyncEntityClient | None = None,
+        job_groups: JobGroupReconciler | None = None,
     ) -> None:
         self._backend_registry = backend_registry
         self._nemo_client = nemo_client
@@ -89,6 +94,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         ).as_service("jobs", internal=True)
 
         self._delegation_cleanup = JobDelegationCleanup(self._system_entities)
+        self._job_groups = job_groups
 
         self._step_reconciliation_total = meter.create_counter(
             name="nhx.jobs.reconciler.step.reconciliation.total",
@@ -246,6 +252,17 @@ class JobReconciler(HeartbeatMixin, Controller):
             self._cleanup_pending_jobs()
             self._enforce_storage_retention()
 
+        if self._job_groups is not None:
+            try:
+                asyncio.run(
+                    self._job_groups.step(
+                        stopped=self._stop_signal.is_set if self._stop_signal else lambda: False,
+                        on_progress=self.emit_heartbeat,
+                    )
+                )
+            except Exception:
+                logger.exception("Could not list JobGroups for reconciliation")
+
     def _recover_unstarted_reruns(self) -> None:
         """Retire a rerun whose Attempt was saved without its first Step.
 
@@ -262,8 +279,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         retries status projection from the persisted ERROR record after failures
         or controller replacement.
 
-        Initial creation uses pending-Job cleanup. A rerun belongs to an
-        existing Job whose earlier Attempts and results must remain intact.
+        Both standalone and grouped initial creation use pending-Job cleanup.
         """
         try:
             response = self._system_entities.list(
@@ -371,11 +387,14 @@ class JobReconciler(HeartbeatMixin, Controller):
                     continue
             try:
                 if job.status == HelixJobStatus.CREATION_PENDING:
+                    if self._preserve_recoverable_group_setup(job):
+                        continue
                     # Claim abandoned setup before cleanup; stale publication loses its version.
                     job.status = HelixJobStatus.DELETION_PENDING
                     job = self._system_entities.update(job)
                 self._delegation_cleanup.cleanup_job(job, on_progress=self.emit_heartbeat)
-                if not self._settle_pending_storage(job):
+                job = self._settle_pending_storage(job)
+                if job is None:
                     continue
                 job = self._settle_pending_artifacts(job)
                 self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
@@ -393,27 +412,76 @@ class JobReconciler(HeartbeatMixin, Controller):
             finally:
                 self.emit_heartbeat()
 
-    def _settle_pending_storage(self, job: HelixJob) -> bool:
-        targets = storage_targets(job.platform_spec)
-        if not targets:
+    def _preserve_recoverable_group_setup(self, job: HelixJob) -> bool:
+        group_id = job.parent
+        if group_id is None:
+            return False
+        try:
+            group = self._system_entities.get_by_id(HelixJobGroup, group_id)
+        except EntityNotFoundError:
+            return False
+        if group.workspace != job.workspace:
+            return False
+        if (
+            job.fileset_id is not None or job.output_location is not None
+        ) and group.controller_state.can_resume_job_setup(job.id, job_name=job.name, group_id=group.id):
             return True
+        if group.controller_state.record_abandoned_creation(job.id, job_name=job.name, group_id=group.id):
+            self._system_entities.update(group)
+        return False
+
+    def _settle_pending_storage(self, job: HelixJob) -> HelixJob | None:
         name = HelixJobStorageReclaim.name_for_job(job.id)
         try:
             record = self._system_entities.get(HelixJobStorageReclaim, name, workspace=SYSTEM_WORKSPACE)
         except EntityNotFoundError:
-            record = self._system_entities.create(
-                HelixJobStorageReclaim(
-                    name=name,
-                    workspace=SYSTEM_WORKSPACE,
-                    job_id=job.id,
-                    job_workspace=job.workspace,
-                    job_name=job.name,
-                    targets=targets,
+            record = None
+
+        if record is not None and record.targets:
+            return None
+
+        settled = True
+        storage_owner = job.id if job.parent is not None else job.name
+        for target in self._storage_targets_for_deletion(job):
+            if job.storage_deletion_completed(target):
+                continue
+            context = {"job": job.id, "provider": target.provider, "profile": target.profile}
+            try:
+                backend = self._backend_registry.get_backend(provider=target.provider, profile=target.profile)
+            except KeyError:
+                logger.warning(
+                    "Restore the execution provider and profile with its original storage configuration to finish Job deletion",
+                    extra=context,
                 )
+                settled = False
+                continue
+            try:
+                if not backend.reclaim_persistent_storage(job.workspace, storage_owner, job_id=job.id):
+                    settled = False
+                    continue
+            except Exception:
+                logger.exception("Could not reclaim Job storage on execution profile", extra=context)
+                settled = False
+                continue
+            finally:
+                self.emit_heartbeat()
+            job = self._system_entities.update(job.with_completed_storage_deletion(target))
+        return job if settled else None
+
+    def _storage_targets_for_deletion(self, job: HelixJob) -> list[JobStorageTarget]:
+        targets = storage_targets(job.platform_spec)
+        parent = ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=job.id)
+        page = 1
+        while True:
+            attempts = self._system_entities.list(
+                HelixJobAttempt, workspace=job.workspace, filter_operation=parent, page=page, page_size=100
             )
-        # Empty records stay durable until the Job is gone, so restart cannot
-        # reintroduce a finished backend cleanup workload.
-        return self._reclaim_storage(record)
+            for attempt in attempts.data:
+                targets.extend(target for target in storage_targets(attempt.platform_spec) if target not in targets)
+            self.emit_heartbeat()
+            if page >= attempts.pagination.total_pages:
+                return targets
+            page += 1
 
     def _settle_pending_artifacts(self, job: HelixJob) -> HelixJob:
         if job.output_location is not None:
@@ -527,7 +595,9 @@ class JobReconciler(HeartbeatMixin, Controller):
                     },
                 )
             else:
-                if not backend.reclaim_persistent_storage(reclaim.job_workspace, reclaim.job_name):
+                if not backend.reclaim_persistent_storage(
+                    reclaim.job_workspace, reclaim.job_name, job_id=reclaim.job_id
+                ):
                     continue
             reclaim = self._system_entities.update(
                 reclaim.model_copy(update={"targets": [pending for pending in reclaim.targets if pending != target]})
@@ -538,10 +608,17 @@ class JobReconciler(HeartbeatMixin, Controller):
         job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
         # An older attempt's stopped step must not reclaim storage from under a rerun. It is not
         # marked either: step names repeat across attempts, so the update could land on the rerun's.
-        current_attempt_id = getattr(job, "attempt_id", None)
-        if current_attempt_id is not None and step.attempt_id != current_attempt_id:
+        if job.attempt_id != step.attempt_id:
             return
-        targets = storage_targets(job.platform_spec)
+        try:
+            attempt = self._system_entities.find_one(
+                HelixJobAttempt,
+                workspace=step.workspace,
+                filter_obj={"id": step.attempt_id, "parent": job.id},
+            )
+        except EntityNotFoundError:
+            return
+        targets = storage_targets(attempt.platform_spec)
         if not targets:
             self._mark_step_swept(step)
             return
@@ -561,6 +638,20 @@ class JobReconciler(HeartbeatMixin, Controller):
                 return
             if not self._mark_storage_reclaimed(step):
                 return
+
+        try:
+            current = self._system_entities.get_by_id(HelixJob, job.id)
+            if current.current_attempt_id != step.attempt_id or current.status not in {
+                HelixJobStatus.PAUSED,
+                HelixJobStatus.ERROR,
+                HelixJobStatus.CANCELLED,
+            }:
+                return
+            # Advance the Job version after marking the Attempt. A retry that missed
+            # the mark either already published or now has a stale Job version.
+            self._system_entities.update(current)
+        except (EntityConflictError, EntityNotFoundError):
+            return
 
         self._queue_storage_reclaim(job.id, step, targets)
         swept_status = step.status

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -13,6 +13,7 @@ from nhx.core.jobs.controllers.admission import AdmissionDecision
 from nhx.core.jobs.controllers.backends.exceptions import ResourceAllocationError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
+from nhx.core.jobs.controllers.job_group_admission import JobGroupAdmission, JobGroupAdmissionDeferred
 from nhx.core.jobs.controllers.scheduler import JobScheduler
 from pytest import fixture
 
@@ -71,6 +72,26 @@ def test_does_schedule_job(
     assert len(test_backend.mock.schedule_calls) == 1
     assert test_backend.mock.schedule_calls[0]["step"].id == test_step_created.id
     assert test_backend.mock.sync_calls == []
+
+
+def test_scheduler_does_not_dispatch_until_group_admission_succeeds(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+) -> None:
+    group_admission = Mock(spec=JobGroupAdmission)
+    group_admission.reserve.side_effect = JobGroupAdmissionDeferred("Waiting for JobGroup capacity")
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, group_admission=group_admission)
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created])
+    backend = backend_registry.get_backend(provider="cpu", profile="default")
+    assert isinstance(backend, MockDockerCPUJobBackend)
+
+    scheduler.step()
+
+    group_admission.reserve.assert_called_once()
+    assert backend.mock.schedule_calls == []
+    assert mock_jobs_client.update_attempt_step_status.call_args.kwargs["body"].status == HelixJobStatus.QUEUED
 
 
 def test_scheduling_deferred_keeps_step_created_with_visible_status_details(

@@ -164,3 +164,11 @@ class ConcurrencyAdmission:
         if principal is not None:
             self._by_user[principal] += 1
         return AdmissionDecision.admit()
+
+    def release(self, step: HelixJobStepWithContext) -> None:
+        """Undo an admission recorded in this pass before dispatch."""
+        self._by_executor[extract_provider_profile(step)] -= 1
+        self._by_workspace[step.workspace] -= 1
+        principal = principal_of(step)
+        if principal is not None:
+            self._by_user[principal] -= 1

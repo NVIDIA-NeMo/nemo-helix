@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+from functools import partial
 from typing import Any
 
 from kubernetes import client
@@ -1186,7 +1187,7 @@ def cleanup_job_persistent_storage(
     batch_v1: client.BatchV1Api,
     pvc_name: str,
     workspace: str,
-    job_id: str,
+    storage_key: str,
     step_name: str,
     permissions_image: str,
     execution_backend: str,
@@ -1194,50 +1195,97 @@ def cleanup_job_persistent_storage(
     job_metadata: KubernetesObjectMetadata,
     pod_metadata: KubernetesObjectMetadata,
     pod_security_context: dict[str, Any] | None = None,
+    *,
+    job_id: str,
 ) -> None:
-    """
-    Create a Kubernetes Job to clean up persistent storage for a completed job.
+    """Start storage cleanup for a workload with a known Helix Job ID."""
+    _cleanup_job_persistent_storage(
+        namespace=namespace,
+        batch_v1=batch_v1,
+        pvc_name=pvc_name,
+        workspace=workspace,
+        storage_key=storage_key,
+        step_name=step_name,
+        permissions_image=permissions_image,
+        execution_backend=execution_backend,
+        execution_profile=execution_profile,
+        job_metadata=job_metadata,
+        pod_metadata=pod_metadata,
+        pod_security_context=pod_security_context,
+        job_id=job_id,
+    )
 
-    Labels are built from the same execution profile the job was submitted with (including
-    backend name, profile name, and profile-specific job/pod metadata such as Istio sidecar settings).
 
-    Args:
-        namespace: Kubernetes namespace
-        batch_v1: BatchV1Api instance for creating Jobs
-        pvc_name: Name of the PersistentVolumeClaim
-        workspace: Workspace ID
-        job_id: Job ID
-        step_name: Step ID
-        permissions_image: Docker image to use for the cleanup job
-        execution_backend: Backend that ran the job (e.g. kubernetes_job, volcano_job).
-        execution_profile: Execution profile name (e.g. default, a100) that ran the job.
-        job_metadata: Optional metadata (labels/annotations) to merge onto the cleanup Job.
-        pod_metadata: Optional metadata (labels/annotations) to merge onto the cleanup Job's pod template.
-        pod_security_context: Same pod security context as workload jobs (runAsUser/fsGroup, etc.) so cleanup
-            can remove files on NFS and similar storage where the workload user owns the data.
-    """
-    # Workload cleanup and retention share this directory. A second rm races the first.
-    labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
-    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
-    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
-        labels.pop(label, None)
-    selector = ",".join(f"{key}={value}" for key, value in labels.items())
-    inflight = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items or []
+def cleanup_workload_persistent_storage(
+    namespace: str,
+    batch_v1: client.BatchV1Api,
+    pvc_name: str,
+    workspace: str,
+    storage_key: str,
+    step_name: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None = None,
+    *,
+    workload_labels: dict[str, str],
+) -> None:
+    """Start cleanup for a finished workload, including workloads with legacy labels."""
+    job_id = workload_labels.get(OWNER_ID_LABEL)
+    cleanup = (
+        partial(_cleanup_job_persistent_storage, job_id=None)
+        if job_id is None
+        else partial(cleanup_job_persistent_storage, job_id=job_id)
+    )
+    cleanup(
+        namespace=namespace,
+        batch_v1=batch_v1,
+        pvc_name=pvc_name,
+        workspace=workspace,
+        storage_key=storage_key,
+        step_name=step_name,
+        permissions_image=permissions_image,
+        execution_backend=execution_backend,
+        execution_profile=execution_profile,
+        job_metadata=job_metadata,
+        pod_metadata=pod_metadata,
+        pod_security_context=pod_security_context,
+    )
+
+
+def _cleanup_job_persistent_storage(
+    namespace: str,
+    batch_v1: client.BatchV1Api,
+    pvc_name: str,
+    workspace: str,
+    storage_key: str,
+    step_name: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None = None,
+    *,
+    job_id: str | None,
+) -> None:
+    # Workload cleanup and retention share this directory.
     if any(
-        _finished_condition(item) != "Failed"
-        and any(
-            volume.name == JOB_STORAGE_VOLUME_NAME
-            and volume.persistent_volume_claim is not None
-            and volume.persistent_volume_claim.claim_name == pvc_name
-            for volume in item.spec.template.spec.volumes or []
+        _finished_condition(item) is None
+        or (
+            _finished_condition(item) == "Complete"
+            and (item.metadata.labels or {}).get(OWNER_ID_LABEL) in (None, job_id)
         )
-        for item in inflight
+        for item in _storage_cleanup_jobs(batch_v1, namespace, pvc_name, workspace, storage_key)
     ):
         return
     cleanup_job_name, cleanup_job = _storage_cleanup_job(
         namespace=namespace,
         pvc_name=pvc_name,
         workspace=workspace,
+        storage_key=storage_key,
         job_id=job_id,
         step_name=step_name,
         permissions_image=permissions_image,
@@ -1251,7 +1299,7 @@ def cleanup_job_persistent_storage(
         batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
         logger.info(
             "Created persistent storage cleanup job",
-            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{storage_key}"),
         )
     except ApiException as e:
         # The name is the directory. The other creator won the race.
@@ -1259,13 +1307,13 @@ def cleanup_job_persistent_storage(
             return
         logger.error(
             "Failed to create persistent storage cleanup job",
-            extra=dict(job=f"{workspace}/{job_id}", error=e),
+            extra=dict(job=f"{workspace}/{storage_key}", error=e),
             exc_info=True,
         )
 
 
 def _storage_cleanup_labels(
-    workspace: str, job_id: str, step_name: str, execution_backend: str, execution_profile: str
+    workspace: str, step_name: str, execution_backend: str, execution_profile: str
 ) -> dict[str, str]:
     # Use same common labels as regular jobs (app, managed-by, backend, profile) plus cleanup-specific labels
     cleanup_common_labels = copy.deepcopy(KUBE_JOB_SELECTOR_LABELS)
@@ -1273,13 +1321,52 @@ def _storage_cleanup_labels(
         {
             JOB_TYPE_LABEL: JOB_TYPE_STORAGE_CLEANUP,
             JOB_WORKSPACE_ID_LABEL: workspace,
-            JOB_ID_LABEL: job_id,
             JOB_STEP_NAME_LABEL: step_name,
             JOB_EXECUTION_BACKEND_LABEL: execution_backend,
             JOB_EXECUTION_PROFILE_LABEL: execution_profile,
         }
     )
     return cleanup_common_labels
+
+
+def _storage_cleanup_jobs(
+    batch_v1: client.BatchV1Api,
+    namespace: str,
+    pvc_name: str,
+    workspace: str,
+    storage_key: str,
+) -> list[client.V1Job]:
+    labels = {
+        **KUBE_JOB_SELECTOR_LABELS,
+        JOB_TYPE_LABEL: JOB_TYPE_STORAGE_CLEANUP,
+        JOB_WORKSPACE_ID_LABEL: workspace,
+    }
+    # Older cleanup Jobs labeled the directory with JOB_ID_LABEL.
+    selector = ",".join(f"{key}={value}" for key, value in {**labels, JOB_ID_LABEL: storage_key}.items())
+    response = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector)
+    jobs = {job.metadata.name: job for job in response.items or []}
+
+    name = _storage_cleanup_job_name(pvc_name, workspace, storage_key)
+    if name not in jobs:
+        try:
+            job = batch_v1.read_namespaced_job(name=name, namespace=namespace)
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+        else:
+            if all((job.metadata.labels or {}).get(key) == value for key, value in labels.items()):
+                jobs[name] = job
+
+    return [
+        job
+        for job in jobs.values()
+        if any(
+            volume.name == JOB_STORAGE_VOLUME_NAME
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in job.spec.template.spec.volumes or []
+        )
+    ]
 
 
 # Without these the namespace's LimitRange default (often several CPUs and GiB) applies, and many finished jobs'
@@ -1291,13 +1378,13 @@ STORAGE_CLEANUP_RESOURCES = client.V1ResourceRequirements(
 )
 
 
-def _storage_cleanup_job_name(pvc_name: str, workspace: str, job_id: str) -> str:
-    """DNS-1123 name for ``jobs/{workspace}/{job_id}`` on one PVC.
+def _storage_cleanup_job_name(pvc_name: str, workspace: str, storage_key: str) -> str:
+    """DNS-1123 name for ``jobs/{workspace}/{storage_key}`` on one PVC.
 
-    Hash the claim and the full folder. Truncating ``cleanup-{workspace}-{job_id}``
+    Hash the claim and the full folder. Truncating ``cleanup-{workspace}-{storage_key}``
     collides across claims and long names, and a 409 then leaves the second directory.
     """
-    folder = f"{pvc_name}/{build_job_storage_subpath(workspace, job_id)}"
+    folder = f"{pvc_name}/{build_job_storage_subpath(workspace, storage_key)}"
     return f"cleanup-{hashlib.sha256(folder.encode()).hexdigest()[:16]}"
 
 
@@ -1305,7 +1392,8 @@ def _storage_cleanup_job(
     namespace: str,
     pvc_name: str,
     workspace: str,
-    job_id: str,
+    storage_key: str,
+    job_id: str | None,
     step_name: str,
     permissions_image: str,
     execution_backend: str,
@@ -1315,16 +1403,23 @@ def _storage_cleanup_job(
     pod_security_context: dict[str, Any] | None,
 ) -> tuple[str, client.V1Job]:
     """Build the Job that removes a job's storage directory, and return its name and body."""
-    job_storage_subpath = build_job_storage_subpath(workspace, job_id)
+    job_storage_subpath = build_job_storage_subpath(workspace, storage_key)
     # Stable name: a second creator for this directory gets 409 instead of a second rm.
-    cleanup_job_name = _storage_cleanup_job_name(pvc_name, workspace, job_id)
-    cleanup_common_labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
+    cleanup_job_name = _storage_cleanup_job_name(pvc_name, workspace, storage_key)
+    cleanup_common_labels = _storage_cleanup_labels(workspace, step_name, execution_backend, execution_profile)
+
+    if job_id is not None:
+        cleanup_common_labels[OWNER_ID_LABEL] = job_id
 
     job_meta = build_metadata(cleanup_common_labels, job_metadata)
     job_meta.name = cleanup_job_name  # type: ignore[assignment]
     job_meta.namespace = namespace  # type: ignore[assignment]
 
     pod_meta = build_metadata(cleanup_common_labels, pod_metadata)
+    for metadata in (job_meta, pod_meta):
+        for label in (JOB_ID_LABEL, OWNER_ID_LABEL):
+            metadata.labels.pop(label, None)
+        metadata.labels.update(cleanup_common_labels)
 
     # Create a Job that removes the job's storage directory
     cleanup_job = client.V1Job(
@@ -1349,7 +1444,7 @@ set -ex
 # Remove the job's storage directory
 if [ -d "/vol/{job_storage_subpath}" ]; then
     rm -rf "/vol/{job_storage_subpath}"
-    echo "Removed persistent storage for job {workspace}/{job_id}"
+    echo "Removed persistent storage for job {workspace}/{storage_key}"
 else
     echo "Storage directory not found, may have been already cleaned up"
 fi
@@ -1381,6 +1476,7 @@ fi
 
 # Step name label of the cleanup Jobs that reclaim a stopped or deleted job's storage.
 STORAGE_RECLAIM_STEP_NAME = "retention"
+OWNER_ID_LABEL = "nhx.nvidia.com/owner-id"
 
 
 def reclaim_job_persistent_storage(
@@ -1388,45 +1484,35 @@ def reclaim_job_persistent_storage(
     batch_v1: client.BatchV1Api,
     pvc_name: str,
     workspace: str,
-    job_id: str,
+    storage_key: str,
     permissions_image: str,
     execution_backend: str,
     execution_profile: str,
     job_metadata: KubernetesObjectMetadata,
     pod_metadata: KubernetesObjectMetadata,
     pod_security_context: dict[str, Any] | None = None,
+    *,
+    job_id: str,
 ) -> bool:
     """Remove a job's persistent storage with a cleanup Job. Return True once the storage is gone.
 
-    The first call creates the cleanup Job and later calls poll it, so the caller keeps its
-    reclaim record until the Job succeeds. A finished cleanup Job is deleted, so a later
-    reclaim of a job with the same name runs its own. A failed one also raises, and the next
-    call starts a new one.
+    Consume finished cleanup Jobs so the next storage target can use the quota.
+    The reconciler persists completion before moving on from a successful target.
     """
-    labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
-    # The Job name depends only on the PVC and directory, so any step or profile may have created it.
-    for label in (JOB_STEP_NAME_LABEL, JOB_EXECUTION_BACKEND_LABEL, JOB_EXECUTION_PROFILE_LABEL):
-        labels.pop(label, None)
-    selector = ",".join(f"{key}={value}" for key, value in labels.items())
-    cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
-    # Providers may use the same profile name with different PVCs. A cleanup of one
-    # PVC must not count as completion of another. Inspect the mounted claim rather
-    # than adding a selector label, so existing cleanup Jobs remain discoverable.
-    cleanup_jobs = [
-        cleanup_job
-        for cleanup_job in cleanup_jobs
-        if any(
-            volume.name == JOB_STORAGE_VOLUME_NAME
-            and volume.persistent_volume_claim is not None
-            and volume.persistent_volume_claim.claim_name == pvc_name
-            for volume in cleanup_job.spec.template.spec.volumes or []
-        )
-    ]
+    cleanup_jobs = []
+    for cleanup_job in _storage_cleanup_jobs(batch_v1, namespace, pvc_name, workspace, storage_key):
+        owner = (cleanup_job.metadata.labels or {}).get(OWNER_ID_LABEL)
+        if owner in (None, job_id):
+            cleanup_jobs.append(cleanup_job)
+        elif _finished_condition(cleanup_job) is None:
+            # Cleanup for another owner or purpose can target the same directory.
+            return False
     if not cleanup_jobs:
         cleanup_job_name, cleanup_job = _storage_cleanup_job(
             namespace=namespace,
             pvc_name=pvc_name,
             workspace=workspace,
+            storage_key=storage_key,
             job_id=job_id,
             step_name=STORAGE_RECLAIM_STEP_NAME,
             permissions_image=permissions_image,
@@ -1436,8 +1522,7 @@ def reclaim_job_persistent_storage(
             pod_metadata=pod_metadata,
             pod_security_context=pod_security_context,
         )
-        # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
-        # succeed, and the next call would start another.
+        # The controller must observe completion before Kubernetes can remove this Job.
         cleanup_job.spec.ttl_seconds_after_finished = None
         try:
             batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
@@ -1447,7 +1532,7 @@ def reclaim_job_persistent_storage(
         else:
             logger.info(
                 "Created storage reclaim job",
-                extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+                extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{storage_key}"),
             )
         return False
 
@@ -1469,7 +1554,7 @@ def reclaim_job_persistent_storage(
         return False
     if "Complete" in outcomes:
         return True
-    raise JobStorageError(f"Storage reclaim job for {workspace}/{job_id} failed")
+    raise JobStorageError(f"Storage reclaim job for {workspace}/{storage_key} failed")
 
 
 def _finished_condition(job: client.V1Job) -> str | None:

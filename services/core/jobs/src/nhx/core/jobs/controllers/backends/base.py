@@ -415,7 +415,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
     @abstractmethod
     def shutdown(self): ...
 
-    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+    def reclaim_persistent_storage(self, workspace: str, job: str, *, job_id: str) -> bool:
         """Delete a job's persistent storage. Backends with durable storage override this.
 
         Return True once the storage is gone, and False while its removal is still running, so the

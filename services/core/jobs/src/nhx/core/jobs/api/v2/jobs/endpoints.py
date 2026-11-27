@@ -864,7 +864,7 @@ async def page_job_logs(
                 detail="tail cannot be combined with page_cursor; pass the returned prev_page as page_cursor without tail.",
             )
 
-        job = await dispatcher.get_job(name, workspace)
+        job = await dispatcher.resolve_job(name, workspace)
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -874,21 +874,18 @@ async def page_job_logs(
         try:
             if job.status in HelixJobStatus.lifecycle_pending():
                 raise JobOperationConflictError(f"Job '{job.name}' has creation or deletion pending.")
-            resolved_attempt_id = job.attempt_id
-            if attempt_id is not None:
-                resolved = await dispatcher.resolve_attempt_by_id(job.id, str(attempt_id), workspace)
-                if resolved is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Attempt '{attempt_id}' for job '{name}' not found in workspace '{workspace}'.",
-                    )
-                resolved_attempt_id = resolved[1].id
-            if resolved_attempt_id is None:
+            selected_attempt = job.current_attempt_id if attempt_id in (None, "current") else str(attempt_id)
+            if selected_attempt is None:
                 raise JobHasNoAttemptError(f"Job '{job.name}' has not run yet.")
-            filters: dict[str, str] = {
-                "job": job.name,
-                "job_attempt": resolved_attempt_id,
-            }
+            attempt = await dispatcher.get_attempt(selected_attempt)
+            if attempt is None or attempt.job != job.id or attempt.workspace != workspace:
+                if attempt_id is None:
+                    raise JobHasNoAttemptError(f"Current attempt for job '{job.name}' does not exist.")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Attempt '{attempt_id}' for job '{name}' not found in workspace '{workspace}'.",
+                )
+            filters = {"job": job.id if job.parent is not None else job.name, "job_attempt": attempt.id}
             if step_id:
                 filters["job_step"] = step_id
             if task_id:

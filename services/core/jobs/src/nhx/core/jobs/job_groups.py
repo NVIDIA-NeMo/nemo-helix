@@ -260,7 +260,9 @@ class JobGroupControllerState(BaseModel):
             update={"progress": member.progress.model_copy(update={"reason": member.reason or reason})}
         )
 
-    def record_abandoned_creation(self, job_id: str, *, job_name: str, group_id: str) -> bool:
+    def _find_setup_member(
+        self, job_id: str, *, job_name: str, group_id: str
+    ) -> tuple[int, JobGroupMemberState] | None:
         entry = self._find_member_by_job_id(job_id)
         if entry is None:
             entry = next(
@@ -273,6 +275,19 @@ class JobGroupControllerState(BaseModel):
                 ),
                 None,
             )
+        return entry
+
+    def can_resume_job_setup(self, job_id: str, *, job_name: str, group_id: str) -> bool:
+        if self.status not in {JobGroupStatus.PENDING, JobGroupStatus.ACTIVE}:
+            return False
+        entry = self._find_setup_member(job_id, job_name=job_name, group_id=group_id)
+        if entry is None:
+            return False
+        _, member = entry
+        return isinstance(member.progress, (_Preparing, _Tracking)) and member.reason is None
+
+    def record_abandoned_creation(self, job_id: str, *, job_name: str, group_id: str) -> bool:
+        entry = self._find_setup_member(job_id, job_name=job_name, group_id=group_id)
         if entry is None:
             return False
         index, member = entry

@@ -3910,7 +3910,7 @@ async def test_update_job_returns_none_when_job_is_deleted_after_resolution(
     resolved = await mock_store.get(HelixJob, created.name, workspace=DEFAULT_WORKSPACE)
 
     with (
-        patch.object(mock_dispatcher, "_resolve_job", new=AsyncMock(return_value=resolved)),
+        patch.object(mock_dispatcher, "resolve_job", new=AsyncMock(return_value=resolved)),
         patch.object(mock_store, "get_by_id", new=AsyncMock(side_effect=EntityNotFoundError("deleted"))),
     ):
         updated = await mock_dispatcher.update_job(

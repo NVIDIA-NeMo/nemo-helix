@@ -15,7 +15,7 @@ from kubernetes import client as kubernetes_client
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nhx.common.controller import Loop, TimedLoopWaiter, TrackLastExecutionTime
-from nhx.common.entities import EntityConflictError
+from nhx.common.entities import EntityConflictError, EntityNotFoundError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.app.constants import STORAGE_SWEPT_AT
@@ -31,7 +31,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
-from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
+from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStorageReclaim, JobStorageTarget
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -286,13 +286,13 @@ def _aged_step(
     return aged
 
 
-def _storage_spec(*, uses_storage: bool = True) -> HelixJobSpec:
+def _storage_spec(*, uses_storage: bool = True, profile: str = "default") -> HelixJobSpec:
     environment = [HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/storage")]
     return HelixJobSpec(
         steps=[
             HelixJobStepSpec(
                 name="train",
-                executor=SubprocessExecutionProvider(provider="subprocess", profile="default", command=["true"]),
+                executor=SubprocessExecutionProvider(provider="subprocess", profile=profile, command=["true"]),
                 environment=environment if uses_storage else None,
             )
         ]
@@ -317,6 +317,9 @@ def _job(
 def _reconciler(backend_registry, mock_nemo_client, storage_config: JobsStorageConfig | None = None):
     system_entities = MagicMock()
     system_entities.list.return_value = SimpleNamespace(data=[])
+    system_entities.find_one.return_value = HelixJobAttempt(
+        name="retained-attempt", job="job-id", workspace="default", platform_spec=_storage_spec()
+    )
     system_entities.update.side_effect = lambda entity: entity
     reconciler = JobReconciler(
         backend_registry,
@@ -376,7 +379,9 @@ def test_storage_retention_uses_live_job_ttl(
             paginated_response([]),
             paginated_response([step]),
         ]
+        job.attempt_id = step.attempt_id
         mock_jobs_client.get_job.return_value = data_response(job)
+        system_entities.get_by_id.return_value = SimpleNamespace(current_attempt_id=step.attempt_id, status=step.status)
         mock_jobs_client.update_job_attempt_status_details.reset_mock()
         mock_jobs_client.update_job_step_status.reset_mock()
         mock_jobs_client.cancel_job.reset_mock()
@@ -410,6 +415,43 @@ def test_storage_retention_uses_live_job_ttl(
             mock_jobs_client.cancel_job.assert_not_called()
 
 
+def test_retention_does_not_queue_storage_when_retry_publication_wins(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_error
+):
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=30))
+    system_entities.get_by_id.return_value = SimpleNamespace(
+        current_attempt_id=expired.attempt_id, status=expired.status
+    )
+    system_entities.update.side_effect = EntityConflictError("Retry published a new current Attempt")
+
+    _run_retention(reconciler, mock_jobs_client, expired, _job(attempt_id=expired.attempt_id))
+
+    mock_jobs_client.update_job_attempt_status_details.assert_called_once()
+    system_entities.update.assert_called_once()
+    system_entities.create.assert_not_called()
+
+
+def test_storage_retention_uses_the_attempts_original_profile(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_error
+):
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=30))
+    system_entities.get_by_id.return_value = SimpleNamespace(
+        current_attempt_id=expired.attempt_id, status=expired.status
+    )
+    job = _job(attempt_id=expired.attempt_id)
+    job.platform_spec = _storage_spec(profile="replacement")
+
+    _run_retention(reconciler, mock_jobs_client, expired, job)
+
+    system_entities.find_one.assert_called_once_with(
+        HelixJobAttempt, workspace=expired.workspace, filter_obj={"id": expired.attempt_id, "parent": job.id}
+    )
+    (record,) = system_entities.create.call_args.args
+    assert record.targets == [JobStorageTarget(provider="subprocess", profile="default")]
+
+
 def test_storage_retention_marks_steps_with_nothing_to_reclaim(
     backend_registry: BackendRegistry,
     mock_nemo_client,
@@ -421,8 +463,9 @@ def test_storage_retention_marks_steps_with_nothing_to_reclaim(
     backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
     expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
     cases = [
-        _job(uses_storage=False),
+        _job(attempt_id=expired.attempt_id, uses_storage=False),
     ]
+    system_entities.find_one.return_value.platform_spec = _storage_spec(uses_storage=False)
     for job in cases:
         reconciler._last_retention_at = None
         # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
@@ -471,6 +514,86 @@ def test_storage_retention_runs_on_its_own_interval(
     assert statuses.count("pending,active,cancelling,pausing") == 2
 
 
+@pytest.mark.parametrize("already_queued", [False, True])
+def test_deletion_reclaims_storage_from_historical_attempt_profiles(backend_registry, mock_nemo_client, already_queued):
+    reconciler, store = _reconciler(backend_registry, mock_nemo_client)
+    job = HelixJob(
+        name="edited-job",
+        workspace="default",
+        source="test",
+        fileset="results",
+        status=HelixJobStatus.DELETION_PENDING,
+        platform_spec=_storage_spec(uses_storage=False),
+    )
+    job._id = "platform-job-edited"
+    historical = HelixJobAttempt(name="earlier", workspace=job.workspace, job=job.id, platform_spec=_storage_spec())
+    attempt_page = SimpleNamespace(data=[historical], pagination=SimpleNamespace(total_pages=1))
+    store.list.return_value = attempt_page
+    if already_queued:
+        store.get.return_value = HelixJobStorageReclaim(
+            name=HelixJobStorageReclaim.name_for_job(job.id),
+            workspace="system",
+            job_id=job.id,
+            job_workspace=job.workspace,
+            job_name=job.name,
+        )
+    else:
+        store.get.side_effect = EntityNotFoundError("no existing reclaim")
+
+    backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
+    with patch.object(backend, "reclaim_persistent_storage", side_effect=[False, True]) as reclaim:
+        if already_queued:
+            record = store.get.return_value
+            record.targets = [JobStorageTarget(provider="subprocess", profile="default")]
+            assert not reconciler._settle_pending_storage(job)
+            store.list.assert_not_called()
+            reclaim.assert_not_called()
+            record.targets = []
+        assert not reconciler._settle_pending_storage(job)
+        assert reconciler._settle_pending_storage(job)
+
+    assert store.list.call_count == 2
+    assert store.list.call_args.args == (HelixJobAttempt,)
+    assert store.list.call_args.kwargs["filter_operation"].value == job.id
+    assert reclaim.call_count == 2
+    reclaim.assert_called_with(job.workspace, job.name, job_id=job.id)
+    store.create.assert_not_called()
+    store.update.assert_called_once_with(job)
+
+
+def test_pending_job_storage_resumes_after_one_profile_completed(backend_registry, mock_nemo_client):
+    reconciler, store = _reconciler(backend_registry, mock_nemo_client)
+    job = HelixJob(
+        name="edited-job",
+        workspace="default",
+        source="test",
+        fileset="results",
+        status=HelixJobStatus.DELETION_PENDING,
+        platform_spec=_storage_spec(),
+    )
+    job._id = "platform-job-edited"
+    historical = HelixJobAttempt(
+        name="earlier", workspace=job.workspace, job=job.id, platform_spec=_storage_spec(profile="earlier")
+    )
+    store.list.return_value = SimpleNamespace(data=[historical], pagination=SimpleNamespace(total_pages=1))
+    store.get.side_effect = EntityNotFoundError("no existing reclaim")
+    store.update.side_effect = lambda entity: entity.model_copy(deep=True)
+    first, second = MagicMock(), MagicMock()
+    second.reclaim_persistent_storage.side_effect = [JobStorageError("cleanup failed"), True]
+    with patch.object(
+        backend_registry,
+        "get_backend",
+        side_effect=lambda *, provider, profile: {"default": first, "earlier": second}[profile],
+    ):
+        assert reconciler._settle_pending_storage(job) is None
+        saved = store.update.call_args.args[0].model_copy(deep=True)
+        assert reconciler._settle_pending_storage(saved) is not None
+
+    first.reclaim_persistent_storage.assert_called_once_with(job.workspace, job.name, job_id=job.id)
+    assert second.reclaim_persistent_storage.call_count == 2
+    assert store.update.call_count == 2
+
+
 def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
     backend_registry: BackendRegistry,
     mock_nemo_client,
@@ -500,7 +623,7 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
     with patch.object(backend, "reclaim_persistent_storage") as reclaim:
         reconciler.step()
 
-    reclaim.assert_called_once_with("team", "train-llama")
+    reclaim.assert_called_once_with("team", "train-llama", job_id=record.job_id)
     system_entities.delete_by_id.assert_called_once_with(
         HelixJobStorageReclaim, record.id, expected_db_version=record.db_version
     )
@@ -588,7 +711,14 @@ def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_cla
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
     batch = MagicMock()
     workloads = {}
-    batch.list_namespaced_job.side_effect = lambda **kwargs: SimpleNamespace(items=list(workloads.values()))
+    batch.list_namespaced_job.return_value = SimpleNamespace(items=[])
+
+    def read(*, name, namespace):
+        if name not in workloads:
+            raise kubernetes_client.ApiException(status=404)
+        return workloads[name]
+
+    batch.read_namespaced_job.side_effect = read
 
     def create(*, namespace, body):
         workloads[body.metadata.name] = body
@@ -617,8 +747,8 @@ def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_cla
     # The backend contract takes workspace and job positionally, unlike the Kubernetes helper.
     for configured in backends.values():
         reclaim = configured.reclaim_persistent_storage
-        configured.reclaim_persistent_storage = lambda workspace, job, reclaim=reclaim: reclaim(
-            workspace=workspace, job_id=job
+        configured.reclaim_persistent_storage = lambda workspace, job, *, job_id, reclaim=reclaim: reclaim(
+            workspace=workspace, storage_key=job, job_id=job_id
         )
     record = HelixJobStorageReclaim(
         name=HelixJobStorageReclaim.name_for_job("deleted-job"),
@@ -691,7 +821,7 @@ def test_reclaim_stops_if_completed_target_cannot_be_persisted(backend_registry,
 
     reconciler._reclaim_queued_storage()
 
-    backend.reclaim_persistent_storage.assert_called_once_with("team", "train")
+    backend.reclaim_persistent_storage.assert_called_once_with("team", "train", job_id=record.job_id)
     assert len(record.targets) == 2
     system_entities.delete_by_id.assert_not_called()
 
@@ -743,7 +873,10 @@ def test_storage_retention_marks_the_job_before_queueing_its_storage(
     mock_jobs_client.cancel_job.side_effect = calls.cancel
     expired = _aged_step(test_step_paused, HelixJobStatus.PAUSED, datetime.timedelta(days=8))
 
-    _run_retention(reconciler, mock_jobs_client, expired, _job())
+    system_entities.get_by_id.return_value = SimpleNamespace(
+        current_attempt_id=expired.attempt_id, status=expired.status
+    )
+    _run_retention(reconciler, mock_jobs_client, expired, _job(attempt_id=expired.attempt_id))
 
     assert [call[0] for call in calls.mock_calls] == ["mark", "queue", "cancel"]
 
@@ -760,7 +893,7 @@ def test_storage_retention_keeps_the_storage_of_a_job_resumed_meanwhile(
     mock_jobs_client.update_job_attempt_status_details.side_effect = NemoHTTPError(httpx.Response(409, request=request))
     expired = _aged_step(test_step_paused, HelixJobStatus.PAUSED, datetime.timedelta(days=8))
 
-    _run_retention(reconciler, mock_jobs_client, expired, _job())
+    _run_retention(reconciler, mock_jobs_client, expired, _job(attempt_id=expired.attempt_id))
 
     mock_jobs_client.update_job_attempt_status_details.assert_called_once()
     system_entities.create.assert_not_called()
@@ -777,9 +910,12 @@ def test_storage_retention_queues_a_marked_job_again(
     """An earlier pass may have marked the job and stopped before queueing its storage."""
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
     system_entities.create.side_effect = EntityConflictError("already queued")
-    marked = _job(status_details={"storage_reclaimed_at": "2026-10-01T00:00:00+00:00"})
     expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
+    marked = _job(attempt_id=expired.attempt_id, status_details={"storage_reclaimed_at": "2026-10-01T00:00:00+00:00"})
 
+    system_entities.get_by_id.return_value = SimpleNamespace(
+        current_attempt_id=expired.attempt_id, status=expired.status
+    )
     _run_retention(reconciler, mock_jobs_client, expired, marked)
 
     mock_jobs_client.update_job_attempt_status_details.assert_not_called()
@@ -984,7 +1120,7 @@ def test_late_setup_child_is_cascaded_after_cleanup_fences_owner(backend_registr
         settle = cleaner._settle_pending_storage
         late_ids: list[str] = []
 
-        def late_insert(owner: HelixJob) -> bool:
+        def late_insert(owner: HelixJob) -> HelixJob | None:
             assert owner.db_version > job.db_version
             late = store.create(
                 HelixJobAttempt(name="late", workspace="default", job=job.id, platform_spec=job.platform_spec)
@@ -1195,7 +1331,8 @@ def test_abandoned_rerun_recovery_survives_restart_and_fences_late_start(
                 platform_spec=job.platform_spec,
             )
         )
-        job.current_attempt_id = original.id
+        original_id = original.id
+        job.current_attempt_id = original_id
         job = store.update(job)
         prepared = store.create(
             HelixJobAttempt(
@@ -1236,6 +1373,8 @@ def test_abandoned_rerun_recovery_survives_restart_and_fences_late_start(
             else:
                 controller._recover_unstarted_reruns()
             assert store.get_by_id(HelixJobAttempt, prepared.id).status == HelixJobStatus.ERROR
+            if not published:
+                assert store.get_by_id(HelixJob, job.id).current_attempt_id == original_id
             with pytest.raises(EntityConflictError):
                 store.create(HelixJobStep(name="basic", attempt_id=prepared.id, workspace="default"))
             held_job.current_attempt_id = prepared.id

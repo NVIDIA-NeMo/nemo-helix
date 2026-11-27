@@ -163,7 +163,7 @@ class TestJobLogsAPI:
             artifact_base_path=None,
         )
 
-    async def test_get_job_logs_by_id_uses_canonical_job_name(
+    async def test_get_job_logs_by_id_queries_the_current_attempt(
         self, test_client, dispatcher, mock_logs_client, sample_logs, sample_platform_job_request
     ):
         job = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)

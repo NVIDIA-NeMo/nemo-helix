@@ -2944,7 +2944,7 @@ def _cleanup_container(docker_client_mock, exit_code: int = 0, wait_error: Excep
 def test_reclaim_reports_storage_removed_by_the_cleanup_container(docker_job, docker_client_mock):
     _cleanup_container(docker_client_mock)
 
-    assert docker_job.reclaim_persistent_storage("default", "job-1") is True
+    assert docker_job.reclaim_persistent_storage("default", "job-1", job_id="platform-job-owner") is True
 
 
 @pytest.mark.parametrize("failure", ["exit", "create", "wait"])
@@ -2959,7 +2959,7 @@ def test_reclaim_raises_when_the_cleanup_container_fails(docker_job, docker_clie
         docker_client_mock.containers.create.side_effect = APIError("daemon unavailable")
 
     with pytest.raises(JobStorageError):
-        docker_job.reclaim_persistent_storage("default", "job-1")
+        docker_job.reclaim_persistent_storage("default", "job-1", job_id="platform-job-owner")
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(docker_job, docker_client_mock, test_job_step):
