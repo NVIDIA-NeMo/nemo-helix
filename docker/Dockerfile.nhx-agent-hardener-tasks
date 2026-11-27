@@ -21,6 +21,9 @@ COPY docker/locks/nhx-agent-hardener-tasks /opt/agent-hardener-lock
 # provisioner, as on a host after `nemo agent-hardener setup`, so its garak pin stays the single source of truth.
 # Apply fixed dependency versions during Garak provisioning, not afterward;
 # Datasets 5.1 admits the fixed fsspec version (same reviewed override as the workspace).
+# garak needs torch, and PyPI's Linux torch pulls about 4 GB of CUDA wheels (nvidia-*, triton) that this
+# CPU image never loads. UV_TORCH_BACKEND=cpu reaches the provisioner's `uv pip install` and installs the
+# CPU build of the same torch version; every other distribution resolves as before.
 # Use uv's compatibility tar backend for the managed Python download under QEMU.
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_LEGACY_TAR_BACKEND=1 uv venv --python 3.12 /opt/agent-hardener/venv && \
@@ -30,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-dev \
         --no-install-project && \
     printf 'urllib3==2.8.0\nfsspec==2026.7.0\ndatasets==5.1.0\n' > /tmp/garak-overrides.txt && \
-    UV_OVERRIDE=/tmp/garak-overrides.txt /opt/agent-hardener/venv/bin/python -c \
+    UV_OVERRIDE=/tmp/garak-overrides.txt UV_TORCH_BACKEND=cpu /opt/agent-hardener/venv/bin/python -c \
         "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()" && \
     rm /tmp/garak-overrides.txt
 
