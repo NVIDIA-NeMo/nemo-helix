@@ -31,8 +31,10 @@ You need:
   needs a working `agents.execute` runtime.
 - Traces for the agent in Intake. Compass can only diagnose what it can
   observe. See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
-- A default and fast model pair. `nemo setup` stores one, and the CLI fills it
-  in on each run; you can also name the models in the run's context.
+- A default and fast model pair. `nemo setup` stores one, and
+  `nemo config set --default-model <workspace/name> --fast-model <workspace/name>`
+  changes it. The CLI fills it in on each run; you can also name the models
+  in the run's context.
 - The workspace's Compass agent. See [Create the Compass Agent](#create-the-compass-agent) below.
 
 <Warning>
@@ -387,8 +389,9 @@ new Insight.
 - **The Compass agent does not exist.** `nemo agents execute` fails because the
   workspace has no `compass-analyst`. [Create it](#create-the-compass-agent).
 - **The context has no `default_model`.** The CLI had no model pair to fill in.
-  Run `nemo setup`, or set `default_model` (and optionally `fast_model`) in the
-  context.
+  Run `nemo setup`, store a pair with
+  `nemo config set --default-model <workspace/name> --fast-model <workspace/name>`,
+  or set `default_model` (and optionally `fast_model`) in the context.
 - **A model is unknown or unsupported.** Use a Model Entity that exists and that
   Compass can call. A bare name resolves in the job's workspace.
 - **Permission denied.** Submitting needs permission to run the Compass agent,

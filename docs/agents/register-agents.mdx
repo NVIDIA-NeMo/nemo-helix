@@ -92,7 +92,7 @@ Open **Agents**, select **Register Agent**, and choose one of:
 </Tabs>
 
 The CLI validates the config, replaces `${NEMO_DEFAULT_MODEL}` with the default model from
-`nemo setup`, creates the agent, and uploads the text files in the config's directory (skills,
+`nemo setup` (change it with `nemo config set --default-model <workspace/name>`), creates the agent, and uploads the text files in the config's directory (skills,
 prompts, MCP server scripts) to the `<name>-ethos` fileset, up to 500 files and 900 KB.
 Deployments and evaluations stage that fileset beside `agent.yaml`, so relative paths keep
 working. The Python SDK registers the config only; use the CLI or Studio when the agent has other

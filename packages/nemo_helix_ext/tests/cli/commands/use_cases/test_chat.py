@@ -140,6 +140,7 @@ def test_chat_without_model_or_configured_default_fails_with_usage_error(runner:
     result = runner.invoke(app, ["chat", "hello"])
     assert result.exit_code == 2
     assert "no default model is configured" in result.output
+    assert "--default-model" in result.output
     assert "NEMO_DEFAULT_MODEL" in result.output
 
 
@@ -148,6 +149,7 @@ def test_chat_fast_without_any_configured_model_fails_with_usage_error(runner: C
     result = runner.invoke(app, ["chat", "--fast", "hello"])
     assert result.exit_code == 2
     assert "no fast or default model is configured" in result.output
+    assert "--fast-model" in result.output
     assert "NEMO_FAST_MODEL" in result.output
     assert "NEMO_DEFAULT_MODEL" in result.output
 

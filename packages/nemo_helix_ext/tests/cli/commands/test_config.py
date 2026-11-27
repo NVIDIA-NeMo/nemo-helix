@@ -270,6 +270,81 @@ def test_set_workspace_in_specific_context(config_file: Path):
     assert context.workspace == "prod-workspace"
 
 
+@pytest.fixture
+def no_model_env(monkeypatch):
+    """Keep NEMO_DEFAULT_MODEL / NEMO_FAST_MODEL from overriding the config file in resolve()."""
+    monkeypatch.delenv("NEMO_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("NEMO_FAST_MODEL", raising=False)
+
+
+def test_set_default_model(config_file: Path, no_model_env):
+    result = runner.invoke(app, "config set --default-model default/model-a")
+    assert_exit_code(result, 0)
+    assert "Configuration updated for context 'local'" in result.output
+
+    context = Config.load(config_path=config_file).resolve()
+    assert context.default_model == "default/model-a"
+    # The fast model falls back to the default model when none is set.
+    assert context.fast_model == "default/model-a"
+
+
+def test_set_default_model_overwrites_existing_value(config_file: Path, no_model_env):
+    assert_exit_code(runner.invoke(app, "config set --default-model default/model-a"), 0)
+    assert_exit_code(runner.invoke(app, "config set --default-model default/model-b"), 0)
+
+    with open(config_file) as f:
+        data = yaml.safe_load(f)
+    local = next(c for c in data["contexts"] if c["name"] == "local")
+    assert local["default_model"] == "default/model-b"
+    assert Config.load(config_path=config_file).resolve().default_model == "default/model-b"
+
+
+def test_set_default_model_keeps_fast_model_and_other_contexts(config_file: Path, no_model_env):
+    assert_exit_code(runner.invoke(app, "config set --default-model default/big --fast-model default/small"), 0)
+    assert_exit_code(runner.invoke(app, "config set --default-model default/bigger"), 0)
+
+    context = Config.load(config_path=config_file).resolve()
+    assert context.default_model == "default/bigger"
+    assert context.fast_model == "default/small"
+
+    production = Config.load(config_path=config_file, overrides={"current_context": "production"}).resolve()
+    assert production.default_model is None
+
+
+def test_set_default_model_in_specific_context(config_file: Path, no_model_env):
+    result = runner.invoke(app, "config set --context production --default-model prod-ns/model-p")
+    assert_exit_code(result, 0)
+
+    production = Config.load(config_path=config_file, overrides={"current_context": "production"}).resolve()
+    assert production.default_model == "prod-ns/model-p"
+    assert Config.load(config_path=config_file).resolve().default_model is None
+
+
+def test_set_default_model_matches_setup_storage(config_file: Path, no_model_env):
+    """`config set` and `nemo setup` write the same context field, so they cannot drift apart."""
+    Config.write({"default_model": "default/from-setup", "fast_model": "default/fast"}, context_name="local")
+    assert_exit_code(runner.invoke(app, "config set --default-model default/from-cli"), 0)
+
+    context = Config.load(config_path=config_file).resolve()
+    assert context.default_model == "default/from-cli"
+    assert context.fast_model == "default/fast"
+
+
+@pytest.mark.parametrize("option", ["--default-model", "--fast-model"])
+def test_set_model_rejects_blank_value(config_file: Path, option: str):
+    result = runner.invoke(app, ["config", "set", option, "  "])
+    assert_exit_code(result, 1)
+    assert f"{option} cannot be empty" in result.output
+
+
+def test_view_shows_default_model(config_file: Path):
+    assert_exit_code(runner.invoke(app, "config set --default-model default/model-a"), 0)
+
+    result = runner.invoke(app, "config view --output-format json")
+    assert_exit_code(result, 0)
+    assert '"default_model": "default/model-a"' in result.stdout
+
+
 def test_set_access_token(config_file: Path):
     result = runner.invoke(app, "config set --access-token test-access-token-123")
     assert_exit_code(result, 0)
