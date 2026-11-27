@@ -59,6 +59,7 @@ class _RecordingEnvironment:
     def __init__(self, marker: str | None = None) -> None:
         self.commands: list[tuple[str, str | int | None]] = []
         self.uploaded_dirs: list[tuple[Path, str]] = []
+        self.uploaded_files: list[str] = []
         #: What a finished install left in the venv's marker, or None when nothing is installed.
         self.marker = marker
 
@@ -78,6 +79,10 @@ class _RecordingEnvironment:
 
     async def upload_dir(self, source_path: Path, target_path: str) -> None:
         self.uploaded_dirs.append((source_path, target_path))
+
+    async def upload_file(self, source_path: Path, target_path: str) -> None:
+        del source_path
+        self.uploaded_files.append(target_path)
 
 
 def _agent(tmp_path: Path, **kwargs: Any) -> FabricInstalledAgent:
@@ -286,6 +291,18 @@ async def test_a_config_bundle_is_uploaded_and_its_target_created(tmp_path: Path
 
     assert environment.uploaded_dirs == [(bundle, "/tmp/fabric-config")]
     assert "/tmp/fabric-config" in _ran(environment, "mkdir -p")
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["fresh", "already installed"])
+async def test_a_stdio_mcp_servers_env_shim_is_uploaded_installed_or_not(tmp_path: Path, installed: bool) -> None:
+    """Like the config bundle, the shim belongs to this agent config, so a preinstalled Fabric still gets it."""
+    calculator = {"transport": "stdio", "url": "/usr/bin/python3", "env": {"CALC_TOKEN": "${CALC_TOKEN}"}}
+    agent = _agent(tmp_path, fabric_config={**_CONFIG, "mcp": {"servers": {"calculator": calculator}}})
+    environment = _RecordingEnvironment(marker=agent.install_spec if installed else None)
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    assert environment.uploaded_files == ["/tmp/nemo-fabric-mcp-env-runner.py"]
 
 
 async def test_every_supported_package_manager_installs_ca_certificates(tmp_path: Path) -> None:

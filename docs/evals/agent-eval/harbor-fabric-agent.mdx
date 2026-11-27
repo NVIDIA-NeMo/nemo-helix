@@ -427,12 +427,16 @@ not declare is rejected. `env` is plain process environment, `secrets` binds an 
 Secrets entry by name (the value never enters the spec), and `model_provider_override.base_url` is the
 laptop case described above.
 
-One limitation inside the task container: a secret bound to a **stdio** MCP server through
-`mcp.<name>.secrets` reaches the agent's environment but not the server itself. On the host Fabric
-runner the resolver names it in the server's `env` as a `${NAME}` template and the runner fills it at
-launch; the runner inside a task container expands no templates, so for a Harbor target the template
-is dropped rather than handed to the server as a literal string. Use a network-transport server, or
-pass the value another way, until that runner learns to.
+A secret bound to a **stdio** MCP server through `mcp.<name>.secrets` reaches the server itself. A
+stdio server doesn't inherit the agent's environment, so the resolver names the secret in the server's
+`env` as a `${NAME}` template. Harbor puts the value in the environment of the Fabric runner inside the
+task container, and the runner fills the template in when it starts the server. With the Hermes harness
+(`nvidia.fabric.hermes`), the runner leaves the template to Hermes, which fills it in itself when it
+starts the server: Hermes writes each server's `env` to a file the trial's logs keep. The spec, Harbor's
+job files and the trial's logs keep only the template. A template that names a variable the job doesn't
+set is refused at submit, or, in a local SDK run, when `HarborRuntimeConfig` is built: bind it in the
+target's `env_secrets` (`HarborRuntimeConfig.env_secrets` locally), or in `env_vars` for a value that
+isn't secret.
 
 ## Next steps
 

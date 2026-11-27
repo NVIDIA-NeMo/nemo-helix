@@ -240,7 +240,8 @@ class FabricInstalledAgent(BaseInstalledAgent):
     async def install(self, environment: BaseEnvironment) -> None:
         """Provision curl, uv, a uv-managed interpreter, and the Fabric virtualenv, unless they're already installed.
 
-        The agent's config bundle is uploaded either way: it belongs to this agent config, not to the install.
+        The agent's config bundle, and the runner shim its stdio MCP servers' env templates need, are uploaded
+        either way: they belong to this agent config, not to the install.
         """
         installed = await self._already_installed(environment)
         if not installed:
@@ -249,6 +250,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
         bundle = self.fabric.fabric_config_bundle
         if bundle is not None:
             await environment.upload_dir(bundle, self.fabric.fabric_config_target)
+        await self.fabric.prepare_mcp_env(environment)
         if installed:
             self.logger.info("NeMo Fabric is already installed in %s; skipping the install", self._venv_path)
             return

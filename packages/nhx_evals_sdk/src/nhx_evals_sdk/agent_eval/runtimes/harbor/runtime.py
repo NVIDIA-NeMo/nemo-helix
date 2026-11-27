@@ -253,6 +253,24 @@ class HarborRuntimeConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _mcp_env_templates_are_bound(self) -> HarborRuntimeConfig:
+        # Without this, every trial builds its environment and installs Fabric before the runner refuses.
+        fabric_config = self.agent_kwargs.get("fabric_config")
+        if not isinstance(fabric_config, dict):
+            return self
+        # Imported here: the shim imports nemo_fabric, which this module keeps off its import path.
+        from nhx_evals_sdk.agent_eval.runtimes.harbor.mcp_env_runner import unbound_mcp_env_templates
+
+        unbound = unbound_mcp_env_templates(fabric_config, {*self.env_secrets, *self.env_vars})
+        if unbound:
+            servers = "; ".join(f"{name!r} reads {', '.join(variables)}" for name, variables in unbound.items())
+            raise ValueError(
+                f"fabric_config's stdio MCP servers name variables the run doesn't set ({servers}); "
+                "set each in env_secrets, or in env_vars for a non-secret value"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _agent_dir_needs_import_path(self) -> HarborRuntimeConfig:
         if self.agent_dir is not None and self.agent_import_path is None:
             raise ValueError("agent_dir only applies to a custom agent_import_path")
