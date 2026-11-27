@@ -68,6 +68,22 @@ async def test_delegation_fact_is_bound_to_verified_credential(credential: str, 
     )
 
 
+@pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key"])
+def test_a_direct_credential_ignores_subject_alias_claims(token_kind: str) -> None:
+    """Only a verified workload token's delegation carries the creator's alias claim; a direct credential can't add one."""
+    claims = TokenClaims(
+        subject="creator",
+        email="creator@example.test",
+        groups=["readers"],
+        scopes=[],
+        raw_claims={SUBJECT_ALIASES_CLAIM: ["creator-alias"]},
+    )
+    principal = ResolvedBearerToken(claims=claims, token_kind=token_kind).principal
+    assert (principal.id, principal.authz_aliases) == ("creator", ["creator", "creator@example.test"])
+    assert not principal.verified_workload_delegation
+    assert principal.on_behalf_of_authz_aliases == []
+
+
 def test_verified_fact_does_not_cross_identity_serialization() -> None:
     principal = Principal(id="docker-runtime", on_behalf_of="creator", verified_workload_delegation=True)
     assert principal.caller_kind == "principal"

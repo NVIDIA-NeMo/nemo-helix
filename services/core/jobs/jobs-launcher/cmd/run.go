@@ -26,6 +26,11 @@ import (
 
 const secretFetchTimeout = 30 * time.Second
 
+// secretClient is the client runExec fetches the job's Secrets with; tests replace it.
+var secretClient = func(session *nhxclient.Session, endpoint nhxclient.Endpoint, principal *nhxclient.Principal) nhxclient.SecretClient {
+	return session.SecretClient(endpoint, principal)
+}
+
 // fetchStepConfig makes the launcher download the step config from the jobs API
 // before starting the workload. Runtimes with no way to place a file in the
 // container before it starts (OpenShell) set it instead of pre-writing the file.
@@ -281,7 +286,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			principal := nhxclient.PrincipalFromEnv()
 
 			session := launcherSession(ctx)
-			secretEnvVars, err := fetchSecretsWithContext(ctx, session.SecretClient(secretEndpoint, principal), secretRefs)
+			secretEnvVars, err := fetchSecretsWithContext(ctx, secretClient(session, secretEndpoint, principal), secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err
