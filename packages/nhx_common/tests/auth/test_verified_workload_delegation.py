@@ -10,7 +10,7 @@ from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import AuthContext as CapturedAuthContext
 from nhx.common.auth.models import Principal
 from nhx.common.auth.token_claims import SUBJECT_ALIASES_CLAIM, ActorClaims, TokenClaims
-from nhx.common.auth.token_resolver import ResolvedBearerToken
+from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind
 from nhx.common.config import AuthConfig
 
 
@@ -69,7 +69,7 @@ async def test_delegation_fact_is_bound_to_verified_credential(credential: str, 
 
 
 @pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key"])
-def test_a_direct_credential_ignores_subject_alias_claims(token_kind: str) -> None:
+def test_a_direct_credential_ignores_subject_alias_claims(token_kind: ResolvedTokenKind) -> None:
     """Only a verified workload token's delegation carries the creator's alias claim; a direct credential can't add one."""
     claims = TokenClaims(
         subject="creator",
