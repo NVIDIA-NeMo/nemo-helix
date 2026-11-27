@@ -7,6 +7,7 @@ import time
 import traceback
 from collections import Counter
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -23,6 +24,7 @@ from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import create_observable_gauge, start_span_with_ctx
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
+from nhx.core.jobs.app.lifecycle import active_ttl_anchor
 from nhx.core.jobs.controllers.admission import AdmissionController, AlwaysAdmit
 from nhx.core.jobs.controllers.backends import JobUpdate, extract_provider_profile
 from nhx.core.jobs.controllers.backends.exceptions import (
@@ -46,6 +48,12 @@ UNKNOWN_USER = "unknown"
 
 # Step counts keyed by (workspace, user).
 StepCounts = dict[tuple[str, str], int]
+
+
+@dataclass(frozen=True)
+class _BacklogSnapshot:
+    timestamp: float
+    oldest_age: float | None
 
 
 def _count_by_workspace_and_user(steps: Iterable[HelixJobStepWithContext]) -> StepCounts:
@@ -89,6 +97,7 @@ class JobScheduler(HeartbeatMixin, Controller):
         # view. Keys with no steps are absent, so their series stop being reported.
         self._queued_counts: StepCounts = {}
         self._running_counts: StepCounts = {}
+        self._backlog_snapshot: _BacklogSnapshot | None = None
         create_observable_gauge(
             meter,
             subsystem="jobs.scheduler",
@@ -102,6 +111,18 @@ class JobScheduler(HeartbeatMixin, Controller):
             name="running",
             description="Number of job steps currently running, by workspace and user",
             callbacks=[self._observe_running],
+        )
+        meter.create_observable_gauge(
+            "nhx.jobs.scheduler.backlog.oldest_age",
+            callbacks=[self._observe_backlog_oldest_age],
+            unit="s",
+            description="Age of the oldest schedulable job step at the last successful scan, or zero for an empty scan",
+        )
+        meter.create_observable_gauge(
+            "nhx.jobs.scheduler.backlog.snapshot_timestamp",
+            callbacks=[self._observe_backlog_snapshot_timestamp],
+            unit="s",
+            description="Unix timestamp of the last successful scan for schedulable job steps",
         )
 
     @property
@@ -122,6 +143,28 @@ class JobScheduler(HeartbeatMixin, Controller):
     def _observe_running(self, options: CallbackOptions) -> Iterator[Observation]:
         """Gauge callback for the running snapshot."""
         return self._observations(self._running_counts)
+
+    def _observe_backlog_oldest_age(self, options: CallbackOptions) -> Iterator[Observation]:
+        snapshot = self._backlog_snapshot
+        if snapshot is not None and snapshot.oldest_age is not None:
+            yield Observation(snapshot.oldest_age)
+
+    def _observe_backlog_snapshot_timestamp(self, options: CallbackOptions) -> Iterator[Observation]:
+        snapshot = self._backlog_snapshot
+        if snapshot is not None:
+            yield Observation(snapshot.timestamp)
+
+    def _refresh_backlog_snapshot(self, steps: Iterable[HelixJobStepWithContext]) -> None:
+        timestamp = time.time()
+        oldest_age: float | None = 0.0
+        for step in steps:
+            anchor = active_ttl_anchor(step)
+            if anchor is None:
+                # We cannot identify the oldest step if a candidate has no timestamp.
+                oldest_age = None
+                break
+            oldest_age = max(oldest_age, timestamp - anchor.timestamp())
+        self._backlog_snapshot = _BacklogSnapshot(timestamp=timestamp, oldest_age=oldest_age)
 
     def _refresh_running_counts(self) -> None:
         """Recount in-flight steps for the ``running`` gauge; keep the last value if the fetch fails."""
@@ -155,6 +198,7 @@ class JobScheduler(HeartbeatMixin, Controller):
                 logger.exception("Could not fetch job steps for scheduling", exc_info=True)
                 return
 
+        self._refresh_backlog_snapshot(steps)
         self._queued_counts = _count_by_workspace_and_user(
             # Resumed steps deferred by admission stay RESUMING (they cannot move to QUEUED),
             # so count them as waiting too or they would be invisible to both gauges.
