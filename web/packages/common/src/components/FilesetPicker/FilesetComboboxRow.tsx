@@ -24,7 +24,7 @@ export const FilesetComboboxRow: FC<FilesetComboboxRowProps> = ({ fileset, showP
         </Text>
         {showPurpose ? (
           <Text kind="body/regular/xs" className="block text-secondary">
-            {PURPOSE_LABELS[fileset.purpose]}
+            {PURPOSE_LABELS[fileset.purpose] ?? fileset.purpose}
           </Text>
         ) : null}
       </span>
