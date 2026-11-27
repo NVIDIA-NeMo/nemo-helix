@@ -11,7 +11,7 @@ from nhx.common.config import AuthConfig
 
 from .jwt import JWTValidator
 from .models import Principal
-from .token_claims import TokenClaims
+from .token_claims import SUBJECT_ALIASES_CLAIM, TokenClaims
 
 ResolvedTokenKind = Literal["access_key", "oidc_access_token", "workload_access_token", "workload_subject_token"]
 
@@ -20,6 +20,14 @@ def _identity_aliases(subject: str, email: str | None) -> list[str]:
     aliases = [subject]
     if email and email not in aliases:
         aliases.append(email)
+    return aliases
+
+
+def _delegated_subject_aliases(claims: TokenClaims) -> list[str]:
+    aliases = _identity_aliases(claims.subject, claims.email)
+    stored = claims.raw_claims.get(SUBJECT_ALIASES_CLAIM)
+    if isinstance(stored, list):
+        aliases.extend(alias for alias in stored if isinstance(alias, str) and alias and alias not in aliases)
     return aliases
 
 
@@ -58,7 +66,7 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
         on_behalf_of=claims.subject,
         on_behalf_of_email=claims.email,
         on_behalf_of_groups=claims.groups,
-        on_behalf_of_authz_aliases=_identity_aliases(claims.subject, claims.email),
+        on_behalf_of_authz_aliases=_delegated_subject_aliases(claims),
     )
 
 

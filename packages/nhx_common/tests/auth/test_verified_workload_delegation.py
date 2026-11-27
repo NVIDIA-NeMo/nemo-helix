@@ -9,8 +9,8 @@ from nemo_helix_plugin.auth import AuthContext
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import AuthContext as CapturedAuthContext
 from nhx.common.auth.models import Principal
-from nhx.common.auth.token_claims import ActorClaims, TokenClaims
-from nhx.common.auth.token_resolver import ResolvedBearerToken
+from nhx.common.auth.token_claims import SUBJECT_ALIASES_CLAIM, ActorClaims, TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind
 from nhx.common.config import AuthConfig
 
 
@@ -23,11 +23,17 @@ async def test_delegation_fact_is_bound_to_verified_credential(credential: str, 
         email="creator@example.test",
         groups=["readers"],
         scopes=[],
-        raw_claims={},
+        raw_claims={SUBJECT_ALIASES_CLAIM: ["creator-alias", 7, "creator"]},
         actor=ActorClaims(subject="docker-runtime", groups=[]),
     )
     workload = ResolvedBearerToken(claims=claims, token_kind="workload_access_token")
     principal = workload.principal
+    assert principal.verified_workload_delegation
+    assert (principal.id, principal.authz_aliases) == ("docker-runtime", ["docker-runtime"])
+    assert principal.on_behalf_of == "creator"
+    assert principal.on_behalf_of_email == "creator@example.test"
+    assert principal.on_behalf_of_groups == ["readers"]
+    assert principal.on_behalf_of_authz_aliases == ["creator", "creator@example.test", "creator-alias"]
     if substitute == "actor":
         principal = principal.model_copy(update={"id": "different-actor"})
     elif substitute == "subject":
@@ -60,6 +66,22 @@ async def test_delegation_fact_is_bound_to_verified_credential(credential: str, 
     assert json.loads(requests[0].content)["input"].get("verified_workload_delegation", False) is (
         credential == "workload_access_token" and substitute == "none"
     )
+
+
+@pytest.mark.parametrize("token_kind", ["oidc_access_token", "access_key"])
+def test_a_direct_credential_ignores_subject_alias_claims(token_kind: ResolvedTokenKind) -> None:
+    """Only a verified workload token's delegation carries the creator's alias claim; a direct credential can't add one."""
+    claims = TokenClaims(
+        subject="creator",
+        email="creator@example.test",
+        groups=["readers"],
+        scopes=[],
+        raw_claims={SUBJECT_ALIASES_CLAIM: ["creator-alias"]},
+    )
+    principal = ResolvedBearerToken(claims=claims, token_kind=token_kind).principal
+    assert (principal.id, principal.authz_aliases) == ("creator", ["creator", "creator@example.test"])
+    assert not principal.verified_workload_delegation
+    assert principal.on_behalf_of_authz_aliases == []
 
 
 def test_verified_fact_does_not_cross_identity_serialization() -> None:

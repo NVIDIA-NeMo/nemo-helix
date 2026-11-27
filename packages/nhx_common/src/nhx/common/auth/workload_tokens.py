@@ -15,7 +15,7 @@ from nhx.common.config import AuthConfig, get_platform_config
 
 from .models import Principal
 from .signing_keys import RSASigningKey, RSASigningKeyCache
-from .token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
+from .token_claims import SUBJECT_ALIASES_CLAIM, ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
 from .token_resolver import ResolvedBearerToken
 
 WORKLOAD_TOKEN_PATH = "/apis/auth/token"
@@ -208,6 +208,8 @@ def _principal_claims(principal: Principal) -> dict[str, Any]:
         claims["email"] = principal.email
     if principal.groups:
         claims["groups"] = ",".join(principal.groups)
+    if principal.authz_aliases:
+        claims[SUBJECT_ALIASES_CLAIM] = list(principal.authz_aliases)
     return claims
 
 

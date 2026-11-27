@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 )
@@ -618,5 +620,101 @@ func restoreEnvVars(envVars map[string]envVarState) {
 		} else {
 			os.Unsetenv(key)
 		}
+	}
+}
+
+type recordingSecretClient struct {
+	contexts []context.Context
+}
+
+func (c *recordingSecretClient) GetSecret(ctx context.Context, workspaceID, secretName string) (*nhxclient.HelixSecretAccessResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.contexts = append(c.contexts, ctx)
+	return &nhxclient.HelixSecretAccessResponse{Value: secretName}, nil
+}
+
+// A shared deadline would let several slow Secrets exhaust one budget before the job starts.
+func TestFetchSecretsGivesEachRequestItsOwnDeadline(t *testing.T) {
+	client := &recordingSecretClient{}
+	refs := []secretReference{
+		{envVarName: "A", workspace: "default", secretName: "a"},
+		{envVarName: "B", workspace: "default", secretName: "b"},
+	}
+	if _, err := fetchSecretsWithContext(context.Background(), client, refs); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.contexts) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(client.contexts))
+	}
+	for i, ctx := range client.contexts {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatalf("request %d has no deadline", i)
+		}
+		if ctx.Err() == nil {
+			t.Fatalf("request %d context was not released after the request", i)
+		}
+	}
+	if client.contexts[0] == client.contexts[1] {
+		t.Fatal("requests share one deadline")
+	}
+}
+
+type slowFirstSecretClient struct {
+	recordingSecretClient
+	delay time.Duration
+}
+
+func (c *slowFirstSecretClient) GetSecret(ctx context.Context, workspaceID, secretName string) (*nhxclient.HelixSecretAccessResponse, error) {
+	if len(c.contexts) == 0 {
+		time.Sleep(c.delay)
+	}
+	return c.recordingSecretClient.GetSecret(ctx, workspaceID, secretName)
+}
+
+// runExec must not give its Secret fetches one shared budget: each request's deadline starts when the request does,
+// so a slow first fetch pushes the second one's deadline back by at least as long.
+func TestRunExecGivesEachSecretFetchItsOwnDeadline(t *testing.T) {
+	defer restoreEnvVars(map[string]envVarState{
+		"NEMO_JOB_SECRETS": getEnvState("NEMO_JOB_SECRETS"),
+		"NHX_SECRETS_URL":  getEnvState("NHX_SECRETS_URL"),
+	})
+	os.Setenv("NEMO_JOB_SECRETS", "A=default/a,B=default/b")
+	os.Setenv("NHX_SECRETS_URL", "http://secrets.invalid")
+
+	const delay = 20 * time.Millisecond
+	client := &slowFirstSecretClient{delay: delay}
+	original := secretClient
+	secretClient = func(*nhxclient.Session, nhxclient.Endpoint, *nhxclient.Principal) nhxclient.SecretClient {
+		return client
+	}
+	defer func() { secretClient = original }()
+
+	if exitCode, err := runExec(context.Background(), []string{"true"}, nil); err != nil || exitCode != 0 {
+		t.Fatalf("runExec = %d, %v", exitCode, err)
+	}
+	if len(client.contexts) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(client.contexts))
+	}
+	first, ok := client.contexts[0].Deadline()
+	if !ok {
+		t.Fatal("first request has no deadline")
+	}
+	second, ok := client.contexts[1].Deadline()
+	if !ok {
+		t.Fatal("second request has no deadline")
+	}
+	if moved := second.Sub(first); moved < delay {
+		t.Fatalf("second deadline moved %v after a %v first fetch; the fetches share one budget", moved, delay)
+	}
+}
+
+func TestFetchSecretsStopsWhenParentIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	refs := []secretReference{{envVarName: "A", workspace: "default", secretName: "a"}}
+	if _, err := fetchSecretsWithContext(ctx, &recordingSecretClient{}, refs); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
