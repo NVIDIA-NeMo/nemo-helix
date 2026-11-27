@@ -110,8 +110,8 @@ def _resolve_context_model(
             # is only reached when neither a fast nor a default model is configured.
             raise click.UsageError(
                 "No model specified and no fast or default model is configured. "
-                "Pass --model, run 'nemo config set --default-model <workspace/name>', or set NEMO_FAST_MODEL "
-                "(or NEMO_DEFAULT_MODEL, which --fast also falls back to)."
+                "Pass --model, run 'nemo config set --fast-model <workspace/name>', or set NEMO_FAST_MODEL. "
+                "--fast also falls back to the default model (--default-model or NEMO_DEFAULT_MODEL)."
             )
         raise click.UsageError(
             "No model specified and no default model is configured. "
