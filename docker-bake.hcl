@@ -658,6 +658,8 @@ target "nhx-jobs-launcher" {
   target     = "artifacts"
   context    = "."
   dockerfile = "docker/base/Dockerfile.nhx-jobs-launcher"
+  cache-to   = maybe_registry_cache_to("nhx-jobs-launcher")
+  cache-from = maybe_registry_cache_from("nhx-jobs-launcher")
   platforms  = get_platforms()
 }
 
@@ -670,6 +672,8 @@ target "nhx-studio-ui" {
     VITE_VERSION_SHA = CI_COMMIT_SHA
     DOCKERHUB_MIRROR = DOCKERHUB_MIRROR
   }
+  cache-to   = maybe_registry_cache_to("nhx-studio-ui")
+  cache-from = maybe_registry_cache_from("nhx-studio-ui")
 }
 
 target "nhx-gpu-base" {
