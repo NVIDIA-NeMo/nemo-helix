@@ -44,6 +44,20 @@ def _validate_base_url(url: str) -> str:
     return url
 
 
+def _validate_model_id(option: str, model: str | None) -> str | None:
+    """Strip a model entity ID and reject blank values. Returns None when the option was not given.
+
+    The value is not checked against the platform: like the other `config set` options,
+    it works offline and before a base URL is configured.
+    """
+    if model is None:
+        return None
+    model = model.strip()
+    if not model:
+        raise ConfigError(f"{option} cannot be empty")
+    return model
+
+
 def _make_completer(collection_name: str):
     """Create an autocompletion callback for a named collection (clusters, contexts, users)."""
 
@@ -124,6 +138,20 @@ def set_config(
         str | None,
         typer.Option("--workspace", "-w", help="Default workspace"),
     ] = None,
+    default_model: Annotated[
+        str | None,
+        typer.Option(
+            "--default-model",
+            help="Default model entity ID ('workspace/name') for chat and agents; the value 'nemo setup' writes",
+        ),
+    ] = None,
+    fast_model: Annotated[
+        str | None,
+        typer.Option(
+            "--fast-model",
+            help="Low-latency model entity ID ('workspace/name'); falls back to the default model when unset",
+        ),
+    ] = None,
     output_format: Annotated[
         OutputFormat | None,
         typer.Option("--output-format", "-f", help="Default output format"),
@@ -161,6 +189,8 @@ def set_config(
       nemo config set --context production --base-url https://nhx.example.com --activate
       nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
       nemo config set --workspace my-workspace --output-format json
+      nemo config set --default-model default/nvidia-nemotron-3-5-super-vl-120b-a12b
+      nemo config set --fast-model default/nvidia-nemotron-3.5-lightning-30b-a3b
       nemo config set --api-key YOUR_API_KEY
       nemo config set --api-key -        # prompts for API key securely
       nemo config set --access-token YOUR_ACCESS_TOKEN
@@ -189,6 +219,9 @@ def set_config(
     if api_key and access_token:
         raise ConfigError("Cannot specify both --api-key and --access-token")
 
+    default_model = _validate_model_id("--default-model", default_model)
+    fast_model = _validate_model_id("--fast-model", fast_model)
+
     # Check if any options were provided
     has_options = any(
         [
@@ -197,6 +230,8 @@ def set_config(
             api_key,
             access_token,
             workspace,
+            default_model,
+            fast_model,
             output_format,
             timestamp_format,
             truncate is not None,
@@ -227,6 +262,10 @@ def set_config(
         params["access_token"] = token
     if workspace is not None:
         params["workspace"] = workspace
+    if default_model is not None:
+        params["default_model"] = default_model
+    if fast_model is not None:
+        params["fast_model"] = fast_model
     if output_format is not None:
         params["output_format"] = output_format
     if timestamp_format is not None:

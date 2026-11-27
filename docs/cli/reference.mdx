@@ -503,6 +503,8 @@ nemo config set --context staging --base-url https://nhx.staging.example.com
 nemo config set --context production --base-url https://nhx.example.com --activate
 nemo config set --context local-tls --base-url https://localhost:8443 --certificate-authority /path/to/ca.crt
 nemo config set --workspace my-workspace --output-format json
+nemo config set --default-model default/nvidia-nemotron-3-5-super-vl-120b-a12b
+nemo config set --fast-model default/nvidia-nemotron-3.5-lightning-30b-a3b
 nemo config set --api-key YOUR_API_KEY
 nemo config set --api-key -        # prompts for API key securely
 nemo config set --access-token YOUR_ACCESS_TOKEN
@@ -522,6 +524,8 @@ nemo config set [OPTIONS]
 * `--api-key`: API key for authentication
 * `--access-token`: OAuth access token for authentication
 * `--workspace, -w`: Default workspace
+* `--default-model`: Default model entity ID ('workspace/name') for chat and agents; the value 'nemo setup' writes
+* `--fast-model`: Low-latency model entity ID ('workspace/name'); falls back to the default model when unset
 * `--output-format, -f <CHOICE>`: Default output format [possible values: table, json, yaml, markdown, csv, raw, code]
 * `--timestamp-format <CHOICE>`: Timestamp display format [possible values: relative, iso8601]
 * `--truncate, --no-truncate`: Truncate long output values
