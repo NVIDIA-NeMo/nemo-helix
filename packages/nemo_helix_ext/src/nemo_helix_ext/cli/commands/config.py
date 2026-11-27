@@ -10,13 +10,19 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from nemo_helix_plugin.cli_state import resolve_output_format
 
 from nemo_helix_ext.cli.commands.config_help import CONFIG_APP_HELP
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.errors import handle_errors
 from nemo_helix_ext.cli.core.formatters import format_output
 from nemo_helix_ext.cli.core.help_formatter import create_typer_app
-from nemo_helix_ext.cli.core.types import ConfigOutputFormatOption, ListOutputFormat, TimestampFormat
+from nemo_helix_ext.cli.core.types import (
+    ConfigOutputFormat,
+    ConfigOutputFormatOption,
+    ListOutputFormat,
+    TimestampFormat,
+)
 from nemo_helix_ext.config.config import Config
 
 OutputFormat = ListOutputFormat
@@ -359,6 +365,10 @@ def view_config(
     By default, this shows only the effective current context (from --context,
     NHX_CURRENT_CONTEXT, or the config file) and its referenced cluster and user.
     Use --all-contexts to show the full configuration.
+
+    The output format follows the same rules as other commands: --output-format,
+    then the global --output-format, then the context's output_format preference.
+    Table-style formats render as YAML, and piped output defaults to JSON.
     """
     from nemo_helix_ext.config.config import Config
 
@@ -418,7 +428,17 @@ def view_config(
             context_message += ", to see all use `--all-contexts`"
         typer.echo(f"{context_message}\n", err=True)
 
-    format_output(config_data, output_format=output_format)
+    format_output(config_data, output_format=_resolve_view_output_format(ctx, output_format))
+
+
+# A config document is nested, so table-style preferences have no rows to show; render YAML instead.
+_TABLE_STYLE_FORMATS = frozenset({"table", "markdown", "csv"})
+
+
+def _resolve_view_output_format(ctx: typer.Context, explicit: ConfigOutputFormat | None) -> str:
+    """Resolve ``config view``'s format through the shared CLI resolution."""
+    resolved_output_format = resolve_output_format(ctx, explicit)
+    return "yaml" if resolved_output_format in _TABLE_STYLE_FORMATS else resolved_output_format
 
 
 _CONFIG_COMMAND_ORDER = {

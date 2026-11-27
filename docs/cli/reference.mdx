@@ -466,6 +466,10 @@ By default, this shows only the effective current context (from `--context`,
 NHX_CURRENT_CONTEXT, or the config file) and its referenced cluster and user.
 Use `--all-contexts` to show the full configuration.
 
+The output format follows the same rules as other commands: `--output-format`,
+then the global `--output-format`, then the context's output_format preference.
+Table-style formats render as YAML, and piped output defaults to JSON.
+
 **Usage:**
 
 ```shell
