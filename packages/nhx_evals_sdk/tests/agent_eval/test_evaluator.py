@@ -1744,3 +1744,80 @@ async def test_metric_is_preflighted_when_any_trial_is_scoreable() -> None:
     )
 
     assert metric.preflight_calls == 1
+
+
+class _RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    async def planned(self, trials: int, /) -> None:
+        self.events.append(("planned", trials))
+
+    async def finished(self, trials: Sequence[AgentEvalTrial], /) -> None:
+        self.events.extend(("finished", trial.task_id, trial.status.value) for trial in trials)
+
+    async def stopped(self) -> None:
+        self.events.append("stopped")
+
+
+@pytest.mark.asyncio
+async def test_a_model_target_reports_each_trial_as_it_is_generated() -> None:
+    async def fake_model_inference(model: Model, request: dict[str, Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if request["messages"][0]["content"] == "fail":
+            raise RuntimeError("endpoint down")
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    failing = _task(task_id="task-2").model_copy(update={"inputs": {"instruction": "fail"}})
+    progress = _RecordingProgress()
+    await AgentEvaluator(inference_fn=fake_model_inference, progress=progress).run(
+        tasks=[_task(), failing],
+        target=Model(url="https://model.test/v1/chat/completions", name="m", format=ModelFormat.OPEN_AI),
+        config=AgentEvalRunConfig(params=RunConfigOnlineModel(parallelism=1, ignore_request_failure=True)),
+    )
+
+    assert progress.events == [
+        ("planned", 2),
+        ("finished", "task-1", "completed"),
+        ("finished", "task-2", "failed"),
+        "stopped",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_raises_still_tells_progress_it_stopped() -> None:
+    async def failing_inference(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("endpoint down")
+
+    progress = _RecordingProgress()
+    with pytest.raises(RuntimeError, match="endpoint down"):
+        await AgentEvaluator(inference_fn=failing_inference, progress=progress).run(
+            tasks=[_task()],
+            target=Model(url="https://model.test/v1/chat/completions", name="m", format=ModelFormat.OPEN_AI),
+        )
+
+    assert progress.events == [("planned", 1), "stopped"]
+
+
+@pytest.mark.asyncio
+async def test_no_trial_is_reported_after_the_run_says_it_stopped() -> None:
+    """A failing generation cancels the others first, so none can report after ``stopped``."""
+    release = asyncio.Event()
+
+    async def inference(model: Model, request: dict[str, Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if request["messages"][0]["content"] == "fail":
+            raise RuntimeError("endpoint down")
+        await release.wait()
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    progress = _RecordingProgress()
+    failing = _task(task_id="task-2").model_copy(update={"inputs": {"instruction": "fail"}})
+    with pytest.raises(RuntimeError, match="endpoint down"):
+        await AgentEvaluator(inference_fn=inference, progress=progress).run(
+            tasks=[_task(), failing],
+            target=Model(url="https://model.test/v1/chat/completions", name="m", format=ModelFormat.OPEN_AI),
+            config=AgentEvalRunConfig(params=RunConfigOnlineModel(parallelism=2)),
+        )
+    release.set()
+    await asyncio.sleep(0)
+
+    assert progress.events == [("planned", 2), "stopped"]

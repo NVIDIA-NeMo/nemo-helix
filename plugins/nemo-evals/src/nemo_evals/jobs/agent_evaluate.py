@@ -40,6 +40,7 @@ from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer, gateway_job_scope
+from nemo_evals.harbor.trial_progress import TrialProgressReporter
 from nemo_evals.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     _secret_refs,
@@ -108,9 +109,11 @@ from nemo_evals.jobs.run_outcome import (
     agent_eval_outcome,
     report_run_outcome,
     report_status_details,
+    status_details_writer,
 )
 from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
+from nemo_evals.jobs.trial_counter import GymTrialCounter, TrialCounter
 from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_evals.task_refs import (
@@ -147,8 +150,10 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 )
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
+from nhx_evals_sdk.agent_eval.progress import TrialProgressListener
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult
 from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborJobScope, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
@@ -520,7 +525,12 @@ class _AgentEvalJobBase(NemoJob):
         return None
 
     @staticmethod
-    def _build_evaluator(client: NemoClient | AsyncNemoClient, target: Target | None) -> AgentEvaluator:
+    def _build_evaluator(
+        client: NemoClient | AsyncNemoClient,
+        target: Target | None,
+        *,
+        progress: TrialProgressListener | None = None,
+    ) -> AgentEvaluator:
         """Construct the evaluator, forwarding the job's platform identity to online inference.
 
         Online generation against a *platform-routed* Model/Agent target must act as the job's
@@ -531,7 +541,8 @@ class _AgentEvalJobBase(NemoJob):
         third-party endpoint (or a runner with no HTTP endpoint) gets *no* identity headers, so the
         delegated identity — which includes the user's email and group PII — never leaves the platform.
         External providers authenticate via their own api key and don't need it anyway. Isolated so
-        tests can inject a fake inference seam.
+        tests can inject a fake inference seam. ``progress`` receives a model or agent target's trials as
+        they finish.
 
         ``client`` is the SDK handle injected into ``run`` — a typed platform client in a submitted
         job (built by ``get_task_nemo_client``, threading ``NHX_PRINCIPAL`` as on-behalf-of). A
@@ -550,7 +561,7 @@ class _AgentEvalJobBase(NemoJob):
                 for key, value in headers.items()
                 if key in _FORWARDED_IDENTITY_HEADERS and isinstance(value, str)
             }
-        return AgentEvaluator(default_headers=identity_headers or None)
+        return AgentEvaluator(default_headers=identity_headers or None, progress=progress)
 
     @staticmethod
     def _resolve_target(
@@ -561,6 +572,8 @@ class _AgentEvalJobBase(NemoJob):
         fabric_gateway_origin: str | None = None,
         trial_issuer: TrialCredentialIssuer | None = None,
         trial_progress: Callable[[HarborRuntimeConfig], HarborJobScope | None] | None = None,
+        gym_progress: RolloutProgress | None = None,
+        fabric_progress: TrialProgressListener | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -568,7 +581,9 @@ class _AgentEvalJobBase(NemoJob):
         shapes its own request, so it contributes neither a prompt template nor inference params.
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
         sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
-        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run.
+        model its own gateway key. ``trial_progress`` gives the scope that reports a Harbor job's trials as they run;
+        ``gym_progress`` receives a Gym run's rollouts as they finish, and ``fabric_progress`` a Fabric runner's
+        trials.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -588,10 +603,11 @@ class _AgentEvalJobBase(NemoJob):
                 base_dir=_staged_agent_files(target, ctx),
                 env_secrets=target.env_secrets,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
+                progress=fabric_progress,
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
-            return gym_runtime_target(target, ctx), None, None
+            return gym_runtime_target(target, ctx, progress=gym_progress), None, None
         if isinstance(target, HarborRunnerTarget):
             target = upgrade_registered_agent_config(target)
             agent_kwargs = dict(target.agent_kwargs)
@@ -700,6 +716,7 @@ class _AgentEvalJobBase(NemoJob):
         )
         run_id = self._run_id() or f"agent-eval-{datetime.now(UTC):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
         trial_issuer = _trial_credential_issuer(spec, ctx, platform_client, async_client, run_id)
+        trial_counter = TrialCounter(status_details_writer(ctx, async_client))
         with proxy as fabric_gateway_origin:
             target, prompt_template, params = self._resolve_target(
                 spec.target,
@@ -708,6 +725,12 @@ class _AgentEvalJobBase(NemoJob):
                 fabric_gateway_origin=fabric_gateway_origin,
                 trial_issuer=trial_issuer,
                 trial_progress=lambda harbor_config: self._trial_progress_scope(harbor_config, ctx, async_client),
+                gym_progress=(
+                    GymTrialCounter(status_details_writer(ctx, async_client), reward_key=spec.target.reward_key)
+                    if isinstance(spec.target, GymRunnerTarget)
+                    else None
+                ),
+                fabric_progress=trial_counter if isinstance(spec.target, FabricRunnerTarget) else None,
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():
@@ -721,7 +744,11 @@ class _AgentEvalJobBase(NemoJob):
                 work_dir=bundle_dir,
                 run_id=run_id,
             )
-            evaluator = self._build_evaluator(platform_client, spec.target)
+            evaluator = self._build_evaluator(
+                platform_client,
+                spec.target,
+                progress=trial_counter if isinstance(spec.target, ModelTarget | AgentTarget) else None,
+            )
             include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
             endpoint = target if isinstance(target, Model | AgentBase) else None
             with (
@@ -832,8 +859,11 @@ class _AgentEvalJobBase(NemoJob):
     def _trial_progress_scope(
         self, config: HarborRuntimeConfig, ctx: JobContext, async_client: AsyncNemoClient | None
     ) -> HarborJobScope | None:
-        """Hook: a scope that reports the Harbor job's trials as they run. None by default: nothing reads them."""
-        return None
+        """Hook: a scope that reports the Harbor job's trials as they run, counted by phase."""
+        reporter = TrialProgressReporter(
+            status_details_writer(ctx, async_client), reward_key=config.reward_key, report_trials=False
+        )
+        return reporter.job_scope()
 
 
 def _trial_credential_issuer(

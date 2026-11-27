@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from nhx_evals_sdk.agent_eval.progress import tell
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import (
     GymRuntimeConfig,
     model_call_capture_dir,
@@ -36,10 +37,16 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.process import (
     pump_stream,
     terminate,
 )
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import (
+    FOLLOW_INTERVAL_S,
+    RolloutFileFollower,
+    RolloutProgress,
+)
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import ENV_LOG_NAME
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     aggregate_scores_from_gym,
     ensure_fresh_output,
+    failures_path_for,
     gym_scoring_metrics,
     natively_scored_components,
     read_run_aggregations,
@@ -78,10 +85,21 @@ class GymAgentTaskRunner:
     to find each secret in this process's environment. Platform jobs pass a source that names
     the variable injected under each ``env_secrets`` key. Gym reads the value from that variable
     and hands it to the subprocess.
+
+    ``progress`` is told how many rollouts a run collects and receives each one as Gym writes it.
     """
 
-    def __init__(self, *, config: GymRuntimeConfig, secret_resolver: EnvSecretSource | None = None) -> None:
+    follow_interval_s: float = FOLLOW_INTERVAL_S
+
+    def __init__(
+        self,
+        *,
+        config: GymRuntimeConfig,
+        secret_resolver: EnvSecretSource | None = None,
+        progress: RolloutProgress | None = None,
+    ) -> None:
         self._config = config
+        self._progress = progress
         self._run_aggregations: dict[str, Any] | None = None
         self._component_names: frozenset[str] = frozenset()
         self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
@@ -191,7 +209,13 @@ class GymAgentTaskRunner:
             input_path,
         )
 
-        await self._run_two_step(input_path, rollouts_path, work_dir, resolved_env)
+        if self._progress is not None:
+            await tell(self._progress.planned(len(index_to_task_id) * cfg.num_repeats))
+        try:
+            await self._run_two_step(input_path, rollouts_path, work_dir, resolved_env)
+        finally:
+            if self._progress is not None:
+                await tell(self._progress.stopped())
         self._run_aggregations = read_run_aggregations(rollouts_path)
         trials = trials_from_rollouts(
             rollouts_path,
@@ -354,6 +378,12 @@ class GymAgentTaskRunner:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
+        follower = (
+            RolloutFileFollower([output_path, failures_path_for(output_path)], self._progress)
+            if self._progress is not None
+            else None
+        )
+        following = asyncio.create_task(follower.follow(self.follow_interval_s)) if follower is not None else None
         tails: dict[str, deque[str]] = {}
         pumps = [
             asyncio.create_task(pump_stream(eval_proc.stdout, stdout_log, label="gym eval", tails=tails, key="stdout")),
@@ -370,6 +400,10 @@ class GymAgentTaskRunner:
             # Terminate first so the pipes close, then drain (bounded) to flush whatever was buffered.
             await terminate(eval_proc, grace_s=cfg.shutdown_grace_s)
             await drain_pumps(pumps, grace_s=cfg.shutdown_grace_s, what="gym eval run")
+            if following is not None and follower is not None:
+                following.cancel()
+                await asyncio.gather(following, return_exceptions=True)
+                await follower.report_new()
         if eval_proc.returncode != 0:
             tail = "\n".join(tails.get("stderr") or tails.get("stdout") or [])
             # A collection failure is frequently *server*-side: the resources-server raises, the

@@ -10,11 +10,14 @@ job's status details under :data:`STATUS_DETAILS_KEY` and decides the job's fina
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import math
+import threading
 from collections import Counter
-from collections.abc import Iterable
-from typing import Literal
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any, Literal
 
 from nemo_evals.jobs.utils import run_with_isolated_async_client
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -32,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 #: Key under which the outcome is merged into the job's ``status_details``.
 STATUS_DETAILS_KEY = "evaluation"
+PUBLISH_TIMEOUT_SEC = 15.0
+"""How long a progress report is waited for; a slower one keeps going in the background."""
 PUBLICATION_STATUS_KEY = "publication"
 """Where an agent evaluation that publishes to Intake records the publish outcome in its status details."""
 
@@ -132,12 +137,85 @@ def report_status_details(details: dict[str, object], *, ctx: JobContext, async_
         logger.warning("Failed to report status details %s for job %r", sorted(details), job_id, exc_info=True)
 
 
+def status_details_writer(
+    ctx: JobContext, async_client: AsyncNemoClient | None
+) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Writes snapshots of the job's progress to its status details, in order, keeping only the newest pending one.
+
+    Each snapshot replaces the one before under the same keys, so a snapshot still pending when a newer one
+    arrives is dropped: one worker writes the newest pending snapshot until none is left, so at most one write
+    is in flight and one snapshot waits, however slow the writes are. ``publish`` returns once the write that
+    carried its snapshot, or a newer one, is done, even while later snapshots keep arriving. The worker is a
+    daemon thread: progress is not worth holding the job's process open at exit, and the job's outcome is
+    written separately.
+    """
+    lock = threading.Lock()
+    pending: dict[str, Any] | None = None
+    waiting: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
+    running = False
+
+    def resolve(loop: asyncio.AbstractEventLoop, written: asyncio.Future[None]) -> None:
+        with contextlib.suppress(RuntimeError):  # the loop closed while the write ran
+            loop.call_soon_threadsafe(lambda: written.done() or written.set_result(None))
+
+    def drain() -> None:
+        nonlocal pending, waiting, running
+        try:
+            while True:
+                with lock:
+                    details, pending = pending, None
+                    carried, waiting = waiting, []
+                    if details is None:
+                        running = False
+                        return
+                try:
+                    report_status_details(details, ctx=ctx, async_client=async_client)
+                finally:
+                    for loop, written in carried:
+                        resolve(loop, written)
+        except BaseException:
+            with lock:
+                running = False
+            raise
+
+    async def publish(details: dict[str, Any]) -> None:
+        nonlocal pending, running
+        loop = asyncio.get_running_loop()
+        written = loop.create_future()
+        with lock:
+            pending = details
+            waiting.append((loop, written))
+            start, running = not running, True
+        if start:
+            threading.Thread(target=drain, name="status-details", daemon=True).start()
+        # When the caller stops waiting, only the wait stops: the snapshot is still written.
+        await written
+
+    return publish
+
+
+async def publish_best_effort(
+    publish: Callable[[dict[str, Any]], Awaitable[None]], details: dict[str, Any], *, timeout: float
+) -> None:
+    """Publish ``details``, logging rather than raising when the write fails or outlasts ``timeout``."""
+    try:
+        async with asyncio.timeout(timeout):
+            await publish(details)
+    except TimeoutError:
+        logger.warning("Reporting progress took over %ss; continuing", timeout)
+    except Exception:
+        logger.warning("Could not report progress", exc_info=True)
+
+
 __all__ = [
     "PUBLICATION_STATUS_KEY",
+    "PUBLISH_TIMEOUT_SEC",
     "STATUS_DETAILS_KEY",
     "RunOutcome",
     "agent_eval_outcome",
+    "publish_best_effort",
     "report_run_outcome",
     "report_status_details",
     "row_eval_outcome",
+    "status_details_writer",
 ]

@@ -35,6 +35,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import FilesetPurpose
 from nemo_helix_plugin.job_context import JobContext
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig, validate_gym_task_row
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 
 
 async def resolve_gym_environment(
@@ -145,8 +146,13 @@ async def prepare_gym_submission(
     return await resolve_gym_environment(target, workspace=ctx.workspace, async_client=ctx.async_client)
 
 
-def gym_runtime_target(target: GymRunnerTarget, ctx: JobContext) -> SessionBackedGymRunner | GymAgentTaskRunner:
-    """The runtime a Gym target runs as inside the job: sandboxed when the compiler planned it, else colocated."""
+def gym_runtime_target(
+    target: GymRunnerTarget, ctx: JobContext, *, progress: RolloutProgress | None = None
+) -> SessionBackedGymRunner | GymAgentTaskRunner:
+    """The runtime a Gym target runs as inside the job: sandboxed when the compiler planned it, else colocated.
+
+    ``progress`` receives the run's rollouts as they finish.
+    """
     # Sandboxing is a deployment decision, not a job field: the same target runs colocated
     # on a trusted box and sandboxed on a shared cluster. The decision, and the settings it
     # needs, were resolved and validated by the compiler in the evals service -- the
@@ -161,6 +167,7 @@ def gym_runtime_target(target: GymRunnerTarget, ctx: JobContext) -> SessionBacke
             job_uid=ctx.job_uid,
             workspace=ctx.workspace,
             persistent_storage_path=ctx.storage.persistent,
+            progress=progress,
         )
     if target.environment is not None:
         # Colocated GymAgentTaskRunner ignores a staged FileSet. A missing plan here means
@@ -204,5 +211,6 @@ def gym_runtime_target(target: GymRunnerTarget, ctx: JobContext) -> SessionBacke
             reward_key=target.reward_key,
         ),
         secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
+        progress=progress,
     )
     return gym_runtime

@@ -18,7 +18,7 @@ from harbor.models.trial.result import ExceptionInfo, StepResult, TrialResult
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.hooks import HookCallback, TrialEvent, TrialHookEvent
 from nemo_evals.harbor.trial_progress import TrialProgressReporter, trial_error, trial_reward
-from nemo_evals.taskset_runs.trials import TRIALS_STATUS_KEY, TrialPhase, TrialProgress
+from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY, TRIALS_STATUS_KEY, TrialPhase, TrialProgress
 
 STARTED = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
@@ -67,6 +67,7 @@ class Harbor:
         )
         for hook in self.hooks.get(event, []):
             await hook(hook_event)
+        await _reported()
 
     async def run(self, config: TrialConfig, *, error: str | None = None, reward: float | None = 1.0) -> None:
         """One attempt: started, agent, verifier, ended."""
@@ -89,6 +90,11 @@ def _error(kind: str) -> ExceptionInfo:
     return ExceptionInfo(
         exception_type=kind, exception_message=f"{kind}: boom", exception_traceback="", occurred_at=STARTED
     )
+
+
+async def _reported() -> None:
+    """Let the reports the hooks scheduled in the background reach ``publish``."""
+    await asyncio.sleep(0)
 
 
 class Reports:
@@ -121,6 +127,7 @@ async def test_every_planned_trial_is_reported_pending_with_its_session(job: Job
     configs = job._remaining_trial_configs
 
     async with _reporter(reports).job_scope()(job):
+        await _reported()
         trials = reports.last()
 
     assert [trial.trial for trial in trials] == [config.trial_name for config in configs]
@@ -284,3 +291,65 @@ def test_reward_and_error_are_read_off_the_attempts_result() -> None:
     multi_step = TrialResult.model_construct(exception_info=None, step_results=[StepResult.model_construct(), step])
 
     assert trial_error(multi_step) == step.exception_info
+
+
+async def test_a_job_with_many_trials_reports_their_counts_without_the_list(job: Job, harbor: Harbor) -> None:
+    """An agent-evaluate job's status shows its trials finished, failed and total as each one moves."""
+    reports = Reports()
+    first, second = job._remaining_trial_configs
+    reporter = TrialProgressReporter(reports, reward_key="reward", report_trials=False)
+
+    async with reporter.job_scope()(job):
+        await harbor.run(first, reward=1.0)
+        await harbor.fire(TrialEvent.START, second)
+
+    published = reports.published
+    assert all(TRIALS_STATUS_KEY not in details for details in published)
+    assert published[0][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"pending": 2}
+    assert published[-2][TRIAL_COUNTS_STATUS_KEY] == {
+        "total": 2,
+        "phases": {"succeeded": 1, "starting": 1},
+        "rewarded": 1,
+        "reward": 1.0,
+        "errors": {},
+    }
+    # The job stopped before the second trial ended.
+    assert published[-1][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"succeeded": 1, "cancelled": 1}
+
+
+async def test_a_hook_returns_before_a_slow_report_is_written(job: Job, harbor: Harbor) -> None:
+    """Harbor waits for each hook before the trial moves on, so a slow status write never holds up the trials."""
+    first, _ = job._remaining_trial_configs
+    release = asyncio.Event()
+    written: list[dict[str, Any]] = []
+
+    async def slow(details: dict[str, Any]) -> None:
+        await release.wait()
+        written.append(details)
+
+    reporter = TrialProgressReporter(slow, reward_key="reward", report_trials=False)
+    scope = reporter.job_scope()(job)
+    await scope.__aenter__()
+
+    await asyncio.wait_for(harbor.run(first), timeout=1)  # every hook returned while no write had finished
+
+    assert written == []
+    release.set()
+    await scope.__aexit__(None, None, None)
+    assert len(written) == 6  # planned, started, agent, verifying, ended, then the unrun trial cancelled at exit
+
+
+async def test_the_last_report_is_written_before_the_scope_exits(job: Job, harbor: Harbor) -> None:
+    """The job's final counts reach its status details even when every write is slow."""
+    first, second = job._remaining_trial_configs
+    written: list[dict[str, Any]] = []
+
+    async def slow(details: dict[str, Any]) -> None:
+        await asyncio.sleep(0.01)
+        written.append(details)
+
+    async with TrialProgressReporter(slow, reward_key="reward", report_trials=False).job_scope()(job):
+        await harbor.run(first)
+        await harbor.run(second, reward=0.0)
+
+    assert written[-1][TRIAL_COUNTS_STATUS_KEY]["phases"] == {"succeeded": 2}

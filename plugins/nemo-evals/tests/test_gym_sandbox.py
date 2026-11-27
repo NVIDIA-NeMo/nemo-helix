@@ -1442,3 +1442,72 @@ def test_a_platform_job_reaches_the_runner_with_its_unique_id(
     runner = gym_submission.gym_runtime_target(target(), ctx)
     assert isinstance(runner, SessionBackedGymRunner)
     assert runner._sandbox_id == job_uid
+
+
+@pytest.mark.asyncio
+async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_returns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
+) -> None:
+    import json
+
+    import sandboxed_gym
+    from nemo_evals.jobs.trial_counter import GymTrialCounter
+    from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY
+    from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
+    from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
+    from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(
+        "".join(
+            json.dumps({"responses_create_params": {"input": [{"role": "user", "content": f"q{i}"}]}, "id": i}) + "\n"
+            for i in range(2)
+        ),
+        encoding="utf-8",
+    )
+    tasks = discover_gym_tasks(rows, metrics=[GymRewardMetric()])
+    reported: list[dict[str, Any]] = []
+
+    async def publish(details: dict[str, Any]) -> None:
+        reported.append(details[TRIAL_COUNTS_STATUS_KEY])
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples, *, on_results):
+            results = [
+                {NG_TASK_INDEX: example[NG_TASK_INDEX], NG_ROLLOUT_INDEX: example[NG_ROLLOUT_INDEX], "reward": 1.0}
+                for example in examples
+            ]
+            for result in results:
+                await on_results([result])
+            return results
+
+    class Orchestrator:
+        def start(self, config):
+            return Session()
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    runner = SessionBackedGymRunner(
+        target=target(num_repeats=2),
+        plan=capable_plan(),
+        job_id="job-1",
+        job_uid="0d4f5a6e-1c2b-4f3a-9e8d-7c6b5a4f3e2d",
+        progress=GymTrialCounter(publish, reward_key="reward"),
+    )
+
+    await AgentEvaluator().run(tasks=tasks, target=runner, config=AgentEvalRunConfig(work_dir=tmp_path / "run"))
+
+    assert [(counts["total"], counts["phases"]) for counts in reported] == [
+        (4, {"pending": 4}),
+        (4, {"succeeded": 1, "pending": 3}),
+        (4, {"succeeded": 2, "pending": 2}),
+        (4, {"succeeded": 3, "pending": 1}),
+        (4, {"succeeded": 4}),
+        (4, {"succeeded": 4}),
+    ]

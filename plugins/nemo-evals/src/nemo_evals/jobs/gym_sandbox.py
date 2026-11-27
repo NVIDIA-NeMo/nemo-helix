@@ -44,6 +44,8 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 )
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from nhx_evals_sdk.agent_eval.progress import tell
+from nhx_evals_sdk.agent_eval.runtimes.gym.progress import RolloutProgress
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nhx_sandbox.harbor_opensandbox_services import SandboxAgentBundle
 from pydantic import BaseModel, ConfigDict, Field
@@ -596,6 +598,7 @@ class SessionBackedGymRunner:
         job_uid: str | None = None,
         workspace: str = "default",
         persistent_storage_path: Path | None = None,
+        progress: RolloutProgress | None = None,
     ) -> None:
         """Keep the resolved plan and the job's storage identity for ``run_tasks``.
 
@@ -604,6 +607,8 @@ class SessionBackedGymRunner:
 
         A platform job's sandboxes are labelled with ``job_uid``, its entity UUID, not ``job_id``, its
         name: names are unique only within a workspace, and the job's sandbox sweeps match the label.
+
+        ``progress`` receives each chunk of rollouts as the host returns it.
         """
         if job_id and not job_uid:
             raise SandboxUnavailableError(
@@ -617,6 +622,7 @@ class SessionBackedGymRunner:
         self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
+        self._progress = progress
         self._delegate: Any | None = None
         self._rollout_settings: dict[str, Any] = {}
 
@@ -709,7 +715,11 @@ class SessionBackedGymRunner:
                     reward_key=self._target.reward_key,
                 ),
                 collect=functools.partial(
-                    collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                    collect_reporting,
+                    functools.partial(
+                        collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                    ),
+                    progress=self._progress,
                 ),
             )
             return await self._delegate.run_tasks(tasks, config)
@@ -717,16 +727,35 @@ class SessionBackedGymRunner:
             await asyncio.to_thread(session.shutdown)
 
 
+async def collect_reporting(
+    collect: Callable[..., Awaitable[list[Any]]],
+    examples: list[dict[str, Any]],
+    *,
+    progress: RolloutProgress | None,
+) -> list[Any]:
+    """Run ``collect``, telling ``progress`` how many rollouts it plans and each chunk of results as it returns."""
+    if progress is None:
+        return await collect(examples)
+    await tell(progress.planned(len(examples)))
+    try:
+        return await collect(examples, on_results=progress.finished)
+    finally:
+        await tell(progress.stopped())
+
+
 async def collect_within(
-    collect: Callable[[list[dict[str, Any]]], Awaitable[list[Any]]],
+    collect: Callable[..., Awaitable[list[Any]]],
     examples: list[dict[str, Any]],
     *,
     timeout_s: float | None,
+    on_results: Callable[[list[Any]], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """Run ``collect`` under one absolute deadline, or none when ``timeout_s`` is ``None``."""
     try:
         async with asyncio.timeout(timeout_s) as deadline:
-            return await collect(examples)
+            if on_results is None:
+                return await collect(examples)
+            return await collect(examples, on_results=on_results)
     except TimeoutError as exc:
         if not deadline.expired():
             raise
