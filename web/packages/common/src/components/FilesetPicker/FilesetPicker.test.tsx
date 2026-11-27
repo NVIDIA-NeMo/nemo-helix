@@ -93,6 +93,46 @@ describe('FilesetPicker', () => {
     expect(onChange).toHaveBeenCalledWith('default/sft-chat-v3', picked);
   });
 
+  it('picks the clicked search result', async () => {
+    const wanted = fileset('sft-chat-v3');
+    vi.mocked(filesListFilesets).mockImplementation(async (_workspace, params) =>
+      listResponse(
+        params?.filter ? [wanted] : [fileset('aaa-first'), fileset('bbb-second'), wanted]
+      )
+    );
+    const { input, onChange } = renderPicker();
+
+    await userEvent.type(input, 'v3');
+    await waitFor(() => expect(screen.queryByRole('option', { name: /aaa-first/ })).toBeNull());
+    await userEvent.click(screen.getByRole('option', { name: /sft-chat-v3/ }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('default/sft-chat-v3', wanted);
+  });
+
+  it('does not rerun an earlier search when editing starts again', async () => {
+    vi.mocked(filesListFilesets).mockImplementation(async (_workspace, params) => {
+      const filter = JSON.stringify(params?.filter ?? '');
+      return listResponse(
+        filter.includes('v3')
+          ? [fileset('only-v3')]
+          : filter.includes('x')
+            ? []
+            : [fileset('other')]
+      );
+    });
+    const { input } = renderPicker();
+    await userEvent.type(input, 'v3');
+    await screen.findByRole('option', { name: /only-v3/ });
+    await userEvent.tab();
+    await waitFor(() => expect(input).toHaveValue(''));
+
+    await userEvent.type(input, 'x');
+
+    // The earlier search's results are cached, so rerunning it would show them without a request.
+    expect(screen.queryByRole('option', { name: /only-v3/ })).toBeNull();
+  });
+
   it('does not auto-select a lone candidate', async () => {
     vi.mocked(filesListFilesets).mockResolvedValue(listResponse([fileset('only-one')]));
     const { input, onChange } = renderPicker();
