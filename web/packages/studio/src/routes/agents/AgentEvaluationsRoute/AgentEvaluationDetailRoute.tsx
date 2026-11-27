@@ -38,6 +38,7 @@ import {
   joinBundleByTask,
   joinBundleByTrial,
   parseBundleRef,
+  taskCountForJob,
 } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
@@ -273,7 +274,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
               <KVPair label="Cost" value={formatCost(evaluation?.cost_usd?.sum)} />
               <KVPair
                 label="Tasks"
-                value={String(job.spec.tasks?.length ?? '-')}
+                value={String(taskCountForJob(job) ?? '-')}
                 loading={isLoadingJob}
               />
               {evalConfigName(job) && (

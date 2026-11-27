@@ -57,10 +57,13 @@ from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
+from nemo_evals.taskset_runs.plan_storage import read_verified_bytes_sync
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
@@ -115,6 +118,14 @@ class _OutputContainsMetric:
     async def compute_scores(self, input: MetricInput) -> MetricResult:  # noqa: A002
         text = input.candidate.output_text or ""
         return MetricResult(outputs=[MetricOutput(name="contains", value=self.expected.lower() in text.lower())])
+
+
+def _frozen_tasks(base_url: str, workspace: str, job_name: str) -> list[dict]:
+    """The tasks job ``job_name`` keeps in its file, checked against its digest as its worker checks them."""
+    pointer = JobsClient(base_url=base_url, workspace=workspace).get_job(name=job_name).data().spec["frozen_tasks"]
+    files_client = FilesClient(base_url=base_url, workspace=workspace)
+    body = read_verified_bytes_sync(files_client, pointer["ref"], expected_digest=pointer["digest"])
+    return json.loads(body)["tasks"]
 
 
 def _output_contains_metric(expected: str) -> MetricInline:
@@ -536,11 +547,14 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
         .raise_for_status()
         .json()
     )
-    persisted_ids = [task["id"] for task in persisted["spec"]["tasks"]]
+    # The job keeps its tasks in a file; its reply only counts them.
+    assert persisted["spec"].get("tasks") is None and persisted["spec"]["task_count"] == len(task_names)
+    frozen = _frozen_tasks(subprocess_platform, WORKSPACE, job_name)
+    persisted_ids = [task["id"] for task in frozen]
     assert set(persisted_ids) == set(task_names)
     if source == "refs":
         assert persisted_ids == task_names
-    assert all(task["spec"]["metrics"][0]["bundle_kind"] == "metric-bundle" for task in persisted["spec"]["tasks"])
+    assert all(task["spec"]["metrics"][0]["bundle_kind"] == "metric-bundle" for task in frozen)
 
     import io
     import tarfile

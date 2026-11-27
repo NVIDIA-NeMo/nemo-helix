@@ -3,7 +3,9 @@
 
 """Agent-evaluate step configs leave their tasks on the job attempt, and workers read them back."""
 
+import hashlib
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -15,13 +17,16 @@ from nemo_evals.jobs import agent_compiler
 from nemo_evals.jobs import attempt_tasks as attempt_tasks_module
 from nemo_evals.jobs.agent_compiler import compile_agent_eval_job
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalOutputSpec, AgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
+    FROZEN_TASKS_PATH,
     TASK_SERVICE_NAME,
     TASKS_DIGEST_KEY,
     TASKS_FROM_ATTEMPT,
     TASKS_FROM_KEY,
     AttemptTasksError,
+    freeze_tasks_in_file,
+    frozen_tasks_bytes,
     frozen_tasks_digest,
     load_attempt_tasks,
     step_config_without_tasks,
@@ -33,10 +38,18 @@ from nemo_evals.jobs.harbor_task_spec import (
     PreparedImage,
     build_task_job_input,
 )
+from nemo_evals.sdk.job_resources import AgentEvaluatorJob
+from nemo_evals.taskset_runs.plan_storage import (
+    PlanStorageError,
+    PlanStoragePermissionDeniedError,
+    StoredPlan,
+)
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.types import HelixJobAttemptResponse, HelixJobSpec, HelixJobStatus
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
 
 BASE = "http://platform.test"
 JOB = "eval-job"
@@ -205,7 +218,9 @@ def test_a_marked_config_gets_its_tasks_back_from_its_own_attempt(harbor_spec: A
 
 @pytest.mark.parametrize("job_class", [AgentEvalJob, AsyncAgentEvalJob])
 def test_both_workers_run_the_attempts_tasks(
-    harbor_spec: AgentEvalSpec, monkeypatch: pytest.MonkeyPatch, job_class: type[AgentEvalJob | AsyncAgentEvalJob]
+    harbor_spec: AgentEvalSpec,
+    monkeypatch: pytest.MonkeyPatch,
+    job_class: type[AgentEvalJob | AsyncAgentEvalJob],
 ) -> None:
     stored, compiled, config = _stored_and_compiled(harbor_spec)
     platform = _Platform(_attempt_body(stored, compiled))
@@ -282,6 +297,325 @@ def test_a_config_the_worker_cannot_trust_is_refused(
     _, _, config = _stored_and_compiled(harbor_spec)
     with pytest.raises(AttemptTasksError, match=message):
         load_attempt_tasks({**config, **override}, ctx=ctx, client=_Platform(None).sync_client())
+
+
+# --- Tasks frozen in a file --------------------------------------------------------------------------------
+
+FILESET = "agent-eval-tasks-0123456789ab"
+FILE_REF = f"default/{FILESET}#{FROZEN_TASKS_PATH}"
+FILE_PATH = f"/apis/files/v2/workspaces/default/filesets/{FILESET}/-/{FROZEN_TASKS_PATH}"
+
+
+class _FrozenPlatform:
+    """Serves one attempt whose spec names a frozen-tasks file, and the file itself."""
+
+    def __init__(self, attempt: dict, file_body: bytes | None, *, file_path: str = FILE_PATH) -> None:
+        self.attempt = attempt
+        self.file_body = file_body
+        self.file_path = file_path
+        self.paths: list[str] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.paths.append(request.url.path)
+        if request.url.path == self.file_path:
+            if self.file_body is None:
+                return httpx.Response(404, json={"detail": "no such file"}, request=request)
+            return httpx.Response(200, content=self.file_body, request=request)
+        return httpx.Response(200, json=self.attempt, request=request)
+
+    def sync_client(self) -> NemoClient:
+        return NemoClient(
+            base_url=BASE,
+            workspace="default",
+            http_client=httpx.Client(transport=httpx.MockTransport(self)),
+            owns_http_client=True,
+        )
+
+
+def _frozen(spec: dict, *, ref: str = FILE_REF) -> tuple[dict, bytes]:
+    """The stored spec that keeps ``spec``'s tasks and trials in a file, and that file's bytes."""
+    body = frozen_tasks_bytes(spec)
+    stored = {key: value for key, value in spec.items() if key not in ("tasks", "trials")}
+    stored["task_count"] = len(spec["tasks"])
+    stored["frozen_tasks"] = {"ref": ref, "digest": hashlib.sha256(body).hexdigest()}
+    return stored, body
+
+
+def test_a_job_stored_with_its_tasks_in_a_file_gets_them_back_from_that_file(
+    harbor_spec: AgentEvalSpec,
+) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert platform.paths == [f"/apis/jobs/v2/workspaces/default/jobs/{JOB}/attempts/{ATTEMPT}", FILE_PATH]
+    assert AgentEvalSpec.model_validate(restored) == harbor_spec
+
+
+def test_a_job_stored_with_its_tasks_in_a_file_replies_with_their_count_and_the_file(
+    harbor_spec: AgentEvalSpec,
+) -> None:
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+
+    reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
+
+    assert "tasks" not in reply  # omitted, not null
+    assert reply["task_count"] == len(harbor_spec.tasks)
+    # The fileset's name is random, so the reply is where a user finds the file.
+    assert reply["frozen_tasks"] == {"ref": FILE_REF, "digest": hashlib.sha256(body).hexdigest()}
+
+
+def test_a_job_stored_with_its_tasks_inline_replies_with_them_alone(harbor_spec: AgentEvalSpec) -> None:
+    reply = AgentEvalOutputSpec.model_validate(harbor_spec.model_dump(mode="json")).model_dump(mode="json")
+
+    assert reply["tasks"] == harbor_spec.model_dump(mode="json")["tasks"]
+    # Clients from before these fields existed refuse unknown fields, so a reply with tasks carries neither.
+    assert "task_count" not in reply and "frozen_tasks" not in reply
+
+
+@pytest.mark.parametrize("shown", ["both", "neither"])
+def test_a_stored_spec_carries_its_tasks_or_their_count(harbor_spec: AgentEvalSpec, shown: str) -> None:
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    if shown == "both":
+        stored["tasks"] = harbor_spec.model_dump(mode="json")["tasks"]
+    else:
+        del stored["task_count"]
+
+    with pytest.raises(ValueError, match="exactly one of `tasks` or `task_count`"):
+        AgentEvalOutputSpec.model_validate(stored)
+
+
+@pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
+def test_a_reply_without_its_tasks_parses_back(harbor_spec: AgentEvalSpec, online: bool) -> None:
+    spec = harbor_spec.model_dump(mode="json")
+    if not online:
+        spec = {"target": None, "tasks": spec["tasks"], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
+    stored, _ = _frozen(spec)
+
+    reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
+
+    # An offline job's reply shows neither `target` nor `trials`; the SDK parses replies with this model.
+    assert AgentEvalOutputSpec.model_validate(reply).task_count == len(harbor_spec.tasks)
+    job = AgentEvaluatorJob.model_validate({"name": JOB, "workspace": "default", "spec": reply})
+    assert job.spec.task_count == len(harbor_spec.tasks)
+
+
+def test_a_stored_spec_with_fields_from_a_later_release_still_renders(harbor_spec: AgentEvalSpec) -> None:
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    stored["frozen_tasks"]["fileset_id"] = "fileset-1"
+    stored["added_later"] = True
+
+    reply = AgentEvalOutputSpec.model_validate(stored).model_dump(mode="json")
+
+    assert reply["task_count"] == len(harbor_spec.tasks)
+    assert "added_later" not in reply and "fileset_id" not in reply["frozen_tasks"]
+
+
+def test_a_null_pointer_leaves_the_tasks_inline(harbor_spec: AgentEvalSpec) -> None:
+    stored, compiled, config = _stored_and_compiled(harbor_spec)
+    stored["frozen_tasks"] = None
+    platform = _Platform(_attempt_body(stored, compiled))
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert platform.paths == [f"/apis/jobs/v2/workspaces/default/jobs/{JOB}/attempts/{ATTEMPT}"]
+    assert AgentEvalSpec.model_validate(restored) == harbor_spec
+
+
+def test_an_offline_jobs_trials_come_back_from_the_file_too(harbor_spec: AgentEvalSpec) -> None:
+    spec = {"target": None, "tasks": [{"id": "t"}], "trials": [{"id": "trial", "task_id": "t"}], "labels": {}}
+    config = step_config_without_tasks(spec)
+    stored, body = _frozen(spec)
+    # Any compiled job serves as the attempt's platform spec; the worker reads only the attempt's spec.
+    platform = _FrozenPlatform(_attempt_body(stored, _compiled(harbor_spec)), body)
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert restored["tasks"] == spec["tasks"] and restored["trials"] == spec["trials"]
+
+
+def test_a_frozen_tasks_file_that_changed_is_refused(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body.replace(b'"tasks"', b'"tasks" '))
+    with pytest.raises(AttemptTasksError, match="doesn't match its step config"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+
+def test_a_missing_frozen_tasks_file_fails_the_run(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), None)
+    with pytest.raises(AttemptTasksError, match="could not read the tasks"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+
+def test_a_frozen_tasks_file_outside_the_jobs_workspace_is_refused(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=f"elsewhere/{FILESET}#{FROZEN_TASKS_PATH}")
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="is outside workspace 'default'"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+    assert FILE_PATH not in platform.paths
+
+
+def test_a_frozen_tasks_file_at_another_path_is_read_by_its_digest(harbor_spec: AgentEvalSpec) -> None:
+    # The digest binds the bytes, so a later release may store the file elsewhere in the workspace.
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"), ref=f"default/{FILESET}#frozen/other.json")
+    other_path = f"/apis/files/v2/workspaces/default/filesets/{FILESET}/-/frozen/other.json"
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body, file_path=other_path)
+
+    restored = load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+    assert AgentEvalSpec.model_validate(restored) == harbor_spec
+
+
+def test_a_stored_digest_that_differs_from_the_step_config_is_refused(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+    stored["frozen_tasks"]["digest"] = "f" * 64
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="digest .* doesn't match its step config"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+    assert FILE_PATH not in platform.paths
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("frozen_tasks", {"digest": "f" * 64}),
+        ("frozen_tasks", {"ref": f"default/{FILESET}#{FROZEN_TASKS_PATH}", "digest": "not-a-digest"}),
+        ("frozen_tasks", f"default/{FILESET}#{FROZEN_TASKS_PATH}"),
+        ("tasks", "not a list"),
+    ],
+    ids=["no file", "malformed digest", "not an object", "tasks not a list"],
+)
+def test_an_attempt_spec_without_its_tasks_or_a_file_and_digest_is_refused(
+    harbor_spec: AgentEvalSpec, key: str, value: object
+) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, body = _frozen(harbor_spec.model_dump(mode="json"))
+    if key == "tasks":
+        stored["frozen_tasks"] = None
+    stored[key] = value
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="has neither a task list nor a tasks file's ref and digest"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+    assert FILE_PATH not in platform.paths
+
+
+def test_a_frozen_tasks_file_without_a_task_list_is_refused(harbor_spec: AgentEvalSpec) -> None:
+    _, compiled, config = _stored_and_compiled(harbor_spec)
+    stored, _ = _frozen(harbor_spec.model_dump(mode="json"))
+    body = b'{"trials": null}'
+    stored["frozen_tasks"]["digest"] = hashlib.sha256(body).hexdigest()
+    config = {**config, TASKS_DIGEST_KEY: "sha256-v1:" + stored["frozen_tasks"]["digest"]}
+    platform = _FrozenPlatform(_attempt_body(stored, compiled), body)
+    with pytest.raises(AttemptTasksError, match="doesn't hold a task list"):
+        load_attempt_tasks(config, ctx=_ctx(), client=platform.sync_client())
+
+
+def test_the_file_bytes_hash_to_the_step_config_digest(harbor_spec: AgentEvalSpec) -> None:
+    spec = harbor_spec.model_dump(mode="json")
+    assert "sha256-v1:" + hashlib.sha256(frozen_tasks_bytes(spec)).hexdigest() == frozen_tasks_digest(spec)
+
+
+# --- Freezing a new job's tasks in a file ----------------------------------------------------------------
+
+
+def _offline(spec: AgentEvalSpec) -> AgentEvalSpec:
+    """``spec`` scoring one precomputed trial per task instead of running its target."""
+    trials = [
+        AgentEvalTrial(
+            id=f"trial-{task.id}",
+            task_id=task.id,
+            status=AgentEvalTrialStatus.COMPLETED,
+            output=AgentOutput(output_text="done"),
+        )
+        for task in spec.tasks
+    ]
+    return AgentEvalSpec(tasks=spec.tasks, trials=trials)
+
+
+@pytest.mark.parametrize("online", [True, False], ids=["online", "offline"])
+@pytest.mark.parametrize("job_name", [JOB, None], ids=["named", "unnamed"])
+async def test_freezing_stores_the_settings_the_count_and_the_file_the_step_config_binds(
+    harbor_spec: AgentEvalSpec, online: bool, job_name: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = harbor_spec if online else _offline(harbor_spec)
+    canonical = spec.model_dump(mode="json")
+    written: list[dict[str, Any]] = []
+
+    async def store(files_client: object, **kwargs: Any) -> StoredPlan:
+        del files_client
+        written.append(kwargs)
+        ref = f"{kwargs['workspace']}/{kwargs['name']}#{kwargs['path']}"
+        return StoredPlan(ref=ref, digest=hashlib.sha256(kwargs["body"]).hexdigest(), fileset_id="fileset-1")
+
+    monkeypatch.setattr(attempt_tasks_module, "store_in_new_fileset", store)
+    async with AsyncNemoClient(base_url=BASE, workspace="default") as client:
+        stored = await freeze_tasks_in_file(spec, workspace="default", job_name=job_name, async_client=client)
+        again = await freeze_tasks_in_file(spec, workspace="default", job_name=job_name, async_client=client)
+
+    [first, second] = written
+    assert re.fullmatch(r"job-tasks-[0-9a-f]{16}", first["name"]) and first["name"] != second["name"]
+    assert first["path"] == FROZEN_TASKS_PATH
+    assert first["body"] == frozen_tasks_bytes(canonical)
+    job = f"agent-evaluate job default/{JOB}" if job_name is not None else "an agent-evaluate job in default"
+    assert first["description"] == f"Tasks frozen for {job}."
+    assert isinstance(stored.spec, AgentEvalOutputSpec)
+    shown = stored.spec.model_dump(mode="json")
+    digest = hashlib.sha256(first["body"]).hexdigest()
+    assert shown == {
+        **{key: value for key, value in canonical.items() if key != "tasks"},
+        "trials": None,
+        "task_count": len(spec.tasks),
+        "frozen_tasks": {"ref": f"default/{first['name']}#{FROZEN_TASKS_PATH}", "digest": digest},
+    }
+    assert "sha256-v1:" + digest == frozen_tasks_digest(canonical)
+    assert again.spec.model_dump(mode="json")["frozen_tasks"]["ref"] != shown["frozen_tasks"]["ref"]
+
+
+def _denied() -> PlanStoragePermissionDeniedError:
+    response = httpx.Response(403, request=httpx.Request("POST", f"{BASE}/apis/files/v2/workspaces/default/filesets"))
+    return PlanStoragePermissionDeniedError("may not create the fileset", PermissionDeniedError(response))
+
+
+@pytest.mark.parametrize(
+    ("failure", "raised"),
+    [
+        (_denied(), PermissionError),  # the route answers 403
+        (PlanStorageError("files are down"), PlanStorageError),  # the route answers 422
+    ],
+    ids=["denied", "failed"],
+)
+async def test_a_job_whose_tasks_cannot_be_frozen_gives_back_the_agents_files(
+    harbor_spec: AgentEvalSpec,
+    failure: Exception,
+    raised: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def refuse(*_: object, **__: object) -> None:
+        raise failure
+
+    discarded: list[object] = []
+
+    async def discard(target: object, async_sdk: object) -> None:
+        del async_sdk
+        discarded.append(target)
+
+    monkeypatch.setattr("nemo_evals.jobs.agent_evaluate.freeze_tasks_in_file", refuse)
+    monkeypatch.setattr("nemo_evals.jobs.agent_evaluate._discard_resolved_agent_files", discard)
+    async with AsyncNemoClient(base_url=BASE, workspace="default") as client:
+        with pytest.raises(raised) as caught:
+            await AgentEvalJob.store_spec(harbor_spec, workspace="default", job_name=JOB, async_sdk=client)
+
+    # No job will own the registered agent's files snapshot that resolution took.
+    assert discarded == [harbor_spec.target]
+    assert isinstance(caught.value, raised)
 
 
 # --- Taskset-run task Jobs ---------------------------------------------------------------------------------

@@ -14,13 +14,17 @@ Keeping this module focused on the shim keeps it fast and stable.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.api_factory import JobRouteOption
 from nemo_helix_plugin.jobs.routes import (
     _adapt_compile,
+    _adapt_store_spec,
     _adapt_to_spec,
     _derive_job_type,
     _derive_service_name,
@@ -538,6 +542,51 @@ class TestAddJobRoutes:
     def test_handles_job_with_input_spec_schema(self) -> None:
         router = add_job_routes(_WithInputJob)
         assert isinstance(router, APIRouter)
+
+    def test_replies_render_the_stored_spec_schema(self) -> None:
+        class _StoredSpec(BaseModel):
+            stored_ref: str
+
+        class StoredJob(_WithInputJob):
+            name = "stored"
+            stored_spec_schema = _StoredSpec
+
+        router = add_job_routes(StoredJob)
+        [get_route] = [
+            r
+            for r in router.routes
+            if isinstance(r, APIRoute) and r.path == "/jobs/stored/{name}" and "GET" in (r.methods or set())
+        ]
+        response_model = get_route.response_model
+        assert isinstance(response_model, type) and issubclass(response_model, BaseModel)
+        assert response_model.model_fields["spec"].annotation == _StoredSpec
+
+    def test_stored_spec_schema_requires_an_input_spec_schema(self) -> None:
+        class StoredWithoutInputJob(_WidgetJob):
+            name = "stored-no-input"
+            stored_spec_schema = _WidgetSpec
+
+        with pytest.raises(TypeError, match="requires input_spec_schema"):
+            add_job_routes(StoredWithoutInputJob)
+
+    async def test_a_job_type_with_a_stored_spec_schema_stores_each_spec_through_store_spec(self) -> None:
+        calls: list[tuple[object, str, str | None, object]] = []
+        client = cast(AsyncNemoClient, object())
+
+        class StoringJob(_WithInputJob):
+            name = "storing"
+            stored_spec_schema = _CanonicalSpec
+
+            @classmethod
+            async def store_spec(cls, spec, *, workspace, job_name, async_sdk):
+                calls.append((spec, workspace, job_name, async_sdk))
+
+        store_spec = _adapt_store_spec(StoringJob)
+        assert store_spec is not None
+        await store_spec("spec", "default", None, client)
+        assert calls == [("spec", "default", None, client)]
+        # Without a stored schema, a job stores its canonical spec, and its spec can be updated.
+        assert _adapt_store_spec(_WithInputJob) is None
 
     def test_respects_job_collection_path_override(self) -> None:
         class FlatCollectionJob(_WidgetJob):

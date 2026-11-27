@@ -17,6 +17,8 @@ The deep spec types live in sibling modules:
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
@@ -243,6 +245,23 @@ class JobDryRunCheck(BaseModel):
     name: str = Field(description="What was checked.")
     passed: bool
     message: str = Field(description="What the check found; on failure, what to fix.")
+
+
+@dataclass(frozen=True)
+class StoredJobSpec:
+    """The spec a new job stores in place of its canonical spec (see ``NemoJob.store_spec``).
+
+    Attributes:
+        spec: The spec the job record stores, an instance of the job's stored spec schema. When storing wrote
+            something outside the record, ``spec`` should bind it with a digest that the job's reader checks
+            before using it, as agent-evaluate's ``frozen_tasks.digest`` does.
+        discard: Undoes what storing the spec wrote outside the record. The job route calls it when the Jobs
+            service refuses the job with a 4xx, so no job will own those writes. A 5xx or a lost reply leaves the
+            job's existence unknown, so the route doesn't call it.
+    """
+
+    spec: BaseModel
+    discard: Callable[[], Awaitable[None]] | None = None
 
 
 class JobDryRunFailureDetail(BaseModel):

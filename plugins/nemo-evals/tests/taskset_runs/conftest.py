@@ -23,7 +23,9 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 
 @pytest.fixture
 def plan(
-    resolved_spec: AgentEvalSpec, sandbox_policy: ResolvedHarborSandboxPolicy, harbor_config: HarborTaskJobsConfig
+    resolved_spec: AgentEvalSpec,
+    sandbox_policy: ResolvedHarborSandboxPolicy,
+    harbor_config: HarborTaskJobsConfig,
 ) -> TasksetRunPlan:
     """Bind the resolved-spec fixture to a fixed keyed run and pinned taskset revision.
 

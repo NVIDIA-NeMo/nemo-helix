@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Internal Files operations; only TasksetRunStore owns this lifecycle."""
+"""Frozen plans in Files: taskset-run plans, and agent-evaluate jobs' frozen tasks.
+
+Only TasksetRunStore owns a run plan's lifecycle. An agent-evaluate job's route writes its frozen tasks
+through :func:`store_in_new_fileset`, and its worker reads them through :func:`read_verified_bytes_sync`.
+"""
 
 import logging
 import secrets
@@ -12,7 +16,7 @@ from filesets import parse_fileset_ref
 from nemo_evals.schema_migrations import migrate_schema_fileset_receipt
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_helix_plugin.client.errors import PermissionDeniedError
-from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 logger = logging.getLogger(__name__)
@@ -89,29 +93,67 @@ async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> St
         PlanStorageError: Fileset creation or upload failed, with the original
             error retained as its cause even when rollback also fails.
     """
-    name = f"{plan.run_id}-plan-{secrets.token_hex(3)}"
-    body = plan.model_dump_json().encode("utf-8")
-    ref = f"{plan.workspace}/{name}#plan.json"
+    return await store_in_new_fileset(
+        files_client,
+        workspace=plan.workspace,
+        name=f"{plan.run_id}-plan-{secrets.token_hex(3)}",
+        path="plan.json",
+        body=plan.model_dump_json().encode("utf-8"),
+        description=f"Frozen plan for {plan.workspace}/{plan.run_id}.",
+        what="plan",
+    )
+
+
+async def store_in_new_fileset(
+    files_client: AsyncFilesClient,
+    *,
+    workspace: str,
+    name: str,
+    path: str,
+    body: bytes,
+    description: str,
+    what: str,
+) -> StoredPlan:
+    """Create fileset ``name``, upload ``body`` to ``path`` in it, and return the file's ref and digest.
+
+    Roll back a failed upload only after a successful create. A failed create, including a lost reply
+    followed by 409, provides no ownership proof.
+
+    Args:
+        files_client: Authorized Files client for ``workspace``.
+        workspace: Workspace of the new fileset.
+        name: Name of the new fileset; it must not exist yet.
+        path: Path of the file in the fileset.
+        body: The file's exact bytes.
+        description: The fileset's description.
+        what: What the file holds, for error messages, such as ``"plan"``.
+
+    Raises:
+        PlanStoragePermissionDeniedError: Files refused fileset creation or upload.
+        PlanStorageError: Fileset creation or upload failed, with the original
+            error retained as its cause even when rollback also fails.
+    """
+    ref = f"{workspace}/{name}#{path}"
     try:
         allocated = (
             await files_client.create_fileset(
-                workspace=plan.workspace,
-                body=CreateFilesetRequest(name=name, description=f"Frozen plan for {plan.workspace}/{plan.run_id}."),
+                workspace=workspace,
+                body=CreateFilesetRequest(name=name, description=description),
                 exist_ok=False,
             )
         ).data()
     except PermissionDeniedError as exc:
-        raise PlanStoragePermissionDeniedError(f"failed to create plan fileset {plan.workspace}/{name}", exc) from exc
+        raise PlanStoragePermissionDeniedError(f"failed to create {what} fileset {workspace}/{name}", exc) from exc
     except Exception as exc:
-        raise PlanStorageError(f"failed to create plan fileset {plan.workspace}/{name}") from exc
+        raise PlanStorageError(f"failed to create {what} fileset {workspace}/{name}") from exc
     try:
-        await files_client.upload_file(workspace=plan.workspace, name=name, path="plan.json", content=body)
+        await files_client.upload_file(workspace=workspace, name=name, path=path, content=body)
     except PermissionDeniedError as exc:
         await delete_fileset_ref(files_client, ref, fileset_id=allocated.id)
-        raise PlanStoragePermissionDeniedError(f"failed to upload plan to {ref}", exc) from exc
+        raise PlanStoragePermissionDeniedError(f"failed to upload {what} to {ref}", exc) from exc
     except Exception as exc:
         await delete_fileset_ref(files_client, ref, fileset_id=allocated.id)
-        raise PlanStorageError(f"failed to upload plan to {ref}") from exc
+        raise PlanStorageError(f"failed to upload {what} to {ref}") from exc
     return StoredPlan(ref=ref, digest=sha256(body).hexdigest(), fileset_id=allocated.id)
 
 
@@ -131,11 +173,34 @@ async def read_verified_bytes(files_client: AsyncFilesClient, plan_ref: str, *, 
         PlanDigestMismatchError: The downloaded bytes do not match the digest.
         Exception: Files download/read failures propagate without being rewrapped.
     """
+    workspace, name, path = _plan_file(plan_ref)
+    response = await files_client.download_file(workspace=workspace, name=name, path=path)
+    return _verified(plan_ref, await response.read(), expected_digest)
+
+
+def read_verified_bytes_sync(files_client: FilesClient, plan_ref: str, *, expected_digest: str) -> bytes:
+    """The synchronous twin of :func:`read_verified_bytes`, for a worker holding a sync client.
+
+    Raises:
+        ValueError: The ref is malformed or lacks a nonempty file fragment.
+        PlanDigestMismatchError: The downloaded bytes do not match the digest.
+        Exception: Files download/read failures propagate without being rewrapped.
+    """
+    workspace, name, path = _plan_file(plan_ref)
+    return _verified(
+        plan_ref, files_client.download_file(workspace=workspace, name=name, path=path).read(), expected_digest
+    )
+
+
+def _plan_file(plan_ref: str) -> tuple[str, str, str]:
+    """``plan_ref``'s workspace, fileset and file path; a plan ref always names one file."""
     workspace, name, path = parse_fileset_ref(plan_ref, workspace_fallback=None)
     if "#" not in plan_ref or not path:
         raise ValueError(f"plan reference must include a nonempty file fragment: {plan_ref!r}")
-    response = await files_client.download_file(workspace=workspace, name=name, path=path)
-    body = await response.read()
+    return workspace, name, path
+
+
+def _verified(plan_ref: str, body: bytes, expected_digest: str) -> bytes:
     actual = sha256(body).hexdigest()
     if actual != expected_digest:
         raise PlanDigestMismatchError(plan_ref, expected_digest, actual)

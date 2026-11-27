@@ -74,7 +74,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
-from nemo_helix_plugin.jobs.types import JobDryRunCheck
+from nemo_helix_plugin.jobs.types import JobDryRunCheck, StoredJobSpec
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -178,6 +178,12 @@ class NemoJob(_NamedPlugin):
 
     spec_schema: ClassVar[type[BaseModel] | None] = None
     input_spec_schema: ClassVar[type[BaseModel] | None] = None
+    #: What the job routes store and return, when it differs from ``spec_schema``. Requires
+    #: ``input_spec_schema``. ``to_spec`` and ``compile`` still see ``spec_schema``. A job type that sets
+    #: it stores each new job's spec through :meth:`store_spec`, and refuses spec updates, since an
+    #: update would store a canonical spec as is. It must also accept the canonical spec: a dry run
+    #: shows that spec, since it stores nothing, and jobs created before the job type set it keep it.
+    stored_spec_schema: ClassVar[type[BaseModel] | None] = None
 
     # ------------------------------------------------------------------ #
     # API routes                                                         #
@@ -348,6 +354,36 @@ class NemoJob(_NamedPlugin):
         """
         del spec, platform_spec, workspace, async_sdk, full
         return []
+
+    @classmethod
+    async def store_spec(
+        cls,
+        spec: BaseModel,
+        *,
+        workspace: str,
+        job_name: str | None,
+        async_sdk: AsyncNemoClient,
+    ) -> StoredJobSpec | None:
+        """The spec a new job stores, when it isn't ``spec`` itself.
+
+        The job route calls this on a create for a job type that sets :attr:`stored_spec_schema`, after
+        :meth:`to_spec` and :meth:`compile`, and never on a dry run. Override it to keep part of a large spec out
+        of the job record, such as in a file the job reads back when it runs. The stored spec is an instance of
+        :attr:`stored_spec_schema`, and the job still runs what :meth:`compile` compiled from ``spec``.
+
+        Args:
+            spec: Canonical :attr:`spec_schema` instance, as :meth:`compile` received it.
+            workspace: Workspace scope.
+            job_name: The new job's name, or ``None`` when it was submitted without one and the Jobs service
+                will name it.
+            async_sdk: The request-scoped :class:`AsyncNemoClient`.
+
+        Returns:
+            What to store, and how to undo its writes when no job will own them (see ``StoredJobSpec``).
+            ``None``, the default, stores ``spec`` as is.
+        """
+        del spec, workspace, job_name, async_sdk
+        return None
 
     # ------------------------------------------------------------------ #
     # Progress reporting (virtual; default = log only)                   #

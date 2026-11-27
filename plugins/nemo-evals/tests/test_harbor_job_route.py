@@ -3,6 +3,8 @@
 
 """Exercise HTTP submission through the real transformer and compiler."""
 
+import hashlib
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -14,8 +16,9 @@ from nemo_evals.api.schemas import HarborTaskDefinition, TaskRef
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, frozen_tasks_digest
+from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY
 from nemo_evals.revisions import publish_revision
+from nemo_evals.taskset_runs.plan_storage import StoredPlan
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.routes import add_job_routes
@@ -69,6 +72,12 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     captured = []
 
     class Jobs:
+        retry_policies = []
+
+        def with_retry(self, policy):
+            self.retry_policies.append(policy)
+            return self
+
         async def get_execution_profiles(self):
             response = MagicMock()
             response.data.return_value = [SubprocessJobExecutionProfile(provider="subprocess", profile="harbor-test")]
@@ -104,6 +113,15 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     monkeypatch.setattr(AsyncFilesClient, "download_file", forbidden)
     monkeypatch.setattr(FilesClient, "download_file", forbidden)
 
+    written = []
+
+    async def store_tasks_file(files_client, **kwargs):
+        del files_client
+        written.append(kwargs)
+        ref = f"{kwargs['workspace']}/{kwargs['name']}#{kwargs['path']}"
+        return StoredPlan(ref=ref, digest=hashlib.sha256(kwargs["body"]).hexdigest(), fileset_id="fileset-1")
+
+    monkeypatch.setattr("nemo_evals.jobs.attempt_tasks.store_in_new_fileset", store_tasks_file)
     jobs = Jobs()
     monkeypatch.setattr("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", lambda *args: jobs)
     monkeypatch.setattr("nemo_evals.jobs.agent_evaluate.client_from_platform", lambda *args: jobs)
@@ -121,7 +139,7 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     )
     if invalid:
         assert response.status_code == 422, response.text
-        assert captured == []
+        assert captured == written == []
         return
     assert response.status_code == 201, response.text
     body = captured[0]
@@ -136,10 +154,16 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
             "metadata": [],
         }
     ]
-    assert body.spec["tasks"] == expected
-    assert response.json()["spec"]["tasks"] == expected
-    # The step config pins the tasks the job stores; the worker reads them back from its attempt.
+    # The create is sent once, so a refusal can safely undo the file.
+    assert [policy.max_retries for policy in jobs.retry_policies] == [0]
+    # The job keeps its tasks in a file, and its record and reply only count them.
+    [tasks_file] = written
+    assert json.loads(tasks_file["body"])["tasks"] == expected
+    assert "tasks" not in body.spec and body.spec["task_count"] == 1
+    assert response.json()["spec"].get("tasks") is None and response.json()["spec"]["task_count"] == 1
+    # The step config pins the file's exact bytes; the worker reads them back through its attempt's pointer.
     assert "tasks" not in body.platform_spec.steps[0].config
-    assert body.platform_spec.steps[0].config[TASKS_DIGEST_KEY] == frozen_tasks_digest(body.spec)
+    digest = body.spec["frozen_tasks"]["digest"]
+    assert body.platform_spec.steps[0].config[TASKS_DIGEST_KEY] == f"sha256-v1:{digest}"
     assert body.platform_spec.steps[0].executor.provider == "subprocess"
     assert body.platform_spec.steps[0].executor.profile == "harbor-test"

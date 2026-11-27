@@ -60,17 +60,24 @@ def _compiler(
     return HelixJobSpec(steps=[HelixJobStep(name="training", executor=executor, config={})])
 
 
+class _ReplySpec(BaseModel):
+    """What a job type's replies show when they differ from the spec it compiles (``stored_spec_schema``)."""
+
+    label: str
+
+
 def _client(
     *,
     dry_run_checks: DryRunChecks | None = None,
     route_options: list[JobRouteOption] | None = None,
     generate_job_name: Callable[[], str] | None = None,
+    job_output: type[BaseModel] = _OutputSpec,
 ) -> TestClient:
     router = job_route_factory(
         service_name="widgets",
         job_type="Widget",
         job_input=_InputSpec,
-        job_output=_OutputSpec,
+        job_output=job_output,
         input_to_output=_to_output,
         platform_job_config_compiler=_compiler,
         route_options=route_options or [JobRouteOption.CORE, JobRouteOption.DRY_RUN],
@@ -122,6 +129,15 @@ def test_a_passing_dry_run_returns_the_unsaved_job_and_its_checks() -> None:
     }
     assert seen == [(_OutputSpec(label="x", learning_rate=5e-6), ["training"], "default")]
     jobs.create_job.assert_not_called()
+
+
+def test_a_dry_run_shows_the_spec_as_the_jobs_replies_would() -> None:
+    jobs = _create_job_spy()
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
+        response = _client(job_output=_ReplySpec).post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["spec"] == {"label": "x"}  # compiled as `_OutputSpec`, shown as `_ReplySpec`
 
 
 def test_a_failed_check_is_a_422_that_lists_every_check() -> None:

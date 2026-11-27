@@ -112,6 +112,23 @@ asyncio.run(main())
   doesn't decide pass/fail, gate a release, or compare runs. Those decisions belong to whatever
   consumes the results.
 
+## Where a job keeps its tasks
+
+An `agent-evaluate` job resolves its tasks when you submit it, and runs exactly those tasks, even if
+the tasks, tasksets or metrics they came from change later. It keeps them in `tasks.json`, in a new
+FileSet of the job's workspace named `job-tasks-` and a random suffix, so the job record stays small
+however many tasks it has. Submitting a job creates that FileSet, so the submitter needs permission to
+create FileSets in the workspace.
+
+- **Replies show `task_count` and `frozen_tasks` in place of `tasks`.** `frozen_tasks.ref` names the
+  file, as `<workspace>/<fileset>#tasks.json`, and `frozen_tasks.digest` is the SHA-256 of its bytes.
+  To see the tasks a job runs, download that file. Jobs submitted to earlier releases keep their tasks
+  in the job record, and their replies still show them.
+- **Helix doesn't delete the FileSet,** when the job finishes or when you delete the job. Delete it
+  yourself once you no longer need the job: without it, the job can't run again.
+- **A job's definition can't be changed.** Updating an `agent-evaluate` job's `spec` is refused with
+  `422`; its description can still change. Submit a new job instead.
+
 ## Targets
 
 An evaluation target is what performs the tasks:
