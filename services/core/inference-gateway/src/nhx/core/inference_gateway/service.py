@@ -64,10 +64,18 @@ class InferenceGatewayService(Service):
         ]
 
     def configure_app(self, app: FastAPI) -> None:
-        """Install the caller-context middleware on the platform app, outside its authorization middleware."""
+        """Install gateway middleware outside the platform's authorization middleware."""
         from nhx.core.inference_gateway.api.caller_context_middleware import CallerContextMiddleware
+        from nhx.core.inference_gateway.api.request_metrics_middleware import InferenceRequestMetricsMiddleware
 
         app.add_middleware(CallerContextMiddleware)
+        app.add_middleware(InferenceRequestMetricsMiddleware, prefix=f"/apis/{self.name}")
+
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        from nhx.core.inference_gateway.api.request_metrics_middleware import InferenceRequestMetricsMiddleware
+
+        super()._setup_dependencies(app)
+        app.add_middleware(InferenceRequestMetricsMiddleware)
 
     async def on_startup(self) -> None:
         """Initialize resources on startup."""
