@@ -19,13 +19,18 @@ from nemo_fabric import FabricConfig, FabricConfigError
 from nemo_fabric.integrations.harbor.fabric_agent import FabricAgent, fabric_runner_command
 from nhx_evals_sdk.agent_eval.runtimes.harbor import mcp_env_runner
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
-from nhx_evals_sdk.agent_eval.runtimes.harbor.mcp_env_runner import fill_mcp_env, run_through
+from nhx_evals_sdk.agent_eval.runtimes.harbor.mcp_env_runner import (
+    fill_mcp_env,
+    run_through,
+    unbound_mcp_env_templates,
+)
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 
 _SHIM = "/tmp/nemo-fabric-mcp-env-runner.py"
 _RUNNER_PYTHON = "/opt/nemo-fabric/bin/python"
 
 
-def _config(env: dict[str, str] | None = None) -> dict[str, Any]:
+def _config(env: dict[str, str] | None = None, *, adapter_id: str = "nvidia.fabric.codex") -> dict[str, Any]:
     servers: dict[str, Any] = {
         "web": {"transport": "streamable-http", "url": "http://search.internal/mcp"},
     }
@@ -33,7 +38,7 @@ def _config(env: dict[str, str] | None = None) -> dict[str, Any]:
         servers["calculator"] = {"transport": "stdio", "url": "/usr/bin/python3", "args": ["srv.py"], "env": env}
     return {
         "metadata": {"name": "codex-agent"},
-        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "harness": {"adapter_id": adapter_id},
         "mcp": {"servers": servers},
     }
 
@@ -101,6 +106,37 @@ def test_the_shim_refuses_a_template_its_environment_does_not_set() -> None:
         fill_mcp_env(config, {})
 
     assert refused.value.code == "harbor_mcp_env_unset"
+
+
+def test_hermes_keeps_its_templates_because_it_fills_them_in_itself() -> None:
+    # Hermes writes each server's env to a config.yaml the trial's logs keep, so a filled-in value would land there.
+    config = FabricConfig.model_validate(_config({"CALC_TOKEN": "${CALC_TOKEN}"}, adapter_id="nvidia.fabric.hermes"))
+
+    fill_mcp_env(config, {"CALC_TOKEN": "s3cret"})
+
+    assert config.mcp is not None
+    assert config.mcp.servers["calculator"].env == {"CALC_TOKEN": "${CALC_TOKEN}"}
+    with pytest.raises(FabricConfigError, match="'calculator' reads CALC_TOKEN"):
+        fill_mcp_env(config, {})
+
+
+def test_unbound_templates_are_each_stdio_servers_variables_the_run_does_not_set() -> None:
+    config = _config({"CALC_TOKEN": "${CALC_TOKEN}", "API": "${API_KEY}", "MODE": "mock", "URL": "http://${HOST}"})
+
+    assert unbound_mcp_env_templates(config, {"API_KEY"}) == {"calculator": ["CALC_TOKEN"]}
+    assert unbound_mcp_env_templates(config, {"API_KEY", "CALC_TOKEN"}) == {}
+    assert unbound_mcp_env_templates(_config(), set()) == {}
+
+
+def test_a_local_run_refuses_a_template_it_does_not_bind_before_any_trial(tmp_path: Path) -> None:
+    agent_kwargs: dict[str, Any] = {"fabric_config": _config({"CALC_MODE": "${CALC_MODE}"})}
+
+    with pytest.raises(ValueError, match="'calculator' reads CALC_MODE"):
+        HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs=agent_kwargs)
+
+    HarborRuntimeConfig(
+        jobs_dir=tmp_path, agent_import_path="x:Y", agent_kwargs=agent_kwargs, env_vars={"CALC_MODE": "mock"}
+    )
 
 
 def test_the_shim_fills_the_payload_in_before_the_runner_runs_it(monkeypatch: pytest.MonkeyPatch) -> None:

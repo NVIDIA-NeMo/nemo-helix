@@ -430,10 +430,13 @@ laptop case described above.
 A secret bound to a **stdio** MCP server through `mcp.<name>.secrets` reaches the server itself. A
 stdio server doesn't inherit the agent's environment, so the resolver names the secret in the server's
 `env` as a `${NAME}` template. Harbor puts the value in the environment of the Fabric runner inside the
-task container, and the runner fills the template in when it starts the server. The spec, Harbor's job
-files and the trial's logs keep only the template. A template that names a variable the job doesn't set
-is refused at submit: bind it in the target's `env_secrets`, or in `env_vars` for a value that isn't
-secret.
+task container, and the runner fills the template in when it starts the server. With the Hermes harness
+(`nvidia.fabric.hermes`), the runner leaves the template to Hermes, which fills it in itself when it
+starts the server: Hermes writes each server's `env` to a file the trial's logs keep. The spec, Harbor's
+job files and the trial's logs keep only the template. A template that names a variable the job doesn't
+set is refused at submit, or, in a local SDK run, when `HarborRuntimeConfig` is built: bind it in the
+target's `env_secrets` (`HarborRuntimeConfig.env_secrets` locally), or in `env_vars` for a value that
+isn't secret.
 
 ## Next steps
 

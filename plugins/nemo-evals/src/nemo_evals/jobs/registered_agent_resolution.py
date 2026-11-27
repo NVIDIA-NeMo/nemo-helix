@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -54,6 +53,7 @@ from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platf
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.refs import parse_entity_ref
+from nhx_evals_sdk.agent_eval.runtimes.harbor.mcp_env_runner import MCP_ENV_TEMPLATE, unbound_mcp_env_templates
 from nhx_evals_sdk.values import SecretRef
 
 logger = logging.getLogger(__name__)
@@ -177,9 +177,6 @@ def _merge_env_secrets(
     return {**agent_secrets, **target_secrets}
 
 
-_ENV_TEMPLATE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-
-
 def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpecInline | None) -> dict[str, Any]:
     """Name each stdio MCP server's bound secrets in its ``env`` as ``${NAME}`` templates.
 
@@ -202,22 +199,14 @@ def _template_mcp_secret_env(config: dict[str, Any], environment: EnvironmentSpe
 
 def _require_mcp_env_templates_bound(config: dict[str, Any], bound: set[str], *, agent: str) -> None:
     """Refuse a stdio MCP server ``${NAME}`` env template that names no variable the job will set."""
-    servers = ((config.get("mcp") or {}).get("servers")) or {}
-    for name, server in servers.items():
-        if not isinstance(server, dict) or server.get("transport") != "stdio":
-            continue
-        templated = {
-            m.group(1)
-            for v in (server.get("env") or {}).values()
-            if isinstance(v, str) and (m := _ENV_TEMPLATE.match(v))
-        }
-        unbound = sorted(templated - bound)
-        if unbound:
-            raise ValueError(
-                f"registered agent {agent}'s stdio MCP server {name!r} reads {', '.join(unbound)} from the "
-                "environment, but the job does not set it; bind it in the target's `env_secrets` (or `env_vars` "
-                f"for a non-secret value) or the source's `environment.mcp.{name}.secrets`"
-            )
+    unbound = unbound_mcp_env_templates(config, bound)
+    if unbound:
+        name, variables = next(iter(unbound.items()))
+        raise ValueError(
+            f"registered agent {agent}'s stdio MCP server {name!r} reads {', '.join(variables)} from the "
+            "environment, but the job does not set it; bind it in the target's `env_secrets` (or `env_vars` "
+            f"for a non-secret value) or the source's `environment.mcp.{name}.secrets`"
+        )
 
 
 def expand_mcp_secret_env(config: dict[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
@@ -234,7 +223,7 @@ def expand_mcp_secret_env(config: dict[str, Any], values: Mapping[str, str]) -> 
         if not isinstance(server, dict) or server.get("transport") != "stdio":
             continue
         for key, value in list((server.get("env") or {}).items()):
-            match = _ENV_TEMPLATE.match(value) if isinstance(value, str) else None
+            match = MCP_ENV_TEMPLATE.match(value) if isinstance(value, str) else None
             if match and match.group(1) in values:
                 server["env"][key] = values[match.group(1)]
     return expanded
@@ -337,7 +326,7 @@ def _fill_target(
         )
 
     # The Fabric agent Harbor installs fills these templates in inside the task container, from the runner's
-    # environment, where Harbor puts each `env_secrets` value.
+    # environment, where Harbor puts each `env_secrets` value; for Hermes, Hermes fills them in itself.
     _require_mcp_env_templates_bound(agent.config, {*env_secrets, *target.env_vars}, agent=agent.ref.root)
     adapter_id = agent.config["harness"]["adapter_id"]
     fabric_package = target.agent_kwargs.get("fabric_package")

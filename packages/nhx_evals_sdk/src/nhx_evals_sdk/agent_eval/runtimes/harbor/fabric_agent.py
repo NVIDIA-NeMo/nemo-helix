@@ -65,6 +65,7 @@ from nemo_fabric.integrations.harbor.fabric_agent import (
 from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, relay_cli_install, tcp_forwarder
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import TRACES_SUBDIR, fold_exports, otlp_endpoint_fields
+from nhx_evals_sdk.agent_eval.runtimes.harbor.mcp_env_runner import MCP_ENV_TEMPLATE
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
@@ -188,8 +189,6 @@ _MCP_ENV_RUNNER_PATH = "/tmp/nemo-fabric-mcp-env-runner.py"
 _MCP_ENV_RUNNER_SOURCE = Path(__file__).with_name("mcp_env_runner.py")
 #: How upstream's runner command starts the runner; the shim takes its place, with the same arguments.
 _RUNNER_MODULE = "-m nemo_fabric.integrations.harbor.runner"
-#: A stdio MCP server env value that names a variable, as registered-agent resolution writes it.
-_ENV_TEMPLATE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 _RELAY_PID_GLOB = "/tmp/nemo-fabric-relay-*.pid"
 
 #: Relay's Codex and Claude adapters launch the ``nemo-relay`` CLI, which the ``nemo-relay`` wheel
@@ -591,7 +590,7 @@ def _has_templated_stdio_env(config: FabricConfig) -> bool:
     """Whether a stdio MCP server in ``config`` names a variable in its ``env``, to be filled in at launch."""
     servers = config.mcp.servers if config.mcp is not None else {}
     return any(
-        server.transport == "stdio" and any(_ENV_TEMPLATE.match(value) for value in server.env.values())
+        server.transport == "stdio" and any(MCP_ENV_TEMPLATE.match(value) for value in server.env.values())
         for server in servers.values()
     )
 
