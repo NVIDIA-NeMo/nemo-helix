@@ -144,42 +144,52 @@ def status_details_writer(
 
     Each snapshot replaces the one before under the same keys, so a snapshot still pending when a newer one
     arrives is dropped: one worker writes the newest pending snapshot until none is left, so at most one write
-    is in flight and one snapshot waits, however slow the writes are. ``publish`` returns once its snapshot, or
-    a newer one, has been written. The worker is a daemon thread: progress is not worth holding the job's
-    process open at exit, and the job's outcome is written separately.
+    is in flight and one snapshot waits, however slow the writes are. ``publish`` returns once the write that
+    carried its snapshot, or a newer one, is done, even while later snapshots keep arriving. The worker is a
+    daemon thread: progress is not worth holding the job's process open at exit, and the job's outcome is
+    written separately.
     """
     lock = threading.Lock()
     pending: dict[str, Any] | None = None
-    draining: asyncio.Future[None] | None = None
+    waiting: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
+    running = False
 
-    def drain(loop: asyncio.AbstractEventLoop, done: asyncio.Future[None]) -> None:
-        nonlocal pending, draining
+    def resolve(loop: asyncio.AbstractEventLoop, written: asyncio.Future[None]) -> None:
+        with contextlib.suppress(RuntimeError):  # the loop closed while the write ran
+            loop.call_soon_threadsafe(lambda: written.done() or written.set_result(None))
+
+    def drain() -> None:
+        nonlocal pending, waiting, running
         try:
             while True:
                 with lock:
                     details, pending = pending, None
+                    carried, waiting = waiting, []
                     if details is None:
-                        draining = None
-                        break
-                report_status_details(details, ctx=ctx, async_client=async_client)
-        finally:
+                        running = False
+                        return
+                try:
+                    report_status_details(details, ctx=ctx, async_client=async_client)
+                finally:
+                    for loop, written in carried:
+                        resolve(loop, written)
+        except BaseException:
             with lock:
-                if draining is done:
-                    draining = None
-            with contextlib.suppress(RuntimeError):  # the loop closed while the write ran
-                loop.call_soon_threadsafe(lambda: done.done() or done.set_result(None))
+                running = False
+            raise
 
     async def publish(details: dict[str, Any]) -> None:
-        nonlocal pending, draining
+        nonlocal pending, running
         loop = asyncio.get_running_loop()
+        written = loop.create_future()
         with lock:
             pending = details
-            if draining is None:
-                draining = loop.create_future()
-                threading.Thread(target=drain, args=(loop, draining), name="status-details", daemon=True).start()
-            written = draining
-        # Shielded: when the caller stops waiting, the write keeps going rather than being dropped.
-        await asyncio.shield(written)
+            waiting.append((loop, written))
+            start, running = not running, True
+        if start:
+            threading.Thread(target=drain, name="status-details", daemon=True).start()
+        # When the caller stops waiting, only the wait stops: the snapshot is still written.
+        await written
 
     return publish
 

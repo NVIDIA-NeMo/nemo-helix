@@ -312,3 +312,34 @@ async def test_status_writes_run_on_a_daemon_thread_so_they_never_hold_the_proce
     await run_outcome.status_details_writer(MagicMock(), None)({"n": 1})
 
     assert [thread.daemon for thread in threads] == [True]
+
+
+async def test_a_status_write_returns_once_its_snapshot_lands_while_newer_ones_keep_arriving(monkeypatch):
+    """Each caller waits for its own snapshot's write, not for the queue to empty."""
+    started: dict[int, threading.Event] = {n: threading.Event() for n in range(1, 4)}
+    may_finish: dict[int, threading.Event] = {n: threading.Event() for n in range(1, 4)}
+
+    def write(details: dict[str, Any], **kwargs: Any) -> None:
+        started[details["n"]].set()
+        may_finish[details["n"]].wait(timeout=5)
+
+    monkeypatch.setattr(run_outcome, "report_status_details", write)
+    publish = run_outcome.status_details_writer(MagicMock(), None)
+
+    first = asyncio.ensure_future(publish({"n": 1}))
+    assert await asyncio.to_thread(started[1].wait, 5)
+    second = asyncio.ensure_future(publish({"n": 2}))
+    await asyncio.sleep(0)
+    may_finish[1].set()
+    async with asyncio.timeout(5):
+        await first
+    assert await asyncio.to_thread(started[2].wait, 5)
+    third = asyncio.ensure_future(publish({"n": 3}))  # the queue is never empty from here until 3 lands
+    may_finish[2].set()
+    async with asyncio.timeout(5):
+        await second
+    assert not third.done()
+
+    may_finish[3].set()
+    async with asyncio.timeout(5):
+        await third
