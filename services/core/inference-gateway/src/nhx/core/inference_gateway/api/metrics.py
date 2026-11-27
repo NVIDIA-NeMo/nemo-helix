@@ -10,7 +10,7 @@ wired centrally by ``nhx_platform_runner`` for every hosted service, so creating
 a counter here is all that is needed for it to be scraped — no per-service
 exporter or endpoint wiring.
 
-The single counter here records every upstream proxy attempt the gateway makes,
+The upstream counter records every upstream proxy attempt the gateway makes,
 dimensioned so an operator can see *where* upstream rate-limits and outages are
 coming from (which workspace, model, and model provider) and *what* the caller
 actually received. Counting every attempt (2xx included) keeps the denominator
@@ -18,6 +18,9 @@ honest so an error *rate* can be computed in a dashboard
 (``5xx / all``) rather than only an absolute error count — matching the RED /
 Prometheus-apiserver / Envoy convention of one request counter dimensioned by
 status, not a separate errors counter.
+
+The end-user instruments record the gateway response once, including failures
+that occur during delivery, and measure the first useful output on that response.
 """
 
 from dataclasses import dataclass
@@ -54,6 +57,20 @@ upstream_requests_counter = create_counter(
         "model, model provider, the true upstream HTTP status, and the proxy-stage HTTP "
         "status the gateway produced for that response."
     ),
+)
+
+requests_counter = create_counter(
+    meter=meter,
+    subsystem="inference_gateway",
+    name="requests.total",
+    description="Inference proxy requests reaching a terminal outcome at the gateway response boundary.",
+)
+
+time_to_first_useful_output = meter.create_histogram(
+    "nhx.inference.gateway.request.time_to_first_useful_output",
+    unit="s",
+    description="Time from gateway ingress to useful streamed output or delivery of a successful nonempty unary response.",
+    explicit_bucket_boundaries_advisory=(0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0),
 )
 
 
