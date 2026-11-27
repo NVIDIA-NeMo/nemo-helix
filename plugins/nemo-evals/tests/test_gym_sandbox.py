@@ -950,9 +950,26 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object],
     return calls
 
 
+@pytest.fixture
+def reaps(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object]]]:
+    """Records the runner's pre-start sweeps instead of reaching a sandbox server."""
+    from sandboxed_gym import job_reaper
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def reap(job_id: str, **kwargs: object) -> tuple[str, ...]:
+        calls.append((job_id, kwargs))
+        return ()
+
+    monkeypatch.setattr(job_reaper, "reap_job_sandboxes", reap)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_session_runner_records_target_provenance_before_and_after_run(
-    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     import sandboxed_gym
     from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
@@ -999,7 +1016,10 @@ async def test_session_runner_records_target_provenance_before_and_after_run(
 
 @pytest.mark.asyncio
 async def test_a_platform_run_scores_each_reward_component_per_trial(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     # The platform hands AgentEvaluator this wrapper, not SandboxedGymAgentTaskRunner, so the wrapper has to
     # carry the scoring hook too; without it the components stay in trial metadata, unscored.
@@ -1338,7 +1358,9 @@ def test_a_disk_request_reaches_the_built_host_spec() -> None:
 
 @pytest.mark.asyncio
 async def test_the_runner_arms_the_job_reaper_on_its_own_thread_before_starting_a_host(
-    monkeypatch: pytest.MonkeyPatch, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     """Only the main thread can install the reaper's SIGTERM handler, and `start` runs in a worker thread.
 
@@ -1446,7 +1468,10 @@ def test_a_platform_job_reaches_the_runner_with_its_unique_id(
 
 @pytest.mark.asyncio
 async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_returns(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, armed: list[tuple[str, dict[str, object], str]]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    armed: list[tuple[str, dict[str, object], str]],
+    reaps: list[tuple[str, dict[str, object]]],
 ) -> None:
     import json
 
@@ -1511,3 +1536,92 @@ async def test_a_sandboxed_platform_run_counts_its_rollouts_as_each_chunk_return
         (4, {"succeeded": 4}),
         (4, {"succeeded": 4}),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job_id", ["job-1", SessionBackedGymRunner.LOCAL_JOB_ID], ids=["job", "job-named-like-the-local-label"]
+)
+async def test_a_run_reaps_its_jobs_leftover_sandboxes_before_starting_a_host(
+    monkeypatch: pytest.MonkeyPatch,
+    reaps: list[tuple[str, dict[str, object]]],
+    job_id: str,
+    armed: list[tuple[str, dict[str, object], str]],
+) -> None:
+    """A rerun reuses the job's storage; a host its killed earlier attempt left must not keep writing to it.
+
+    The sweep matches the job's unique id, so a platform job sweeps whatever its name, even the local label's.
+    """
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    order: list[str] = []
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            order.append(f"start:{len(reaps)}")
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    plan = capable_plan()
+    runner = SessionBackedGymRunner(target=target(), plan=plan, job_id=job_id, job_uid="job-1-uid")
+
+    await runner.run_tasks([])
+
+    # One sweep, with this job's unique id and the plan's provider settings, finished before the host was created.
+    assert reaps == [
+        ("job-1-uid", {"host_provider": plan.host_provider, "host_provider_options": plan.host_provider_options})
+    ]
+    assert order == ["start:1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_id", [None, ""], ids=["no-job-id", "empty-job-id"])
+async def test_a_local_run_does_not_sweep_the_label_every_local_run_shares(
+    monkeypatch: pytest.MonkeyPatch,
+    reaps: list[tuple[str, dict[str, object]]],
+    armed: list[tuple[str, dict[str, object], str]],
+    job_id: str | None,
+) -> None:
+    """Without a platform job id, the run's sandboxes carry LOCAL_JOB_ID, as do those of any other local run."""
+    import sandboxed_gym
+    from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            assert config.job_id == SessionBackedGymRunner.LOCAL_JOB_ID
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+
+    await SessionBackedGymRunner(target=target(), plan=capable_plan(), job_id=job_id).run_tasks([])
+
+    assert reaps == []

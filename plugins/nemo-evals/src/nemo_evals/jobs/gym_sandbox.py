@@ -620,6 +620,9 @@ class SessionBackedGymRunner:
         self._plan = plan
         self._job_id = job_id or self.LOCAL_JOB_ID
         self._sandbox_id = job_uid if job_id and job_uid else self.LOCAL_JOB_ID
+        # A platform job sweeps by its unique id, which no other job shares. LOCAL_JOB_ID is shared by every
+        # local run, so a local run doesn't sweep: it could destroy the host of another local run in progress.
+        self._should_sweep_before_start = self._sandbox_id != self.LOCAL_JOB_ID
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
         self._progress = progress
@@ -672,6 +675,7 @@ class SessionBackedGymRunner:
             SandboxedGymRuntimeConfig,
         )
         from sandboxed_gym import SandboxedGymOrchestrator, SandboxedGymServeConfig
+        from sandboxed_gym.job_reaper import reap_job_sandboxes
 
         payload = serve_config(
             self._target,
@@ -690,6 +694,17 @@ class SessionBackedGymRunner:
             "collection_timeout_s": self._target.collection_timeout_s,
             "environment_offline": serve.environment_offline,
         }
+        # Sandboxes an earlier attempt of this job left behind, when its pod was killed before its own
+        # sweep ran: a rerun reuses the job's storage, and they would keep writing to it. This run starts
+        # the job's only Gym session, so nothing of its own exists yet. Never raises: a sweep that fails
+        # leaves things as they were. A platform job only; see ``__init__``.
+        if self._should_sweep_before_start:
+            await asyncio.to_thread(
+                reap_job_sandboxes,
+                serve.job_id,
+                host_provider=serve.host_provider,
+                host_provider_options=serve.sandbox.host_provider_options,
+            )
         # Armed here, on the event loop's thread, because only the main thread can install a signal
         # handler: `start` arms the same reaper, but in a worker thread it gets only `atexit`. A cancel
         # (SIGTERM) then can't unwind past `start` blocked on the host's readiness, or past a blocked
