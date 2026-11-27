@@ -132,8 +132,8 @@ jobs:
           IMAGE_TAG: ${{ inputs.image_tag }}
           PUBLISH: ${{ inputs.publish }}
           FAMILY: ${{ inputs.family }}
-          CACHE_SOURCE_BRANCH: ${{ steps.cache-branch.outputs.source-branch }}
-          CACHE_TARGET_BRANCH: ${{ inputs.write_cache && steps.cache-branch.outputs.target-branch || '' }}
+          CACHE_SOURCE_BRANCH: "main"  # SCRATCH (AALGO-1325 A/B)
+          CACHE_TARGET_BRANCH: "scratch-uv-layer-change3"  # SCRATCH (AALGO-1325 A/B)
         run: |
           set -euo pipefail
 
