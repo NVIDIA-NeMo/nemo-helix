@@ -380,3 +380,10 @@ describe('isBaseModel', () => {
     expect(isBaseModel(createModel({ base_model: 'default/qwen3-0.6b' }))).toBe(false);
   });
 });
+
+// TEMP (AALGO-1322 red-run proof): must fail CI. Revert before review.
+describe('AALGO-1322 canary', () => {
+  it('fails on purpose', () => {
+    expect(1).toBe(2);
+  });
+});
