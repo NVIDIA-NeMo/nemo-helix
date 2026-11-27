@@ -8,7 +8,7 @@ from typing import Self
 
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
-from nemo_evals.jobs.agent_spec import ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 #: Files required to aggregate every intermediate task bundle.
@@ -87,7 +87,7 @@ class TasksetRunPlan(BaseModel):
             "so later taskset edits do not change what this run evaluates."
         )
     )
-    spec: ResolvedAgentEvalSpec = Field(
+    spec: AgentEvalSpec = Field(
         description=(
             "Resolved agent evaluation spec: target agent, metrics, and self-contained task snapshots. "
             "A member's task_index is its position in spec.tasks."

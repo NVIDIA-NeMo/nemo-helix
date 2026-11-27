@@ -19,7 +19,7 @@ from nemo_evals.api.taskset_run_schemas import (
     request_digest,
     to_status,
 )
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget, ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, HarborRunnerTarget
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.runner_targets import runner_to_target
 from nemo_evals.taskset_runs.entities import (
@@ -211,7 +211,7 @@ def test_nested_spec_validation_runs_before_kubernetes_rules(run_body, spec):
     assert exc.value.errors()[0]["loc"] == ("spec",)
 
 
-@pytest.mark.parametrize("spec_type", [AgentEvalInputSpec, ResolvedAgentEvalSpec])
+@pytest.mark.parametrize("spec_type", [AgentEvalInputSpec, AgentEvalSpec])
 def test_shared_scoring_schema_has_correct_scope(spec_type):
     schema = spec_type.model_json_schema()["properties"]
     assert schema["max_concurrent_tasks"]["default"] == 4

@@ -22,6 +22,7 @@ from nemo_evals.intake.publish import publish_to_intake
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
+    AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
     FabricConfigSource,
@@ -33,7 +34,6 @@ from nemo_evals.jobs.agent_spec import (
     HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
-    ResolvedAgentEvalSpec,
     ResolvedTask,
     Target,
     target_agent_identity,
@@ -477,8 +477,8 @@ def _job_context(tmp_path: Path, *, job_id: str | None = None) -> JobContext:
     )
 
 
-def _job_spec(*, required: bool = True) -> ResolvedAgentEvalSpec:
-    return ResolvedAgentEvalSpec(
+def _job_spec(*, required: bool = True) -> AgentEvalSpec:
+    return AgentEvalSpec(
         tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
         target=FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m")),
         publication=PublicationSpec(
@@ -493,7 +493,7 @@ def test_job_does_not_publish_without_a_publication_spec(
     mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     client = intake.client()
 
-    spec = ResolvedAgentEvalSpec(
+    spec = AgentEvalSpec(
         tasks=[ResolvedTask(id="task-1", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer."))],
         target=FabricRunnerTarget(source=FabricConfigSource(config={})),
     )

@@ -8,8 +8,8 @@ from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefin
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
+    AgentEvalSpec,
     AgentEvalTaskInput,
-    ResolvedAgentEvalSpec,
     ResolvedTask,
     ResolvedTaskDefinition,
     Target,
@@ -77,7 +77,7 @@ async def test_injected_registry_dispatches_submission_and_validates_before_work
             async_sdk=async_client,
             is_local=True,
         )
-    assert isinstance(spec, ResolvedAgentEvalSpec)
+    assert isinstance(spec, AgentEvalSpec)
     assert [task.id for task in spec.tasks] == ["second", "first"]
     assert evaluator.calls[-2:] == [("accept", ["second", "first"]), ("validate", ["second", "first"])]
     evaluator.calls.clear()

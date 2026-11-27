@@ -24,7 +24,7 @@ from nemo_evals.api.fields import MetadataItem, TaskInputs
 from nemo_evals.api.schemas import EvaluatorTaskDefinition, TaskInput
 from nemo_evals.api.service.task_service import stored_evaluator_task_digest
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
 from nemo_evals.jobs.attempt_tasks import (
     FROZEN_TASKS_KEY,
     FROZEN_TASKS_PATH,
@@ -105,7 +105,7 @@ def _tasks(*, snapshot: str | None = TASKSET) -> dict[str, Any]:
     return {"fileset": FILE} if snapshot is None else {"fileset": FILE, "snapshot": snapshot}
 
 
-def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> ResolvedAgentEvalSpec:
+def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> AgentEvalSpec:
     """Submit through the job route and return the frozen spec the job holds."""
     response = ctx.test_client.post(
         "/apis/evals/v2/workspaces/default/agent-evaluate/jobs", json={"spec": _spec(tasks), "profile": "default"}
@@ -114,13 +114,13 @@ def _submit(ctx: ClientContext, tasks: dict[str, Any]) -> ResolvedAgentEvalSpec:
     return _frozen_spec(ctx, response.json()["name"])
 
 
-def _frozen_spec(ctx: ClientContext, name: str) -> ResolvedAgentEvalSpec:
+def _frozen_spec(ctx: ClientContext, name: str) -> AgentEvalSpec:
     """Job ``name``'s settings as its reply shows them, with the tasks and trials from the file that holds them."""
     job = ctx.test_client.get(f"/apis/evals/v2/workspaces/default/agent-evaluate/jobs/{name}")
     shown = job.raise_for_status().json()["spec"]
     assert shown.pop("tasks", None) is None
     assert shown.pop("task_count") >= 1
-    return ResolvedAgentEvalSpec.model_validate({**shown, **json.loads(_frozen_file(ctx, name))})
+    return AgentEvalSpec.model_validate({**shown, **json.loads(_frozen_file(ctx, name))})
 
 
 def _frozen_file(ctx: ClientContext, name: str) -> bytes:

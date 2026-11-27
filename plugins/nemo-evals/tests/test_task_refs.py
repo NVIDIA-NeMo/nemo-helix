@@ -22,9 +22,9 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
     AgentEvalTaskInput,
     GymAgentSource,
-    ResolvedAgentEvalSpec,
     ResolvedTask,
 )
 from nemo_evals.jobs.attempt_tasks import TASKS_DIGEST_KEY, frozen_tasks_digest
@@ -132,14 +132,14 @@ async def test_harbor_direct_list_snapshots_selected_revision(entity_store):
         async_sdk=None,
         is_local=False,
     )
-    assert isinstance(compiled, ResolvedAgentEvalSpec) and all(task.spec.kind == "harbor" for task in compiled.tasks)
+    assert isinstance(compiled, AgentEvalSpec) and all(task.spec.kind == "harbor" for task in compiled.tasks)
     snapshot = compiled.model_dump_json()
     assert isinstance(task.spec, HarborTaskDefinition)
     task.spec.source.fileset_ref = "default/files#v2/task/files"
     await entity_store.update(task)
     await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
     await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
-    restored = ResolvedAgentEvalSpec.model_validate_json(snapshot)
+    restored = AgentEvalSpec.model_validate_json(snapshot)
     assert all(task.spec.kind == "harbor" for task in restored.tasks)
     members = restored.tasks
     assert members[0].spec.kind == "harbor"
@@ -181,7 +181,7 @@ async def test_harbor_snapshot_survives_suite_tag_moves_and_deletion(entity_stor
     before = await AgentEvalJob.to_spec(
         request, workspace="default", entity_client=entity_store, async_sdk=None, is_local=False
     )
-    assert isinstance(before, ResolvedAgentEvalSpec) and all(task.spec.kind == "harbor" for task in before.tasks)
+    assert isinstance(before, AgentEvalSpec) and all(task.spec.kind == "harbor" for task in before.tasks)
     stored_task = await entity_store.get(TaskEntity, name="checkout", workspace="default")
     assert isinstance(stored_task.spec, HarborTaskDefinition)
     stored_task.spec.source.fileset_ref = "default/files#v2/task/files"
@@ -197,10 +197,10 @@ async def test_harbor_snapshot_survives_suite_tag_moves_and_deletion(entity_stor
     after = await AgentEvalJob.to_spec(
         request, workspace="default", entity_client=entity_store, async_sdk=None, is_local=False
     )
-    assert isinstance(after, ResolvedAgentEvalSpec) and all(task.spec.kind == "harbor" for task in after.tasks)
+    assert isinstance(after, AgentEvalSpec) and all(task.spec.kind == "harbor" for task in after.tasks)
     assert after.tasks != before.tasks
     entity_store.entities.clear()
-    restored = ResolvedAgentEvalSpec.model_validate_json(snapshot)
+    restored = AgentEvalSpec.model_validate_json(snapshot)
     assert restored == before
 
 
@@ -240,7 +240,7 @@ async def test_harbor_suite_post_resolves_each_member_with_scoring(entity_store,
         is_local=False,
     )
     assert fetched.count(TaskEntity) == len(tasks)
-    assert isinstance(result, ResolvedAgentEvalSpec)
+    assert isinstance(result, AgentEvalSpec)
     assert all(task.spec.kind == "harbor" for task in result.tasks)
     assert len(result.tasks) == len(tasks)
     assert all(entry.spec.metrics == [] and entry.spec.views == {} for entry in result.tasks)
@@ -865,7 +865,7 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
     spec = await AgentEvalJob.to_spec(
         request, workspace="default", entity_client=entity_store, async_sdk=_async_platform(), is_local=False
     )
-    assert isinstance(spec, ResolvedAgentEvalSpec) and all(task.spec.kind == "evaluator" for task in spec.tasks)
+    assert isinstance(spec, AgentEvalSpec) and all(task.spec.kind == "evaluator" for task in spec.tasks)
     assert [task.id for task in spec.tasks] == ["third", "second", "first"]
     assert spec.tasks[-1].spec.kind == "evaluator"
     assert spec.tasks[-1].spec.intent == "Do first."
@@ -1113,7 +1113,7 @@ async def test_evaluator_taskset_shared_files_remains_supported(entity_store, of
         async_sdk=_async_platform(),
         is_local=False,
     )
-    assert isinstance(spec, ResolvedAgentEvalSpec)
+    assert isinstance(spec, AgentEvalSpec)
     assert spec.tasks[0].spec.kind == "evaluator"
     assert _provenance(spec.tasks[0]).entity_name == "default/shared"
 

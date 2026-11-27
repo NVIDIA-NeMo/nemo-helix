@@ -1112,12 +1112,8 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         return self
 
 
-class ResolvedAgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical evaluation containing self-contained, resolved task snapshots.
-
-    This is the spec submission builds, compile reads and the worker runs. It never leaves the service: a
-    stored job keeps its resolved tasks in a file, and job replies render :class:`AgentEvalSpec`.
-    """
+class AgentEvalSpec(_AgentEvalSpecCommon):
+    """Canonical evaluation containing self-contained, resolved task snapshots."""
 
     tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
         description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
@@ -1145,7 +1141,7 @@ class ResolvedAgentEvalSpec(_AgentEvalSpecCommon):
         validate_single_kind(self.tasks)
         return self
 
-    def only_task(self, index: int) -> ResolvedAgentEvalSpec:
+    def only_task(self, index: int) -> AgentEvalSpec:
         """A new validated spec running only ``tasks[index]``; everything else equal. Never mutates this spec.
 
         Raises:
@@ -1155,7 +1151,7 @@ class ResolvedAgentEvalSpec(_AgentEvalSpecCommon):
             raise IndexError(f"task index {index} is outside 0..{len(self.tasks) - 1}")
         data = self.model_dump(mode="json")
         data["tasks"] = [data["tasks"][index]]
-        return ResolvedAgentEvalSpec.model_validate(data)
+        return AgentEvalSpec.model_validate(data)
 
 
 class FrozenTasks(BaseModel):
@@ -1178,7 +1174,7 @@ class FrozenTasks(BaseModel):
     trial_count: int | None = Field(default=None, ge=0)
 
 
-class AgentEvalSpec(_AgentEvalSpecCommon):
+class AgentEvalOutputSpec(_AgentEvalSpecCommon):
     """An agent evaluation as its job stores and returns it.
 
     It holds the resolved tasks, or, for a job that keeps them in a file, only their count.

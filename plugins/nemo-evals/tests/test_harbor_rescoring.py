@@ -12,7 +12,7 @@ import pytest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import ResolvedAgentEvalSpec, ResolvedTask
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -126,7 +126,7 @@ def test_rescore_executes_metrics_views_without_harbor(offline_worker, tmp_path,
     ctx = offline_worker
     changes = {"status": "partial", "error": TrialError(type="RuntimeError", message="agent failed")} if failed else {}
     trial = _trial(reward_key, **changes)
-    spec = ResolvedAgentEvalSpec(tasks=_source(reward_key), trials=[trial])
+    spec = AgentEvalSpec(tasks=_source(reward_key), trials=[trial])
     client = NemoClient(base_url="http://unused.test", workspace="default")
     async_client = AsyncNemoClient(base_url="http://unused.test", workspace="default") if asynchronous else None
     result = AgentEvalJob()._run_with_client(
@@ -157,7 +157,7 @@ def test_rescore_executes_metrics_views_without_harbor(offline_worker, tmp_path,
 )
 def test_canonical_rescore_requires_explicit_consistent_key(metadata, error):
     with pytest.raises(ValueError, match=error):
-        spec = ResolvedAgentEvalSpec(tasks=_source(), trials=[_trial(), _trial(metadata=metadata)])
+        spec = AgentEvalSpec(tasks=_source(), trials=[_trial(), _trial(metadata=metadata)])
         validate_scoring(spec.tasks, target=spec.target, trials=spec.trials, adapters=KIND_ADAPTERS)
 
 
@@ -175,7 +175,7 @@ def test_rescore_preserves_sdk_trial_coverage_checks(offline_worker, unknown):
         source.append(missing)
     with pytest.raises(ValueError, match="unknown task" if unknown else "no trials produced"):
         AgentEvalJob()._run_with_client(
-            ResolvedAgentEvalSpec(tasks=source, trials=trials).model_dump(mode="json"),
+            AgentEvalSpec(tasks=source, trials=trials).model_dump(mode="json"),
             ctx=ctx,
             platform_client=NemoClient(base_url="http://unused.test"),
             async_client=None,

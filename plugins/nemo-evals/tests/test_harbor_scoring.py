@@ -10,7 +10,7 @@ from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.jobs.agent_compiler import _secret_refs
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget, ResolvedAgentEvalSpec, ResolvedTask
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, HarborRunnerTarget, ResolvedTask
 from nemo_evals.jobs.harbor_scoring import harbor_scoring_task
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evals.jobs.kinds.types import SubmitContext
@@ -122,7 +122,7 @@ async def test_submission_freezes_scoring_and_compiler_collects_secrets(
         async_sdk=None,
         is_local=False,
     )
-    assert isinstance(spec, ResolvedAgentEvalSpec)
+    assert isinstance(spec, AgentEvalSpec)
     assert calls == [([MetricRef("judge")], task_workspace)]
     assert all(task.spec.kind == "harbor" for task in spec.tasks)
     assert spec.tasks[0].spec.provenance is not None
@@ -134,7 +134,7 @@ async def test_submission_freezes_scoring_and_compiler_collects_secrets(
     task.spec.config["changed"] = True
     task.spec.instruction = "Changed after submission"
     assert spec.model_dump_json() == snapshot
-    restored = ResolvedAgentEvalSpec.model_validate_json(snapshot)
+    restored = AgentEvalSpec.model_validate_json(snapshot)
     assert all(task.spec.kind == "harbor" for task in restored.tasks)
     assert restored.tasks[0].spec.views == _views("grade")
     assert "harbor_scoring" not in restored.model_dump()
@@ -150,7 +150,7 @@ async def test_submission_freezes_scoring_and_compiler_collects_secrets(
 )
 def test_invalid_scoring_rejected_before_execution(metrics, views, error):
     with pytest.raises(ValueError, match=error):
-        spec = ResolvedAgentEvalSpec(
+        spec = AgentEvalSpec(
             tasks=[_resolved_task(metrics=metrics, views=views)],
             target=HarborRunnerTarget(),
         )
@@ -222,7 +222,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
         )
     )
     with pytest.raises(ValueError, match="models must be resolved"):
-        spec = ResolvedAgentEvalSpec(
+        spec = AgentEvalSpec(
             tasks=[_resolved_task(metrics=[judge])],
             target=HarborRunnerTarget(),
         )
@@ -269,7 +269,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
             is_local=False,
         )
     assert calls == ["default/judge"]
-    assert isinstance(spec, ResolvedAgentEvalSpec) and all(task.spec.kind == "harbor" for task in spec.tasks)
+    assert isinstance(spec, AgentEvalSpec) and all(task.spec.kind == "harbor" for task in spec.tasks)
     metric = unbundle_metric(to_runtime_bundle(spec.tasks[0].spec.metrics[0]))
     assert isinstance(metric, LLMJudgeMetric) and isinstance(metric.model, Model)
     assert metric.model.url == "https://example.test/v1/chat/completions"

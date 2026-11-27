@@ -17,7 +17,7 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.harbor.archive import pack_task
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget, ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, HarborRunnerTarget
 from nemo_evals.jobs.metric_resolution import to_inline
 from nemo_evals.revisions import publish_revision
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -132,8 +132,8 @@ def stored_packages(tmp_path, entity_store, request):
             is_local=False,
         )
     )
-    assert isinstance(spec, ResolvedAgentEvalSpec)
-    restored = ResolvedAgentEvalSpec.model_validate_json(spec.model_dump_json())
+    assert isinstance(spec, AgentEvalSpec)
+    restored = AgentEvalSpec.model_validate_json(spec.model_dump_json())
     assert all(task.spec.kind == "harbor" for task in restored.tasks)
     return restored.tasks, handler, requests
 

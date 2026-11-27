@@ -3781,6 +3781,88 @@ components:
       type: object
       title: AgentEvalMetricOutputCoverage
       description: Coverage counts for one metric output across scored trials.
+    AgentEvalOutputSpec:
+      properties:
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/ModelTarget'
+          - $ref: '#/components/schemas/AgentTarget'
+          - $ref: '#/components/schemas/FabricRunnerTarget'
+          - $ref: '#/components/schemas/GymRunnerTarget'
+          - $ref: '#/components/schemas/HarborRunnerTarget'
+          title: Target
+          description: 'What generates trials online: a Model or Agent endpoint, or
+            an agent runner (e.g. a Fabric harness). Endpoint targets carry their
+            own request config (prompt template / inference params). Mutually exclusive
+            with `trials`.'
+        trials:
+          title: Trials
+          description: Precomputed trials to score directly (offline eval), instead
+            of generating them from a `target`. Mutually exclusive with `target`.
+          items:
+            $ref: '#/components/schemas/AgentEvalTrial'
+          type: array
+        max_concurrent_tasks:
+          type: integer
+          minimum: 1.0
+          title: Max Concurrent Tasks
+          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
+            concurrent scoring calls only (trials are bounded by the runner). Other
+            runners: concurrent trials and scoring calls. For model and agent targets,
+            target.params.parallelism bounds concurrent inference requests during
+            trial generation. On Kubernetes runs it applies per task Job; the task-Job
+            cap is execution.max_concurrent_task_jobs.'
+          default: 4
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+          description: Fail on the first metric error instead of recording an errored
+            score. On Kubernetes runs it fails that task's Job.
+          default: false
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
+            mode, backend).
+        result_ignore_patterns:
+          items:
+            type: string
+            minLength: 1
+          type: array
+          title: Result Ignore Patterns
+          description: Files to leave out of the saved result bundle. `*.ext` and
+            `name` match files at any depth, `name/` matches directories with that
+            name at any depth (folder globs allowed), and `dir/sub/` matches that
+            directory at the bundle root, with each folder name a glob such as `sub*`.
+            Omit to keep every file.
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/PublicationSpec'
+          description: Where the completed run publishes its results, beyond its own
+            result bundle. Omit to publish nowhere.
+        tasks:
+          title: Tasks
+          description: Resolved task snapshots in execution order. Only archive materialization
+            remains on the worker.
+          items:
+            $ref: '#/components/schemas/ResolvedTask'
+          type: array
+          minItems: 1
+        task_count:
+          title: Task Count
+          description: Number of tasks the job runs, set when `tasks` is omitted because
+            the job keeps its tasks outside its record.
+          type: integer
+          minimum: 1.0
+      type: object
+      title: AgentEvalOutputSpec
+      description: 'An agent evaluation as its job stores and returns it.
+
+
+        It holds the resolved tasks, or, for a job that keeps them in a file, only
+        their count.'
     AgentEvalResult:
       properties:
         id:
@@ -3920,88 +4002,6 @@ components:
       required:
       - data
       title: AgentEvalResultsPage
-    AgentEvalSpec:
-      properties:
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/ModelTarget'
-          - $ref: '#/components/schemas/AgentTarget'
-          - $ref: '#/components/schemas/FabricRunnerTarget'
-          - $ref: '#/components/schemas/GymRunnerTarget'
-          - $ref: '#/components/schemas/HarborRunnerTarget'
-          title: Target
-          description: 'What generates trials online: a Model or Agent endpoint, or
-            an agent runner (e.g. a Fabric harness). Endpoint targets carry their
-            own request config (prompt template / inference params). Mutually exclusive
-            with `trials`.'
-        trials:
-          title: Trials
-          description: Precomputed trials to score directly (offline eval), instead
-            of generating them from a `target`. Mutually exclusive with `target`.
-          items:
-            $ref: '#/components/schemas/AgentEvalTrial'
-          type: array
-        max_concurrent_tasks:
-          type: integer
-          minimum: 1.0
-          title: Max Concurrent Tasks
-          description: 'Concurrency for this evaluation''s SDK work. Harbor and Gym:
-            concurrent scoring calls only (trials are bounded by the runner). Other
-            runners: concurrent trials and scoring calls. For model and agent targets,
-            target.params.parallelism bounds concurrent inference requests during
-            trial generation. On Kubernetes runs it applies per task Job; the task-Job
-            cap is execution.max_concurrent_task_jobs.'
-          default: 4
-        fail_fast:
-          type: boolean
-          title: Fail Fast
-          description: Fail on the first metric error instead of recording an errored
-            score. On Kubernetes runs it fails that task's Job.
-          default: false
-        labels:
-          additionalProperties:
-            type: string
-          type: object
-          title: Labels
-          description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
-            mode, backend).
-        result_ignore_patterns:
-          items:
-            type: string
-            minLength: 1
-          type: array
-          title: Result Ignore Patterns
-          description: Files to leave out of the saved result bundle. `*.ext` and
-            `name` match files at any depth, `name/` matches directories with that
-            name at any depth (folder globs allowed), and `dir/sub/` matches that
-            directory at the bundle root, with each folder name a glob such as `sub*`.
-            Omit to keep every file.
-        publication:
-          allOf:
-          - $ref: '#/components/schemas/PublicationSpec'
-          description: Where the completed run publishes its results, beyond its own
-            result bundle. Omit to publish nowhere.
-        tasks:
-          title: Tasks
-          description: Resolved task snapshots in execution order. Only archive materialization
-            remains on the worker.
-          items:
-            $ref: '#/components/schemas/ResolvedTask'
-          type: array
-          minItems: 1
-        task_count:
-          title: Task Count
-          description: Number of tasks the job runs, set when `tasks` is omitted because
-            the job keeps its tasks outside its record.
-          type: integer
-          minimum: 1.0
-      type: object
-      title: AgentEvalSpec
-      description: 'An agent evaluation as its job stores and returns it.
-
-
-        It holds the resolved tasks, or, for a job that keeps them in a file, only
-        their count.'
     AgentEvalTaskInput:
       properties:
         id:
@@ -4139,7 +4139,7 @@ components:
           type: string
           format: date-time
         spec:
-          $ref: '#/components/schemas/AgentEvalSpec'
+          $ref: '#/components/schemas/AgentEvalOutputSpec'
         status:
           $ref: '#/components/schemas/HelixJobStatus'
         status_details:
@@ -4183,7 +4183,7 @@ components:
           type: integer
           title: Seq
         spec:
-          $ref: '#/components/schemas/AgentEvalSpec'
+          $ref: '#/components/schemas/AgentEvalOutputSpec'
         status:
           $ref: '#/components/schemas/HelixJobStatus'
         status_details:

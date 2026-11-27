@@ -11,11 +11,11 @@ from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_spec import (
     REGISTERED_AGENT_GYM_COMPONENT,
     AgentEvalInputSpec,
+    AgentEvalSpec,
     GymAgentSource,
     GymPlacement,
     GymRunnerTarget,
     RegisteredAgentSource,
-    ResolvedAgentEvalSpec,
     registered_agent_config,
     registered_agent_files,
     registered_agent_source,
@@ -132,7 +132,7 @@ def test_resolved_config_is_derived_never_submitted_and_required_to_run() -> Non
     with pytest.raises(ValidationError, match="not the submitter"):
         AgentEvalInputSpec.model_validate({"tasks": tasks, "target": submitted})
     with pytest.raises(ValidationError, match="must be resolved before run"):
-        ResolvedAgentEvalSpec.model_validate(
+        AgentEvalSpec.model_validate(
             {
                 "tasks": [_RESOLVED_TASK],
                 "target": {"kind": "gym", "source": {"agent": "calc"}, "resources_server": "mcqa"},
@@ -145,6 +145,6 @@ def test_resolved_config_is_derived_never_submitted_and_required_to_run() -> Non
         resources_server="mcqa",
         resolved_config={"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
     )
-    ResolvedAgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved.model_dump(mode="json")})
+    AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": resolved.model_dump(mode="json")})
     assert registered_agent_config(resolved) == resolved.resolved_config
     assert registered_agent_files(resolved) == FilesetRef(root="dev/agent-files-0123abcd4567")

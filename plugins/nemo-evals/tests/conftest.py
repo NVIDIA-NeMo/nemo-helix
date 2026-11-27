@@ -45,7 +45,7 @@ from nemo_evals.harbor.remote.preparation import (
 )
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.harbor.remote.sandbox_policy import resolve_sandbox_policy
-from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget, ResolvedAgentEvalSpec, ResolvedTask
+from nemo_evals.jobs.agent_spec import AgentEvalSpec, HarborBuiltinAgentSource, HarborRunnerTarget, ResolvedTask
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.revisions import get_revision
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -580,9 +580,9 @@ def harbor_resolved_task_factory() -> Callable[..., ResolvedTask]:
 
 
 @pytest.fixture
-def harbor_spec() -> ResolvedAgentEvalSpec:
+def harbor_spec() -> AgentEvalSpec:
     """A resolved two-task Harbor spec running the built-in oracle agent."""
-    return ResolvedAgentEvalSpec(
+    return AgentEvalSpec(
         tasks=[harbor_resolved_task("greet-universe"), harbor_resolved_task("sum-three")],
         target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
     )

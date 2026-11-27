@@ -21,13 +21,13 @@ from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer
 from nemo_evals.jobs import agent_compiler, gateway_agents, gateway_models
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
     HarborBuiltinAgentSource,
     HarborGatewayModel,
     HarborImportedAgentSource,
     HarborModelName,
     HarborRunnerTarget,
     RegisteredAgentSource,
-    ResolvedAgentEvalSpec,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
@@ -583,7 +583,7 @@ def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_ch
 
 
 def test_the_compiled_job_carries_the_placeholder_key(harbor_resolved_task) -> None:
-    spec = ResolvedAgentEvalSpec(tasks=[harbor_resolved_task("hello")], target=_codex())
+    spec = AgentEvalSpec(tasks=[harbor_resolved_task("hello")], target=_codex())
 
     variables = {variable.name: variable for variable in agent_compiler._environment(spec, sandbox_plan=None)}
 

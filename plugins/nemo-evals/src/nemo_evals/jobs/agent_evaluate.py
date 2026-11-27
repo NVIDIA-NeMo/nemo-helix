@@ -49,6 +49,7 @@ from nemo_evals.jobs.agent_compiler import (
 from nemo_evals.jobs.agent_files_snapshot import discard_registered_agent_files
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
+    AgentEvalOutputSpec,
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
@@ -58,7 +59,6 @@ from nemo_evals.jobs.agent_spec import (
     HarborRunnerTarget,
     ModelTarget,
     RegisteredAgentSource,
-    ResolvedAgentEvalSpec,
     Target,
     registered_agent_config,
     registered_agent_files,
@@ -260,9 +260,9 @@ class _AgentEvalJobBase(NemoJob):
     description: ClassVar[str] = "Run agent evaluation over tasks against a model, agent, or runner."
     container: ClassVar[str] = "cpu-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalInputSpec
-    spec_schema: ClassVar[type[BaseModel] | None] = ResolvedAgentEvalSpec
+    spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
     #: What replies show: the job's settings and task count, with the resolved tasks kept out of the record.
-    stored_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalSpec
+    stored_spec_schema: ClassVar[type[BaseModel] | None] = AgentEvalOutputSpec
     #: A job keeps the definition it was accepted with; a changed evaluation is a new job. Its tasks are in a
     #: file named after it (see :meth:`store_spec`), which a new definition couldn't replace.
     allow_spec_update: ClassVar[bool] = False
@@ -334,7 +334,7 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
             validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-            spec = ResolvedAgentEvalSpec(
+            spec = AgentEvalSpec(
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
             add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
@@ -344,7 +344,7 @@ class _AgentEvalJobBase(NemoJob):
 
             async def publish(canonical: BaseModel) -> BaseModel:
                 # Publishing is the submission's only write, so it runs after every check.
-                assert isinstance(canonical, ResolvedAgentEvalSpec)
+                assert isinstance(canonical, AgentEvalSpec)
                 try:
                     pinned = await publish_snapshot(
                         source,
@@ -429,9 +429,7 @@ class _AgentEvalJobBase(NemoJob):
         here, as ``to_spec`` does for its own failures.
         """
         del entity_client, job_name, options
-        canonical_spec = (
-            spec if isinstance(spec, ResolvedAgentEvalSpec) else ResolvedAgentEvalSpec.model_validate(spec.model_dump())
-        )
+        canonical_spec = spec if isinstance(spec, AgentEvalSpec) else AgentEvalSpec.model_validate(spec.model_dump())
         try:
             return await cls._compile(canonical_spec, async_sdk=async_sdk, profile=profile)
         except Exception:
@@ -440,7 +438,7 @@ class _AgentEvalJobBase(NemoJob):
 
     @classmethod
     async def _compile(
-        cls, canonical_spec: ResolvedAgentEvalSpec, *, async_sdk: AsyncHelixClient | None, profile: str | None
+        cls, canonical_spec: AgentEvalSpec, *, async_sdk: AsyncHelixClient | None, profile: str | None
     ) -> HelixJobSpec:
         execution_profile: BaseExecutionProfile | None = None
         if isinstance(canonical_spec.target, GymRunnerTarget):
@@ -725,7 +723,7 @@ class _AgentEvalJobBase(NemoJob):
         async_client: AsyncNemoClient | None,
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
-        spec = ResolvedAgentEvalSpec.model_validate(config)
+        spec = AgentEvalSpec.model_validate(config)
         prepare_ctx = PrepareContext(
             storage_root=ctx.storage.persistent,
             client=platform_client if isinstance(platform_client, NemoClient) else None,
@@ -887,7 +885,7 @@ class _AgentEvalJobBase(NemoJob):
 
 
 def _trial_credential_issuer(
-    spec: ResolvedAgentEvalSpec,
+    spec: AgentEvalSpec,
     ctx: JobContext,
     platform_client: NemoClient | AsyncNemoClient,
     async_client: AsyncNemoClient | None,

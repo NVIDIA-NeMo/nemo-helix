@@ -10,7 +10,7 @@ from datetime import datetime
 
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResolvedHarborSandboxPolicy
-from nemo_evals.jobs.agent_spec import ResolvedAgentEvalSpec
+from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import member_name
@@ -34,7 +34,7 @@ class HarborTaskJobSpec(BaseModel):
     run_id: str
     member_id: str = Field(description="task-<index>, the member this Job runs.")
     task_index: int = Field(ge=0)
-    spec: ResolvedAgentEvalSpec = Field(description="The run's spec with only this task.")
+    spec: AgentEvalSpec = Field(description="The run's spec with only this task.")
     environment: PreparedHarborEnvironment
     sandbox_policy: ResolvedHarborSandboxPolicy
     dispatcher_image: str = Field(min_length=1)

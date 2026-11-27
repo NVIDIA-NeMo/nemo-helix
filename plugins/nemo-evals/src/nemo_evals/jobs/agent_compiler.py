@@ -19,13 +19,13 @@ from dataclasses import dataclass
 
 from nemo_evals.config import config, platform_config
 from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
     AgentTarget,
     FabricRunnerTarget,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
     RegisteredAgentSource,
-    ResolvedAgentEvalSpec,
     registered_agent_config,
     registered_agent_files,
 )
@@ -80,7 +80,7 @@ class _AgentEvalCPUCompilation:
 
 
 def compile_agent_eval_job(
-    spec: ResolvedAgentEvalSpec,
+    spec: AgentEvalSpec,
     *,
     profile: str | None = None,
     use_subprocess: bool = False,
@@ -109,7 +109,7 @@ def compile_agent_eval_job(
 
 
 def _compile_agent_eval_cpu_job(
-    spec: ResolvedAgentEvalSpec,
+    spec: AgentEvalSpec,
     *,
     profile: str | None = None,
 ) -> _AgentEvalCPUCompilation:
@@ -148,7 +148,7 @@ def _require_step_configs_fit(steps: list[HelixJobStep]) -> None:
             )
 
 
-def _secret_refs(spec: ResolvedAgentEvalSpec) -> Iterator[tuple[str, str]]:
+def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
     for task in spec.tasks:
         metrics = task.spec.metrics
@@ -178,7 +178,7 @@ def _agent_eval_image(*, is_colocated_gym: bool) -> str:
 
 
 def _agent_eval_step(
-    spec: ResolvedAgentEvalSpec,
+    spec: AgentEvalSpec,
     profile: str | None,
     *,
     use_subprocess: bool,
@@ -207,7 +207,7 @@ def _agent_eval_step(
 
 
 def _agent_eval_cpu_step(
-    spec: ResolvedAgentEvalSpec,
+    spec: AgentEvalSpec,
     profile: str | None,
     *,
     sandbox_plan: SandboxPlan | None,
@@ -234,7 +234,7 @@ def _agent_eval_cpu_step(
     return _AgentEvalCPUStep(step=step, executor=executor)
 
 
-def _sandbox_plan(spec: ResolvedAgentEvalSpec) -> SandboxPlan | None:
+def _sandbox_plan(spec: AgentEvalSpec) -> SandboxPlan | None:
     """Resolve the deployment-selected Gym sandbox plan once during compilation."""
     if not isinstance(spec.target, GymRunnerTarget):
         return None
@@ -245,7 +245,7 @@ def _sandbox_plan(spec: ResolvedAgentEvalSpec) -> SandboxPlan | None:
     )
 
 
-def _environment(spec: ResolvedAgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> list[EnvironmentVariable]:
+def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> list[EnvironmentVariable]:
     """The step's environment: secret refs, plus the sandbox plan when Gym runs sandboxed.
 
     Resolving the plan here rather than in the job is what makes the operator's configuration reach
@@ -260,7 +260,7 @@ def _environment(spec: ResolvedAgentEvalSpec, *, sandbox_plan: SandboxPlan | Non
     return environment
 
 
-def _staged_fileset(spec: ResolvedAgentEvalSpec) -> EnvironmentStageSpec | None:
+def _staged_fileset(spec: AgentEvalSpec) -> EnvironmentStageSpec | None:
     """What the evaluation step needs on job storage before it starts, if anything.
 
     A Gym target stages its environment package, plus, for a registered agent, that agent's Ethos files
