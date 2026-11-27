@@ -15,7 +15,7 @@ jobs:
     with:
       family: api
       source_sha: ${{ github.sha }}
-      write_cache: true
+      write_cache: false
       publish: true
   build-task-images:
     name: Build task images
@@ -26,5 +26,5 @@ jobs:
     with:
       family: tasks
       source_sha: ${{ github.sha }}
-      write_cache: true
+      write_cache: false
       publish: true
