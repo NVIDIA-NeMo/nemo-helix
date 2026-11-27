@@ -20,6 +20,7 @@ from harbor.models.verifier.result import VerifierResult
 from harbor.trial.hooks import HookCallback, TrialEvent, TrialHookEvent
 from nemo_evals.harbor.trial_progress import TrialProgressReporter, trial_error, trial_reward
 from nemo_evals.taskset_runs.trials import TRIAL_COUNTS_STATUS_KEY, TRIALS_STATUS_KEY, TrialPhase, TrialProgress
+from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE
 
 STARTED = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
@@ -238,6 +239,20 @@ async def test_a_trial_whose_sandbox_stopped_reports_the_error_type_its_final_re
         "Harbor then reported ExecInterrupted: ExecInterrupted: boom"
     )
     assert stopped.error_type == "SandboxTerminated"
+
+
+@pytest.mark.parametrize("kind", ["", "  "], ids=["empty", "blank"])
+async def test_an_error_without_a_type_is_reported_as_unknown_as_its_final_result_is(
+    job: Job, harbor: Harbor, kind: str
+) -> None:
+    reports = Reports()
+    first, _ = job._remaining_trial_configs
+
+    async with _reporter(reports).job_scope()(job):
+        await harbor.fire(TrialEvent.END, first, _result(error=kind))
+        reported, _ = reports.last()
+
+    assert reported.error_type == UNKNOWN_ERROR_TYPE
 
 
 async def test_a_resumed_trial_whose_sandbox_stopped_reports_the_error_type_its_final_result_has(

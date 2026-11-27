@@ -318,6 +318,22 @@ def test_allocated_sandbox_whose_container_stopped_is_failed_with_its_reason(
     assert (status["state"], status["message"]) == ("Failed", "container sandbox: OOMKilled (exit 137)")
 
 
+def test_a_service_containers_oom_kill_is_reported_under_its_own_name(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    """The client tells the agent's sandbox running out of memory from a compose service doing so by this name."""
+    k8s.pods = [
+        _pod(
+            _container("sandbox", None),
+            _container("db", V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")),
+        )
+    ]
+
+    status = _status(provider, k8s, _labelled_workload({POD_ANNOTATION: SPEC}, "Pending", "10.0.0.5"))
+
+    assert (status["state"], status["message"]) == ("Failed", "container db: OOMKilled (exit 137)")
+
+
 @pytest.mark.parametrize(("name", "state"), [("db-init", "Allocated"), ("sandbox", "Failed")])
 def test_only_the_sandbox_container_has_failed_when_it_exits_0(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient, name: str, state: str

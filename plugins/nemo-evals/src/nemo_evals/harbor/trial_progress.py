@@ -38,7 +38,7 @@ from nemo_evals.taskset_runs.trials import (
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborJobScope
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import with_sandbox_terminations
-from nhx_evals_sdk.agent_eval.trials import TrialError
+from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, TrialError
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,9 @@ def reported_error(result: TrialResult) -> TrialError | None:
     error = trial_error(result)
     if error is None:
         return None
-    harbor = TrialError(type=error.exception_type, message=error.exception_message)
+    # A blank type is UnknownError, as the final result names it; TrialError refuses a blank one.
+    error_type = error.exception_type if error.exception_type.strip() else UNKNOWN_ERROR_TYPE
+    harbor = TrialError(type=error_type, message=error.exception_message)
     uri = urlparse(result.trial_uri)
     return with_sandbox_terminations(harbor, Path(url2pathname(uri.path))) if uri.scheme == "file" else harbor
 

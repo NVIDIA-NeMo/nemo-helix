@@ -164,6 +164,16 @@ def test_an_oom_kill_in_the_servers_message_is_named() -> None:
     assert diagnosis.cause is TerminationCause.OUT_OF_MEMORY
 
 
+def test_an_oom_kill_in_a_service_container_is_not_the_sandboxs() -> None:
+    """A compose service's memory limit is the task's to raise; blaming the sandbox would point at the agent."""
+    diagnosis = diagnose_from_status(
+        state="Failed", reason="CONTAINER_TERMINATED", message="container db: OOMKilled (exit 137)", events=[]
+    )
+
+    assert diagnosis.cause is TerminationCause.UNKNOWN
+    assert diagnosis.detail.startswith("the sandbox's db service container ran out of memory; ")
+
+
 def test_server_1_2s_expiry_reason_is_the_lifetime() -> None:
     diagnosis = diagnose_from_status(state="Terminated", reason="SANDBOX_EXPIRED", message="Sandbox expired", events=[])
 
