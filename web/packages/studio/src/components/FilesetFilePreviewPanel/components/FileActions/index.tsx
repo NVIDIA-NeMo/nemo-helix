@@ -3,6 +3,7 @@
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
+import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
@@ -42,6 +43,8 @@ export const FileActions: FC<Props> = ({
   const toast = useToast();
   const bearerToken = useOidcBearerToken();
   const { createWorker } = useWorkers();
+  // The modals otherwise read the fileset from the route, which a preview opened over a form lacks.
+  const datasetId = getEntityReference({ workspace, name: filesetName });
 
   const { mutateAsync: deleteFile } = useDatasetFileDelete();
 
@@ -125,12 +128,18 @@ export const FileActions: FC<Props> = ({
         <RenameFileModal
           open
           filepath={file.path}
+          datasetId={datasetId}
           onClose={() => setOpenModal(undefined)}
           onSuccess={handleRenameSuccess}
         />
       )}
       {openModal === 'createSplit' && modalFile && (
-        <CreateFileSplitsModal open onClose={() => setOpenModal(undefined)} filepath={file.path} />
+        <CreateFileSplitsModal
+          open
+          onClose={() => setOpenModal(undefined)}
+          filepath={file.path}
+          datasetId={datasetId}
+        />
       )}
     </>
   );

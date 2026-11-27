@@ -12,11 +12,15 @@ vi.mock('@studio/providers/workers/useWorkers', () => ({
 }));
 
 vi.mock('@studio/components/FilesTable/RenameFileModal', () => ({
-  RenameFileModal: () => <div data-testid="rename-file-modal" />,
+  RenameFileModal: ({ datasetId }: { datasetId?: string }) => (
+    <div data-testid="rename-file-modal" data-dataset-id={datasetId} />
+  ),
 }));
 
 vi.mock('@studio/components/FilesTable/CreateFileSplitsModal', () => ({
-  CreateFileSplitsModal: () => <div data-testid="create-file-splits-modal" />,
+  CreateFileSplitsModal: ({ datasetId }: { datasetId?: string }) => (
+    <div data-testid="create-file-splits-modal" data-dataset-id={datasetId} />
+  ),
 }));
 
 describe('FileActions', () => {
@@ -41,6 +45,20 @@ describe('FileActions', () => {
     ]);
     expect(items.at(-1)).toHaveClass('nv-menu-item--danger');
     expect(items[0]).not.toHaveClass('nv-menu-item--danger');
+  });
+
+  // A preview opened over a form has no fileset in the route, so the modals can't read it there.
+  it.each([
+    ['Rename', 'rename-file-modal'],
+    ['Create Split', 'create-file-splits-modal'],
+  ])('gives the %s modal the fileset it previews', async (action, testId) => {
+    const user = userEvent.setup();
+    render(<FileActions workspace="ws" filesetName="evals" file={file} />);
+
+    await openMenu(user);
+    await user.click(screen.getByText(action));
+
+    expect(await screen.findByTestId(testId)).toHaveAttribute('data-dataset-id', 'ws/evals');
   });
 
   it('opens the delete confirmation modal when Delete is clicked', async () => {
