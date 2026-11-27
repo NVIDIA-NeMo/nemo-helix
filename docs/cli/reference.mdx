@@ -1567,9 +1567,7 @@ nemo files filesets create [OPTIONS] [NAME]
 * `--cache`: Cache all files after creation. Only applies to external storage.
 * `--custom-fields`: Custom fields for the fileset. (JSON string)
 * `--description`: The description of the fileset.
-* `--metadata`: Tagged metadata container - the key indicates the type.
-
-Example: metadata = FilesetMetadata( dataset=DatasetMetadataContent( schema=`{"columns": ["id", "name"]}`, ) ) (JSON string)
+* `--metadata`: Fileset metadata as a JSON object keyed by type (dataset, model, or environment; at most one). Example: `--metadata` '`{"dataset": {"schema": {"type": "object", "properties": {"id": {"type": "integer"}`, "name": `{"type": "string"}}}}}`' (JSON string)
 * `--project`: The name of the project associated with this fileset.
 * `--purpose <CHOICE>`: The purpose of the fileset. [possible values: dataset, environment, generic, model]
 * `--storage`: The storage configuration for the fileset. If not provided, uses default storage. (JSON string)
@@ -1752,9 +1750,7 @@ nemo files filesets update [OPTIONS] NAME
 * `--workspace`
 * `--custom-fields`: Custom fields for the fileset. (JSON string)
 * `--description`: The description of the fileset.
-* `--metadata`: Tagged metadata container - the key indicates the type.
-
-Example: metadata = FilesetMetadata( dataset=DatasetMetadataContent( schema=`{"columns": ["id", "name"]}`, ) ) (JSON string)
+* `--metadata`: Fileset metadata as a JSON object keyed by type (dataset, model, or environment; at most one). Example: `--metadata` '`{"dataset": {"schema": {"type": "object", "properties": {"id": {"type": "integer"}`, "name": `{"type": "string"}}}}}`' (JSON string)
 * `--project`: The name of the project associated with this fileset.
 * `--purpose <CHOICE>`: The purpose of the fileset. [possible values: dataset, environment, generic, model]
 

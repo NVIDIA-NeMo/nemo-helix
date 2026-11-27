@@ -67,8 +67,9 @@ FILESET_NAME_HELP = (
     "letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). (required)"
 )
 FILESET_METADATA_HELP = (
-    "Tagged metadata container - the key indicates the type.Example: metadata = FilesetMetadata( "
-    'dataset=DatasetMetadataContent( schema={"columns": ["id", "name"]}, ) ) (JSON string)'
+    "Fileset metadata as a JSON object keyed by type (dataset, model, or environment; at most one). "
+    'Example: --metadata \'{"dataset": {"schema": {"type": "object", "properties": '
+    '{"id": {"type": "integer"}, "name": {"type": "string"}}}}}\' (JSON string)'
 )
 
 DEFAULT_COLUMNS = [
