@@ -2,102 +2,109 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
-import { Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ScoreItem } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreItem';
+import { Anchor, Grid, Panel, Stack } from '@nvidia/foundations-react-core';
+import { LINK_SAFE_SYNTHESIZER_LOW_SQS, LINK_SAFE_SYNTHESIZER_SQS } from '@studio/constants/links';
+import { ScoreGuidance } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreGuidance';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
 import { TitledDial } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/TitledDial';
-import {
-  getSyntheticQualityGradeLabel,
-  GRADE_VALUES,
-  isPassingGrade,
-} from '@studio/routes/SafeSynthesizerJobReportRoute/util';
-import type { FC } from 'react';
+import { METRIC_COPY } from '@studio/routes/SafeSynthesizerJobReportRoute/reportCopy';
+import { QUALITY_RECOMMENDED_USES } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
+import type { FC, ReactNode } from 'react';
 
 interface SyntheticQualityPanelProps {
   reportSummary?: SafeSynthesizerSummary;
+  /** Overrides the summary's SQS, such as with the report data's. */
+  score?: number | null;
   title: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
+  /** Per-metric cards; without them the panel lists the summary's subscores. */
+  children?: ReactNode;
 }
 
 export const SyntheticQualityPanel: FC<SyntheticQualityPanelProps> = ({
   reportSummary,
+  score,
   title,
   icon,
+  children,
 }) => {
-  const sqsScore = reportSummary?.synthetic_data_quality_score ?? 0;
-  const sqsGrade = sqsScore ? getSyntheticQualityGradeLabel(sqsScore) : GRADE_VALUES.UNAVAILABLE;
+  const sqsScore = score ?? reportSummary?.synthetic_data_quality_score;
+
+  const dial = (
+    <TitledDial
+      title="Synthetic Quality Score (SQS)"
+      score={sqsScore}
+      description={
+        <>
+          The{' '}
+          <Anchor href={LINK_SAFE_SYNTHESIZER_SQS} textKind="body/regular/sm" external>
+            SQS measures
+          </Anchor>{' '}
+          how well synthetic data preserves the statistical properties of your training data,
+          scoring 0.0–10.0 (higher is better) across up to 5 subscores.
+        </>
+      }
+    />
+  );
+  const guidance = (
+    <ScoreGuidance
+      heading="Understanding Quality Scores"
+      intro="Some quality loss is expected — and acceptable — since it's inherent to privacy preservation. Mid-range scores are often sufficient for model training. You should test your synthetic data on the downstream use case to assess true viability."
+      lowScoreGoal="model learning"
+      lowScoreHref={LINK_SAFE_SYNTHESIZER_LOW_SQS}
+      uses={QUALITY_RECOMMENDED_USES}
+      score={sqsScore}
+    />
+  );
+
+  if (children) {
+    return (
+      <Panel slotHeading={title} slotIcon={icon} elevation="high" density="standard">
+        <Stack gap="density-2xl">
+          <Grid cols={{ xs: 1, md: 2 }} gap="density-2xl">
+            {dial}
+            {guidance}
+          </Grid>
+          {children}
+        </Stack>
+      </Panel>
+    );
+  }
 
   return (
     <Panel slotHeading={title} slotIcon={icon} elevation="high" density="standard">
       <Grid cols={{ xs: 1, md: 2 }} gap="density-2xl">
         <Stack>
-          <Stack>
-            <TitledDial
-              title="Synthetic Quality Score (SQS)"
-              score={reportSummary?.synthetic_data_quality_score}
-              description="The Synthetic Quality Score is computed by taking a weighted combination of the individual quality metrics: Column Distribution Stability, Column Correlation Stability, Deep Structure Stability, Text Semantic Similarity and Text Structure Similarity."
-              grade={sqsGrade}
-            />
-            <Stack gap="density-lg">
-              <Text kind="body/bold/md">Understand what you can do with your data</Text>
-              <Stack gap="density-lg">
-                <ScoreItem
-                  success={isPassingGrade(GRADE_VALUES.MODERATE, sqsGrade)}
-                  value="Analyze internally for directional guidance"
-                />
-
-                <ScoreItem
-                  success={isPassingGrade(GRADE_VALUES.MODERATE, sqsGrade)}
-                  value="Prototype, test, and run QA"
-                />
-                <ScoreItem
-                  success={isPassingGrade(GRADE_VALUES.GOOD, sqsGrade)}
-                  value="Balance or augment real-world datasets"
-                />
-                <ScoreItem
-                  success={isPassingGrade(GRADE_VALUES.GOOD, sqsGrade)}
-                  value="Train production models"
-                />
-              </Stack>
-            </Stack>
-          </Stack>
+          {dial}
+          {guidance}
         </Stack>
         <Stack>
           <ScoreTable
             scores={[
               {
-                name: 'Column Correlation Stability',
-                description: 'Compares the correlation across every combination of two columns.',
-                value: reportSummary?.column_correlation_stability_score ?? 0,
-                displayValue: reportSummary?.column_correlation_stability_score?.toFixed(1) ?? '—',
+                name: METRIC_COPY.column_correlation_stability.name,
+                description: `${METRIC_COPY.column_correlation_stability.description}.`,
+                value: reportSummary?.column_correlation_stability_score,
               },
               {
-                name: 'Deep Structure Stability',
-                description:
-                  'Compares the original and synthetic data using Principal Component Analysis to reduce the dimensionality.',
-                value: reportSummary?.deep_structure_stability_score ?? 0,
-                displayValue: reportSummary?.deep_structure_stability_score?.toFixed(1) ?? '—',
+                name: METRIC_COPY.deep_structure_stability.name,
+                description: `${METRIC_COPY.deep_structure_stability.description}.`,
+                value: reportSummary?.deep_structure_stability_score,
               },
               {
-                name: 'Column Distribution Stability',
-                description:
-                  'Compares the distribution for each column in the original data to the matching column in the synthetic data.',
-                value: reportSummary?.column_distribution_stability_score ?? 0,
-                displayValue: reportSummary?.column_distribution_stability_score?.toFixed(1) ?? '—',
+                name: METRIC_COPY.column_distribution_stability.name,
+                description: `${METRIC_COPY.column_distribution_stability.description}.`,
+                value: reportSummary?.column_distribution_stability_score,
               },
               {
-                name: 'Text Semantic Similarity',
-                description:
-                  'Compares the semantic meaning of the text columns between the original and synthetic data.',
-                value: reportSummary?.text_semantic_similarity_score ?? 0,
-                displayValue: reportSummary?.text_semantic_similarity_score?.toFixed(1) ?? '—',
+                name: METRIC_COPY.text_semantic_similarity.name,
+                description: `${METRIC_COPY.text_semantic_similarity.description}.`,
+                value: reportSummary?.text_semantic_similarity_score,
               },
               {
-                name: 'Text Structure Similarity',
-                description:
-                  'Compares the sentence, word, and character counts across text columns in the original and synthetic data.',
-                value: reportSummary?.text_structure_similarity_score ?? 0,
-                displayValue: reportSummary?.text_structure_similarity_score?.toFixed(1) ?? '—',
+                name: METRIC_COPY.text_structure_similarity.name,
+                description: `${METRIC_COPY.text_structure_similarity.description}.`,
+                value: reportSummary?.text_structure_similarity_score,
               },
             ]}
           />

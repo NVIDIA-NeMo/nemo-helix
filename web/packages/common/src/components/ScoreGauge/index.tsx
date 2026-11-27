@@ -15,7 +15,7 @@ export * from '@nemo/common/src/components/ScoreGauge/utils';
 type ScoreGaugeSize = 'lg' | 'sm';
 
 interface ScoreGaugeProps {
-  /** Raw score on a 0-10 scale. Falsy / non-finite renders as unavailable. */
+  /** Raw score on a 0-10 scale. Missing, negative or non-finite renders as unavailable. */
   score?: number;
   size?: ScoreGaugeSize;
   /** Scales the gauge to fit its parent while keeping a square aspect ratio. */
@@ -23,7 +23,7 @@ interface ScoreGaugeProps {
 }
 
 export const ScoreGauge = ({ score, size = 'lg', scaleToFit = false }: ScoreGaugeProps) => {
-  const available = typeof score === 'number' && Number.isFinite(score) && score > 0;
+  const available = typeof score === 'number' && Number.isFinite(score) && score >= 0;
   const clamped = available ? Math.min(Math.max(score, 0), 10) : 0;
   const percentage = clamped * 10;
   const display = available ? clamped.toFixed(1) : '—';
