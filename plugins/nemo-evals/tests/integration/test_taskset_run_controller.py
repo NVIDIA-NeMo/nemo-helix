@@ -455,8 +455,3 @@ async def test_submit_dependency_delegates_group_only_caller(auth_controller_pla
         # Without the group the same caller is refused.
         outsider = await http.get(f"{runs_path}/{run.name}", headers={"X-NHX-Principal-Groups": ""})
         assert outsider.status_code == 403, outsider.text
-
-
-@requires_auth_off_platform
-def test_ci_canary_controller_suite() -> None:
-    raise AssertionError("throwaway canary for AALGO-1321: the controller suite job must go red")
