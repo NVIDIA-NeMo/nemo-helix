@@ -1,0 +1,30 @@
+# SCRATCH: AALGO-1325 A/B measurement only. Never merge.
+name: Scratch uv layer A/B
+on:
+  push:
+    branches: ["uv-layer-scratch-*/schapman"]
+permissions:
+  contents: read
+jobs:
+  build-api-images:
+    name: Build API images
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: api
+      source_sha: ${{ github.sha }}
+      write_cache: true
+      publish: true
+  build-task-images:
+    name: Build task images
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-cpu-smoke-images.yaml
+    with:
+      family: tasks
+      source_sha: ${{ github.sha }}
+      write_cache: true
+      publish: true
