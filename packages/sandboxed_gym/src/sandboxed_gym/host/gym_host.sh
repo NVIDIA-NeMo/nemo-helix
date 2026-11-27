@@ -10,11 +10,37 @@
 # Defaults match sandboxed_gym.host.entrypoint.
 set -eu
 
+# An image with a container engine starts as root for its setup, which the runtime runs and then drops
+# privileges. This script would unpack the job's variables and run programs as root before that, so a job's
+# PATH could choose them. That image starts the runtime directly; refuse it here.
+if [ -n "${NHX_GYM_HOST_CONTAINER_ENGINE:-}" ]; then
+    echo "gym-host: gym_host.sh does not support an image with a container engine" \
+        "(NHX_GYM_HOST_CONTAINER_ENGINE is set); start the image's default command instead" >&2
+    exit 1
+fi
+
 # Nothing this launcher starts needs execd's token, so it goes before the job's variables can change
 # which programs run here. Unsetting it would leave it in /proc/<pid>/environ for a child to read, so
 # the launcher starts again without it.
 if [ -n "${EXECD_ACCESS_TOKEN+set}" ]; then
     exec /usr/bin/env -u EXECD_ACCESS_TOKEN /bin/sh "$0" "$@"
+fi
+
+# The agent bundle's CLI, named by the host provider: its directory goes first on PATH and it is checked
+# here, before the job's variables arrive, as the launcher that ran this script used to. This script has
+# no privileged setup to wait for. Unset, so the runtime doesn't repeat the check with the job's variables.
+# A failing or hanging agent stops the script: the runtime's 120 s limit, then a kill for an agent that
+# ignores SIGTERM. Without coreutils `timeout` there is no limit, so the script refuses to run the check.
+if [ -n "${NHX_GYM_AGENT_EXECUTABLE:-}" ]; then
+    # Found before the bundle's directory goes on PATH, so a `timeout` the bundle ships can't stand in for it.
+    if ! timeout_command=$(command -v timeout 2>/dev/null); then
+        echo "gym-host: checking the agent bundle needs coreutils timeout, which this image lacks" >&2
+        exit 1
+    fi
+    PATH="${NHX_GYM_AGENT_EXECUTABLE%/*}:$PATH"
+    export PATH
+    "$timeout_command" -k 10 120 "$NHX_GYM_AGENT_EXECUTABLE" --version >&2
+    unset NHX_GYM_AGENT_EXECUTABLE
 fi
 
 # This launcher has no privileged setup, so the job's variables, which the orchestrator packs into
