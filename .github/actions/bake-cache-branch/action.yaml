@@ -3,9 +3,9 @@
 
 name: Resolve bake cache branch
 description: >
-  Chooses the registry cache branch for docker bake. Pull requests import the
-  base branch cache and never write one. Push, merge queue, and manual runs on
-  main or release/* write the cache for their branch.
+  Chooses the registry cache branch for docker bake. Pull requests and merge
+  queue runs import the base branch cache and never write one. Push and manual
+  runs on main or release/* write the cache for their branch.
 
 inputs:
   base-ref:
@@ -43,9 +43,12 @@ runs:
         cache_branch="${cache_branch%-}"
         # Pull requests read the base branch cache. Only long-lived refs publish it,
         # so a feature branch does not write a tag the next run will not read.
+        # Merge queue runs only read it: up to five groups build at once, each from a
+        # tree that is not on the base branch yet, and each write would replace the
+        # base branch's cache with that tree's layers.
         cache_target_branch=""
         case "$EVENT_NAME" in
-          push|merge_group)
+          push)
             cache_target_branch="$cache_branch"
             ;;
           workflow_dispatch)
