@@ -22,7 +22,7 @@ import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Combobox, type ComboboxEntry, Text } from '@nvidia/foundations-react-core';
 import { useQuery } from '@tanstack/react-query';
 import { type FC, useEffect, useMemo, useState } from 'react';
-import { useDebounce } from 'use-debounce';
+import { useDebouncedCallback } from 'use-debounce';
 
 const NEW_FILESET_VALUE = '__new_fileset__';
 const EMPTY_MESSAGE_VALUE = '__fileset_empty__';
@@ -66,11 +66,19 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   // never lands in the input.
   const [editing, setEditing] = useState(false);
   const [inputText, setInputText] = useState('');
-  const [debouncedInput] = useDebounce(inputText, SEARCH_DEBOUNCE_MS);
   const [picked, setPicked] = useState<FilesetOutput | null>(null);
 
   const { filesets, search, setSearch, loadMore, isLoading, isLoadingMore, isError } =
     useFilesetSearchCore({ workspace, listFilesets, purpose });
+  const searchDebounced = useDebouncedCallback(
+    (text: string) => setSearch(text.trim()),
+    SEARCH_DEBOUNCE_MS
+  );
+  const stopEditing = () => {
+    setEditing(false);
+    searchDebounced.cancel();
+    setSearch('');
+  };
 
   const loaded = value ? filesets.find((fileset) => getEntityReference(fileset) === value) : null;
   const pickedMatches = picked && getEntityReference(picked) === value ? picked : null;
@@ -95,15 +103,12 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
         : 'unavailable'
       : null;
 
+  // The error is derived during render, where a parent's state can't be set, so report it after.
   useEffect(() => {
     onSelectionErrorChange?.(selectionError);
   }, [selectionError, onSelectionErrorChange]);
 
   const selectedLabel = selected?.name ?? (selectionError && value ? valueName : '');
-
-  useEffect(() => {
-    setSearch(editing ? debouncedInput.trim() : '');
-  }, [editing, debouncedInput, setSearch]);
 
   const showPurpose = Array.isArray(purpose) && purpose.length > 1;
 
@@ -202,7 +207,7 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
   ]);
 
   const handleValueChange = (next: string) => {
-    setEditing(false);
+    stopEditing();
     if (next === NEW_FILESET_VALUE) {
       onRequestNew?.();
       return;
@@ -233,9 +238,10 @@ export const FilesetCombobox: FC<FilesetComboboxProps> = ({
           onChange: (event) => {
             setEditing(true);
             setInputText(event.currentTarget.value);
+            searchDebounced(event.currentTarget.value);
           },
           onBlur: () => {
-            setEditing(false);
+            stopEditing();
             onBlur?.();
           },
         },
