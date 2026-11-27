@@ -7,12 +7,14 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { Cloud, Db } from '@nemo/icons/icons';
+import {
+  formatStorageBackendLabel,
+  getStorageBackendIcon,
+} from '@nemo/common/src/utils/storageBackend';
 import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Text } from '@nvidia/foundations-react-core';
 import { getStorageBackend } from '@studio/components/FilesetsTable/helpers';
 import type { DatasetWithId } from '@studio/components/FilesetsTable/types';
-import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ComponentProps, ReactNode } from 'react';
 
 interface MakeDatasetsTableColumnsArgs {
@@ -47,7 +49,7 @@ export function makeDatasetsTableColumns({
           const backend = getStorageBackend(row.original?.storage);
           if (!backend) return null;
           const label = formatStorageBackendLabel(backend);
-          const Icon = backend === 'local' ? Db : Cloud;
+          const Icon = getStorageBackendIcon(backend);
           return (
             <Flex align="center" gap="density-sm" className="min-w-0">
               <Icon className="flex-none text-fg-subdued" size="16" strokeWidth={0} />

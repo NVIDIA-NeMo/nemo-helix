@@ -3,7 +3,7 @@
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { FilesListFilesetsParams, FilesetOutput, FilesetOutputsPage, FilesetPurpose, HelixJobLog, HelixJobStatus, InferenceParams, ModelEntity, ModelEntityFilter, ModelEntitysPage, ModelsListModelsParams, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
 import { ModelEntitySortField } from "@nemo/sdk/generated/platform/schema/ModelEntitySortField";
@@ -10039,6 +10039,60 @@ interface Props$4<DataType> {
 }
 export declare const StudioDataView: <DataType>({ attributes, children, makeColumns, dataViewState, onRowClick, maxTwoLines, renderBulkActions, scrollContainerRef, searchField, toolbarSlotStart, toolbarSlotEnd }: Props$4<DataType>) => import("react/jsx-runtime").JSX.Element;
 //#endregion
+//#region src/api/filesets/filesetPages.d.ts
+type ListFilesets = (workspace: string, params?: FilesListFilesetsParams, signal?: AbortSignal) => Promise<FilesetOutputsPage>;
+type RetrieveFileset = (workspace: string, name: string, signal?: AbortSignal) => Promise<FilesetOutput>;
+//#endregion
+//#region src/components/FilesetPicker/types.d.ts
+interface FilesetPickerNoun {
+  readonly one: string;
+  readonly many: string;
+}
+type FilesetPickerPurpose = FilesetPurpose | readonly FilesetPurpose[];
+//#endregion
+//#region src/components/FilesetPicker/FilesetPickerCore.d.ts
+interface FilesetPickerCoreProps {
+  workspace: string;
+  listFilesets: ListFilesets;
+  retrieveFileset: RetrieveFileset;
+  /** Selected fileset reference (`workspace/name`), or null. */
+  value: string | null;
+  onChange: (value: string | null, fileset?: FilesetOutput) => void;
+  label: ReactNode;
+  purpose?: FilesetPickerPurpose;
+  noun?: FilesetPickerNoun;
+  onRequestNew?: () => void;
+  disabled?: boolean;
+  required?: boolean;
+  slotHelp?: ReactNode;
+  slotInfo?: ReactNode;
+  errorText?: string;
+  onBlur?: () => void;
+}
+declare const FilesetPickerCore: FC<FilesetPickerCoreProps>;
+//#endregion
+//#region src/api/filesets/useFilesetSearchCore.d.ts
+interface UseFilesetSearchCoreOptions {
+  workspace: string;
+  listFilesets: ListFilesets;
+  purpose?: FilesetPurpose | readonly FilesetPurpose[];
+  description?: string;
+  enabled?: boolean;
+  pageSize?: number;
+}
+interface UseFilesetSearchResult {
+  filesets: FilesetOutput[];
+  search: string;
+  setSearch: (value: string) => void;
+  loadMore: () => Promise<void>;
+  hasMore: boolean;
+  isLoading: boolean;
+  isLoadingMore: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+declare const useFilesetSearchCore: ({ workspace, listFilesets, purpose, description, enabled, pageSize }: UseFilesetSearchCoreOptions) => UseFilesetSearchResult;
+//#endregion
 //#region src/utils/logs.d.ts
 /** Whether more lines may still arrive (`live`) or the log has ended (`ended`). */
 type LogStatus = 'live' | 'ended';
@@ -11657,4 +11711,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus$1[];
 export declare const CJobTerminalStatuses: HelixJobStatus$1[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus$1[];
 //#endregion
-export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useModelSearchCore as useModelSearch };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, FilesetPickerCore as FilesetPicker, type FilesetPickerNoun, type FilesetPickerCoreProps as FilesetPickerProps, type FilesetPickerPurpose, type FilterOperators, type FormModalProps, type ListFilesets, type ListModels, type LogStatus, type ModelSearchFilter, type ModelSearchProps, type ModelSelectProps, type ModelSelection, type ModelType, type ModelWorkspaceGroup, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type RetrieveFileset, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseFilesetSearchCoreOptions as UseFilesetSearchOptions, type UseFilesetSearchResult, type UseModelSearchCoreOptions as UseModelSearchOptions, type UseModelSearchResult, type UseStudioDataViewStateOptions, type WithFilterOperators, WorkspaceModelSelectCore as WorkspaceModelSelect, type WorkspaceModelSelectCoreProps as WorkspaceModelSelectProps, useFilesetSearchCore as useFilesetSearch, useModelSearchCore as useModelSearch };

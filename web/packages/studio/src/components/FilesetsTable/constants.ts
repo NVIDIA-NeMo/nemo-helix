@@ -5,13 +5,6 @@ import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema/FilesetPurpo
 import type { Tag } from '@nvidia/foundations-react-core';
 import type { ComponentProps } from 'react';
 
-export const PURPOSE_LABELS: Record<FilesetPurpose, string> = {
-  [FilesetPurpose.generic]: 'Generic',
-  [FilesetPurpose.dataset]: 'Dataset',
-  [FilesetPurpose.model]: 'Model',
-  [FilesetPurpose.environment]: 'Environment',
-};
-
 type TagColor = NonNullable<ComponentProps<typeof Tag>['color']>;
 
 /**
