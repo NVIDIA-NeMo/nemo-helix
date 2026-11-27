@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// TEMP (AALGO-1322 measurement): touch this package so PR CI runs every web package. Revert before review.
 import { User } from 'oidc-client-ts';
 
 export type OidcBearerTokenSource = 'access_token';
